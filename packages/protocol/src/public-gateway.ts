@@ -64,7 +64,13 @@ import {
 import { DEVICE_WAKE_KEY_PATH } from "./wake.ts";
 import { FLEET_HIRE_DEFAULTS_PATH, FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
 import { OPERATOR_PERSONA_PATH } from "./discord-attention.ts";
-import { isWorkerAccountsRoute, WORKER_ACCOUNTS_PATH, WORKER_ACCOUNT_HOLDS_PATH } from "./worker-accounts.ts";
+import {
+  isWorkerAccountsRoute,
+  USAGE_PATH,
+  USAGE_SETTINGS_PATH,
+  WORKER_ACCOUNTS_PATH,
+  WORKER_ACCOUNT_HOLDS_PATH,
+} from "./worker-accounts.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
 /** ADR 0151's host-to-gateway multiplexing protocol. */
@@ -189,6 +195,9 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: WORKER_ACCOUNTS_PATH, target: "relay" },
   { method: "GET", path: WORKER_ACCOUNT_HOLDS_PATH, target: "relay" },
   { method: "POST", path: WORKER_ACCOUNT_HOLDS_PATH, target: "relay" },
+  { method: "GET", path: USAGE_PATH, target: "relay" },
+  { method: "GET", path: USAGE_SETTINGS_PATH, target: "relay" },
+  { method: "POST", path: USAGE_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: HOST_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: HOST_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: "/v1/operator/voice", target: "relay" },
@@ -360,6 +369,7 @@ export function publicGatewayTargetFor(
   // Preserve that query for the relay's own validation; never normalize others.
   if (method === "GET" && path === `${PROJECTS_PATH}?includeAutonomy=true`) path = PROJECTS_PATH;
   if (method === "GET" && isWorkerAccountsRoute(path)) path = WORKER_ACCOUNTS_PATH;
+  if (method === "GET" && path === `${USAGE_PATH}?refresh=1`) path = USAGE_PATH;
   if (method === "POST" && path === `${PROJECT_UPDATE_SETTINGS_PATH}?includeAutonomy=true`)
     path = PROJECT_UPDATE_SETTINGS_PATH;
   if (method === "POST" && /^\/v1\/support\/grants\/[a-f0-9-]{36}\/(?:revoke|pairing-offer)$/u.test(path))

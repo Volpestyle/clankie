@@ -4,7 +4,12 @@ import { hostedDiscordAllows } from "./hosted-discord.ts";
 export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
 import { OperatorConversationServiceRequestSchema } from "./index.ts";
 import { FLEET_HIRE_DEFAULTS_PATH, FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
-import { isWorkerAccountsRoute, WORKER_ACCOUNT_HOLDS_PATH } from "./worker-accounts.ts";
+import {
+  isWorkerAccountsRoute,
+  USAGE_PATH,
+  USAGE_SETTINGS_PATH,
+  WORKER_ACCOUNT_HOLDS_PATH,
+} from "./worker-accounts.ts";
 import { RUNTIME_HEALTH_PATH } from "./runtime-health.ts";
 import { OFFICIAL_DISCORD_BODY_PATH } from "./official-discord.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
@@ -20,6 +25,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
   if (path === `${PROJECT_UPDATE_SETTINGS_PATH}?includeAutonomy=true`) return method === "POST";
   // Worker accounts read one machine through the only query that route accepts.
   if (isWorkerAccountsRoute(path)) return method === "GET";
+  if (path === `${USAGE_PATH}?refresh=1`) return method === "GET";
   if (path === "/operator/v1/dispatch" && method === "POST") {
     let value: unknown;
     try {
@@ -95,6 +101,8 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       HOST_SETTINGS_PATH,
       "/v1/operator/voice",
       WORKER_ACCOUNT_HOLDS_PATH,
+      USAGE_PATH,
+      USAGE_SETTINGS_PATH,
       LINEAR_FOLLOW_PATH,
       LINEAR_WAKE_PATH,
       "/v1/discord/rooms",
@@ -150,6 +158,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       FLEET_SETTINGS_PATH,
       FLEET_HIRE_DEFAULTS_PATH,
       WORKER_ACCOUNT_HOLDS_PATH,
+      USAGE_SETTINGS_PATH,
       PROJECT_UPDATE_SETTINGS_PATH,
       "/v1/support/grants",
     ],

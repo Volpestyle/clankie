@@ -1508,8 +1508,11 @@ them (`claude auth status`; Codex's app-server `account/read` and
 `account/rateLimits/read`), Codex `headroom`, whether Clankie's worker plugin is
 in each Claude profile, any owner hold, and `usable` or the `reason` with its
 fix. Tokens are never returned. Pi inspection reads its native profile without
-refreshing or changing credentials. Claude usage is not observable, so its
-headroom stays `null`.
+refreshing or changing credentials. Each Claude and Codex account also carries
+`usage`: its windows (percent used, length, reset) with their source and
+observation time, read from the profile's own `claude -p /usage` or Codex's
+rate limits ([ADR 0260](adr/0260-usage-meters-come-from-each-harness.md)).
+`headroom` is the tightest account-wide window; unobserved usage stays `null`.
 
 The local Pi `default` profile uses the same report and holds. It is usable only
 when the native adapter is enabled, its pinned files and executable verify, and
@@ -1574,6 +1577,36 @@ The owner-authorized API offers `GET /v1/accounts/codex` and
 `POST /v1/accounts/codex` with `{op:"add", home, label}` or `{op:"remove", label}`.
 Local transcript discovery, `clankie agents`, resumed sessions and follow-up
 queue delivery use the account's home; seat-sync uses the hook's transcript path.
+
+### `usage [--refresh]` / `usage overlay [on|off]`
+
+`usage` lists this Mac's registered Claude profiles and Codex accounts with
+identity, plan, `headroom`, and each usage window: its harness label (Claude's
+"Current session", "Current week (all models)", model-scoped weeks; Codex's
+weekly and model-scoped limits), `usedPercent`, `windowMinutes` and `resetsAt`.
+`usage.source` names the reading (`claude-usage` or `codex-rate-limits`),
+`usage.observedAt` when it was read and `ageSeconds` how old it is. An account
+whose usage was not reported has no `usage` and a `reason`; unknown is never
+shown as free quota. Readings come from `GET /v1/usage` (owner credential,
+relayed for the app), which shares one reading per minute across every surface;
+`--refresh` reads again now. No harness credential is read or returned
+([ADR 0260](adr/0260-usage-meters-come-from-each-harness.md)).
+
+`usage overlay on|off` shows or hides the meters beside Clankie in the desktop
+overlay (`usage.overlay` in settings, default on; `GET`/`POST /v1/usage/settings`,
+revision-fenced). The console's `/usage` shows the same report and toggles the
+overlay; the app's Usage screen does both.
+
+```sh
+clankie usage
+clankie usage --refresh
+clankie usage overlay off
+```
+
+Register a second Claude profile with `accounts claude add HOME --label LABEL`.
+For `~/.claude` itself, sign it in once with
+`CLAUDE_CONFIG_DIR=~/.claude claude auth login`: Claude Code keeps a separate
+sign-in for an explicitly named config directory.
 
 ### `accounts [list]` / `accounts connect PROVIDER` / `accounts disconnect PROVIDER` / `accounts apps`
 

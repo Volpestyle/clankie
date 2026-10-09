@@ -227,6 +227,7 @@ export interface ClankieAppDependencies {
   /** A machine's worker accounts (VUH-1527); absent fleet is this machine. */
   workerAccounts?: (
     fleet?: string,
+    harnesses?: readonly import("../captain/harness-accounts.ts").WorkerAccountHarness[],
   ) => Promise<import("../captain/harness-accounts.ts").MachineWorkerAccounts>;
   /** Host-only project eligibility on a configured fleet; never verifies an MCP connection. */
   inspectFleetMembership?: (

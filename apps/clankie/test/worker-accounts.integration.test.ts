@@ -432,6 +432,15 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
     const low = await hireOn(undefined, [], undefined, tight, "claude");
     expect(low.result).toMatchObject({ outcome: "spawned", profile: { harness: "claude" } });
     expect(low.env).toContain("CLAUDE_CONFIG_DIR=C:\\Users\\volpe\\.claude-james");
+    // Claude's observed usage is tighter still: back to Codex (VUH-1961).
+    const claudeTighter: MachineWorkerAccounts = {
+      ...tight,
+      accounts: tight.accounts.map((entry) =>
+        entry.harness === "claude" ? { ...entry, headroom: 0.2 } : entry,
+      ),
+    };
+    const lower = await hireOn(undefined, [], undefined, claudeTighter);
+    expect(lower.result).toMatchObject({ outcome: "spawned", profile: { harness: "codex" } });
     // Every Codex account held by the owner: Claude even with full Codex usage.
     const held = await hireOn(
       undefined,

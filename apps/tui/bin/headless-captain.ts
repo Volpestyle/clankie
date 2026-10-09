@@ -90,6 +90,7 @@ import { runGatewayCommand } from "../src/command/gateway.ts";
 import { runAutostartCommand } from "../src/command/autostart.ts";
 import { runRecoverCommand } from "../src/command/recover.ts";
 import { runAwakeCommand } from "../src/command/awake.ts";
+import { runUsageCommand } from "../src/command/usage.ts";
 import { runRuntimeHealthCommand } from "../src/command/runtime-health.ts";
 import { commandHelp } from "../src/command/registry.ts";
 import { outputJson, type Writable } from "../src/command/io.ts";
@@ -255,6 +256,10 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "awake") {
       outputJson(stdout, await runAwakeCommand(rest, options));
+      return 0;
+    }
+    if (command === "usage") {
+      outputJson(stdout, await runUsageCommand(rest, options));
       return 0;
     }
     if (command === "runtime-health") {

@@ -108,6 +108,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0256 — Lent input needs native drain proof](0256-lent-input-needs-native-drain-proof.md)
 - [0257 — A lowered local runtime keeps an OS boundary](0257-a-lowered-local-runtime-keeps-an-os-boundary.md)
 - [0258 — Evidence lives in the evidence store](0258-evidence-lives-in-the-evidence-store.md)
+- [0260 — Usage meters come from each harness's own CLI](0260-usage-meters-come-from-each-harness.md)
 
 ## Archived decisions
 

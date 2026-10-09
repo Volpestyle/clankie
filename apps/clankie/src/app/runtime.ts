@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import { roomForkIdOf } from "../captain/captain-discord-turns.ts";
 import { hostedActivityViewer } from "../hosted-activity-viewer.ts";
 import { createWorkerAccountHoldsRoutes } from "../worker-account-holds-routes.ts";
+import { createUsageRoutes } from "../usage-routes.ts";
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
 import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
 import { createRuntimeHealthRoutes } from "../runtime-health-routes.ts";
@@ -1293,6 +1294,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
 
   app.route("/", createWorkerAccountHoldsRoutes(authorizeOwnerSecrets, settingsSource));
+  const workerAccounts = dependencies.workerAccounts;
+  app.route(
+    "/",
+    createUsageRoutes(
+      authorizeOwnerSecrets,
+      settingsSource,
+      workerAccounts && (async () => workerAccounts(undefined, ["claude", "codex"])),
+    ),
+  );
 
   app.get("/v1/runtime-connections", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);

@@ -9,6 +9,15 @@ import {
   codexStatusFromLimits,
   type ClankieSettings,
 } from "@clankie/settings";
+import type { AccountUsage } from "@clankie/protocol/worker-accounts";
+import {
+  CLAUDE_USAGE_MIN_VERSION_NUMBER,
+  claudeUsageLines,
+  claudeUsageWindows,
+  codexUsageWindows,
+  exhaustedUntil,
+  usageHeadroom,
+} from "./harness-usage.ts";
 import {
   remoteProgramCommand,
   type FleetShellRun,
@@ -20,8 +29,9 @@ import {
  * Which Claude profiles and Codex homes a machine has, and whether each can
  * take a worker now (VUH-1527). A linked machine answers for itself: the probe
  * runs there through the fleet link, asks each profile's own CLI
- * (`claude auth status`, Codex's app-server `account/read` and
- * `account/rateLimits/read`) and returns identity, plan and usage only. It
+ * (`claude auth status` and `claude -p /usage`, Codex's app-server
+ * `account/read` and `account/rateLimits/read`) and returns identity, plan and
+ * usage only. It
  * never reads, prints or moves a credential, and never starts a login or turn.
  *
  * Profiles are the machine's default home plus every `~/.claude-<label>` and
@@ -41,9 +51,11 @@ export interface WorkerAccountStatus {
   /** The account's email as its CLI reports it; never a token. */
   readonly identity?: string;
   readonly plan?: string;
-  /** Codex: lowest remaining fraction of its usage windows; null when unobservable (always for Claude). */
+  /** Lowest remaining fraction of the account's all-model usage windows; null when unobserved. */
   readonly headroom: number | null;
   readonly resetsAt?: string;
+  /** The windows behind `headroom`, with their source and observation time. */
+  readonly usage?: AccountUsage;
   /** Claude: whether Clankie's worker plugin is installed in this profile. */
   readonly workerPlugin?: boolean;
   /** The owner set this account aside from automatic choice. */
@@ -106,19 +118,28 @@ const envFor = (key, dir) => {
   if (dir === undefined) delete env[key]; else env[key] = dir;
   return env;
 };
-const run = (command, args, env) => new Promise((resolve) => {
+const run = (command, args, env, cwd) => new Promise((resolve) => {
   let out = "", done = false;
-  const child = cp.spawn(command, args, { env, shell: windows, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+  const child = cp.spawn(command, args, { env, cwd, shell: windows, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
   const finish = (value) => { if (done) return; done = true; clearTimeout(timer); kill(child); resolve(value); };
   const timer = setTimeout(() => finish(null), input.timeoutMs);
   child.stdout.on("data", (chunk) => { out += chunk; if (out.length > 65536) finish(null); });
   child.on("error", () => finish(null));
   child.on("close", () => finish(out));
 });
+const claudeUsage = async (env) => {
+  const v = String(await run("claude", ["--version"], env)).split(".", 3);
+  if (!(v[0] * 1e6 + v[1] * 1e3 + parseFloat(v[2]) >= input.claudeUsageVersion)) return {};
+  let r = String(await run("claude", ["-p", "/usage", "--output-format", "json", "--no-session-persistence"], env, os.tmpdir()));
+  try { r = JSON.parse(r.slice(r.indexOf("{"))); } catch {}
+  return r.local_command == "usage" ? { usageLines: String(r.result).split("\n").filter((l) => l.startsWith("Current ")).slice(0, 8) } : {};
+};
 const claude = async (profile) => {
-  const raw = await run("claude", ["auth", "status", "--json"], envFor("CLAUDE_CONFIG_DIR", profile.isDefault ? process.env.CLAUDE_CONFIG_DIR : profile.home));
+  const env = envFor("CLAUDE_CONFIG_DIR", profile.isDefault ? process.env.CLAUDE_CONFIG_DIR : profile.home);
+  const raw = await run("claude", ["auth", "status", "--json"], env);
   let status = null;
   try { status = JSON.parse(String(raw).slice(String(raw).indexOf("{"))); } catch {}
+  const usage = status && status.loggedIn === true ? await claudeUsage(env) : {};
   let plugin = false;
   try {
     const registry = JSON.parse(fs.readFileSync(path.join(profile.home, "plugins", "installed_plugins.json"), "utf8"));
@@ -130,6 +151,7 @@ const claude = async (profile) => {
     identity: status && status.loggedIn && typeof status.email === "string" ? status.email : undefined,
     plan: status && status.loggedIn && typeof status.subscriptionType === "string" ? status.subscriptionType : (status && status.loggedIn && typeof status.authMethod === "string" ? status.authMethod : undefined),
     workerPlugin: plugin,
+    ...usage,
   };
 };
 const codex = (profile) => new Promise((resolve) => {
@@ -165,10 +187,11 @@ const codex = (profile) => new Promise((resolve) => {
         } else {
           const all = message.result || {};
           const limits = (all.rateLimitsByLimitId && all.rateLimitsByLimitId.codex) || all.rateLimits;
+          const window = (value) => value ? { used_percent: value.usedPercent, window_minutes: value.windowDurationMins, resets_at: value.resetsAt } : null;
           if (limits) {
-            const window = (value) => value ? { used_percent: value.usedPercent, window_minutes: value.windowDurationMins, resets_at: value.resetsAt } : null;
             result.limits = { primary: window(limits.primary), secondary: window(limits.secondary), rate_limit_reached_type: limits.rateLimitReachedType || null };
           }
+          result.scopedLimits = Object.entries(all.rateLimitsByLimitId || {}).filter(([id, v]) => id != "codex" && v).slice(0, 4).map(([id, v]) => ({ id, name: v.limitName, primary: window(v.primary) }));
           if (all.ordinaryUsageAllowed === false || (limits && limits.spendControlReached === true)) result.usageBlocked = true;
         }
         pending -= 1;
@@ -215,6 +238,17 @@ const ProbeOutput = z.object({
         workerPlugin: z.boolean().optional(),
         usageError: z.string().max(16).optional(),
         usageBlocked: z.boolean().optional(),
+        usageLines: z.array(z.string().max(300)).max(8).optional(),
+        scopedLimits: z
+          .array(
+            z.object({
+              id: z.string().max(256),
+              name: z.string().max(256).nullable().optional(),
+              primary: Window,
+            }),
+          )
+          .max(4)
+          .optional(),
         limits: z
           .object({ primary: Window, secondary: Window, rate_limit_reached_type: z.unknown() })
           .optional(),
@@ -240,6 +274,7 @@ export function workerAccountsProbeCommand(
     JSON.stringify({
       harnesses,
       timeoutMs: PROBE_TIMEOUT_MS,
+      claudeUsageVersion: CLAUDE_USAGE_MIN_VERSION_NUMBER,
       ...(profiles === undefined ? {} : { profiles }),
     }),
   ]);
@@ -307,6 +342,23 @@ function judgeWorkerAccount(
 ): WorkerAccountStatus {
   let headroom: number | null = null;
   let resetsAt: string | undefined;
+  let usage: AccountUsage | undefined;
+  if (account.usageLines !== undefined || account.limits !== undefined) {
+    const windows =
+      account.harness === "claude"
+        ? claudeUsageWindows(claudeUsageLines(account.usageLines ?? []), now)
+        : codexUsageWindows(account.limits, account.scopedLimits);
+    if (windows.length)
+      usage = {
+        source: account.harness === "claude" ? "claude-usage" : "codex-rate-limits",
+        observedAt: new Date(now).toISOString(),
+        windows,
+      };
+  }
+  if (account.harness === "claude" && usage) {
+    headroom = usageHeadroom(usage, now);
+    if (headroom === 0) resetsAt = exhaustedUntil(usage, now);
+  }
   if (account.harness === "codex" && account.limits) {
     const limits = codexRateLimit(JSON.stringify({ payload: { rate_limits: account.limits } }));
     headroom = codexStatusFromLimits(
@@ -351,6 +403,7 @@ function judgeWorkerAccount(
     ...(account.plan === undefined ? {} : { plan: account.plan }),
     headroom,
     ...(resetsAt === undefined ? {} : { resetsAt }),
+    ...(usage === undefined ? {} : { usage }),
     ...(account.workerPlugin === undefined ? {} : { workerPlugin: account.workerPlugin }),
     ...(hold === undefined ? {} : { held: hold.reason === undefined ? {} : { reason: hold.reason } }),
     usable: reason === undefined,
@@ -449,7 +502,7 @@ export function chooseWorkerAccount(
   };
 }
 
-/** Codex's best observed headroom must beat this to win the fallback; Claude's usage is unobservable. */
+/** An account whose usage was not observed counts as this much headroom. */
 const UNOBSERVED_HEADROOM = 0.5;
 
 type WorkerHarnessChoice =
@@ -461,8 +514,9 @@ type WorkerHarnessChoice =
  * role or fleet harness). Clankie normally chooses per job; this runs only when
  * he passes nothing, and it never assumes a harness. Among the machine's
  * usable accounts the owner has not held: one harness with any is chosen; with
- * both, Codex only when its best account has more than half its usage left,
- * otherwise Claude, whose usage cannot be observed and counts as half.
+ * both, Codex only when its best account has more usage left than Claude's
+ * best, otherwise Claude. An account whose usage was not observed counts as
+ * half.
  * `allowed` narrows the candidates, for example to the family of a requested
  * model. No usable account refuses with each skipped account's reason.
  */
@@ -487,13 +541,13 @@ export function chooseWorkerHarness(
   }
   const codex = best.get("codex");
   const claude = best.get("claude");
-  if (codex !== undefined && (claude === undefined || codex > UNOBSERVED_HEADROOM))
+  if (codex !== undefined && (claude === undefined || codex > claude))
     return {
       harness: "codex",
       why:
         claude === undefined
           ? `no usable, unheld Claude profile on ${machine}`
-          : `a Codex account on ${machine} has ${Math.round(codex * 100)}% usage left`,
+          : `a Codex account on ${machine} has ${Math.round(codex * 100)}% usage left, more than Claude's ${Math.round(claude * 100)}%`,
     };
   if (claude !== undefined)
     return {
@@ -501,7 +555,7 @@ export function chooseWorkerHarness(
       why:
         codex === undefined
           ? `no usable, unheld Codex account on ${machine}`
-          : `Codex's best account on ${machine} has ${Math.round(codex * 100)}% usage left`,
+          : `Codex's best account on ${machine} has ${Math.round(codex * 100)}% usage left, no more than Claude's ${Math.round(claude * 100)}%`,
     };
   if (best.has("pi")) return { harness: "pi", why: `a verified Pi profile on ${machine} can run the hire` };
   const unavailable = allowed

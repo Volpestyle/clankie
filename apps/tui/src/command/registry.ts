@@ -210,6 +210,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["usage"],
+    lines: [
+      "  usage [--refresh]        Claude/Codex accounts on this Mac: % used per limit, resets, observation age (JSON)",
+      "  usage overlay [on|off]   Show or hide the desktop overlay's usage meters",
+    ],
+  },
+  {
     nouns: ["pair"],
     lines: [
       "  pair [--json] [--timeout SEC]",

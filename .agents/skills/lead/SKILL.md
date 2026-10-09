@@ -116,7 +116,8 @@ project's profile, and follow up with `message_seat` on the returned seat ID.
 Where neither the role nor the fleet names a harness, choosing one is yours per
 job: a Claude or a Codex worker, each leading its own native subagents. The
 owner's guidance: Claude for visual and creative work; otherwise the best fit
-for the job, weighing usage headroom in `worker_accounts`.
+for the job, weighing usage headroom in `worker_accounts` (Claude and Codex
+both report each window's percent used and reset; `clankie usage` shows them).
 Workers report with `message_clankie`. Never deliver work by typing into a
 terminal. Mechanics, routing and recovery: [fleet tools](reference/fleet-tools.md).
 

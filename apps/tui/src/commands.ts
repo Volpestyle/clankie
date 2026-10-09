@@ -91,6 +91,8 @@ import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
 import type { AwakeCommandResult } from "./command/awake.ts";
+import { formatUsage, type runUsageCommand } from "./command/usage.ts";
+import { USAGE_WORDING, type UsageReport } from "@clankie/protocol/worker-accounts";
 import {
   formatRuntimeHealth,
   parseRuntimeHealthArgs,
@@ -123,6 +125,8 @@ export interface ConsoleCommandContext {
   /** `clankie awake`: the launcher-supervised keep-awake, and the power state it answers to. */
   readonly commandAwake?: (args: readonly string[]) => Promise<AwakeCommandResult>;
   readonly commandRuntimeHealth?: (args: readonly string[]) => ReturnType<typeof runRuntimeHealthCommand>;
+  /** `clankie usage`: account usage meters and the overlay's show/hide choice (VUH-1961). */
+  readonly commandUsage?: (args: readonly string[]) => ReturnType<typeof runUsageCommand>;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
@@ -1953,6 +1957,65 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             "error",
           );
         }
+      },
+    },
+    {
+      name: "usage",
+      aliases: [],
+      description: "How much each Claude and Codex account has left, and the overlay meters",
+      argumentHint: "[refresh | overlay on|off]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const usage = context.commandUsage;
+        if (usage === undefined) {
+          shell.insertCommandResult("/usage", "Usage meters are unavailable.", "error");
+          return;
+        }
+        const words = argument.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+        if (words[0] === "overlay" && words.length === 2 && ["on", "off"].includes(words[1]!)) {
+          try {
+            const result = (await usage(words)) as { display: { overlay: boolean } };
+            shell.insertCommandResult(
+              "/usage",
+              `Overlay meters ${result.display.overlay ? "shown" : "hidden"}.`,
+              "success",
+            );
+          } catch (error) {
+            shell.insertCommandResult(
+              "/usage",
+              error instanceof Error ? error.message : String(error),
+              "error",
+            );
+          }
+          return;
+        }
+        if (!(words.length === 0 || (words.length === 1 && words[0] === "refresh"))) {
+          shell.insertCommandResult("/usage", "Usage: /usage [refresh | overlay on|off]", "error");
+          return;
+        }
+        await runSettingsMenu(shell, "/usage", async () => {
+          const report = (await usage(words[0] === "refresh" ? ["--refresh"] : [])) as UsageReport;
+          const overlay = report.settings.display.overlay;
+          return {
+            title: formatUsage(report),
+            actions: [
+              {
+                value: "overlay",
+                label: overlay ? "Hide usage beside Clankie" : USAGE_WORDING.overlay.label,
+                hint: USAGE_WORDING.overlay.description,
+                async run() {
+                  const next = (await usage([
+                    "overlay",
+                    overlay ? "off" : "on",
+                    "--expected-revision",
+                    report.settings.revision,
+                  ])) as { display: { overlay: boolean } };
+                  return `Overlay meters ${next.display.overlay ? "shown" : "hidden"}.`;
+                },
+              },
+            ],
+          };
+        });
       },
     },
     {

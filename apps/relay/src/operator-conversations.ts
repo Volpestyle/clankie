@@ -51,6 +51,11 @@ import {
   WORKER_ACCOUNT_HOLDS_PATH,
   WorkerAccountHoldRequestSchema,
   WorkerAccountHoldsSchema,
+  USAGE_PATH,
+  USAGE_SETTINGS_PATH,
+  UsageReportSchema,
+  UsageSettingsSnapshotSchema,
+  UpdateUsageSettingsSchema,
 } from "../../../packages/protocol/src/worker-accounts.ts";
 import {
   PROJECTS_PATH,
@@ -147,6 +152,9 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "GET", path: WORKER_ACCOUNTS_PATH },
   { method: "GET", path: WORKER_ACCOUNT_HOLDS_PATH },
   { method: "POST", path: WORKER_ACCOUNT_HOLDS_PATH },
+  { method: "GET", path: USAGE_PATH },
+  { method: "GET", path: USAGE_SETTINGS_PATH },
+  { method: "POST", path: USAGE_SETTINGS_PATH },
   { method: "GET", path: LINEAR_FOLLOW_PATH },
   { method: "POST", path: LINEAR_FOLLOW_PATH },
   { method: "GET", path: LINEAR_WAKE_PATH },
@@ -213,6 +221,12 @@ const OWNER_SETTINGS_ROUTES: Readonly<
     methods: ["GET", "POST"],
     update: WorkerAccountHoldRequestSchema,
     snapshot: WorkerAccountHoldsSchema,
+  },
+  [USAGE_PATH]: { methods: ["GET"], snapshot: UsageReportSchema },
+  [USAGE_SETTINGS_PATH]: {
+    methods: ["GET", "POST"],
+    update: UpdateUsageSettingsSchema,
+    snapshot: UsageSettingsSnapshotSchema,
   },
   [PROJECTS_PATH]: { methods: ["GET"], snapshot: ProjectsSnapshotSchema },
   [PROJECT_UPDATE_SETTINGS_PATH]: {
