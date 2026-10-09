@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "artifacts/focused-stable.json",
+      "size": 40107,
+      "sha256": "0e1bc2c7f10e12e106a4ff6414cc714f5dca9e80cf20365bc4921eb06c17a6ea",
+      "url": "clankie://evidence/sha256/0e1bc2c7f10e12e106a4ff6414cc714f5dca9e80cf20365bc4921eb06c17a6ea"
+    },
+    {
+      "path": "artifacts/proof-metadata.json",
+      "size": 50555,
+      "sha256": "c61f419d9fd0feef858f9dfe3df27a9f0dbf97f604c32876d55e33920e56fc98",
+      "url": "clankie://evidence/sha256/c61f419d9fd0feef858f9dfe3df27a9f0dbf97f604c32876d55e33920e56fc98"
+    },
+    {
+      "path": "artifacts/root-no-bail-1.json",
+      "size": 2658887,
+      "sha256": "98e334626df2722236f07b78fe42a798347e1e9ad1f7af68ecfeeade032ff489",
+      "url": "clankie://evidence/sha256/98e334626df2722236f07b78fe42a798347e1e9ad1f7af68ecfeeade032ff489"
+    },
+    {
+      "path": "artifacts/root-no-bail-1.log",
+      "size": 529424,
+      "sha256": "273a1b2cc200c26537ec59149f0f6112b399a2cd02bc86ba38b874271831a907",
+      "url": "clankie://evidence/sha256/273a1b2cc200c26537ec59149f0f6112b399a2cd02bc86ba38b874271831a907"
+    }
+  ]
+}

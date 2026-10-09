@@ -9,7 +9,12 @@ import { randomUUID } from "node:crypto";
 import { afterEach, aroundEach, describe, expect, it } from "vitest";
 import { createResourceGovernor } from "../src/governor.ts";
 import { defaultResourcePolicy } from "../src/model.ts";
-import { processIdentity, resourceNativeHelperPath, resourcePython } from "../src/process.ts";
+import {
+  observeProcesses,
+  processIdentity,
+  resourceNativeHelperPath,
+  resourcePython,
+} from "../src/process.ts";
 import { ResourceStore } from "../src/store.ts";
 import { fixtureWork, withFixtureWork } from "../../../scripts/testing/fixture-work.ts";
 
@@ -45,6 +50,15 @@ async function exists(path: string) {
     return false;
   }
 }
+// A process terminating between native reads can be temporarily unobservable.
+// Keep its ownership proof until a fresh observation confirms identity or exit.
+async function confirmedIdentity(pid: number) {
+  const observation = await eventually(
+    async () => (await observeProcesses([pid])).get(pid)!,
+    (observation) => observation.status !== "unknown",
+  );
+  return observation.status === "live" ? observation.identity : undefined;
+}
 async function fixture() {
   const lifetime = fixtureWork();
   return lifetime.run(async () => {
@@ -64,7 +78,7 @@ async function fixture() {
       receipts: string[] = [];
     function own(child: ChildProcess) {
       children.push(child);
-      const birth = child.pid ? processIdentity(child.pid) : Promise.resolve(undefined);
+      const birth = child.pid ? confirmedIdentity(child.pid) : Promise.resolve(undefined);
       void birth.catch(() => undefined);
       births.set(child, birth);
       const done = new Promise<number>((resolve, reject) => {
@@ -130,15 +144,16 @@ async function fixture() {
       lifetime.signal.removeEventListener("abort", cancel);
       for (const child of children) {
         const birth = await births.get(child);
-        const current = birth ? await processIdentity(birth.pid) : undefined;
+        const current = birth ? await confirmedIdentity(birth.pid) : undefined;
         if (birth && current?.startTime === birth.startTime && current.pgid === birth.pid)
           killGroup(birth.pgid, "SIGTERM");
       }
       const state = await new ResourceStore(directory).read();
       for (const lease of state.leases) {
         if (lease.kind !== "heavy" || !lease.runner) continue;
-        const current = await processIdentity(lease.runner.pid);
-        if (current?.startTime === lease.runner.startTime) killGroup(lease.runner.pgid, "SIGKILL");
+        const current = await confirmedIdentity(lease.runner.pid);
+        if (current?.startTime === lease.runner.startTime && current.pgid === lease.runner.pgid)
+          killGroup(lease.runner.pgid, "SIGKILL");
       }
       // Cleanup uses exact receipts from commands this fixture started, including
       // survivors of a killed runner; journal census bookkeeping is not authority.
@@ -149,12 +164,14 @@ async function fixture() {
           pgid: number;
           startTime: string;
         };
-        const survivor = await processIdentity(proof.pid);
+        const survivor = await confirmedIdentity(proof.pid);
         if (survivor?.startTime === proof.startTime && survivor.pgid === proof.pgid)
           killGroup(proof.pgid, "SIGKILL");
         await eventually(
-          () => processIdentity(proof.pid),
-          (current) => current?.startTime !== proof.startTime,
+          async () => (await observeProcesses([proof.pid])).get(proof.pid)!,
+          (observation) =>
+            observation.status === "exited" ||
+            (observation.status === "live" && observation.identity.startTime !== proof.startTime),
         );
       }
       await Promise.allSettled(completions.values());
@@ -192,7 +209,7 @@ describe("machine shared heavy permits with actual OS children", () => {
     await f.close();
     await Promise.all([active.done, waiting.done]);
     for (const driver of drivers)
-      expect((await processIdentity(driver!.pid))?.startTime).not.toBe(driver!.startTime);
+      expect((await confirmedIdentity(driver!.pid))?.startTime).not.toBe(driver!.startTime);
     expect(await exists(f.directory)).toBe(false);
     expect(() => f.start("cancelled-no-new-child")).toThrow();
   });

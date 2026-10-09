@@ -1,7 +1,8 @@
 # Fixture cancellation and full-run ordering (VUH-1938)
 
-Work in progress. This archive does not yet establish the required three
-consecutive full no-bail root passes or a resolved native EBADF cause.
+Work in progress. The lead revised acceptance to one complete no-bail root
+run, three concurrent repeats of the affected files inside one heavy permit,
+then the root `check:landing`. The native EBADF cause remains unresolved.
 
 ## Causes and boundaries
 
@@ -40,8 +41,11 @@ consecutive full no-bail root passes or a resolved native EBADF cause.
 
 ## Native lock error remains unresolved
 
-Moss observed one admission failure with `OSError (errno 9)` at 08:06:21 UTC;
-Vitest never started. Ash 2's eleven-waiter assertion captured one exit 1 but
+Moss observed two live admission failures with `OSError (errno 9)`, at about
+08:06:21 UTC and exactly 09:09:24.225 UTC. Neither requested child started.
+The second receipt is `picker-admission-failure.json` in Moss's VUH-1925
+evidence; both errors preceded this diagnostic change. Ash 2's eleven-waiter
+assertion captured one exit 1 but
 did not include that waiter's stderr. FIFO did not change the native helper or
 store locking code. The helper is single-threaded and owns its descriptors;
 there is no demonstrated closed/reused descriptor cause yet.
@@ -60,7 +64,23 @@ Real cancellation cases exercise Google HTTP refresh plus broker-lock cleanup,
 and separate kernel process groups plus terminal children in a private heavy
 journal. Focused checks passed 106/106 across seven files, with both affected
 package typechecks passing. The coalescing case completed in 6.27 seconds.
-Three consecutive complete root Vitest runs with `--bail 0` and the mandatory
-root `check:landing` are pending. No timeout raises,
+The one complete root run on `3e0856e7` / base `536263c9` retained its actual
+exit 1: 7,694 passed, four failed and 60 skipped, with stable source. All
+original named cases passed; contention took 40.90 seconds. Failures were:
+
+- The new private-group cancellation case encountered an uncertain native
+  identity read after teardown started terminating its processes. Cleanup now
+  waits for a confirmed native identity or exit within the existing wait bound;
+  unknown is never treated as exited. This correction still needs repeated proof.
+- The unchanged native-parent replacement case (already taken: true) exhausted
+  its default one-second outbox-journal poll with `ENOENT`. Exactly that case
+  passed alone on both head `3e0856e7` and base `536263c9` (one selected case
+  each). That comparison does not establish a head-only regression or an
+  isolated base failure.
+- Unchanged cancellation/inherited-permit and managed-runtime-provider startup
+  cases hit their 30-second test deadlines. They are retained as failures.
+
+The three concurrent affected-file repeats and mandatory root `check:landing`
+are pending. No timeout raises,
 new skips, manual evals, live capacity edits or simulator boots are part of this
 work.
