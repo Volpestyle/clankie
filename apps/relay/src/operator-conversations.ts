@@ -653,11 +653,14 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     request.once("aborted", disconnected);
     response.once("close", disconnected);
     if (request.aborted || response.destroyed) abort.abort();
+    // Recorded evidence bytes are owner-device reads: the service checks the
+    // device's own signed identity, so a captain bearer can never fetch them.
     const ownerRoute =
       nativeMessageOp ||
       questionOp ||
       workWriteOp ||
       serviceRequest.op === "tracker_sync" ||
+      serviceRequest.op === "evidence_fetch" ||
       (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);
     try {
       if (abort.signal.aborted) return true;
@@ -679,6 +682,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "work_item_write" ||
           serviceRequest.op === "work_item_write_receipt" ||
           serviceRequest.op === "tracker_sync" ||
+          serviceRequest.op === "evidence_fetch" ||
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||
           serviceRequest.op === "project_proposal_tweak" ||
@@ -1231,7 +1235,8 @@ async function writeTailAuthFailure(response: ServerResponse, reason: string): P
 
 function publicServiceResult(value: unknown): OperatorConversationServiceResult {
   const parsed = OperatorConversationServiceResultSchema.parse(value);
-  if (parsed.op === "tracker_sync") return parsed;
+  // Opaque payloads: redacting inside base64 bytes or an NDJSON bootstrap would corrupt them.
+  if (parsed.op === "tracker_sync" || parsed.op === "evidence_fetch") return parsed;
   return OperatorConversationServiceResultSchema.parse(redactPublicValue(parsed));
 }
 

@@ -6579,7 +6579,7 @@ be proved.
 
 `clankie work project-details --repo REPO` reads the saved tracker project’s summary, description, status, priority, lead, dates, teams, resources and latest 200 authored status updates. Paired devices use the additive `work_project_details` operation. Linear and the built-in tracker share the canonical project/status-update tools. Unsupported or failed reads answer unavailable; an empty feed means a successful read with no updates. The read never infers health, author or delivery from issue state.
 
-Paired owner devices fetch evidence bytes with `evidence_fetch` (`sha256`, `offset`, `length`, at most 256 KiB). Responses contain base64 bytes, total size and the recorded content type; no service URL or signed link leaves the authenticated device/relay path. Unsupported storage backends answer unavailable.
+Paired owner devices fetch evidence bytes with `evidence_fetch` (`sha256`, `offset`, `length`, at most 256 KiB). Responses contain base64 bytes, total size and the recorded content type; no service URL or signed link leaves the authenticated device/relay path. Unsupported storage backends answer unavailable. The relay forwards it as an owner route under the device's own identity (never the captain bearer) and passes the bytes through unredacted; unpaired, revoked or supervise-only devices are refused (VUH-1977).
 
 ### `work import linear --project UUID --scratch NAME`
 
