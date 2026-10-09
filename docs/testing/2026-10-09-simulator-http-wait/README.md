@@ -65,7 +65,8 @@ was 11.28; that observation does not prove the failure's cause.
 The preceding root attempt was interrupted during lint when main advanced;
 it supplies no acceptance. No assertion, timeout or selection was weakened.
 
-The [combined canonical proof](clankie://evidence/sha256/d49f4d77378622b38c1875faf086edbe44174cac6a527f32f63e2f5c0a6b59d6)
+The combined canonical proof
+`clankie://evidence/sha256/d49f4d77378622b38c1875faf086edbe44174cac6a527f32f63e2f5c0a6b59d6`
 retains the actual nonzero gate, exact failure, isolated results and load sample.
 A timing-exception landing requires lead acceptance. This result is not a
 green root gate or a live deployment.
