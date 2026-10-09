@@ -47,7 +47,17 @@ export async function readProjectDetails(
   );
   const id = text(project.uuid) ?? text(project.id);
   if (!id) throw new Error("Project has no identity");
-  const resources = project.resources ? row(project.resources) : {};
+  const resources = Array.isArray(project.resources)
+    ? { links: project.resources }
+    : project.resources
+      ? row(project.resources)
+      : {};
+  const priority =
+    typeof project.priority === "number"
+      ? project.priority
+      : project.priority
+        ? row(project.priority).value
+        : undefined;
   const updates: WorkProjectDetails["updates"] = [];
   let cursor: string | undefined;
   const seen = new Set<string>();
@@ -87,11 +97,13 @@ export async function readProjectDetails(
   return WorkProjectDetailsSchema.parse({
     id,
     name: project.name,
-    identifier: text(project.identifier),
+    identifier:
+      text(project.identifier) ??
+      (project.uuid && project.id !== project.uuid ? text(project.id) : undefined),
     summary: text(project.summary),
     description: text(project.description),
     status: name(project.status),
-    priority: typeof project.priority === "number" ? project.priority : undefined,
+    priority: typeof priority === "number" ? priority : undefined,
     lead: name(project.lead),
     startDate: text(project.startDate),
     targetDate: text(project.targetDate),
