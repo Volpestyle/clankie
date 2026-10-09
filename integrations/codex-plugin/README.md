@@ -136,3 +136,9 @@ acknowledges the report and refuses receipts belonging to another native seat.
 
 Worker MCP uses `worker`; existing `clankie` registrations remain supported for
 original-session catalog observation and refresh. See the [MCP migration](../claude-plugin/README.md#mcp-name-and-result-migration) for result decoding and update behavior.
+
+Worker MCP approval travels with the worker plugin registration (`codex-mcp.json`),
+not just the hire's command-line overrides. This keeps `worker` unprompted when
+an existing Codex session refreshes from the legacy `clankie` server name. The
+legacy launch approval remains valid for that old connection; other MCP servers
+retain their own policies. Clankie's service gates still authorize every call.

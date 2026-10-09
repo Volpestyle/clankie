@@ -150,13 +150,18 @@ async function fixture(pid = 42, paneId = "w1:p1", serverName = "clankie") {
             ],
           });
         }
-        if (method === "config/value/write") {
+        if (method === "config/batchWrite") {
           expect(params.expectedVersion).toBe(await version());
           expect(params.filePath).toBe(configPath);
-          expect(params.keyPath).toBe(`mcp_servers.${serverName}.env.CLANKIE_CATALOG_REVISION`);
+          const edits = params.edits as { keyPath: string; value: unknown }[];
+          const values = Object.fromEntries(edits.map((edit) => [edit.keyPath, edit.value]));
+          expect(values[`mcp_servers.${serverName}.command`]).toBe("clankie");
+          expect(values[`mcp_servers.${serverName}.args`]).toEqual(["mcp", "--fleet"]);
+          expect(values[`mcp_servers.${serverName}.default_tools_approval_mode`]).toBe("approve");
+          const revision = values[`mcp_servers.${serverName}.env.CLANKIE_CATALOG_REVISION`];
           await writeFile(
             configPath,
-            `# owned copied worker config\nCLANKIE_CATALOG_REVISION="${String(params.value)}"\n`,
+            `# owned copied worker config\nCLANKIE_CATALOG_REVISION="${String(revision)}"\n`,
             { mode: 0o600 },
           );
           if (busyAfterWrite) busy = true;
@@ -332,17 +337,17 @@ it.each(["clankie", "worker"])(
     expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([
       { outcome: "catalog-refreshed", catalogs: [{ threadId: "child" }, { threadId: "root" }] },
     ]);
-    expect(f.count("config/value/write")).toBe(1);
+    expect(f.count("config/batchWrite")).toBe(1);
     expect(f.count("config/mcpServer/reload")).toBe(1);
     expect(readLocalCodexRecords(f.recordsPath)[0]!.catalogConfig?.filePath).toBe(f.configPath);
     expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "catalog-refreshed" }]);
-    expect(f.count("config/value/write")).toBe(1);
+    expect(f.count("config/batchWrite")).toBe(1);
     first.close();
     f.restartRegistry();
     expect(await f.coordinator().refresh({ revision: "deploy-two" })).toMatchObject([
       { outcome: "catalog-refreshed" },
     ]);
-    expect(f.count("config/value/write")).toBe(2);
+    expect(f.count("config/batchWrite")).toBe(2);
     expect(f.count("config/mcpServer/reload")).toBe(2);
     expect(
       f.calls.every((call) =>
@@ -351,7 +356,7 @@ it.each(["clankie", "worker"])(
           "thread/loaded/list",
           "thread/read",
           "config/read",
-          "config/value/write",
+          "config/batchWrite",
           "config/mcpServer/reload",
           "mcpServerStatus/list",
         ].includes(call.method),
@@ -371,7 +376,7 @@ it("recovers a legacy registration only from the original native endpoint and lo
     threadId: "root",
     catalogConfig: { filePath: f.configPath },
   });
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
 
@@ -384,7 +389,7 @@ it.each(["digest", "requested", "independent"] as const)(
     if (kind === "requested") f.setRequestedThread("replacement-thread");
     if (kind === "independent") f.setIndependent();
     expect(await f.coordinator().refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "failed" }]);
-    expect(f.count("config/value/write")).toBe(0);
+    expect(f.count("config/batchWrite")).toBe(0);
     expect(f.count("config/mcpServer/reload")).toBe(0);
   },
 );
@@ -403,7 +408,7 @@ it("requires enabled fleet peer tools on the original root and every descendant"
       ])
       .refresh({ revision: "deploy-one" }),
   ).toMatchObject([{ outcome: "failed", reason: "original_codex_catalog_unverified" }]);
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
 
@@ -442,7 +447,7 @@ it("keeps the original uncertain journal when a replacement same-thread TUI chan
   coordinator.close();
   expect((await readdir(directory)).filter((name) => name.endsWith(".json"))).toEqual(names);
   expect(await readFile(journal, "utf8")).toBe(original);
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(0);
 });
 
@@ -470,7 +475,7 @@ it.each(["child-active", "child-active-idle", "birth", "foreground"] as const)(
     const result = await coordinator.refresh({ revision: "deploy-one" });
     coordinator.close();
     expect(result[0]!.outcome).toBe(kind.startsWith("child-") ? "skipped-busy" : "failed");
-    expect(f.count("config/value/write")).toBe(0);
+    expect(f.count("config/batchWrite")).toBe(0);
     expect(f.count("config/mcpServer/reload")).toBe(0);
   },
 );
@@ -483,7 +488,7 @@ it("fences a descendant's active-to-idle activity after a confirmed write before
   });
   expect(await coordinator.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "skipped-busy" }]);
   coordinator.close();
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(0);
 });
 
@@ -509,7 +514,7 @@ it("allows read-only reconciliation under a held crash claim without deleting it
   coordinator.close();
   expect(await readFile(claim, "utf8")).toBe(holder);
   expect(await readFile(journal, "utf8")).toBe(original);
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
 
@@ -547,7 +552,7 @@ it("isolates a malformed signal from another registered controller in the same w
   expect(results).toContainEqual(
     expect.objectContaining({ paneId: "w1:p1", reason: "invalid_codex_catalog_signal" }),
   );
-  expect(second.count("config/value/write")).toBe(1);
+  expect(second.count("config/batchWrite")).toBe(1);
   expect(second.count("config/mcpServer/reload")).toBe(1);
 });
 
@@ -556,10 +561,10 @@ it("defers busy root or descendant and automatically refreshes when the original
   f.setChildBusy(true);
   f.coordinator(true);
   await until(() => f.results.some((result) => result.outcome === "skipped-busy"));
-  expect(f.count("config/value/write")).toBe(0);
+  expect(f.count("config/batchWrite")).toBe(0);
   f.setChildBusy(false);
   await until(() => f.results.some((result) => result.outcome === "catalog-refreshed"));
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
 
@@ -568,13 +573,13 @@ it("waits after a confirmed write if a turn begins, then sends the first reload 
   f.setBusyAfterWrite();
   const coordinator = f.coordinator();
   expect(await coordinator.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "skipped-busy" }]);
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(0);
   f.setBusy(false);
   expect(await coordinator.refresh({ revision: "deploy-one" })).toMatchObject([
     { outcome: "catalog-refreshed" },
   ]);
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
 
@@ -585,7 +590,7 @@ it.each(["write", "reload"] as const)(
     f.loseReply(kind);
     const first = f.coordinator();
     expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "failed" }]);
-    const writes = f.count("config/value/write"),
+    const writes = f.count("config/batchWrite"),
       reloads = f.count("config/mcpServer/reload");
     first.close();
     f.restartRegistry();
@@ -595,7 +600,7 @@ it.each(["write", "reload"] as const)(
         reason: "original_codex_refresh_delivery_unconfirmed_readonly_reconciliation_required",
       },
     ]);
-    expect(f.count("config/value/write")).toBe(writes);
+    expect(f.count("config/batchWrite")).toBe(writes);
     expect(f.count("config/mcpServer/reload")).toBe(reloads);
     expect(
       (await readdir(join(f.root, "codex-catalog-refresh"))).filter((path) => path.endsWith(".json")),
@@ -614,7 +619,7 @@ it("reconciles a confirmed reload through complete filtered catalogs without ano
   expect(await coordinator.reconcile({ revision: "deploy-one" })).toMatchObject([
     { outcome: "catalog-refreshed" },
   ]);
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
 
@@ -637,7 +642,7 @@ it("repairs a definitively failed startup after confirmed reload, retaining the 
   // The protocol fixture remains failed after this new reload too. The
   // actual binary integration proves successful reconnect and six-tool adoption.
   expect(await f.coordinator().refresh({ revision: "deploy-two" })).toMatchObject([{ outcome: "failed" }]);
-  expect(f.count("config/value/write")).toBe(2);
+  expect(f.count("config/batchWrite")).toBe(2);
   expect(f.count("config/mcpServer/reload")).toBe(2);
   expect(JSON.parse(await readFile(journal, "utf8")).envRevision).not.toBe(failed.envRevision);
   expect(
@@ -656,7 +661,7 @@ it.each(["starting", "disconnected", "unknown", "connected"])(
     expect(await coordinator.refresh({ revision: "deploy-two" })).toMatchObject([
       { outcome: "failed", reason: "original_codex_catalog_unverified" },
     ]);
-    expect(f.count("config/value/write")).toBe(1);
+    expect(f.count("config/batchWrite")).toBe(1);
     expect(f.count("config/mcpServer/reload")).toBe(1);
   },
 );
@@ -671,7 +676,7 @@ it.each(["write", "reload"] as const)(
     expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "failed" }]);
     first.close();
     f.restartRegistry();
-    const writes = f.count("config/value/write"),
+    const writes = f.count("config/batchWrite"),
       reloads = f.count("config/mcpServer/reload");
     expect(await f.coordinator().refresh({ revision: "deploy-two" })).toMatchObject([
       {
@@ -679,7 +684,7 @@ it.each(["write", "reload"] as const)(
         reason: "original_codex_refresh_delivery_unconfirmed_readonly_reconciliation_required",
       },
     ]);
-    expect(f.count("config/value/write")).toBe(writes);
+    expect(f.count("config/batchWrite")).toBe(writes);
     expect(f.count("config/mcpServer/reload")).toBe(reloads);
     expect(
       (await readdir(join(f.root, "codex-catalog-refresh"))).filter((name) => name.endsWith(".json")),
@@ -714,7 +719,7 @@ it("serializes journal reconciliation and native effects across independent coor
   expect(await f.coordinator().reconcile({ revision: "deploy-one" })).toMatchObject([
     { outcome: "catalog-refreshed" },
   ]);
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
 
@@ -753,7 +758,7 @@ it("retains a queued operator's authority while a service refresh is already in 
         result.revision === "manual-two" && result.reason === "codex_refresh_operator_authority_changed",
     ),
   );
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
 
@@ -771,7 +776,7 @@ it.each(["independent", "masked", "birth", "binding", "release"] as const)(
       });
     const result = await f.coordinator().refresh({ revision: "deploy-one" });
     expect(result[0]!.outcome).toBe("failed");
-    expect(f.count("config/value/write")).toBe(0);
+    expect(f.count("config/batchWrite")).toBe(0);
     expect(f.count("config/mcpServer/reload")).toBe(0);
   },
 );
@@ -795,7 +800,7 @@ it("rechecks operator authority after preparation and carries it through a defer
   f.setBusy(false);
   await until(() => f.results.some((result) => result.reason === "codex_refresh_operator_authority_changed"));
   expect(checks).toBeGreaterThan(0);
-  expect(f.count("config/value/write")).toBe(0);
+  expect(f.count("config/batchWrite")).toBe(0);
   expect(f.count("config/mcpServer/reload")).toBe(0);
 });
 
@@ -812,12 +817,12 @@ it("never resumes an operator's confirmed write through an unguarded service lan
       },
     }),
   ).toMatchObject([{ outcome: "failed", reason: "codex_refresh_operator_authority_changed" }]);
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(0);
   expect(await coordinator.refresh({ revision: "service-two" })).toMatchObject([
     { outcome: "failed", reason: "original_codex_operator_refresh_requires_current_operator" },
   ]);
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(0);
   expect(
     await coordinator.refresh({
@@ -826,6 +831,6 @@ it("never resumes an operator's confirmed write through an unguarded service lan
       beforeDispatch: async () => {},
     }),
   ).toMatchObject([{ outcome: "catalog-refreshed" }]);
-  expect(f.count("config/value/write")).toBe(1);
+  expect(f.count("config/batchWrite")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });

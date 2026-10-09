@@ -2,6 +2,7 @@
   "mcpServers": {
     "worker": {
       "command": "node",
+      "default_tools_approval_mode": "approve",
       "args": ["bin/fleet-mcp.mjs"],
       "env_vars": ["HERDR_PANE_ID", "HERDR_SOCKET_PATH", "CLANKIE_STATE"],
       "cwd": "."

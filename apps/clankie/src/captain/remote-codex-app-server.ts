@@ -296,6 +296,7 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
             viewConfigArgs: [
               "mcp_servers.clankie.enabled=false",
               "mcp_servers.worker.enabled=true",
+              'mcp_servers.worker.default_tools_approval_mode="approve"',
               'mcp_servers.worker.env.NODE_OPTIONS=""',
               'mcp_servers.worker.env.NODE_PATH=""',
               `mcp_servers.worker.command=${JSON.stringify(started.bridge!.node)}`,

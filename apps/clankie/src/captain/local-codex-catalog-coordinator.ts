@@ -942,10 +942,21 @@ export function createLocalCodexCatalogCoordinator(input: {
         assertIdleObservation();
         requireProof(authority.current?.() !== false, "codex_refresh_operator_authority_changed");
         const written = object(
-          await request("config/value/write", {
-            keyPath: revisionKey(config.server),
-            value: attempt.envRevision,
-            mergeStrategy: "upsert",
+          // A renamed bridge may exist only in launch flags. Writing its env
+          // alone creates an invalid on-disk server without a transport. Publish
+          // the proven registration, approval and revision in one versioned edit.
+          // Legacy controllers retain their original server name.
+          await request("config/batchWrite", {
+            edits: [
+              ["command", "clankie"],
+              ["args", ["mcp", "--fleet"]],
+              ["default_tools_approval_mode", "approve"],
+              ["env.CLANKIE_CATALOG_REVISION", attempt.envRevision],
+            ].map(([key, value]) => ({
+              keyPath: `mcp_servers.${config.server}.${key}`,
+              value,
+              mergeStrategy: "upsert",
+            })),
             filePath: config.filePath,
             expectedVersion: config.expectedVersion,
           }),

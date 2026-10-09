@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import type { CodexAppServerSeat, CodexSeatEvent } from "../src/captain/codex-app-server.ts";
@@ -138,6 +139,7 @@ describe("Codex harness seat adapter", () => {
       ...inherited,
       "mcp_servers.worker.required=false",
       'mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"',
+      'mcp_servers.worker.default_tools_approval_mode="approve"',
     ]);
     if (started.outcome === "started") await started.control.close();
     const ordinary = createCodexSeatAdapter({
@@ -191,10 +193,38 @@ describe("Codex harness seat adapter", () => {
     expect(result.outcome).toBe("started");
     const config: string[] = f.start.mock.calls[0]![0].config;
     expect(config).toContain('approval_policy="on-request"');
-    // Only the clankie server is approved; other MCP servers keep Codex's prompts.
+    // Only the worker server is approved; other MCP servers keep Codex's prompts.
     expect(config.filter((entry) => entry.includes("approval_mode"))).toEqual([
       'mcp_servers.worker.default_tools_approval_mode="approve"',
     ]);
+    if (result.outcome === "started") await result.control.close();
+  });
+
+  it("approves the renamed bridge for remote hires and plugin refresh of legacy launches", async () => {
+    const f = fixture();
+    const legacyApproval = 'mcp_servers.clankie.default_tools_approval_mode="approve"';
+    const adapter = createCodexSeatAdapter({
+      start: f.start,
+      herdr: f.herdr,
+      trackerOverrides: async () => [legacyApproval],
+      serverForView: () => async () => {
+        throw new Error("unused fixture launcher");
+      },
+    });
+    const result = await adapter.start({ harness: "codex", cwd: "/scratch", brief: "" }, f.view);
+    expect(result.outcome).toBe("started");
+    const config: string[] = f.start.mock.calls[0]![0].config;
+    expect(config).toContain(legacyApproval);
+    expect(config).toContain('mcp_servers.worker.default_tools_approval_mode="approve"');
+    // A running legacy TUI cannot change its argv. Native plugin refresh must
+    // bring the new server's policy with its registration instead.
+    const plugin = JSON.parse(
+      await readFile(
+        new URL("../../../integrations/claude-plugin/worker/codex-mcp.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    expect(plugin.mcpServers.worker.default_tools_approval_mode).toBe("approve");
     if (result.outcome === "started") await result.control.close();
   });
 

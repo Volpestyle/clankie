@@ -314,6 +314,8 @@ export function createCodexSeatAdapter(
           // Clankie's own bridge needs no native Codex prompt: fleet gates select
           // on-request above, and the service already decides each bridged call.
           // The approval applies to this one server, never to other MCP servers.
+          if (options.localProcess || options.serverForView)
+            trackerOverrides.push('mcp_servers.worker.default_tools_approval_mode="approve"');
           if (options.localProcess)
             trackerOverrides.push(
               "mcp_servers.clankie.enabled=false",
@@ -321,7 +323,6 @@ export function createCodexSeatAdapter(
               'mcp_servers.worker.command="clankie"',
               'mcp_servers.worker.args=["mcp","--fleet"]',
               'mcp_servers.worker.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
-              'mcp_servers.worker.default_tools_approval_mode="approve"',
             );
           await view.guard?.();
           seat = await (options.start ?? startCodexAppServerSeat)({

@@ -42,7 +42,7 @@ function modelToolNames(value: unknown): string[] {
 }
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-async function nativeFixture(options: { omitModelTools?: boolean } = {}) {
+async function nativeFixture(options: { omitModelTools?: boolean; launchOnlyBridge?: boolean } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "native-catalog-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "worker-codex", "seat-native"),
@@ -175,17 +175,32 @@ async function nativeFixture(options: { omitModelTools?: boolean } = {}) {
     `model = "owned-model"\nmodel_provider = "owned"\n[mcp_servers.clankie]\ncommand = "clankie"\nargs = ["mcp", "--fleet"]\nenv_vars = ["CLANKIE_STATE", "HERDR_SOCKET_PATH", "HERDR_PANE_ID"]\nenv = { CLANKIE_EXPECTED_TOOL_NAMES = '${JSON.stringify(names)}' }\nstartup_timeout_sec = 10\n${options.omitModelTools ? 'omit_tools_from = ["code_mode", "deferred", "direct"]\n' : ""}[model_providers.owned]\nname = "Owned offline provider"\nbase_url = "http://127.0.0.1:${port}/unused-model"\nwire_api = "responses"\n`,
     { mode: 0o600 },
   );
-  const child = spawn("codex", ["app-server", "--listen", `unix://${socketPath}`], {
-    env: {
-      ...process.env,
-      CODEX_HOME: home,
-      CLANKIE_STATE: state,
-      HERDR_SOCKET_PATH: "owned-herdr",
-      HERDR_PANE_ID: "w1:p1",
-      PATH: `${bin}:${process.env.PATH}`,
+  const overrides = options.launchOnlyBridge
+    ? [
+        "mcp_servers.clankie.enabled=false",
+        "mcp_servers.worker.enabled=true",
+        'mcp_servers.worker.command="clankie"',
+        'mcp_servers.worker.args=["mcp","--fleet"]',
+        'mcp_servers.worker.env_vars=["CLANKIE_STATE","HERDR_SOCKET_PATH","HERDR_PANE_ID"]',
+        `mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(names))}`,
+        "mcp_servers.worker.startup_timeout_sec=10",
+      ]
+    : [];
+  const child = spawn(
+    "codex",
+    [...overrides.flatMap((value) => ["-c", value]), "app-server", "--listen", `unix://${socketPath}`],
+    {
+      env: {
+        ...process.env,
+        CODEX_HOME: home,
+        CLANKIE_STATE: state,
+        HERDR_SOCKET_PATH: "owned-herdr",
+        HERDR_PANE_ID: "w1:p1",
+        PATH: `${bin}:${process.env.PATH}`,
+      },
+      stdio: ["ignore", "ignore", "pipe"],
     },
-    stdio: ["ignore", "ignore", "pipe"],
-  });
+  );
   let stderr = "",
     spawnError: Error | undefined;
   child.stderr.on("data", (bytes) => {
@@ -286,7 +301,7 @@ async function nativeFixture(options: { omitModelTools?: boolean } = {}) {
 nativeIt(
   "repairs a confirmed startup failure with a fresh generation on the original real Codex thread",
   async () => {
-    const f = await nativeFixture(),
+    const f = await nativeFixture({ launchOnlyBridge: true }),
       first = f.coordinator();
     const before = await codexToolCatalogReport({
       sessionId: f.threadId,
@@ -294,6 +309,14 @@ nativeIt(
       requireConnected: true,
     });
     expect(before.error).toContain("disconnected or rejected");
+    // The pre-migration env-only write cannot register a launch-only server.
+    await expect(
+      f.request("config/value/write", {
+        keyPath: "mcp_servers.worker.env.CLANKIE_CATALOG_REVISION",
+        value: "old-env-only-write",
+        mergeStrategy: "upsert",
+      }),
+    ).rejects.toThrow();
     expect(modelToolNames((await f.turn()).tools)).not.toContain("clankie_tools");
     expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([
       {

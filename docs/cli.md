@@ -526,8 +526,10 @@ identity; elapsed downtime never counts as healthy observation.
 
 The service also schedules an in-place tool refresh for running workers. Local
 managed Codex controllers keep their original thread and descendants, wait for
-idle, update only the private Clankie transport revision with a native config
-version check, and reload once. A lost mutation acknowledgment is held for
+idle, atomically persist the proven Clankie bridge registration, its tool approval
+and transport revision with a native config version check, and reload once.
+A renamed bridge that previously existed only in launch flags becomes a valid
+on-disk registration; legacy controllers keep their original server name. A lost mutation acknowledgment is held for
 read-only reconciliation. If an acknowledged reload's original native runtime
 reports failed startup, a fresh guarded transport revision can repair it in
 place; the failed generation is retained. No turn or uncertain report is replayed.
