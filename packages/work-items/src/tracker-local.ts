@@ -7,6 +7,7 @@ import {
   applyTrackerDescriptionPatch,
   DELIVERY_STAGES,
   TRACKER_LEAD,
+  TRACKER_OWNER,
   TRACKER_TOOLS,
   validateTrackerToolArgs,
   type DeliveryStage,
@@ -121,6 +122,22 @@ interface Issue extends Entity {
   asking?: boolean;
   errored?: boolean;
 }
+export interface EvidenceReference {
+  recordId: string;
+  sha256: string;
+  url: string;
+  type: "log" | "screenshot" | "video" | "diff" | "eval" | "other";
+}
+interface EvidenceBundle {
+  id: string;
+  issueId: string;
+  runId: string | null;
+  references: EvidenceReference[];
+  gaps: string[];
+  actor: TrackerActor;
+  at: string;
+  checked?: { actor: TrackerActor; at: string; eventId: string };
+}
 interface Link {
   url: string;
   title: string;
@@ -157,6 +174,9 @@ interface Run {
   number: number;
   parentRunId: string | null;
   status: "active" | "succeeded" | "failed" | "canceled";
+  paused?: boolean;
+  /** Event IDs until linked, then ADR 0245 request IDs in ownerAsk references. */
+  pendingGates?: string[];
   actor: TrackerActor;
   worktree: string | null;
   branch: string | null;
@@ -233,6 +253,9 @@ interface Store {
   cycles?: Cycle[];
   /** Runs of issue work (VUH-1918). */
   runs?: Run[];
+  bundles?: EvidenceBundle[];
+  /** Links to ADR 0245 records; no question, answer or parallel ask lifecycle here. */
+  ownerAsks?: { eventId: string; issueId: string; runId?: string; requestId: string }[];
 }
 
 /** Who and why for one write, threaded into item events. */
@@ -245,6 +268,10 @@ interface WriteContext {
 export type TrackerEventListener = (event: TrackerItemEvent) => void;
 export interface LocalTrackerBackend extends TrackerToolBackend {
   /** Replays events after the cursor (seq), then pushes new ones. Returns an unsubscribe. */
+  /** Host-only: link the existing mailbox record to its requesting item event. */
+  linkOwnerAsk(eventId: string, requestId: string): Promise<void>;
+  /** Host-only: apply an authenticated ADR 0245 resolution. Public tools cannot approve. */
+  resolveOwnerAsk(eventId: string, requestId: string, approved: boolean, body: string): Promise<void>;
   subscribe(listener: TrackerEventListener, after?: number): Promise<() => void>;
   /**
    * Upserts a repository's shipped versions and moves each built-in item a version
@@ -279,6 +306,8 @@ export interface LocalTrackerOptions {
    * The live seat, pane and hire behind a run's actor, from the host's own hire records
    * (VUH-1918). Read on every view; the tracker keeps no copy of seat state.
    */
+  /** Resolve store records at the host boundary. Missing validation fails closed on uploads. */
+  readonly validateEvidence?: (issueKey: string, references: readonly EvidenceReference[]) => Promise<void>;
   readonly runner?: (actor: TrackerActor) => Record<string, unknown> | undefined;
 }
 
@@ -421,6 +450,21 @@ function parseStore(content: string): Store {
       previous = event.hash;
     });
   }
+  if (
+    store.bundles !== undefined &&
+    (!Array.isArray(store.bundles) ||
+      store.bundles.some(
+        (bundle) =>
+          typeof bundle?.id !== "string" || !Array.isArray(bundle.references) || !Array.isArray(bundle.gaps),
+      ))
+  )
+    throw new Error("Invalid local tracker evidence bundles");
+  if (
+    store.ownerAsks !== undefined &&
+    (!Array.isArray(store.ownerAsks) ||
+      store.ownerAsks.some((ref) => typeof ref?.eventId !== "string" || typeof ref.requestId !== "string"))
+  )
+    throw new Error("Invalid local tracker owner ask references");
   bindStageStatuses(store);
   if (
     store.runs !== undefined &&
@@ -569,7 +613,12 @@ function appendEvent(
   now: string,
   issue: Issue,
   event: Pick<TrackerItemEvent, "type"> &
-    Partial<Pick<TrackerItemEvent, "body" | "from" | "to" | "commentId">>,
+    Partial<
+      Pick<
+        TrackerItemEvent,
+        "body" | "from" | "to" | "commentId" | "bundleId" | "runId" | "requestId" | "gate" | "purpose"
+      >
+    >,
 ): void {
   store.events ??= [];
   const body = {
@@ -606,6 +655,21 @@ function moveStage(
         ? "only the owner verifies an item; report landed or delivered and the owner checks it"
         : `only the owner moves an item back (from ${current} to ${target})`,
     );
+  if (DELIVERY_STAGES.indexOf(target) > DELIVERY_STAGES.indexOf("landed")) {
+    const bundle = currentBundle(store, issue.id);
+    if (bundle === undefined)
+      throw new TrackerWriteRefused(
+        "evidence_bundle_required",
+        "completion past landed requires an evidence bundle",
+      );
+    if (target === "owner-verified" && bundle.checked === undefined)
+      checkBundle(store, bundle, context, now, "Owner verification checked the bundle.");
+    if (bundle.checked === undefined)
+      throw new TrackerWriteRefused(
+        "bundle_check_required",
+        "completion past landed requires an independent bundle check",
+      );
+  }
   issue.stage = target;
   issue.statusId = statusForStage(store, target).id;
   appendEvent(store, context, now, issue, {
@@ -671,7 +735,21 @@ function recordIssueChanges(
           "owner_verification_required",
           "only the owner creates an item as completed",
         );
-      issue.stage = is === "completed" ? "owner-verified" : "reported";
+      if (is === "completed")
+        throw new TrackerWriteRefused(
+          "evidence_bundle_required",
+          "create the item, attach a bundle and independently verify it before completing",
+        );
+      const initialStage = store.issueStatuses.find((status) => status.id === issue.statusId)?.stage;
+      if (
+        initialStage !== undefined &&
+        DELIVERY_STAGES.indexOf(initialStage) > DELIVERY_STAGES.indexOf("landed")
+      )
+        throw new TrackerWriteRefused(
+          "evidence_bundle_required",
+          "create the item and attach a checked bundle before setting a status past landed",
+        );
+      issue.stage = "reported";
       appendEvent(store, context, now, issue, { type: "created", to: stageOf(issue) });
     } else if (previous.statusId !== issue.statusId) {
       const from = before.issueStatuses.find((status) => status.id === previous.statusId)?.name;
@@ -684,18 +762,16 @@ function recordIssueChanges(
               ? `only the owner completes an item; report it with post_issue_event (stage landed or delivered) and the owner verifies it`
               : "only the owner reopens a completed item",
           );
-        issue.stage = is === "completed" ? "owner-verified" : "accepted";
-        appendEvent(store, context, now, issue, {
-          type: is === "completed" ? "verified" : "reopened",
-          ...(from === undefined ? {} : { from }),
-          to,
-        });
-      } else
+        moveStage(store, issue, is === "completed" ? "owner-verified" : "accepted", context, now);
+      } else {
+        const bound = store.issueStatuses.find((status) => status.id === issue.statusId)?.stage;
+        if (bound !== undefined) moveStage(store, issue, bound, context, now);
         appendEvent(store, context, now, issue, {
           type: "state",
           ...(from === undefined ? {} : { from }),
           to,
         });
+      }
     }
     if (previous !== undefined && previous.priority !== issue.priority)
       appendEvent(store, context, now, issue, {
@@ -1063,9 +1139,164 @@ function runView(store: Store, run: Run, now: string, options: LocalTrackerOptio
   return {
     ...run,
     identifier: issue?.identifier ?? null,
+    blocked: run.status === "active" && (run.paused === true || (run.pendingGates?.length ?? 0) > 0),
+    bundle: currentBundle(store, run.issueId, run.id) ?? null,
+    ownerAsks: (store.ownerAsks ?? []).filter((ref) => ref.runId === run.id),
     durationMs: Date.parse(run.endedAt ?? now) - Date.parse(run.startedAt),
     link: options.runner?.(run.actor) ?? null,
   };
+}
+
+const currentBundle = (store: Store, issueId: string, runId: string | null = null) =>
+  (store.bundles ?? []).findLast((bundle) => bundle.issueId === issueId && bundle.runId === runId);
+
+function checkBundle(
+  store: Store,
+  bundle: EvidenceBundle,
+  context: WriteContext,
+  now: string,
+  body?: string,
+) {
+  const issue = findIssue(store, bundle.issueId);
+  if (currentBundle(store, bundle.issueId, bundle.runId)?.id !== bundle.id)
+    throw new TrackerWriteRefused("bundle_superseded", "check the current bundle, not a superseded version");
+  const workers = [
+    bundle.actor,
+    ...runsOf(store, issue.id).map((run) => run.actor),
+    ...(store.events ?? [])
+      .filter(
+        (event) =>
+          event.issueId === issue.id &&
+          event.at < now &&
+          event.via !== "owner_ask" &&
+          (["action", "result"].includes(event.type) || (event.type === "stage" && event.to === "landed")),
+      )
+      .map((event) => event.actor),
+  ];
+  if (workers.some((actor) => actorKey(actor) === actorKey(context.actor)))
+    throw new TrackerWriteRefused("bundle_self_check", "an actor who did the work cannot check its bundle");
+  if (bundle.checked !== undefined) return;
+  appendEvent(store, context, now, issue, {
+    type: "bundle_checked",
+    bundleId: bundle.id,
+    ...(bundle.runId === null ? {} : { runId: bundle.runId }),
+    ...(body === undefined ? {} : { body }),
+  });
+  bundle.checked = { actor: context.actor, at: now, eventId: store.events!.at(-1)!.id };
+}
+
+async function saveBundle(
+  store: Store,
+  args: Record<string, unknown>,
+  context: WriteContext,
+  now: string,
+  options: LocalTrackerOptions,
+) {
+  const issue = findIssue(store, args.issueId as string);
+  options.assertIssueWrite?.(issueView(store, issue));
+  const runId = (args.runId as string | undefined) ?? null;
+  if (runId === null && DELIVERY_STAGES.indexOf(stageOf(issue)) > DELIVERY_STAGES.indexOf("landed"))
+    throw new TrackerWriteRefused(
+      "bundle_locked",
+      "the owner must reopen an item to landed or earlier before replacing its completion bundle",
+    );
+  if (runId !== null && !(store.runs ?? []).some((run) => run.id === runId && run.issueId === issue.id))
+    throw new Error("runId must name a run on this issue");
+  const references = args.references as EvidenceReference[];
+  for (const ref of references)
+    if (ref.url !== `clankie://evidence/sha256/${ref.sha256}`)
+      throw new Error("Evidence link and sha256 must match");
+  if (!options.validateEvidence)
+    throw new TrackerWriteRefused(
+      "evidence_store_unavailable",
+      "the host must validate evidence-store record IDs before attaching them",
+    );
+  await options.validateEvidence(issue.identifier, references);
+  const bundle: EvidenceBundle = {
+    id: randomUUID(),
+    issueId: issue.id,
+    runId,
+    references,
+    gaps: args.gaps as string[],
+    actor: context.actor,
+    at: now,
+  };
+  (store.bundles ??= []).push(bundle);
+  appendEvent(store, context, now, issue, {
+    type: "bundle",
+    bundleId: bundle.id,
+    ...(runId === null ? {} : { runId }),
+  });
+  issue.updatedAt = now;
+  return bundle;
+}
+
+function postAsk(
+  store: Store,
+  args: Record<string, unknown>,
+  context: WriteContext,
+  now: string,
+  options: LocalTrackerOptions,
+) {
+  const issue = findIssue(store, args.issueId as string);
+  options.assertIssueWrite?.(issueView(store, issue));
+  const run =
+    args.runId === undefined
+      ? undefined
+      : (store.runs ?? []).find((entry) => entry.id === args.runId && entry.issueId === issue.id);
+  if (args.runId !== undefined && run === undefined) throw new Error("runId must name a run on this issue");
+  if (run && actorKey(run.actor) !== actorKey(context.actor) && !ownerOrLead(context.actor))
+    throw new TrackerWriteRefused(
+      "run_owner_required",
+      "only its runner, owner or lead requests a gate on a run",
+    );
+  if (args.purpose === "gate" && (!run || !args.gate)) throw new Error("A gate requires runId and gate");
+  if (args.purpose !== "gate" && args.gate !== undefined) throw new Error("gate requires purpose gate");
+  if (run && run.status !== "active") throw new Error("A finished run cannot request an ask");
+  appendEvent(store, context, now, issue, {
+    type: "ask",
+    purpose: args.purpose as "decision" | "gate",
+    body: args.body as string,
+    ...(run === undefined ? {} : { runId: run.id }),
+    ...(args.gate === undefined ? {} : { gate: args.gate as NonNullable<TrackerItemEvent["gate"]> }),
+  });
+  const event = store.events!.at(-1)!;
+  if (args.purpose === "gate") (run!.pendingGates ??= []).push(event.id);
+  issue.updatedAt = now;
+  return event;
+}
+
+function controlRun(
+  store: Store,
+  args: Record<string, unknown>,
+  context: WriteContext,
+  now: string,
+  options: LocalTrackerOptions,
+) {
+  if (!ownerOrLead(context.actor))
+    throw new TrackerWriteRefused(
+      "run_control_reserved",
+      "only the owner or lead steers, pauses or stops a run",
+    );
+  const run = (store.runs ?? []).find((entry) => entry.id === args.runId);
+  if (!run) throw new Error("Run not found");
+  if (run.status !== "active") throw new Error("Run already finished");
+  const issue = findIssue(store, run.issueId);
+  options.assertIssueWrite?.(issueView(store, issue));
+  const action = args.action as "steer" | "pause" | "resume" | "stop";
+  if (action === "pause") run.paused = true;
+  if (action === "resume") run.paused = false;
+  if (action === "stop") {
+    run.status = "canceled";
+    run.endedAt = now;
+  }
+  appendEvent(store, context, now, issue, {
+    type: action,
+    runId: run.id,
+    ...(args.body === undefined ? {} : { body: args.body as string }),
+  });
+  issue.updatedAt = now;
+  return runView(store, run, now, options);
 }
 
 /** Start a run (issueId) or update or finish one (id). Only its runner, the owner or the lead touch it. */
@@ -1095,6 +1326,11 @@ function saveRun(
         : (store.runs ?? []).find((entry) => entry.id === args.parentRunId);
     if (args.parentRunId !== undefined && parent === undefined)
       throw new Error(`Run not found: ${String(args.parentRunId)}`);
+    if (parent?.status === "active" && (parent.paused || (parent.pendingGates?.length ?? 0) > 0))
+      throw new TrackerWriteRefused(
+        "run_blocked",
+        "a child run cannot bypass its parent's pause or owner gate",
+      );
     run = {
       id: randomUUID(),
       issueId: issue.id,
@@ -1127,6 +1363,13 @@ function saveRun(
         "only the run's own runner, the owner or the lead updates it",
       );
     if (args.parentRunId !== undefined) throw new Error("A run's parent is set when it starts");
+    options.assertIssueWrite?.(issueView(store, issue));
+    if ((run.pendingGates?.length ?? 0) > 0 || run.paused === true)
+      if (args.status !== "canceled")
+        throw new TrackerWriteRefused(
+          "run_blocked",
+          "run is paused or waiting for an owner gate; only cancellation is allowed",
+        );
     if (run.status !== "active") throw new Error(`Run ${String(run.number)} already ${run.status}`);
   }
   for (const key of ["worktree", "branch", "tokens", "costUsd", "summary"] as const)
@@ -1406,6 +1649,8 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
     createdById: issue.creatorId,
     url: localUrl("issue", issue.id),
     stage: stageOf(issue),
+    bundle: currentBundle(store, issue.id) ?? null,
+    ownerAsks: (store.ownerAsks ?? []).filter((ref) => ref.issueId === issue.id),
   };
   if (relations) {
     const summary = (id: string) => {
@@ -1913,6 +2158,23 @@ async function dispatch(
         ? saved
         : issueView(store, issue, true);
     }
+    case "save_evidence_bundle":
+      return saveBundle(store, args, context, now, options);
+    case "get_evidence_bundle": {
+      const issue = findIssue(store, args.issueId as string);
+      return currentBundle(store, issue.id, (args.runId as string | undefined) ?? null) ?? null;
+    }
+    case "post_bundle_check": {
+      const bundle = (store.bundles ?? []).find((entry) => entry.id === args.bundleId);
+      if (!bundle) throw new Error("Bundle not found");
+      options.assertIssueWrite?.(issueView(store, findIssue(store, bundle.issueId)));
+      checkBundle(store, bundle, context, now, args.body as string | undefined);
+      return bundle;
+    }
+    case "post_issue_ask":
+      return postAsk(store, args, context, now, options);
+    case "post_run_control":
+      return controlRun(store, args, context, now, options);
     case "save_run":
       return saveRun(store, args, context, now, options);
     case "save_lease":
@@ -2410,6 +2672,94 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
   };
   return {
     catalog: () => TRACKER_TOOLS,
+    async linkOwnerAsk(eventId, requestId) {
+      await withTrackerStoreLock(path, async (assertHeld) => {
+        const { store, clock } = await load();
+        const prior = (store.ownerAsks ?? []).find((ref) => ref.eventId === eventId);
+        if (prior?.requestId === requestId) return;
+        if (prior) throw new Error("Ask event already linked to a different mailbox record");
+        await write(
+          store,
+          clock,
+          "link_owner_ask",
+          { eventId, requestId },
+          undefined,
+          { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] },
+          { via: "owner_ask" },
+          assertHeld,
+          (target, now, context) => {
+            const event = target.events?.find((entry) => entry.id === eventId);
+            if (!event) throw new Error("Ask source event not found");
+            const issue = findIssue(target, event.issueId);
+            (target.ownerAsks ??= []).push({
+              eventId,
+              requestId,
+              issueId: issue.id,
+              ...(event.runId === undefined ? {} : { runId: event.runId }),
+            });
+            appendEvent(target, context, now, issue, {
+              type: "ask",
+              requestId,
+              ...(event.runId === undefined ? {} : { runId: event.runId }),
+              body: "ADR 0245 ask linked.",
+            });
+            issue.updatedAt = now;
+            return issueView(target, issue);
+          },
+        );
+      });
+    },
+    async resolveOwnerAsk(eventId, requestId, approved, body) {
+      await withTrackerStoreLock(path, async (assertHeld) => {
+        const { store, clock } = await load();
+        // Public idempotency keys cannot shadow a host resolution. The committed,
+        // host-stamped resolution event is its receipt in the same atomic journal.
+        if (
+          store.events?.some(
+            (event) =>
+              event.requestId === requestId &&
+              event.via === "owner_ask" &&
+              (event.type === "gate" || event.type === "result"),
+          )
+        )
+          return;
+        await write(
+          store,
+          clock,
+          "resolve_owner_ask",
+          { eventId, requestId, approved },
+          undefined,
+          { ...TRACKER_OWNER, onBehalfOf: [] },
+          { via: "owner_ask" },
+          assertHeld,
+          (target, now, context) => {
+            if (!target.ownerAsks?.some((ref) => ref.eventId === eventId && ref.requestId === requestId))
+              throw new Error("Ask is not linked to this event");
+            const event = target.events!.find((entry) => entry.id === eventId)!;
+            const issue = findIssue(target, event.issueId);
+            if (event.purpose === "gate") {
+              const run = target.runs?.find((entry) => entry.id === event.runId);
+              if (!run) throw new Error("Gate run not found");
+              if (approved) run.pendingGates = (run.pendingGates ?? []).filter((id) => id !== eventId);
+              appendEvent(target, context, now, issue, {
+                type: "gate",
+                requestId,
+                runId: run.id,
+                from: "pending",
+                to: approved ? "approved" : "refused",
+                body,
+                gate: event.gate!,
+              });
+            } else if (event.to === "landed" || event.type === "stage" || event.type === "reopened") {
+              appendEvent(target, context, now, issue, { type: "result", requestId, body });
+              moveStage(target, issue, approved ? "owner-verified" : "accepted", context, now, body);
+            } else appendEvent(target, context, now, issue, { type: "result", requestId, body });
+            issue.updatedAt = now;
+            return issueView(target, issue);
+          },
+        );
+      });
+    },
     async subscribe(listener, after = 0) {
       // Replay and registration share the store lock, so no event falls between them.
       await withTrackerStoreLock(path, async () => {

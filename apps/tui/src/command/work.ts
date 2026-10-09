@@ -22,6 +22,9 @@ const WORK_USAGE = [
   "  | cycle [--project P] [--type current|previous|next|all] | cycle show ID [--project P]",
   "  | cycle add ITEM [--to current|next|NUMBER] | cycle remove ITEM | cycle length PROJECT DAYS",
   "  | ready [--project P] [--limit N] | drift [--project P] [--idle-days N] | runs [ITEM] [--status S]",
+  "  | bundle set ITEM --json BUNDLE | bundle show ITEM [--run ID] | bundle check ID [--body TEXT]",
+  "  | gate ask ITEM --run ID --kind plan|spend|destructive_action|merge|external_write --body TEXT",
+  "  | run steer|pause|resume|stop ID [--body TEXT] | ask ITEM --body TEXT",
   "  | lease ITEM [--minutes N] [--release]",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker)",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
@@ -323,6 +326,46 @@ function trackerRequest(
         ...(minutes === undefined ? {} : { ttlMinutes: Number(minutes) }),
       });
     }
+    case "bundle": {
+      if (rest.length !== 2) throw new Error(WORK_USAGE);
+      const [action, target] = rest;
+      if (action === "show")
+        return owner("get_evidence_bundle", {
+          issueId: target,
+          ...(one(parsed, "--run") === undefined ? {} : { runId: one(parsed, "--run") }),
+        });
+      if (action === "check")
+        return owner("post_bundle_check", {
+          bundleId: target,
+          ...(one(parsed, "--body") === undefined ? {} : { body: one(parsed, "--body") }),
+        });
+      if (action === "set" && one(parsed, "--json")) {
+        const bundle = JSON.parse(one(parsed, "--json")!);
+        if (!bundle || typeof bundle !== "object" || Array.isArray(bundle))
+          throw new Error("--json takes a bundle object");
+        return owner("save_evidence_bundle", { ...bundle, issueId: target });
+      }
+      throw new Error(WORK_USAGE);
+    }
+    case "gate":
+      if (rest[0] !== "ask" || rest.length !== 2) throw new Error(WORK_USAGE);
+      return owner("post_issue_ask", {
+        issueId: rest[1],
+        runId: one(parsed, "--run"),
+        purpose: "gate",
+        gate: one(parsed, "--kind"),
+        body: one(parsed, "--body"),
+      });
+    case "ask":
+      if (rest.length !== 1) throw new Error(WORK_USAGE);
+      return owner("post_issue_ask", { issueId: rest[0], purpose: "decision", body: one(parsed, "--body") });
+    case "run":
+      if (rest.length !== 2) throw new Error(WORK_USAGE);
+      return owner("post_run_control", {
+        runId: rest[1],
+        action: rest[0],
+        ...(one(parsed, "--body") === undefined ? {} : { body: one(parsed, "--body") }),
+      });
     case "owner": {
       if (rest.length !== 1) throw new Error(WORK_USAGE);
       const json = one(parsed, "--json");

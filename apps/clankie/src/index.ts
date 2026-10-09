@@ -667,8 +667,16 @@ const boundApp = (): ClankieApp => {
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
 // The built-in tracker; its event stream drives the in-process owner loop (VUH-1917).
 // A run's seat, pane and hire are read live from the hire records (VUH-1918).
+const evidenceStore = EvidenceStore.local(join(stateRoot, "evidence"));
 const builtInTracker = createLocalTracker({
   directory: join(stateRoot, "tracker"),
+  validateEvidence: async (_issueKey, references) => {
+    for (const ref of references) {
+      const record = await evidenceStore.record(ref.recordId);
+      if (!record || record.sha256 !== ref.sha256)
+        throw new Error(`Evidence record ${ref.recordId} does not match sha256`);
+    }
+  },
   runner: (actor) =>
     trackerRunner(actor.id, (fleet, pane) => captain.projectHireMembershipCandidate(fleet, pane)),
 });
@@ -1826,7 +1834,7 @@ const clankie = await createClankieApp({
   },
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
-  evidenceStore: EvidenceStore.local(join(stateRoot, "evidence")),
+  evidenceStore,
   builtInTracker,
   localFleet,
   runtimeProvider,

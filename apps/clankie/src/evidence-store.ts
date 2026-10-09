@@ -74,6 +74,7 @@ export interface EvidenceMetadataStore {
     row: EvidenceUploadRow,
     outcome: { record: Omit<EvidenceRecord, "url"> } | { refusal: "sha256_mismatch" | "size_mismatch" },
   ): Promise<EvidenceUploadRow>;
+  findRecord(id: string): Promise<Omit<EvidenceRecord, "url"> | undefined>;
   listRecords(filter: { issueKey: string } | { commit: string }): Promise<Omit<EvidenceRecord, "url">[]>;
   recent(query: EvidenceRecentQuery): Promise<EvidenceRecentResponse>;
   hasRecordForBlob(sha256: string): Promise<boolean>;
@@ -324,6 +325,13 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
       throw error;
     }
     return this.findUpload(row.actorKey, row.idempotencyKey).then((stored) => stored!);
+  }
+
+  findRecord(id: string) {
+    const row = this.db.prepare("SELECT * FROM records WHERE id=?").get(id) as unknown as
+      | RecordSqlRow
+      | undefined;
+    return Promise.resolve(row === undefined ? undefined : SqliteEvidenceMetadata.record(row));
   }
 
   listRecords(filter: { issueKey: string } | { commit: string }) {
@@ -638,6 +646,12 @@ export class EvidenceStore {
     return text === undefined
       ? { sha256, available: false, reason: "not_previewable" }
       : { sha256, available: true, contentType: "text/plain", text };
+  }
+
+  /** Internal record lookup for tracker references; resolves metadata, never reads blob bytes. */
+  async record(id: string): Promise<EvidenceRecord | undefined> {
+    const record = await this.metadata.findRecord(id);
+    return record === undefined ? undefined : { ...record, url: evidenceLink(record.sha256) };
   }
 
   async list(filter: { issueKey: string } | { commit: string }): Promise<EvidenceRecord[]> {

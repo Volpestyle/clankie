@@ -39,6 +39,16 @@ audit log in the same atomic replacement as the effect, and refuses stale
 `ifUpdatedAt` updates. `get_write_receipt` and `list_audit_events` read them.
 Other backends refuse these inputs explicitly (ADR 0226 amendment, VUH-1916).
 
+Evidence bundles hold validated store references and gaps on items and runs.
+Completion past landed requires the current item bundle and a `bundle_checked`
+event from an actor who did not do the work; the owner's verification counts.
+The host supplies `validateEvidence` from its evidence store. Item asks and run
+gates use the existing ADR 0245 mailbox; tracker records hold only its references.
+A gate blocks a run immediately until the authenticated owner answer approves it.
+Owner/lead steer, pause, resume and stop are events. See the
+[VUH-1919 amendment](../../docs/adr/0226-one-tracker-tool-surface.md#amendment-evidence-bundles-owner-asks-and-run-gates-2026-10-09-vuh-1919)
+for tools, recovery and scope.
+
 Hosted registered OAuth selects the service's in-process GraphQL adapter with
 broker entry `linear-api` ([ADR 0232](../../docs/adr/0232-hosted-connections-use-the-body-broker.md)).
 It retains account/repository/fleet fences and mutation receipts, and never

@@ -19,7 +19,9 @@ wakes. A third proposed [amendment](#amendment-releases-2026-10-09-vuh-1930)
 fourth [amendment](#amendment-cycles-2026-10-09-vuh-1931) (VUH-1931) adds
 per-project cycles with automatic rollover, and a fifth
 [amendment](#amendment-runs-leases-the-ready-queue-and-drift-2026-10-09-vuh-1918)
-(VUH-1918) adds runs, leases, the ready queue and drift.
+(VUH-1918) adds runs, leases, the ready queue and drift. A sixth
+[amendment](#amendment-evidence-bundles-owner-asks-and-run-gates-2026-10-09-vuh-1919)
+(VUH-1919) adds evidence bundles, linked owner asks and run gates.
 
 ## Context
 
@@ -345,3 +347,89 @@ oldest.
 
 Cycle rollover is bookkeeping and does not count as an update, so an item that
 only rolls over still reads as idle.
+
+## Amendment: evidence bundles, owner asks and run gates (2026-10-09, VUH-1919)
+
+Status: proposed. Tracks [VUH-1919](https://linear.app/vuhlp/issue/VUH-1919).
+Built-in tracker only, on top of actors, events and runs. The existing World
+mailbox remains the owner surface ([ADR 0245](0245-one-owner-ask-across-surfaces.md)).
+
+**Bundles.** `save_evidence_bundle` attaches an immutable bundle to an item,
+optionally to one of its runs. It contains store record IDs, sha256 and matching
+`clankie://evidence/sha256/…` links, typed `log`, `screenshot`, `video`, `diff`,
+`eval` or `other`, and an explicit `gaps` list. The host resolves each record ID
+against the evidence store before accepting it; a missing store or mismatched
+hash refuses the write. A record may be reused across items. The tracker stores
+references, never bytes. `get_evidence_bundle`, item reads and run reads expose
+the current bundle. New bundles supersede the previous bundle and its check.
+Item completion uses the item's bundle; run bundles describe their own attempts.
+An item past landed must be reopened by the owner before its completion bundle
+can be replaced, preserving its checked-proof invariant.
+
+**Completion.** Moving past `landed` requires the current item bundle and an
+independent check, recorded as `bundle_checked` with its bundle ID and actor.
+`post_bundle_check` refuses a checker who published the bundle, ran the work,
+or reported action/result/landing on the item, and refuses a superseded bundle.
+The owner's verification through the existing `verify` ask counts as a check.
+The same gate applies to typed stage moves, hand-set completion and automatic
+release delivery; a release sync refuses atomically if an item it would advance
+lacks a checked bundle. Creating an item already completed is refused: create,
+attach proof, then verify. Listed gaps remain visible for the checker to assess;
+there is no automatic judgment of their severity.
+
+**Asks.** `post_issue_ask` records the request in the item event stream. The host
+raises a source-bound ADR 0245 decision ask and links its `requestId` from the
+item. No second question/answer store exists. An item and a run hold only mailbox
+references. Verification asks raised on landing use the same links.
+The project's lead chat receives the ask; the default chat is the fallback.
+
+**Gates.** A request with purpose `gate` names a run and one of `plan`, `spend`,
+`destructive_action`, `merge` or `external_write`. It blocks the run immediately,
+including before the mailbox link is available. The host raises the ADR 0245
+ask with purpose `gate` and explicit Approve/Decline choices. Only an authenticated
+owner answer choosing Approve clears that gate; free text, decline and cancellation
+leave it blocked. Multiple pending gates must all be approved. Public tracker
+arguments cannot approve, resolve or replace an ask. The resolution is a `gate`
+event attributed to the owner, `via: owner_ask`; lead controls retain the lead's
+actor and are never reported as owner approvals.
+
+**Run controls.** Only the owner, the owner's app or Clankie as lead can call
+`post_run_control` to steer, pause, resume or stop a run. Each writes its named
+event with `runId` and optional instruction text. Pause blocks run updates;
+resume clears the pause but does not clear gates; stop records cancellation and
+end time. Cancellation is still allowed while blocked. Child runs cannot bypass
+a parent's pause or pending gates. These are durable execution-state actions;
+they do not type into a terminal, terminate a process or imply native delivery.
+
+**Recovery.** The item event is the durable request. Host ask publication uses
+that event ID as its identity, reconciling the same retained mailbox record even
+if already answered. The loop keeps its cursor behind failed publication, retries
+the same identity and applies retained settled answers on restart. Linking and
+resolution use the tracker's atomic journal; resolution is idempotent by request
+ID. Owner-answer events do not wake the lead twice: ADR 0245 already wakes the
+source conversation. Mailbox retention bounds still apply.
+
+**Interfaces.** Additive built-in tools share the existing host catalog and
+refuse on connected Linear, GitHub and Markdown backends. The owner CLI uses
+`clankie work bundle set|show|check`, `work ask`, `work gate ask` and
+`work run steer|pause|resume|stop` through the authenticated tracker owner route.
+The existing `input_list`/`input_answer` API and `clankie conversations questions|answer` commands answer
+asks, including gates; there is no tracker approval shortcut.
+
+```mermaid
+sequenceDiagram
+    participant W as Worker or lead
+    participant T as Built-in tracker
+    participant H as Owner loop
+    participant Q as ADR 0245 mailbox
+    participant O as Owner
+    W->>T: Request gate on run
+    T->>T: Append request event and block run atomically
+    T-->>H: Committed event
+    H->>Q: Raise gate ask with event publication ID
+    H->>T: Link requestId from item and run
+    O->>Q: input_answer: Approve
+    Q-->>H: Durable authenticated resolution
+    H->>T: Append owner gate event and clear this blocker
+    W->>T: Continue run
+```

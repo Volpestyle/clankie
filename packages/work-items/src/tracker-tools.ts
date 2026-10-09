@@ -51,6 +51,11 @@ export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
   "list_issue_events",
   "save_issue_status",
   "get_cycle",
+  "save_evidence_bundle",
+  "get_evidence_bundle",
+  "post_bundle_check",
+  "post_issue_ask",
+  "post_run_control",
   "save_run",
   "list_runs",
   "save_lease",
@@ -89,7 +94,14 @@ export interface TrackerItemEvent {
     | "reopened"
     | "cycle"
     | "run"
-    | "lease";
+    | "lease"
+    | "bundle"
+    | "bundle_checked"
+    | "gate"
+    | "steer"
+    | "pause"
+    | "stop"
+    | "resume";
   readonly actor: TrackerActor;
   /** True when Clankie or his workers wrote it; owner activity (human or the owner's app) is false. */
   readonly selfEcho: boolean;
@@ -97,6 +109,13 @@ export interface TrackerItemEvent {
   readonly from?: string;
   readonly to?: string;
   readonly commentId?: string;
+  readonly bundleId?: string;
+  readonly runId?: string;
+  /** ADR 0245 reference, not a second ask record. */
+  readonly requestId?: string;
+  readonly gate?: "plan" | "spend" | "destructive_action" | "merge" | "external_write";
+  readonly purpose?: "decision" | "gate";
+
   /** Host-stamped origin, e.g. owner_ask when an owner answer caused it. */
   readonly via?: string;
   readonly prevHash: string;
@@ -523,6 +542,67 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
     ["id"],
   ),
   tool(
+    "save_evidence_bundle",
+    "Built-in tracker only. Publish a bundle of evidence-store references and explicit gaps for an issue, optionally a run. Never sends bytes. A new bundle supersedes the previous check; an item past landed must first be reopened by the owner. Completion past landed needs a bundle checked by someone who did not do the work.",
+    {
+      issueId: string,
+      runId: string,
+      references: {
+        type: "array",
+        minItems: 1,
+        maxItems: 100,
+        items: object(
+          {
+            recordId: { ...string, minLength: 1 },
+            sha256: { ...string, pattern: "^[a-f0-9]{64}$" },
+            url: { ...string, pattern: "^clankie://evidence/sha256/[a-f0-9]{64}$" },
+            type: { type: "string", enum: ["log", "screenshot", "video", "diff", "eval", "other"] },
+          },
+          ["recordId", "sha256", "url", "type"],
+        ),
+      },
+      gaps: { type: "array", maxItems: 100, items: { ...string, minLength: 1, maxLength: 2000 } },
+      idempotencyKey,
+    },
+    ["issueId", "references", "gaps"],
+  ),
+  tool(
+    "get_evidence_bundle",
+    "Built-in tracker only. Read the current issue or run bundle, including its gaps and independent check.",
+    { issueId: string, runId: string },
+    ["issueId"],
+  ),
+  tool(
+    "post_bundle_check",
+    "Built-in tracker only. Independently check the current bundle by its ID; the worker who did the work cannot check it. An owner verification counts too.",
+    { bundleId: string, body: { ...string, maxLength: 4000 }, idempotencyKey },
+    ["bundleId"],
+  ),
+  tool(
+    "post_issue_ask",
+    "Built-in tracker only. Ask the owner through the existing ADR 0245 mailbox, linked from the issue. A gate requires runId and blocks that run until the owner answers Approve. The event queues the ask; requestId appears when the host links it. No tool can approve a gate.",
+    {
+      issueId: string,
+      runId: string,
+      purpose: { type: "string", enum: ["decision", "gate"] },
+      gate: { type: "string", enum: ["plan", "spend", "destructive_action", "merge", "external_write"] },
+      body: { ...string, minLength: 1, maxLength: 2000 },
+      idempotencyKey,
+    },
+    ["issueId", "purpose", "body"],
+  ),
+  tool(
+    "post_run_control",
+    "Built-in tracker only. Owner or lead steer, pause, resume or stop a run. Each action is an event; pause prevents updates until resumed, stop cancels it. These tracker actions do not send terminal keys or kill a process.",
+    {
+      runId: string,
+      action: { type: "string", enum: ["steer", "pause", "resume", "stop"] },
+      body: { ...string, maxLength: 4000 },
+      idempotencyKey,
+    },
+    ["runId", "action"],
+  ),
+  tool(
     "save_run",
     "Built-in tracker only. Start a run on an issue (issueId; one attempt of the work, optionally a child of parentRunId) or update yours (id): finish it with status succeeded, failed or canceled, and report tokens and costUsd. Your seat, pane and hire are linked from your identity; give the worktree and branch you work in. A run cannot start on an issue someone else holds the lease on.",
     {
@@ -626,6 +706,12 @@ function validate(value: unknown, schema: Record<string, unknown>, path: string)
       (typeof schema.maxLength === "number" && value.length > schema.maxLength))
   )
     throw new Error(`${path}: string length is outside the supported range`);
+  if (
+    typeof value === "string" &&
+    typeof schema.pattern === "string" &&
+    !new RegExp(schema.pattern, "u").test(value)
+  )
+    throw new Error(`${path}: string does not match the required pattern`);
   if (Array.isArray(value)) {
     if (
       (typeof schema.minItems === "number" && value.length < schema.minItems) ||

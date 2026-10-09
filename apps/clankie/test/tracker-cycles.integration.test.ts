@@ -9,6 +9,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
+import { trackerEvidence } from "./helpers/tracker-evidence.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 
 /**
@@ -21,7 +22,12 @@ it("plans a project cycle, reads its summary from the event stream and rolls unf
   const settings = new SettingsStore(join(root, "settings.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   let now = "2026-10-05T09:00:00.000Z";
-  const tracker = createLocalTracker({ directory: join(root, "tracker"), clock: () => new Date(now) });
+  const evidence = trackerEvidence(root);
+  const tracker = createLocalTracker({
+    validateEvidence: evidence.validateEvidence,
+    directory: join(root, "tracker"),
+    clock: () => new Date(now),
+  });
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
     credentials,
@@ -148,6 +154,11 @@ it("plans a project cycle, reads its summary from the event stream and rolls unf
   // During the week: one finishes, one is dropped from the cycle, one is added late.
   now = "2026-10-07T15:00:00.000Z";
   await call("linear_post_issue_event", { issueId: "LOCAL-1", type: "ack" });
+  await call("linear_save_evidence_bundle", {
+    issueId: "LOCAL-1",
+    references: [await evidence.record("LOCAL-1")],
+    gaps: [],
+  });
   await owner("save_issue", { id: "LOCAL-1", state: "Done" });
   await owner("save_issue", { id: "LOCAL-3", cycle: null });
   now = "2026-10-09T10:00:00.000Z";

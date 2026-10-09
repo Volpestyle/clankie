@@ -5708,8 +5708,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     // A host-raised owner ask (ADR 0245), bound to an existing chat; no model turn issues it.
-    requestOwnerAsk(conversationId, draft) {
+    readOwnerAsk(requestId) {
+      return conversations.readOwnerAsk(requestId);
+    },
+    requestOwnerAsk(conversationId, draft, publicationId) {
       return conversations.requestSurfaceQuestion(conversationId, draft, {
+        ...(publicationId === undefined ? {} : { publicationId }),
         current: () => !shutdown.signal.aborted && conversations.conversation(conversationId) !== undefined,
       });
     },

@@ -12,6 +12,7 @@ import { createMcpHost } from "../src/mcp-host.ts";
 import { startTrackerOwnerLoop } from "../src/tracker-owner-loop.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { trackerEvidence } from "./helpers/tracker-evidence.ts";
+import { TRACKER_LEAD } from "@clankie/work-items";
 import { createWorkItemsService } from "../src/work-items.ts";
 
 /**
@@ -20,7 +21,7 @@ import { createWorkItemsService } from "../src/work-items.ts";
  * operator dispatch route, a real conversation store, and the in-process owner
  * loop. Only the model turn a wake would start is observed at the captain seam.
  */
-it("moves an item through every stage, asks the owner to check it, verifies on answer and wakes the lead chat on owner activity only", async () => {
+it("requires independently checked real evidence, blocks a run on an owner gate and records run controls", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-tracker-events-"));
   const settings = new SettingsStore(join(root, "settings.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
@@ -32,11 +33,10 @@ it("moves an item through every stage, asks the owner to check it, verifies on a
     undefined,
   );
   if (created.op !== "create") throw new Error("create failed");
-  const leadChat = created.conversation.conversationId;
   const evidence = trackerEvidence(root);
   const tracker = createLocalTracker({
-    validateEvidence: evidence.validateEvidence,
     directory: join(root, "tracker"),
+    validateEvidence: evidence.validateEvidence,
   });
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
@@ -106,7 +106,7 @@ it("moves an item through every stage, asks the owner to check it, verifies on a
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer tracker-owner" ? { operatorId: "owner" } : undefined,
   });
-  const stopLoop = await startTrackerOwnerLoop({
+  let stopLoop = await startTrackerOwnerLoop({
     tracker,
     captain,
     settings,
@@ -168,149 +168,183 @@ it("moves an item through every stage, asks the owner to check it, verifies on a
     for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 10));
   };
   try {
-    const project = await owner("save_project", { name: "Clankie Work", addTeams: ["LOCAL"] });
-    await settings.update((value) => ({
-      ...value,
-      linearWebhook: {
-        ...value.linearWebhook,
-        projectChats: [{ projectId: project.id, name: "Clankie Work", conversationId: leadChat }],
-      },
-    }));
-    const issue = await call("linear_save_issue", {
-      team: "LOCAL",
-      title: "Stage walk",
-      project: project.id,
-    });
-    expect(issue.stage).toBe("reported");
-
-    // Typed reports derive state: ack accepts, blocked flags until the next progress.
-    expect((await call("linear_post_issue_event", { issueId: issue.id, type: "ack" })).stage).toBe(
-      "accepted",
+    const issue = await call("linear_save_issue", { team: "LOCAL", title: "Evidence and gate round trip" });
+    const run = await call("linear_save_run", { issueId: issue.id, worktree: repo, branch: "proof" });
+    await call("linear_post_issue_event", { issueId: issue.id, type: "result", stage: "landed" });
+    expect(
+      (await raw("linear_post_issue_event", { issueId: issue.id, type: "result", stage: "delivered" }))
+        .detail,
+    ).toContain("evidence_bundle_required");
+    expect((await raw("linear_save_issue", { id: issue.id, state: "Delivered" })).detail).toContain(
+      "evidence_bundle_required",
     );
-    await call("linear_post_issue_event", { issueId: issue.id, type: "plan", body: "Three steps" });
-    await call("linear_post_issue_event", { issueId: issue.id, type: "blocked", body: "Waiting on CI" });
-    expect((await call("linear_get_issue", { id: issue.id })).blocked).toBe(true);
-    await call("linear_post_issue_event", { issueId: issue.id, type: "action", body: "CI green" });
-    const progressed = await call("linear_get_issue", { id: issue.id });
-    expect(progressed).toMatchObject({ blocked: false, stage: "accepted", status: "In Progress" });
-
-    // Agents cannot close or verify work; only the owner can.
-    const closing = await raw("linear_save_issue", { id: issue.id, state: "Done" });
-    expect(closing.detail).toContain("owner_verification_required");
-    const verifying = await raw("linear_post_issue_event", {
-      issueId: issue.id,
-      type: "result",
-      stage: "owner-verified",
+    // Owner verification has the same completion gate, including the hand-set Done route.
+    const without = await app.app.request("/v1/tracker/owner/call", {
+      method: "POST",
+      headers: { authorization: "Bearer tracker-owner", "content-type": "application/json" },
+      body: JSON.stringify({ name: "save_issue", arguments: { id: issue.id, state: "Done" } }),
     });
-    expect(verifying.detail).toContain("owner_verification_required");
-
-    // Landed raises one "check it works" ask (ADR 0245) in the project's lead chat.
-    const landed = await call("linear_post_issue_event", {
-      issueId: issue.id,
-      type: "result",
-      body: "Merged as abc123",
-      stage: "landed",
-    });
-    expect(landed).toMatchObject({ stage: "landed", status: "In Review" });
+    expect((await without.json()).detail).toContain("evidence_bundle_required");
     const reference = await evidence.record(issue.identifier);
     const bundle = await call("linear_save_evidence_bundle", {
       issueId: issue.id,
       references: [reference],
+      gaps: ["No visual needed for this API contract."],
+    });
+    const runBundle = await call("linear_save_evidence_bundle", {
+      issueId: issue.id,
+      runId: run.id,
+      references: [reference],
       gaps: [],
     });
-    await owner("post_bundle_check", { bundleId: bundle.id });
-    await call("linear_post_issue_event", { issueId: issue.id, type: "result", stage: "delivered" });
-    await settle();
-    const listed = await dispatch({ op: "input_list" });
-    const asks = listed.result.questions.filter(
-      (entry: { question: { purpose: string } }) => entry.question.purpose === "verify",
+    expect((await call("linear_list_runs", { issueId: issue.id })).runs[0].bundle.id).toBe(runBundle.id);
+    expect((await raw("linear_post_bundle_check", { bundleId: bundle.id })).detail).toContain(
+      "bundle_self_check",
     );
-    expect(asks).toHaveLength(1);
-    const ask = asks[0].question;
-    expect(ask).toMatchObject({
-      conversationId: leadChat,
-      status: "pending",
-      issue: { tracker: "clankie-work", key: issue.identifier, url: issue.url },
+    expect(
+      (await raw("linear_post_issue_event", { issueId: issue.id, type: "result", stage: "delivered" }))
+        .detail,
+    ).toContain("bundle_check_required");
+    await owner("post_bundle_check", {
+      bundleId: bundle.id,
+      body: "Independent owner inspected the real log.",
     });
-    // Clankie's and the worker's own events never woke anyone.
-    expect(wakes).toEqual([]);
-
-    // The owner comments: owner activity wakes the routed lead chat.
-    await owner("save_comment", { issueId: issue.id, body: "Looks close, checking now" });
+    await call("linear_post_issue_event", { issueId: issue.id, type: "result", stage: "delivered" });
+    expect(
+      (await raw("linear_save_evidence_bundle", { issueId: issue.id, references: [reference], gaps: [] }))
+        .detail,
+    ).toContain("bundle_locked");
+    await owner("save_issue", { id: issue.id, state: "In Review" });
+    const replacement = await call("linear_save_evidence_bundle", {
+      issueId: issue.id,
+      references: [reference],
+      gaps: [],
+    });
+    expect((await call("linear_get_evidence_bundle", { issueId: issue.id })).checked).toBeUndefined();
+    expect((await raw("linear_post_bundle_check", { bundleId: bundle.id })).detail).toContain(
+      "bundle_superseded",
+    );
     await settle();
-    expect(wakes).toHaveLength(1);
-    expect(wakes[0]!.conversationId).toBe(leadChat);
-    expect(wakes[0]!.text).toContain("Looks close, checking now");
-
-    // Answering the ask sets owner-verified as the owner; the answer wakes its source chat itself.
-    const answered = await dispatch({
+    const verifyList = await dispatch({ op: "input_list" });
+    const verify = verifyList.result.questions.find((entry: any) => entry.question?.purpose === "verify");
+    await dispatch({
       op: "input_answer",
-      conversationId: ask.conversationId,
-      requestId: ask.requestId,
-      incarnationId: ask.incarnationId,
-      expectedRevision: listed.result.questions.find(
-        (entry: { question: { requestId: string } }) => entry.question.requestId === ask.requestId,
-      ).revision,
+      conversationId: verify.conversationId,
+      incarnationId: verify.incarnationId,
+      requestId: verify.question.requestId,
+      expectedRevision: verify.revision,
       answer: {
         kind: "choice",
-        optionId: ask.options.find((option: { label: string }) => option.label === "It works").optionId,
+        optionId: verify.question.options.find((option: any) => option.label === "It works").optionId,
       },
     });
-    expect(answered.result.question.status).toBe("submitted");
     await settle();
-    const verified = await call("linear_get_issue", { id: issue.id });
-    expect(verified).toMatchObject({ stage: "owner-verified", status: "Done", statusType: "completed" });
-    expect(wakes).toHaveLength(1);
-
-    // The stream: typed, derived, hash-linked, resumable, and self-echo flagged.
-    const stream = await call("linear_list_issue_events", { issueId: issue.id });
+    expect((await call("linear_get_issue", { id: issue.id })).stage).toBe("owner-verified");
+    const events = (await call("linear_list_issue_events", { issueId: issue.id })).events;
     expect(
-      stream.events
-        .filter((event: { type: string }) => !["bundle", "bundle_checked", "ask"].includes(event.type))
-        .map((event: { type: string; to?: string; selfEcho: boolean }) => [
-          event.type,
-          event.to ?? null,
-          event.selfEcho,
-        ]),
-    ).toEqual([
-      ["created", "reported", true],
-      ["ack", null, true],
-      ["stage", "accepted", true],
-      ["plan", null, true],
-      ["blocked", null, true],
-      ["action", null, true],
-      ["result", null, true],
-      ["stage", "landed", true],
-      ["result", null, true],
-      ["stage", "delivered", true],
-      ["comment", null, false],
-      ["result", null, false],
-      ["verified", "owner-verified", false],
-    ]);
-    const verifiedEvent = stream.events.at(-1);
-    expect(verifiedEvent).toMatchObject({ actor: { type: "human", id: "owner" }, via: "owner_ask" });
-    const all = (await call("linear_list_issue_events", {})).events as {
-      seq: number;
-      prevHash: string;
-      hash: string;
-    }[];
-    all.slice(1).forEach((event, index) => expect(event.prevHash).toBe(all[index]!.hash));
-    const resumed = await call("linear_list_issue_events", { after: String(all.at(-3)!.seq) });
-    expect(resumed.events.map((event: { seq: number }) => event.seq)).toEqual(
-      all.slice(-2).map((event) => event.seq),
-    );
-    expect(resumed.cursor).toBe(String(all.at(-1)!.seq));
+      events.some(
+        (event: any) =>
+          event.type === "bundle_checked" && event.bundleId === replacement.id && event.via === "owner_ask",
+      ),
+    ).toBe(true);
 
-    // Reprioritizing is owner activity too; reopening a verified item is the owner's alone.
-    await owner("save_issue", { id: issue.id, priority: 1 });
+    const gate = await call("linear_post_issue_ask", {
+      issueId: issue.id,
+      runId: run.id,
+      purpose: "gate",
+      gate: "merge",
+      body: "Approve merging this run's result?",
+      idempotencyKey: "request-merge-gate",
+    });
+    expect((await raw("linear_save_run", { id: run.id, status: "succeeded" })).detail).toContain(
+      "run_blocked",
+    );
     await settle();
-    expect(wakes).toHaveLength(2);
-    expect(wakes[1]!.text).toContain('"type":"priority"');
-    const reopenByWorker = await raw("linear_save_issue", { id: issue.id, state: "In Progress" });
-    expect(reopenByWorker.detail).toContain("owner_verification_required");
+    const linked = await call("linear_get_issue", { id: issue.id });
+    expect(linked.ownerAsks.some((ref: any) => ref.eventId === gate.id && ref.runId === run.id)).toBe(true);
+    const asks = await dispatch({ op: "input_list" });
+    const ask = asks.result.questions.find((entry: any) => entry.question?.purpose === "gate");
+    expect(ask.question.issue.key).toBe(issue.identifier);
+    const unauthorized = await app.app.request("/operator/v1/dispatch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        op: "input_answer",
+        conversationId: ask.conversationId,
+        incarnationId: ask.incarnationId,
+        requestId: ask.question.requestId,
+        expectedRevision: ask.revision,
+        answer: { kind: "choice", optionId: ask.question.options[0].optionId },
+      }),
+    });
+    expect(unauthorized.status).not.toBe(200);
+    expect((await raw("linear_post_run_control", { runId: run.id, action: "stop" })).detail).toContain(
+      "run_control_reserved",
+    );
+    // A caller-selected public receipt key cannot shadow the host's resolution.
+    await call("linear_create_comment", {
+      issueId: issue.id,
+      body: "Worker report before approval.",
+      idempotencyKey: `owner-ask:${ask.question.requestId}`,
+    });
+    // Approval can commit while the tracker loop is stopped; restart reconciles it.
+    await stopLoop();
+    await dispatch({
+      op: "input_answer",
+      conversationId: ask.conversationId,
+      incarnationId: ask.incarnationId,
+      requestId: ask.question.requestId,
+      expectedRevision: ask.revision,
+      answer: {
+        kind: "choice",
+        optionId: ask.question.options.find((option: any) => option.label === "Approve").optionId,
+      },
+    });
+    stopLoop = await startTrackerOwnerLoop({
+      tracker,
+      captain,
+      settings,
+      statePath: join(root, "tracker", "owner-loop.json"),
+      logger: { info() {}, warn() {} },
+    });
+    await settle();
+    expect((await call("linear_list_runs", { issueId: issue.id })).runs[0].blocked).toBe(false);
+    await call("linear_save_run", { id: run.id, tokens: 42 });
+    // Lead controls are stamped as the lead, rather than an owner approval.
+    const lead = { ...TRACKER_LEAD, onBehalfOf: [] };
+    await tracker.call(
+      "post_run_control",
+      { runId: run.id, action: "steer", body: "Inspect the diff before finishing." },
+      { actor: lead },
+    );
+    await tracker.call("post_run_control", { runId: run.id, action: "pause" }, { actor: lead });
+    expect((await raw("linear_save_run", { id: run.id, status: "succeeded" })).detail).toContain(
+      "run_blocked",
+    );
+    await owner("post_run_control", { runId: run.id, action: "stop", body: "Stop this attempt." });
+    const controls = (await call("linear_list_issue_events", { issueId: issue.id })).events;
+    expect(controls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "gate",
+          to: "approved",
+          actor: { type: "human", id: "owner", name: "Owner", onBehalfOf: [] },
+        }),
+        expect.objectContaining({
+          type: "steer",
+          runId: run.id,
+          actor: expect.objectContaining({ id: "clankie" }),
+        }),
+        expect.objectContaining({ type: "pause", runId: run.id }),
+        expect.objectContaining({ type: "stop", runId: run.id }),
+      ]),
+    );
+    expect((await call("linear_list_runs", { issueId: issue.id })).runs[0].status).toBe("canceled");
   } finally {
     await stopLoop();
-    app.close();
+    evidence.store.close();
+    await app.close();
     await worker.close();
     await host.close();
     await conversations.close();

@@ -427,10 +427,13 @@ export interface CaptainPort {
   observeQuestionResolutions(
     listener: (question: import("@clankie/protocol").ConversationQuestion) => void,
   ): () => void;
+  /** Host-only receipt lookup for an ask this host raised; never an owner mailbox route. */
+  readOwnerAsk(requestId: string): import("@clankie/protocol").ConversationQuestion | undefined;
   /** Raise an owner ask from the host in an existing chat (ADR 0245 surface ask). */
   requestOwnerAsk(
     conversationId: string,
     draft: import("./conversation-questions.ts").QuestionDraft,
+    publicationId?: string,
   ): Promise<import("@clankie/protocol").ConversationQuestionResult>;
   fleetConversationAuthority(principalId: string): Promise<ConversationAuthority | undefined>;
   fleetWriteAuthority(
@@ -550,6 +553,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     // wants the trigger passes its own store's observer through `overrides`.
     observeDurableMessages: () => () => {},
     observeQuestionResolutions: () => () => {},
+    readOwnerAsk: () => undefined,
     requestOwnerAsk: async (conversationId) => ({
       status: "refused",
       conversationId,

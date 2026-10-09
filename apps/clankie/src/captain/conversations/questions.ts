@@ -94,7 +94,8 @@ export async function requestQuestion(
   ctx["validQuestionState"](meta);
   const matchingPending = () =>
     meta.questions?.records.find((record) => {
-      if (record.question.status !== "pending") return false;
+      if (record.question.status !== "pending" && !(surface && record.question.originRunId === context.runId))
+        return false;
       if (workspaceBound) return !!record.projectCreation || record.question.purpose === "preference";
       if (record.projectCreation || record.question.workerQuestion || input.workerQuestion) return false;
       if (!isDeepStrictEqual(record.workspace, context.questionBinding?.workspace)) return false;
@@ -116,7 +117,13 @@ export async function requestQuestion(
       );
     });
   const pending = matchingPending();
-  if (pending) return ctx["questionResult"](meta, pending, "ready", "already_pending");
+  if (pending)
+    return ctx["questionResult"](
+      meta,
+      pending,
+      pending.question.status === "pending" ? "ready" : "resolved",
+      pending.question.status === "pending" ? "already_pending" : "already_resolved",
+    );
   if (input.purpose === "approval" && !(await ctx["questionGate"]?.(conversationId, input.gate!)))
     return ctx["questionResult"](meta, undefined, "refused", "approval_not_owner_reserved");
   const workerQuestion = input.workerQuestion

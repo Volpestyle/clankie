@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "scratch.json",
+      "size": 57189,
+      "sha256": "637012934b34d671857eb0f2c7f4ebccc97ebadde17f7bddf240a84608980739",
+      "url": "clankie://evidence/sha256/637012934b34d671857eb0f2c7f4ebccc97ebadde17f7bddf240a84608980739"
+    }
+  ]
+}

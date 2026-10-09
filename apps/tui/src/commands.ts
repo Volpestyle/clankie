@@ -540,8 +540,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "work",
       aliases: [],
-      description: "Read project work, releases and goals; set the repo tracker",
-      argumentHint: "[project|list|init --release-source tags|milestones|both --release-lane NAME]",
+      description: "Read work, manage proof bundles and owner gates; set the repo tracker",
+      argumentHint: "[project|list|bundle set|show|check|gate ask|run steer|pause|resume|stop|init]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         const result = await runWorkCommand(

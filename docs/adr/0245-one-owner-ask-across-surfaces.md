@@ -178,3 +178,15 @@ The app presentation change follows separately. Historical cancellations stay
 cancelled; this change does not recreate their pending requests or fabricate an
 answer. Native attachment does not remove the workspace or original issuer
 fences. Project creation still refuses when the native driver has taken over.
+
+## Built-in tracker asks and gates (VUH-1919, 2026-10-09)
+
+The proposed [ADR 0226 amendment](0226-one-tracker-tool-surface.md#amendment-evidence-bundles-owner-asks-and-run-gates-2026-10-09-vuh-1919)
+reuses these records for item decisions, landed-item verification (`verify`) and
+run approvals (`gate`). Items and runs link the mailbox `requestId`; they do not
+store another question or answer. A gate names plan, spend, destructive action,
+merge or external write and blocks its run until an authenticated owner chooses
+Approve. Decline, cancellation and free text leave it blocked. Tracker-raised
+asks carry a host publication identity so replay reconciles the retained record;
+the loop reads settled receipts on restart. Lead run controls retain the lead's
+attribution and never stand in for owner approval.

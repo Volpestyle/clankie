@@ -3271,10 +3271,26 @@ export class ConversationStore {
     return this.ownerUpdates.publish(conversationId, draft, publicationId);
   }
 
+  /** Internal receipt read for durable host-raised asks, not a mailbox authorization bypass. */
+  public readOwnerAsk(requestId: string): ConversationQuestion | undefined {
+    for (const meta of this.metas.values()) {
+      this.validQuestionState(meta);
+      const question = meta.questions?.records.find(
+        (record) => record.question.requestId === requestId,
+      )?.question;
+      if (question) return structuredClone(question);
+    }
+    return undefined;
+  }
+
   public async requestSurfaceQuestion(
     conversationId: string,
     draft: QuestionDraft,
-    admission: { readonly current: () => boolean; readonly authorize?: () => Promise<boolean> },
+    admission: {
+      readonly current: () => boolean;
+      readonly authorize?: () => Promise<boolean>;
+      readonly publicationId?: string;
+    },
   ): Promise<ConversationQuestionResult> {
     if (
       !admission.current() ||
@@ -3288,7 +3304,7 @@ export class ConversationStore {
       conversationId,
       draft,
       {
-        runId: `ask-${randomUUID()}`,
+        runId: admission.publicationId ?? `ask-${randomUUID()}`,
         signal: new AbortController().signal,
         questionCurrent: admission.current,
         acceptedAt: new Date().toISOString(),

@@ -13,6 +13,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { startTrackerOwnerLoop } from "../src/tracker-owner-loop.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
+import { trackerEvidence } from "./helpers/tracker-evidence.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 
 const git = promisify(execFile);
@@ -68,7 +69,11 @@ it("derives each release's items from the commits since the previous tag, delive
   await commit("feat: LOCAL-3 was canceled before it shipped");
   await run("tag", "-a", "v0.10.0", "-m", "v0.10.0");
 
-  const tracker = createLocalTracker({ directory: join(root, "tracker") });
+  const evidence = trackerEvidence(root);
+  const tracker = createLocalTracker({
+    validateEvidence: evidence.validateEvidence,
+    directory: join(root, "tracker"),
+  });
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
     credentials,
@@ -114,8 +119,12 @@ it("derives each release's items from the commits since the previous tag, delive
   const captain = createStubCaptain({
     serveOperatorConversation: (request, owner) =>
       conversations.serve(request as Parameters<ConversationStore["serve"]>[0], owner),
-    requestOwnerAsk: (conversationId, draft) =>
-      conversations.requestSurfaceQuestion(conversationId, draft, { current: () => true }),
+    requestOwnerAsk: (conversationId, draft, publicationId) =>
+      conversations.requestSurfaceQuestion(conversationId, draft, {
+        current: () => true,
+        ...(publicationId === undefined ? {} : { publicationId }),
+      }),
+    readOwnerAsk: (requestId) => conversations.readOwnerAsk(requestId),
     observeQuestionResolutions: (listener) => conversations.observeQuestionResolutions(listener),
     linearWakeTargetAllowed: (conversationId) => conversations.linearWakeTargetAllowed(conversationId),
     wakeConversation: async (_owner, text) => {
@@ -208,6 +217,14 @@ it("derives each release's items from the commits since the previous tag, delive
   // Only the owner (or the owner's app) asks for a sync.
   expect((await post("/v1/tracker/releases/sync", { repo }, "Bearer someone-else")).status).toBe(401);
 
+  for (const key of ["LOCAL-1", "LOCAL-2"]) {
+    const bundle = await call("linear_save_evidence_bundle", {
+      issueId: key,
+      references: [await evidence.record(key)],
+      gaps: [],
+    });
+    await owner("post_bundle_check", { bundleId: bundle.id });
+  }
   const first = await sync();
   expect(first.repository).toBe("github.com/example/releases");
   expect(first.releases.map((release: { version: string }) => release.version)).toEqual([
@@ -259,7 +276,9 @@ it("derives each release's items from the commits since the previous tag, delive
     "v0.2.0",
   ]);
   const events = (await call("linear_list_issue_events", { issueId: "LOCAL-1" })).events;
-  expect(events.at(-1)).toMatchObject({
+  expect(
+    events.find((event: { type: string; to?: string }) => event.type === "stage" && event.to === "delivered"),
+  ).toMatchObject({
     type: "stage",
     from: "reported",
     to: "delivered",
@@ -326,5 +345,5 @@ it("derives each release's items from the commits since the previous tag, delive
     stage: "owner-verified",
     statusType: "completed",
   });
-  stopLoop();
+  await stopLoop();
 });

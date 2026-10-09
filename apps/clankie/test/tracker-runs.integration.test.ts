@@ -10,6 +10,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { trackerRunner } from "../src/tracker-runner.ts";
+import { trackerEvidence } from "./helpers/tracker-evidence.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 
 /**
@@ -23,7 +24,9 @@ it("orders the ready queue, expires leases, rolls run cost up to the item and sh
   const settings = new SettingsStore(join(root, "settings.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   let now = "2026-10-05T09:00:00.000Z";
+  const evidence = trackerEvidence(root);
   const tracker = createLocalTracker({
+    validateEvidence: evidence.validateEvidence,
     directory: join(root, "tracker"),
     clock: () => new Date(now),
     runner: (actor) => trackerRunner(actor.id, () => ({ state: "none" })),
@@ -205,6 +208,11 @@ it("orders the ready queue, expires leases, rolls run cost up to the item and sh
   ]);
 
   // Drift: the owner closes the item while its retry is still running, and the rest go quiet.
+  await call("linear_save_evidence_bundle", {
+    issueId: "LOCAL-2",
+    references: [await evidence.record("LOCAL-2")],
+    gaps: [],
+  });
   await owner("save_issue", { id: "LOCAL-2", state: "Done" });
   now = "2026-11-06T00:00:00.000Z";
   const drifted = await call("linear_list_drift", { project: "Clankie Work" });

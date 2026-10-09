@@ -263,3 +263,29 @@ done. Record each attempt with
 `parentRunId`. Your seat and hire are linked from your identity. Owner and lead
 see `linear_list_drift` (stale leases, runs on closed items, idle items) and
 `clankie work ready|drift|runs|lease`.
+
+Evidence bundles and run gates are built-in tracker features. Publish
+`linear_save_evidence_bundle {issueId, references, gaps, runId?}` with real store
+record IDs, matching sha256 and `clankie://evidence/sha256/…` links, typed
+`log|screenshot|video|diff|eval|other`. Upload bytes through the evidence store
+first. Read with `linear_get_evidence_bundle`; item/run reads include their
+current bundle. Completion past landed requires the item's bundle and an
+independent `linear_post_bundle_check {bundleId, body?}`. Whoever did the work
+cannot check it. The owner's verify answer counts as a check. Replacing a bundle
+requires another check; the owner must reopen an item past landed before its
+completion bundle can be replaced. Name gaps honestly. Release sync obeys the same gate.
+
+Use `linear_post_issue_ask {issueId, purpose: "decision", body}` for an item
+question. This raises the existing ADR 0245 owner ask, linked by `requestId`,
+not a "Needs owner" comment. For a gate, supply `purpose: "gate"`, `runId` and
+`gate: plan|spend|destructive_action|merge|external_write`. The run blocks
+immediately, then the host links the mailbox ask. Only its authenticated owner
+answer choosing Approve clears it; no tracker tool approves. Lead controls do
+not become owner approvals. The owner and lead can use
+`linear_post_run_control {runId, action: steer|pause|resume|stop, body?}`;
+a worker is refused. Resume clears the pause only; stop cancels the attempt.
+These are tracker events, not proof of native delivery or process termination.
+
+Owner CLI equivalents are `clankie work bundle set|show|check`, `work ask`,
+`work gate ask` and `work run steer|pause|resume|stop`; answer through the
+existing `clankie conversations questions|answer` mailbox. Other tracker backends refuse these additions.

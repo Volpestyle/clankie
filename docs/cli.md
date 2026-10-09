@@ -1783,7 +1783,8 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   It uses the same tag source as `work project`. Each release's items are the
   keys named by commits since the previous version, in version order:
   `LOCAL-…` plus the convention's Linear team. Built-in items move to
-  `delivered` on the first release that ships them. Syncing again is a no-op
+  `delivered` on the first release that ships them, provided their evidence bundle
+  has an independent check. Missing proof refuses the sync atomically. Syncing again is a no-op
   for items that are already delivered. `clankie work releases [--lane L]
 [--item KEY] [--limit N]` lists releases newest first. `clankie work release
 ID|VERSION` shows one release, with each item's commits and, for built-in
@@ -1807,6 +1808,30 @@ PROJECT DAYS` sets the project's cycle length (default 7), starting with its
 [--idle-days N]` lists stale leases, runs still active on closed items, and
   items idle for N days
   ([ADR 0226 amendment, VUH-1918](adr/0226-one-tracker-tool-surface.md#amendment-runs-leases-the-ready-queue-and-drift-2026-10-09-vuh-1918)).
+- `clankie work bundle set ITEM --json '{"references":[{"recordId":"UUID",
+"sha256":"HASH","url":"clankie://evidence/sha256/HASH","type":"log"}],"gaps":[]}'`
+  publishes the current built-in item bundle. Add `runId` to the JSON to attach
+  it to a run instead. References name real evidence-store records with matching
+  lowercase 64-character hashes and links; supported types are `log`,
+  `screenshot`, `video`, `diff`, `eval`, `other`. No bytes go into the tracker.
+  `work bundle show ITEM [--run ID]` reads it; `work bundle check BUNDLE_ID
+[--body TEXT]` checks it as the owner. Its worker cannot self-check. Replacement
+  bundles need a fresh check; the owner must reopen an item past landed before
+  replacing its completion bundle. Completion past landed needs the item's bundle
+  and a check; the owner's existing "It works" answer counts as a check.
+- `clankie work ask ITEM --body TEXT` raises an ADR 0245 owner decision ask,
+  linked from the item. `work gate ask ITEM --run ID --kind
+plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
+  immediately and raises an ADR 0245 ask with purpose `gate`. The linked
+  `requestId` appears after the host publishes it. Use the existing `clankie conversations questions|answer` commands to choose Approve. Decline, free text and
+  cancellation do not unblock the gate; every pending gate needs approval.
+- `clankie work run steer|pause|resume|stop ID [--body TEXT]` records an owner
+  control event. The additive `linear_post_run_control` tool also permits the
+  lead; workers are refused. Paused or gated runs refuse updates except
+  cancellation. Resume clears only the pause; stop cancels the attempt. These
+  commands change tracked run state and do not deliver native terminal input
+  or kill a process. The tool/API contract is the
+  [VUH-1919 amendment](adr/0226-one-tracker-tool-surface.md#amendment-evidence-bundles-owner-asks-and-run-gates-2026-10-09-vuh-1919).
 - `clankie work owner TOOL [--json ARGS]` makes the owner's own call to the
   built-in tracker (`POST /v1/tracker/owner/call`) with a `linear_*` tool name
   (prefix optional), for example `work owner get_issue --json
@@ -4814,7 +4839,9 @@ Clankie's `request_user_input` is one structured ask tool across native seats
 over MCP, the console, Discord rooms and service conversations. `purpose` is
 `decision` (options plus recommendation), `approval` (an action the owner's
 effective `autonomy.fleet` settings reserve), or `owner_action` (exact steps only
-the owner can take). Legacy `preference` questions remain supported. `kind`
+the owner can take). Built-in tracker verification uses `verify`; tracked run
+approvals use `gate` with Approve/Decline choices. Both link the item through
+the same mailbox. Legacy `preference` questions remain supported. `kind`
 (`text` or `choice`) describes the answer control. Every new ask states
 `waitingOn`; its host-bound `conversationId` identifies the source. Answers
 never grant credentials, enroll a machine or change settings. Project creation

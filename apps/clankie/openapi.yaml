@@ -3639,8 +3639,11 @@ paths:
         immutable target, and `input_answer` or `input_cancel` to resolve it.
         All require authenticated operator or active terminalControl device
         authority; a captain bearer receives 403 question_owner_required.
-        Decision, approval and owner_action asks carry their source conversation,
+        Decision, approval, owner_action, verify and gate asks carry their source conversation,
         waitingOn, recommendation, options and exact steps as applicable.
+        Built-in tracker gate asks name a run and block it until the owner chooses
+        Approve. Decline, cancellation and free text leave it blocked; item/run
+        references link the same ADR 0245 record rather than another ask store.
         Escalated worker questions pin native session/request/question IDs;
         worker answers use an ID-keyed answers map, never terminal typing.
         Duplicate answers reconcile the original receipt and never send twice.

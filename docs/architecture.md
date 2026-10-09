@@ -840,6 +840,11 @@ Linear-shaped tracker tool surface to Clankie and workers, using the connected
 owner account or durable local storage when disconnected; repository conventions
 adapt GitHub and Markdown to that same surface. `clankie doctor` reports backend
 selection and reason ([ADR 0226](adr/0226-one-tracker-tool-surface.md)).
+Built-in items and runs carry evidence-store reference bundles. Completion past
+landed requires an independent bundle check. Item questions and run gates reuse
+ADR 0245 owner asks; gates block tracked execution until owner approval. The
+[tracker amendment](adr/0226-one-tracker-tool-surface.md#amendment-evidence-bundles-owner-asks-and-run-gates-2026-10-09-vuh-1919)
+defines their event and recovery boundaries.
 Account Connections in the app and account page use body-owned GitHub device
 authorization and registered Linear S256 PKCE. Provider tokens stay in the
 body's broker; the portals exchange only sealed lifecycle requests and public
