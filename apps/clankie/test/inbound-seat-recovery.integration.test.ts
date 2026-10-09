@@ -4,7 +4,8 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
+import { build } from "esbuild";
 import {
   FleetSeatMessageReceiptSchema,
   WorkerReportBridgeStatusSchema,
@@ -35,6 +36,25 @@ interface HttpCall {
 }
 const roots: string[] = [];
 const children = new Set<ChildProcess>();
+let serviceRoot: string;
+let serviceEntry: string;
+beforeAll(async () => {
+  serviceRoot = mkdtempSync(join(tmpdir(), "inbound-seat-service-"));
+  serviceEntry = join(serviceRoot, "service.mjs");
+  // Compile the real service once. Restart/receipt tests exercise fresh Node
+  // processes, without making every restart transform the full TS import graph.
+  await build({
+    entryPoints: [fileURLToPath(new URL("./fixtures/inbound-seat-recovery/service.ts", import.meta.url))],
+    outfile: serviceEntry,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    banner: {
+      js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    },
+  });
+});
+afterAll(() => rmSync(serviceRoot, { recursive: true, force: true }));
 afterEach(async () => {
   for (const child of children) await stop(child);
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -71,19 +91,9 @@ async function service(
     | "admission-post-nonmember",
   deadlineMs = 30_000,
 ) {
-  const child = spawn(
-    process.execPath,
-    [
-      "--import",
-      fileURLToPath(new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url)),
-      fileURLToPath(new URL("./fixtures/inbound-seat-recovery/service.ts", import.meta.url)),
-      root,
-      mode,
-      randomUUID(),
-      String(deadlineMs),
-    ],
-    { stdio: ["ignore", "ignore", "pipe", "ipc"] },
-  );
+  const child = spawn(process.execPath, [serviceEntry, root, mode, randomUUID(), String(deadlineMs)], {
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
+  });
   children.add(child);
   const messages: FixtureMessage[] = [];
   let stderr = "";
