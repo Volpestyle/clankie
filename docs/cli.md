@@ -3905,6 +3905,14 @@ restart also revokes all remote heads. The token is delivered in memory, never i
 plugin files, arguments or receipts; OS paging and administrator memory access
 are outside this guarantee. The bridge delegates project lead tools and messaging
 with the selected chat's attribution, not general owner HTTP or settings access.
+It also exposes ordinary `linear_*` tracker reads/writes and tracker-only
+`mcp_tool_search` / `mcp_tool_call`. Deferred calls cannot reach another service;
+raw GraphQL, owner repository overrides and persona-selectable worker publishing are excluded. Tracker
+writes require current delegation and proved chat attribution at dispatch.
+`linear_wake` accepts only `action: received` with the chat's original `wakeId`.
+The owner routes the project's wakes with `linear routes set --json-stdin`,
+preserving other project routes. Verify an issue read and comment from the live
+head after redeploy/relaunch; a fixture pass does not prove that acceptance.
 
 Remote Codex heads and in-place worker conversion are not implemented. Preserve
 an existing worker's written handoff and original session reference, launch a new

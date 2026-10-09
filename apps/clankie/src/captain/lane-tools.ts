@@ -24,9 +24,16 @@ import type { HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
 import type { HireSeat, LaneTool, LaneToolBank, LaneToolResult, MessageSeat } from "./port.ts";
 import { captainTools, callConversationBrowser, toolJson, type TurnContext } from "./tools.ts";
+import { assertConversationAuthority, type ConversationAuthority } from "./conversation-owner.ts";
 
 type McpToolDescriptor = Awaited<ReturnType<CaptainDeps["mcp"]["catalog"]>>[number];
 type BrowserToolDescriptor = Awaited<ReturnType<CaptainDeps["browser"]["catalog"]>>["tools"][number];
+
+interface ServiceAccess {
+  server: string;
+  allows(tool: McpToolDescriptor): boolean;
+  authority: ConversationAuthority;
+}
 
 /**
  * The authored bank for a lane. Mail is listed only where it works: it refuses
@@ -72,6 +79,7 @@ export async function buildLaneToolBank(
   hireSeat?: HireSeat,
   messageSeat?: MessageSeat,
   reports?: WorkerReportActions,
+  serviceAccess?: ServiceAccess,
 ): Promise<LaneToolBank> {
   const tools: LaneTool[] = laneAuthoredTools(
     deps,
@@ -91,10 +99,11 @@ export async function buildLaneToolBank(
     tools.push(browserLaneTool(deps, turn, tool, lane === "operator" || turn.shell === true));
   }
   const services = (await deps.mcp.catalog(lane, { readyOnly: true })).filter(
-    (tool) => tool.server !== "minecraft",
+    (tool) => tool.server !== "minecraft" && (serviceAccess?.allows(tool) ?? true),
   );
-  for (const tool of services) if (tool.initial) tools.push(mcpLaneTool(deps, lane, tool, turn));
-  tools.push(...serviceDirectoryTools(deps, lane, turn));
+  for (const tool of services)
+    if (tool.initial) tools.push(mcpLaneTool(deps, lane, tool, turn, serviceAccess));
+  tools.push(...serviceDirectoryTools(deps, lane, turn, serviceAccess));
   return { lane, tools };
 }
 
@@ -124,8 +133,20 @@ const MAX_SCHEMA_NAMES = 10;
  * schema, one to call it. Search covers the whole catalog, listed ones included,
  * with readiness statuses so an unavailable catalog is never a capability verdict.
  */
-function serviceDirectoryTools(deps: CaptainDeps, lane: CaptainSessionLaneV2, turn: TurnContext): LaneTool[] {
-  const refresh = async () => (await deps.mcp.catalog(lane)).filter((tool) => tool.server !== "minecraft");
+function serviceDirectoryTools(
+  deps: CaptainDeps,
+  lane: CaptainSessionLaneV2,
+  turn: TurnContext,
+  serviceAccess?: ServiceAccess,
+): LaneTool[] {
+  const refresh = async () =>
+    (await deps.mcp.catalog(lane)).filter(
+      (tool) => tool.server !== "minecraft" && (serviceAccess?.allows(tool) ?? true),
+    );
+  const status = async () =>
+    (await deps.mcp.catalogStatus?.(lane))?.filter(
+      (server) => !serviceAccess || server.server === serviceAccess.server,
+    );
   return [
     {
       name: "mcp_tool_search",
@@ -172,7 +193,7 @@ function serviceDirectoryTools(deps: CaptainDeps, lane: CaptainSessionLaneV2, tu
           return {
             content: toolJson({
               tools: found,
-              services: await deps.mcp.catalogStatus?.(lane),
+              services: await status(),
               ...(missing.length > 0 ? { missing } : {}),
             }).content,
           };
@@ -181,7 +202,7 @@ function serviceDirectoryTools(deps: CaptainDeps, lane: CaptainSessionLaneV2, tu
         return {
           content: toolJson({
             tools: searchCatalog(catalog, query),
-            services: await deps.mcp.catalogStatus?.(lane),
+            services: await status(),
           }).content,
         };
       },
@@ -218,7 +239,7 @@ function serviceDirectoryTools(deps: CaptainDeps, lane: CaptainSessionLaneV2, tu
           input !== null && typeof input === "object" && !Array.isArray(input)
             ? (input as Record<string, unknown>)
             : {};
-        return await mcpLaneTool(deps, lane, tool, turn).call(callArgs);
+        return await mcpLaneTool(deps, lane, tool, turn, serviceAccess).call(callArgs);
       },
     },
   ];
@@ -328,18 +349,40 @@ function mcpLaneTool(
   lane: CaptainSessionLaneV2,
   tool: McpToolDescriptor,
   turn: TurnContext,
+  serviceAccess?: ServiceAccess,
 ): LaneTool {
   return {
     name: tool.qualifiedName,
     description: tool.description,
     inputSchema: tool.inputSchema,
     async call(args) {
+      if (serviceAccess && args.repo !== undefined)
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Remote lead tracker calls use the connected tracker, not owner repository access.",
+            },
+          ],
+          isError: true,
+        };
       const result = await deps.mcp.call({
         lane,
         server: tool.server,
         tool: tool.name,
         arguments: args,
         ...(turn.conversationAuthority ? { conversationAuthority: turn.conversationAuthority } : {}),
+        ...(serviceAccess
+          ? {
+              requireConversationAttribution: true,
+              fence: async () => {
+                await assertConversationAuthority(serviceAccess.authority);
+                return () => {
+                  if (!serviceAccess.authority.current()) throw new Error("remote_lead_revoked");
+                };
+              },
+            }
+          : {}),
       });
       if (result.outcome === "ok" && result.isError) {
         return {

@@ -12,6 +12,16 @@ channel. `dispatched` proves handoff only; verify a native tool call after deplo
 Runtime updates build the standalone bridge before cutover; a source-only
 missing-bridge refusal names `clankie heavy -- node scripts/build-remote-lead.mjs`.
 
+Remote heads get ordinary `linear_*` tracker tools from the bound lead chat.
+Use their tracker-only `mcp_tool_search` / `mcp_tool_call` for tools beyond the
+initial list. Writes require current seat delegation and chat attribution; do
+not substitute Claude's inherited tracker connector. Other connected services,
+raw GraphQL, owner repository overrides, persona-selectable worker publishing and owner settings are not
+delegated. `linear_wake` only confirms `action: received` with a wake's original
+`wakeId` in this chat. Configure project wake routing as the owner through
+`clankie linear routes set --json-stdin`, preserving existing routes. After
+redeploy/relaunch, verify an issue read and comment from the actual head.
+
 ## Connected fleet tools
 
 Admitted panes in a Clankie-linked session reach verified accounts through exactly

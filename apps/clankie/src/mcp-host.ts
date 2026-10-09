@@ -246,6 +246,8 @@ export interface McpHost {
     readonly fence?: () => Promise<void | (() => void)>;
     /** Host-stamped turn attribution; it grants no provider tools. */
     readonly conversationAuthority?: ConversationAuthority;
+    /** Seat-bound leads cannot dispatch a tracker call without their chat attribution. */
+    readonly requireConversationAttribution?: boolean;
     /** Host-stamped model of the calling turn, recorded by the built-in tracker; never a tool argument. */
     readonly model?: string;
     /** Host-only socket/controller proof for native author attribution; never a grant. */
@@ -1089,7 +1091,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         // GraphQL runs as the app itself; it carries no worker author.
         const publicationCall = !isReadTool(input.tool) && !graphqlCall;
         const providedSource =
-          publicationCall && input.conversationAuthority
+          (publicationCall || input.requireConversationAttribution) && input.conversationAuthority
             ? captureConversationAuthority(input.conversationAuthority)
             : undefined;
         const workerProof =
@@ -1291,7 +1293,12 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           const refreshAttribution = async () => {
             authority = undefined;
             recipient = undefined;
-            if (!publicationCall || (!source && !admittedNativeSource)) return;
+            if (!publicationCall && !input.requireConversationAttribution) return;
+            if (!source && !admittedNativeSource) {
+              if (input.requireConversationAttribution)
+                throw new DispatchRefused("Tracker conversation attribution is unavailable");
+              return;
+            }
             // Assign only the bounded result. A late proof cannot mutate the
             // recipient of a call that already proceeded without attribution.
             const observed = await optionalAttribution(async () => {
@@ -1313,10 +1320,15 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             authority = observed?.owner;
             recipient = observed?.native;
             recipient ??= authority ? { kind: "conversation", owner: authority.owner } : undefined;
+            if (input.requireConversationAttribution && !authority)
+              throw new DispatchRefused("Tracker conversation attribution is unavailable");
           };
           // Owned publication backends reprove at their actual beforeWrite
           // boundary. Generic MCP writes need one reproof before dispatch.
-          if (!repositoryCall && !isLocalTracker(server) && !isApiTracker(server) && !workerPost)
+          if (
+            input.requireConversationAttribution ||
+            (!repositoryCall && !isLocalTracker(server) && !isApiTracker(server) && !workerPost)
+          )
             await refreshAttribution();
           // Admission may await; retain the account/config fence after it, then
           // check revocation without yielding again before provider dispatch.

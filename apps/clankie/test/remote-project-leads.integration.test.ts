@@ -12,6 +12,12 @@ import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import * as census from "../src/captain/herdr-census.ts";
 import { RemoteProjectLeads } from "../src/remote-project-leads.ts";
 import { logger } from "../src/app/log.ts";
+import { createMcpHost } from "../src/mcp-host.ts";
+import { createRemoteLeadBridge } from "../src/remote-lead-bridge.ts";
+import type { CredentialStore } from "@clankie/credential-broker";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 // Real launch, captain/store, settings and framed child pipes. The linked
 // machine/SSH endpoint is a fixture; installed Windows native admission is live proof.
@@ -41,13 +47,115 @@ it("launches an approved Windows workspace through the real conversation store w
     await mkdir(dirname(join(root, path)), { recursive: true });
     await writeFile(join(root, path), "fixture artifact");
   }
+  await settings.update((current) => ({
+    ...current,
+    mcp: {
+      ...current.mcp,
+      servers: [
+        {
+          id: "linear",
+          transport: "stdio",
+          command: "fixture",
+          args: [],
+          lane: "operator",
+          credential: "linear",
+          enabled: true,
+          initialTools: ["get_issue", "save_comment"],
+        },
+        {
+          id: "owner_mail",
+          transport: "stdio",
+          command: "fixture",
+          args: [],
+          lane: "operator",
+          enabled: true,
+          initialTools: ["send"],
+        },
+      ],
+    },
+  }));
+  let holdCredentials = false;
+  let enter!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((r) => {
+    enter = r;
+  });
+  const resume = new Promise<void>((r) => {
+    release = r;
+  });
+  const providerCalls: string[] = [];
+  const observed: { tool: string; owner?: { conversationId: string }; recipient?: unknown }[] = [];
+  const mcp = createMcpHost({
+    settings,
+    curated: [],
+    logger,
+    credentials: {
+      get: async () => {
+        if (holdCredentials) {
+          enter();
+          await resume;
+        }
+        return {
+          type: "api",
+          key: "fixture-only",
+          account: {
+            provider: "linear",
+            connectionId: "fixture-linear",
+            userId: "app",
+            workspaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            name: "Clankie",
+            email: "app@example.test",
+            workspaceName: "Personal",
+            verifiedAt: "2026-10-09T00:00:00Z",
+          },
+        };
+      },
+      set: async () => {},
+      delete: async () => true,
+      list: async () => ({}),
+    } as CredentialStore,
+    connect: async (server) => ({
+      listTools: async () =>
+        (server.id === "linear"
+          ? ["get_issue", "get_project", "save_comment", "save_issue", "graphql", "create_worker_comment"]
+          : ["send"]
+        ).map((name) => ({
+          name,
+          description: name,
+          inputSchema: { type: "object", properties: {}, additionalProperties: true },
+        })),
+      callTool: async (name) => {
+        providerCalls.push(name);
+        return { content: JSON.stringify({ id: "fixture", result: name }), isError: false };
+      },
+      close: async () => {},
+    }),
+    observeCall: (call) => {
+      observed.push(call);
+    },
+  });
+  const realCall = mcp.call.bind(mcp);
+  let settleBlocked!: (result: Awaited<ReturnType<typeof mcp.call>>) => void;
+  const blockedSettled = new Promise<Awaited<ReturnType<typeof mcp.call>>>((r) => {
+    settleBlocked = r;
+  });
+  vi.spyOn(mcp, "call").mockImplementation(async (input) => {
+    const blocked = input.arguments.body === "Must not dispatch";
+    if (blocked) holdCredentials = true;
+    const result = await realCall(input);
+    if (blocked) settleBlocked(result);
+    return result;
+  });
+  await mcp.catalog("operator");
+  const client = new Client({ name: "remote-tracker-acceptance", version: "1" });
+  let bridge: ReturnType<typeof createRemoteLeadBridge> | undefined;
   const captain = createCaptain(
     {
       herdrAvailable: () => false,
       presence: { listSessions: async () => [] },
       embodiment: { getLiveSession: async () => undefined },
       browser: { catalog: async () => ({ available: false, tools: [] }) },
-      mcp: { catalog: async () => [] },
+      mcp,
     } as unknown as CaptainDeps,
     { repoRoot: root, stateDir: root, settings },
   );
@@ -146,6 +254,103 @@ it("launches an approved Windows workspace through the real conversation store w
     await expect(captain.laneToolBank("operator", conversationId)).rejects.toThrow("seat-bound delegation");
     const issued = await issue.mock.results[0]!.value;
     const binding = issued.binding;
+    const nativeIdentity = {
+      fleet: "pc",
+      pane: "w1:p1",
+      current: () => true,
+      validate: async () => true,
+      projectProof: async () => ({
+        ...binding,
+        binding: { socketPath: "fixture-pipe", session: fleet.session },
+        workspace: { machineId: "pc", platform: "windows" as const, canonicalPath: cwd },
+        processes: [{ pid: 456, startTime: "2026-10-09T00:00:01Z" }],
+      }),
+    };
+    bridge = createRemoteLeadBridge({
+      captain,
+      delegations: leads.delegations,
+      identity: () => nativeIdentity,
+    });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL("http://service/v1/fleet/lead/mcp"), {
+        requestInit: { headers: { authorization: `Bearer ${issued.token}` } },
+        fetch: async (input, init) => bridge!.app.fetch(new Request(input, init)),
+      }) as unknown as Transport,
+    );
+    const catalog = (await client.listTools()).tools.map((tool) => tool.name);
+    expect(catalog).toContain("linear_get_issue");
+    expect(catalog).toContain("linear_save_comment");
+    expect(catalog).not.toContain("owner_mail_send");
+    expect(catalog).not.toContain("linear_graphql");
+    expect(catalog).not.toContain("linear_create_worker_comment");
+    expect(
+      (await client.callTool({ name: "linear_get_issue", arguments: { id: "VUH-1510" } })).isError,
+    ).not.toBe(true);
+    expect(
+      (
+        await client.callTool({
+          name: "linear_save_comment",
+          arguments: { issueId: "VUH-1510", body: "Project lead evidence" },
+        })
+      ).isError,
+    ).not.toBe(true);
+    const found = await client.callTool({
+      name: "mcp_tool_search",
+      arguments: {
+        names: [
+          "linear_get_project",
+          "linear_save_issue",
+          "owner_mail_send",
+          "linear_graphql",
+          "linear_create_worker_comment",
+        ],
+      },
+    });
+    const directory = JSON.parse((found.content as { text: string }[])[0]!.text);
+    expect(directory.tools.map((tool: { name: string }) => tool.name)).toEqual(
+      expect.arrayContaining(["linear_get_project", "linear_save_issue"]),
+    );
+    expect(directory.missing).toEqual(
+      expect.arrayContaining(["owner_mail_send", "linear_graphql", "linear_create_worker_comment"]),
+    );
+    expect(
+      (
+        await client.callTool({
+          name: "mcp_tool_call",
+          arguments: {
+            name: "linear_save_issue",
+            arguments: { id: "VUH-1510", description: "Updated evidence" },
+          },
+        })
+      ).isError,
+    ).not.toBe(true);
+    expect(
+      (
+        await client.callTool({
+          name: "mcp_tool_call",
+          arguments: { name: "owner_mail_send", arguments: {} },
+        })
+      ).isError,
+    ).toBe(true);
+    await expect(
+      client.callTool({ name: "linear_wake", arguments: { action: "set", projectChats: [] } }),
+    ).rejects.toThrow("remote_lead_wake_settings_denied");
+    for (const name of ["get_issue", "save_comment", "save_issue"]) {
+      expect(observed.find((call) => call.tool === name)).toMatchObject({
+        owner: { conversationId },
+        recipient: { kind: "conversation", owner: { conversationId } },
+      });
+    }
+    const beforeRepositoryRefusal = providerCalls.length;
+    expect(
+      (
+        await client.callTool({
+          name: "linear_get_issue",
+          arguments: { id: "VUH-1510", repo: "/owner/private" },
+        })
+      ).isError,
+    ).toBe(true);
+    expect(providerCalls).toHaveLength(beforeRepositoryRefusal);
     const admitted = await leads.delegations.authorize(
       new Request("http://fixture/lead", { headers: { authorization: `Bearer ${issued.token}` } }),
       {
@@ -220,7 +425,33 @@ it("launches an approved Windows workspace through the real conversation store w
     expect(await readFile(join(root, "launches", `${failedInput.requestId}.json`), "utf8")).not.toContain(
       "private-fixture-secret",
     );
+    // Revoke while the real MCP host awaits credentials, before its dispatch fence.
+    const callsBeforeRevoke = providerCalls.length;
+    const cancelled = new AbortController();
+    const pendingWrite = client
+      .callTool(
+        {
+          name: "linear_save_comment",
+          arguments: { issueId: "VUH-1510", body: "Must not dispatch" },
+        },
+        undefined,
+        { signal: cancelled.signal },
+      )
+      .catch(() => undefined);
+    await entered;
+    expect(leads.delegations.revoke(issued.id)).toBe(true);
+    release();
+    expect(await blockedSettled).toMatchObject({ outcome: "refused", possiblyDispatched: false });
+    // Revocation closes the MCP transport. Cancel this caller's original wait;
+    // the host refusal above, not a transport receipt, proves no dispatch.
+    cancelled.abort();
+    await pendingWrite;
+    expect(providerCalls).toHaveLength(callsBeforeRevoke);
   } finally {
+    release();
+    await client.close();
+    await bridge?.close();
+    await mcp.close();
     leads.delegations.close();
     for (const child of children) child.kill();
     await captain.close();

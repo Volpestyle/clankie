@@ -23,6 +23,8 @@ const PROJECT_TOOLS = new Set([
   "mail_owner_update",
   "refresh_worker_tools",
   "close_worker_pane",
+  "mcp_tool_search",
+  "mcp_tool_call",
 ]);
 type Authority = NonNullable<Awaited<ReturnType<RemoteLeadDelegations["authorize"]>>>;
 
@@ -86,13 +88,36 @@ export function createRemoteLeadBridge(input: {
                 return {
                   ...bank,
                   tools: bank.tools
-                    .filter((tool) => PROJECT_TOOLS.has(tool.name))
+                    // The delegated captain bank narrows both direct and deferred
+                    // connected tools to the tracker; never expose its general directory.
+                    .filter((tool) => PROJECT_TOOLS.has(tool.name) || tool.name.startsWith("linear_"))
                     .map((tool) => ({
                       ...tool,
+                      ...(tool.name === "linear_wake"
+                        ? {
+                            description:
+                              "Confirm a Linear wake received in this lead chat, using its original wakeId. Wake settings and routing remain owner-controlled.",
+                            inputSchema: {
+                              type: "object",
+                              properties: {
+                                action: { type: "string", const: "received" },
+                                wakeId: { type: "string", pattern: "^seat-[a-f0-9-]{36}$" },
+                              },
+                              required: ["action", "wakeId"],
+                              additionalProperties: false,
+                            },
+                          }
+                        : {}),
                       call: async (args, options) => {
                         const current = calls.getStore();
                         if (!current || current.id !== admitted.id) throw new Error("remote_lead_revoked");
                         await requireCurrent(current);
+                        if (
+                          tool.name === "linear_wake" &&
+                          (args.action !== "received" ||
+                            Object.keys(args).some((key) => key !== "action" && key !== "wakeId"))
+                        )
+                          throw new Error("remote_lead_wake_settings_denied");
                         return tool.call(args, options);
                       },
                     })),

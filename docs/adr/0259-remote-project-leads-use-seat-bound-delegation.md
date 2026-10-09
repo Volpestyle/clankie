@@ -1,6 +1,6 @@
 # ADR 0259: Remote project leads use seat-bound delegation
 
-Status: trust model accepted by James, 2026-10-09; implementation and proof pending.
+Status: accepted and implemented, 2026-10-09; VUH-1927 head startup and a live bridge tool call verified on the PC.
 Tracked by [VUH-1927](https://linear.app/vuhlp/issue/VUH-1927).
 Extends [ADR 0218](0218-native-seats-drive-their-attached-conversation.md)
 and [ADR 0244](0244-machines-join-clankie-at-an-access-level.md).
@@ -79,5 +79,34 @@ revocation and access downgrade; and exclusion from general operator APIs.
 Live evidence must use a coordinated throwaway PC seat in a scratch chat, prove
 lead-tool access and child adoption, inspect remote application artifacts for
 secret persistence, and show a formerly valid call denied after revocation.
-Implementation and live verification are pending. Deployment and the existing
-KH2 lead's context handoff remain separately coordinated owner actions.
+The live KH2 head started with its existing signed-in Claude Max profile and
+called `worker_reports` through the bridge (VUH-1927). Tracker acceptance below
+still requires a deployed head to read an issue and post a comment. Deployment
+and the existing KH2 lead's context handoff remain coordinated owner actions.
+
+## Tracker delegation (VUH-1968)
+
+The head gets the connected tracker's ordinary `linear_*` reads and writes from
+its conversation tool bank. Deferred `mcp_tool_search` and `mcp_tool_call` use
+that same tracker-only catalog, including tools beyond the initial list. They
+cannot reach other connected services. Raw GraphQL, owner repository overrides and persona-selectable
+worker publishing are excluded; the head writes as Clankie, attributed to its
+lead chat, rather than choosing another author. This retains the connected
+account's existing tracker access; project leadership is not a provider-level
+project ACL.
+
+Every tracker call carries the bound conversation's authority. The MCP host
+rechecks the delegation after asynchronous setup and at the actual write
+boundary, with a synchronous revocation check immediately before dispatch.
+Writes require proved chat attribution; they refuse rather than falling back
+to an unattributed connected-account write. Other callers retain their existing
+optional-attribution semantics. Calls already dispatched remain reconcilable
+and are never replayed automatically.
+
+The owner configures project-to-chat wake routes through `clankie linear routes
+set --json-stdin`, preserving other projects' routes. The delegated `linear_wake`
+accepts only `action: received` with the original host-issued `wakeId`, and only
+for that chat. It cannot change wake rules, owner identity or project routing.
+A removed/unavailable project chat retains the existing global fallback. Restart
+revokes the old head; relaunch and live tracker verification are separate from
+passing the HTTP/MCP acceptance fixture.

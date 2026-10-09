@@ -196,6 +196,7 @@ import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
 import { readIssueMetrics } from "./issue-metrics.ts";
 import { LaneLog } from "./lane-log.ts";
 import { buildLaneToolBank, laneAuthoredTools, laneAuthoredToolsNamed } from "./lane-tools.ts";
+import { isLinearWorkerTool } from "../linear-publishing.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
 import {
   ModelCredentialHealthLog,
@@ -2826,6 +2827,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       hireSeat,
       messageSeat,
       workerReportActions,
+      delegation
+        ? {
+            server: "linear",
+            allows: (tool) =>
+              tool.server === "linear" && tool.name !== "graphql" && !isLinearWorkerTool(tool.name),
+            authority: delegation,
+          }
+        : undefined,
     );
     const ownerTools =
       lane === "operator" && toolLane === "operator" && capture.targetId !== undefined
