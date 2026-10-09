@@ -4641,6 +4641,22 @@ bearer alone cannot read the owner mailbox or answer. Hosted devices use the sam
 contract without additional owner setup. The app mailbox consumes this API for
 owner answers and informational updates.
 
+Native seat attachment and polling leave unanswered questions pending in their
+source conversation; takeover is not an answer or cancellation. Existing owner
+and workspace checks still apply. New workspace preferences and project
+confirmation remain unavailable while the native driver owns the conversation.
+Existing workspace preference answers also refuse with `native_driver_active`
+and stay pending, preventing a competing service continuation; owner asks with
+semantic purposes retain their normal source answer delivery.
+
+Question reads expose `resolvedBy: {kind: operator | device | service, id}`,
+`resolvedAt`, and the cancellation `reason` code. The existing `input_resolved` event remains compatible with strict legacy
+clients; refresh the question record to read attribution. Explicit cancellation names its authenticated caller;
+automatic cancellation names the service. Submitted legacy records expose their
+stored responder; older cancellations with no recorded actor leave it unknown.
+Render `status: cancelled` as cancelled, never as an answer or selected option.
+These records do not turn driver takeover into owner approval.
+
 Approval routing reads the effective global/project `autonomy.fleet` leaves.
 `lead` or `allow` means Clankie handles it and no owner ask is created; `owner`
 allows the ask. Existing commit, push and release leaves are reused. Missing gate

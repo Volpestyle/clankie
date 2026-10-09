@@ -143,6 +143,11 @@ credentials or changes room trust. Escalated worker answers keep the original
 native request and question IDs and return without terminal typing. Retain
 pending or uncertain asks rather than repeating them.
 
+Native seat takeover leaves unanswered owner asks pending in their source.
+Question reads expose `resolvedBy`, `resolvedAt` and cancellation `reason`;
+`cancelled` never means answered or approved. Historical missing attribution
+stays unknown.
+
 `clankie conversations questions` lists pending asks across sources;
 `conversations questions ID --request UUID` reads an exact target. Answer with
 `conversations answer ID UUID --incarnation UUID --revision N --text TEXT`

@@ -145,7 +145,7 @@ const RecordSchema = z
       ctx.addIssue({ code: "custom", message: "Incomplete submitted receipt" });
     if (q.status === "cancelled" && !q.resolvedAt)
       ctx.addIssue({ code: "custom", message: "Incomplete cancellation" });
-    if (q.status === "pending" && (q.answer || q.continuation || q.resolvedAt))
+    if (q.status === "pending" && (q.answer || q.continuation || q.resolvedAt || q.resolvedBy))
       ctx.addIssue({ code: "custom", message: "Invalid pending receipt" });
   });
 export type QuestionRecord = z.infer<typeof RecordSchema>;

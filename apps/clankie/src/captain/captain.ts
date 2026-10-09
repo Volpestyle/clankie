@@ -5109,7 +5109,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const outbox = seatOutbox(binding.conversationId);
       if (waitMs > 0 || goalExecutionReason(binding.conversationId) !== undefined)
         autonomy.pauseGoal(binding.conversationId);
-      conversations.cancelPendingQuestion(binding.conversationId, "native_seat_takeover");
+      // Owner asks remain pending in their source conversation across driver takeover.
       void recoverWorkerReports(binding.conversationId).catch(() => undefined);
       // A wake held after model failures can go to the seat that just bound.
       autonomy.releaseHeldWake(binding.conversationId);

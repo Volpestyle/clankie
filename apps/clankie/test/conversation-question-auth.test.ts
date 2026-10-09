@@ -208,6 +208,7 @@ it("actual operator send -> shared client pending -> another Take Control device
     ...target,
     answer: { kind: "choice", optionId: q.options[0]!.optionId },
   });
+  expect(answer.question?.resolvedBy).toEqual({ kind: "device", id: "control" });
   await f.store.awaitRun(answer.question!.continuation!.runId);
   expect(f.continuation).toHaveBeenCalledTimes(1);
   expect(f.continuation.mock.calls[0]![0].ownerAuthority.principal).toEqual({
@@ -364,4 +365,28 @@ it("owner update HTTP and hosted routes require current owner authority without 
   } finally {
     await f.store.close();
   }
+});
+
+it("authenticated device cancellation exposes its identity and reason through HTTP", async () => {
+  const f = await fixture();
+  await f.send();
+  const client = f.client(f.tokens.control!);
+  const pending = await client.inputGet!(f.id);
+  const q = pending.question!;
+  const cancelled = await client.inputCancel!({
+    conversationId: f.id,
+    requestId: q.requestId,
+    incarnationId: q.incarnationId,
+    expectedRevision: pending.revision!,
+  });
+  expect(cancelled.question).toMatchObject({
+    status: "cancelled",
+    reason: "owner_cancelled",
+    resolvedBy: { kind: "device", id: "control" },
+    resolvedAt: expect.any(String),
+  });
+  expect(cancelled.question?.answer).toBeUndefined();
+  expect((await f.client("owner").inputGet!(f.id, q.requestId)).question).toEqual(cancelled.question);
+  expect(f.continuation).not.toHaveBeenCalled();
+  await f.store.close();
 });

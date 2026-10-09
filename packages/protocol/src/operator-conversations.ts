@@ -1575,6 +1575,9 @@ export const ConversationQuestionAnswerSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 export type ConversationQuestionAnswer = z.infer<typeof ConversationQuestionAnswerSchema>;
+const QuestionResolutionActorSchema = z
+  .object({ kind: z.enum(["operator", "device", "service"]), id: z.string().min(1).max(256) })
+  .strict();
 export const ConversationQuestionSchema = z
   .object({
     requestId: z.string().uuid(),
@@ -1606,6 +1609,7 @@ export const ConversationQuestionSchema = z
     originRunId: z.string().min(1).max(256),
     status: z.enum(["pending", "submitted", "cancelled"]),
     resolvedAt: z.string().datetime().optional(),
+    resolvedBy: QuestionResolutionActorSchema.optional(),
     reason: z.string().max(100).optional(),
     answer: ConversationQuestionAnswerSchema.optional(),
     continuation: z

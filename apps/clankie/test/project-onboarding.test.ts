@@ -684,3 +684,24 @@ it("uncertain initial artifact persistence does not restore an empty question sl
   expect(meta.questions.records).toHaveLength(1);
   expect(meta.questions.records[0].question.requestId).toBe(attemptedRequest);
 });
+
+it("native takeover retains the pending proposal but refuses project configuration", async () => {
+  const f = await fixture();
+  f.store.rememberNativeSource(f.id, {
+    paneId: "w1:p1",
+    terminalId: "owner-seat",
+    agent: "codex",
+    status: "idle",
+    title: "Owner",
+    session: { source: "herdr:codex", kind: "id", value: "native-thread" },
+  });
+  f.store.questionEligible = () => false;
+  expect(
+    await f.store.serve(
+      { op: "input_get", schemaVersion: 1, conversationId: f.id, requestId: f.locator.requestId },
+      f.owner,
+    ),
+  ).toMatchObject({ result: { question: { status: "pending" } } });
+  expect(await f.confirm()).toMatchObject({ status: "refused", reason: "owner_context_lost" });
+  expect(f.update).not.toHaveBeenCalled();
+});

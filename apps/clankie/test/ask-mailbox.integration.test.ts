@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -192,4 +192,200 @@ it("reconciles proof of native resolution once and wakes the source without inve
       owner,
     ),
   ).toMatchObject({ result: { question: { status: "cancelled", reason: "worker_question_resolved" } } });
+});
+
+it("preserves an owner action across native attachment, restart, and attributed cancellation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ask-takeover-"));
+  roots.push(root);
+  let store = new ConversationStore(root, async () => {});
+  const asked = await store.requestSurfaceQuestion(
+    "global-default",
+    QuestionDraftSchema.parse({
+      purpose: "owner_action",
+      kind: "text",
+      prompt: "Run the read-only diagnosis?",
+      waitingOn: "Root-cause evidence",
+      steps: ["Run the owner-approved diagnostics"],
+    }),
+    { current: () => true },
+  );
+  const source = {
+    paneId: "w1:p1",
+    terminalId: "owner-seat",
+    agent: "codex" as const,
+    status: "idle",
+    title: "Owner",
+    session: { source: "herdr:codex", kind: "id" as const, value: "native-thread" },
+  };
+  store.rememberNativeSource("global-default", source);
+  store.rememberNativeSource("global-default", source);
+  await store.close();
+  store = new ConversationStore(root, async () => {});
+  const get = await store.serve(
+    {
+      op: "input_get",
+      schemaVersion: 1,
+      conversationId: "global-default",
+      requestId: asked.question!.requestId,
+    },
+    owner,
+  );
+  if (get.op !== "input_get") throw new Error("wrong response");
+  expect(get.result.question).toEqual(asked.question);
+  const cancel = await store.serve(
+    {
+      op: "input_cancel",
+      schemaVersion: 1,
+      conversationId: "global-default",
+      requestId: asked.question!.requestId,
+      incarnationId: asked.question!.incarnationId,
+      expectedRevision: get.result.revision!,
+    },
+    owner,
+  );
+  OperatorConversationServiceResultSchema.parse(cancel);
+  expect(cancel).toMatchObject({
+    result: {
+      question: {
+        status: "cancelled",
+        reason: "owner_cancelled",
+        resolvedBy: owner.principal,
+      },
+    },
+  });
+  const events = readFileSync(join(root, "global-default", "events.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  expect(events.filter((event) => event.type === "input_resolved")).toEqual([
+    expect.objectContaining({ outcome: "cancelled", requestId: asked.question!.requestId }),
+  ]);
+  await store.close();
+  store = new ConversationStore(root, async () => {});
+  expect(await store.serve({ op: "input_list", schemaVersion: 1, status: "cancelled" }, owner)).toMatchObject(
+    { result: { questions: [{ question: { resolvedBy: owner.principal, reason: "owner_cancelled" } }] } },
+  );
+  await store.close();
+});
+it("attributes automatic cancellation to the service without inventing an owner answer", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ask-service-cancel-"));
+  roots.push(root);
+  const store = new ConversationStore(root, async () => {});
+  const asked = await store.requestSurfaceQuestion("global-default", draft(), { current: () => true });
+  store.cancelPendingQuestion("global-default", "conversation_closed");
+  const got = await store.serve(
+    {
+      op: "input_get",
+      schemaVersion: 1,
+      conversationId: "global-default",
+      requestId: asked.question!.requestId,
+    },
+    owner,
+  );
+  OperatorConversationServiceResultSchema.parse(got);
+  expect(got).toMatchObject({
+    result: {
+      question: {
+        status: "cancelled",
+        reason: "conversation_closed",
+        resolvedBy: { kind: "service", id: "clankie" },
+      },
+    },
+  });
+  if (got.op !== "input_get") throw new Error("wrong response");
+  expect(got.result.question?.answer).toBeUndefined();
+  await store.close();
+});
+
+it("keeps historical takeover cancellations cancelled with unknown attribution", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ask-legacy-cancel-"));
+  roots.push(root);
+  let store = new ConversationStore(root, async () => {});
+  const asked = await store.requestSurfaceQuestion("global-default", draft(), { current: () => true });
+  await store.close();
+  const path = join(root, "global-default", "meta.json");
+  const meta = JSON.parse(readFileSync(path, "utf8"));
+  Object.assign(meta.questions.records[0].question, {
+    status: "cancelled",
+    reason: "native_seat_takeover",
+    resolvedAt: new Date().toISOString(),
+  });
+  writeFileSync(path, JSON.stringify(meta));
+  store = new ConversationStore(root, async () => {});
+  const got = await store.serve(
+    {
+      op: "input_get",
+      schemaVersion: 1,
+      conversationId: "global-default",
+      requestId: asked.question!.requestId,
+    },
+    owner,
+  );
+  OperatorConversationServiceResultSchema.parse(got);
+  if (got.op !== "input_get") throw new Error("wrong response");
+  expect(got.result.question?.status).toBe("cancelled");
+  expect(got.result.question?.reason).toBe("native_seat_takeover");
+  expect(got.result.question?.resolvedBy).toBeUndefined();
+  expect(got.result.question?.answer).toBeUndefined();
+  await store.close();
+});
+
+it("answers the same owner-action request after native takeover without cancelling or duplicating it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ask-takeover-answer-"));
+  roots.push(root);
+  let continuations = 0;
+  const store = new ConversationStore(root, async () => {
+    continuations++;
+  });
+  const asked = await store.requestSurfaceQuestion(
+    "global-default",
+    QuestionDraftSchema.parse({
+      purpose: "owner_action",
+      kind: "text",
+      prompt: "Run diagnostics?",
+      waitingOn: "Root evidence",
+      steps: ["Run the read-only command"],
+    }),
+    { current: () => true },
+  );
+  store.rememberNativeSource("global-default", {
+    paneId: "w1:p1",
+    terminalId: "owner-seat",
+    agent: "codex",
+    status: "idle",
+    title: "Owner",
+    session: { source: "herdr:codex", kind: "id", value: "native-thread" },
+  });
+  const get = await store.serve(
+    {
+      op: "input_get",
+      schemaVersion: 1,
+      conversationId: "global-default",
+      requestId: asked.question!.requestId,
+    },
+    owner,
+  );
+  if (get.op !== "input_get") throw new Error("wrong response");
+  expect(get.result.question?.status).toBe("pending");
+  const target = {
+    op: "input_answer" as const,
+    schemaVersion: 1 as const,
+    conversationId: "global-default",
+    requestId: asked.question!.requestId,
+    incarnationId: asked.question!.incarnationId,
+    expectedRevision: get.result.revision!,
+    answer: { kind: "text" as const, text: "I'll run it" },
+  };
+  const answer = await store.serve(target, owner);
+  OperatorConversationServiceResultSchema.parse(answer);
+  if (answer.op !== "input_answer") throw new Error("wrong response");
+  expect(answer.result.question).toMatchObject({
+    status: "submitted",
+    resolvedBy: owner.principal,
+    answer: target.answer,
+  });
+  await store.awaitRun(answer.result.question!.continuation!.runId);
+  await store.serve(target, owner);
+  expect(continuations).toBe(1);
+  await store.close();
 });

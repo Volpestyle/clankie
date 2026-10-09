@@ -435,7 +435,10 @@ what waits on the answer. Operator and `terminalControl` device clients list and
 answer the same immutable records through `input_list`, `input_get`,
 `input_answer` and `input_cancel` on the operator dispatch API. An owner answer
 resolves all portals and wakes the original source without changing room trust.
-Pending asks protect their source from retention pruning.
+Pending asks protect their source from retention pruning. Native seat takeover
+keeps them pending in that source. Public question reads expose
+`resolvedBy`, `resolvedAt` and cancellation `reason`; automatic cancellation is
+attributed to the service, never inferred to be an owner answer.
 
 Worker escalation copies a host-observed native question, preserving its session,
 request and question IDs. An owner answer uses the existing native question-answer

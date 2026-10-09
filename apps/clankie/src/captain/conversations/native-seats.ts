@@ -236,7 +236,7 @@ export function rememberNativeSource(
 ): void {
   const meta = ctx["metas"].get(conversationId);
   if (meta === undefined || JSON.stringify(meta.nativeSource) === JSON.stringify(source)) return;
-  ctx["cancelPendingQuestion"](conversationId, "native_seat_takeover");
+  // Driver attachment does not resolve an unanswered owner question.
   meta.nativeSource = source;
   ctx["saveMeta"](meta);
 }

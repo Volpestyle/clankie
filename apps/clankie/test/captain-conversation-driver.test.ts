@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -15,6 +15,8 @@ import type { CaptainDeps } from "../src/captain/deps.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { CONVERSATION_RUN_STALL_MS } from "../src/captain/conversation-run.ts";
+import { ConversationStore } from "../src/captain/conversations.ts";
+import { QuestionDraftSchema } from "../src/captain/conversation-questions.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import * as fleetRunner from "../src/captain/herdr-fleet-runner.ts";
 
@@ -108,8 +110,23 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function fixture() {
+async function fixture(pendingOwnerAction = false) {
   const root = mkdtempSync(join(tmpdir(), "captain-conversation-driver-"));
+  if (pendingOwnerAction) {
+    const store = new ConversationStore(join(root, "conversations"), async () => {});
+    await store.requestSurfaceQuestion(
+      "global-default",
+      QuestionDraftSchema.parse({
+        purpose: "owner_action",
+        kind: "text",
+        prompt: "Run diagnostics?",
+        waitingOn: "Root-cause evidence",
+        steps: ["Run the read-only diagnostics"],
+      }),
+      { current: () => true },
+    );
+    await store.close();
+  }
   const agent: HerdrAgentSnapshot = {
     paneId: "w1:p1",
     terminalId: "worker-seat",
@@ -575,4 +592,17 @@ it("a Linear event reaches the selected ordinary chat driver exactly once across
   expect(captain.receiveLinearActivity(activity, true, target)).toBe(false);
   expect(await captain.pollSeatEvents(0, undefined, id)).toEqual([]);
   expect(fake.prompts).toEqual([]);
+});
+
+it("native seat polling leaves an unanswered owner action pending with no resolution event", async () => {
+  const { captain, root } = await fixture(true);
+  const path = join(root, "conversations", "global-default", "meta.json");
+  const before = JSON.parse(readFileSync(path, "utf8")).questions.records[0].question;
+  expect(before.status).toBe("pending");
+  await captain.pollSeatEvents(0, undefined, "global-default");
+  await captain.pollSeatEvents(0, undefined, "global-default");
+  expect(JSON.parse(readFileSync(path, "utf8")).questions.records[0].question).toEqual(before);
+  expect(readFileSync(join(root, "conversations", "global-default", "events.jsonl"), "utf8")).not.toContain(
+    '"type":"input_resolved"',
+  );
 });

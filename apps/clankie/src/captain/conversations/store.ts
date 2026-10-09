@@ -516,6 +516,7 @@ export class ConversationStore {
                 q.status = "cancelled";
                 q.resolvedAt = new Date().toISOString();
                 q.reason = "service_restarted";
+                q.resolvedBy = { kind: "service", id: "clankie" };
                 cancelledQuestions.push(record);
               }
               if (q.continuation?.state === "accepted") {
@@ -809,13 +810,15 @@ export class ConversationStore {
           conversation: await this.fork(request.parentConversationId),
         };
       case "reset":
-        return this.resetConversation(request.conversationId, request.expectedRevision);
+        if (authority) await authorizeQuestion(authority);
+        return this.resetConversation(request.conversationId, request.expectedRevision, authority?.principal);
       case "close":
+        if (authority) await authorizeQuestion(authority);
         return {
           op: "close",
           schemaVersion: 1,
           conversationId: request.conversationId,
-          closed: await this.removeConversation(request.conversationId),
+          closed: await this.removeConversation(request.conversationId, authority?.principal),
         };
       case "replay":
         return { op: "replay", schemaVersion: 1, result: this.replay(request.replay) };
@@ -915,12 +918,13 @@ export class ConversationStore {
         };
       }
       case "cancel":
+        if (authority) await authorizeQuestion(authority);
         return {
           op: "cancel",
           schemaVersion: 1,
           conversationId: request.conversationId,
           runId: request.runId,
-          cancelled: this.cancel(request.conversationId, request.runId),
+          cancelled: this.cancel(request.conversationId, request.runId, authority?.principal),
         };
       default: {
         const exhaustive: never = request;
@@ -934,10 +938,14 @@ export class ConversationStore {
    * stops the model turn); a still-queued run settles as cancelled without ever
    * invoking the runner. Unknown or already settled runs report false.
    */
-  public cancel(conversationId: string, runId: string): boolean {
+  public cancel(
+    conversationId: string,
+    runId: string,
+    resolvedBy?: NonNullable<ConversationQuestion["resolvedBy"]>,
+  ): boolean {
     const entry = this.runControllers.get(runId);
     if (entry === undefined || entry.conversationId !== conversationId) return false;
-    this.cancelPendingQuestion(conversationId, "operator_interrupt", runId);
+    this.cancelPendingQuestion(conversationId, "operator_interrupt", runId, undefined, resolvedBy);
     this.cancelRequests.add(runId);
     entry.controller.abort();
     return true;
@@ -2594,6 +2602,7 @@ export class ConversationStore {
       record.question = {
         ...record.question,
         status: "submitted",
+        resolvedBy: { ...authority.principal },
         answer,
         resolvedAt: new Date().toISOString(),
         continuation: { runId, state: "accepted" },
@@ -3294,8 +3303,9 @@ export class ConversationStore {
     reason: string,
     originRunId?: string,
     requestId?: string,
+    resolvedBy?: NonNullable<ConversationQuestion["resolvedBy"]>,
   ): void {
-    return cancelPendingQuestion(this, conversationId, reason, originRunId, requestId);
+    return cancelPendingQuestion(this, conversationId, reason, originRunId, requestId, resolvedBy);
   }
 
   public invalidateQuestionPrincipal(deviceId: string): void {
@@ -3398,7 +3408,11 @@ export class ConversationStore {
     this.onPrune?.(meta.conversationId, meta.scope);
   }
 
-  private resetConversation(conversationId: string, expectedRevision: number): ConversationServiceResult {
+  private resetConversation(
+    conversationId: string,
+    expectedRevision: number,
+    resolvedBy?: NonNullable<ConversationQuestion["resolvedBy"]>,
+  ): ConversationServiceResult {
     const meta = this.metas.get(conversationId);
     if (meta === undefined) throw new ConversationResetError("Unknown conversation");
     if (!this.runsCaptainTurns(conversationId) || meta.parentConversationId !== undefined) {
@@ -3417,7 +3431,7 @@ export class ConversationStore {
         "Wait for the current turn to finish and close side conversations before resetting context",
       );
     }
-    this.cancelPendingQuestion(conversationId, "context_reset");
+    this.cancelPendingQuestion(conversationId, "context_reset", undefined, undefined, resolvedBy);
     const archiveId = `reset-${randomUUID()}`;
     const archiveRoot = join(dirname(this.root), "conversation-archives");
     const archive = join(archiveRoot, archiveId);
@@ -3466,7 +3480,10 @@ export class ConversationStore {
     return { op: "reset", schemaVersion: 1, conversation: publicConversation(fresh), archiveId };
   }
 
-  private async removeConversation(conversationId: string): Promise<boolean> {
+  private async removeConversation(
+    conversationId: string,
+    resolvedBy?: NonNullable<ConversationQuestion["resolvedBy"]>,
+  ): Promise<boolean> {
     const meta = this.metas.get(conversationId);
     if (
       meta === undefined ||
@@ -3494,7 +3511,7 @@ export class ConversationStore {
         }),
       );
     }
-    this.cancelPendingQuestion(conversationId, "conversation_closed");
+    this.cancelPendingQuestion(conversationId, "conversation_closed", undefined, undefined, resolvedBy);
     this.remove(meta);
     return true;
   }

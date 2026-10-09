@@ -155,3 +155,26 @@ The app lane owns the top-left World mailbox, badges, asks versus
 informational update presentation, source navigation, and iPhone/iPad layout checks.
 Hosted clients use the existing authenticated operator contract; no owner setup
 is added by this core API.
+
+## Native takeover and resolution attribution (VUH-1881, 2026-10-08)
+
+Native seat attachment and polling leave unanswered questions pending in their
+source conversation; takeover is not an answer or cancellation. Existing owner
+and workspace checks still apply. New workspace preferences and project
+confirmation remain unavailable while the native driver owns the conversation.
+Existing workspace preference answers also refuse with `native_driver_active`
+and stay pending, preventing a competing service continuation; owner asks with
+semantic purposes retain their normal source answer delivery.
+
+Question reads expose `resolvedBy: {kind: operator | device | service, id}`,
+`resolvedAt`, and the cancellation `reason` code. The existing `input_resolved` event remains compatible with strict legacy
+clients; refresh the question record to read attribution. Explicit cancellation names its authenticated caller;
+automatic cancellation names the service. Submitted legacy records expose their
+stored responder; older cancellations with no recorded actor leave it unknown.
+Render `status: cancelled` as cancelled, never as an answer or selected option.
+These records do not turn driver takeover into owner approval.
+
+The app presentation change follows separately. Historical cancellations stay
+cancelled; this change does not recreate their pending requests or fabricate an
+answer. Native attachment does not remove the workspace or original issuer
+fences. Project creation still refuses when the native driver has taken over.

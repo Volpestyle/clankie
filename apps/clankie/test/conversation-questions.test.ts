@@ -135,6 +135,7 @@ it("returns pending immediately, survives activity, and commits one attributed q
   const first = await f.respond({}, responder);
   if (first.op !== "input_answer") throw new Error("wrong result");
   expect(first.result.question?.status).toBe("submitted");
+  expect(first.result.question?.resolvedBy).toEqual(responder.principal);
   const runId = first.result.question!.continuation!.runId;
   const duplicate = await f.respond({}, responder);
   expect(duplicate).toEqual(first); // old revision reconciles original acceptance
@@ -178,7 +179,9 @@ it("serializes racing answer/cancel and never resumes cancelled IDs", async () =
   const f = await fixture();
   const cancel = { op: "input_cancel", schemaVersion: 1, ...f.target } as const;
   const results = await Promise.all([f.store.serve(cancel, owner), f.respond()]);
-  expect(results[0]).toMatchObject({ result: { question: { status: "cancelled" } } });
+  expect(results[0]).toMatchObject({
+    result: { question: { status: "cancelled", reason: "owner_cancelled", resolvedBy: owner.principal } },
+  });
   expect(results[1]).toMatchObject({ result: { question: { status: "cancelled" } } });
   expect(await f.respond()).toMatchObject({ result: { question: { status: "cancelled" } } });
   await f.store.close();
@@ -201,30 +204,56 @@ it("rechecks the answering exact principal when queued work enters the runner", 
   expect(f.calls).toHaveLength(1);
   await f.store.close();
 });
-it.each(["workspace", "native", "run_cancel", "issuer_revoked"])(
-  "cancels pending on %s context loss",
-  async (kind) => {
-    const f = await fixture(true);
-    if (kind === "workspace") {
-      fs.renameSync(f.workspace, f.workspace + "-old");
-      fs.mkdirSync(f.workspace);
-    }
-    if (kind === "native") f.store.questionEligible = () => false;
-    if (kind === "run_cancel") f.store.cancel(f.id, f.originRunId);
-    if (kind === "issuer_revoked") f.store.cancelPendingQuestion(f.id, "owner_context_lost");
-    expect(await f.respond()).toMatchObject({ result: { question: { status: "cancelled" } } });
-    f.finish.resolve();
-    await f.store.close();
-    expect(f.calls).toHaveLength(1);
-  },
-);
+it.each(["workspace", "run_cancel", "issuer_revoked"])("cancels pending on %s context loss", async (kind) => {
+  const f = await fixture(true);
+  if (kind === "workspace") {
+    fs.renameSync(f.workspace, f.workspace + "-old");
+    fs.mkdirSync(f.workspace);
+  }
+  if (kind === "run_cancel") f.store.cancel(f.id, f.originRunId);
+  if (kind === "issuer_revoked") f.store.cancelPendingQuestion(f.id, "owner_context_lost");
+  expect(await f.respond()).toMatchObject({ result: { question: { status: "cancelled" } } });
+  f.finish.resolve();
+  await f.store.close();
+  expect(f.calls).toHaveLength(1);
+});
+it("keeps an existing workspace preference pending without starting a competing service turn", async () => {
+  const f = await fixture();
+  f.store.rememberNativeSource(f.id, {
+    paneId: "w1:p1",
+    terminalId: "native-seat",
+    agent: "codex",
+    status: "idle",
+    title: "Owner",
+    session: { source: "herdr:codex", kind: "id", value: "native-thread" },
+  });
+  f.store.questionEligible = () => false;
+  expect((await f.read()).question?.status).toBe("pending");
+  const answered = await f.respond({ expectedRevision: (await f.read()).revision });
+  expect(answered).toMatchObject({
+    result: { status: "refused", reason: "native_driver_active", question: { status: "pending" } },
+  });
+  await f.store.close();
+});
 it("rotates reset incarnation and never revives archived request IDs", async () => {
   const f = await fixture();
-  await f.store.serve({
-    op: "reset",
-    schemaVersion: 1,
-    conversationId: f.id,
-    expectedRevision: f.target.expectedRevision,
+  const reset = await f.store.serve(
+    {
+      op: "reset",
+      schemaVersion: 1,
+      conversationId: f.id,
+      expectedRevision: f.target.expectedRevision,
+    },
+    owner,
+  );
+  if (reset.op !== "reset") throw new Error("wrong response");
+  const archived = JSON.parse(
+    fs.readFileSync(join(f.root, "conversation-archives", reset.archiveId, "meta.json"), "utf8"),
+  );
+  expect(archived.questions.records[0].question).toMatchObject({
+    status: "cancelled",
+    reason: "context_reset",
+    resolvedBy: owner.principal,
   });
   expect(await f.respond()).toMatchObject({ result: { status: "refused", reason: "stale_request" } });
   await f.store.close();
@@ -241,7 +270,13 @@ it("restart cancels pending without replay and retains terminal receipts even wi
     requestId: f.target.requestId,
   } as const;
   expect(await restarted.serve(get, owner)).toMatchObject({
-    result: { question: { status: "cancelled", reason: "service_restarted" } },
+    result: {
+      question: {
+        status: "cancelled",
+        reason: "service_restarted",
+        resolvedBy: { kind: "service", id: "clankie" },
+      },
+    },
   });
   await restarted.close();
   // Simulate a committed submitted receipt whose accepted projection never reached the journal.
@@ -249,6 +284,7 @@ it("restart cancels pending without replay and retains terminal receipts even wi
     meta = JSON.parse(fs.readFileSync(path, "utf8"));
   const record = meta.questions.records[0];
   record.question.status = "submitted";
+  delete record.question.resolvedBy; // Legacy answer stores attribution only on its private responder.
   record.question.answer = f.answer;
   record.question.continuation = { runId: "run-crash", state: "accepted" };
   record.responder = owner.principal;
@@ -261,6 +297,7 @@ it("restart cancels pending without replay and retains terminal receipts even wi
     result: {
       question: {
         status: "submitted",
+        resolvedBy: owner.principal,
         continuation: { runId: "run-crash", state: "failed", reasonCode: "service_restarted" },
       },
     },
@@ -595,7 +632,7 @@ it.each(["before question", "while pending"])(
           owner,
         );
         expect(answer).toMatchObject({
-          result: { question: { status: "cancelled", reason: "owner_context_lost" } },
+          result: { status: "refused", reason: "native_driver_active", question: { status: "pending" } },
         });
         expect(answer).not.toHaveProperty("result.question.continuation");
       } else {
@@ -614,3 +651,21 @@ it.each(["before question", "while pending"])(
     }
   },
 );
+
+it("records the authenticated caller when interrupting a run with a pending question", async () => {
+  const f = await fixture(true);
+  const device: QuestionAuthority = { ...owner, principal: { kind: "device", id: "interrupting-phone" } };
+  expect(
+    await f.store.serve(
+      { op: "cancel", schemaVersion: 1, conversationId: f.id, runId: f.originRunId },
+      device,
+    ),
+  ).toMatchObject({ cancelled: true });
+  expect((await f.read()).question).toMatchObject({
+    status: "cancelled",
+    reason: "operator_interrupt",
+    resolvedBy: device.principal,
+  });
+  f.finish.resolve();
+  await f.store.close();
+});

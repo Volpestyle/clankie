@@ -47,6 +47,8 @@ export function assertQuestionContext(
   meta: ConversationMeta,
   record: QuestionRecord,
 ): void {
+  // Driver takeover changes delivery, not the existing question or owner/workspace binding.
+  // New asks and project mutations enforce native-driver eligibility separately.
   const workspaceBound = record.projectCreation || record.question.purpose === "preference";
   if (
     ctx["metas"].get(meta.conversationId) !== meta ||
@@ -54,8 +56,8 @@ export function assertQuestionContext(
     (workspaceBound &&
       (meta.scope.kind !== "workspace" ||
         meta.parentConversationId ||
-        meta.nativeSource ||
-        !ctx["questionEligible"](meta.conversationId) ||
+        (record.question.status === "submitted" &&
+          (meta.nativeSource || !ctx["questionEligible"](meta.conversationId))) ||
         !record.workspace ||
         !sameQuestionWorkspace(
           meta.scope.kind === "workspace" ? meta.scope.workspaceId : "",
@@ -79,7 +81,10 @@ export async function requestQuestion(
   const meta = ctx["metas"].get(conversationId);
   if (
     !meta ||
-    (workspaceBound && !context.questionBinding?.workspace) ||
+    (workspaceBound &&
+      (!context.questionBinding?.workspace ||
+        meta.nativeSource ||
+        !ctx["questionEligible"](conversationId))) ||
     context.signal.aborted ||
     context.questionCurrent?.() === false ||
     (!surface && ctx["runControllers"].get(context.runId)?.conversationId !== conversationId) ||
@@ -147,7 +152,8 @@ export async function requestQuestion(
   if (
     context.signal.aborted ||
     context.questionCurrent?.() === false ||
-    ctx["metas"].get(conversationId) !== meta
+    ctx["metas"].get(conversationId) !== meta ||
+    (workspaceBound && (meta.nativeSource || !ctx["questionEligible"](conversationId)))
   )
     throw new Error("question_turn_unavailable");
   const concurrent = matchingPending();
@@ -211,6 +217,8 @@ export async function requestQuestion(
     ctx["assertQuestionContext"](meta, record);
     if (
       meta.revision !== revision ||
+      meta.nativeSource ||
+      !ctx["questionEligible"](conversationId) ||
       context.signal.aborted ||
       context.questionCurrent?.() === false ||
       ctx["runControllers"].get(context.runId)?.conversationId !== conversationId ||
@@ -396,6 +404,8 @@ export async function projectProposalOperation(
   const assertCurrent = () => {
     ctx["assertQuestionContext"](meta, record);
     if (
+      meta.nativeSource ||
+      !ctx["questionEligible"](meta.conversationId) ||
       !sameRecord() ||
       !originalPrincipal() ||
       record.question.status !== "pending" ||
@@ -498,6 +508,7 @@ export async function projectProposalOperation(
     };
     record.question.status = "cancelled";
     record.question.reason = "project_created";
+    record.question.resolvedBy = { ...authority!.principal };
     record.question.resolvedAt = new Date().toISOString();
     meta.revision += 1;
     ctx["saveQuestionMeta"](meta);
@@ -543,7 +554,16 @@ export function questionResult(
     revision: meta.revision,
     safeCursor: ctx["lastCursor"](meta),
     ...(meta.questions ? { incarnationId: meta.questions.incarnationId } : {}),
-    ...(record ? { question: structuredClone(record.question) } : {}),
+    ...(record
+      ? {
+          question: structuredClone({
+            ...record.question,
+            ...(record.question.status === "submitted" && !record.question.resolvedBy && record.responder
+              ? { resolvedBy: record.responder }
+              : {}),
+          }),
+        }
+      : {}),
     ...(reason ? { reason } : {}),
   };
 }
@@ -554,6 +574,7 @@ export function cancelPendingQuestion(
   reason: string,
   originRunId?: string,
   requestId?: string,
+  resolvedBy: NonNullable<QuestionRecord["question"]["resolvedBy"]> = { kind: "service", id: "clankie" },
 ): void {
   const meta = ctx["metas"].get(conversationId);
   if (!meta) return;
@@ -570,6 +591,7 @@ export function cancelPendingQuestion(
   for (const record of records) {
     record.question.status = "cancelled";
     record.question.reason = reason;
+    record.question.resolvedBy = { ...resolvedBy };
     record.question.resolvedAt = new Date().toISOString();
   }
   meta.revision += 1;
@@ -705,12 +727,21 @@ export async function questionOperation(
   }
   if (request.expectedRevision !== meta.revision)
     return ctx["questionResult"](meta, record, "revision_conflict");
+  // Keep legacy workspace asks visible without creating a competing service turn.
+  // Semantic source asks retain their normal driver-aware answer delivery.
+  if (
+    request.op === "input_answer" &&
+    (record.projectCreation || record.question.purpose === "preference") &&
+    (meta.nativeSource || !ctx["questionEligible"](meta.conversationId))
+  )
+    return ctx["questionResult"](meta, record, "refused", "native_driver_active");
   if (request.op === "input_cancel") {
     ctx["cancelPendingQuestion"](
       meta.conversationId,
       "owner_cancelled",
       undefined,
       record.question.requestId,
+      authority!.principal,
     );
     return ctx["questionResult"](meta, record, "resolved");
   }
