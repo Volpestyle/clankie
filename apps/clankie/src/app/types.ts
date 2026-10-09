@@ -177,6 +177,7 @@ export interface ClankieAppDependencies {
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;
   /** The built-in tracker, for the owner's own authenticated writes (VUH-1917). */
   builtInTracker?: import("@clankie/work-items").LocalTrackerBackend;
+  importLinear?: (projectId: string, scratch: string, assertCurrent: () => Promise<void>) => Promise<unknown>;
   /** Optional host policy; ordinary installations do not supply a provider. */
   runtimeProvider?: RuntimeProvider;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;

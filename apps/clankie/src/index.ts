@@ -1,4 +1,5 @@
 import { MachineJoins } from "./machine-joins.ts";
+import { importConnectedLinear } from "./linear-import.ts";
 import { alertRecoveredCrash } from "./crash-report-alert.ts";
 import { requireMachineAccess } from "./machine-access.ts";
 import { verifyLocalSandbox } from "@clankie/settings";
@@ -1846,6 +1847,18 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   evidenceStore,
   builtInTracker,
+  importLinear: async (projectId, scratch, assertCurrent) => {
+    const settings = await settingsStore.load();
+    return importConnectedLinear(projectId, {
+      credentials: operatorCredentialStore,
+      budget: linearRequestBudget,
+      evidence: evidenceStore,
+      directory: join(stateRoot, "tracker-imports", scratch),
+      ownerIds: settings.linearWebhook.wake.ownerUserIds,
+      ownerEmails: settings.linearWebhook.wake.ownerUserEmails,
+      assertCurrent,
+    });
+  },
   localFleet,
   runtimeProvider,
   ...(runtimeProvider.quota?.composer === undefined

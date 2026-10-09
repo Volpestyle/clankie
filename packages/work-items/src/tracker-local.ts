@@ -10,6 +10,7 @@ import { open, readFile, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { compareVersions, type ReleaseHistory } from "./releases.ts";
 import { withTrackerStoreLock } from "./tracker-store-lock.ts";
+import { linearId, linearRow, type LinearImportSnapshot, type LinearImportReport, type LinearRecord } from "./linear-import.ts";
 import {
   applyTrackerDescriptionPatch,
   DELIVERY_STAGES,
@@ -248,6 +249,12 @@ interface Store {
   issues: Issue[];
   projects: Project[];
   comments: Comment[];
+  /** Mirror records, keyed by provider id; Linear remains authoritative until cutover. */
+  linearMirror?: { workspaceId: string; records: Record<string, LinearRecord[]> };
+  actors?: (User & { actor: TrackerActor })[];
+  milestones?: LinearRecord[];
+  documents?: LinearRecord[];
+  recordEvents?: { type: string; id: string; at: string; actor: TrackerActor; via: string }[];
   statusUpdates: StatusUpdate[];
   /** Absent in stores written before VUH-1916; created on their next write. */
   receipts?: WriteReceipt[];
@@ -281,6 +288,8 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
     options?: TrackerToolCallOptions,
     signal?: AbortSignal,
   ): Promise<TrackerSyncResult>;
+  /** Host-only mirror write. Never invokes workflow gates, wakes or rollover. */
+  importLinear(snapshot: LinearImportSnapshot, actorMap: Readonly<Record<string, TrackerActor>>, options?: TrackerToolCallOptions): Promise<LinearImportReport>;
   /** Replays events after the cursor (seq), then pushes new ones. Returns an unsubscribe. */
   /** Host-only: link the existing mailbox record to its requesting item event. */
   linkOwnerAsk(eventId: string, requestId: string): Promise<void>;
@@ -979,6 +988,7 @@ function addCycle(store: Store, project: Project, startsAt: string, now: string)
  * ended cycle (a later cycle may already exist, planned ahead): the next access rolls over.
  */
 function cyclesDue(store: Store, clock: string): boolean {
+  if (store.linearMirror) return false; // provider cycles remain authoritative during mirror
   const ended = new Set(
     (store.cycles ?? []).filter((cycle) => cycle.endsAt <= clock).map((cycle) => cycle.id),
   );
@@ -1634,6 +1644,8 @@ function findTeam(store: Store, reference: string): Team {
   return store.team;
 }
 function findUser(store: Store, reference: string): User {
+  const imported = store.actors?.find(user => [user.id, user.name, user.displayName].some(value => norm(value) === norm(reference)));
+  if (imported) return imported;
   if (
     ![store.user.id, store.user.name, store.user.displayName, "me"].some(
       (value) => norm(value) === norm(reference),
@@ -1670,7 +1682,7 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
   const status = store.issueStatuses.find((entry) => entry.id === issue.statusId)!;
   const project =
     issue.projectId === null ? undefined : store.projects.find((entry) => entry.id === issue.projectId);
-  const assignee = issue.assigneeId === null ? null : store.user;
+  const assignee = issue.assigneeId === null ? null : findUser(store, issue.assigneeId);
   const view: Record<string, unknown> = {
     ...issue,
     uuid: issue.id,
@@ -1681,7 +1693,7 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
     team: store.team.name,
     project: project?.name ?? null,
     assignee: assignee?.name ?? null,
-    createdBy: store.user.name,
+    createdBy: findUser(store, issue.creatorId).name,
     createdById: issue.creatorId,
     url: localUrl("issue", issue.id),
     stage: stageOf(issue),
@@ -1690,6 +1702,8 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
   };
   if (relations) {
     const summary = (id: string) => {
+      const external = store.linearMirror?.records.issues?.find(entry => entry.id === id);
+      if (!store.issues.some(entry => entry.id === id)) return { id, identifier: external?.identifier ?? id, title: external?.title ?? "Outside imported project", external: true };
       const target = findIssue(store, id);
       return {
         id: target.id,
@@ -1714,7 +1728,7 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
 function updateView(store: Store, update: StatusUpdate): Record<string, unknown> {
   return {
     ...update,
-    user: store.user,
+    user: findUser(store, update.userId),
     project: findProject(store, update.projectId).name,
     url: localUrl("status-update", update.id),
   };
@@ -1732,10 +1746,10 @@ function projectView(store: Store, project: Project): Record<string, unknown> {
     statusType: status.type,
     teams: [store.team],
     leadTeam: store.team,
-    lead: project.leadId === null ? null : store.user,
+    lead: project.leadId === null ? null : findUser(store, project.leadId),
     members: [],
-    milestones: [],
-    resources: { links: project.links, documents: [], attachments: [] },
+    milestones: (store.milestones ?? []).filter(entry => linearId(entry.project) === project.id),
+    resources: { links: project.links, documents: (store.documents ?? []).filter(entry => linearId(entry.project) === project.id), attachments: [] },
     latestStatusUpdate: latest === undefined ? null : updateView(store, latest),
     cycleDays: project.cycleDays ?? DEFAULT_CYCLE_DAYS,
     url: localUrl("project", project.id),
@@ -1744,10 +1758,10 @@ function projectView(store: Store, project: Project): Record<string, unknown> {
 function commentView(store: Store, comment: Comment): Record<string, unknown> {
   return {
     ...comment,
-    author: store.user,
-    user: store.user,
-    onBehalfOf: null,
-    attachments: [],
+    author: findUser(store, comment.userId),
+    user: findUser(store, comment.userId),
+    onBehalfOf: linearRow(comment).onBehalfOf ?? null,
+    attachments: linearRow(comment).attachments ?? [],
     url: localUrl("comment", comment.id),
   };
 }
@@ -2468,7 +2482,7 @@ async function dispatch(
       return findUser(store, args.query as string);
     case "list_users":
       return page(
-        norm(store.user.name).includes(norm(text(args, "query") ?? "")) ? [{ ...store.user }] : [],
+        [store.user, ...(store.actors ?? [])].filter(user => norm(user.name).includes(norm(text(args, "query") ?? ""))).map(user => ({ ...user })),
         args,
         "users",
         name,
@@ -2511,8 +2525,22 @@ async function dispatch(
     case "list_initiatives":
       return { initiatives: [], hasNextPage: false };
     case "list_milestones":
-      findProject(store, args.project as string);
-      return { milestones: [], hasNextPage: false };
+      return page((store.milestones ?? []).filter(entry => linearId(entry.project) === findProject(store, args.project as string).id), args, "milestones", name);
+    case "get_milestone": {
+      const record = store.milestones?.find(entry => entry.id === args.id);
+      if (!record) throw new Error(`Milestone not found: ${String(args.id)}`);
+      return record;
+    }
+    case "get_document": {
+      const record = store.documents?.find(entry => entry.id === args.id || entry.slugId === args.id);
+      if (!record) throw new Error(`Document not found: ${String(args.id)}`);
+      return record;
+    }
+    case "list_documents":
+      return page((store.documents ?? []).filter(entry =>
+        (args.project === undefined || entry.projectId === findProject(store, String(args.project)).id) &&
+        (args.issueId === undefined || entry.issueId === findIssue(store, String(args.issueId)).id) &&
+        String(entry.title).toLowerCase().includes(norm(text(args, "query") ?? ""))), args, "documents", name);
     default:
       throw new Error(`Unsupported tracker tool ${name}`);
   }
@@ -3051,6 +3079,91 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         listeners.delete(listener);
         if (!listeners.size) syncListeners.delete(path);
       }
+    },
+    async importLinear(snapshot, actorMap, callOptions) {
+      return withTrackerStoreLock(path, async (assertHeld) => {
+        const { store, clock } = await load();
+        if (store.linearMirror && store.linearMirror.workspaceId !== snapshot.workspaceId)
+          throw new Error("Scratch store belongs to another Linear workspace");
+        if (!store.linearMirror && store.issues.length > 0)
+          throw new Error("Import requires an empty scratch store or its existing mirror");
+        const report: LinearImportReport = { workspaceId: snapshot.workspaceId, counts: {}, created: 0, updated: 0, unchanged: 0, skipped: [], samples: snapshot.issues.slice(0, 5).map(i => String(i.identifier)) };
+        report.counts.archivedIssues = snapshot.issues.filter(issue => issue.archivedAt != null).length;
+        report.counts.stateHistory = snapshot.issues.reduce((count, issue) => count + ((issue.stateHistory ?? []) as unknown[]).length, 0);
+        report.counts.attachments = snapshot.issues.reduce((count, issue) => count + ((issue.attachments ?? []) as unknown[]).length, 0);
+        const records: Record<string, LinearRecord[]> = {};
+        for (const [key, value] of Object.entries(snapshot)) {
+          if (!Array.isArray(value)) continue;
+          records[key] = value as LinearRecord[];
+          report.counts[key] = value.length;
+          for (const record of value as LinearRecord[]) {
+            const prior = store.linearMirror?.records[key]?.find(r => r.id === record.id);
+            if (!prior) report.created++;
+            else if (canonical(prior) === canonical(record)) report.unchanged++;
+            else report.updated++;
+          }
+        }
+        if (report.created + report.updated === 0) return report;
+        const actor = callOptions?.actor ?? { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
+        const sourceActor = (record: LinearRecord): TrackerActor => {
+          const id = linearId(record.botActor ?? record.creator ?? record.user);
+          return (id && actorMap[id]) || actor;
+        };
+        const entity = (record: LinearRecord) => ({ ...record, createdAt: String(record.createdAt ?? clock), updatedAt: String(record.updatedAt ?? record.createdAt ?? clock), createdByActor: sourceActor(record), updatedByActor: sourceActor(record) });
+        const id = (record: LinearRecord, key: string) => linearId(record[key]);
+        const upsert = <T extends { id: string }>(target: T[], incoming: T[]) => {
+          for (const record of incoming) {
+            const index = target.findIndex(r => r.id === record.id);
+            if (index < 0) target.push(record); else target[index] = record;
+          }
+        };
+        store.team = snapshot.team as unknown as Team;
+        upsert(store.actors ??= [], snapshot.actors.map(record => ({ id: record.id, name: String(record.name), displayName: String(record.displayName ?? record.name), isLocal: true as const, actor: actorMap[record.id] ?? { type: "app", id: `linear:${record.id}`, name: String(record.name), onBehalfOf: [] } })));
+        const statuses = new Map<string, Status>();
+        for (const issue of snapshot.issues) {
+          const state = linearRow(issue.state) as unknown as Status;
+          statuses.set(state.id, state);
+          for (const span of (issue.stateHistory ?? []) as LinearRecord[]) {
+            const status = linearRow(span.state) as unknown as Status;
+            statuses.set(status.id, status);
+          }
+        }
+        upsert(store.issueStatuses, [...statuses.values()]);
+        for (const project of snapshot.projects) upsert(store.projectStatuses, [linearRow(project.status) as unknown as Status]);
+        upsert(store.labels, snapshot.labels.map(record => ({ ...entity(record), name: String(record.name), description: String(record.description ?? ""), color: String(record.color ?? ""), teamId: id(record, "team"), isGroup: record.isGroup === true, parentId: id(record, "parent") })));
+        upsert(store.projects, snapshot.projects.map(record => ({ ...entity(record), identifier: String(record.identifier ?? record.id), slug: String(record.slugId ?? record.id), name: String(record.name), summary: String(record.description ?? ""), description: String(record.content ?? record.description ?? ""), statusId: id(record, "status")!, priority: Number(record.priority ?? 0), teamIds: [snapshot.team.id], leadTeamId: snapshot.team.id, leadId: id(record, "lead"), labels: [], startDate: record.startDate as string | null, targetDate: record.targetDate as string | null, links: [] })));
+        upsert(store.milestones ??= [], snapshot.milestones.map(record => ({ ...entity(record), projectId: id(record, "project")! })));
+        upsert(store.documents ??= [], snapshot.documents.map(record => ({ ...entity(record), projectId: id(record, "project"), issueId: id(record, "issue") })));
+        upsert(store.statusUpdates, snapshot.statusUpdates.map(record => ({ ...entity(record), type: "project" as const, projectId: id(record, "project")!, body: String(record.body ?? ""), health: String(record.health), userId: id(record, "user") ?? store.user.id })));
+        // Linear cycles belong to a team. Preserve them once, never invent a project or roll them over.
+        upsert(store.cycles ??= [], snapshot.cycles.map(record => ({ ...record, projectId: "", number: Number(record.number), startsAt: String(record.startsAt), endsAt: String(record.endsAt), createdAt: String(record.createdAt) })));
+        upsert(store.comments, snapshot.comments.map(record => ({ ...entity(record), body: String(record.body ?? ""), parentId: record.parentId as string | null ?? null, issueId: record.issueId as string | null ?? null, projectId: record.projectId as string | null ?? null, statusUpdateId: record.statusUpdateId as string | null ?? null, userId: id(record, "user") ?? store.user.id, quotedText: record.quotedText as string | null ?? null })));
+        upsert(store.issues, snapshot.issues.map(record => {
+          const relations = snapshot.relations;
+          const forward = (type: string) => relations.filter(r => r.type === type && id(r, "issue") === record.id).map(r => id(r, "relatedIssue")!);
+          const backward = (type: string) => relations.filter(r => r.type === type && id(r, "relatedIssue") === record.id).map(r => id(r, "issue")!);
+          return { ...entity(record), identifier: String(record.identifier), title: String(record.title), description: String(record.description ?? ""), teamId: snapshot.team.id, projectId: id(record, "project"), milestoneId: id(record, "projectMilestone"), statusId: id(record, "state")!, priority: Number(record.priority), labels: (record.labels as LinearRecord[]).map(label => String(label.name)), assigneeId: id(record, "assignee"), creatorId: id(record, "creator") ?? store.user.id, parentId: id(record, "parent"), blocks: forward("blocks"), blockedBy: backward("blocks"), relatedTo: [...new Set([...forward("related"), ...backward("related")])], duplicateOf: forward("duplicate")[0] ?? null, dueDate: record.dueDate as string | null, estimate: record.estimate as number | null, links: ((record.attachments ?? []) as LinearRecord[]).map(a => ({ title: String(a.title), url: String(a.url) })), cycleId: id(record, "cycle") };
+        }));
+        // Historical records stay historical: no invented owner verification, asks or lease effects.
+        for (const [kind, incoming] of Object.entries(records)) for (const record of incoming) {
+          const prior = store.linearMirror?.records[kind]?.find(r => r.id === record.id);
+          if (prior && canonical(prior) === canonical(record)) continue;
+          (store.recordEvents ??= []).push({ type: kind, id: record.id, at: clock, actor: sourceActor(record), via: "linear_import" });
+          if (kind === "issues") {
+            const issue = findIssue(store, record.id);
+            if (!prior) appendEvent(store, { actor: sourceActor(record), via: "linear_import" }, String(record.createdAt), issue, { type: "created" });
+            const oldSpans = (prior?.stateHistory ?? []) as LinearRecord[];
+            for (const span of (record.stateHistory ?? []) as LinearRecord[]) if (!oldSpans.some(s => canonical(s) === canonical(span)))
+              appendEvent(store, { actor: sourceActor(record), via: "linear_import" }, String(span.startedAt), issue, { type: "state", to: String(linearRow(span.state).name) });
+          }
+          if (kind === "comments" && typeof record.issueId === "string") appendEvent(store, { actor: sourceActor(record), via: "linear_import" }, String(record.createdAt), findIssue(store, record.issueId), { type: "comment", body: String(record.body), commentId: record.id });
+        }
+        store.linearMirror = { workspaceId: snapshot.workspaceId, records: { ...(store.linearMirror?.records ?? {}), ...records } };
+        appendAudit(store, { at: clock, tool: "import_linear", outcome: "applied", actor, fields: Object.keys(records), entities: snapshot.issues.map(i => ({ type: "issue", id: i.id, identifier: String(i.identifier) })) });
+        parseStore(JSON.stringify(store));
+        await persist(path, store, assertHeld, callOptions);
+        return report;
+      });
     },
     async linkOwnerAsk(eventId, requestId) {
       await withTrackerStoreLock(path, async (assertHeld) => {

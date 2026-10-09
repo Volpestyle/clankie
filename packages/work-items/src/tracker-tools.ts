@@ -651,10 +651,13 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   ),
   tool(
     "list_milestones",
-    "List project milestones. The local subset currently has no milestones.",
+    "List project milestones, including mirrored Linear records.",
     { ...pagination, project: string },
     ["project"],
   ),
+  tool("get_milestone", "Read a project milestone by id.", { id: string }, ["id"]),
+  tool("list_documents", "List tracker documents, optionally by project or issue.", { ...pagination, project: string, issueId: string, query: string }),
+  tool("get_document", "Read a tracker document by id or slug.", { id: string }, ["id"]),
 ];
 
 /** Runtime validation is shared with adapters; tool transport schemas alone are not a boundary. */

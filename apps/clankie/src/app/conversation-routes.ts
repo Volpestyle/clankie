@@ -855,6 +855,21 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       );
     }
   });
+  ctx.app.post("/v1/tracker/import/linear", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (!identity || identity === "unavailable") return context.json({ error: "operator_required" }, 401);
+    const parsed = z.object({ projectId: z.string().uuid(), scratch: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u) }).strict().safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!ctx.dependencies.importLinear) return context.json({ error: "import_unavailable" }, 503);
+    try {
+      return context.json(await ctx.dependencies.importLinear(parsed.data.projectId, parsed.data.scratch, async () => {
+        const current = await authenticateOperator(context.req.raw, ctx.dependencies);
+        if (!current || current === "unavailable") throw new Error("Import authority expired");
+      }));
+    } catch (error) {
+      return context.json({ error: "linear_import_failed", detail: error instanceof Error ? error.message : String(error) }, 422);
+    }
+  });
   // Releases (VUH-1930): git decides what shipped; the owner only says which repository
   // to read. Clankie records the derived versions and the stage events they cause.
   ctx.app.post(TRACKER_RELEASE_SYNC_PATH, async (context) => {

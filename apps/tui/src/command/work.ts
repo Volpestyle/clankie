@@ -270,6 +270,9 @@ function trackerRequest(
       const command = TrackerSyncCommandSchema.parse(JSON.parse(one(parsed, "--json")!));
       return { path: "/operator/v1/dispatch", body: { op: "tracker_sync", schemaVersion: 1, command } };
     }
+    case "import":
+      if (rest.length !== 1 || rest[0] !== "linear" || !one(parsed, "--project") || !one(parsed, "--scratch")) throw new Error("Usage: clankie work import linear --project UUID --scratch NAME");
+      return { path: "/v1/tracker/import/linear", body: { projectId: one(parsed, "--project"), scratch: one(parsed, "--scratch") } };
     case "releases": {
       if (rest[0] === "sync" && rest.length === 1)
         return { path: "/v1/tracker/releases/sync", body: { repo } };
@@ -427,7 +430,7 @@ export async function runWorkCommand(
       method: "POST",
       headers,
       body: JSON.stringify(tracker.body),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(tracker.path === "/v1/tracker/import/linear" ? 1_200_000 : 60_000),
     });
     const body: unknown = await response.json();
     if (tracker.body.op === "tracker_sync" && response.ok) {
