@@ -174,3 +174,21 @@ Explicit Queue bypasses steering, and an impossible
 explicit Steer is a reasoned pre-send rejection under the existing delivery-mode
 contract. Once a mutation may have been written, a lost response remains
 unconfirmed and cannot authorize a queue, fallback model turn or second send.
+
+## Exact Claude worker acknowledgment (VUH-1870, 2026-10-09)
+
+Lead implementation decision under James’s assignment: worker channels require
+an explicit authenticated ACK of the original event ID and native recipient
+binding; a later poll never acknowledges a different event. The bridge checks
+the response’s exact event ID. Native control retains that channel ID and
+conversation in its fence and trusts the retained ACK without waiting for a
+remote transcript. Transport delivery is reported as `delivered`, not model
+consumption.
+
+The operator list includes worker mailboxes and native fences after restart,
+even when the mailbox ACK already resolved. Reconciliation accepts the native
+ID or the original scoped MCP call ID, never dispatches, and checks original
+content, recipient binding and native occupant. Legacy fences without a retained channel ID remain visible by their internal
+receipt ID for owner settlement. A matching body hash cannot establish which
+dispatch was acknowledged, so it never substitutes for the missing ID. Authenticated owner abandonment preserves unknown evidence and
+frees an ordinary recipient for new intent; it never retries the original.

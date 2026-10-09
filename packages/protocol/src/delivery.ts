@@ -40,6 +40,8 @@ export function fleetDeliveryStage(result: {
   if (result.outcome === "unconfirmed") return "uncertain";
   if (result.outcome !== "delivered") return result.deliveryStage === "rejected" ? "rejected" : "unavailable";
   if (result.deliveryStage === "stored") return "stored";
+  // A bridge ACK is transport evidence even when the mailbox state is queued.
+  if (result.deliveryStage === "delivered") return "delivered";
   return result.deliveryStage === "responded"
     ? "responded"
     : result.state === undefined

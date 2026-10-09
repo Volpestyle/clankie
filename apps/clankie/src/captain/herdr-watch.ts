@@ -1000,6 +1000,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       options.remoteCodexQueue,
       options.remoteCodexControl,
       `${this.path}.delivery-receipts.json`,
+      options.channelReceipt,
     );
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
@@ -1012,6 +1013,60 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.wake = wake;
     this.projectSeat = projectSeat;
     for (const watch of this.state.watches) this.launch(watch);
+  }
+
+  /** Body-free native delivery observations, including persisted legacy fences. */
+  public async unresolvedSeatDeliveries() {
+    const entries = this.seatControl.unresolvedDeliveries();
+    return Promise.all(
+      entries.map(async (entry) => {
+        const agent = await this.runner.resolveTerminal(entry.seatId).catch(() => undefined);
+        let owner: ConversationOwner | undefined;
+        try {
+          owner = agent ? this.nativeOwner(agent) : undefined;
+        } catch {
+          /* Retain visibility after occupant replacement. */
+        }
+        return {
+          ...entry,
+          conversationId: entry.conversationId ?? owner?.conversationId ?? "global-default",
+        };
+      }),
+    );
+  }
+
+  private async scopedDelivery(id: string, conversationId: string, ownerSettlement = false) {
+    const original = await this.seatControl.locateDelivery(id);
+    if (!original) return undefined;
+    const [key, receipt] = original;
+    const agent = await this.runner.resolveTerminal(receipt.seatId ?? key).catch(() => undefined);
+    let owner: ConversationOwner | undefined;
+    try {
+      owner = agent ? this.nativeOwner(agent) : undefined;
+    } catch {
+      /* Persisted delivery scope remains authoritative. */
+    }
+    if (
+      (receipt.conversationId ??
+        owner?.conversationId ??
+        (ownerSettlement ? "global-default" : undefined)) !== conversationId
+    )
+      throw new Error("Original delivery belongs to another conversation");
+    return original;
+  }
+
+  public async reconcileSeatDelivery(id: string, conversationId: string) {
+    if (!(await this.scopedDelivery(id, conversationId))) return undefined;
+    return this.seatControl.reconcileDelivery(id);
+  }
+
+  public async abandonSeatDelivery(
+    id: string,
+    conversationId: string,
+    beforeSettlement?: () => Promise<void>,
+  ) {
+    if (!(await this.scopedDelivery(id, conversationId, true))) return undefined;
+    return this.seatControl.abandonDelivery(id, beforeSettlement);
   }
 
   /**

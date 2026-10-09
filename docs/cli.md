@@ -762,12 +762,17 @@ the operator MCP bridge with `/mcp`, then check a fresh owner turn. A service
 restart alone cannot refresh an old native MCP process.
 
 `clankie seat-delivery list` reads the operator-only `seat_deliveries`
-operation: every head seat-mailbox delivery whose receipt never resolved, with
-its conversation, receipt ID and age (receipts recorded before VUH-1779 have no
-start time). An unresolved delivery refuses only a resend of that original, by
+operation: unresolved head and worker mailbox deliveries, plus native delivery
+fences that block a worker recipient. Entries include conversation, exact
+receipt ID, worker seat ID when applicable, and age when a start time was
+recorded. Native fences remain visible after their mailbox ACK. An unresolved delivery refuses only a resend of that original, by
 ID or exact content; unrelated wakes, watches and worker reports keep reaching
 the seat, and the seat receives one `seat-delivery-alert` message about it.
-`clankie doctor` lists the same entries.
+`clankie doctor` lists the same entries. For a worker channel,
+`reconcile_seat_call` accepts the returned native `messageId` as `deliveryId`,
+or the original MCP dispatch UUID, in the original conversation. An exact
+retained ACK reconciles the native fence without sending anything. A bridge
+ACK proves transport delivery, not that the model consumed or acted on it.
 
 `clankie seat-delivery settle RECEIPT_ID abandoned-unknown [--conversation ID]`
 (default `global-default`) calls `settle_seat_delivery`. It is the owner's

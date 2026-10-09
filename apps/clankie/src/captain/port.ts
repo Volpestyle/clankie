@@ -387,6 +387,8 @@ export interface CaptainPort {
    * and room never leak into another's.
    */
   laneToolBank(lane: CaptainSessionLaneV2, conversationId?: string): Promise<LaneToolBank>;
+  /** Read-only exact native delivery reconciliation; operator conversation only. */
+  reconcileSeatDelivery?(id: string, conversationId?: string): Promise<FleetSeatDelivery | undefined>;
   /**
    * The in-flight owner-directed room turn (`room_turn`, ADR 0218) a Discord
    * route names by fork ID. Its authority replaces a delivery receipt.

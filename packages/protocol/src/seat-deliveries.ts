@@ -22,6 +22,7 @@ export const UnresolvedSeatDeliverySchema = z
   .object({
     conversationId: z.string().min(1),
     receiptId: z.string().min(1),
+    seatId: z.string().min(1).optional(),
     /** Absent for receipts recorded before VUH-1779; their age is unknown. */
     beganAt: z.number().int().nonnegative().optional(),
     ageMs: z.number().int().nonnegative().optional(),

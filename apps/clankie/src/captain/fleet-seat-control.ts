@@ -1,5 +1,5 @@
 import { fleetDeliveryStage } from "@clankie/protocol";
-import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
+import { DeliveryFence, deliveryFingerprint, type UncertainReceipt } from "./delivery-fence.ts";
 import { externalCodexQuestions, guardedCodexQuestions } from "./external-codex-questions.ts";
 import { openCodexSocket } from "./codex-app-server.ts";
 import { channelBody } from "./claude-worker-seat.ts";
@@ -33,6 +33,14 @@ export function createFleetSeatControl(
   ) => Promise<boolean | FleetSeatDelivery>,
   remoteCodexControl?: (fleet: string, paneId: string) => ExternalCodexControl | undefined,
   uncertaintyPath?: string,
+  channelReceipt?: (id: string) => Promise<
+    | {
+        seatId: string;
+        receipt: UncertainReceipt;
+        acknowledged: boolean;
+      }
+    | undefined
+  >,
 ) {
   const fence = new DeliveryFence(uncertaintyPath);
   const questionFence = new DeliveryFence(
@@ -222,7 +230,7 @@ export function createFleetSeatControl(
       begin();
       try {
         const delivery =
-          authorized || options?.delivery
+          authorized || options?.delivery || options?.recipientBinding !== undefined
             ? await control.send(text, {
                 ...(authorized ? { beforeDispatch: authorized } : {}),
                 ...(options?.fence === undefined ? {} : { source: options.source ?? "peer" }),
@@ -233,7 +241,12 @@ export function createFleetSeatControl(
               })
             : await control.send(text);
         if (delivery.outcome === "accepted")
-          return { outcome: "delivered", messageId: delivery.messageId, state: delivery.state };
+          return {
+            outcome: "delivered",
+            messageId: delivery.messageId,
+            state: delivery.state,
+            ...(delivery.deliveryStage === undefined ? {} : { deliveryStage: delivery.deliveryStage }),
+          };
         if (delivery.outcome === "unconfirmed" || delivery.outcome === "offline") return delivery;
         return {
           outcome: "undelivered",
@@ -261,9 +274,90 @@ export function createFleetSeatControl(
         }
       : { outcome: "offline", detail: "The native seat is unavailable." };
   };
+  const locateDelivery = async (id: string) => {
+    const direct = fence
+      .entries()
+      .filter(([, entry]) => entry.messageId === id || entry.nativeDeliveryId === id);
+    if (direct.length > 1) throw new Error("Original native delivery is ambiguous");
+    if (direct.length === 1) return direct[0];
+    // Legacy fences lack the channel ID. Matching their body hash would guess
+    // which dispatch was acknowledged; expose their internal ID for owner settlement.
+    return undefined;
+  };
+  const reconcileDelivery = async (id: string) => {
+    const original = await locateDelivery(id);
+    if (!original) return undefined;
+    const [key, pending] = original;
+    const seatId = pending.seatId ?? key;
+    if (active.has(seatId)) throw new Error("Original native delivery is still active");
+    const agent = await runner.resolveTerminal(seatId).catch(() => undefined);
+    if (
+      !agent?.session ||
+      agent.paneId !== pending.paneId ||
+      nativeSessionId(agent) !== pending.sessionId ||
+      (pending.occupantId !== undefined && occupantIdForHerdrSession(agent.session) !== pending.occupantId)
+    )
+      return {
+        outcome: "unconfirmed" as const,
+        deliveryStage: "uncertain" as const,
+        messageId: pending.nativeDeliveryId ?? pending.messageId,
+        detail: "Original native occupant is unavailable or changed; nothing was sent.",
+      };
+    const channel = await channelReceipt?.(pending.nativeDeliveryId ?? id);
+    const fresh = await runner.resolveTerminal(seatId).catch(() => undefined);
+    if (
+      channel?.acknowledged &&
+      channel.seatId === seatId &&
+      channel.receipt.fingerprint === pending.fingerprint &&
+      channel.receipt.sessionId === pending.recipientBinding &&
+      fresh?.session &&
+      fresh.paneId === agent.paneId &&
+      occupantIdForHerdrSession(fresh.session) === occupantIdForHerdrSession(agent.session)
+    ) {
+      if (pending.seatId)
+        fence.complete(key, pending.messageId, {
+          messageId: channel.receipt.messageId,
+          deliveryStage: "delivered",
+          state: "queued",
+        });
+      else fence.reconcile(key, pending.messageId);
+      return {
+        outcome: "delivered" as const,
+        deliveryStage: "delivered" as const,
+        messageId: channel.receipt.messageId,
+        detail: "Exact original channel acknowledgment reconciled; nothing was sent.",
+      };
+    }
+    return {
+      outcome: "unconfirmed" as const,
+      deliveryStage: "uncertain" as const,
+      messageId: pending.nativeDeliveryId ?? pending.messageId,
+      detail: "Original acknowledgment is unresolved; nothing was sent.",
+    };
+  };
   return {
     attach,
     attachQuestion,
+    locateDelivery,
+    reconcileDelivery,
+    unresolvedDeliveries: () =>
+      fence.entries().map(([key, receipt]) => ({
+        seatId: receipt.seatId ?? key,
+        receiptId: receipt.nativeDeliveryId ?? receipt.messageId,
+        ...(receipt.conversationId === undefined ? {} : { conversationId: receipt.conversationId }),
+        ...(receipt.beganAt === undefined ? {} : { beganAt: receipt.beganAt }),
+      })),
+    async abandonDelivery(id: string, beforeSettlement?: () => Promise<void>) {
+      const entry = await locateDelivery(id);
+      if (!entry) throw new Error("Original native delivery is missing");
+      const [key, original] = entry;
+      if (active.has(original.seatId ?? key)) throw new Error("Original native delivery is still active");
+      await beforeSettlement?.();
+      if (active.has(original.seatId ?? key)) throw new Error("Original native delivery is still active");
+      const evidence = fence.abandonUnknown(key, original.messageId, Date.now());
+      if (!original.seatId) fence.archiveAbandoned(key, original.messageId);
+      return evidence;
+    },
     async deliverToSeat(
       seatId: string,
       text: string,
@@ -311,6 +405,19 @@ export function createFleetSeatControl(
         fence.pending(seatId) ??
         fence.entries().find(([, receipt]) => receipt.seatId === seatId)?.[1];
       if (pending !== undefined) {
+        const nativeId = pending.nativeDeliveryId;
+        if (nativeId) {
+          const reconciled = await reconcileDelivery(nativeId);
+          if (reconciled?.outcome === "delivered") {
+            return pending.fingerprint === deliveryFingerprint(text)
+              ? { ...reconciled, detail: "Original delivery reconciled; nothing was sent." }
+              : {
+                  outcome: "undelivered",
+                  deliveryStage: "unavailable",
+                  detail: "Original delivery reconciled; this different message was not sent.",
+                };
+          }
+        }
         const pendingKey = fence.entries().find(([, receipt]) => receipt === pending)?.[0] ?? key;
         if (stableReceiptKey !== undefined && pendingKey !== key)
           return {
@@ -454,6 +561,9 @@ export function createFleetSeatControl(
         };
       const receiptData = {
         fingerprint: deliveryFingerprint(text),
+        beganAt: Date.now(),
+        ...(options?.conversationId === undefined ? {} : { conversationId: options.conversationId }),
+        ...(options?.recipientBinding === undefined ? {} : { recipientBinding: options.recipientBinding }),
         ...(stableReceiptKey === undefined ? {} : { seatId }),
         ...(occupantId === undefined ? {} : { occupantId }),
         ...(sessionId === undefined ? {} : { sessionId }),
@@ -488,10 +598,12 @@ export function createFleetSeatControl(
           fence.complete(key, receipt.messageId, {
             ...(result.messageId === undefined ? {} : { messageId: result.messageId }),
             ...(result.state === undefined ? {} : { state: result.state }),
-            deliveryStage: fleetDeliveryStage(result),
+            deliveryStage: result.deliveryStage ?? fleetDeliveryStage(result),
           });
           receipt = undefined;
         }
+        if (result.outcome === "unconfirmed" && result.messageId && receipt)
+          fence.update(key, receipt.messageId, { nativeDeliveryId: result.messageId });
         if (pi && result.outcome === "unconfirmed" && result.messageId !== undefined && receipt !== undefined)
           fence.update(key, receipt.messageId, { nativeMessageId: result.messageId });
         if (result.outcome !== "unconfirmed") clear();
@@ -500,7 +612,7 @@ export function createFleetSeatControl(
         const deliveryStage =
           options?.delivery === undefined && result.outcome === "undelivered"
             ? "unavailable"
-            : fleetDeliveryStage(result);
+            : (result.deliveryStage ?? fleetDeliveryStage(result));
         return { ...result, deliveryStage };
       } catch (error) {
         if (receipt === undefined) {

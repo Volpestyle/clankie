@@ -53,6 +53,10 @@ export const ReceiptSchema = z
     occupantId: z.string().optional(),
     paneId: z.string().optional(),
     agentName: z.string().optional(),
+    /** Exact native channel event returned to the caller, distinct from the control fence key. */
+    nativeDeliveryId: z.string().min(1).max(256).optional(),
+    conversationId: z.string().min(1).max(256).optional(),
+    recipientBinding: z.string().optional(),
     beforeIds: z.array(z.string()).optional(),
     seatId: z.string().optional(),
     /** A terminal inbound lookup refusal; this original ID may never dispatch. */
@@ -221,6 +225,24 @@ export class DeliveryFence {
       : [...this.records.entries()].filter(
           ([, receipt]) => !receipt.completed && !receipt.settlement && !receipt.abandoned,
         );
+  }
+
+  /** Free an ordinary recipient key while retaining the abandoned original forever. */
+  public archiveAbandoned(key: string, messageId: string): void {
+    const original = this.records.get(key);
+    if (this.unreadable || !original?.abandoned || original.messageId !== messageId)
+      throw new Error("Only a retained abandoned original can free its recipient key");
+    const archive = `abandoned:${messageId}`;
+    if (this.records.has(archive)) throw new Error("Abandoned original archive already exists");
+    this.records.set(archive, original);
+    this.records.delete(key);
+    try {
+      this.save();
+    } catch (error) {
+      this.records.set(key, original);
+      this.records.delete(archive);
+      throw error;
+    }
   }
 
   /** Persist before crossing the uncertain boundary. A persistence failure sends nothing. */

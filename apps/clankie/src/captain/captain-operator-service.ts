@@ -53,6 +53,7 @@ export interface CreateOperatorServiceContext {
   readonly seatOutbox: (conversationId: string) => SeatOutbox;
   /** Conversations with a head mailbox in memory or a receipt journal on disk. */
   readonly headSeatConversations: () => readonly string[];
+  readonly fleetSeatOutboxes?: () => readonly (readonly [string, SeatOutbox])[];
   readonly terminals: RuntimeTerminals;
   readonly conversations: ConversationStore;
   readonly autonomy: AutonomyStore;
@@ -632,23 +633,64 @@ export function createOperatorService(
       return {
         op: "seat_deliveries",
         schemaVersion: 1,
-        unresolved: ctx.headSeatConversations().flatMap((conversationId) =>
-          ctx
-            .seatOutbox(conversationId)
-            .unresolvedDeliveries()
-            .map((receipt) => ({
-              conversationId,
+        unresolved: [
+          ...ctx.headSeatConversations().flatMap((conversationId) =>
+            ctx
+              .seatOutbox(conversationId)
+              .unresolvedDeliveries()
+              .map((receipt) => ({
+                conversationId,
+                ...receipt,
+                ...(receipt.beganAt === undefined ? {} : { ageMs: Math.max(0, now - receipt.beganAt) }),
+              })),
+          ),
+          ...(await ctx.herdrWatches.unresolvedSeatDeliveries()),
+          ...(ctx.fleetSeatOutboxes?.() ?? []).flatMap(([seatId, mailbox]) =>
+            mailbox.unresolvedDeliveries().map((receipt) => ({
               ...receipt,
-              ...(receipt.beganAt === undefined ? {} : { ageMs: Math.max(0, now - receipt.beganAt) }),
+              conversationId:
+                mailbox.recoveryReceipt(receipt.receiptId)?.conversationId ??
+                ctx.conversations.conversationIdForSeat(seatId) ??
+                "global-default",
             })),
-        ),
+          ),
+        ]
+          .filter(
+            (entry, index, all) =>
+              all.findIndex(
+                (candidate) =>
+                  candidate.receiptId === entry.receiptId &&
+                  candidate.conversationId === entry.conversationId,
+              ) === index,
+          )
+          .map((entry) => ({
+            ...entry,
+            ...(entry.beganAt === undefined ? {} : { ageMs: Math.max(0, now - entry.beganAt) }),
+          })),
       };
     }
     if (request.op === "settle_seat_delivery") {
       if (!authority) throw new ConversationRefusedError("Operator settlement authority is required");
       await authorizeQuestion(authority);
       try {
-        const evidence = ctx.seatOutbox(request.conversationId).abandonUnknown(request.receiptId);
+        const mailboxes = (ctx.fleetSeatOutboxes?.() ?? []).filter(
+          ([seatId, mailbox]) =>
+            mailbox.unresolvedDeliveries().some((entry) => entry.receiptId === request.receiptId) &&
+            (mailbox.recoveryReceipt(request.receiptId)?.conversationId ??
+              ctx.conversations.conversationIdForSeat(seatId)) === request.conversationId,
+        );
+        if (mailboxes.length > 1) throw new Error("Original fleet delivery is ambiguous");
+        const mailbox = mailboxes[0]?.[1];
+        const native = await ctx.herdrWatches.abandonSeatDelivery(
+          request.receiptId,
+          request.conversationId,
+          () => authorizeQuestion(authority),
+        );
+        await authorizeQuestion(authority);
+        const evidence =
+          mailbox?.abandonUnknown(request.receiptId) ??
+          native ??
+          ctx.seatOutbox(request.conversationId).abandonUnknown(request.receiptId);
         return {
           op: "settle_seat_delivery",
           schemaVersion: 1,

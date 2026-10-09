@@ -74,7 +74,7 @@ export interface ClaudeWorkerSeatDeps {
       text: string,
       source?: string,
       recipientBinding?: string,
-    ): Promise<boolean | Extract<SeatDelivery, { readonly outcome: "unconfirmed" }>>;
+    ): Promise<boolean | Extract<SeatDelivery, { readonly outcome: "unconfirmed" | "accepted" }>>;
   };
   readonly timing?: { readonly readyMs?: number; readonly receiptMs?: number; readonly pollMs?: number };
   /** Deny rules for the tracker connectors a session in `cwd` would inherit. */
@@ -677,7 +677,10 @@ class ClaudeWorkerSeatControl implements SeatControl {
       : options?.source === undefined
         ? this.deps.mailbox.deliver(agent.terminalId, message)
         : this.deps.mailbox.deliver(agent.terminalId, message, options.source));
-    if (typeof delivery !== "boolean") return { ...delivery, deliveryStage: "uncertain" };
+    // An exact authenticated bridge ACK proves transport delivery without waiting
+    // for a remote transcript read. It never proves model awareness or completion.
+    if (typeof delivery !== "boolean")
+      return delivery.outcome === "unconfirmed" ? { ...delivery, deliveryStage: "uncertain" } : delivery;
     if (!delivery) return { outcome: "released", deliveryStage: "unavailable" };
     const id = await receipt(
       this.deps,

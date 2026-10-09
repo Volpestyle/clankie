@@ -35,6 +35,8 @@ export interface PeerDeliveryOptions {
   readonly reconcileOnly?: boolean;
   readonly originalId?: string;
   readonly recipientBinding?: string;
+  /** Service-authored lead attribution, never a peer request field. */
+  readonly conversationId?: string;
   readonly fence?: (agent: HerdrAgentSnapshot | undefined) => Promise<boolean>;
 }
 const ReceiptRecordSchema = z

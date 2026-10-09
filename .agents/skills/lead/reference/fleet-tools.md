@@ -245,3 +245,14 @@ Refresh the destination ref through the repo's workflow, confirm
 needed ignored evidence, then remove only a worktree you own whose result
 landed. Every tidy result lists the remaining candidates with path, branch and
 checked destination.
+
+## Unresolved Claude channel deliveries
+
+A bridge ACK proves transport delivery, not model consumption. If
+`message_seat` is unconfirmed, reconcile its exact native `messageId` (or MCP
+dispatch UUID) with `reconcile_seat_call` in the original conversation. Read
+`clankie seat-delivery list` for worker mailbox and native fences, including
+fences retained after a mailbox ACK. Never resend to test receipt. The owner
+can settle an unknowable original with `seat-delivery settle ID
+abandoned-unknown --conversation ID`; it retains unknown evidence and frees
+new intent without replaying the original.

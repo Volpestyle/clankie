@@ -107,11 +107,12 @@ export function fleetSeatMailbox(
 ): SeatOutbox {
   const existing = mailboxes.get(seatId);
   if (existing !== undefined) return existing;
-  const created = new SeatOutbox(
-    uncertaintyDir === undefined
+  const created = new SeatOutbox({
+    explicitAcknowledgments: true,
+    ...(uncertaintyDir === undefined
       ? {}
-      : { uncertaintyPath: join(uncertaintyDir, `${encodeURIComponent(seatId)}.json`) },
-  );
+      : { uncertaintyPath: join(uncertaintyDir, `${encodeURIComponent(seatId)}.json`) }),
+  });
   mailboxes.set(seatId, created);
   return created;
 }
@@ -152,7 +153,13 @@ export async function deliverFleetSeatMessage(
       })
       .then((delivery): FleetSeatDelivery => {
         if (delivery.outcome === "delivered" || delivery.outcome === "replied")
-          return { outcome: "delivered", deliveryStage: headSeatDeliveryStage(delivery.outcome) };
+          return {
+            outcome: "delivered",
+            deliveryStage: headSeatDeliveryStage(delivery.outcome),
+            ...(delivery.outcome === "delivered" && delivery.messageId !== undefined
+              ? { messageId: delivery.messageId }
+              : {}),
+          };
         if (delivery.outcome === "unconfirmed") return delivery;
         return { outcome: "undelivered", detail: `Seat mailbox delivery was ${delivery.outcome}.` };
       });

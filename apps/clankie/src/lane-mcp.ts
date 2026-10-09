@@ -62,7 +62,7 @@ export function createLaneMcpEndpoint({
   captain,
   receiptPath,
 }: {
-  captain: Pick<CaptainPort, "laneToolBank">;
+  captain: Pick<CaptainPort, "laneToolBank" | "reconcileSeatDelivery">;
   receiptPath?: string;
 }): LaneMcpEndpoint {
   const sessions = new Map<string, LaneMcpSession>();
@@ -75,12 +75,12 @@ export function createLaneMcpEndpoint({
   const reconciliationTool = {
     name: RECONCILE_SEAT_CALL,
     description:
-      "Read the original operator message_seat or hire_agent receipt by its MCP deliveryId or hireId. " +
+      "Read the original operator message_seat or hire_agent receipt by its MCP deliveryId, native channel event ID, or hireId. " +
       "Read-only: never dispatches, retries, or starts an agent. Use the same conversation as the original call.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        deliveryId: { type: "string", format: "uuid" },
+        deliveryId: { type: "string", minLength: 1, maxLength: 256 },
         hireId: { type: "string", format: "uuid" },
       },
       oneOf: [{ required: ["deliveryId"] }, { required: ["hireId"] }],
@@ -138,15 +138,39 @@ export function createLaneMcpEndpoint({
         const key = keys[0];
         if (keys.length !== 1 || (key !== "deliveryId" && key !== "hireId"))
           return failure("Supply exactly one deliveryId or hireId. Nothing dispatched.");
+        if (key === "deliveryId" && typeof args[key] === "string" && args[key].length <= 256) {
+          try {
+            const native = await captain.reconcileSeatDelivery?.(args[key], conversationId);
+            if (native) return { content: [{ type: "text", text: JSON.stringify(native) }] };
+          } catch (error) {
+            return failure(error);
+          }
+        }
         const id = SeatCallIdSchema.safeParse(args[key]);
         if (!id.success) return failure("Invalid seat-call receipt ID. Nothing dispatched.");
         try {
-          return receipts.read(
+          const original = receipts.read(
             id.data,
             key === "deliveryId" ? "message_seat" : "hire_agent",
             lane,
             conversationId,
           );
+          if (key === "deliveryId" && !original.isError) {
+            for (const block of original.content) {
+              if (block.type !== "text") continue;
+              let body;
+              try {
+                body = JSON.parse(block.text);
+              } catch {
+                continue;
+              }
+              if (body?.outcome !== "unconfirmed" || typeof body.messageId !== "string") continue;
+              const native = await captain.reconcileSeatDelivery?.(body.messageId, conversationId);
+              if (native)
+                return { content: [{ type: "text", text: JSON.stringify(native) }], _meta: original._meta };
+            }
+          }
+          return original;
         } catch (error) {
           return failure(error);
         }

@@ -660,6 +660,7 @@ it("VUH-1779: an unresolved head delivery refuses only its own resend; later wak
     settingsStore: {},
     deps: { herdrAvailable: () => true },
     shutdown: new AbortController(),
+    herdrWatches: new HerdrWatchStore(join(f.root, "operator-watches.json")),
     seatOutboxes: unbound.outboxes,
     seatOutbox: unbound.outbox,
     headSeatConversations: () => [ID],

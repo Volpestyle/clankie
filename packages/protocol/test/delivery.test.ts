@@ -27,3 +27,9 @@ it("does not collapse uncertainty into unavailability or expiration", () => {
   expect(headSeatDeliveryStage("unbound")).toBe("unavailable");
   expect(headSeatDeliveryStage("aborted")).toBe("expired");
 });
+
+it("preserves exact channel transport acknowledgment without claiming model consumption", () => {
+  expect(fleetDeliveryStage({ outcome: "delivered", state: "queued", deliveryStage: "delivered" })).toBe(
+    "delivered",
+  );
+});

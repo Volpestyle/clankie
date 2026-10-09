@@ -516,7 +516,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           wantsReply: false,
           ...(recipientBinding === undefined ? {} : { recipientBinding }),
         });
-        return delivery.outcome === "unconfirmed" ? delivery : delivery.outcome === "delivered";
+        return delivery.outcome === "unconfirmed"
+          ? delivery
+          : delivery.outcome === "delivered" && delivery.messageId
+            ? {
+                outcome: "accepted" as const,
+                deliveryStage: "delivered" as const,
+                messageId: delivery.messageId,
+                state: "queued" as const,
+              }
+            : delivery.outcome === "delivered";
       },
     },
   } satisfies Pick<ClaudeWorkerSeatDeps, "hooks" | "agent" | "transcript" | "mailbox" | "hookQuestions">;
@@ -599,24 +608,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           }),
         }),
     channelReceipt: async (id) => {
-      const directory = join(options.stateDir, "delivery-receipts", "fleet");
-      const ids = new Set(fleetMailboxes.keys());
-      if (existsSync(directory))
-        for (const file of readdirSync(directory)) {
-          const name = file.endsWith(".json.delivered")
-            ? file.slice(0, -15)
-            : file.endsWith(".json")
-              ? file.slice(0, -5)
-              : undefined;
-          if (name !== undefined) {
-            const seatId = decodeURIComponent(name);
-            if (encodeURIComponent(seatId) !== name) throw new Error("Mailbox receipt path is noncanonical");
-            ids.add(seatId);
-          }
-        }
-      const matches = [...ids]
-        .map((seatId) => {
-          const mailbox = fleetSeatMailbox(fleetMailboxes, seatId, directory);
+      const entries = fleetSeatOutboxes();
+      const matches = entries
+        .map(([seatId, mailbox]) => {
           return { seatId, mailbox, receipt: mailbox.recoveryReceipt(id) };
         })
         .filter((item) => item.receipt !== undefined);
@@ -1124,6 +1118,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // that pane's bridge first polls. A bound mailbox takes a DM or room turn
   // as a channel event; an unbound one reports unavailable delivery.
   const fleetMailboxes = new Map<string, SeatOutbox>();
+  function fleetSeatOutboxes(): readonly (readonly [string, SeatOutbox])[] {
+    const directory = join(options.stateDir, "delivery-receipts", "fleet");
+    const ids = new Set(fleetMailboxes.keys());
+    if (existsSync(directory))
+      for (const file of readdirSync(directory)) {
+        const name = file.endsWith(".json.delivered")
+          ? file.slice(0, -15)
+          : file.endsWith(".json")
+            ? file.slice(0, -5)
+            : undefined;
+        if (name !== undefined) {
+          const seatId = decodeURIComponent(name);
+          if (encodeURIComponent(seatId) !== name) throw new Error("Mailbox receipt path is noncanonical");
+          ids.add(seatId);
+        }
+      }
+    return [...ids].map((seatId) => [seatId, fleetSeatMailbox(fleetMailboxes, seatId, directory)] as const);
+  }
+
   const nextTurnMailboxes = new NextTurnMailbox(join(options.stateDir, "next-turn-mailboxes.json"));
   async function publishWaitingNotice(seat: string, binding: string | undefined, pane: string) {
     const notice = nextTurnMailboxes.waitingNotice(seat, binding, pane);
@@ -2394,6 +2407,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       await deliveryOptions.guard!();
     }
     const current = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+    deliveryOptions = {
+      ...deliveryOptions,
+      conversationId: context.conversationId,
+      ...(inboundBinding(current) === undefined ? {} : { recipientBinding: inboundBinding(current)! }),
+    };
     const prior = nextTurnMailboxes.receipt(seatId, inboundBinding(current), message);
     if (prior && deliveryOptions?.stableReceiptKey === undefined) return prior;
     const mailbox = fleetSeatMailbox(
@@ -4726,6 +4744,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return seatOutboxes;
       },
       seatOutbox: (conversationId: string) => seatOutbox(conversationId),
+      fleetSeatOutboxes,
       headSeatConversations: () => {
         const directory = join(options.stateDir, "delivery-receipts", "head");
         const ids = new Set(seatOutboxes.keys());
@@ -5033,6 +5052,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     laneToolBank: laneToolBankFor,
+    async reconcileSeatDelivery(id, conversationId) {
+      const binding = seatContext(conversationId);
+      if (!binding || conversations.conversation(binding.conversationId)?.scope.kind === "room")
+        throw new Error("Private operator conversation is required");
+      return herdrWatches.reconcileSeatDelivery(id, binding.conversationId);
+    },
     roomForkGrant,
 
     async pollSeatEvents(waitMs, signal, conversationId, capabilities) {

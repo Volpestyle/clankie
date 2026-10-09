@@ -91,7 +91,7 @@ export class SeatLinkInterruptedError extends Error {
 }
 
 export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
-  | { readonly outcome: "delivered" }
+  | { readonly outcome: "delivered"; readonly messageId?: string }
   | { readonly outcome: "replied"; readonly text: string }
   | { readonly outcome: "unconfirmed"; readonly messageId: string; readonly detail: string }
   | { readonly outcome: "unbound" }
@@ -150,6 +150,7 @@ export class SeatOutbox {
   private readonly awaitingReply = new Map<string, Pending>();
   private readonly pollers = new Set<ParkedPoller>();
   private readonly boundGraceMs: number;
+  private readonly explicitAcknowledgments: boolean;
   private readonly replyTimeoutMs: number;
   private readonly now: () => number;
   private readonly fence: DeliveryFence;
@@ -188,6 +189,8 @@ export class SeatOutbox {
   public constructor(
     options: {
       readonly uncertaintyPath?: string;
+      /** Worker channels acknowledge an exact event, never implicitly on the next poll. */
+      readonly explicitAcknowledgments?: boolean;
       readonly boundGraceMs?: number;
       readonly replyTimeoutMs?: number;
       readonly now?: () => number;
@@ -213,6 +216,7 @@ export class SeatOutbox {
       options.uncertaintyPath === undefined ? undefined : `${options.uncertaintyPath}.delivered`,
     );
     this.boundGraceMs = options.boundGraceMs ?? BOUND_GRACE_MS;
+    this.explicitAcknowledgments = options.explicitAcknowledgments ?? false;
     this.replyTimeoutMs = options.replyTimeoutMs ?? REPLY_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
     this.presencePath = options.presencePath;
@@ -477,6 +481,7 @@ export class SeatOutbox {
         messageId: event.id,
         fingerprint,
         beganAt: this.now(),
+        conversationId: input.conversationId,
         ...(input.original === undefined
           ? input.recipientBinding === undefined
             ? {}
@@ -585,7 +590,7 @@ export class SeatOutbox {
       );
     // A polling seat is present: announce receipts it has not been told about yet.
     this.alertUnresolved();
-    this.ackInFlight(recipientBinding);
+    if (!this.explicitAcknowledgments) this.ackInFlight(recipientBinding);
     const ready = this.take(recipientBinding, capabilities);
     if (ready.length > 0 || waitMs <= 0 || signal?.aborted === true) return Promise.resolve(ready);
     return new Promise((resolve) => {
@@ -744,6 +749,7 @@ export class SeatOutbox {
         this.delivered.begin(pending.event.id, {
           messageId: pending.event.id,
           fingerprint: pending.fingerprint,
+          conversationId: pending.event.conversationId,
           ...(pending.exactRecipient
             ? { sessionId: pending.recipientBinding ?? "" }
             : pending.recipientBinding === undefined
@@ -762,7 +768,7 @@ export class SeatOutbox {
     if (pending.admission !== undefined) pending.onAdmitted?.(pending.admission);
     if (pending.timer !== undefined) clearTimeout(pending.timer);
     if (!pending.wantsReply) {
-      pending.settle({ outcome: "delivered" });
+      pending.settle({ outcome: "delivered", messageId: pending.event.id });
       return;
     }
     this.awaitingReply.set(pending.event.id, pending);

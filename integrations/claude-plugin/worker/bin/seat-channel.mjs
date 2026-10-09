@@ -790,7 +790,8 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
           );
           await checkFleetMembership(ack);
           const receipt = ack.ok ? await ack.json() : undefined;
-          if (receipt?.acknowledged !== true) throw new Error("Exact channel acknowledgment is unresolved");
+          if (receipt?.acknowledged !== true || receipt.eventId !== event.id)
+            throw new Error("Exact channel acknowledgment is unresolved");
           receiptUnresolved = false;
         }
       } catch (error) {

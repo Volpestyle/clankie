@@ -3,7 +3,7 @@ import { deliverFleetSeatMessage, fleetSeatMailbox } from "../src/captain/fleet-
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 
 describe("fleet seat mailbox", () => {
-  it("a bound mailbox takes the message and confirms it on its next poll", async () => {
+  it("a bound worker mailbox confirms only the exact explicit acknowledgement", async () => {
     const mailboxes = new Map<string, SeatOutbox>();
     const mailbox = fleetSeatMailbox(mailboxes, "term-potato");
     const parked = mailbox.poll(5_000);
@@ -18,9 +18,15 @@ describe("fleet seat mailbox", () => {
       source: "operator",
       content: "Please finish the tests",
     });
-    // Take is acked on the next poll, not at dequeue.
+    // A later poll is not evidence of which channel event reached the harness.
     void mailbox.poll(0);
-    await expect(sending).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
+    expect(mailbox.acknowledge("seat-invented")).toBe(false);
+    expect(mailbox.acknowledge(event!.id)).toBe(true);
+    await expect(sending).resolves.toMatchObject({
+      outcome: "delivered",
+      deliveryStage: "delivered",
+      messageId: event!.id,
+    });
   });
 
   it("an unbound mailbox reports undelivered without a terminal fallback", async () => {

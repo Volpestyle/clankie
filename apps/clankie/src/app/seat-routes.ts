@@ -366,7 +366,12 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
         context.req.param("id"),
       );
       return acknowledged
-        ? context.json({ schemaVersion: 1, acknowledged: true, deliveryStage: "delivered" })
+        ? context.json({
+            schemaVersion: 1,
+            acknowledged: true,
+            eventId: context.req.param("id"),
+            deliveryStage: "delivered",
+          })
         : context.json({ error: "unknown_event" }, 404);
     }),
   );
