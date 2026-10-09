@@ -29,6 +29,7 @@ const WORK_USAGE = [
   "  | lease ITEM [--minutes N] [--release]",
   "  | sync --json COMMAND   (built-in bootstrap, batch, subscribe or keyed transaction)",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker)",
+  "  | import linear --project UUID --scratch NAME   (read-only Linear mirror into a scratch store)",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
 ].join("\n");
 
@@ -271,8 +272,12 @@ function trackerRequest(
       return { path: "/operator/v1/dispatch", body: { op: "tracker_sync", schemaVersion: 1, command } };
     }
     case "import":
-      if (rest.length !== 1 || rest[0] !== "linear" || !one(parsed, "--project") || !one(parsed, "--scratch")) throw new Error("Usage: clankie work import linear --project UUID --scratch NAME");
-      return { path: "/v1/tracker/import/linear", body: { projectId: one(parsed, "--project"), scratch: one(parsed, "--scratch") } };
+      if (rest.length !== 1 || rest[0] !== "linear" || !one(parsed, "--project") || !one(parsed, "--scratch"))
+        throw new Error("Usage: clankie work import linear --project UUID --scratch NAME");
+      return {
+        path: "/v1/tracker/import/linear",
+        body: { projectId: one(parsed, "--project"), scratch: one(parsed, "--scratch") },
+      };
     case "releases": {
       if (rest[0] === "sync" && rest.length === 1)
         return { path: "/v1/tracker/releases/sync", body: { repo } };

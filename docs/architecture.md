@@ -840,6 +840,10 @@ Linear-shaped tracker tool surface to Clankie and workers, using the connected
 owner account or durable local storage when disconnected; repository conventions
 adapt GitHub and Markdown to that same surface. `clankie doctor` reports backend
 selection and reason ([ADR 0226](adr/0226-one-tracker-tool-surface.md)).
+The [Linear importer](../apps/clankie/src/linear-import.ts) mirrors a single-team
+project into a named scratch store through the same broker and request budget.
+Provider IDs, history and graph references survive; uploads enter the evidence
+store. It leaves Linear authoritative and never selects the live tracker.
 Built-in items and runs carry evidence-store reference bundles. Completion past
 landed requires an independent bundle check. Item questions and run gates reuse
 ADR 0245 owner asks; gates block tracked execution until owner approval. The

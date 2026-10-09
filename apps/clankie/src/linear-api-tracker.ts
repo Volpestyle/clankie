@@ -348,6 +348,32 @@ export function createLinearApiTracker(options: {
   ): Promise<unknown> => {
     validateTrackerToolArgs(name, args);
     refuseBuiltInTrackerFeatures(name, args);
+    if (name === "get_document")
+      return one(
+        "document",
+        String(args.id),
+        "id title content createdAt updatedAt archivedAt slugId url creator { id name } project { id } issue { id }",
+      );
+    if (name === "list_documents") {
+      const filter: RecordValue = {};
+      if (args.project) filter.project = { id: { eq: await id("project", args.project) } };
+      if (args.issueId) filter.issue = { id: { eq: args.issueId } };
+      if (args.query) filter.title = { containsIgnoreCase: args.query };
+      const result = await page(
+        "documents",
+        "DocumentFilter",
+        "id title content createdAt updatedAt archivedAt slugId url creator { id name } project { id } issue { id }",
+        args,
+        filter,
+      );
+      return { documents: result.nodes, hasNextPage: result.hasNextPage, cursor: result.cursor };
+    }
+    if (name === "get_milestone")
+      return one(
+        "projectMilestone",
+        String(args.id),
+        "id name description targetDate sortOrder createdAt updatedAt archivedAt project { id }",
+      );
     if (name === "get_issue") {
       unsupported(args, ["includeCustomerNeeds", "includeReleases"]);
       const issue = await one(

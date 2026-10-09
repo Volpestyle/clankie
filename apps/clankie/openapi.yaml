@@ -1882,6 +1882,37 @@ paths:
         "409":
           { description: Unknown connection or synchronization unconfirmed; inspect state before retrying }
         "503": { description: Execution management or authentication unavailable }
+  /v1/tracker/import/linear:
+    post:
+      tags: [Operator]
+      operationId: importLinearScratch
+      summary: Mirror a Linear project into a named scratch built-in tracker
+      description: >-
+        Read-only on the broker-connected Clankie Linear app. Every collection is
+        paginated, including archived issues. Imports provider IDs and VUH keys,
+        comments/replies, history, labels, relations, milestones, documents, updates
+        and team cycles. Uploads enter the evidence store with rewritten links.
+        Shares the background request budget. Scratch stores live under tracker-imports,
+        separate from the live tracker. Writes import-report.json and returns counts,
+        skips, actor mappings and created/updated/unchanged totals. Does not switch
+        the active backend. Multi-team mappings are refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectId, scratch]
+              properties:
+                projectId: { type: string, format: uuid }
+                scratch: { type: string, pattern: "^[a-zA-Z0-9_-]{1,80}$" }
+      responses:
+        "200": { description: Import report; an unchanged rerun writes no tracker records }
+        "401": { description: Operator authentication required }
+        "400": { description: Invalid project UUID or scratch name }
+        "422": { description: Import failed; detail includes any request-budget retry time }
+        "503": { description: Import capability unavailable }
   /v1/work:
     post:
       tags: [Operator]

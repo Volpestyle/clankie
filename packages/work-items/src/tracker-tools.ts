@@ -656,7 +656,12 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
     ["project"],
   ),
   tool("get_milestone", "Read a project milestone by id.", { id: string }, ["id"]),
-  tool("list_documents", "List tracker documents, optionally by project or issue.", { ...pagination, project: string, issueId: string, query: string }),
+  tool("list_documents", "List tracker documents, optionally by project or issue.", {
+    ...pagination,
+    project: string,
+    issueId: string,
+    query: string,
+  }),
   tool("get_document", "Read a tracker document by id or slug.", { id: string }, ["id"]),
 ];
 

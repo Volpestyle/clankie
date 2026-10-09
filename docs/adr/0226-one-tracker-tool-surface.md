@@ -526,3 +526,54 @@ Integration proof exercises real pairing, signed sessions, host and relay HTTP,
 bootstrap/lazy hydration, atomic refusal, keyed replay and disconnect/resume.
 `apps/clankie/scripts/tracker-sync-roundtrip.ts` is a separate disposable scratch
 round trip with two paired clients observing each other's writes in order.
+
+## Proposed amendment: read-only Linear mirror import (2026-10-09, VUH-1963)
+
+Status: proposed. Linear stays authoritative until the explicit ADR 0181 cutover.
+
+The host imports a single-team Linear project into a named scratch built-in
+store with `clankie work import linear --project UUID --scratch NAME`. Scratch
+stores live under `tracker-imports`, separate from the live tracker; this command
+neither selects a backend nor deploys anything. Multi-team mappings and team-wide
+imports require a later explicit mapping decision and are refused for now.
+
+Every imported record keeps its Linear UUID, issue identifier, timestamps,
+archive marker and source metadata. Projects, issues, comments/replies, state
+spans and actor-bearing history, labels, relations, documents, milestones,
+project updates and team cycles are paginated. Out-of-project relation endpoints
+remain explicit references. Reruns compare provider records by UUID and content;
+unchanged records do not write, append history, or advance sync IDs. Upstream
+changes update existing records. Disappearance alone never deletes local data.
+Linear statuses are historical observations, not an assertion that the owner
+verified a built-in delivery. Imports never raise asks, run completion gates or
+roll Linear cycles over. A mirror store suppresses local cycle rollover until
+cutover; cutover policy belongs to Mirror 3.
+
+**Missing foundations.** Milestones and documents become built-in records.
+Milestones retain `id`, `projectId`, `name`, `description`, `targetDate`,
+`sortOrder` and timestamps; issues retain `milestoneId` and their original
+`projectMilestone`. Documents retain `id`, `projectId`, optional `issueId`, title,
+content, slug, sort order, timestamps and author. The sync names are `milestone`
+(the VUH-1962 reservation) and `document`; existing bootstrap, batch and delta
+paths carry them. Imported changes enter the same atomic sync journal and audit
+log; a record event marks the source observation. Native read tools expose both.
+Project status updates reuse the existing built-in records.
+
+**Identity.** Actor mapping is keyed by Linear ID. Owner IDs/emails come from
+owner-authored Linear wake settings, the connected app actor maps to `clankie`,
+and explicit bot-persona authors map to agent workers. Unknown authors retain
+the original provider identity. Names merely mentioned in prose are not evidence
+of authorship. Original author fields remain alongside built-in provenance.
+
+**Bytes and authority.** Only the broker-connected Clankie app is used. Queries
+and authenticated upload downloads share the service's background request
+budget, and budget refusal stops the import with its retry time. No provider
+mutation is available in the importer. App bearers go only to HTTPS
+`uploads.linear.app` and `public.linear.app`, with redirects disabled. External
+attachment links are retained and reported rather than receiving a bearer.
+Downloads are bounded to 128 MiB; a failure leaves the prior tracker snapshot
+intact. Evidence uses ADR 0258's existing content-addressed upload/receipt path.
+Imported links become `clankie://evidence`; original links remain in source
+metadata. A durable scratch cache avoids downloading unchanged URLs again.
+The response reports counts, created/updated/unchanged records, skipped download
+reasons, request count and five issue keys for inspection.

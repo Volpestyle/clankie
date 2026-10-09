@@ -72,7 +72,8 @@ hosted availability is listed on [clankie.bot](https://clankie.bot).
 Linear-shaped tracker. It uses your connected Linear account, or durable local
 storage without one; `clankie doctor` shows which. Built-in work carries evidence
 bundles that someone else checks, and owner questions and run approvals arrive
-in the same [owner mailbox](/cli/).
+in the same [owner mailbox](/cli/). You can [mirror a Linear project](/cli/) into
+a scratch built-in store for inspection while Linear remains authoritative.
 
 **Herdr holds the agents.** Workers run in their real terminals, which you can
 watch and type into. Clankie hires and messages Claude Code, Codex, Pi, OpenCode,

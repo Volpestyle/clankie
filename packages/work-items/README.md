@@ -127,3 +127,20 @@ for model fields, groups, hydration ordering and cursor recovery. This changes
 neither connected Linear nor repository adapters.
 
 `clankie work project-details --repo REPO` reads the saved tracker project’s summary, description, status, priority, lead, dates, teams, resources and latest 200 authored status updates. Paired devices use the additive `work_project_details` operation. Linear and the built-in tracker share the canonical project/status-update tools. Unsupported or failed reads answer unavailable; an empty feed means a successful read with no updates. The read never infers health, author or delivery from issue state.
+
+### Linear mirror import
+
+`clankie work import linear --project UUID --scratch NAME` copies a single-team
+project through Clankie's connected account into a separate built-in store.
+Linear remains authoritative. It retains provider UUIDs and VUH identifiers,
+archived records, comments/replies, state history and source actors, relations,
+labels/priorities, projects, milestones, documents, updates and team cycles.
+Milestones/documents participate in the existing sync protocol. Uploads enter the
+evidence store and their links become `clankie://evidence`.
+
+The importer is read-only on Linear, obeys the shared background request budget,
+and compares records by provider ID/content. An unchanged rerun writes no tracker
+records or events. It does not run local cycle rollover or completion gates.
+Reports live in the scratch directory as `import-report.json`. External attachment
+URLs are retained and reported; failed authenticated downloads abort before the
+tracker replacement. Multi-team/project-to-team mappings are currently refused.

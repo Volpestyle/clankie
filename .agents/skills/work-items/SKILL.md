@@ -306,3 +306,17 @@ ride the existing relay tail route. Contract and command shapes live in
 [docs/cli.md](../../../docs/cli.md#work-sync---json-command).
 
 `clankie work project-details --repo REPO` reads the saved tracker project’s summary, description, status, priority, lead, dates, teams, resources and latest 200 authored status updates. Paired devices use the additive `work_project_details` operation. Linear and the built-in tracker share the canonical project/status-update tools. Unsupported or failed reads answer unavailable; an empty feed means a successful read with no updates. The read never infers health, author or delivery from issue state.
+
+## Read-only Linear import
+
+For an authorized mirror proof, use `clankie work import linear --project UUID
+--scratch NAME`. It always targets a named scratch store under `tracker-imports`,
+never the live tracker. Linear stays authoritative until the separate cutover.
+Use Clankie's connected account only. The importer paginates archived issues and
+all supported collections and obeys his background request budget; a budget
+refusal names its retry time. Keep the report (`import-report.json` in the printed
+scratch directory), compare counts and inspect five issue graphs and evidence
+links. A rerun on unchanged source must report zero created/updated records.
+Changes made in Linear during the run are legitimate updates, not duplicates.
+Do not infer authorship from worker names mentioned in prose; original Linear
+identity is retained when a persona cannot be proven.

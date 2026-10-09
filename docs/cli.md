@@ -6535,3 +6535,18 @@ be proved.
 `clankie work project-details --repo REPO` reads the saved tracker project’s summary, description, status, priority, lead, dates, teams, resources and latest 200 authored status updates. Paired devices use the additive `work_project_details` operation. Linear and the built-in tracker share the canonical project/status-update tools. Unsupported or failed reads answer unavailable; an empty feed means a successful read with no updates. The read never infers health, author or delivery from issue state.
 
 Paired owner devices fetch evidence bytes with `evidence_fetch` (`sha256`, `offset`, `length`, at most 256 KiB). Responses contain base64 bytes, total size and the recorded content type; no service URL or signed link leaves the authenticated device/relay path. Unsupported storage backends answer unavailable.
+
+### `work import linear --project UUID --scratch NAME`
+
+Read-only import of a single-team Linear project through Clankie's broker-connected
+app. The service stores the mirror under its `tracker-imports/NAME` directory,
+separate from the live tracker, and writes `import-report.json` there. Names use
+letters, digits, underscores and hyphens. No backend switch or deploy is implied.
+
+The import includes archived issues, VUH identifiers, comments/replies, history,
+labels/priorities, relations, project milestones, documents, updates and team
+cycles. Authenticated Linear uploads enter the evidence store and links become
+`clankie://evidence`. External links remain references and appear in the report.
+The shared background request budget applies; a refusal includes its retry time.
+Reruns upsert by provider UUID and do not change the tracker when the source is
+unchanged. Multi-team project mappings are refused rather than guessed.

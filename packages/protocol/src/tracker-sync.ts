@@ -6,6 +6,7 @@ export const TrackerSyncModelNameSchema = z.enum([
   "comment",
   "project",
   "milestone",
+  "document",
   "cycle",
   "release",
   "run",

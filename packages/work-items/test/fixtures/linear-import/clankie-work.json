@@ -1,0 +1,2504 @@
+{
+  "workspaceId": "75f1d1f0-542b-4095-9967-fd7b27093472",
+  "team": {
+    "id": "d53265da-b742-43c3-9a13-7cac6506234e",
+    "name": "Vuhlp",
+    "key": "VUH"
+  },
+  "projects": [
+    {
+      "id": "cbd205ab-cad4-48b8-9724-7109410fc921",
+      "identifier": "P-VUH-25",
+      "name": "Clankie Work",
+      "description": "Clankie's built-in, agent-native, multi-project tracker that replaces Linear: evidence store, sync core, agent API, GPU-motion Work UI, guided reviews.",
+      "content": "Clankie's built-in, multi-project work tracker for humans and agents. It starts as a mirror of Linear and replaces it at cutover. \"Clankie Work\" is a placeholder name.\n\nThe requirements, decisions and stack are in the project doc **Requirements**. The research behind them is in `~/dev/tracker-research-20261008/`, files 01 to 05.\n\nWhat lives where:\n\n* the core and agent API (CLI/MCP) in `clankie`\n*",
+      "createdAt": "2026-10-09T04:22:15.049Z",
+      "updatedAt": "2026-10-09T04:22:15.049Z",
+      "archivedAt": null,
+      "slugId": "8c0a12ba88f7",
+      "url": "https://linear.app/vuhlp/project/clankie-work-8c0a12ba88f7",
+      "priority": 2,
+      "startDate": "2026-10-09",
+      "targetDate": null,
+      "status": {
+        "id": "88868426-2867-4935-98ba-518641fd6659",
+        "name": "In Progress",
+        "type": "started"
+      },
+      "lead": {
+        "id": "634ad2c8-4992-48b5-b14d-af650cd30030",
+        "name": "James Volpe",
+        "displayName": "volpestyle"
+      },
+      "teams": {
+        "nodes": [
+          {
+            "id": "d53265da-b742-43c3-9a13-7cac6506234e",
+            "name": "Vuhlp",
+            "key": "VUH"
+          }
+        ]
+      }
+    }
+  ],
+  "labels": [
+    {
+      "id": "351f342c-37b9-40d7-93f5-eef847c24c2f",
+      "name": "game-build-qa",
+      "description": "Toolchain, agent workflows, integration, packaging, performance, and verification.",
+      "color": "#95A2B3",
+      "createdAt": "2026-09-05T18:29:27.887Z",
+      "updatedAt": "2026-09-05T18:29:27.887Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "f727e833-cb5c-4633-8028-695982154ba8",
+      "name": "game-experience",
+      "description": "Onboarding, controls, UI, sound, and VFX feedback.",
+      "color": "#D7B651",
+      "createdAt": "2026-09-05T18:29:27.533Z",
+      "updatedAt": "2026-09-05T18:29:27.533Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "19a06abc-3be9-4ced-bf92-2a5623842eb4",
+      "name": "game-world",
+      "description": "Level design, environments, materials, lighting, and technical art.",
+      "color": "#5D9D83",
+      "createdAt": "2026-09-05T18:29:27.193Z",
+      "updatedAt": "2026-09-05T18:29:27.193Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "4a966092-f6e4-4b61-8a5e-4ae5152cf902",
+      "name": "game-characters",
+      "description": "Character concepts, meshes, rigs, and animation.",
+      "color": "#E99B57",
+      "createdAt": "2026-09-05T18:29:26.794Z",
+      "updatedAt": "2026-09-05T18:29:26.794Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "abc9762f-d5ff-4500-8077-e4ac173b4a39",
+      "name": "game-gameplay",
+      "description": "Movement, interaction, gameplay rules, and network simulation.",
+      "color": "#4EA7FC",
+      "createdAt": "2026-09-05T18:29:26.455Z",
+      "updatedAt": "2026-09-05T18:29:26.455Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "9800d457-467b-4225-8480-95719f12374c",
+      "name": "game-production",
+      "description": "Product decisions, playtests, scope, and acceptance gates.",
+      "color": "#B980D1",
+      "createdAt": "2026-09-05T18:29:26.079Z",
+      "updatedAt": "2026-09-05T18:29:26.079Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "9d1864b7-f0fa-4e94-8bc3-73d86a9ea7fe",
+      "name": "needs-human",
+      "description": "Requires a James-only decision, live verification, credential/access step, or privileged tracker transition before work can continue or close.",
+      "color": "#F2994A",
+      "createdAt": "2026-07-12T05:11:17.254Z",
+      "updatedAt": "2026-07-12T05:11:17.254Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "74029b96-0e56-464f-afa8-a805a8d70c41",
+      "name": "clankie-app",
+      "description": "Write scope: private Volpestyle/clankie-app product monorepo (mobile/macos shells, command-center UI, garden art). Not the public-bound agent OS monorepo. Filter: label:clankie-app in Clankie v2.",
+      "color": "#7C3AED",
+      "createdAt": "2026-07-12T04:09:32.307Z",
+      "updatedAt": "2026-07-12T04:09:32.307Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": null
+    },
+    {
+      "id": "84b49afe-d552-475a-ac41-ceb28e71b501",
+      "name": "minecraft",
+      "description": "Minecraft embodiment, environment control, Mineflayer, and verification",
+      "color": "#62A65E",
+      "createdAt": "2026-07-11T04:13:31.942Z",
+      "updatedAt": "2026-07-11T04:13:31.942Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "fb929954-e608-4e88-ac3f-fa03aee9333e",
+      "name": "clankie-rename",
+      "description": "Cross-surface Clanky -> Clankie rename migration and compatibility plan.",
+      "color": "#8B5CF6",
+      "createdAt": "2026-07-05T16:22:44.748Z",
+      "updatedAt": "2026-07-05T16:22:44.748Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": null
+    },
+    {
+      "id": "44788f05-95b6-4c27-916d-dac73b95f263",
+      "name": "official-domain",
+      "description": "Clankie official-domain migration: clankie.bot landing page and docs.clankie.bot cutover.",
+      "color": "#16A34A",
+      "createdAt": "2026-07-05T16:16:04.449Z",
+      "updatedAt": "2026-07-05T16:16:04.449Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "34992697-4c68-4918-8524-11ff5b4fe119",
+      "name": "ledger",
+      "description": "Cross-project effort: The Ledger \u2014 durable usage analytics/reflection. Usage ledger + rollups + stats relay op in clanky-agent; Ledger destination (delegation outcomes, attention, spend, run detail) in clanky-ios.",
+      "color": "#D4A25E",
+      "createdAt": "2026-07-04T20:10:50.911Z",
+      "updatedAt": "2026-07-04T20:10:50.911Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": null
+    },
+    {
+      "id": "ed58e772-2382-4f91-94e9-b9a691e4c9f5",
+      "name": "lead-state",
+      "description": "Cross-project effort: detect the lead \"settled\" phases (awaiting workers / harvest-ready / needs-human) server-side and render them faithfully in the iOS Canvas + Garden. Spans clanky-agent (contract/registry/lead skill) and clanky-ios.",
+      "color": "#8B7EC8",
+      "createdAt": "2026-07-04T04:56:55.499Z",
+      "updatedAt": "2026-07-04T04:56:55.499Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": null
+    },
+    {
+      "id": "88e407ad-278f-482d-8451-8bc18f84c961",
+      "name": "herdr-perf",
+      "description": "Cross-project effort: fix herdr UI freezes under swarm load and make iOS terminal streaming near-zero-cost (herdr fork + clanky-agent hub + clanky-ios attach policy). Rooted in the 2026-07-03 freeze investigation.",
+      "color": "#F2994A",
+      "createdAt": "2026-07-03T22:43:43.715Z",
+      "updatedAt": "2026-07-03T22:43:43.715Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": null
+    },
+    {
+      "id": "d259036f-2c9e-448c-9ff7-5be1375a2f9f",
+      "name": "terminal-multiplexer",
+      "description": "Clanky work to make the stage/relay/client support common terminal multiplexers beyond Herdr: tmux, Zellij, GNU screen, and future adapters.",
+      "color": "#26B5CE",
+      "createdAt": "2026-07-01T01:02:24.497Z",
+      "updatedAt": "2026-07-01T01:02:24.497Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": null
+    },
+    {
+      "id": "af8f91c6-dd80-428a-a2ed-96a7086a7ef8",
+      "name": "react-native",
+      "description": "Clanky iOS \u2192 React Native (Expo) re-platform. Cross-project carrier: the Clanky iOS app rewrite + the Clanky backend contract/lifecycle/push changes it needs.",
+      "color": "#61DAFB",
+      "createdAt": "2026-06-30T23:21:09.985Z",
+      "updatedAt": "2026-06-30T23:21:09.985Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "ddd6283a-fc2f-4923-92b4-77696b8b75ca",
+      "name": "3-hosted",
+      "description": "Wave 3 \u2014 paid hosted tier (was M3). Clanky Hosted project.",
+      "color": "#eb5757",
+      "createdAt": "2026-06-30T03:36:35.500Z",
+      "updatedAt": "2026-06-30T03:36:35.500Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": {
+        "id": "41c10700-79ee-4bec-b8fb-24c585f40fd3"
+      },
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "4ea9601f-122c-42cc-9a80-a3ce0bc3ca3f",
+      "name": "2-app-store",
+      "description": "Wave 2 \u2014 free iOS app to the App Store (was M2). Clanky iOS project.",
+      "color": "#5e6ad2",
+      "createdAt": "2026-06-30T03:36:32.228Z",
+      "updatedAt": "2026-06-30T03:36:32.228Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": {
+        "id": "41c10700-79ee-4bec-b8fb-24c585f40fd3"
+      },
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "a98f8be3-f2d1-4f33-b4e0-e47a25a4e890",
+      "name": "1-oss",
+      "description": "Wave 1 \u2014 open-source the agent (was M1). Clanky project.",
+      "color": "#4cb782",
+      "createdAt": "2026-06-30T03:36:30.307Z",
+      "updatedAt": "2026-06-30T03:36:30.307Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": {
+        "id": "41c10700-79ee-4bec-b8fb-24c585f40fd3"
+      },
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "5d151e0c-20fc-4d35-a6fb-97a588bcdc41",
+      "name": "0-live-proof",
+      "description": "Wave 0 \u2014 live proof on the Mac mini (was M0). Mostly the Clanky project.",
+      "color": "#26b5ce",
+      "createdAt": "2026-06-30T03:36:26.280Z",
+      "updatedAt": "2026-06-30T03:36:26.280Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": {
+        "id": "41c10700-79ee-4bec-b8fb-24c585f40fd3"
+      },
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "41c10700-79ee-4bec-b8fb-24c585f40fd3",
+      "name": "wave",
+      "description": "Launch wave sequence (cross-project) for the Clanky App Store Release initiative. One child per wave; carries the M0-M3 ordering that used to live in milestone names.",
+      "color": "#8b5cf6",
+      "createdAt": "2026-06-30T03:36:01.682Z",
+      "updatedAt": "2026-06-30T03:36:01.682Z",
+      "archivedAt": null,
+      "isGroup": true,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "5b62e9bd-b30c-4929-8dd7-b6f952d6247f",
+      "name": "clanky-launch",
+      "description": "Cross-project umbrella for the Clanky v1 launch waves (M0 live proof \u2192 M1 OSS \u2192 M2 app \u2192 M3 hosted).",
+      "color": "#5e6ad2",
+      "createdAt": "2026-06-30T00:52:27.696Z",
+      "updatedAt": "2026-06-30T00:52:27.696Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "44bca928-c265-47ae-995e-22317f280cc2",
+      "name": "docs",
+      "description": "Design / reskin documentation",
+      "color": "#26B5CE",
+      "createdAt": "2026-05-31T00:13:11.839Z",
+      "updatedAt": "2026-05-31T00:14:35.912Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "784ecfac-779d-4832-9c59-5c49fcdc6f6c",
+      "name": "spike",
+      "description": "Proof-of-concept / milestone demo",
+      "color": "#F7C8D0",
+      "createdAt": "2026-05-31T00:13:09.810Z",
+      "updatedAt": "2026-05-31T00:17:17.354Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "11fa00d2-2c43-43ae-879f-380afc6f068d",
+      "name": "infra",
+      "description": "Build/packaging (Tauri, monorepo)",
+      "color": "#95A2B3",
+      "createdAt": "2026-05-31T00:13:08.099Z",
+      "updatedAt": "2026-05-31T00:18:27.149Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "29625c98-1c0b-4c51-8d90-4683abcb6ce7",
+      "name": "assets",
+      "description": "Sprite/tileset/UI art pipeline",
+      "color": "#F2994A",
+      "createdAt": "2026-05-31T00:13:06.019Z",
+      "updatedAt": "2026-05-31T00:16:26.253Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "8a7d4ba0-b8b8-4861-bf3d-f661052eda47",
+      "name": "ios",
+      "description": "iOS / WKWebView host / native bridge",
+      "color": "#F2C94C",
+      "createdAt": "2026-05-31T00:13:03.894Z",
+      "updatedAt": "2026-05-31T00:18:27.146Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "ed3e5273-2ff6-4def-a100-d99df95cc058",
+      "name": "voice",
+      "description": "STT/TTS voice adapter",
+      "color": "#BB87FC",
+      "createdAt": "2026-05-31T00:13:01.354Z",
+      "updatedAt": "2026-05-31T00:18:30.925Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "c5fb162a-53cf-4124-801e-b5c0ed8716eb",
+      "name": "pcg",
+      "description": "Procedural town generation + pathfinding",
+      "color": "#0F783C",
+      "createdAt": "2026-05-31T00:12:59.043Z",
+      "updatedAt": "2026-05-31T00:18:11.858Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "6e7a3fd5-2cc2-4377-b5b3-a2c1d39ef2e2",
+      "name": "renderer",
+      "description": "PixiJS renderer / camera / UI",
+      "color": "#4EA7FC",
+      "createdAt": "2026-05-31T00:12:56.689Z",
+      "updatedAt": "2026-05-31T00:18:48.148Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "49a1cf0c-d838-49b2-bbfd-61ba80d7b292",
+      "name": "diorama-town",
+      "description": "@agentroom/diorama-town: player, proximity, conversation, town layout",
+      "color": "#26B5CE",
+      "createdAt": "2026-05-31T00:12:55.000Z",
+      "updatedAt": "2026-05-31T00:18:48.134Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "70abe150-4adc-449c-b28a-24084ac53a8a",
+      "name": "diorama-core",
+      "description": "@agentroom/diorama-core: protocol types, reducer, layout, commands, source",
+      "color": "#5E6AD2",
+      "createdAt": "2026-05-31T00:12:51.955Z",
+      "updatedAt": "2026-05-31T00:18:19.495Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "dc0546e8-cb5c-4f5a-bb6c-555650901d66",
+      "name": "daemon",
+      "description": "agentroomd / daemon REST + SSE",
+      "color": "#EB5757",
+      "createdAt": "2026-05-31T00:12:49.746Z",
+      "updatedAt": "2026-05-31T00:14:12.088Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "03c5caa6-cf51-404e-8a9c-6f65cc1d4c2c",
+      "name": "headless",
+      "description": "Headless product surface for external UIs and non-web clients",
+      "color": "#F2C94C",
+      "createdAt": "2026-05-15T02:20:13.716Z",
+      "updatedAt": "2026-05-28T01:50:29.609Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "5b210248-97e9-41e1-ad4b-6417ee074951",
+      "name": "mcp",
+      "description": "OutOfContext MCP server and agent-facing tool interfaces",
+      "color": "#5E6AD2",
+      "createdAt": "2026-05-15T02:20:12.975Z",
+      "updatedAt": "2026-05-28T01:50:29.583Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "84db7b07-e782-4081-8b17-c435903b2074",
+      "name": "cli",
+      "description": "OutOfContext command-line interface and scriptable local workflows",
+      "color": "#26B5CE",
+      "createdAt": "2026-05-15T02:20:12.468Z",
+      "updatedAt": "2026-05-28T01:50:29.593Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "156cb756-0abf-4e05-980b-0bee67c4b133",
+      "name": "api",
+      "description": "OutOfContext API contracts, services, persistence, and provider boundaries",
+      "color": "#4EA7FC",
+      "createdAt": "2026-05-15T02:20:11.891Z",
+      "updatedAt": "2026-05-28T01:50:29.475Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "b25cfbf0-8c73-4e79-b63b-5e88d8edada9",
+      "name": "component-library",
+      "description": "Reusable UI components and design-system work for swarm-ios",
+      "color": "#CBA6F7",
+      "createdAt": "2026-05-13T06:18:31.607Z",
+      "updatedAt": "2026-05-28T01:50:29.358Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "257f2804-5f8b-4518-b780-0fedfe7fe83b",
+      "name": "testing",
+      "description": "Smoke scenarios and mocked unit tests",
+      "color": "#0F783C",
+      "createdAt": "2026-05-09T02:13:15.356Z",
+      "updatedAt": "2026-06-01T01:47:15.843Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "ca74c1fd-5d4c-45ee-a93b-3eb96fb3eaba",
+      "name": "mobile",
+      "description": "iOS / mobile bridge / herdr remote access",
+      "color": "#F2C94C",
+      "createdAt": "2026-05-09T02:13:13.587Z",
+      "updatedAt": "2026-05-27T18:51:33.360Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "e41a74bf-c3e0-4973-b740-5fbec016cbed",
+      "name": "swarm-mcp-core",
+      "description": "Upstream changes inside swarm-mcp itself (not the plugin)",
+      "color": "#26B5CE",
+      "createdAt": "2026-05-09T02:13:11.817Z",
+      "updatedAt": "2026-05-27T18:51:33.522Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "17fd0d8d-6782-4a07-85c4-b194461fecd5",
+      "name": "hermes-plugin",
+      "description": "Work in swarm-mcp/integrations/hermes (the plugin)",
+      "color": "#5E6AD2",
+      "createdAt": "2026-05-09T02:13:10.040Z",
+      "updatedAt": "2026-05-27T18:51:33.267Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e"
+      }
+    },
+    {
+      "id": "a3fa3943-390c-47b9-ad0f-06703c4a14bf",
+      "name": "Bug",
+      "description": null,
+      "color": "#EB5757",
+      "createdAt": "2026-05-08T19:08:55.614Z",
+      "updatedAt": "2026-06-01T04:47:41.359Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": null
+    },
+    {
+      "id": "a0b1842c-bee8-47da-8a60-a57ce43ee3a3",
+      "name": "Feature",
+      "description": null,
+      "color": "#BB87FC",
+      "createdAt": "2026-05-08T19:08:55.614Z",
+      "updatedAt": "2026-05-28T01:50:29.361Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": null
+    },
+    {
+      "id": "3249d7ea-3ca8-4f1a-8a0d-98cc093b5a91",
+      "name": "Improvement",
+      "description": null,
+      "color": "#4EA7FC",
+      "createdAt": "2026-05-08T19:08:55.614Z",
+      "updatedAt": "2026-06-01T02:07:52.016Z",
+      "archivedAt": null,
+      "isGroup": false,
+      "parent": null,
+      "team": null
+    }
+  ],
+  "milestones": [
+    {
+      "id": "61b1dd61-3522-4a0a-b850-e034d9eafe24",
+      "name": "6. Linear mirror and cutover",
+      "description": "A lossless import from Linear and a webhook mirror while Clankie switches to the built-in backend. After cutover, Linear is an optional connection.",
+      "targetDate": null,
+      "sortOrder": 5217,
+      "createdAt": "2026-10-09T04:24:21.697Z",
+      "updatedAt": "2026-10-09T04:24:21.697Z",
+      "archivedAt": null,
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      }
+    },
+    {
+      "id": "624e9cdc-ba4c-48a7-89b5-c6a3597978bc",
+      "name": "5. Guided reviews",
+      "description": "Review a PR from any repo host in the Work UI: a review agent leaves findings, then generates a guided walkthrough. Like Linear Diffs, but host-agnostic.",
+      "targetDate": null,
+      "sortOrder": 4179,
+      "createdAt": "2026-10-09T04:24:15.933Z",
+      "updatedAt": "2026-10-09T04:24:15.933Z",
+      "archivedAt": null,
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      }
+    },
+    {
+      "id": "e33ac3d6-e6e4-4f7e-a3b3-71c9836c4ed3",
+      "name": "4. Work UI",
+      "description": "The Work UI in clankie-app (mobile, web, macOS) with a Linear-like layout and GPU motion from Skia runtime shaders and Reanimated. It opens on the fleet overview.",
+      "targetDate": null,
+      "sortOrder": 3108,
+      "createdAt": "2026-10-09T04:24:09.693Z",
+      "updatedAt": "2026-10-09T04:24:09.693Z",
+      "archivedAt": null,
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      }
+    },
+    {
+      "id": "3a24b49a-df0a-4e07-b19c-52bef2959fe0",
+      "name": "3. Sync and agent API",
+      "description": "A local-first sync protocol for app clients (server-ordered sync IDs, an object pool, a durable offline queue), plus a CLI/MCP agent API with per-actor budgets and cursor reads.",
+      "targetDate": null,
+      "sortOrder": 2131,
+      "createdAt": "2026-10-09T04:23:54.188Z",
+      "updatedAt": "2026-10-09T04:23:54.188Z",
+      "archivedAt": null,
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      }
+    },
+    {
+      "id": "fdfbc9c5-e8e2-44eb-b7cc-e78f51e92bc9",
+      "name": "2. Tracker core",
+      "description": "Grow the ADR 0226 local tracker backend into Clankie's built-in default tracker. It adds actors and provenance, exactly-once writes, a typed event stream with derived state, delivery stages, runs and leases, evidence bundles, owner asks and gates, and an audit log.",
+      "targetDate": null,
+      "sortOrder": 1122,
+      "createdAt": "2026-10-09T04:23:42.022Z",
+      "updatedAt": "2026-10-09T04:23:42.022Z",
+      "archivedAt": null,
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      }
+    },
+    {
+      "id": "384e9943-8ef4-472e-9a0a-a9ae8538e0fb",
+      "name": "1. Evidence store",
+      "description": "First slice. Evidence media and raw eval JSON move out of git: a manifest per folder, `clankie evidence push|fetch`, local storage when self-hosted and S3/R2 when hosted.",
+      "targetDate": null,
+      "sortOrder": 27,
+      "createdAt": "2026-10-09T04:23:26.759Z",
+      "updatedAt": "2026-10-09T04:23:26.759Z",
+      "archivedAt": null,
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      }
+    }
+  ],
+  "documents": [
+    {
+      "id": "8f4fb6b1-fcbe-4c25-85b5-b84a5ed13573",
+      "title": "Requirements",
+      "content": "# Clankie Work \u2014 requirements (draft 2, 2026-10-09)\n\n\"Clankie Work\" is a placeholder name.\n\nThis doc combines five research tracks, all in `~/dev/tracker-research-20261008/`:\n\n* 01-clankie-needs (code and ADRs)\n* 02-linear-baseline\n* 03-stack\n* 04-agent-native\n* 05-observed-usage (live Linear and the fleet)\n\nEvidence and citations live in those files; this doc records the decisions.\n\n## Decisions ",
+      "createdAt": "2026-10-09T04:25:05.703Z",
+      "updatedAt": "2026-10-09T04:25:05.703Z",
+      "archivedAt": null,
+      "slugId": "9636b997d071",
+      "url": "https://linear.app/vuhlp/document/requirements-9636b997d071",
+      "sortOrder": -53,
+      "creator": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      },
+      "issue": null
+    }
+  ],
+  "statusUpdates": [
+    {
+      "id": "db2f1489-cc1c-4b0b-8a43-8c861a3ad679",
+      "body": "**Overnight 2026-10-09.**\n\n**Done:**\n- **Evidence store:** VUH-1903 (store), VUH-1933 (viewer), VUH-1914 (evidence out of git in clankie and clankie-app) and VUH-1915 (workers publish through the store).\n- **Tracker core:** VUH-1916 (actors, receipts, audit), VUH-1917 (typed events, delivery stages, owner asks and wakes), VUH-1930 (releases) and VUH-1931 (cycles).\n- **Work UI in the app:** VUH-193",
+      "health": "onTrack",
+      "createdAt": "2026-10-09T12:14:17.016Z",
+      "updatedAt": "2026-10-09T12:14:17.016Z",
+      "archivedAt": null,
+      "url": "https://linear.app/vuhlp/project/clankie-work-8c0a12ba88f7/activity#project-update-db2f1489",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      }
+    },
+    {
+      "id": "fa09b4eb-8576-4045-b4fe-02d82fe507ce",
+      "body": "**Lead:** the Clankie Work project lead chat (VUH-1927). James is building through the night.\n\n**Decided 2026-10-09:**\n- Everything is TypeScript, including the evidence store.\n- ADR 0258 and the ADR 0181 amendment are accepted.\n- v1 includes releases (VUH-1930) and cycles (VUH-1931); initiatives are out.\n- The Work UI lives inside the Clankie app. The World is the overview, and Work is the overfl",
+      "health": "onTrack",
+      "createdAt": "2026-10-09T06:06:31.894Z",
+      "updatedAt": "2026-10-09T06:06:31.894Z",
+      "archivedAt": null,
+      "url": "https://linear.app/vuhlp/project/clankie-work-8c0a12ba88f7/activity#project-update-fa09b4eb",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      }
+    }
+  ],
+  "cycles": [],
+  "actors": [
+    {
+      "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+      "name": "Clankie",
+      "displayName": "clankie2"
+    },
+    {
+      "id": "634ad2c8-4992-48b5-b14d-af650cd30030",
+      "name": "James Volpe",
+      "displayName": "volpestyle"
+    }
+  ],
+  "relations": [
+    {
+      "id": "e2bd67fd-2639-44fc-b397-5b8d18e99cca",
+      "type": "blocks",
+      "createdAt": "2026-10-09T14:08:13.279Z",
+      "updatedAt": "2026-10-09T14:08:13.279Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "ff626db4-80d2-482b-ba1f-6fceb925e63a",
+        "identifier": "VUH-1963",
+        "title": "Mirror 1: lossless Linear import into the built-in tracker"
+      },
+      "relatedIssue": {
+        "id": "26b44bd9-e798-4058-97f1-d785d0f4b1f2",
+        "identifier": "VUH-1965",
+        "title": "Mirror 2: Linear webhooks keep the built-in tracker current"
+      }
+    },
+    {
+      "id": "e15fda14-72b9-4570-a042-f84846fa021d",
+      "type": "blocks",
+      "createdAt": "2026-10-09T14:08:10.142Z",
+      "updatedAt": "2026-10-09T14:08:10.142Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "21429ca0-2b60-4ad8-a9ac-aaa7048bcc98",
+        "identifier": "VUH-1962",
+        "title": "Sync 1: server change log, bootstrap and live deltas for the built-in tracker"
+      },
+      "relatedIssue": {
+        "id": "06c3d117-08d4-469c-a4e2-50e2e81f5205",
+        "identifier": "VUH-1964",
+        "title": "Sync 2: app local object pool, optimistic writes and offline queue"
+      }
+    },
+    {
+      "id": "40055a57-203b-4df3-8b43-2d49e0dbe21e",
+      "type": "related",
+      "createdAt": "2026-10-09T12:06:22.644Z",
+      "updatedAt": "2026-10-09T12:06:22.644Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "a55f7ede-026e-44d5-8588-37bd38f1d737",
+        "identifier": "VUH-1954",
+        "title": "Work UI 3: polish from the live proof (image thumbnails, multi-key records, chips, pills)"
+      },
+      "relatedIssue": {
+        "id": "7f8297ff-db03-412e-90f1-b2d23d7c92dd",
+        "identifier": "VUH-1933",
+        "title": "Evidence viewer: one issue's evidence (narrow) and everything proven recently (broad)"
+      }
+    },
+    {
+      "id": "bf8e5dc6-ece4-4f17-be34-feaad74bde2e",
+      "type": "related",
+      "createdAt": "2026-10-09T12:06:22.642Z",
+      "updatedAt": "2026-10-09T12:06:22.642Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "a55f7ede-026e-44d5-8588-37bd38f1d737",
+        "identifier": "VUH-1954",
+        "title": "Work UI 3: polish from the live proof (image thumbnails, multi-key records, chips, pills)"
+      },
+      "relatedIssue": {
+        "id": "a14a0169-e4e0-4a96-8fa2-ed094a92e2a7",
+        "identifier": "VUH-1951",
+        "title": "clankie evidence push: default the issue key from the branch or worktree"
+      }
+    },
+    {
+      "id": "47cb3084-7371-4763-b146-30e540e19cbe",
+      "type": "related",
+      "createdAt": "2026-10-09T12:06:22.608Z",
+      "updatedAt": "2026-10-09T12:06:22.608Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "a55f7ede-026e-44d5-8588-37bd38f1d737",
+        "identifier": "VUH-1954",
+        "title": "Work UI 3: polish from the live proof (image thumbnails, multi-key records, chips, pills)"
+      },
+      "relatedIssue": {
+        "id": "d50a250f-1f0e-455f-a064-0ee144fa895f",
+        "identifier": "VUH-1936",
+        "title": "Work UI 2: the issue sheet (stage path, evidence, activity trail, verify)"
+      }
+    },
+    {
+      "id": "1ddbf36b-b169-4978-ab43-a5219b2590bd",
+      "type": "related",
+      "createdAt": "2026-10-09T11:00:49.211Z",
+      "updatedAt": "2026-10-09T11:00:49.211Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "a14a0169-e4e0-4a96-8fa2-ed094a92e2a7",
+        "identifier": "VUH-1951",
+        "title": "clankie evidence push: default the issue key from the branch or worktree"
+      },
+      "relatedIssue": {
+        "id": "b0557637-8d90-4eba-af47-f0ea1c8ec417",
+        "identifier": "VUH-1914",
+        "title": "Move clankie, clankie-app and clankie-ops evidence out of git"
+      }
+    },
+    {
+      "id": "46ab23cc-0e90-4721-bfd2-0abb975c664e",
+      "type": "related",
+      "createdAt": "2026-10-09T11:00:48.888Z",
+      "updatedAt": "2026-10-09T11:00:48.888Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "a14a0169-e4e0-4a96-8fa2-ed094a92e2a7",
+        "identifier": "VUH-1951",
+        "title": "clankie evidence push: default the issue key from the branch or worktree"
+      },
+      "relatedIssue": {
+        "id": "7f8297ff-db03-412e-90f1-b2d23d7c92dd",
+        "identifier": "VUH-1933",
+        "title": "Evidence viewer: one issue's evidence (narrow) and everything proven recently (broad)"
+      }
+    },
+    {
+      "id": "28c4ce75-1b36-4709-92f4-ae97b57ed716",
+      "type": "related",
+      "createdAt": "2026-10-09T06:04:44.846Z",
+      "updatedAt": "2026-10-09T06:04:44.846Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "d50a250f-1f0e-455f-a064-0ee144fa895f",
+        "identifier": "VUH-1936",
+        "title": "Work UI 2: the issue sheet (stage path, evidence, activity trail, verify)"
+      },
+      "relatedIssue": {
+        "id": "a7c70646-a58f-4953-a404-7ec82888f2c2",
+        "identifier": "VUH-1919",
+        "title": "Tracker core: evidence bundles and owner asks/gates"
+      }
+    },
+    {
+      "id": "3e905b42-82da-4b1f-9f12-a4bd8537f7e7",
+      "type": "related",
+      "createdAt": "2026-10-09T06:04:44.839Z",
+      "updatedAt": "2026-10-09T06:04:44.839Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "d50a250f-1f0e-455f-a064-0ee144fa895f",
+        "identifier": "VUH-1936",
+        "title": "Work UI 2: the issue sheet (stage path, evidence, activity trail, verify)"
+      },
+      "relatedIssue": {
+        "id": "7f8297ff-db03-412e-90f1-b2d23d7c92dd",
+        "identifier": "VUH-1933",
+        "title": "Evidence viewer: one issue's evidence (narrow) and everything proven recently (broad)"
+      }
+    },
+    {
+      "id": "a2ca1513-4dd4-46bf-a5ea-9fb0346e6ec8",
+      "type": "related",
+      "createdAt": "2026-10-09T06:04:44.838Z",
+      "updatedAt": "2026-10-09T06:04:44.838Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "d50a250f-1f0e-455f-a064-0ee144fa895f",
+        "identifier": "VUH-1936",
+        "title": "Work UI 2: the issue sheet (stage path, evidence, activity trail, verify)"
+      },
+      "relatedIssue": {
+        "id": "2b1f5449-196a-4115-aec8-aa5f72e39406",
+        "identifier": "VUH-1917",
+        "title": "Tracker core: typed events, derived state and delivery stages"
+      }
+    },
+    {
+      "id": "436dc46a-0dfb-475a-a000-739fdbdb12d1",
+      "type": "related",
+      "createdAt": "2026-10-09T14:11:36.474Z",
+      "updatedAt": "2026-10-09T14:11:36.474Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "831b912e-bf12-4526-ad9a-17bfb1d2b182",
+        "identifier": "VUH-1716",
+        "title": "App: Work, Team and Releases tabs in the tray; Work is a list by status"
+      },
+      "relatedIssue": {
+        "id": "d50a250f-1f0e-455f-a064-0ee144fa895f",
+        "identifier": "VUH-1936",
+        "title": "Work UI 2: the issue sheet (stage path, evidence, activity trail, verify)"
+      }
+    },
+    {
+      "id": "1e1ba714-1fd1-425c-95b8-50c0cbcaa8ad",
+      "type": "related",
+      "createdAt": "2026-10-09T06:04:39.558Z",
+      "updatedAt": "2026-10-09T06:04:39.558Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "4c56e63d-0998-42ab-95ee-108813dc2360",
+        "identifier": "VUH-1935",
+        "title": "Work UI 1: a district opens its project sheet"
+      },
+      "relatedIssue": {
+        "id": "9ab9bd97-dd5c-4075-a629-c7c9ef193e7a",
+        "identifier": "VUH-1932",
+        "title": "Work UI: information architecture and Figma design inside the Clankie app"
+      }
+    },
+    {
+      "id": "b17901f2-0883-4800-95da-fdf716d5102b",
+      "type": "related",
+      "createdAt": "2026-10-09T06:04:39.557Z",
+      "updatedAt": "2026-10-09T06:04:39.557Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "4c56e63d-0998-42ab-95ee-108813dc2360",
+        "identifier": "VUH-1935",
+        "title": "Work UI 1: a district opens its project sheet"
+      },
+      "relatedIssue": {
+        "id": "54710248-9806-49ea-8846-01277ebedaf5",
+        "identifier": "VUH-1934",
+        "title": "World: the \"Work\" text pill becomes a recognizable icon button"
+      }
+    },
+    {
+      "id": "267674b5-a88e-4c7e-ac45-599a857bdac2",
+      "type": "related",
+      "createdAt": "2026-10-09T14:11:36.481Z",
+      "updatedAt": "2026-10-09T14:11:36.481Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "831b912e-bf12-4526-ad9a-17bfb1d2b182",
+        "identifier": "VUH-1716",
+        "title": "App: Work, Team and Releases tabs in the tray; Work is a list by status"
+      },
+      "relatedIssue": {
+        "id": "4c56e63d-0998-42ab-95ee-108813dc2360",
+        "identifier": "VUH-1935",
+        "title": "Work UI 1: a district opens its project sheet"
+      }
+    },
+    {
+      "id": "d2d22d02-9a24-4592-9d64-cecac77186a9",
+      "type": "related",
+      "createdAt": "2026-10-09T05:59:54.216Z",
+      "updatedAt": "2026-10-09T05:59:54.216Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "7f8297ff-db03-412e-90f1-b2d23d7c92dd",
+        "identifier": "VUH-1933",
+        "title": "Evidence viewer: one issue's evidence (narrow) and everything proven recently (broad)"
+      },
+      "relatedIssue": {
+        "id": "9ab9bd97-dd5c-4075-a629-c7c9ef193e7a",
+        "identifier": "VUH-1932",
+        "title": "Work UI: information architecture and Figma design inside the Clankie app"
+      }
+    },
+    {
+      "id": "b1377bdc-b03a-41e9-bed3-92d6f7e91092",
+      "type": "related",
+      "createdAt": "2026-10-09T05:59:54.212Z",
+      "updatedAt": "2026-10-09T05:59:54.212Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "7f8297ff-db03-412e-90f1-b2d23d7c92dd",
+        "identifier": "VUH-1933",
+        "title": "Evidence viewer: one issue's evidence (narrow) and everything proven recently (broad)"
+      },
+      "relatedIssue": {
+        "id": "a7c70646-a58f-4953-a404-7ec82888f2c2",
+        "identifier": "VUH-1919",
+        "title": "Tracker core: evidence bundles and owner asks/gates"
+      }
+    },
+    {
+      "id": "d03d1ace-945f-4bed-a473-01c53b97de30",
+      "type": "blocks",
+      "createdAt": "2026-10-09T05:59:54.218Z",
+      "updatedAt": "2026-10-09T05:59:54.218Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "ad0a10ae-24a3-493d-b50b-35dfeaa85ec9",
+        "identifier": "VUH-1903",
+        "title": "Evidence store in the clankie service (TypeScript) + clankie evidence push|fetch + MCP tools"
+      },
+      "relatedIssue": {
+        "id": "7f8297ff-db03-412e-90f1-b2d23d7c92dd",
+        "identifier": "VUH-1933",
+        "title": "Evidence viewer: one issue's evidence (narrow) and everything proven recently (broad)"
+      }
+    },
+    {
+      "id": "edecb43a-88dc-4209-8742-3ed2cedd9140",
+      "type": "related",
+      "createdAt": "2026-10-09T05:45:02.525Z",
+      "updatedAt": "2026-10-09T05:45:02.525Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "9ab9bd97-dd5c-4075-a629-c7c9ef193e7a",
+        "identifier": "VUH-1932",
+        "title": "Work UI: information architecture and Figma design inside the Clankie app"
+      },
+      "relatedIssue": {
+        "id": "28ba0565-973c-4397-a7bd-eec33a879c0e",
+        "identifier": "VUH-1921",
+        "title": "Work UI in clankie-app"
+      }
+    },
+    {
+      "id": "74fd9e1a-51d6-4899-9c61-e824f23b1f6d",
+      "type": "related",
+      "createdAt": "2026-10-09T05:45:02.525Z",
+      "updatedAt": "2026-10-09T05:45:02.525Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "9ab9bd97-dd5c-4075-a629-c7c9ef193e7a",
+        "identifier": "VUH-1932",
+        "title": "Work UI: information architecture and Figma design inside the Clankie app"
+      },
+      "relatedIssue": {
+        "id": "b447cfb3-f864-4364-9349-166b60eefa3e",
+        "identifier": "VUH-1905",
+        "title": "Motion check: Skia runtime shaders + Reanimated at 120 Hz"
+      }
+    },
+    {
+      "id": "90ed16fe-3e1a-4e73-8d93-6097dafb6a6e",
+      "type": "related",
+      "createdAt": "2026-10-09T14:11:39.348Z",
+      "updatedAt": "2026-10-09T14:11:39.348Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "b47533bc-b362-402e-b86a-d360627c6888",
+        "identifier": "VUH-1722",
+        "title": "App: a Board view on iPad and Mac"
+      },
+      "relatedIssue": {
+        "id": "9ab9bd97-dd5c-4075-a629-c7c9ef193e7a",
+        "identifier": "VUH-1932",
+        "title": "Work UI: information architecture and Figma design inside the Clankie app"
+      }
+    },
+    {
+      "id": "ac287650-cd84-496f-ad9a-8fc1cbb8d2aa",
+      "type": "related",
+      "createdAt": "2026-10-09T06:01:20.805Z",
+      "updatedAt": "2026-10-09T06:01:20.805Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "54710248-9806-49ea-8846-01277ebedaf5",
+        "identifier": "VUH-1934",
+        "title": "World: the \"Work\" text pill becomes a recognizable icon button"
+      },
+      "relatedIssue": {
+        "id": "9ab9bd97-dd5c-4075-a629-c7c9ef193e7a",
+        "identifier": "VUH-1932",
+        "title": "Work UI: information architecture and Figma design inside the Clankie app"
+      }
+    },
+    {
+      "id": "d208d697-a63a-4ed2-a26e-8ac87f1ac200",
+      "type": "related",
+      "createdAt": "2026-10-09T05:41:23.242Z",
+      "updatedAt": "2026-10-09T05:41:23.242Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "1b8ef3b3-4e7a-4fd7-86c9-84c33874bbe2",
+        "identifier": "VUH-1931",
+        "title": "Tracker core: cycles"
+      },
+      "relatedIssue": {
+        "id": "f4402606-ce50-43a3-91dc-023d11d0cf79",
+        "identifier": "VUH-1930",
+        "title": "Tracker core: releases as first-class records"
+      }
+    },
+    {
+      "id": "2979711b-5b6f-4b87-b01e-df622655c444",
+      "type": "blocks",
+      "createdAt": "2026-10-09T05:41:23.260Z",
+      "updatedAt": "2026-10-09T05:41:23.260Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "2b1f5449-196a-4115-aec8-aa5f72e39406",
+        "identifier": "VUH-1917",
+        "title": "Tracker core: typed events, derived state and delivery stages"
+      },
+      "relatedIssue": {
+        "id": "1b8ef3b3-4e7a-4fd7-86c9-84c33874bbe2",
+        "identifier": "VUH-1931",
+        "title": "Tracker core: cycles"
+      }
+    },
+    {
+      "id": "ab3da0b4-1957-4438-a01f-c9e4f7d9665b",
+      "type": "blocks",
+      "createdAt": "2026-10-09T05:40:43.664Z",
+      "updatedAt": "2026-10-09T05:40:43.664Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "2b1f5449-196a-4115-aec8-aa5f72e39406",
+        "identifier": "VUH-1917",
+        "title": "Tracker core: typed events, derived state and delivery stages"
+      },
+      "relatedIssue": {
+        "id": "f4402606-ce50-43a3-91dc-023d11d0cf79",
+        "identifier": "VUH-1930",
+        "title": "Tracker core: releases as first-class records"
+      }
+    },
+    {
+      "id": "710f1db2-c66c-4787-b6e2-24cff4c32ffb",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:51.098Z",
+      "updatedAt": "2026-10-09T04:32:51.098Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "28ba0565-973c-4397-a7bd-eec33a879c0e",
+        "identifier": "VUH-1921",
+        "title": "Work UI in clankie-app"
+      },
+      "relatedIssue": {
+        "id": "ea8daca9-c940-411a-bdf9-2ee313a3ccbb",
+        "identifier": "VUH-1881",
+        "title": "Owner questions cancelled by a native seat takeover show as answered in the app"
+      }
+    },
+    {
+      "id": "f2ede30b-24e0-4c7b-a7f8-1d68535afa0c",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:51.094Z",
+      "updatedAt": "2026-10-09T04:32:51.094Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "28ba0565-973c-4397-a7bd-eec33a879c0e",
+        "identifier": "VUH-1921",
+        "title": "Work UI in clankie-app"
+      },
+      "relatedIssue": {
+        "id": "41bc9f62-b4ea-4999-9c87-f58a1bdc9308",
+        "identifier": "VUH-1890",
+        "title": "Model settings: name the actual model, route routine/escalation automatically, and let owners pick provider/model on one credit plan"
+      }
+    },
+    {
+      "id": "3b4f9af6-e643-4b02-8fc9-65c825d38d2e",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:51.092Z",
+      "updatedAt": "2026-10-09T04:32:51.092Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "28ba0565-973c-4397-a7bd-eec33a879c0e",
+        "identifier": "VUH-1921",
+        "title": "Work UI in clankie-app"
+      },
+      "relatedIssue": {
+        "id": "a2501dc2-1953-4444-a5f3-3ee821639b7d",
+        "identifier": "VUH-1856",
+        "title": "Render Clankie plugin tool calls as UI components"
+      }
+    },
+    {
+      "id": "e57d745e-ce93-4224-9a37-3344083a5c3e",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:51.091Z",
+      "updatedAt": "2026-10-09T04:32:51.091Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "28ba0565-973c-4397-a7bd-eec33a879c0e",
+        "identifier": "VUH-1921",
+        "title": "Work UI in clankie-app"
+      },
+      "relatedIssue": {
+        "id": "af573d18-6735-46b3-9de5-af74f3ca8404",
+        "identifier": "VUH-1884",
+        "title": "World bubbles: tap to expand a truncated message; question bubbles open a proper answer UI in the chat dock"
+      }
+    },
+    {
+      "id": "efb366d8-744e-44ed-b736-e75c5aa44e06",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:44.585Z",
+      "updatedAt": "2026-10-09T04:27:44.585Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "28ba0565-973c-4397-a7bd-eec33a879c0e",
+        "identifier": "VUH-1921",
+        "title": "Work UI in clankie-app"
+      },
+      "relatedIssue": {
+        "id": "db9f1dfe-0b3a-4b0f-bad4-89ac750a0e30",
+        "identifier": "VUH-1906",
+        "title": "Guided reviews (host-agnostic Linear Diffs)"
+      }
+    },
+    {
+      "id": "d390846f-235b-4661-b47d-e736d7655b76",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:41.046Z",
+      "updatedAt": "2026-10-09T04:27:41.046Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "b447cfb3-f864-4364-9349-166b60eefa3e",
+        "identifier": "VUH-1905",
+        "title": "Motion check: Skia runtime shaders + Reanimated at 120 Hz"
+      },
+      "relatedIssue": {
+        "id": "28ba0565-973c-4397-a7bd-eec33a879c0e",
+        "identifier": "VUH-1921",
+        "title": "Work UI in clankie-app"
+      }
+    },
+    {
+      "id": "a87df812-2ad3-4228-bb55-ae2fa3ab6563",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:41.040Z",
+      "updatedAt": "2026-10-09T04:27:41.040Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "0dd570af-5958-4bb1-a67b-7aab48863602",
+        "identifier": "VUH-1920",
+        "title": "Local-first sync protocol and agent API"
+      },
+      "relatedIssue": {
+        "id": "28ba0565-973c-4397-a7bd-eec33a879c0e",
+        "identifier": "VUH-1921",
+        "title": "Work UI in clankie-app"
+      }
+    },
+    {
+      "id": "4fd61673-ff4c-42f0-8d67-f064918edc1d",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:31.055Z",
+      "updatedAt": "2026-10-09T04:32:31.055Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "0dd570af-5958-4bb1-a67b-7aab48863602",
+        "identifier": "VUH-1920",
+        "title": "Local-first sync protocol and agent API"
+      },
+      "relatedIssue": {
+        "id": "c9dadf52-e612-45dd-b823-7fd82b8fe9fb",
+        "identifier": "VUH-1898",
+        "title": "message_clankie: the status lookup can't find a just-stored delivery, and senders never learn it was handled"
+      }
+    },
+    {
+      "id": "df6885dd-ff6e-4f5f-829d-d66d80f524e8",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:31.054Z",
+      "updatedAt": "2026-10-09T04:32:31.054Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "0dd570af-5958-4bb1-a67b-7aab48863602",
+        "identifier": "VUH-1920",
+        "title": "Local-first sync protocol and agent API"
+      },
+      "relatedIssue": {
+        "id": "d7cddad2-82de-4051-88c7-f27af27d1379",
+        "identifier": "VUH-1697",
+        "title": "Clankie Mac Work panel polled Linear about once a second and hit the 5,000/hour rate limit"
+      }
+    },
+    {
+      "id": "2e7cd615-c437-45bd-b0c3-c5090a2681f9",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:37.435Z",
+      "updatedAt": "2026-10-09T04:27:37.435Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "683b68da-840d-4574-8e34-07935f4b498d",
+        "identifier": "VUH-1916",
+        "title": "Tracker core: actors, provenance and exactly-once writes"
+      },
+      "relatedIssue": {
+        "id": "0dd570af-5958-4bb1-a67b-7aab48863602",
+        "identifier": "VUH-1920",
+        "title": "Local-first sync protocol and agent API"
+      }
+    },
+    {
+      "id": "17e9b55d-08bb-47e7-ac47-322c5c1d2182",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:37.435Z",
+      "updatedAt": "2026-10-09T04:27:37.435Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "2b1f5449-196a-4115-aec8-aa5f72e39406",
+        "identifier": "VUH-1917",
+        "title": "Tracker core: typed events, derived state and delivery stages"
+      },
+      "relatedIssue": {
+        "id": "0dd570af-5958-4bb1-a67b-7aab48863602",
+        "identifier": "VUH-1920",
+        "title": "Local-first sync protocol and agent API"
+      }
+    },
+    {
+      "id": "84f07256-fb15-42c3-ab8a-fda9947a4073",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:20.408Z",
+      "updatedAt": "2026-10-09T04:27:20.408Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "ad0a10ae-24a3-493d-b50b-35dfeaa85ec9",
+        "identifier": "VUH-1903",
+        "title": "Evidence store in the clankie service (TypeScript) + clankie evidence push|fetch + MCP tools"
+      },
+      "relatedIssue": {
+        "id": "a7c70646-a58f-4953-a404-7ec82888f2c2",
+        "identifier": "VUH-1919",
+        "title": "Tracker core: evidence bundles and owner asks/gates"
+      }
+    },
+    {
+      "id": "83e3ac56-36b6-4b45-b0ab-2d62743eaf97",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:20.361Z",
+      "updatedAt": "2026-10-09T04:27:20.361Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "44289784-4024-4831-8732-117181116ce6",
+        "identifier": "VUH-1904",
+        "title": "Amend ADR 0181: the built-in tracker is the default"
+      },
+      "relatedIssue": {
+        "id": "a7c70646-a58f-4953-a404-7ec82888f2c2",
+        "identifier": "VUH-1919",
+        "title": "Tracker core: evidence bundles and owner asks/gates"
+      }
+    },
+    {
+      "id": "3c5b0068-e438-4abc-8265-e5d3d7aaa6ee",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:44.588Z",
+      "updatedAt": "2026-10-09T04:27:44.588Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "1bc8ea14-3e99-43a8-9f2f-1e3d26b12928",
+        "identifier": "VUH-1918",
+        "title": "Tracker core: runs, leases and the ready queue"
+      },
+      "relatedIssue": {
+        "id": "db9f1dfe-0b3a-4b0f-bad4-89ac750a0e30",
+        "identifier": "VUH-1906",
+        "title": "Guided reviews (host-agnostic Linear Diffs)"
+      }
+    },
+    {
+      "id": "a207e62e-fabd-4610-8258-7d17de26064c",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:15.310Z",
+      "updatedAt": "2026-10-09T04:27:15.310Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "44289784-4024-4831-8732-117181116ce6",
+        "identifier": "VUH-1904",
+        "title": "Amend ADR 0181: the built-in tracker is the default"
+      },
+      "relatedIssue": {
+        "id": "1bc8ea14-3e99-43a8-9f2f-1e3d26b12928",
+        "identifier": "VUH-1918",
+        "title": "Tracker core: runs, leases and the ready queue"
+      }
+    },
+    {
+      "id": "6e8c7eaa-d811-4b68-a7b0-ab31d49c7b21",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:48.741Z",
+      "updatedAt": "2026-10-09T04:27:48.741Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "2b1f5449-196a-4115-aec8-aa5f72e39406",
+        "identifier": "VUH-1917",
+        "title": "Tracker core: typed events, derived state and delivery stages"
+      },
+      "relatedIssue": {
+        "id": "2ab1d264-b9be-40a3-81fd-8a2ae45da918",
+        "identifier": "VUH-1907",
+        "title": "Linear import, mirror and cutover"
+      }
+    },
+    {
+      "id": "b209318e-fc1d-4ba8-b3bc-a382e5beb0dd",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:44.597Z",
+      "updatedAt": "2026-10-09T04:27:44.597Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "2b1f5449-196a-4115-aec8-aa5f72e39406",
+        "identifier": "VUH-1917",
+        "title": "Tracker core: typed events, derived state and delivery stages"
+      },
+      "relatedIssue": {
+        "id": "db9f1dfe-0b3a-4b0f-bad4-89ac750a0e30",
+        "identifier": "VUH-1906",
+        "title": "Guided reviews (host-agnostic Linear Diffs)"
+      }
+    },
+    {
+      "id": "cf17b588-b863-433f-a818-63ada37835f6",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:09.742Z",
+      "updatedAt": "2026-10-09T04:27:09.742Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "44289784-4024-4831-8732-117181116ce6",
+        "identifier": "VUH-1904",
+        "title": "Amend ADR 0181: the built-in tracker is the default"
+      },
+      "relatedIssue": {
+        "id": "2b1f5449-196a-4115-aec8-aa5f72e39406",
+        "identifier": "VUH-1917",
+        "title": "Tracker core: typed events, derived state and delivery stages"
+      }
+    },
+    {
+      "id": "4698e957-8779-4622-ab16-91bcb1cbc5f5",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:48.796Z",
+      "updatedAt": "2026-10-09T04:27:48.796Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "683b68da-840d-4574-8e34-07935f4b498d",
+        "identifier": "VUH-1916",
+        "title": "Tracker core: actors, provenance and exactly-once writes"
+      },
+      "relatedIssue": {
+        "id": "2ab1d264-b9be-40a3-81fd-8a2ae45da918",
+        "identifier": "VUH-1907",
+        "title": "Linear import, mirror and cutover"
+      }
+    },
+    {
+      "id": "da344625-4644-4b06-9bbe-6cd242671da6",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:44.585Z",
+      "updatedAt": "2026-10-09T04:27:44.585Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "683b68da-840d-4574-8e34-07935f4b498d",
+        "identifier": "VUH-1916",
+        "title": "Tracker core: actors, provenance and exactly-once writes"
+      },
+      "relatedIssue": {
+        "id": "db9f1dfe-0b3a-4b0f-bad4-89ac750a0e30",
+        "identifier": "VUH-1906",
+        "title": "Guided reviews (host-agnostic Linear Diffs)"
+      }
+    },
+    {
+      "id": "57bfc91a-a2ec-4b74-b0e0-df3ee31511ef",
+      "type": "related",
+      "createdAt": "2026-10-09T04:27:05.398Z",
+      "updatedAt": "2026-10-09T04:27:05.398Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "683b68da-840d-4574-8e34-07935f4b498d",
+        "identifier": "VUH-1916",
+        "title": "Tracker core: actors, provenance and exactly-once writes"
+      },
+      "relatedIssue": {
+        "id": "c9dadf52-e612-45dd-b823-7fd82b8fe9fb",
+        "identifier": "VUH-1898",
+        "title": "message_clankie: the status lookup can't find a just-stored delivery, and senders never learn it was handled"
+      }
+    },
+    {
+      "id": "38019d4f-e65d-4dee-9d14-097164a18e4e",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:05.395Z",
+      "updatedAt": "2026-10-09T04:27:05.395Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "44289784-4024-4831-8732-117181116ce6",
+        "identifier": "VUH-1904",
+        "title": "Amend ADR 0181: the built-in tracker is the default"
+      },
+      "relatedIssue": {
+        "id": "683b68da-840d-4574-8e34-07935f4b498d",
+        "identifier": "VUH-1916",
+        "title": "Tracker core: actors, provenance and exactly-once writes"
+      }
+    },
+    {
+      "id": "b8dd8b05-0121-4aa5-9a0a-5b9e4591f291",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:27:01.365Z",
+      "updatedAt": "2026-10-09T04:27:01.365Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "ad0a10ae-24a3-493d-b50b-35dfeaa85ec9",
+        "identifier": "VUH-1903",
+        "title": "Evidence store in the clankie service (TypeScript) + clankie evidence push|fetch + MCP tools"
+      },
+      "relatedIssue": {
+        "id": "f1914369-df6b-4ec8-b083-563bb47ad9dc",
+        "identifier": "VUH-1915",
+        "title": "Workers publish evidence through the store"
+      }
+    },
+    {
+      "id": "8e11c012-65eb-4165-b377-e0af20ccb230",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:23.110Z",
+      "updatedAt": "2026-10-09T04:32:23.110Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "b0557637-8d90-4eba-af47-f0ea1c8ec417",
+        "identifier": "VUH-1914",
+        "title": "Move clankie, clankie-app and clankie-ops evidence out of git"
+      },
+      "relatedIssue": {
+        "id": "015b3abe-5cb4-44de-b896-d3381f7eb70e",
+        "identifier": "VUH-1871",
+        "title": "Charge machine load to who's using it: per-holder CPU, unleased work, and system costs"
+      }
+    },
+    {
+      "id": "1aa3a572-2bb7-4669-be64-075ff2879683",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:23.095Z",
+      "updatedAt": "2026-10-09T04:32:23.095Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "b0557637-8d90-4eba-af47-f0ea1c8ec417",
+        "identifier": "VUH-1914",
+        "title": "Move clankie, clankie-app and clankie-ops evidence out of git"
+      },
+      "relatedIssue": {
+        "id": "47dc02a7-5b39-436d-a834-0bb0d6646057",
+        "identifier": "VUH-1899",
+        "title": "One booted iPhone simulator holds ~50 GB and drives load to 100+; lease policy should bound simulator memory"
+      }
+    },
+    {
+      "id": "4051b065-81f0-4588-a3c2-edeb325e74be",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:26:57.710Z",
+      "updatedAt": "2026-10-09T04:26:57.710Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "ad0a10ae-24a3-493d-b50b-35dfeaa85ec9",
+        "identifier": "VUH-1903",
+        "title": "Evidence store in the clankie service (TypeScript) + clankie evidence push|fetch + MCP tools"
+      },
+      "relatedIssue": {
+        "id": "b0557637-8d90-4eba-af47-f0ea1c8ec417",
+        "identifier": "VUH-1914",
+        "title": "Move clankie, clankie-app and clankie-ops evidence out of git"
+      }
+    },
+    {
+      "id": "39a7dea2-8621-4fd0-8cda-990cefb5207a",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:26:52.415Z",
+      "updatedAt": "2026-10-09T04:26:52.415Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "ad0a10ae-24a3-493d-b50b-35dfeaa85ec9",
+        "identifier": "VUH-1903",
+        "title": "Evidence store in the clankie service (TypeScript) + clankie evidence push|fetch + MCP tools"
+      },
+      "relatedIssue": {
+        "id": "bcd5580c-6a77-4287-b357-dc0377a12407",
+        "identifier": "VUH-1913",
+        "title": "Evidence store: S3/R2 backend and hosted bucket"
+      }
+    },
+    {
+      "id": "5c1cfd3b-72fc-4a79-80fd-8386980e1de9",
+      "type": "related",
+      "createdAt": "2026-10-09T09:02:20.889Z",
+      "updatedAt": "2026-10-09T09:02:20.889Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "e2b6abcb-53f7-4948-912e-5b919515c4fd",
+        "identifier": "VUH-1942",
+        "title": "iPhone app is capped at 60 Hz on ProMotion: Info.plist lacks CADisableMinimumFrameDurationOnPhone"
+      },
+      "relatedIssue": {
+        "id": "b447cfb3-f864-4364-9349-166b60eefa3e",
+        "identifier": "VUH-1905",
+        "title": "Motion check: Skia runtime shaders + Reanimated at 120 Hz"
+      }
+    },
+    {
+      "id": "a4223ba5-fc41-4fd5-a49a-9f6eb1578f05",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:26.473Z",
+      "updatedAt": "2026-10-09T04:32:26.473Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "44289784-4024-4831-8732-117181116ce6",
+        "identifier": "VUH-1904",
+        "title": "Amend ADR 0181: the built-in tracker is the default"
+      },
+      "relatedIssue": {
+        "id": "d2dc8107-e8ef-4712-8385-83be6bd74fcb",
+        "identifier": "VUH-1901",
+        "title": "Let a project's Linear wakes route to a worker seat that leads that project"
+      }
+    },
+    {
+      "id": "8666e1a5-ebe2-4ec9-a97c-d9b7fd0b7a87",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:26.472Z",
+      "updatedAt": "2026-10-09T04:32:26.472Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "44289784-4024-4831-8732-117181116ce6",
+        "identifier": "VUH-1904",
+        "title": "Amend ADR 0181: the built-in tracker is the default"
+      },
+      "relatedIssue": {
+        "id": "51a2b776-3102-40cf-b0b6-8d2f2957a39e",
+        "identifier": "VUH-1900",
+        "title": "Hand-started `claude` in a Clankie Herdr pane gets the worker channel automatically via a PATH shim"
+      }
+    },
+    {
+      "id": "8e189115-da2e-4238-b756-21951ce576df",
+      "type": "related",
+      "createdAt": "2026-10-09T04:32:19.149Z",
+      "updatedAt": "2026-10-09T04:32:19.149Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "ad0a10ae-24a3-493d-b50b-35dfeaa85ec9",
+        "identifier": "VUH-1903",
+        "title": "Evidence store in the clankie service (TypeScript) + clankie evidence push|fetch + MCP tools"
+      },
+      "relatedIssue": {
+        "id": "c9dadf52-e612-45dd-b823-7fd82b8fe9fb",
+        "identifier": "VUH-1898",
+        "title": "message_clankie: the status lookup can't find a just-stored delivery, and senders never learn it was handled"
+      }
+    },
+    {
+      "id": "9c7573f4-0d30-48e0-93f6-47ae0891728a",
+      "type": "blocks",
+      "createdAt": "2026-10-09T04:25:51.849Z",
+      "updatedAt": "2026-10-09T04:25:51.849Z",
+      "archivedAt": null,
+      "issue": {
+        "id": "2d31bf78-6db8-4efa-9a0a-860c82614203",
+        "identifier": "VUH-1902",
+        "title": "ADR: evidence store (manifests, blobs, backends)"
+      },
+      "relatedIssue": {
+        "id": "ad0a10ae-24a3-493d-b50b-35dfeaa85ec9",
+        "identifier": "VUH-1903",
+        "title": "Evidence store in the clankie service (TypeScript) + clankie evidence push|fetch + MCP tools"
+      }
+    }
+  ],
+  "issues": [
+    {
+      "id": "21429ca0-2b60-4ad8-a9ac-aaa7048bcc98",
+      "identifier": "VUH-1962",
+      "title": "Sync 1: server change log, bootstrap and live deltas for the built-in tracker",
+      "description": "The first slice of milestone 3. It's server-side in clankie, built on the VUH-1917 event stream.\n\n* **One ordering:** every committed tracker change gets a server-assigned, monotonic `syncId`, the same atomic write that VUH-1916/1917 already make. Expose it as a change log of model deltas (issue, comment, project, milestone, cycle, release, run, lease, bundle). Each delta carries its actor and its",
+      "createdAt": "2026-10-09T14:07:55.117Z",
+      "updatedAt": "2026-10-09T14:48:22.105Z",
+      "archivedAt": null,
+      "priority": 2,
+      "estimate": null,
+      "dueDate": null,
+      "startedAt": "2026-10-09T14:08:56.721Z",
+      "completedAt": "2026-10-09T14:48:22.088Z",
+      "canceledAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1962/sync-1-server-change-log-bootstrap-and-live-deltas-for-the-built-in",
+      "previousIdentifiers": [],
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e",
+        "name": "Vuhlp",
+        "key": "VUH"
+      },
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      },
+      "projectMilestone": null,
+      "cycle": null,
+      "parent": {
+        "id": "0dd570af-5958-4bb1-a67b-7aab48863602",
+        "identifier": "VUH-1920",
+        "title": "Local-first sync protocol and agent API"
+      },
+      "creator": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "assignee": null,
+      "state": {
+        "id": "34ee1744-ca31-4a16-bade-4248e24eac50",
+        "name": "Done",
+        "type": "completed"
+      },
+      "stateHistory": [
+        {
+          "id": "5eb1b7ec-fd39-4532-8a70-aef01fb87322",
+          "startedAt": "2026-10-09T14:07:55.117Z",
+          "endedAt": "2026-10-09T14:08:56.737Z",
+          "state": {
+            "id": "71e52101-7fb1-42f5-b297-b0935be80629",
+            "name": "Backlog",
+            "type": "backlog"
+          }
+        },
+        {
+          "id": "f1b04aed-89a8-4ca2-99ca-825ea27eb7b2",
+          "startedAt": "2026-10-09T14:08:56.737Z",
+          "endedAt": "2026-10-09T14:48:22.098Z",
+          "state": {
+            "id": "82c62772-3a2f-422e-8a2b-6bae5d9a1c3f",
+            "name": "In Progress",
+            "type": "started"
+          }
+        },
+        {
+          "id": "ebb392c7-445c-430f-9f59-50ea747fe7b0",
+          "startedAt": "2026-10-09T14:48:22.098Z",
+          "endedAt": null,
+          "state": {
+            "id": "34ee1744-ca31-4a16-bade-4248e24eac50",
+            "name": "Done",
+            "type": "completed"
+          }
+        }
+      ],
+      "labels": [],
+      "attachments": []
+    },
+    {
+      "id": "7f8297ff-db03-412e-90f1-b2d23d7c92dd",
+      "identifier": "VUH-1933",
+      "title": "Evidence viewer: one issue's evidence (narrow) and everything proven recently (broad)",
+      "description": "James, 2026-10-09: evidence has to be easy to look at, both for one issue and across all activity. Sketches (boards 4 and 5): [https://claude.ai/artifact/LHPBfFbnjYDU1gzNV7MsNH](<https://claude.ai/artifact/LHPBfFbnjYDU1gzNV7MsNH>)\n\n**Narrow: one issue's evidence.** Tapping any evidence on an issue opens a full-screen viewer: images, video, terminal captures, and run JSON as a collapsible tree. You",
+      "createdAt": "2026-10-09T05:59:53.777Z",
+      "updatedAt": "2026-10-09T12:06:22.644Z",
+      "archivedAt": null,
+      "priority": 2,
+      "estimate": null,
+      "dueDate": null,
+      "startedAt": "2026-10-09T06:40:57.706Z",
+      "completedAt": "2026-10-09T08:09:05.611Z",
+      "canceledAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1933/evidence-viewer-one-issues-evidence-narrow-and-everything-proven",
+      "previousIdentifiers": [],
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e",
+        "name": "Vuhlp",
+        "key": "VUH"
+      },
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      },
+      "projectMilestone": null,
+      "cycle": null,
+      "parent": null,
+      "creator": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "assignee": null,
+      "state": {
+        "id": "34ee1744-ca31-4a16-bade-4248e24eac50",
+        "name": "Done",
+        "type": "completed"
+      },
+      "stateHistory": [
+        {
+          "id": "8191b806-1dac-4e37-8be1-d11c19937f35",
+          "startedAt": "2026-10-09T05:59:53.777Z",
+          "endedAt": "2026-10-09T06:40:57.720Z",
+          "state": {
+            "id": "71e52101-7fb1-42f5-b297-b0935be80629",
+            "name": "Backlog",
+            "type": "backlog"
+          }
+        },
+        {
+          "id": "44751c4f-6cd8-47fc-8357-90a6a18c80d7",
+          "startedAt": "2026-10-09T06:40:57.720Z",
+          "endedAt": "2026-10-09T08:09:05.625Z",
+          "state": {
+            "id": "82c62772-3a2f-422e-8a2b-6bae5d9a1c3f",
+            "name": "In Progress",
+            "type": "started"
+          }
+        },
+        {
+          "id": "d5f2659d-b5eb-4a73-88e9-410802eb8e3d",
+          "startedAt": "2026-10-09T08:09:05.625Z",
+          "endedAt": null,
+          "state": {
+            "id": "34ee1744-ca31-4a16-bade-4248e24eac50",
+            "name": "Done",
+            "type": "completed"
+          }
+        }
+      ],
+      "labels": [],
+      "attachments": [
+        {
+          "id": "2502e5f3-4057-4c23-9e19-4d4357acefce",
+          "title": "390px browser layout \u2014 not a physical-phone proof",
+          "subtitle": null,
+          "url": "clankie://evidence/sha256/cc4f38d25254e984ffe5ffdd32b769da197a2a6e6fc6801ff86e6bee7fe3b4c5",
+          "createdAt": "2026-10-09T07:08:41.683Z",
+          "updatedAt": "2026-10-09T07:08:41.683Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        },
+        {
+          "id": "5518e668-8e89-4ab8-8986-a9bcf8e586cf",
+          "title": "Full-screen issue evidence \u2014 inspected scratch browser proof",
+          "subtitle": null,
+          "url": "clankie://evidence/sha256/d37439e52d2854aac4608857aead1fc396a86e076a57f101a5c2b0280828f545",
+          "createdAt": "2026-10-09T07:08:20.225Z",
+          "updatedAt": "2026-10-09T07:08:20.225Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        },
+        {
+          "id": "6a8751d9-78c6-47ea-b6fe-9e603e8afe3c",
+          "title": "Recent evidence feed \u2014 inspected scratch browser proof",
+          "subtitle": null,
+          "url": "clankie://evidence/sha256/de814db7b7a12640900c9640686521e0bb37f0ba90a1894838e7264633d2c084",
+          "createdAt": "2026-10-09T07:07:58.836Z",
+          "updatedAt": "2026-10-09T07:07:58.836Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a7c70646-a58f-4953-a404-7ec82888f2c2",
+      "identifier": "VUH-1919",
+      "title": "Tracker core: evidence bundles and owner asks/gates",
+      "description": "* **Evidence bundles** on work items and runs: typed references to evidence store objects (logs, screenshots, video, diffs, eval JSON), with listed gaps. Completion past \"landed\" needs a bundle, checked by an actor other than whoever did the work.\n* **Owner asks** are their own records. A worker or lead asks James something, and the answer is recorded and routed back. This replaces \"Needs James\" c",
+      "createdAt": "2026-10-09T04:27:19.818Z",
+      "updatedAt": "2026-10-09T14:45:09.859Z",
+      "archivedAt": null,
+      "priority": 2,
+      "estimate": null,
+      "dueDate": null,
+      "startedAt": "2026-10-09T13:10:35.513Z",
+      "completedAt": "2026-10-09T14:07:17.762Z",
+      "canceledAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1919/tracker-core-evidence-bundles-and-owner-asksgates",
+      "previousIdentifiers": [],
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e",
+        "name": "Vuhlp",
+        "key": "VUH"
+      },
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      },
+      "projectMilestone": {
+        "id": "fdfbc9c5-e8e2-44eb-b7cc-e78f51e92bc9"
+      },
+      "cycle": null,
+      "parent": null,
+      "creator": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "assignee": null,
+      "state": {
+        "id": "34ee1744-ca31-4a16-bade-4248e24eac50",
+        "name": "Done",
+        "type": "completed"
+      },
+      "stateHistory": [
+        {
+          "id": "9eaac4b0-78ba-417b-86ba-adfe39dff5ba",
+          "startedAt": "2026-10-09T04:27:19.818Z",
+          "endedAt": "2026-10-09T13:10:35.541Z",
+          "state": {
+            "id": "71e52101-7fb1-42f5-b297-b0935be80629",
+            "name": "Backlog",
+            "type": "backlog"
+          }
+        },
+        {
+          "id": "6e710a84-a082-4920-9638-6b3ac655cb63",
+          "startedAt": "2026-10-09T13:10:35.541Z",
+          "endedAt": "2026-10-09T14:07:17.777Z",
+          "state": {
+            "id": "82c62772-3a2f-422e-8a2b-6bae5d9a1c3f",
+            "name": "In Progress",
+            "type": "started"
+          }
+        },
+        {
+          "id": "2242f359-58e7-495b-8d0f-c43806bceadf",
+          "startedAt": "2026-10-09T14:07:17.777Z",
+          "endedAt": null,
+          "state": {
+            "id": "34ee1744-ca31-4a16-bade-4248e24eac50",
+            "name": "Done",
+            "type": "completed"
+          }
+        }
+      ],
+      "labels": [],
+      "attachments": []
+    },
+    {
+      "id": "2ab1d264-b9be-40a3-81fd-8a2ae45da918",
+      "identifier": "VUH-1907",
+      "title": "Linear import, mirror and cutover",
+      "description": "This is the parent issue for the milestone. It gets broken into sub-issues when the milestone starts.\n\nScope:\n\n* **Lossless import** into the built-in tracker via the Linear API: issues (including archived), comments, attachments with authenticated downloads, projects, documents, status updates, labels, relations, and VUH identifiers preserved.\n* **Webhook mirror** that keeps the built-in tracker ",
+      "createdAt": "2026-10-09T04:26:13.052Z",
+      "updatedAt": "2026-10-09T14:08:00.943Z",
+      "archivedAt": null,
+      "priority": 3,
+      "estimate": null,
+      "dueDate": null,
+      "startedAt": null,
+      "completedAt": null,
+      "canceledAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1907/linear-import-mirror-and-cutover",
+      "previousIdentifiers": [],
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e",
+        "name": "Vuhlp",
+        "key": "VUH"
+      },
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      },
+      "projectMilestone": {
+        "id": "61b1dd61-3522-4a0a-b850-e034d9eafe24"
+      },
+      "cycle": null,
+      "parent": null,
+      "creator": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "assignee": null,
+      "state": {
+        "id": "71e52101-7fb1-42f5-b297-b0935be80629",
+        "name": "Backlog",
+        "type": "backlog"
+      },
+      "stateHistory": [
+        {
+          "id": "cb3d6b08-a032-414b-9cf1-14e012b1158f",
+          "startedAt": "2026-10-09T04:26:13.052Z",
+          "endedAt": null,
+          "state": {
+            "id": "71e52101-7fb1-42f5-b297-b0935be80629",
+            "name": "Backlog",
+            "type": "backlog"
+          }
+        }
+      ],
+      "labels": [],
+      "attachments": []
+    },
+    {
+      "id": "b447cfb3-f864-4364-9349-166b60eefa3e",
+      "identifier": "VUH-1905",
+      "title": "Motion check: Skia runtime shaders + Reanimated at 120 Hz",
+      "description": "**James, 2026-10-09: \"i just want the UI in webgpu\".** The motion check has to show that the WebGPU path works inside clankie-app's shells, not only Skia's default backend. Candidates to verify (not yet checked): Skia's WebGPU/Graphite backend and `react-native-wgpu` for custom shaders on iOS/macOS, and native WebGPU in Chrome and Safari on web. Report the frame-rate results for each path and shel",
+      "createdAt": "2026-10-09T04:26:02.107Z",
+      "updatedAt": "2026-10-09T10:12:12.266Z",
+      "archivedAt": null,
+      "priority": 3,
+      "estimate": null,
+      "dueDate": null,
+      "startedAt": "2026-10-09T06:41:42.879Z",
+      "completedAt": null,
+      "canceledAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1905/motion-check-skia-runtime-shaders-reanimated-at-120-hz",
+      "previousIdentifiers": [],
+      "team": {
+        "id": "d53265da-b742-43c3-9a13-7cac6506234e",
+        "name": "Vuhlp",
+        "key": "VUH"
+      },
+      "project": {
+        "id": "cbd205ab-cad4-48b8-9724-7109410fc921"
+      },
+      "projectMilestone": {
+        "id": "e33ac3d6-e6e4-4f7e-a3b3-71c9836c4ed3"
+      },
+      "cycle": null,
+      "parent": null,
+      "creator": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "assignee": null,
+      "state": {
+        "id": "82c62772-3a2f-422e-8a2b-6bae5d9a1c3f",
+        "name": "In Progress",
+        "type": "started"
+      },
+      "stateHistory": [
+        {
+          "id": "c6fd1413-790b-49a4-baa5-8770ec0dee08",
+          "startedAt": "2026-10-09T04:26:02.107Z",
+          "endedAt": "2026-10-09T06:41:42.905Z",
+          "state": {
+            "id": "71e52101-7fb1-42f5-b297-b0935be80629",
+            "name": "Backlog",
+            "type": "backlog"
+          }
+        },
+        {
+          "id": "b0207202-f557-4346-ba8d-16643dd9468a",
+          "startedAt": "2026-10-09T06:41:42.905Z",
+          "endedAt": null,
+          "state": {
+            "id": "82c62772-3a2f-422e-8a2b-6bae5d9a1c3f",
+            "name": "In Progress",
+            "type": "started"
+          }
+        }
+      ],
+      "labels": [],
+      "attachments": [
+        {
+          "id": "94919862-902a-4f11-a97a-e4dde7503e0a",
+          "title": "macOS: detail page after the shader reveal (screenshot)",
+          "subtitle": "Detail text crisp at rest on Dawn/Metal.",
+          "url": "clankie://evidence/sha256/4a19288ee3b763297cb4fd77b6ec89ae4fb789232253009cbf3ef7aded6e2250",
+          "createdAt": "2026-10-09T10:06:07.090Z",
+          "updatedAt": "2026-10-09T10:06:07.090Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        },
+        {
+          "id": "381e912b-5464-43db-bdfa-f384f59163d9",
+          "title": "Chrome: Clankie toss, squash and stretch (frames from recording)",
+          "subtitle": "Four frames 0.2 s apart: flight, wall, ceiling squash, falling.",
+          "url": "clankie://evidence/sha256/188ba59ad0b55eb035603ad281a21e6de2541357d94f5ffce7ac3b4a92620849",
+          "createdAt": "2026-10-09T10:05:37.065Z",
+          "updatedAt": "2026-10-09T10:05:37.065Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        },
+        {
+          "id": "59993ae8-b0fa-45fa-b0ae-7a5f4d12045b",
+          "title": "macOS: 120 fps, but 7.9 ms per frame waiting on display (screenshot)",
+          "subtitle": "HUD: loop work 0.24 ms, getCurrentTexture blocks the JS thread about 7.9 ms each frame.",
+          "url": "clankie://evidence/sha256/cc58cc74f5e8ee1a9a54d5060850f0f13fe32cd3befa2fac8ac1368267f030b3",
+          "createdAt": "2026-10-09T10:05:15.934Z",
+          "updatedAt": "2026-10-09T10:05:15.934Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        },
+        {
+          "id": "9e040443-c46c-4af0-b0e9-1de6a3fc3846",
+          "title": "Safari 27: WebGPU at 60 Hz on a 120 Hz panel (screenshot)",
+          "subtitle": "HUD after a real-mouse Clankie drag: 60 fps, 0 dropped, touch to frame p50 10 / p95 15 ms.",
+          "url": "clankie://evidence/sha256/9c69caca59c62ab832e9236f17aec782cefc008cdde2fbf1c12823094fbb0d1e",
+          "createdAt": "2026-10-09T10:04:54.854Z",
+          "updatedAt": "2026-10-09T10:04:54.854Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        },
+        {
+          "id": "d3015d00-39f4-4a9b-ae46-7458b6033159",
+          "title": "Chrome: list at rest, text crisp (screenshot)",
+          "subtitle": "Same rows after the fling settles: textures land on whole device pixels.",
+          "url": "clankie://evidence/sha256/7cac6c72b0bb6f598ab20e5dc9348a0aa19aa8b31d3c0064c74809dc270ac85c",
+          "createdAt": "2026-10-09T10:04:33.075Z",
+          "updatedAt": "2026-10-09T10:04:33.075Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        },
+        {
+          "id": "e0d449c2-0d71-4161-b71e-ca39a59de0f1",
+          "title": "Chrome: motion blur mid-fling (screenshot)",
+          "subtitle": "Velocity blur shader on rows during a real drag-fling.",
+          "url": "clankie://evidence/sha256/f08c361939d69d56b955666be8bffc563e4b1c9daed35f4d555fef781d0f2176",
+          "createdAt": "2026-10-09T10:04:12.384Z",
+          "updatedAt": "2026-10-09T10:04:12.384Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        },
+        {
+          "id": "fc322429-20c3-4095-812c-d04e3c6be1b6",
+          "title": "macOS WebGPU demo (real recording)",
+          "subtitle": "Release build, Dawn/Metal, JS thread, real mouse: list fling, detail reveal and close, hold/drag/throw Clankie.",
+          "url": "clankie://evidence/sha256/cd13a8b7f3d94dffd61f0d8851be85d9dc083f28bfb34a9794a3bf48613f38f2",
+          "createdAt": "2026-10-09T10:03:51.692Z",
+          "updatedAt": "2026-10-09T10:03:51.692Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        },
+        {
+          "id": "9f8cc0b0-8089-4d16-8bc0-a4ea6c1eaa3e",
+          "title": "Chrome 155 WebGPU demo (real recording)",
+          "subtitle": "List fling + motion blur, shader reveal into detail, reduced motion, hold/drag/throw Clankie. Production export, 120 Hz panel.",
+          "url": "clankie://evidence/sha256/c0addbae8e57090e6bf0caac221d636166d77a2ce47b8bd35a87c1189f37cc1c",
+          "createdAt": "2026-10-09T10:03:21.204Z",
+          "updatedAt": "2026-10-09T10:03:21.204Z",
+          "archivedAt": null,
+          "metadata": {},
+          "creator": {
+            "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+            "name": "Clankie"
+          }
+        }
+      ]
+    }
+  ],
+  "comments": [
+    {
+      "id": "84b9e7b1-7a3b-44dd-866e-7177f4c8d6e5",
+      "body": "Landed on main: [6de102306f1553405bc749fc48b349179dd31e68](https://github.com/Volpestyle/clankie/commit/6de102306f1553405bc749fc48b349179dd31e68).\n\nAtomic sync ordering/delta journal, project JSON-lines bootstrap and lazy batch reads, signed-device resumable relay subscription, and receipt-backed transactions are implemented. CLI/API and proposed ADR 0226 amendment included.\n\nProof: five integrati",
+      "createdAt": "2026-10-09T14:47:39.047Z",
+      "updatedAt": "2026-10-09T14:47:38.964Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1962/sync-1-server-change-log-bootstrap-and-live-deltas-for-the-built-in#comment-84b9e7b1",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "21429ca0-2b60-4ad8-a9ac-aaa7048bcc98"
+    },
+    {
+      "id": "ae9d4d51-3679-4f51-a46b-ebd74d726b75",
+      "body": "Lead reviewed the 15-check scratch result, actual diff and all three captures. Feed failures are visibly distinct; the issue view shows provenance and listed gaps. The 390px capture is browser-only, not physical-phone proof.\n\nPush remains held. The prior root gate exited 1 on the `VUH-1937` result-contract mismatch; a deterministic known failure does not qualify for the timing-sensitive exception.",
+      "createdAt": "2026-10-09T07:45:16.125Z",
+      "updatedAt": "2026-10-09T07:45:16.099Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1933/evidence-viewer-one-issues-evidence-narrow-and-everything-proven#comment-ae9d4d51",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "7f8297ff-db03-412e-90f1-b2d23d7c92dd"
+    },
+    {
+      "id": "1b0d7af2-a61e-41d2-b3a2-4840ed2c7ad9",
+      "body": "![Recent feed: project filter, day grouping and loud failures; scratch data](clankie://evidence/sha256/de814db7b7a12640900c9640686521e0bb37f0ba90a1894838e7264633d2c084)\n\n![Issue viewer: image, provenance and listed gaps; scratch fixture](clankie://evidence/sha256/d37439e52d2854aac4608857aead1fc396a86e076a57f101a5c2b0280828f545)\n\nLanded on main at [c2dd9b67fa597e2b42b6bb7b2ba0e3e663d59075](https://",
+      "createdAt": "2026-10-09T07:19:10.458Z",
+      "updatedAt": "2026-10-09T08:08:48.479Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1933/evidence-viewer-one-issues-evidence-narrow-and-everything-proven#comment-1b0d7af2",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "7f8297ff-db03-412e-90f1-b2d23d7c92dd"
+    },
+    {
+      "id": "e7b0d94e-f7f4-43b4-b516-77c1c0451d91",
+      "body": "Global lead: the new `gate` question purpose this landed in `packages/protocol` isn't handled by clankie-app's MailboxSheet `askKind`, so the app fails to typecheck against current clankie main (TS2366, the same as `verify` in VUH-1960). Linnea is adding the app handling now as a prerequisite commit.\n\nGoing forward, a new protocol enum member needs its clankie-app consumer handled in the same chan",
+      "createdAt": "2026-10-09T14:45:09.883Z",
+      "updatedAt": "2026-10-09T14:45:09.859Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1919/tracker-core-evidence-bundles-and-owner-asksgates#comment-e7b0d94e",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "a7c70646-a58f-4953-a404-7ec82888f2c2"
+    },
+    {
+      "id": "86cb75c0-c81a-48f4-b4e8-7bcfc8f1090e",
+      "body": "**Landed** on main: `6f85c9a3b` (Sable's evidence bundles, owner asks and run gates) and `be99b5620` (the lead's fix: the README cites the capture as a plain `clankie://evidence` URI, which the doc-link checker accepts). The lead took over from Sable's handoff when Sable's context ran out.\n\n**Full-gate result:** `clankie heavy -- pnpm check:landing` on HEAD `be99b5620`, against base `29e578082`: *",
+      "createdAt": "2026-10-09T14:07:15.920Z",
+      "updatedAt": "2026-10-09T14:07:15.894Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1919/tracker-core-evidence-bundles-and-owner-asksgates#comment-86cb75c0",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "a7c70646-a58f-4953-a404-7ec82888f2c2"
+    },
+    {
+      "id": "938f99f1-c0dd-4748-92e7-c4caa25e4bd5",
+      "body": "Sable handoff: implementation committed on `clankie2/vuh-1919-evidence-bundles-gates` at `c275eb06839f961d88c057c36c31cc495b812ffb`, rebased onto fetched main `de130cd2168026fdc7b2ff6f22decc03982b33aa`. Clean worktree; not pushed.\n\nEvidence bundles/completion checks, ADR 0245 linked asks/run gates, owner/lead run control events, tools/CLI and proposed ADR amendment implemented. Four package typech",
+      "createdAt": "2026-10-09T13:54:07.079Z",
+      "updatedAt": "2026-10-09T13:54:07.059Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1919/tracker-core-evidence-bundles-and-owner-asksgates#comment-938f99f1",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "a7c70646-a58f-4953-a404-7ec82888f2c2"
+    },
+    {
+      "id": "a05996ad-21d6-419f-be70-62ae08d77f28",
+      "body": "James, 2026-10-09: \"Needs you\" is the existing World mailbox (clankie-app VUH-1809, `11babb62`). It already reads the core owner-ask API (ADR 0245 `input_list`/`input_answer`) across conversations, plus owner updates.\n\nSo owner asks and gates here **reuse ADR 0245 asks**. Don't add a parallel record type. Work adds one ask kind: \"check it works\" for landed items (the owner-verified stage, VUH-1917",
+      "createdAt": "2026-10-09T06:00:38.225Z",
+      "updatedAt": "2026-10-09T06:00:38.202Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1919/tracker-core-evidence-bundles-and-owner-asksgates#comment-a05996ad",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "a7c70646-a58f-4953-a404-7ec82888f2c2"
+    },
+    {
+      "id": "7375a6c5-9d8a-4632-97ac-b5b3591e0ef2",
+      "body": "Branch pushed (branch only, not main): [`clankie2/vuh-1905-motion-check`](https://github.com/Volpestyle/clankie-app/tree/clankie2/vuh-1905-motion-check) at `6932deed`. The device checklist is in [`docs/testing/2026-10-09-vuh-1905-motion-check/README.md`](https://github.com/Volpestyle/clankie-app/blob/clankie2/vuh-1905-motion-check/docs/testing/2026-10-09-vuh-1905-motion-check/README.md). The iPhon",
+      "createdAt": "2026-10-09T10:12:54.896Z",
+      "updatedAt": "2026-10-09T10:12:54.853Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1905/motion-check-skia-runtime-shaders-reanimated-at-120-hz#comment-7375a6c5",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "b447cfb3-f864-4364-9349-166b60eefa3e"
+    },
+    {
+      "id": "217b2ec7-dd58-4167-9184-300f20a8891c",
+      "body": "**Motion check result: web and macOS measured; iPhone/iPad waiting on James's ProMotion run**\n\nM5 Max, built-in 120 Hz panel, production/Release builds. touch\u2192frame runs from the oldest unrendered input sample to the submit of the frame that draws it. It doesn't include scan-out, about one more frame. Recordings and screenshots are attached to this issue.\n\n| Shell and path | Run | fps | interval p",
+      "createdAt": "2026-10-09T10:12:12.289Z",
+      "updatedAt": "2026-10-09T10:12:12.266Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1905/motion-check-skia-runtime-shaders-reanimated-at-120-hz#comment-217b2ec7",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "b447cfb3-f864-4364-9349-166b60eefa3e"
+    },
+    {
+      "id": "101222c4-7757-4595-9adb-3d8248ccd899",
+      "body": "**Progress so far (2026-10-09, interim, not the final report)**\n\nBranch `clankie2/vuh-1905-motion-check` (not pushed yet). Both demos are built on a dev-only screen: `packages/command-center/src/motionCheck/`. Each shell mounts it only behind a flag:\n- web and mobile: `EXPO_PUBLIC_CLANKIE_MOTION_CHECK=1`\n- macOS: the `clankie.dev.motionCheck` default\n\nIt isn't in the production navigation.\n\n**How ",
+      "createdAt": "2026-10-09T08:57:34.248Z",
+      "updatedAt": "2026-10-09T08:57:34.204Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1905/motion-check-skia-runtime-shaders-reanimated-at-120-hz#comment-101222c4",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "b447cfb3-f864-4364-9349-166b60eefa3e"
+    },
+    {
+      "id": "1da93696-3f3c-4a43-aeda-c8069ac55421",
+      "body": "**Step 1 research: what WebGPU path exists today (checked 2026-10-09)**\n\n| Path | Status today | What it means for us |\n|---|---|---|\n| `@shopify/react-native-skia` **2.6.9** (what the app ships) | Renders with **Ganesh on Metal**. Graphite is a build-time opt-in: the podspec looks for a `libs/.graphite` marker, but the `install-skia-graphite` script it names isn't in the published package, and ou",
+      "createdAt": "2026-10-09T06:44:37.928Z",
+      "updatedAt": "2026-10-09T06:44:37.900Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1905/motion-check-skia-runtime-shaders-reanimated-at-120-hz#comment-1da93696",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "b447cfb3-f864-4364-9349-166b60eefa3e"
+    },
+    {
+      "id": "b8ba53b1-5915-42d1-8072-aa9fe6453ba7",
+      "body": "James approved the approach on 2026-10-09: React Native for structure, text and accessibility, and WebGPU (Skia's WebGPU backend and `react-native-wgpu`) for the motion surfaces: springs, motion blur, shader transitions and the fleet overview canvas. If this check shows WebGPU holding 120 Hz in the app, the UI leans on it more. Note: simulators can't prove 120 Hz. The iPhone and iPad numbers need ",
+      "createdAt": "2026-10-09T05:42:04.245Z",
+      "updatedAt": "2026-10-09T05:42:04.226Z",
+      "archivedAt": null,
+      "parentId": null,
+      "quotedText": null,
+      "resolvedAt": null,
+      "url": "https://linear.app/vuhlp/issue/VUH-1905/motion-check-skia-runtime-shaders-reanimated-at-120-hz#comment-b8ba53b1",
+      "user": {
+        "id": "9f8a15ed-d7cd-4e7e-bbb8-aba8696dd185",
+        "name": "Clankie",
+        "displayName": "clankie2"
+      },
+      "onBehalfOf": null,
+      "botActor": null,
+      "issueId": "b447cfb3-f864-4364-9349-166b60eefa3e"
+    }
+  ]
+}
