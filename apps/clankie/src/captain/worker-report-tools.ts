@@ -10,7 +10,11 @@ import { toolJson, type TurnContext } from "./tools.ts";
 
 export interface WorkerReportActions {
   read(authority: ConversationAuthority, limit?: number): Promise<WorkerReportPage>;
-  acknowledge(authority: ConversationAuthority, ids: readonly string[]): Promise<boolean>;
+  acknowledge(
+    authority: ConversationAuthority,
+    ids: readonly string[],
+    receipt?: { summary?: string | undefined; links?: string[] | undefined },
+  ): Promise<boolean>;
 }
 
 export function workerReportTools(actions: WorkerReportActions, turn: TurnContext): ToolDefinition[] {
@@ -31,15 +35,31 @@ export function workerReportTools(actions: WorkerReportActions, turn: TurnContex
       name: "acknowledge_worker_reports",
       label: "Acknowledge reviewed worker reports",
       description:
-        "Mark only fully reviewed reports offered by worker_reports as read. Supply their exact deliveryIds. This clears their unread roster warning; receiving a native message alone does not.",
+        "Mark only fully reviewed reports offered by worker_reports as read. Supply their exact deliveryIds. This automatically sends the original sender a short acknowledgment receipt. Include a summary and any resulting chat or issue URLs in receipt. This clears their unread roster warning; receiving a native message alone does not.",
       parameters: Type.Object({
         deliveryIds: Type.Array(Type.String({ format: "uuid" }), { minItems: 1, maxItems: 100 }),
+        receipt: Type.Optional(
+          Type.Object({
+            summary: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+            links: Type.Optional(
+              Type.Array(Type.String({ format: "uri", maxLength: 2048 }), { maxItems: 10 }),
+            ),
+          }),
+        ),
       }),
       executionMode: "sequential",
-      execute: async (_id, input: { deliveryIds: string[] }) => {
+      execute: async (
+        _id,
+        input: {
+          deliveryIds: string[];
+          receipt?: { summary?: string | undefined; links?: string[] | undefined };
+        },
+      ) => {
         const authority = captureConversationAuthority(turn.conversationAuthority);
         await assertConversationAuthority(authority);
-        return toolJson({ acknowledged: await actions.acknowledge(authority, input.deliveryIds) });
+        return toolJson({
+          acknowledged: await actions.acknowledge(authority, input.deliveryIds, input.receipt),
+        });
       },
     },
   ];

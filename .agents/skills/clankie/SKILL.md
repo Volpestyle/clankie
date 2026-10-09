@@ -40,6 +40,12 @@ not prove nothing was sent. Reconcile an uncertain original through
 `message_clankie` rather than starting another send. The CLI equivalent in your
 native pane is `clankie agents message-status DELIVERY_ID`.
 
+Sender progress also arrives automatically as `worker-report-receipt` channel
+events: stored, taken into a lead turn, then acknowledged. These are receipts,
+not new assignments; no reply is needed. The acknowledgment includes the lead's
+short summary and resulting links when supplied. Transport acknowledgment of an
+event does not mark your report read by the lead.
+
 Ask your lead with `message_clankie`. Your harness's own ask-the-user prompt
 reaches the lead only on a managed seat that routes it; otherwise it waits
 unseen in your pane. Durable state (what landed and at which commit, evidence,

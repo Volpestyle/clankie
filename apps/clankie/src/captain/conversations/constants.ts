@@ -49,7 +49,17 @@ export const InboundReportDeliverySchema = z
     attemptedAt: z.string().datetime().optional(),
     deliveredAt: z.string().datetime().optional(),
     offeredAt: z.string().datetime().optional(),
+    takenAt: z.string().datetime().optional(),
     readAt: z.string().datetime().optional(),
+    senderNotifications: z.boolean().optional(),
+    senderEventAcks: z.array(z.enum(["stored", "taken", "acknowledged"])).optional(),
+    acknowledgment: z
+      .object({
+        summary: z.string().trim().min(1).max(500).optional(),
+        links: z.array(z.string().url().max(2048)).max(10).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

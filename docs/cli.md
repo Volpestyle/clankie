@@ -4439,6 +4439,15 @@ returns the oldest unread reports with their original delivery IDs and exact tex
 Reading does not mark them read. After reviewing every offered report, run
 `clankie agents reports ack DELIVERY_ID... --conversation ID` (or
 `acknowledge_worker_reports`). Only fully offered IDs can be acknowledged.
+The original sender receives durable channel events for stored, taken into a
+lead turn, and acknowledged, including unadopted native panes. Events remain
+pending across reconnect until their transport acknowledgment; that transport
+ack never marks the report read. Status lookup uses the original sender binding
+and works immediately for returned IDs through both local and remote fleet links.
+Add `--receipt '{"summary":"Filed the follow-up.","links":["https://linear.app/vuhlp/issue/VUH-1898"]}'`
+to `reports ack`, or supply the equivalent `receipt` object to
+`acknowledge_worker_reports`, to include a short result and resulting chat/issue
+links in the automatic acknowledgment. Receipt events require no reply.
 You can pass the unmodified returned page on standard input with
 `clankie agents reports ack --json-stdin --conversation ID`; the page must name
 the same conversation. A page holds at most 100 IDs.

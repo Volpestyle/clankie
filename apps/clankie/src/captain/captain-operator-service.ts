@@ -285,7 +285,13 @@ export function createOperatorService(
           acknowledged: new Set(request.deliveryIds).size,
         };
       }
-      if (!ctx.conversations.acknowledgeInboundReports(request.conversationId, request.deliveryIds))
+      if (
+        !ctx.conversations.acknowledgeInboundReports(
+          request.conversationId,
+          request.deliveryIds,
+          request.receipt,
+        )
+      )
         throw new ConversationRefusedError("Only fully offered worker reports may be acknowledged");
       return {
         op: request.op,

@@ -539,6 +539,13 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
       deliveryIds: z.array(z.string().uuid()).min(1).max(100),
+      receipt: z
+        .object({
+          summary: z.string().trim().min(1).max(500).optional(),
+          links: z.array(z.string().url().max(2048)).max(10).optional(),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -1225,7 +1232,11 @@ export interface OperatorConversationServiceClient {
   roster(): Promise<readonly OperatorFleetSeat[]>;
   readoptSeat?(seatId: string, conversationId: string): Promise<boolean>;
   workerReports?(conversationId: string, limit?: number): Promise<WorkerReportPage>;
-  acknowledgeWorkerReports?(conversationId: string, deliveryIds: readonly string[]): Promise<number>;
+  acknowledgeWorkerReports?(
+    conversationId: string,
+    deliveryIds: readonly string[],
+    receipt?: { summary?: string | undefined; links?: string[] | undefined },
+  ): Promise<number>;
   /** Owner-only retirement of explicitly selected retained history. */
   acknowledgeWorkerReportHistory?(conversationId: string, deliveryIds: readonly string[]): Promise<number>;
   /** Park until the fleet cursor changes, then return one coherent snapshot. */
@@ -1500,12 +1511,13 @@ export function createOperatorConversationServiceClient(
         throw new Error(`Unexpected ${result.op} result for worker reports`);
       return result.page;
     },
-    async acknowledgeWorkerReports(conversationId, deliveryIds) {
+    async acknowledgeWorkerReports(conversationId, deliveryIds, receipt) {
       const result = await dispatch({
         op: "acknowledge_worker_reports",
         schemaVersion: 1,
         conversationId,
         deliveryIds: [...deliveryIds],
+        ...(receipt === undefined ? {} : { receipt }),
       });
       if (result.op !== "acknowledge_worker_reports")
         throw new Error(`Unexpected ${result.op} result for worker report acknowledgment`);

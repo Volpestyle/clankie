@@ -219,6 +219,8 @@ import {
 } from "./types.ts";
 import {
   acknowledgeInboundReports,
+  senderReportEvents,
+  acknowledgeSenderReportEvent,
   hasUnreadInboundReports,
   inboundReports,
   notifyInboundReportChange,
@@ -1770,6 +1772,13 @@ export class ConversationStore {
     return inboundReports(this, conversationId, options);
   }
 
+  public senderReportEvents(paneId: string, binding: string) {
+    return senderReportEvents(this, paneId, binding);
+  }
+  public acknowledgeSenderReportEvent(paneId: string, binding: string, eventId: string): boolean {
+    return acknowledgeSenderReportEvent(this, paneId, binding, eventId);
+  }
+
   /** Offering full, bounded payloads does not mark them read. */
   public readInboundReports(
     conversationId: string,
@@ -1779,8 +1788,12 @@ export class ConversationStore {
   }
 
   /** An authenticated recipient explicitly acknowledges only reports it was offered. */
-  public acknowledgeInboundReports(conversationId: string, deliveryIds: readonly string[]): boolean {
-    return acknowledgeInboundReports(this, conversationId, deliveryIds);
+  public acknowledgeInboundReports(
+    conversationId: string,
+    deliveryIds: readonly string[],
+    receipt?: { summary?: string | undefined; links?: string[] | undefined },
+  ): boolean {
+    return acknowledgeInboundReports(this, conversationId, deliveryIds, { receipt });
   }
 
   /** The operator explicitly retires selected history; native receipts never call this. */
@@ -2627,6 +2640,7 @@ export class ConversationStore {
             ...meta.inboundAcceptances?.[provenance.inboundReceipt.deliveryId]?.reportDelivery,
             state: "pending",
             stage: "stored",
+            senderNotifications: true,
           },
         },
       };

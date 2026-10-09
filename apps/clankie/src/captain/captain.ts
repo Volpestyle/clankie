@@ -3777,6 +3777,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   void refreshFleet().catch(() => undefined);
   const {
     workerReportActions,
+    reportChangeSignal,
     reportSummaries,
     conversationReportRunner,
     recoverWorkerReports,
@@ -5595,15 +5596,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       const binding = native?.terminalId === seatId ? inboundBinding(native) : undefined;
       const live = binding !== undefined && mailbox.boundTo(binding);
-      const pending = mailbox.poll(waitMs, signal, binding);
+      const changed = reportChangeSignal();
+      const receipts = binding ? conversations.senderReportEvents(paneId, binding) : [];
+      const pending = mailbox.poll(
+        receipts.length ? 0 : waitMs,
+        AbortSignal.any([changed, ...(signal ? [signal] : [])]),
+        binding,
+      );
       if (binding && !live) fleetChanges.touch();
-      return pending;
+      const events = await pending;
+      const current = await herdrRunner.get(paneId).catch(() => undefined);
+      if (!binding || inboundBinding(current) !== binding) return [];
+      return [...events, ...conversations.senderReportEvents(paneId, binding)].slice(0, 64);
     },
 
     async acknowledgeFleetSeatEvent(paneId, eventId) {
       shutdown.signal.throwIfAborted();
       const seatId = await herdrWatches.seatIdForPane(paneId);
       const native = await herdrRunner.get(paneId).catch(() => undefined);
+      const binding = native?.terminalId === seatId ? inboundBinding(native) : undefined;
+      if (eventId.startsWith("report:"))
+        return binding !== undefined && conversations.acknowledgeSenderReportEvent(paneId, binding, eventId);
       return (
         seatId !== undefined &&
         fleetSeatMailbox(

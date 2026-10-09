@@ -160,10 +160,12 @@ describe("a fleet link (VUH-1527)", () => {
         )
       ).status,
     ).toBe(200);
+    expect((await fetch(new Request(`http://127.0.0.1${original}/status`))).status).toBe(200);
     const ack = "/v1/fleet/seats/w8%3Ap3/events/seat-original/ack";
     expect((await fetch(new Request(`http://127.0.0.1${ack}`, { method: "POST" }))).status).toBe(200);
     for (const [method, path] of [
       ["POST", original],
+      ["POST", `${original}/status`],
       ["GET", ack],
       ["GET", `${original}/other`],
       ["GET", "/v1/fleet/seats/w8%3Ap3/messages/not-a-uuid"],
@@ -171,7 +173,7 @@ describe("a fleet link (VUH-1527)", () => {
       ["GET", "/v1/captain/seat-events/original/ack"],
     ] as const)
       expect((await fetch(new Request(`http://127.0.0.1${path}`, { method }))).status).toBe(404);
-    expect(inner).toHaveBeenCalledTimes(4);
+    expect(inner).toHaveBeenCalledTimes(5);
   });
 
   it("forwards only the remote loopback to the link listener", () => {

@@ -36,6 +36,8 @@ const LINK_ROUTE =
   /^\/v1\/fleet\/(?:seats\/[^/]+\/(?:events|hook|messages|peers|peer-messages|tool-catalog)|mcp)$/u;
 const LINK_RECEIPT =
   /^\/v1\/fleet\/seats\/[^/]+\/(?:messages|peer-messages)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
+const LINK_MESSAGE_STATUS =
+  /^\/v1\/fleet\/seats\/[^/]+\/messages\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/status$/iu;
 const LINK_EVENT_ACK = /^\/v1\/fleet\/seats\/[^/]+\/events\/[^/]+\/ack$/u;
 
 export function fleetLinkFetch<Rest extends unknown[]>(
@@ -44,7 +46,7 @@ export function fleetLinkFetch<Rest extends unknown[]>(
   return (request, ...rest) => {
     const path = new URL(request.url).pathname;
     return LINK_ROUTE.test(path) ||
-      (request.method === "GET" && LINK_RECEIPT.test(path)) ||
+      (request.method === "GET" && (LINK_RECEIPT.test(path) || LINK_MESSAGE_STATUS.test(path))) ||
       (request.method === "POST" && LINK_EVENT_ACK.test(path))
       ? fetch(request, ...rest)
       : Response.json({ error: "not_found" }, { status: 404 });

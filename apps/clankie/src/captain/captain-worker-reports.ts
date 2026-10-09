@@ -36,13 +36,23 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
         limit === undefined ? {} : { limit },
       );
     },
-    async acknowledge(authority: ConversationAuthority, ids: readonly string[]) {
+    async acknowledge(
+      authority: ConversationAuthority,
+      ids: readonly string[],
+      receipt?: { summary?: string | undefined; links?: string[] | undefined },
+    ) {
       await assertConversationAuthority(authority);
-      return ctx.conversations.acknowledgeInboundReports(authority.owner.conversationId, ids);
+      return ctx.conversations.acknowledgeInboundReports(authority.owner.conversationId, ids, receipt);
     },
   };
 
-  ctx.conversations.onInboundReportChange = ctx.onChange;
+  let reportChange = new AbortController();
+  ctx.conversations.onInboundReportChange = () => {
+    const previous = reportChange;
+    reportChange = new AbortController();
+    previous.abort();
+    ctx.onChange();
+  };
   function reportSummaries(
     conversationId?: string,
     native?: HerdrAgentSnapshot,
@@ -179,6 +189,7 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
   }
   return {
     workerReportActions,
+    reportChangeSignal: () => reportChange.signal,
     reportSummaries,
     conversationReportRunner,
     recoverWorkerReports,

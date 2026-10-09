@@ -1,0 +1,171 @@
+[
+  {
+    "at": "2026-10-09T04:49:21.145Z",
+    "method": "GET",
+    "path": "/v1/fleet/seats/w1%3Ap1/messages",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1
+    }
+  },
+  {
+    "at": "2026-10-09T04:49:21.391Z",
+    "method": "POST",
+    "path": "/v1/fleet/seats/w1%3Ap1/messages",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1,
+      "received": true,
+      "deliveryStage": "stored",
+      "deliveryId": "83c4fbae-b5f7-49b8-9e2f-b26fc763c539"
+    }
+  },
+  {
+    "at": "2026-10-09T04:49:21.404Z",
+    "method": "GET",
+    "path": "/v1/fleet/seats/w1%3Ap1/events",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1,
+      "events": [
+        {
+          "schemaVersion": 1,
+          "id": "report:83c4fbae-b5f7-49b8-9e2f-b26fc763c539:stored",
+          "kind": "message",
+          "conversationId": "global-default",
+          "source": "worker-report-receipt",
+          "content": "Report 83c4fbae-b5f7-49b8-9e2f-b26fc763c539: stored.\nReceipt only; no reply needed.",
+          "createdAt": "2026-10-09T04:49:21.342Z"
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-10-09T04:49:22.798Z",
+    "method": "POST",
+    "path": "/v1/fleet/seats/w1%3Ap1/events/report%3A83c4fbae-b5f7-49b8-9e2f-b26fc763c539%3Astored/ack",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1,
+      "acknowledged": true,
+      "eventId": "report:83c4fbae-b5f7-49b8-9e2f-b26fc763c539:stored",
+      "deliveryStage": "delivered"
+    }
+  },
+  {
+    "at": "2026-10-09T04:49:25.722Z",
+    "method": "GET",
+    "path": "/v1/fleet/seats/w1%3Ap1/messages/83c4fbae-b5f7-49b8-9e2f-b26fc763c539/status",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1,
+      "deliveryId": "83c4fbae-b5f7-49b8-9e2f-b26fc763c539",
+      "deliveryStage": "uncertain"
+    }
+  },
+  {
+    "at": "2026-10-09T04:49:30.383Z",
+    "method": "GET",
+    "path": "/v1/fleet/seats/w1%3Ap1/events",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1,
+      "events": [
+        {
+          "schemaVersion": 1,
+          "id": "report:83c4fbae-b5f7-49b8-9e2f-b26fc763c539:taken",
+          "kind": "message",
+          "conversationId": "global-default",
+          "source": "worker-report-receipt",
+          "content": "Report 83c4fbae-b5f7-49b8-9e2f-b26fc763c539: taken into a lead turn.\nReceipt only; no reply needed.",
+          "createdAt": "2026-10-09T04:49:30.329Z"
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-10-09T04:49:30.672Z",
+    "method": "POST",
+    "path": "/v1/fleet/seats/w1%3Ap1/events/report%3A83c4fbae-b5f7-49b8-9e2f-b26fc763c539%3Ataken/ack",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1,
+      "acknowledged": true,
+      "eventId": "report:83c4fbae-b5f7-49b8-9e2f-b26fc763c539:taken",
+      "deliveryStage": "delivered"
+    }
+  },
+  {
+    "at": "2026-10-09T04:49:36.800Z",
+    "method": "GET",
+    "path": "/v1/fleet/seats/w1%3Ap1/events",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1,
+      "events": [
+        {
+          "schemaVersion": 1,
+          "id": "report:83c4fbae-b5f7-49b8-9e2f-b26fc763c539:acknowledged",
+          "kind": "message",
+          "conversationId": "global-default",
+          "source": "worker-report-receipt",
+          "content": "Clankie acknowledged report 83c4fbae-b5f7-49b8-9e2f-b26fc763c539. Confirmed the native receipt flow.\nhttps://linear.app/vuhlp/issue/VUH-1898\nReceipt only; no reply needed.",
+          "createdAt": "2026-10-09T04:49:35.398Z"
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-10-09T04:49:38.599Z",
+    "method": "POST",
+    "path": "/v1/fleet/seats/w1%3Ap1/events/report%3A83c4fbae-b5f7-49b8-9e2f-b26fc763c539%3Aacknowledged/ack",
+    "status": 503,
+    "body": {
+      "error": "fleet_admission_unavailable",
+      "retryable": true,
+      "reason": "Clankie could not verify this local fleet request yet. Retry shortly; if it persists, ask the lead to inspect clankie fleet status."
+    }
+  },
+  {
+    "at": "2026-10-09T04:50:46.257Z",
+    "method": "GET",
+    "path": "/v1/fleet/seats/w1%3Ap1/events",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1,
+      "events": [
+        {
+          "schemaVersion": 1,
+          "id": "report:83c4fbae-b5f7-49b8-9e2f-b26fc763c539:acknowledged",
+          "kind": "message",
+          "conversationId": "global-default",
+          "source": "worker-report-receipt",
+          "content": "Clankie acknowledged report 83c4fbae-b5f7-49b8-9e2f-b26fc763c539. Confirmed the native receipt flow.\nhttps://linear.app/vuhlp/issue/VUH-1898\nReceipt only; no reply needed.",
+          "createdAt": "2026-10-09T04:49:35.398Z"
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-10-09T04:50:46.511Z",
+    "method": "POST",
+    "path": "/v1/fleet/seats/w1%3Ap1/events/report%3A83c4fbae-b5f7-49b8-9e2f-b26fc763c539%3Aacknowledged/ack",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1,
+      "acknowledged": true,
+      "eventId": "report:83c4fbae-b5f7-49b8-9e2f-b26fc763c539:acknowledged",
+      "deliveryStage": "delivered"
+    }
+  },
+  {
+    "at": "2026-10-09T04:50:56.897Z",
+    "method": "GET",
+    "path": "/v1/fleet/seats/w1%3Ap1/events",
+    "status": 200,
+    "body": {
+      "schemaVersion": 1,
+      "events": []
+    }
+  }
+]

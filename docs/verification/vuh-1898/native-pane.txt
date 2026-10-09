@@ -1,0 +1,60 @@
+❯ VUH-1898 isolated live proof. Call message_clankie exactly once with text "VUH-1898 native sender proof; acknowledge
+  with the VUH-1898 issue link." Immediately call message_clankie_status with its exact returned deliveryId. Report the
+  result, then stay available for receipt events. Receipt events require no reply or further tool call. Do not edit
+  files or contact anything else.
+
+  Called plugin:clankie-worker:worker
+
+← worker: Report 83c4fbae-b5f7-49b8-9e2f-b26fc763c539: stored. Receip…
+
+  Called plugin:clankie-worker:worker
+
+⏺ I sent the message to Clankie once, and the status check came back "uncertain" even though the send was confirmed as
+  stored.
+
+  - message_clankie: returned received: true, deliveryStage: "stored", deliveryId: 83c4fbae-b5f7-49b8-9e2f-b26fc763c539.
+  - Receipt event: a "stored" receipt for that deliveryId came in at 2026-10-09T04:49:21Z.
+  - message_clankie_status: called right after with that exact deliveryId, it returned deliveryStage: "uncertain".
+
+  A status that drops from "stored" to "uncertain" for the same message may be a bug in how the status lookup reads
+  delivery state, which looks relevant to VUH-1898. I didn't resend or try to reconcile, since the run allowed only one
+  call to each tool. No files were edited and nothing else was contacted.
+
+  I'm still listening for receipt events and won't reply to them.
+
+✻ Baked for 17s · done 11:49 PM
+
+← worker: Report 83c4fbae-b5f7-49b8-9e2f-b26fc763c539: taken into a l…
+
+⏺ Receipt noted: at 04:49:30Z, message 83c4fbae… was taken into a lead turn, which is later than the "uncertain" result
+  the status check gave a few seconds earlier.
+
+✻ Cogitated for 5s · done 11:49 PM
+
+← worker: Clankie acknowledged report 83c4fbae-b5f7-49b8-9e2f-b26fc76…
+
+⏺ Clankie acknowledged message 83c4fbae… at 04:49:35Z with the issue link https://linear.app/vuhlp/issue/VUH-1898, so
+  the proof is complete. Receipts came in order: stored, then taken into a lead turn, then acknowledged. The one anomaly
+  is still the status check returning "uncertain" in between.
+
+✻ Cooked for 4s · done 11:49 PM
+
+⏺ clankie-worker: Native claude client catalog differs from this Clankie bridge. Missing: list_fleet_seats,
+  message_peer Run /reload-plugins in this Claude Code pane to reload Clankie's bridge and recheck its tools.
+
+❯ /mcp
+  ⎿  Reconnected to plugin:clankie-worker:worker.
+
+← worker: Clankie acknowledged report 83c4fbae-b5f7-49b8-9e2f-b26fc76…
+
+⏺ After the reconnect, the "acknowledged" receipt for 83c4fbae… arrived again with the same event_id
+  (report:…:acknowledged) and timestamp. It's a duplicate of one already received, not a new event, so the reconnect
+  replayed it instead of skipping it. That may be worth noting for VUH-1898.
+
+✻ Cogitated for 2s · done 11:50 PM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⚠ clankie-worker: Native claude client catalog differs from this Clankie bridge. Missing: list_fleet_seats, message…
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents

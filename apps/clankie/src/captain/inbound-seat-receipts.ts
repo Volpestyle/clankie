@@ -56,7 +56,16 @@ export class InboundSeatReceipts {
   /** Progress reads never reconcile fences, acknowledge reports, or enqueue work. */
   public status(paneId: string, binding: string, deliveryId: string): FleetSeatMessageStatus | undefined {
     const accepted = this.conversations.inboundAcceptance(deliveryId);
-    if (!accepted || accepted.paneId !== paneId || accepted.binding !== binding) return undefined;
+    if (!accepted) {
+      const pending = this.fence.pending(`id:${deliveryId}`);
+      const active = this.active.get(deliveryId);
+      if (pending?.paneId === paneId && pending.sessionId === binding)
+        return { schemaVersion: 1, deliveryId, deliveryStage: pending.notSent ? "unavailable" : "uncertain" };
+      if (active?.paneId === paneId && active.delivery.binding === binding)
+        return { schemaVersion: 1, deliveryId, deliveryStage: "uncertain" };
+      return undefined;
+    }
+    if (accepted.paneId !== paneId || accepted.binding !== binding) return undefined;
     const report = accepted.reportDelivery;
     return {
       schemaVersion: 1,
@@ -264,7 +273,16 @@ export class InboundSeatReceipts {
         this.conversations.inboundAcceptance(delivery.id)
       )
         return receipt;
-      return { ...receipt, deliveryStage: "unavailable" };
+      if (
+        !this.fence.sealInboundAbsence(paneId, {
+          messageId: delivery.id,
+          paneId,
+          sessionId: delivery.binding,
+          fingerprint: receipt.fingerprint,
+        })
+      )
+        return receipt;
+      return { ...receipt, deliveryStage: "unavailable", definitive: "not_sent" };
     } catch {
       return receipt;
     }

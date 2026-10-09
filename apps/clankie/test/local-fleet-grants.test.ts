@@ -213,6 +213,11 @@ it("admits exact linked receipt and ACK routes only with the same proven local p
     localFleet: local,
     authenticateOperator: async () => undefined,
     captain: createStubCaptain({
+      fleetSeatMessageStatus: async (_pane, deliveryId) => ({
+        schemaVersion: 1,
+        deliveryId,
+        deliveryStage: "stored",
+      }),
       fleetSeatMessageBinding: async () => binding,
       reconcileFleetSeatMessage: async (pane, delivery) => {
         reconciled.push(`${pane}/${delivery.id}`);
@@ -241,6 +246,10 @@ it("admits exact linked receipt and ACK routes only with the same proven local p
   try {
     expect((await app.app.fetch(request(messagePath))).status).toBe(401);
     expect((await linked(messagePath)).status).toBe(200);
+    const statusPath = `/v1/fleet/seats/w1%3Ap1/messages/${deliveryId}/status`;
+    expect((await linked(statusPath)).status).toBe(200);
+    expect((await linked(statusPath, "GET", "w1:p2")).status).toBe(403);
+    expect((await linked(statusPath, "POST")).status).toBe(404);
     expect((await linked(ackPath, "POST")).status).toBe(200);
     expect(reconciled).toEqual([`w1:p1/${deliveryId}`]);
     expect(acknowledged).toEqual(["w1:p1/seat-original"]);

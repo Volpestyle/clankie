@@ -297,3 +297,68 @@ it("does not dispatch a queued report after its recipient has explicitly read it
   expect(invoked).toEqual(["held turn"]);
   expect(store.inboundReports()).toEqual([]);
 });
+
+it.each(["unadopted", "adoption"] as const)(
+  "retains immediately resolvable %s receipts and sender stage events across reconnect",
+  async (source) => {
+    const root = fixtureRoot();
+    const directory = join(root, "conversations");
+    const store = new ConversationStore(directory, async () => {});
+    const receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+    const delivery = { id: randomUUID(), binding: "a".repeat(64) };
+    const refused = receipts.refuse(
+      "refused-pane",
+      { id: randomUUID(), binding: delivery.binding },
+      "refused",
+    );
+    expect(receipts.status("refused-pane", delivery.binding, refused.deliveryId)).toMatchObject({
+      deliveryStage: "unavailable",
+    });
+    expect(receipts.status("pane", delivery.binding, refused.deliveryId)).toBeUndefined();
+    const sent = receipts.accept("pane", delivery, "handoff", "handoff", "global-default", async () => {}, {
+      source,
+    });
+    expect(sent.received).toBe(true);
+    expect(receipts.status("pane", delivery.binding, sent.deliveryId)).toMatchObject({
+      deliveryStage: "stored",
+    });
+    expect(receipts.status("other", delivery.binding, sent.deliveryId)).toBeUndefined();
+    expect(receipts.status("pane", "b".repeat(64), sent.deliveryId)).toBeUndefined();
+    const stored = store.senderReportEvents("pane", delivery.binding);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.content).toContain("stored");
+    expect(store.senderReportEvents("pane", "b".repeat(64))).toEqual([]);
+    expect(store.acknowledgeSenderReportEvent("pane", "b".repeat(64), stored[0]!.id)).toBe(false);
+    expect(store.acknowledgeSenderReportEvent("pane", delivery.binding, stored[0]!.id)).toBe(true);
+    expect(store.inboundReports()).toHaveLength(1);
+    store.recordInboundReportDelivery(sent.deliveryId, "consumed");
+    const taken = store.senderReportEvents("pane", delivery.binding);
+    store.recordInboundReportDelivery(sent.deliveryId, "uncertain");
+    expect(store.senderReportEvents("pane", delivery.binding)).toEqual(taken);
+    const page = store.readInboundReports("global-default");
+    expect(store.senderReportEvents("pane", delivery.binding)[0]?.content).toContain(
+      "taken into a lead turn",
+    );
+    const link = "https://linear.app/vuhlp/issue/VUH-1898";
+    expect(
+      store.acknowledgeInboundReports("global-default", page.ackDeliveryIds, {
+        summary: "Filed the follow-up.",
+        links: [link],
+      }),
+    ).toBe(true);
+    const events = store.senderReportEvents("pane", delivery.binding);
+    expect(events).toHaveLength(2);
+    expect(events[1]?.content).toContain("acknowledged");
+    expect(events[1]?.content).toContain(link);
+    expect(events[1]?.content).toContain("Filed the follow-up.");
+    await store.close();
+    const reopened = new ConversationStore(directory, async () => {});
+    expect(reopened.senderReportEvents("pane", delivery.binding)).toEqual(events);
+    for (const event of events)
+      expect(reopened.acknowledgeSenderReportEvent("pane", delivery.binding, event.id)).toBe(true);
+    expect(reopened.senderReportEvents("pane", delivery.binding)).toEqual([]);
+    expect(reopened.acknowledgeInboundReports("global-default", page.ackDeliveryIds)).toBe(true);
+    expect(reopened.senderReportEvents("pane", delivery.binding)).toEqual([]);
+    await reopened.close();
+  },
+);

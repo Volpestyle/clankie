@@ -137,11 +137,30 @@ it("accepts the returned JSON page verbatim and preserves conversation binding",
     }),
   ).rejects.toThrow("different conversation");
   expect(
-    await runAgentsCommand(["reports", "ack", "--json-stdin", "--conversation", "global-default"], {
-      env: f.env,
-      stdin: Readable.from([JSON.stringify(page)]),
-    }),
+    await runAgentsCommand(
+      [
+        "reports",
+        "ack",
+        "--json-stdin",
+        "--conversation",
+        "global-default",
+        "--receipt",
+        JSON.stringify({
+          summary: "Follow-up recorded.",
+          links: ["https://linear.app/vuhlp/issue/VUH-1898"],
+        }),
+      ],
+      {
+        env: f.env,
+        stdin: Readable.from([JSON.stringify(page)]),
+      },
+    ),
   ).toEqual({ conversationId: "global-default", acknowledged: 1 });
+  const receipt = f.store
+    .senderReportEvents("w3Z:pCass", "a".repeat(64))
+    .find((event) => event.id.endsWith(":acknowledged"));
+  expect(receipt?.content).toContain("Follow-up recorded.");
+  expect(receipt?.content).toContain("https://linear.app/vuhlp/issue/VUH-1898");
 });
 
 it("retires 165 selected migrated reports only as the operator, while preserving a fresh unread report", async () => {

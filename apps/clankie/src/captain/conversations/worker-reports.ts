@@ -1,5 +1,6 @@
 import {
   type DeliveryStage,
+  type OperatorSeatEvent,
   type SubmitOperatorConversationTurnResult,
   type WorkerReportPage,
 } from "@clankie/protocol";
@@ -117,7 +118,12 @@ export function readInboundReports(
   );
   for (const report of items) {
     const receipt = meta.inboundAcceptances![report.deliveryId]!;
-    receipt.reportDelivery = { ...receipt.reportDelivery!, offeredAt: now };
+    receipt.reportDelivery = {
+      ...receipt.reportDelivery!,
+      offeredAt: now,
+      takenAt: receipt.reportDelivery?.takenAt ?? now,
+      senderNotifications: true,
+    };
   }
   if (items.length > 0) {
     try {
@@ -141,7 +147,10 @@ export function acknowledgeInboundReports(
   ctx: ConversationStore,
   conversationId: string,
   deliveryIds: readonly string[],
-  options: { reviewedHistory?: boolean } = {},
+  options: {
+    reviewedHistory?: boolean;
+    receipt?: { summary?: string | undefined; links?: string[] | undefined } | undefined;
+  } = {},
 ): boolean {
   const meta = ctx["metas"].get(conversationId);
   if (!meta || deliveryIds.length === 0 || deliveryIds.length > (options.reviewedHistory ? 1000 : 100))
@@ -153,10 +162,13 @@ export function acknowledgeInboundReports(
     return false;
   const before = structuredClone(meta.inboundAcceptances);
   for (const receipt of receipts) {
+    if (receipt!.reportDelivery?.state === "read") continue;
     receipt!.reportDelivery = {
       ...receipt!.reportDelivery!,
       state: "read",
+      ...(!options.reviewedHistory ? { senderNotifications: true } : {}),
       readAt: new Date().toISOString(),
+      ...(options.receipt === undefined ? {} : { acknowledgment: options.receipt }),
     };
   }
   try {
@@ -193,6 +205,9 @@ export function recordInboundReportDelivery(
     ...before,
     state,
     stage,
+    ...(["consumed", "responded"].includes(stage)
+      ? { takenAt: before?.takenAt ?? new Date().toISOString() }
+      : {}),
     ...(state === "delivered" ? { deliveredAt: new Date().toISOString() } : {}),
   };
   try {
@@ -227,4 +242,72 @@ export function retryInboundReport(
     origin: "message",
     inboundReceipt: original,
   });
+}
+
+/** Sender events are retained with the original acceptance, independently of a live bridge. */
+export function senderReportEvents(
+  ctx: ConversationStore,
+  paneId: string,
+  binding: string,
+): OperatorSeatEvent[] {
+  return inboundReports(ctx, undefined, { includeRead: true })
+    .flatMap((report) => {
+      const delivery = report.reportDelivery;
+      if (report.paneId !== paneId || report.binding !== binding || !delivery.senderNotifications) return [];
+      const takenAt =
+        delivery.takenAt ??
+        delivery.offeredAt ??
+        (["consumed", "responded"].includes(delivery.stage ?? "") ? delivery.deliveredAt : undefined);
+      const stages = [
+        ["stored", report.acceptedAt],
+        ["taken", takenAt],
+        ["acknowledged", delivery.readAt],
+      ] as const;
+      return stages.flatMap(([stage, at]) => {
+        if (!at || delivery.senderEventAcks?.includes(stage)) return [];
+        const receipt = delivery.acknowledgment;
+        const content =
+          stage === "acknowledged"
+            ? `Clankie acknowledged report ${report.deliveryId}.${receipt?.summary ? ` ${receipt.summary}` : ""}${receipt?.links?.length ? `\n${receipt.links.join("\n")}` : ""}`
+            : `Report ${report.deliveryId}: ${stage === "stored" ? "stored" : "taken into a lead turn"}.`;
+        return [
+          {
+            schemaVersion: 1 as const,
+            id: `report:${report.deliveryId}:${stage}`,
+            kind: "message" as const,
+            conversationId: report.conversationId,
+            source: "worker-report-receipt",
+            content: `${content}\nReceipt only; no reply needed.`,
+            createdAt: at,
+          },
+        ];
+      });
+    })
+    .slice(0, 64);
+}
+
+/** Transport acknowledgment only: it never acknowledges the report on the lead's behalf. */
+export function acknowledgeSenderReportEvent(
+  ctx: ConversationStore,
+  paneId: string,
+  binding: string,
+  eventId: string,
+): boolean {
+  const match = /^report:([a-f0-9-]{36}):(stored|taken|acknowledged)$/u.exec(eventId);
+  if (!match) return false;
+  const meta = [...ctx["metas"].values()].find((entry) => entry.inboundAcceptances?.[match[1]!]);
+  const report = meta?.inboundAcceptances?.[match[1]!];
+  if (!meta || !report || report.paneId !== paneId || report.binding !== binding) return false;
+  const stage = match[2] as "stored" | "taken" | "acknowledged";
+  if (report.reportDelivery?.senderEventAcks?.includes(stage)) return true;
+  if (!senderReportEvents(ctx, paneId, binding).some((event) => event.id === eventId)) return false;
+  const previous = report.reportDelivery;
+  report.reportDelivery = { ...previous!, senderEventAcks: [...(previous?.senderEventAcks ?? []), stage] };
+  try {
+    ctx["saveMeta"](meta);
+  } catch (error) {
+    report.reportDelivery = previous;
+    throw error;
+  }
+  return true;
 }

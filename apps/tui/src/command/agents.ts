@@ -28,8 +28,8 @@ const AGENTS_USAGE =
   "       clankie agents message-status DELIVERY_ID (current native seat)\n" +
   "       clankie agents readopt SEAT --conversation ID\n" +
   "       clankie agents reports --conversation ID [--limit N]\n" +
-  "       clankie agents reports ack DELIVERY_ID... --conversation ID\n" +
-  "       clankie agents reports ack --json-stdin --conversation ID\n" +
+  "       clankie agents reports ack DELIVERY_ID... --conversation ID [--receipt JSON]\n" +
+  "       clankie agents reports ack --json-stdin --conversation ID [--receipt JSON]\n" +
   "       clankie agents reports ack-history DELIVERY_ID... --conversation ID\n" +
   "       clankie agents efficiency [review SEAT --json-stdin] --conversation ID\n" +
   "       clankie agents tidy-worktrees --repo PATH [--merged-into REF]\n" +
@@ -150,6 +150,7 @@ export async function runAgentsCommand(
       args[0] === "efficiency" ? ["--conversation"] : ["--repo", "--merged-into"],
     );
     if (reviewing !== jsonInput) throw new Error(AGENTS_USAGE);
+    if (values.has("--receipt") && args[1] !== "ack") throw new Error(AGENTS_USAGE);
     const conversationId = values.get("--conversation");
     const repository = values.get("--repo");
     if (args[0] === "efficiency" ? !conversationId : !repository) throw new Error(AGENTS_USAGE);
@@ -210,7 +211,7 @@ export async function runAgentsCommand(
     if (first < 0) throw new Error(AGENTS_USAGE);
     const values = flags(
       args.slice(first),
-      args[0] === "reports" ? ["--conversation", "--limit"] : ["--conversation"],
+      args[0] === "reports" ? ["--conversation", "--limit", "--receipt"] : ["--conversation"],
     );
     const conversationId = values.get("--conversation");
     if (!conversationId) throw new Error("Worker ownership and reports require --conversation ID");
@@ -232,6 +233,7 @@ export async function runAgentsCommand(
     }
     if (args[1] === "ack" || args[1] === "ack-history") {
       if ((jsonInput ? first !== 2 : first < 3) || values.has("--limit")) throw new Error(AGENTS_USAGE);
+      if (args[1] === "ack-history" && values.has("--receipt")) throw new Error(AGENTS_USAGE);
       let deliveryIds = args.slice(2, first);
       if (jsonInput) {
         const page = WorkerReportPageSchema.parse(JSON.parse(await text(options.stdin ?? process.stdin)));
@@ -246,6 +248,7 @@ export async function runAgentsCommand(
         schemaVersion: 1,
         conversationId,
         deliveryIds,
+        ...(values.has("--receipt") ? { receipt: JSON.parse(values.get("--receipt")!) } : {}),
       });
       if (!parsed.success)
         throw new Error(
@@ -256,7 +259,11 @@ export async function runAgentsCommand(
         acknowledged:
           args[1] === "ack-history"
             ? await client.acknowledgeWorkerReportHistory!(conversationId, deliveryIds)
-            : await client.acknowledgeWorkerReports!(conversationId, deliveryIds),
+            : await client.acknowledgeWorkerReports!(
+                conversationId,
+                deliveryIds,
+                parsed.data.op === "acknowledge_worker_reports" ? parsed.data.receipt : undefined,
+              ),
       };
     }
     if (first !== 1 || jsonInput) throw new Error(AGENTS_USAGE);
