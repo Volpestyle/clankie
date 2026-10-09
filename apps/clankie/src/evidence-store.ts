@@ -25,6 +25,7 @@ import {
   EvidenceUploadRequestSchema,
   evidenceLink,
   type EvidenceActor,
+  type EvidenceDevicePreview,
   type EvidenceFetchResponse,
   type EvidenceReceipt,
   type EvidenceRecord,
@@ -408,6 +409,28 @@ class EvidenceRefusal extends Error {
 
 const SIGNED_URL_MS = EVIDENCE_SIGNED_URL_MAX_MS;
 
+/** Safe raster types from their magic; SVG/HTML are never served from the service origin. */
+function rasterType(bytes: Buffer): string | undefined {
+  if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
+  if (bytes[0] === 255 && bytes[1] === 216) return "image/jpeg";
+  if (bytes.subarray(0, 3).toString() === "GIF") return "image/gif";
+  return undefined;
+}
+
+/** Valid UTF-8 without control bytes other than whitespace, else undefined. */
+function utf8Text(bytes: Buffer): string | undefined {
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    for (let index = 0; index < text.length; index++) {
+      const code = text.charCodeAt(index);
+      if (code < 32 && code !== 9 && code !== 10 && code !== 13) return undefined;
+    }
+    return text;
+  } catch {
+    return undefined;
+  }
+}
+
 export class EvidenceStore {
   /** Per-process: a restart invalidates every outstanding link, and none outlives 15 minutes anyway. */
   private readonly signingKey = randomBytes(32);
@@ -578,6 +601,27 @@ export class EvidenceStore {
     return { sha256, size: blob.size, url: link.url, expiresAt: link.expiresAt };
   }
 
+  /**
+   * A small look at recorded bytes for a paired device: a safe raster image as
+   * base64, or UTF-8 text. Never a link to this origin, never partial images.
+   */
+  async devicePreview(sha256: string): Promise<EvidenceDevicePreview> {
+    await this.fetch({ sha256 });
+    const blob = await this.blobs.open(sha256);
+    if (!blob) throw new EvidenceRefusal(404, "unknown_object");
+    if (blob.size > EVIDENCE_PREVIEW_MAX_BYTES) {
+      await blob.body.cancel();
+      return { sha256, available: false, reason: "too_large" };
+    }
+    const bytes = Buffer.from(await new Response(blob.body).arrayBuffer());
+    const image = rasterType(bytes);
+    if (image) return { sha256, available: true, contentType: image, data: bytes.toString("base64") };
+    const text = utf8Text(bytes);
+    return text === undefined
+      ? { sha256, available: false, reason: "not_previewable" }
+      : { sha256, available: true, contentType: "text/plain", text };
+  }
+
   async list(filter: { issueKey: string } | { commit: string }): Promise<EvidenceRecord[]> {
     return (await this.metadata.listRecords(filter)).map((record) => ({
       ...record,
@@ -731,14 +775,7 @@ export function createEvidenceRoutes(
         return context.json({ sha256: hash.data, available: false, reason: "too_large" });
       }
       const bytes = Buffer.from(await new Response(blob.body).arrayBuffer());
-      // Detect safe raster types from their magic, never serve SVG/HTML from the service origin.
-      const contentType = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-        ? "image/png"
-        : bytes[0] === 255 && bytes[1] === 216
-          ? "image/jpeg"
-          : bytes.subarray(0, 3).toString() === "GIF"
-            ? "image/gif"
-            : undefined;
+      const contentType = rasterType(bytes);
       return context.json(
         contentType
           ? { sha256: hash.data, available: true, contentType, data: bytes.toString("base64") }

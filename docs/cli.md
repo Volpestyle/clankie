@@ -1804,6 +1804,11 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   names none), with body, attachments and reply target. Linear and the local
   tracker keep activity; Markdown and GitHub repos answer unavailable. Devices
   read the same through `work_item_activity`.
+  Paired devices also read an issue's evidence store records through
+  `evidence_records` (by issue key) and a small look at one blob through
+  `evidence_preview`: an image up to 64 KiB as base64 or UTF-8 text, never a
+  signed link to the service. The bearer `/v1/evidence/*` routes stay
+  operator-only.
 - `clankie work create TITLE [--summary S] [--owner NAME] [--criterion C]...
 [--status S] [--priority 0..4]`.
 - `clankie work update ID [--status S] [--owner NAME | --no-owner] [--title T]

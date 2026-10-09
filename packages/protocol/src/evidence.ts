@@ -165,6 +165,27 @@ export const EvidenceRecentResponseSchema = z
   })
   .strict();
 export type EvidenceRecentResponse = z.infer<typeof EvidenceRecentResponseSchema>;
+/**
+ * What a paired device may see of one recorded blob (VUH-1936): a small image
+ * as base64, or small UTF-8 text (a log, a JSON proof) as text. Anything
+ * larger, or binary, is unavailable with a reason; devices never get a link
+ * to the service's own origin.
+ */
+export const EvidenceDevicePreviewSchema = z
+  .object({
+    sha256: EvidenceSha256Schema,
+    available: z.boolean(),
+    contentType: z.string().max(127).optional(),
+    data: z
+      .string()
+      .max(Math.ceil((EVIDENCE_PREVIEW_MAX_BYTES * 4) / 3) + 4)
+      .optional(),
+    text: z.string().max(EVIDENCE_PREVIEW_MAX_BYTES).optional(),
+    reason: z.enum(["too_large", "not_previewable"]).optional(),
+  })
+  .strict();
+export type EvidenceDevicePreview = z.infer<typeof EvidenceDevicePreviewSchema>;
+
 /** Images at or below the cap only; larger images return unavailable, never partial image bytes. */
 export const EvidencePreviewResponseSchema = z
   .object({

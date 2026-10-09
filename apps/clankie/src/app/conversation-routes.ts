@@ -494,6 +494,44 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
       }
     }
+    // The evidence store's records and small previews for paired devices (VUH-1936);
+    // the bearer HTTP routes stay operator-only.
+    if (parsed.data.op === "evidence_records") {
+      try {
+        const store = ctx.dependencies.evidenceStore;
+        if (!store) throw new Error("No evidence store on this host");
+        const records = await store.list({ issueKey: parsed.data.issueKey });
+        return context.json({
+          op: "evidence_records",
+          schemaVersion: 1,
+          result: { outcome: "ready", records: records.slice(-500) },
+        });
+      } catch {
+        return context.json({
+          op: "evidence_records",
+          schemaVersion: 1,
+          result: { outcome: "unavailable", message: "This Clankie’s evidence can’t be read right now." },
+        });
+      }
+    }
+    if (parsed.data.op === "evidence_preview") {
+      try {
+        const store = ctx.dependencies.evidenceStore;
+        if (!store) throw new Error("No evidence store on this host");
+        const preview = await store.devicePreview(parsed.data.sha256);
+        return context.json({
+          op: "evidence_preview",
+          schemaVersion: 1,
+          result: { outcome: "ready", ...preview },
+        });
+      } catch {
+        return context.json({
+          op: "evidence_preview",
+          schemaVersion: 1,
+          result: { outcome: "unavailable", message: "That evidence can’t be shown here." },
+        });
+      }
+    }
     if (parsed.data.op === "work_item_activity") {
       try {
         if (!ctx.dependencies.workItems) throw new Error("Work tracking is not running on this host");

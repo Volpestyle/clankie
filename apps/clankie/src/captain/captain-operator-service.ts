@@ -874,6 +874,8 @@ export function createOperatorService(
       request.op === "work_repos" ||
       request.op === "work_project" ||
       request.op === "work_item_activity" ||
+      request.op === "evidence_records" ||
+      request.op === "evidence_preview" ||
       request.op === "work_items" ||
       request.op === "work_item_write" ||
       request.op === "work_item_write_receipt"
