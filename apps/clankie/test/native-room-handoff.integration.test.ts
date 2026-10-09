@@ -69,7 +69,15 @@ describe("native room handoff through the real MCP surface", () => {
       const endpoint = createLaneMcpEndpoint({
         captain: { laneToolBank: async () => ({ lane: "operator", tools: handoffs.tools("parent") }) },
       });
-      const server = serve({ fetch: (request) => endpoint.handle(request, "operator", "parent"), port: 0 });
+      const server = serve({
+        fetch: (request) => endpoint.handle(request, "operator", "parent"),
+        hostname: "127.0.0.1",
+        port: 0,
+      });
+      await new Promise<void>((resolve, reject) => {
+        server.once("listening", resolve);
+        server.once("error", reject);
+      });
       const address = server.address();
       if (address === null || typeof address === "string") throw new Error("No HTTP test address");
       const client = new Client({ name: "native-room-test", version: "1" });
