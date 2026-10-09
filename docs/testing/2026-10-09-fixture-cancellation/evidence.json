@@ -20,6 +20,12 @@
       "url": "clankie://evidence/sha256/0e1bc2c7f10e12e106a4ff6414cc714f5dca9e80cf20365bc4921eb06c17a6ea"
     },
     {
+      "path": "artifacts/paired-current-proof.json",
+      "size": 73557,
+      "sha256": "c58313ca5a1da82bf5226dc4d17c8044dd76bf49f5be11dd118365fa2cac92c9",
+      "url": "clankie://evidence/sha256/c58313ca5a1da82bf5226dc4d17c8044dd76bf49f5be11dd118365fa2cac92c9"
+    },
+    {
       "path": "artifacts/proof-metadata.json",
       "size": 50555,
       "sha256": "c61f419d9fd0feef858f9dfe3df27a9f0dbf97f604c32876d55e33920e56fc98",

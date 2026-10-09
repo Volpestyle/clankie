@@ -1,8 +1,9 @@
 # Fixture cancellation and full-run ordering (VUH-1938)
 
-Work in progress. The lead revised acceptance to one complete no-bail root
-run, three concurrent repeats of the affected files inside one heavy permit,
-then the root `check:landing`. The native EBADF cause remains unresolved.
+The lead bounded acceptance to the completed no-bail root run, one three-round
+heavy-process comparison against the rebased main `501922c9`, then one root
+`check:landing`. Each round starts the two arms simultaneously inside one
+heavy permit, with `VITEST_MAX_WORKERS=1` per arm. Native EBADF remains unresolved.
 
 ## Causes and boundaries
 
@@ -73,7 +74,7 @@ original named cases passed; contention took 40.90 seconds. Failures were:
 - The new private-group cancellation case encountered an uncertain native
   identity read after teardown started terminating its processes. Cleanup now
   waits for a confirmed native identity or exit within the existing wait bound;
-  unknown is never treated as exited. This correction still needs repeated proof.
+  unknown is never treated as exited. The corrected cancellation case passed in every later affected-file repeat.
 - The unchanged native-parent replacement case (already taken: true) exhausted
   its default one-second outbox-journal poll with `ENOENT`. Exactly that case
   passed alone on both head `3e0856e7` and base `536263c9` (one selected case
@@ -93,7 +94,31 @@ awaits stderr drainage and includes that output on failure. These isolates do
 not establish a fix for the earlier exit. All original named cases and new
 cancellation cases passed in each first attempt.
 
-Three complete affected-file repeats with the corrected bound and mandatory
-root `check:landing` remain pending. No timeout raises,
+The corrected concurrent affected-file repeats retained 102/102, 102/102 and
+101/102. The third failure occurred before the termination test could observe
+its initial command receipt; termination had not been sent. The assertion now
+reports drained command stderr and private admission queue/phase on this boundary.
+All original named cases and cancellation cases passed in all three repeats.
+
+The final paired experiment used fixed main `501922c9` and head `3b59bc46`.
+Both arms started within one millisecond in each of three sequential rounds,
+with one Vitest worker per arm inside one heavy permit. Base passed 12/12 and
+head passed 13/13 in all three rounds; source remained stable. The additional
+head case exercises private-group cancellation. Before/after load samples were
+healthy (0.59–1.45 per core), with 52,369–54,754 MiB available; these samples
+do not establish per-case peak load. The paired run detected no head-only
+failure, but did not reproduce or establish the cause of the earlier startup
+flake. That gap is tracked as [VUH-1956](https://linear.app/vuhlp/issue/VUH-1956).
+
+The first control attempt had already admitted against `909ee29b` when the
+lead corrected the base to `501922c9`. Its source changed during the second
+round; the scheduler stopped before round three, existing children finished
+and owned groups were cleaned up. That attempt is discarded evidence, never
+acceptance. The corrected three-round experiment above used a fixed base.
+
+The root landing gate result is attached to [VUH-1938](https://linear.app/vuhlp/issue/VUH-1938)
+with its actual exit, checked HEAD, fixed base and stable-source result.
+Earlier failed full/repeat runs remain failures in the evidence manifest.
+No timeout raises,
 new skips, manual evals, live capacity edits or simulator boots are part of this
 work.
