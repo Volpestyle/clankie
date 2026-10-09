@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
-import { mkdtemp, readFile, rm, writeFile, access } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -247,10 +247,11 @@ describe("machine shared heavy permits with actual OS children", () => {
   it("passes bounded tool concurrency through real commands and nested permits", async () => {
     const f = await fixture();
     try {
+      // VITEST_MAX_WORKERS, TURBO_CONCURRENCY, CARGO_BUILD_JOBS, GOMAXPROCS, MAKEFLAGS (VUH-1981).
       for (const [vitest, turbo, expected] of [
-        ["", "", ["4", "4"]],
-        ["99", "100%", ["4", "4"]],
-        ["2", "1", ["2", "1"]],
+        ["", "", ["4", "4", "4", "4", "-j4"]],
+        ["99", "100%", ["4", "4", "4", "4", "-j4"]],
+        ["2", "1", ["2", "1", "2", "1", "-j2"]],
       ] as const) {
         const receipt = join(f.directory, "parallelism.json");
         const child = f.own(() =>
@@ -266,13 +267,20 @@ describe("machine shared heavy permits with actual OS children", () => {
               "nested-parallelism",
               process.execPath,
               "-e",
-              "require('node:fs').writeFileSync(process.argv[1], JSON.stringify([process.env.VITEST_MAX_WORKERS, process.env.TURBO_CONCURRENCY]))",
+              "const e=process.env;require('node:fs').writeFileSync(process.argv[1], JSON.stringify([e.VITEST_MAX_WORKERS, e.TURBO_CONCURRENCY, e.CARGO_BUILD_JOBS, e.GOMAXPROCS, e.MAKEFLAGS]))",
               receipt,
             ],
             {
               detached: true,
               stdio: "ignore",
-              env: { ...process.env, VITEST_MAX_WORKERS: vitest, TURBO_CONCURRENCY: turbo },
+              env: {
+                ...process.env,
+                VITEST_MAX_WORKERS: vitest,
+                TURBO_CONCURRENCY: turbo,
+                CARGO_BUILD_JOBS: vitest,
+                GOMAXPROCS: turbo === "100%" ? "64" : turbo,
+                MAKEFLAGS: vitest === "" ? "" : `-j${vitest}`,
+              },
             },
           ),
         );
@@ -280,6 +288,52 @@ describe("machine shared heavy permits with actual OS children", () => {
         expect(JSON.parse(await readFile(receipt, "utf8"))).toEqual(expected);
         expect((await f.governor.snapshot()).capacity.used).toBe(0);
       }
+    } finally {
+      await f.close();
+    }
+  }, 30_000);
+  it("bounds an xcodebuild's compile fan-out to the slot unless it names its own -jobs", async () => {
+    const f = await fixture();
+    try {
+      // A real executable named xcodebuild that records the argv it was given.
+      const bin = join(f.directory, "bin");
+      await mkdir(bin);
+      const xcodebuild = join(bin, "xcodebuild");
+      await writeFile(
+        xcodebuild,
+        `#!${process.execPath}\nrequire("node:fs").writeFileSync(process.argv[2] === "-jobs" ? process.argv[4] : process.argv[2], JSON.stringify(process.argv.slice(2)))\n`,
+        { mode: 0o755 },
+      );
+      for (const [args, expected] of [
+        [["argv-default.json"], ["argv-default.json", "-jobs", "4"]],
+        [
+          ["-jobs", "2", "argv-explicit.json"],
+          ["-jobs", "2", "argv-explicit.json"],
+        ],
+      ] as const) {
+        const receipt = join(f.directory, args.at(-1)!);
+        const child = f.own(() =>
+          spawn(
+            process.execPath,
+            [
+              driver,
+              f.directory,
+              "xcodebuild",
+              xcodebuild,
+              ...args.map((arg) => (arg.endsWith(".json") ? receipt : arg)),
+            ],
+            {
+              detached: true,
+              stdio: "ignore",
+            },
+          ),
+        );
+        expect(await new Promise((resolve) => child.once("exit", resolve))).toBe(0);
+        expect(JSON.parse(await readFile(receipt, "utf8"))).toEqual(
+          expected.map((arg) => (arg.endsWith(".json") ? receipt : arg)),
+        );
+      }
+      expect((await f.governor.snapshot()).capacity.used).toBe(0);
     } finally {
       await f.close();
     }

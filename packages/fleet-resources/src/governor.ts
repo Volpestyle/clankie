@@ -22,7 +22,7 @@ import {
 import { processIdentity, observeProcesses, resourceNativeHelperPath, resourcePython } from "./process.ts";
 import { resourceCapacity, ResourcePressureSampler } from "./pressure.ts";
 import { ResourceStore } from "./store.ts";
-import { heavyJobEnvironment } from "./parallelism.ts";
+import { heavyJobArgs, heavyJobEnvironment } from "./parallelism.ts";
 
 const sameQueue = (
   a: NonNullable<ResourceQueueEntry["simulator"]>,
@@ -364,7 +364,7 @@ export function createResourceGovernor(
       const parentLease = await inherited(options.holderId);
       if (signal.aborted) throw abort();
       if (parentLease) {
-        child = spawn(command, [...args], {
+        child = spawn(command, heavyJobArgs(command, args), {
           stdio: "inherit",
           env: heavyJobEnvironment(process.env),
         });
@@ -413,7 +413,7 @@ export function createResourceGovernor(
       const input = child.stdio[3] as Writable;
       const replies = createInterface({ input: child.stdio[4] as Readable });
       const first = replies[Symbol.asyncIterator]().next();
-      input.write(`${JSON.stringify({ command, args })}\n`);
+      input.write(`${JSON.stringify({ command, args: heavyJobArgs(command, args) })}\n`);
       const cancelRegistration = () => {
         input.end();
       };
