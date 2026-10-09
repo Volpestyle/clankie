@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "investigation.json",
+      "size": 35195,
+      "sha256": "86e48517e0ec95af809d283bc4526aa2693d698c8381ec024f3befe9f61f5f80",
+      "url": "clankie://evidence/sha256/86e48517e0ec95af809d283bc4526aa2693d698c8381ec024f3befe9f61f5f80"
+    }
+  ]
+}
