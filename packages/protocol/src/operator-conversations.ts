@@ -1252,6 +1252,19 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
       control: SeatControlModeSchema.optional(),
       profile: HireProfileSchema.optional(),
       /**
+       * Which harness and account the hire landed on when Clankie chose either,
+       * and why, in the owner's words (VUH-1974). Absent when the request named
+       * both. Never carries a credential.
+       */
+      accountChoice: z
+        .object({
+          harness: z.string().max(32),
+          account: z.string().max(64).optional(),
+          reason: z.string().max(1200),
+        })
+        .strict()
+        .optional(),
+      /**
        * Retired opinionated-skill condition. Bodies no longer send it; kept so
        * clients still parse spawn results from an older body.
        */

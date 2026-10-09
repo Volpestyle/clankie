@@ -214,6 +214,7 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  usage [--refresh]        Claude/Codex accounts on this Mac: % used per limit, resets, observation age (JSON)",
       "  usage overlay [on|off]   Show or hide the desktop overlay's usage meters",
+      "  usage warning [on|off|HOURS]  Tell the lead when an account will run out HOURS+ before its weekly reset (default on, 12)",
     ],
   },
   {

@@ -629,11 +629,19 @@ export const ClankieSettingsSchema = z
     host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),
     runtimeHealth: RuntimeHealthSettingsSchema.default(() => RuntimeHealthSettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
-    /** Where the owner sees account usage meters (VUH-1961). */
+    /**
+     * Where the owner sees account usage meters (VUH-1961), and when Clankie's
+     * lead hears that an account is on pace to run out before its weekly reset
+     * (VUH-1974; the allocation rules are in `@clankie/protocol/worker-accounts`).
+     */
     usage: z
-      .object({ overlay: z.boolean().default(true) })
+      .object({
+        overlay: z.boolean().default(true),
+        runOutWarning: z.boolean().default(true),
+        runOutWarningHours: z.number().min(0).max(168).default(12),
+      })
       .strict()
-      .default(() => ({ overlay: true })),
+      .default(() => ({ overlay: true, runOutWarning: true, runOutWarningHours: 12 })),
     claudeAccounts: z
       .array(
         z

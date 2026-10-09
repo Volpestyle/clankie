@@ -3,6 +3,7 @@ import {
   USAGE_SETTINGS_PATH,
   UsageReportSchema,
   UsageSettingsSnapshotSchema,
+  USAGE_WORDING,
   type UsageAccount,
   type UsageReport,
   type UsageSettingsSnapshot,
@@ -10,12 +11,14 @@ import {
 import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
 
 const USAGE_COMMAND_USAGE =
-  "Usage: clankie usage [--refresh] | usage overlay [on|off] [--expected-revision REV]";
+  "Usage: clankie usage [--refresh] | usage overlay [on|off] [--expected-revision REV] | usage warning [on|off|HOURS] [--expected-revision REV]";
 
 /**
  * `clankie usage` (VUH-1961): this Mac's Claude and Codex accounts with each
  * limit's percent used and reset, from `GET /v1/usage`. `overlay on|off` is
- * the owner's show/hide choice for the desktop meters.
+ * the owner's show/hide choice for the desktop meters. `warning on|off|HOURS`
+ * sets when Clankie's lead hears that an account is on pace to run out
+ * before its weekly reset (VUH-1974).
  */
 export async function runUsageCommand(
   args: readonly string[],
@@ -24,11 +27,12 @@ export async function runUsageCommand(
   const api = await ownerSettingsApi(options);
   if (args.length === 0 || (args.length === 1 && args[0] === "--refresh"))
     return api.get(`${USAGE_PATH}${args[0] === "--refresh" ? "?refresh=1" : ""}`, UsageReportSchema);
-  if (args[0] !== "overlay") throw new Error(USAGE_COMMAND_USAGE);
-  const [, value, flag, revision, ...rest] = args;
+  if (args[0] !== "overlay" && args[0] !== "warning") throw new Error(USAGE_COMMAND_USAGE);
+  const [command, value, flag, revision, ...rest] = args;
   if (value === undefined) return api.get(USAGE_SETTINGS_PATH, UsageSettingsSnapshotSchema);
+  const hours = command === "warning" && /^\d+(?:\.\d+)?$/u.test(value) ? Number(value) : undefined;
   if (
-    (value !== "on" && value !== "off") ||
+    (value !== "on" && value !== "off" && (hours === undefined || hours > 168)) ||
     rest.length ||
     (flag !== undefined && (flag !== "--expected-revision" || revision === undefined))
   )
@@ -37,9 +41,26 @@ export async function runUsageCommand(
     revision ?? (await api.get(USAGE_SETTINGS_PATH, UsageSettingsSnapshotSchema)).revision;
   return api.write(
     USAGE_SETTINGS_PATH,
-    { expectedRevision, display: { overlay: value === "on" } },
+    command === "overlay"
+      ? { expectedRevision, display: { overlay: value === "on" } }
+      : {
+          expectedRevision,
+          allocation:
+            hours === undefined
+              ? { runOutWarning: value === "on" }
+              : { runOutWarning: true, runOutWarningHours: hours },
+        },
     UsageSettingsSnapshotSchema,
   );
+}
+
+/** The run-out warning setting in one line. */
+export function runOutWarningText(settings: UsageSettingsSnapshot): string {
+  const allocation = settings.allocation;
+  if (allocation === undefined) return "This Clankie has no run-out warning setting.";
+  return allocation.runOutWarning
+    ? `Run-out warning on: Clankie's lead hears once when an account is on pace to run out ${allocation.runOutWarningHours}h or more before its weekly reset.`
+    : "Run-out warning off.";
 }
 
 function until(iso: string | undefined, now: number): string {
@@ -64,8 +85,18 @@ export function formatUsage(report: UsageReport, now = Date.now()): string {
       ),
     ].join("\n");
   });
+  const warning = report.settings.allocation;
   return [
     ...lines,
+    ...(report.allocation?.recommendations.map((entry) => `${USAGE_WORDING.nextHire}: ${entry.reason}`) ??
+      []),
     `Overlay meters ${report.settings.display.overlay ? "shown" : "hidden"} (/usage overlay on|off)`,
+    ...(warning === undefined
+      ? []
+      : [
+          warning.runOutWarning
+            ? `Run-out warning on, ${warning.runOutWarningHours}h or more before a weekly reset (/usage warning on|off|HOURS)`
+            : "Run-out warning off (/usage warning on|off|HOURS)",
+        ]),
   ].join("\n");
 }

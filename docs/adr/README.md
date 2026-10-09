@@ -109,6 +109,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0257 — A lowered local runtime keeps an OS boundary](0257-a-lowered-local-runtime-keeps-an-os-boundary.md)
 - [0258 — Evidence lives in the evidence store](0258-evidence-lives-in-the-evidence-store.md)
 - [0260 — Usage meters come from each harness's own CLI](0260-usage-meters-come-from-each-harness.md)
+- [0261 — Hires go where capacity would otherwise go unused](0261-hires-go-where-capacity-would-go-unused.md)
 
 ## Archived decisions
 

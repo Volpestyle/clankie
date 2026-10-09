@@ -239,6 +239,7 @@ import { RoomHandoffCoordinator } from "./room-handoff-coordinator.ts";
 import { NativeRoomHandoffs } from "./native-room-handoffs.ts";
 import { RoomConversations } from "./room-conversations.ts";
 import { sameLinearWakeRecipient } from "./conversations/linear-wakes.ts";
+import { runOutWarnings } from "./account-allocation.ts";
 import { captainRoutingExtension } from "./routing.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
@@ -3691,6 +3692,30 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   herdrWatches.workerAccountsReport = (fleet) => readWorkerAccounts(fleet);
   const pendingFleetRounds = new Set<string>();
   const completedFleetRounds = new Map<string, string>();
+  // Each lead hears a run-out projection once per window reset (VUH-1974).
+  const toldRunOuts = new Set<string>();
+  const warnRunOuts = async (owners: ReadonlyMap<string, ConversationOwner>) => {
+    const usage = (await settings()).usage;
+    if (!usage.runOutWarning || shutdown.signal.aborted) return;
+    const warnings = runOutWarnings(await readWorkerAccounts(undefined, ["claude", "codex"]), usage);
+    for (const [ownerKey, owner] of owners) {
+      const fresh = warnings.filter((warning) => !toldRunOuts.has(`${ownerKey}|${warning.key}`));
+      if (!fresh.length || !(await validateConversationOwner(owner))) continue;
+      const accepted = await wakeConversation(
+        owner,
+        fresh.map((warning) => warning.text).join("\n\n"),
+        async () => {
+          if (shutdown.signal.aborted) throw new Error("Usage warning stopped");
+        },
+        "machine",
+        false,
+        false,
+      );
+      if (!accepted) continue;
+      for (const warning of fresh) toldRunOuts.add(`${ownerKey}|${warning.key}`);
+      while (toldRunOuts.size > 512) toldRunOuts.delete(toldRunOuts.values().next().value!);
+    }
+  };
   const stopFleetRounds = startFleetRounds(async () => {
     if (shutdown.signal.aborted) return;
     const seats = await refreshFleet();
@@ -3702,6 +3727,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     for (const ownerKey of completedFleetRounds.keys()) {
       if (!owners.has(ownerKey)) completedFleetRounds.delete(ownerKey);
     }
+    if (owners.size)
+      await warnRunOuts(owners).catch((error: unknown) => {
+        if (!shutdown.signal.aborted) console.warn("Usage warning unavailable", String(error));
+      });
     for (const [ownerKey, owner] of owners) {
       if (pendingFleetRounds.has(ownerKey)) continue;
       try {

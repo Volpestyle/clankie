@@ -24,12 +24,21 @@ task.
 An unset harness is yours to choose per hire (status shows it as "no
 preference"). Guidance from the owner, not a rule: prefer Claude for visual and
 creative work; otherwise pick the best fit for the job and consider each
-harness's usage headroom in `worker_accounts`. Pass the harness you chose. If
+harness's `allocation` in `worker_accounts`. Pass the harness you chose. If
 you pass none and no role or fleet names one, the hire falls back to the
-machine's usable, unheld accounts: the only harness that has one, else Codex
-when its best account has more than half its usage left, else Claude (whose
-usage cannot be observed). No usable account refuses before any pane opens. A
-resume keeps its saved session's harness.
+machine's usable, unheld accounts: the only harness that has one, else the one
+whose best account is not on pace to run out before its reset, else Codex only
+when its best account has more of its tightest window left than Claude's. No
+usable account refuses before any pane opens. A resume keeps its saved
+session's harness.
+
+With the harness chosen and no account named, the hire takes that harness's
+rank-1 account in `allocation`: the one with the most spare capacity per day
+(plan size × what is left ÷ days to reset, less its current pace). The hire
+result's `accountChoice.reason` says which and why. A "Usage warning" wake
+means an account is on pace to run out well before its reset: steer new hires
+to the account it names and hand long seats off at their next checkpoint;
+nothing was moved for you.
 
 Changing `clankie model` or `clankie effort` tunes Clankie's own turns, not an
 external worker. A pane label or a brief asking for effort is not
@@ -60,14 +69,16 @@ plugin builds copy the shipped skills rather than maintaining a second guide.
 
 Accounts: `worker_accounts` (omit `fleet` for this Mac, or pass one such as
 `pc`) reads that machine's Claude profiles and Codex accounts now: identity,
-plan, Codex usage headroom (Claude usage is not observable), worker plugin per
-Claude profile, owner holds, and `usable` or the reason with its fix. Choose the
+plan and tier, each account's usage windows, worker plugin per Claude profile,
+owner holds, `usable` or the reason with its fix (including a Claude profile
+whose first-run setup is unfinished), and `allocation`: each harness's accounts
+ranked for the next hire with a one-line reason and any projected run-out. Choose the
 harness and `account` per hire from it and the owner's fleet notes; nothing pins
 one, and no harness is assumed. A linked machine's labels are its own: `default` plus each
 `~/.claude-<label>` / `~/.codex-<label>`. An explicit label is used exactly or
 refused with the machine, profile and fix, never swapped; omitted (or `auto`),
-Clankie takes a usable, unheld account (Codex by headroom) and names what it
-skipped. Exhausted, signed-out or refused sign-ins are skipped. Relay a refusal's
+Clankie takes the usable, unheld account ranked first in `allocation` and
+names what it skipped. Exhausted, signed-out or refused sign-ins are skipped. Relay a refusal's
 fix to the owner rather than signing anything in yourself.
 
 ## Report routing

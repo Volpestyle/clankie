@@ -119,11 +119,24 @@ describe("the owner's overlay choice", () => {
     expect(initial.display).toEqual({ overlay: true });
     const hidden = UsageSettingsSnapshotSchema.parse(await runUsageCommand(["overlay", "off"], client));
     expect(hidden.display).toEqual({ overlay: false });
-    expect((await settings.load()).usage).toEqual({ overlay: false });
+    const defaults = { runOutWarning: true, runOutWarningHours: 12 };
+    expect((await settings.load()).usage).toEqual({ overlay: false, ...defaults });
     await expect(
       runUsageCommand(["overlay", "on", "--expected-revision", initial.revision], client),
     ).rejects.toThrow(/Settings changed/u);
-    expect((await settings.load()).usage).toEqual({ overlay: false });
+    expect((await settings.load()).usage).toEqual({ overlay: false, ...defaults });
+    // The run-out warning threshold (VUH-1974) rides the same fenced settings.
+    expect(hidden.allocation).toEqual(defaults);
+    const later = UsageSettingsSnapshotSchema.parse(await runUsageCommand(["warning", "24"], client));
+    expect(later.allocation).toEqual({ runOutWarning: true, runOutWarningHours: 24 });
+    const off = UsageSettingsSnapshotSchema.parse(await runUsageCommand(["warning", "off"], client));
+    expect(off.allocation).toEqual({ runOutWarning: false, runOutWarningHours: 24 });
+    expect((await settings.load()).usage).toEqual({
+      overlay: false,
+      runOutWarning: false,
+      runOutWarningHours: 24,
+    });
+    await expect(runUsageCommand(["warning", "500"], client)).rejects.toThrow(/Usage: clankie usage/u);
   });
 });
 

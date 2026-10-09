@@ -790,6 +790,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly projectPolicy: ProjectHirePolicy | undefined;
   private projectPolicyQueue = Promise.resolve();
   private readonly hireDefaultPolicies = new WeakMap<SpawnOperatorSeat, string>();
+  /** Why Clankie chose this hire's harness, when no layer named one (VUH-1974). */
+  private readonly hireHarnessReasons = new WeakMap<SpawnOperatorSeat, string>();
   private readonly projectAllocations = new WeakMap<SpawnOperatorSeat, string>();
   private readonly activeProjectHires = new Set<string>();
   private readonly projectRecoveryOnly = new WeakSet<SpawnOperatorSeat>();
@@ -866,7 +868,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly claudeAccounts: (() => Promise<readonly CodexAccount[]>) | undefined;
   private readonly accounts: () => Promise<readonly CodexAccount[]>;
   private readonly workerAccounts:
-    | ((fleet: string, harness: WorkerAccountHarness) => Promise<MachineWorkerAccounts>)
+    | ((fleet: string | undefined, harness: WorkerAccountHarness) => Promise<MachineWorkerAccounts>)
     | undefined;
   private readonly accountHolds: (() => Promise<readonly WorkerAccountHold[]>) | undefined;
   private readonly resumeInventory: ((fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>) | undefined;
@@ -894,7 +896,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
        * refuse an account override.
        */
       readonly workerAccounts?: (
-        fleet: string,
+        /** Omitted for this machine's registered profiles. */
+        fleet: string | undefined,
         harness: WorkerAccountHarness,
       ) => Promise<MachineWorkerAccounts>;
       /** Owner holds that keep an account out of automatic choice. */
@@ -1933,10 +1936,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     // No layer named a harness: choose one for this hire outside a project. A
     // project hire chooses below, once its role's fields are known.
     const unprojected = async (): Promise<SpawnOperatorSeat | HerdrSeatSpawnResult> => {
-      const harness = input.harness ?? (await this.chooseHireHarness(input, resume));
-      if (typeof harness !== "string") return harness;
-      const seat = { ...input, harness };
+      const chosen = input.harness === undefined ? await this.chooseHireHarness(input, resume) : undefined;
+      if (chosen !== undefined && "outcome" in chosen) return chosen;
+      const seat = { ...input, harness: input.harness ?? chosen!.harness };
       this.hireDefaultPolicies.set(seat, JSON.stringify(defaults));
+      if (chosen?.why !== undefined) this.hireHarnessReasons.set(seat, chosen.why);
       return seat;
     };
     if (!this.projectPolicy && input.delegation === "native-first")
@@ -2000,10 +2004,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
           : { ...inputRequest, workingDirectory: input.workingDirectory };
       // No request, role or fleet harness: choose one now, recorded as this hire's own choice.
       const planned = projectHireProfile(settings, projectId, hireRequest, defaults);
+      let harnessReason: string | undefined;
       if (planned.harness === undefined) {
-        const harness = await this.chooseHireHarness(planned, resume);
-        if (typeof harness !== "string") return harness;
-        hireRequest = { ...hireRequest, harness };
+        const chosen = await this.chooseHireHarness(planned, resume);
+        if ("outcome" in chosen) return chosen;
+        hireRequest = { ...hireRequest, harness: chosen.harness };
+        harnessReason = chosen.why;
       }
       let live: HerdrAgentSnapshot | undefined;
       if (this.runner.list) {
@@ -2044,6 +2050,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (harness === undefined) throw new Error("This hire's record names no harness; hire again.");
       const seat: SpawnOperatorSeat = { ...reserved.request, harness };
       this.hireDefaultPolicies.set(seat, JSON.stringify(defaults));
+      if (harnessReason !== undefined) this.hireHarnessReasons.set(seat, harnessReason);
       this.projectAllocations.set(seat, allocation);
       this.projectContexts.set(seat, {
         projectId,
@@ -2082,8 +2089,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private async chooseHireHarness(
     input: HireRequest,
     resume?: SavedAgentSession,
-  ): Promise<SpawnOperatorSeat["harness"] | HerdrSeatSpawnResult> {
-    if (resume !== undefined) return savedSessionHarness(resume) as SpawnOperatorSeat["harness"];
+  ): Promise<
+    { readonly harness: SpawnOperatorSeat["harness"]; readonly why?: string } | HerdrSeatSpawnResult
+  > {
+    if (resume !== undefined) return { harness: savedSessionHarness(resume) as SpawnOperatorSeat["harness"] };
     const failed = (detail: string): HerdrSeatSpawnResult => ({
       outcome: "failed",
       reason: "harness_unavailable",
@@ -2140,7 +2149,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return failed("No usable worker harness can run every requested model. No pane was opened.");
     }
     const choice = chooseWorkerHarness(machine, report, allowed, input.account);
-    return "refused" in choice ? failed(choice.refused) : choice.harness;
+    return "refused" in choice ? failed(choice.refused) : { harness: choice.harness, why: choice.why };
   }
 
   private async admitProjectLaunch(input: SpawnOperatorSeat, dispatched = false): Promise<void> {
@@ -3129,8 +3138,65 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
   }
 
+  /**
+   * This Mac's best-ranked account on a harness for an automatic hire
+   * (VUH-1974), or nothing when its accounts cannot be read or none can take
+   * the hire; the caller then keeps its previous choice.
+   */
+  private async allocatedLocalAccount(
+    harness: "claude" | "codex",
+  ): Promise<{ readonly label: string; readonly why: string } | undefined> {
+    if (this.workerAccounts === undefined) return undefined;
+    const report = await this.workerAccounts(undefined, harness).catch(() => undefined);
+    if (report === undefined) return undefined;
+    const choice = chooseWorkerAccount("this Mac", harness, report);
+    return "refused" in choice ? undefined : { label: choice.account.label, why: choice.why };
+  }
+
+  /**
+   * Starts the seat, and states on its receipt which harness and account
+   * Clankie chose for it and why, when the request left either open.
+   */
   private async startSeat(
     input: SpawnOperatorSeat,
+    subjectOverride?: string,
+    brief?: string,
+    resume?: SavedAgentSession,
+    receiptKey?: string,
+    authority?: HireAuthority,
+  ): Promise<HerdrSeatSpawnResult> {
+    const chosen: { account?: string; reason?: string } = {};
+    const result = await this.launchSeat(
+      input,
+      chosen,
+      subjectOverride,
+      brief,
+      resume,
+      receiptKey,
+      authority,
+    );
+    const harnessReason = this.hireHarnessReasons.get(input);
+    if (result.outcome !== "spawned" || (harnessReason === undefined && chosen.reason === undefined))
+      return result;
+    const reason = [
+      harnessReason === undefined ? undefined : `${input.harness}: ${harnessReason}`,
+      chosen.reason,
+    ]
+      .filter((part): part is string => part !== undefined)
+      .join(". ");
+    return {
+      ...result,
+      accountChoice: {
+        harness: input.harness,
+        ...(chosen.account === undefined ? {} : { account: chosen.account }),
+        reason: reason.slice(0, 1200),
+      },
+    };
+  }
+
+  private async launchSeat(
+    input: SpawnOperatorSeat,
+    chosen: { account?: string; reason?: string },
     subjectOverride?: string,
     brief?: string,
     resume?: SavedAgentSession,
@@ -3248,6 +3314,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
             return { outcome: "failed", reason: "harness_unavailable", detail: choice.refused };
         } else {
           account = { label: choice.account.label, home: choice.account.home };
+          if (input.account === undefined) {
+            chosen.account = choice.account.label;
+            chosen.reason = `account ${choice.account.label} on ${remote}: ${choice.why}`;
+          }
           if (choice.account.label !== "default")
             remoteAccountEnv = {
               [accountHarness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"]: choice.account.home,
@@ -3261,30 +3331,58 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const held = ((await this.accountHolds?.().catch(() => [])) ?? [])
           .filter((hold) => hold.machine === "local" && hold.harness === "codex")
           .map((hold) => hold.label);
+        const ranked =
+          resume === undefined && input.account === undefined
+            ? await this.allocatedLocalAccount("codex")
+            : undefined;
+        const registered = ranked && accounts.find((entry) => entry.label === ranked.label);
         const selected =
-          resume === undefined
+          registered ??
+          (resume === undefined
             ? await selectLiveCodexAccount(accounts, input.account, held)
-            : await savedCodexAccount(resume, accounts, input.account);
+            : await savedCodexAccount(resume, accounts, input.account));
         account = { label: selected.label, home: selected.home };
+        if (registered) {
+          chosen.account = registered.label;
+          chosen.reason = `account ${registered.label}: ${ranked!.why}`;
+        }
       } catch (error) {
         return { outcome: "failed", reason: "harness_unavailable", detail: reasonDetail(error) };
       }
     }
     let claudeHome: string | undefined;
-    if (input.harness === "claude" && input.account && remote === undefined) {
-      const selected = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === input.account);
+    let claudeLabel = input.account;
+    // No layer named a Claude profile: the allocation ranking picks one of
+    // this Mac's registered profiles. `default` keeps the service's own
+    // profile; an unreadable ranking keeps it too, as before account choice.
+    if (
+      input.harness === "claude" &&
+      claudeLabel === undefined &&
+      remote === undefined &&
+      prepared === undefined &&
+      resume === undefined
+    ) {
+      const ranked = await this.allocatedLocalAccount("claude");
+      if (ranked !== undefined) {
+        chosen.account = ranked.label;
+        chosen.reason = `account ${ranked.label}: ${ranked.why}`;
+        if (ranked.label !== "default") claudeLabel = ranked.label;
+      }
+    }
+    if (input.harness === "claude" && claudeLabel && remote === undefined) {
+      const selected = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === claudeLabel);
       if (!selected)
         return {
           outcome: "failed",
           reason: "harness_unavailable",
-          detail: `Claude account ${input.account} is not registered. Configure its profile home in claudeAccounts; no login or account fallback was attempted.`,
+          detail: `Claude account ${claudeLabel} is not registered. Configure its profile home in claudeAccounts; no login or account fallback was attempted.`,
         };
       claudeHome = await realpath(selected.home).catch(() => undefined);
       if (!claudeHome)
         return {
           outcome: "failed",
           reason: "harness_unavailable",
-          detail: `Claude account ${input.account} profile home is unavailable. Register its existing directory again; no account fallback was attempted.`,
+          detail: `Claude account ${claudeLabel} profile home is unavailable. Register its existing directory again; no account fallback was attempted.`,
         };
     }
     let paneId: string;
@@ -3376,7 +3474,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         await this.admitProjectLaunch(input);
       }
       if (claudeHome) {
-        const current = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === input.account);
+        const current = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === claudeLabel);
         if (!current || (await realpath(current.home).catch(() => undefined)) !== claudeHome)
           throw new Error("Claude account profile changed during startup");
       }

@@ -9,7 +9,8 @@ import {
   codexStatusFromLimits,
   type ClankieSettings,
 } from "@clankie/settings";
-import type { AccountUsage } from "@clankie/protocol/worker-accounts";
+import type { AccountUsage, MachineAllocation } from "@clankie/protocol/worker-accounts";
+import { allocateAccounts, rankedAccounts } from "./account-allocation.ts";
 import {
   CLAUDE_USAGE_MIN_VERSION_NUMBER,
   claudeUsageLines,
@@ -51,6 +52,8 @@ export interface WorkerAccountStatus {
   /** The account's email as its CLI reports it; never a token. */
   readonly identity?: string;
   readonly plan?: string;
+  /** The plan's rate-limit tier as the harness caches it for this sign-in, e.g. Claude's `default_claude_max_20x`. */
+  readonly tier?: string;
   /** Lowest remaining fraction of the account's all-model usage windows; null when unobserved. */
   readonly headroom: number | null;
   readonly resetsAt?: string;
@@ -73,6 +76,8 @@ export interface MachineWorkerAccounts {
   readonly accounts: readonly WorkerAccountStatus[];
   /** A harness the machine could not answer for, with why. */
   readonly unavailable?: Partial<Record<WorkerAccountHarness, string>>;
+  /** How Clankie would spread hires over these accounts now (VUH-1974). */
+  readonly allocation?: MachineAllocation;
 }
 
 export interface WorkerAccountHold {
@@ -140,6 +145,9 @@ const claude = async (profile) => {
   let status = null;
   try { status = JSON.parse(String(raw).slice(String(raw).indexOf("{"))); } catch {}
   const usage = status && status.loggedIn === true ? await claudeUsage(env) : {};
+  let c = null;
+  try { c = JSON.parse(fs.readFileSync(path.join(profile.isDefault && !process.env.CLAUDE_CONFIG_DIR ? home : profile.home, ".claude.json"), "utf8")); } catch (e) { if (e.code == "ENOENT") c = {}; }
+  const o = c && status && status.loggedIn && c.oauthAccount && c.oauthAccount.emailAddress == status.email ? c.oauthAccount : {};
   let plugin = false;
   try {
     const registry = JSON.parse(fs.readFileSync(path.join(profile.home, "plugins", "installed_plugins.json"), "utf8"));
@@ -151,6 +159,7 @@ const claude = async (profile) => {
     identity: status && status.loggedIn && typeof status.email === "string" ? status.email : undefined,
     plan: status && status.loggedIn && typeof status.subscriptionType === "string" ? status.subscriptionType : (status && status.loggedIn && typeof status.authMethod === "string" ? status.authMethod : undefined),
     workerPlugin: plugin,
+    onboarded: c ? c.hasCompletedOnboarding === true : undefined, tier: o.organizationRateLimitTier,
     ...usage,
   };
 };
@@ -215,7 +224,11 @@ const codex = (profile) => new Promise((resolve) => {
   process.stdout.write(JSON.stringify(output));
   process.exit(0);
 })().catch(() => { process.stderr.write("account probe failed\n"); process.exit(1); });
-`.replace(/\n[ \t]*/gu, " ");
+`
+  .replace(/\n[ \t]*/gu, " ")
+  // Windows carries it UTF-16 base64-encoded inside a bounded ssh command
+  // line; no string in it has a space beside this punctuation.
+  .replace(/ *([,;{}()=:?|&<>]) */gu, "$1");
 
 const Window = z
   .object({
@@ -236,6 +249,12 @@ const ProbeOutput = z.object({
         identity: z.string().max(320).optional(),
         plan: z.string().max(64).optional(),
         workerPlugin: z.boolean().optional(),
+        onboarded: z.boolean().optional(),
+        tier: z
+          .string()
+          .regex(/^[a-z0-9_]{1,64}$/u)
+          .optional()
+          .catch(undefined),
         usageError: z.string().max(16).optional(),
         usageBlocked: z.boolean().optional(),
         usageLines: z.array(z.string().max(300)).max(8).optional(),
@@ -392,6 +411,8 @@ function judgeWorkerAccount(
     reason = `its sign-in was refused when reading usage (expired, revoked or unpaid). ${fix}`;
   else if (headroom === 0)
     reason = `usage exhausted${resetsAt ? ` until ${resetsAt}` : ""}; choose another account or wait`;
+  else if (account.harness === "claude" && account.onboarded === false)
+    reason = `Claude's first-run setup (theme, security notes, folder trust) is unfinished in this profile, so a hire would stall at it. ${claudeSetupFix(machine, shell, account.label, account.home)}`;
   else if (account.harness === "claude" && account.workerPlugin === false)
     reason = `Clankie's worker plugin is not installed in this profile. Run clankie herdr prepare ${machine}`;
   return {
@@ -401,6 +422,7 @@ function judgeWorkerAccount(
     signedIn: account.signedIn,
     ...(account.identity === undefined ? {} : { identity: account.identity }),
     ...(account.plan === undefined ? {} : { plan: account.plan }),
+    ...(account.tier === undefined ? {} : { tier: account.tier }),
     headroom,
     ...(resetsAt === undefined ? {} : { resetsAt }),
     ...(usage === undefined ? {} : { usage }),
@@ -417,6 +439,22 @@ function newProfileHome(report: MachineWorkerAccounts, harness: WorkerAccountHar
   const fallback = report.shell === "powershell" ? "%USERPROFILE%" : "~";
   const base = report.accounts.find((account) => account.label === "default")?.home;
   return native.join(base === undefined ? fallback : native.dirname(base), `.${harness}-${label}`);
+}
+
+/** Finishing Claude's first-run screens once, interactively, in that profile. */
+function claudeSetupFix(
+  machine: string,
+  shell: HerdrSshTransport["shell"],
+  label: string,
+  home: string,
+): string {
+  const command =
+    label === "default"
+      ? "claude"
+      : shell === "powershell"
+        ? `$env:CLAUDE_CONFIG_DIR='${home.replaceAll("'", "''")}'; claude`
+        : `CLAUDE_CONFIG_DIR='${home.replaceAll("'", "'\\''")}' claude`;
+  return `Open it once on ${machine} with ${command}, pick a theme, accept the security notes and trust the folder you hire into, then quit.`;
 }
 
 /** The owner's one step to make a profile usable on its machine. */
@@ -441,14 +479,15 @@ function accountFix(
 }
 
 export type WorkerAccountChoice =
-  | { readonly account: WorkerAccountStatus; readonly skipped: readonly string[] }
+  | { readonly account: WorkerAccountStatus; readonly skipped: readonly string[]; readonly why: string }
   | { readonly refused: string };
 
 /**
  * One account for a hire. An explicit label is used exactly or refused with
  * the reason and fix; nothing else is tried. Without one, the usable
- * accounts that the owner has not held compete: known headroom first, then
- * unknown, in the machine's order. Skipped accounts are named with why.
+ * accounts that the owner has not held compete by allocation rank
+ * (`allocateAccounts`: spare capacity per day, plan-weighted; unknown usage
+ * last). Skipped accounts are named with why.
  */
 export function chooseWorkerAccount(
   machine: string,
@@ -473,7 +512,7 @@ export function chooseWorkerAccount(
       return {
         refused: `${noun} ${label} on ${machine} (${selected.home}${selected.identity ? `, ${selected.identity}` : ""}) cannot take this hire: ${selected.reason}. No other account was tried.`,
       };
-    return { account: selected, skipped: [] };
+    return { account: selected, skipped: [], why: `${label} was named for this hire` };
   }
   const skipped = accounts
     .filter((account) => !account.usable || account.held)
@@ -482,18 +521,17 @@ export function chooseWorkerAccount(
         ? `${account.label}: held by the owner${account.held.reason ? ` (${account.held.reason})` : ""}`
         : `${account.label}: ${account.reason}`,
     );
-  const rank = (headroom: number | null) => (headroom === null ? 1 : 2);
-  const candidates = accounts
-    .filter((account) => account.usable && !account.held)
-    .map((account, index) => ({ account, index }))
-    .sort(
-      (a, b) =>
-        rank(b.account.headroom) - rank(a.account.headroom) ||
-        (b.account.headroom ?? 0) - (a.account.headroom ?? 0) ||
-        a.index - b.index,
-    );
-  const chosen = candidates[0]?.account;
-  if (chosen) return { account: chosen, skipped };
+  const best = harness === "pi" ? undefined : rankedAccounts(report, harness)[0];
+  const chosen =
+    best === undefined
+      ? accounts.find((account) => account.usable && !account.held)
+      : accounts.find((account) => account.label === best.label);
+  if (chosen)
+    return {
+      account: chosen,
+      skipped,
+      why: best === undefined ? `${chosen.label} is the only usable, unheld ${noun}` : best.reason,
+    };
   const unavailable = report.unavailable?.[harness];
   return {
     refused: unavailable
@@ -502,7 +540,7 @@ export function chooseWorkerAccount(
   };
 }
 
-/** An account whose usage was not observed counts as this much headroom. */
+/** An account whose usage was not observed counts as this much left. */
 const UNOBSERVED_HEADROOM = 0.5;
 
 type WorkerHarnessChoice =
@@ -514,9 +552,10 @@ type WorkerHarnessChoice =
  * role or fleet harness). Clankie normally chooses per job; this runs only when
  * he passes nothing, and it never assumes a harness. Among the machine's
  * usable accounts the owner has not held: one harness with any is chosen; with
- * both, Codex only when its best account has more usage left than Claude's
- * best, otherwise Claude. An account whose usage was not observed counts as
- * half.
+ * both, the one whose best-ranked account is not on pace to run out before
+ * its reset, then the one with more of its tightest window left (Codex only
+ * when strictly more), otherwise Claude. An account whose usage was not
+ * observed counts as half left and not running out.
  * `allowed` narrows the candidates, for example to the family of a requested
  * model. No usable account refuses with each skipped account's reason.
  */
@@ -527,6 +566,8 @@ export function chooseWorkerHarness(
   label?: string,
 ): WorkerHarnessChoice {
   const best = new Map<WorkerAccountHarness, number>();
+  const short = new Map<WorkerAccountHarness, boolean>();
+  const allocation = report.allocation ?? allocateAccounts(report);
   const skipped: string[] = [];
   for (const account of report.accounts) {
     if (!allowed.includes(account.harness) || (label !== undefined && account.label !== label)) continue;
@@ -537,10 +578,38 @@ export function chooseWorkerHarness(
       continue;
     }
     const headroom = account.headroom ?? UNOBSERVED_HEADROOM;
-    best.set(account.harness, Math.max(best.get(account.harness) ?? -1, headroom));
+    const ranked = allocation.accounts.find(
+      (entry) => entry.harness === account.harness && entry.label === account.label,
+    );
+    const runsShort =
+      ranked?.sparePerDay !== undefined && ranked.sparePerDay !== null && ranked.sparePerDay < 0;
+    const previous = best.get(account.harness);
+    const previousShort = short.get(account.harness) ?? true;
+    if (
+      previous === undefined ||
+      (previousShort && !runsShort) ||
+      (previousShort === runsShort && headroom > previous)
+    ) {
+      best.set(account.harness, headroom);
+      short.set(account.harness, runsShort);
+    }
   }
   const codex = best.get("codex");
   const claude = best.get("claude");
+  const codexShort = short.get("codex") === true;
+  const claudeShort = short.get("claude") === true;
+  const pace = (harness: "claude" | "codex") =>
+    allocation.recommendations.find((entry) => entry.harness === harness)?.reason ?? "";
+  if (codex !== undefined && claude !== undefined && codexShort !== claudeShort)
+    return claudeShort
+      ? {
+          harness: "codex",
+          why: `Claude's best account on ${machine} is on pace to run out before its reset (${pace("claude")})`,
+        }
+      : {
+          harness: "claude",
+          why: `Codex's best account on ${machine} is on pace to run out before its reset (${pace("codex")})`,
+        };
   if (codex !== undefined && (claude === undefined || codex > claude))
     return {
       harness: "codex",
@@ -584,7 +653,7 @@ export function createWorkerAccountsReader(options: {
   readonly fleet: (id: string) => Promise<HerdrFleet | undefined>;
   readonly shell?: (fleet: HerdrFleet) => FleetShellRun;
 }) {
-  return async (
+  const readAccounts = async (
     fleetId?: string,
     harnesses?: readonly WorkerAccountHarness[],
   ): Promise<MachineWorkerAccounts> => {
@@ -637,5 +706,12 @@ export function createWorkerAccountsReader(options: {
     if (fleet === undefined || options.shell === undefined)
       throw new Error(`${fleetId} is not a linked machine; list them with clankie machines`);
     return readMachineWorkerAccounts(fleet, options.shell(fleet), read);
+  };
+  return async (
+    fleetId?: string,
+    harnesses?: readonly WorkerAccountHarness[],
+  ): Promise<MachineWorkerAccounts> => {
+    const report = await readAccounts(fleetId, harnesses);
+    return { ...report, allocation: allocateAccounts(report) };
   };
 }

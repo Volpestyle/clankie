@@ -91,8 +91,12 @@ import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
 import type { AwakeCommandResult } from "./command/awake.ts";
-import { formatUsage, type runUsageCommand } from "./command/usage.ts";
-import { USAGE_WORDING, type UsageReport } from "@clankie/protocol/worker-accounts";
+import { formatUsage, runOutWarningText, type runUsageCommand } from "./command/usage.ts";
+import {
+  USAGE_WORDING,
+  type UsageReport,
+  type UsageSettingsSnapshot,
+} from "@clankie/protocol/worker-accounts";
 import {
   formatRuntimeHealth,
   parseRuntimeHealthArgs,
@@ -1989,8 +1993,25 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           }
           return;
         }
+        if (words[0] === "warning" && words.length === 2) {
+          try {
+            const result = (await usage(words)) as UsageSettingsSnapshot;
+            shell.insertCommandResult("/usage", runOutWarningText(result), "success");
+          } catch (error) {
+            shell.insertCommandResult(
+              "/usage",
+              error instanceof Error ? error.message : String(error),
+              "error",
+            );
+          }
+          return;
+        }
         if (!(words.length === 0 || (words.length === 1 && words[0] === "refresh"))) {
-          shell.insertCommandResult("/usage", "Usage: /usage [refresh | overlay on|off]", "error");
+          shell.insertCommandResult(
+            "/usage",
+            "Usage: /usage [refresh | overlay on|off | warning on|off|HOURS]",
+            "error",
+          );
           return;
         }
         await runSettingsMenu(shell, "/usage", async () => {
@@ -2013,6 +2034,26 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                   return `Overlay meters ${next.display.overlay ? "shown" : "hidden"}.`;
                 },
               },
+              ...(report.settings.allocation === undefined
+                ? []
+                : [
+                    {
+                      value: "warning",
+                      label: report.settings.allocation.runOutWarning
+                        ? "Stop run-out warnings"
+                        : USAGE_WORDING.runOutWarning.label,
+                      hint: USAGE_WORDING.runOutWarning.description,
+                      async run() {
+                        const next = (await usage([
+                          "warning",
+                          report.settings.allocation!.runOutWarning ? "off" : "on",
+                          "--expected-revision",
+                          report.settings.revision,
+                        ])) as UsageSettingsSnapshot;
+                        return runOutWarningText(next);
+                      },
+                    },
+                  ]),
             ],
           };
         });

@@ -12,6 +12,7 @@ import {
 import type { ClankieSettings, SettingsStore } from "@clankie/settings";
 import type { MachineWorkerAccounts } from "./captain/harness-accounts.ts";
 import { CLAUDE_USAGE_MIN_VERSION, usageHeadroom } from "./captain/harness-usage.ts";
+import { allocateAccounts } from "./captain/account-allocation.ts";
 
 /** Meters poll; spawning every profile's CLI on each poll would load the Mac for nothing. */
 const USAGE_CACHE_MS = 60_000;
@@ -20,7 +21,15 @@ const USAGE_LAST_GOOD_MS = 30 * 60_000;
 
 function usageSettings(settings: ClankieSettings): UsageSettingsSnapshot {
   const display = { overlay: settings.usage.overlay };
-  return { display, revision: createHash("sha256").update(JSON.stringify(display)).digest("hex") };
+  const allocation = {
+    runOutWarning: settings.usage.runOutWarning,
+    runOutWarningHours: settings.usage.runOutWarningHours,
+  };
+  return {
+    display,
+    allocation,
+    revision: createHash("sha256").update(JSON.stringify({ display, allocation })).digest("hex"),
+  };
 }
 
 function usageAccounts(report: MachineWorkerAccounts, now: number): UsageAccount[] {
@@ -128,6 +137,7 @@ export function createUsageRoutes(
       accounts: usageAccounts(machine, now),
       ...(Object.keys(unavailable).length ? { unavailable } : {}),
       settings: usageSettings(current),
+      allocation: allocateAccounts(machine, now),
     };
     return context.json(body);
   });
@@ -147,7 +157,13 @@ export function createUsageRoutes(
             ...current,
             usage: {
               ...current.usage,
-              ...(input.data.display.overlay === undefined ? {} : { overlay: input.data.display.overlay }),
+              ...(input.data.display?.overlay === undefined ? {} : { overlay: input.data.display.overlay }),
+              ...(input.data.allocation?.runOutWarning === undefined
+                ? {}
+                : { runOutWarning: input.data.allocation.runOutWarning }),
+              ...(input.data.allocation?.runOutWarningHours === undefined
+                ? {}
+                : { runOutWarningHours: input.data.allocation.runOutWarningHours }),
             },
           };
         },

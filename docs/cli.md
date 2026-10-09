@@ -1522,6 +1522,28 @@ refreshing or changing credentials. Each Claude and Codex account also carries
 observation time, read from the profile's own `claude -p /usage` or Codex's
 rate limits ([ADR 0260](adr/0260-usage-meters-come-from-each-harness.md)).
 `headroom` is the tightest account-wide window; unobserved usage stays `null`.
+Claude profiles also report `tier`, the plan's rate-limit tier Claude Code
+caches for that same sign-in (for example `default_claude_max_20x`); a cache
+for a different email is ignored. A signed-in Claude profile whose first-run
+setup (theme, security notes, folder trust) is unfinished is not `usable`: a
+hire there would stall at those screens with `start_unconfirmed`. Its `reason`
+names the one-time fix, opening Claude once in that profile.
+
+The report's `allocation` ranks each harness's accounts for automatic hires
+(VUH-1974). Each eligible (usable, unheld) account gets its spare capacity per
+day: plan weight × (fraction left ÷ days until that window resets − share used
+per day so far), at its tightest all-model window. Plan weights are relative to
+each harness's base paid plan: Claude Pro 0.2, Max 5x 1, Max 20x 4; Codex Plus
+1, Pro 6. An unreported tier counts as 1 and says so. Pace is a window's own
+average, measured once 5% of it has passed; a window with no reset counts as a
+whole window away. Model-scoped windows (`week:<scope>`, such as Codex's
+gpt-reserve) bound only hires on that model, so they are named in the reason
+but never rank. Unknown usage ranks after every reading. `runsOut` lists any
+window on pace to run out before its reset, and `recommendations` says where
+the next automatic hire on each harness goes and why. Hires that leave the
+account open, locally and on linked machines, take rank 1; the hire result's
+`accountChoice` states the harness and account chosen and the reason. Explicit
+accounts (request, role or fleet) and owner holds always win.
 
 The local Pi `default` profile uses the same report and holds. It is usable only
 when the native adapter is enabled, its pinned files and executable verify, and
@@ -1567,7 +1589,9 @@ without a recognized prompt reports `start_unconfirmed` with the same pending
 explanation. Do not repeat the hire; inspect the existing pane. Closing that pane
 cancels its pending startup.
 
-Local Codex hires choose the greatest minimum remaining fraction across the
+Local Codex hires that name no account take the allocation's rank 1 (see
+`accounts workers`; [ADR 0261](adr/0261-hires-go-where-capacity-would-go-unused.md)). When the allocation cannot be read, they choose the
+greatest minimum remaining fraction across the
 windows Codex reports (some plans report only a weekly window). The read-only
 `account/rateLimits/read` query uses each home without starting a model turn.
 If unavailable after ten seconds, recent rollout `rate_limits` provide a fallback.
@@ -1587,7 +1611,7 @@ The owner-authorized API offers `GET /v1/accounts/codex` and
 Local transcript discovery, `clankie agents`, resumed sessions and follow-up
 queue delivery use the account's home; seat-sync uses the hook's transcript path.
 
-### `usage [--refresh]` / `usage overlay [on|off]`
+### `usage [--refresh]` / `usage overlay [on|off]` / `usage warning [on|off|HOURS]`
 
 `usage` lists this Mac's registered Claude profiles and Codex accounts with
 identity, plan, `headroom`, and each usage window: its harness label (Claude's
@@ -1599,7 +1623,17 @@ whose usage was not reported has no `usage` and a `reason`; unknown is never
 shown as free quota. Readings come from `GET /v1/usage` (owner credential,
 relayed for the app), which shares one reading per minute across every surface;
 `--refresh` reads again now. No harness credential is read or returned
-([ADR 0260](adr/0260-usage-meters-come-from-each-harness.md)).
+([ADR 0260](adr/0260-usage-meters-come-from-each-harness.md)). The report's
+`allocation` is the hire ranking described under `accounts workers`; the console
+prints its recommendations as "Next hire" lines.
+
+`usage warning on|off|HOURS` sets when Clankie's lead hears that an account is
+on pace to run out before its weekly reset (`usage.runOutWarning`, default on;
+`usage.runOutWarningHours`, default 12, 0–168). Each fleet round with led seats
+reads this Mac's accounts; a weekly window projected to run out at least that
+many hours before its reset wakes each lead once per window reset, naming where
+the next hires should go and suggesting a handoff at the next checkpoint.
+Nothing is moved or stopped.
 
 `usage overlay on|off` shows or hides the meters beside Clankie in the desktop
 overlay (`usage.overlay` in settings, default on; `GET`/`POST /v1/usage/settings`,
@@ -1610,6 +1644,7 @@ overlay; the app's Usage screen does both.
 clankie usage
 clankie usage --refresh
 clankie usage overlay off
+clankie usage warning 24
 ```
 
 Register a second Claude profile with `accounts claude add HOME --label LABEL`.

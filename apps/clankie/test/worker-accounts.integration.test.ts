@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HerdrFleet, HerdrFleetRun } from "../src/herdr-fleet.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
@@ -21,6 +21,7 @@ import {
   type MachineWorkerAccounts,
   type WorkerAccountHold,
 } from "../src/captain/harness-accounts.ts";
+import { allocateAccounts, runOutWarnings } from "../src/captain/account-allocation.ts";
 
 /**
  * Account choice across the fleet link (VUH-1527, ADR 0221): the probe is the
@@ -468,4 +469,202 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
     expect((result as { detail: string }).detail).toContain("Pass harness");
     expect(calls).toEqual([]);
   });
+
+  /**
+   * The 2026-10-09 accounts (VUH-1974): a Max 20x week 84% used with 4.7 days
+   * to go, a Max 5x week barely touched, Codex Pro at 18% with its gpt-reserve
+   * pool at 94%, and the free Codex account held.
+   */
+  const NOW = Date.parse("2026-10-09T17:17:07.344Z");
+  const week = (usedPercent: number, resetsAt: string, id = "week", label = "Current week (all models)") => ({
+    id,
+    label,
+    usedPercent,
+    windowMinutes: 10_080,
+    resetsAt,
+  });
+  const OCT_9: MachineWorkerAccounts = {
+    machine: "pc",
+    shell: "powershell",
+    observedAt: new Date(NOW).toISOString(),
+    accounts: [
+      {
+        harness: "claude",
+        label: "james",
+        home: "C:\\Users\\volpe\\.claude-james",
+        signedIn: true,
+        identity: "owner@example.com",
+        plan: "max",
+        tier: "default_claude_max_20x",
+        headroom: 0.16,
+        usage: {
+          source: "claude-usage",
+          observedAt: new Date(NOW).toISOString(),
+          windows: [week(84, "2026-10-14T11:00:00.000Z")],
+        },
+        workerPlugin: true,
+        usable: true,
+      },
+      {
+        harness: "claude",
+        label: "volpestyle",
+        home: "C:\\Users\\volpe\\.claude-volpestyle",
+        signedIn: true,
+        identity: "owner2@example.com",
+        plan: "max",
+        tier: "default_claude_max_5x",
+        headroom: 0.99,
+        usage: {
+          source: "claude-usage",
+          observedAt: new Date(NOW).toISOString(),
+          windows: [week(1, "2026-10-14T00:59:00.000Z")],
+        },
+        workerPlugin: true,
+        usable: true,
+      },
+      {
+        harness: "codex",
+        label: "default",
+        home: "C:\\Users\\volpe\\.codex",
+        signedIn: true,
+        plan: "pro",
+        headroom: 0.82,
+        usage: {
+          source: "codex-rate-limits",
+          observedAt: new Date(NOW).toISOString(),
+          windows: [
+            { ...week(18, "2026-10-16T12:04:44.000Z"), label: "Weekly limit" },
+            week(94, "2026-10-16T10:05:37.000Z", "week:base_model_inference", "Weekly limit (gpt-reserve)"),
+          ],
+        },
+        usable: true,
+      },
+      {
+        harness: "codex",
+        label: "james",
+        home: "C:\\Users\\volpe\\.codex-james",
+        signedIn: true,
+        plan: "free",
+        headroom: 1,
+        usable: true,
+      },
+    ],
+  };
+
+  it("puts an unpinned Claude hire on the account with room by plan and pace, and says why", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    try {
+      const auto = await hireOn("claude", [], undefined, OCT_9);
+      expect(auto.result).toMatchObject({
+        outcome: "spawned",
+        accountChoice: { harness: "claude", account: "volpestyle" },
+      });
+      expect(auto.env).toContain("CLAUDE_CONFIG_DIR=C:\\Users\\volpe\\.claude-volpestyle");
+      const reason = (auto.result as { accountChoice: { reason: string } }).accountChoice.reason;
+      expect(reason).toContain("volpestyle (Max 5x): 99% of its week left");
+      // An explicit choice is used exactly, with no allocation reason.
+      const named = await hireOn("claude", [], "james", OCT_9);
+      expect(named.env).toContain("CLAUDE_CONFIG_DIR=C:\\Users\\volpe\\.claude-james");
+      expect(named.result).not.toHaveProperty("accountChoice");
+      // An owner hold is never overridden by the ranking.
+      const held = await hireOn(
+        "claude",
+        [{ machine: "pc", harness: "claude", label: "volpestyle" }],
+        undefined,
+        OCT_9,
+      );
+      expect(held.env).toContain("CLAUDE_CONFIG_DIR=C:\\Users\\volpe\\.claude-james");
+      const codex = await hireOn(
+        "codex",
+        [{ machine: "pc", harness: "codex", label: "james" }],
+        undefined,
+        OCT_9,
+      );
+      expect(codex.result).toMatchObject({ accountChoice: { account: "default" } });
+      expect((codex.result as { accountChoice: { reason: string } }).accountChoice.reason).toContain(
+        "Weekly limit (gpt-reserve) 94% used (only hires on that model)",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("projects the 20x week running out before its reset, once per reset", () => {
+    const settings = { runOutWarning: true, runOutWarningHours: 12 };
+    const first = runOutWarnings(OCT_9, settings, NOW);
+    expect(first).toHaveLength(1);
+    expect(first[0]!.text).toContain("Claude account james (owner@example.com) on pc is on pace to run out");
+    expect(first[0]!.text).toContain("Put the next Claude hires on volpestyle");
+    expect(first[0]!.text).toContain("Nothing was moved or stopped");
+    // A later round of the same week is the same warning, so the lead is told once.
+    const later = runOutWarnings(
+      {
+        ...OCT_9,
+        accounts: OCT_9.accounts.map((account) =>
+          account.label === "james" && account.harness === "claude"
+            ? {
+                ...account,
+                usage: { ...account.usage!, windows: [week(88, "2026-10-14T11:00:00.000Z")] },
+              }
+            : account,
+        ),
+      },
+      settings,
+      NOW + 3_600_000,
+    );
+    expect(later.map((warning) => warning.key)).toEqual(first.map((warning) => warning.key));
+    expect(runOutWarnings(OCT_9, { ...settings, runOutWarning: false }, NOW)).toEqual([]);
+    expect(runOutWarnings(OCT_9, { ...settings, runOutWarningHours: 120 }, NOW)).toEqual([]);
+    expect(JSON.stringify(allocateAccounts(OCT_9, NOW))).not.toMatch(/token|secret|bearer/iu);
+  });
+});
+
+describe("a Claude profile that has not finished first-run setup", () => {
+  it("is reported unusable with the fix, and a finished one carries its plan tier", async () => {
+    const home = await fixtureHome();
+    const bin = join(home, "..", "bin");
+    await mkdir(bin, { recursive: true });
+    // Stands in for a signed-in Claude Code: the probe reads the profile's own files.
+    await writeFile(
+      join(bin, "claude"),
+      `#!/bin/sh\ncase "$*" in\n  "auth status --json") echo '{"loggedIn":true,"email":"owner@example.com","subscriptionType":"max"}';;\n  "--version") echo "1.0.0 (Claude Code)";;\nesac\n`,
+      { mode: 0o755 },
+    );
+    await mkdir(join(home, ".claude-ready"), { recursive: true });
+    await writeFile(
+      join(home, ".claude-ready", ".claude.json"),
+      JSON.stringify({
+        hasCompletedOnboarding: true,
+        oauthAccount: {
+          emailAddress: "owner@example.com",
+          organizationRateLimitTier: "default_claude_max_20x",
+        },
+      }),
+    );
+    await writeFile(
+      join(home, ".claude.json"),
+      JSON.stringify({
+        hasCompletedOnboarding: true,
+        // A cached sign-in for someone else says nothing about this one.
+        oauthAccount: {
+          emailAddress: "other@example.com",
+          organizationRateLimitTier: "default_claude_max_5x",
+        },
+      }),
+    );
+    const shell = fixtureShell(home);
+    const report = await readMachineWorkerAccounts(
+      box,
+      (command, timeout) => shell(`PATH='${bin}':"$PATH"; ${command}`, timeout),
+      { harnesses: ["claude"] },
+    );
+    const byLabel = Object.fromEntries(report.accounts.map((account) => [account.label, account]));
+    expect(byLabel["work"]).toMatchObject({ signedIn: true, usable: false });
+    expect(byLabel["work"]!.reason).toContain("first-run setup");
+    expect(byLabel["work"]!.reason).toContain(`CLAUDE_CONFIG_DIR='${join(home, ".claude-work")}' claude`);
+    expect(byLabel["ready"]).toMatchObject({ tier: "default_claude_max_20x" });
+    expect(byLabel["ready"]!.reason ?? "").not.toContain("first-run setup");
+    expect(byLabel["default"]).not.toHaveProperty("tier");
+    expect(byLabel["default"]!.reason ?? "").not.toContain("first-run setup");
+  }, 60_000);
 });

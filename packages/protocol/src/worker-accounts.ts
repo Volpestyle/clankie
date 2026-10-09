@@ -58,6 +58,8 @@ export const WorkerAccountStatusSchema = z.object({
   /** The account's email as its CLI reports it; never a token. */
   identity: z.string().optional(),
   plan: z.string().optional(),
+  /** The plan's rate-limit tier as the harness caches it for this sign-in, e.g. `default_claude_max_20x`. */
+  tier: z.string().max(64).optional(),
   /** Lowest remaining fraction of the account's all-model usage windows; null when unobserved. */
   headroom: z.number().min(0).max(1).nullable(),
   resetsAt: z.string().optional(),
@@ -73,6 +75,81 @@ export const WorkerAccountStatusSchema = z.object({
 });
 export type WorkerAccountStatus = z.infer<typeof WorkerAccountStatusSchema>;
 
+/**
+ * How Clankie would spread hires over one machine's Claude and Codex accounts
+ * (VUH-1974). Each account's spare capacity per day is its plan weight times
+ * (the fraction left of a window divided by the days until that window resets,
+ * minus the share it has been using per day), at its tightest all-model
+ * window. Positive spare goes unused at reset unless hired on; negative means
+ * it is projected to run out first. Model-scoped windows (`week:<scope>`)
+ * bound only hires on that model, so they are named but never rank.
+ */
+export const AccountAllocationSchema = z.object({
+  harness: z.enum(["claude", "codex"]),
+  label: z.string(),
+  /**
+   * Plan size against the harness's base plan (Claude Max 5x = 1, Max 20x = 4,
+   * Pro = 0.2; Codex Plus = 1, Pro = 6), from what the harness reports; null
+   * when it reported no tier, which then counts as 1.
+   */
+  planWeight: z.number().positive().nullable(),
+  /** The plan as named, e.g. `max_20x`; absent when unreported. */
+  tier: z.string().max(64).optional(),
+  /** Whether Clankie may pick it on his own: usable and not held. */
+  eligible: z.boolean(),
+  /** 1 is the next automatic hire on this harness; absent when not eligible. */
+  rank: z.number().int().positive().optional(),
+  /** Fraction left of the tightest all-model window; null when usage is unknown. */
+  remaining: z.number().min(0).max(1).nullable(),
+  /** Spare capacity per day in base-plan units; null when usage is unknown. */
+  sparePerDay: z.number().nullable(),
+  /** The all-model window that binds, by `UsageWindow.id`. */
+  window: z.string().optional(),
+  /** Percent of that window used per day so far; absent until 5% of it has passed. */
+  burnPerDay: z.number().min(0).optional(),
+  resetsAt: z.iso.datetime().optional(),
+  /** When a window runs out at that pace, if before its reset (all-model or scoped). */
+  runsOut: z
+    .array(
+      z.object({ window: z.string(), label: z.string(), at: z.iso.datetime(), resetsAt: z.iso.datetime() }),
+    )
+    .max(16)
+    .optional(),
+  /** One line in the owner's words. */
+  reason: z.string().max(400),
+});
+export type AccountAllocation = z.infer<typeof AccountAllocationSchema>;
+
+export const AllocationRecommendationSchema = z.object({
+  harness: z.enum(["claude", "codex"]),
+  /** The account the next automatic hire on this harness takes; absent when none can. */
+  label: z.string().optional(),
+  /** E.g. "next Claude hire → volpestyle: Max 20x, 99% of its week left, 4.3 days to reset". */
+  reason: z.string().max(600),
+});
+export type AllocationRecommendation = z.infer<typeof AllocationRecommendationSchema>;
+
+export const MachineAllocationSchema = z.object({
+  accounts: z.array(AccountAllocationSchema).max(64),
+  recommendations: z.array(AllocationRecommendationSchema).max(2),
+});
+export type MachineAllocation = z.infer<typeof MachineAllocationSchema>;
+
+/** The owner's thresholds for allocation warnings (settings `usage`). */
+export const UsageAllocationSettingsSchema = z
+  .object({
+    /** Wake the lead once when a weekly window is projected to run out before it resets. */
+    runOutWarning: z.boolean(),
+    /** ...and only when the projected run-out is at least this many hours before the reset. */
+    runOutWarningHours: z.number().min(0).max(168),
+  })
+  .strict();
+export type UsageAllocationSettings = z.infer<typeof UsageAllocationSettingsSchema>;
+export const USAGE_ALLOCATION_DEFAULTS: UsageAllocationSettings = {
+  runOutWarning: true,
+  runOutWarningHours: 12,
+};
+
 export const MachineWorkerAccountsSchema = z.object({
   machine: z.string(),
   shell: z.enum(["posix", "powershell"]),
@@ -80,6 +157,8 @@ export const MachineWorkerAccountsSchema = z.object({
   accounts: z.array(WorkerAccountStatusSchema).max(256),
   /** A harness the machine could not answer for, with why. */
   unavailable: z.partialRecord(WorkerAccountHarnessSchema, z.string()).optional(),
+  /** How Clankie would spread hires over these accounts now. */
+  allocation: MachineAllocationSchema.optional(),
 });
 export type MachineWorkerAccounts = z.infer<typeof MachineWorkerAccountsSchema>;
 
@@ -162,18 +241,25 @@ export type UsageDisplaySettings = z.infer<typeof UsageDisplaySettingsSchema>;
 export const UsageSettingsSnapshotSchema = z.object({
   revision: z.string().regex(/^[a-f0-9]{64}$/u),
   display: UsageDisplaySettingsSchema,
+  /** Absent from bodies older than VUH-1974. */
+  allocation: UsageAllocationSettingsSchema.optional(),
 });
 export type UsageSettingsSnapshot = z.infer<typeof UsageSettingsSnapshotSchema>;
 
 export const UpdateUsageSettingsSchema = z
   .object({
     expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
-    display: UsageDisplaySettingsSchema.partial().refine(
-      (value) => Object.values(value).some((entry) => entry !== undefined),
-      "No usage display change",
-    ),
+    display: UsageDisplaySettingsSchema.partial().optional(),
+    allocation: UsageAllocationSettingsSchema.partial().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      [...Object.values(value.display ?? {}), ...Object.values(value.allocation ?? {})].some(
+        (entry) => entry !== undefined,
+      ),
+    "No usage settings change",
+  );
 export type UpdateUsageSettings = z.infer<typeof UpdateUsageSettingsSchema>;
 
 export const UsageReportSchema = z.object({
@@ -183,6 +269,8 @@ export const UsageReportSchema = z.object({
   accounts: z.array(UsageAccountSchema).max(64),
   unavailable: z.partialRecord(z.enum(["claude", "codex"]), z.string()).optional(),
   settings: UsageSettingsSnapshotSchema,
+  /** Where the next automatic hires go and why (VUH-1974); absent from older bodies. */
+  allocation: MachineAllocationSchema.optional(),
 });
 export type UsageReport = z.infer<typeof UsageReportSchema>;
 
@@ -198,4 +286,10 @@ export const USAGE_WORDING = {
   resets: "resets",
   unknown: "Not reported",
   stale: "Last read",
+  nextHire: "Next hire",
+  runOutWarning: {
+    label: "Warn when an account will run out",
+    description:
+      "Clankie tells his lead once when an account's weekly limit is on pace to run out this many hours or more before it resets.",
+  },
 } as const;
