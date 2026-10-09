@@ -24,7 +24,9 @@ tracker can only point at repo paths; it cannot hold the media.
 Git keeps narratives, conclusions and pointers. The evidence store keeps the
 bytes and the records that describe them.
 
-**Scope.** Only files under a repository's declared evidence roots move:
+**Scope.** Each repository may declare its evidence roots in
+`.clankie/evidence.json`; an absent declaration defaults to `docs/testing`.
+Only files under a repository's declared evidence roots move:
 `docs/testing/**` in clankie and in clankie-app, plus clankie-app's
 `artifacts/**`. Product assets stay in git wherever they live: branding, app
 icons and images, persona art, App Store screenshots, fixtures. Inside an

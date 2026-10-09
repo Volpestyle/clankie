@@ -52,7 +52,8 @@ const EVIDENCE_USAGE = [
 ].join("\n");
 
 /** Repository-relative evidence roots (ADR 0258). Only files under these ever move. */
-const EVIDENCE_ROOTS = ["docs/testing"] as const;
+const DEFAULT_EVIDENCE_ROOTS = ["docs/testing"] as const;
+const EVIDENCE_CONFIG = join(".clankie", "evidence.json");
 const MANIFEST = "evidence.json";
 const MIRROR = join(".local", "evidence");
 /** Non-media files below this stay readable in git. */
@@ -208,6 +209,32 @@ async function repoRootOf(cwd: string) {
   }
 }
 
+async function evidenceRoots(repo: string): Promise<readonly string[]> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(join(repo, EVIDENCE_CONFIG), "utf8"));
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !Array.isArray((parsed as { roots?: unknown }).roots) ||
+      !(parsed as { roots: unknown[] }).roots.length ||
+      (parsed as { roots: unknown[] }).roots.some(
+        (root) =>
+          typeof root !== "string" ||
+          root.length === 0 ||
+          isAbsolute(root) ||
+          root.split(/[\\/]/u).includes(".."),
+      )
+    )
+      throw new Error(`must contain a non-empty relative roots array`);
+    return (parsed as { roots: string[] }).roots.map((root) =>
+      root.replaceAll("\\", "/").replace(/\/+$/u, ""),
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return DEFAULT_EVIDENCE_ROOTS;
+    throw new Error(`Invalid ${EVIDENCE_CONFIG}: ${String(error)}`);
+  }
+}
+
 const posix = (path: string) => path.split(sep).join("/");
 
 async function sha256File(path: string): Promise<string> {
@@ -274,9 +301,9 @@ async function manifestFolder(root: string, start: string): Promise<string> {
   return start;
 }
 
-function refusal(repoRelative: string) {
+function refusal(repoRelative: string, roots: readonly string[]) {
   return new Error(
-    `${repoRelative || "."} is outside the evidence roots (${EVIDENCE_ROOTS.join(", ")}); ` +
+    `${repoRelative || "."} is outside the evidence roots (${roots.join(", ")}); ` +
       "push a folder inside one. Product assets stay in git.",
   );
 }
@@ -308,12 +335,13 @@ async function evidencePush(
 ): Promise<EvidencePushResult> {
   const cwd = options.cwd ?? process.cwd();
   const repo = await repoRootOf(cwd);
+  const roots = await evidenceRoots(repo);
   const requested = resolve(cwd, input.path ?? ".");
   if (!(await exists(requested))) throw new Error(`${input.path ?? "."} does not exist`);
   const target = await realpath(requested);
   const targetRelative = posix(relative(repo, target));
-  const root = EVIDENCE_ROOTS.map((entry) => join(repo, entry)).find((entry) => inside(entry, target));
-  if (root === undefined) throw refusal(targetRelative);
+  const root = roots.map((entry) => join(repo, entry)).find((entry) => inside(entry, target));
+  if (root === undefined) throw refusal(targetRelative, roots);
   const isFile = (await stat(target)).isFile();
   const folder = await manifestFolder(root, isFile ? dirname(target) : target);
   const folderRelative = posix(relative(repo, folder));
@@ -512,14 +540,23 @@ async function evidenceFetch(
 ): Promise<EvidenceFetchResult> {
   const cwd = options.cwd ?? process.cwd();
   const repo = await repoRootOf(cwd);
+  const roots = await evidenceRoots(repo);
   const requested = resolve(cwd, input.path ?? ".");
   if (!(await exists(requested))) throw new Error(`${input.path ?? "."} does not exist`);
   const target = await realpath(requested);
+  if (target !== repo && !roots.some((entry) => inside(join(repo, entry), target)))
+    throw refusal(posix(relative(repo, target)), roots);
   const fetched: string[] = [];
   const present: string[] = [];
   const failures: Failure[] = [];
   let client: EvidenceClient | undefined;
-  for (const folder of await manifestsFor(repo, target)) {
+  const manifestFolders =
+    target === repo
+      ? await Promise.all(roots.map((entry) => manifestsFor(repo, join(repo, entry)))).then((groups) =>
+          groups.flat(),
+        )
+      : await manifestsFor(repo, target);
+  for (const folder of [...new Set(manifestFolders)]) {
     const folderRelative = posix(relative(repo, folder));
     let manifest: EvidenceManifest;
     try {

@@ -45,6 +45,8 @@ live capture or inspected output, recorded as evidence. Put raw captures (media,
 large JSON and logs) under `docs/testing/<folder>` and run `clankie evidence push
 <folder> --issue <KEY>` (or `evidence_push`): commit only the README and
 `evidence.json`, and cite the printed `clankie://evidence` links.
+Evidence roots default to `docs/testing`; a repository may declare relative
+roots such as `docs/testing` and `artifacts` in `.clankie/evidence.json`.
 
 For recent proof across issues, use `clankie evidence list --recent` with
 `--project`, `--repo`, `--issue`, `--actor-kind`, `--actor-name`, `--media-type`,

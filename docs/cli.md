@@ -1868,7 +1868,9 @@ inside any git repository, with no per-repository configuration. Each command
 prints one JSON document; push and fetch also print a plain summary on stderr.
 
 - `clankie evidence push [PATH] [--issue KEY] [--caption TEXT]` (default `.`)
-  works only inside an evidence root (`docs/testing/<folder>`). Outside one it
+  works only inside a declared evidence root (by default `docs/testing/<folder>`).
+  Repositories may declare relative roots in `.clankie/evidence.json`, for example
+  `{"roots":["docs/testing","artifacts"]}`. Outside one it
   refuses, names the roots and changes nothing. It hashes the in-scope files
   under `PATH`: media (png, jpg, gif, mp4, mov, webm) of any size, and any other
   non-Markdown file of 16 KiB or more. Smaller text, Markdown and
@@ -1882,7 +1884,8 @@ prints one JSON document; push and fetch also print a plain summary on stderr.
   `Nothing uploaded; … unchanged`. A listed file that is missing locally keeps
   its entry; removing one is an explicit manifest edit. Commit only the README
   and `evidence.json`, and cite the printed links in tracker comments.
-- `clankie evidence fetch [PATH]` reads the manifest at or above `PATH`, or
+- `clankie evidence fetch [PATH]` reads manifests at or above `PATH` within the
+  declared roots, or
   every manifest below it. It downloads each listed object into
   `.local/evidence/<repo-relative folder>/<path>` and verifies its size and
   sha256 before moving it into place. Objects already present with the right
