@@ -23,6 +23,7 @@ it("ships every repo-owned skill, leadership included, without retired names", (
     "trace-clankie",
     "work-items",
     "research-team",
+    "codebase-cleanup",
     "browser-use",
     "connected-accounts",
     "desktop-control",
