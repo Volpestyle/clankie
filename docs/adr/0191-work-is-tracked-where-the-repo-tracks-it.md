@@ -5,7 +5,10 @@ Amended for parent metadata ([VUH-1593](https://linear.app/vuhlp/issue/VUH-1593)
 and owner-authorized receipt-backed writes ([VUH-1595](https://linear.app/vuhlp/issue/VUH-1595); journal direction approved 2026-10-04).
 The tool vocabulary, priority and disconnected behavior are amended by
 [ADR 0226](0226-one-tracker-tool-surface.md); the original design below is historical
-where it differs from that decision.
+where it differs from that decision. A proposed
+[ADR 0181 amendment](0181-clankie-is-independent-of-his-connections.md#amendment-the-built-in-tracker-is-the-default-2026-10-09-vuh-1904)
+(VUH-1904) makes Clankie's built-in tracker the default; GitHub and Markdown
+conventions become explicit, opt-in adapters.
 
 ## Context
 

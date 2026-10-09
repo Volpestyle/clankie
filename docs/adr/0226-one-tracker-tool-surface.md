@@ -5,6 +5,10 @@ Amends the tool vocabulary, priority and disconnected behavior of
 [ADR 0191](0191-work-is-tracked-where-the-repo-tracks-it.md).
 Amended by [ADR 0243](0243-linear-graphql-is-the-tracker-escape-hatch.md):
 `linear_graphql` reaches the rest of Linear's API beyond this subset.
+A proposed
+[ADR 0181 amendment](0181-clankie-is-independent-of-his-connections.md#amendment-the-built-in-tracker-is-the-default-2026-10-09-vuh-1904)
+(VUH-1904) grows the built-in default tracker from the durable local backend and
+makes Linear an optional connection; these tools stay the agent vocabulary.
 
 ## Context
 

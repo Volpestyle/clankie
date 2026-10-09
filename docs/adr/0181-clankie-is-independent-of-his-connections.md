@@ -6,6 +6,9 @@ default in [ADR 0170](0170-a-session-that-stops-is-unbound.md) and scopes
 [ADR 0184](0184-clankie-leads-more-than-one-fleet.md) to Herdr connections.
 Acceptance ratifies the design; current support and remaining acceptance live in
 the [Swarm host README](0213-clankie-retires-swarm.md).
+A proposed amendment (2026-10-09, pending James's acceptance; tracks
+[VUH-1904](https://linear.app/vuhlp/issue/VUH-1904)) makes Clankie's built-in
+tracker the default; see [the amendment](#amendment-the-built-in-tracker-is-the-default-2026-10-09-vuh-1904).
 
 ## Context and decision
 
@@ -18,14 +21,14 @@ Closing a portal does not end the work it owns.
 
 The following roles compose independently:
 
-| Role                  | Responsibility                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------- |
-| Clankie               | Understand intent, retain context, lead authorized work, review and deliver                 |
-| Portals               | Converse, inspect and control under the caller's grants                                     |
-| `lead`                | Shared leadership judgment; `swarm-lead` and `herdr-lead` supply concrete workflows         |
-| Swarm MCP             | Preferred cross-session assignments, peer messages, ownership and handoffs                  |
-| Execution runtimes    | Terminals and process lifecycle through available CLI/MCP capabilities; Herdr is one option |
-| Optional work tracker | Durable outcomes, priorities, acceptance, dependencies, decisions and evidence              |
+| Role               | Responsibility                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| Clankie            | Understand intent, retain context, lead authorized work, review and deliver                 |
+| Portals            | Converse, inspect and control under the caller's grants                                     |
+| `lead`             | Shared leadership judgment; `swarm-lead` and `herdr-lead` supply concrete workflows         |
+| Swarm MCP          | Preferred cross-session assignments, peer messages, ownership and handoffs                  |
+| Execution runtimes | Terminals and process lifecycle through available CLI/MCP capabilities; Herdr is one option |
+| Work tracker       | Built-in by default; durable outcomes, priorities, acceptance, dependencies and evidence    |
 
 ```mermaid
 flowchart TB
@@ -38,7 +41,7 @@ flowchart TB
   agents <--> swarm
   agents -->|Scoped tool grants| clankie
   clankie <--> services[Connected services / broker-owned accounts]
-  person <--> tracker[Optional tracker: Linear or equivalent]
+  person <--> tracker[Built-in tracker; optional Linear connection]
   tracker -->|Authenticated updates routed to work owner| clankie
   clankie -->|Decisions, results, evidence| tracker
 ```
@@ -287,6 +290,38 @@ per-owner volumes. This provides an independently runnable coding environment
 without building a second process supervisor or a multi-tenant control plane.
 Containers within that owner's environment are trusted; mutually untrusted owners
 need a stronger host boundary. Managed provisioning remains separate work.
+
+## Amendment: the built-in tracker is the default (2026-10-09, VUH-1904)
+
+Status: proposed, pending James's acceptance. Records James's decisions of
+2026-10-08/09; tracked by [VUH-1904](https://linear.app/vuhlp/issue/VUH-1904).
+
+Agents author nearly all tracker activity, and Clankie already works around
+Linear with local write journals, self-imposed request budgets and coordination
+state Linear cannot hold. The tracker stays a separate role, but it no longer
+has to live outside Clankie.
+
+**Decision.** Clankie has a built-in, multi-project tracker, and it is the
+default. Linear becomes an optional connection: the built-in
+tracker mirrors it first, then the owner cuts over. Until cutover, Linear stays
+authoritative and the app shows its work rather than a competing copy. GitHub
+and Markdown repository conventions ([ADR 0191](0191-work-is-tracked-where-the-repo-tracks-it.md))
+remain explicit, opt-in adapters.
+
+[ADR 0226](0226-one-tracker-tool-surface.md)'s `linear_*` tool surface stays the
+agent vocabulary. The built-in tracker grows from its durable local backend, so
+workers keep the tools they already know; a new tool vocabulary is not part of
+this decision.
+
+- **Where it lives.** The core and agent API (CLI/MCP) live in `clankie`; the
+  Work UI lives in `clankie-app`; `clankie-ops` holds only hosted plumbing
+  (managed Postgres/S3, tenancy, backups, deploy).
+- **Order.** Core before UI. The first slice is the evidence store
+  ([VUH-1902](https://linear.app/vuhlp/issue/VUH-1902)).
+
+App-only operation still needs no external account. The connection contract
+above is unchanged: a connected Linear keeps its broker-owned credentials,
+grants, webhook ingress and automation identity.
 
 ## Alternatives and consequences
 
