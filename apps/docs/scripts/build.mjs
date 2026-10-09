@@ -341,6 +341,29 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/usage",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read this machine's Claude and Codex usage windows, the run-out warning settings, and the hire allocation: each account's rank, spare capacity per day, projected run-out and reason, plus the next hire per harness; never credentials.",
+      },
+    ],
+    [
+      "GET /v1/usage/settings",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read the usage overlay and run-out warning settings with their revision.",
+      },
+    ],
+    [
+      "POST /v1/usage/settings",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Show or hide the overlay meters, or set when the lead is warned that an account will run out before its reset, against the current revision.",
+      },
+    ],
+    [
       "GET /v1/operator/persona",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

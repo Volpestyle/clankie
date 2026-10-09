@@ -181,6 +181,7 @@ paths:
         "503": { description: Leave unconfirmed; retain credential }
   /v1/machines/access-refusals:
     get:
+      tags: [Workers]
       summary: Read unresolved machine access refusals for the owner
       operationId: getMachineAccessRefusals
       security:
@@ -2616,6 +2617,54 @@ paths:
         "401": { description: Authentication required }
         "403": { description: Owner authority required }
         "409": { description: Stale revision, changed owner authority or unsupported preference }
+        "503": { description: Settings unavailable }
+  /v1/usage:
+    get:
+      tags: [Operator]
+      operationId: getUsage
+      summary: Read this machine's account usage and where the next hires go
+      description: >-
+        Each registered Claude profile and Codex account with identity, plan, headroom and its usage windows (percent used,
+        length, reset, source and observation age), read through each harness's own CLI and shared for a minute across
+        surfaces; refresh=1 reads again now. `allocation.accounts` ranks each eligible account per harness by spare capacity
+        per day (planWeight, tier, remaining, sparePerDay, window, burnPerDay, resetsAt, runsOut, rank, reason);
+        `allocation.recommendations` names the next automatic hire per harness with its reason (ADR 0261). `settings`
+        carries the overlay and run-out warning settings with their revision. Never credentials (UsageReportSchema).
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      parameters:
+        - { name: refresh, in: query, required: false, schema: { type: string, enum: ["1"] } }
+      responses:
+        "200": { description: Usage report with allocation; Cache-Control no-store }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+        "409": { description: The accounts could not be read }
+        "503": { description: Usage unavailable on this body }
+  /v1/usage/settings:
+    get:
+      tags: [Operator]
+      operationId: getUsageSettings
+      summary: Read the usage overlay and run-out warning settings
+      description: "`display.overlay`, `allocation.runOutWarning` and `allocation.runOutWarningHours` with their SHA-256 revision (UsageSettingsSnapshotSchema)."
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200": { description: Current settings and revision; Cache-Control no-store }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+    post:
+      tags: [Operator]
+      operationId: updateUsageSettings
+      summary: Save usage display and run-out warning settings with revision fencing
+      description: >-
+        expectedRevision from GET is required, with `display.overlay` and/or `allocation.runOutWarning` (boolean) and
+        `allocation.runOutWarningHours` (0-168): the lead is woken once per window reset when an account's weekly limit is on
+        pace to run out at least that many hours before it resets (UpdateUsageSettingsSchema).
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200": { description: Saved settings and revision }
+        "400": { description: Invalid or empty settings update }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision or changed owner authority }
         "503": { description: Settings unavailable }
   /v1/operator/fleet-settings/context:
     get:
