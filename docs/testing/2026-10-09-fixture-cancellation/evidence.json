@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "artifacts/corrected-affected-proof.json",
+      "size": 178301,
+      "sha256": "6ba8ac58666b4307a216ab98f2d196ffec8aa01521f4b53113c12d6f4282ad4d",
+      "url": "clankie://evidence/sha256/6ba8ac58666b4307a216ab98f2d196ffec8aa01521f4b53113c12d6f4282ad4d"
+    },
+    {
       "path": "artifacts/first-affected-proof.json",
       "size": 178470,
       "sha256": "015723057ddd5314886e8d01102fcd405615b4b39780a1f7c946bbe70d2d3ae2",
