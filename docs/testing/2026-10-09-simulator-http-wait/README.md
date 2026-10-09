@@ -49,3 +49,23 @@ timeout was widened. Verification results and raw logs are published in this
 case's canonical `evidence.json`. The requested hour-long timeout policy is
 verified with a shortened real transport deadline; no hour-long live wait or
 simulator capture is claimed. Deployment remains held by the owner canary decision.
+
+## Root gate on 29e57808
+
+**Full-gate result:** checked head `78f436a0`, fixed base `29e57808`, source
+stable, exit 1. Formatting, lint, deadcode, documentation/evidence checks and
+all 31 typechecks passed. Tests bailed after 1,340 passes, one failure and
+23 existing skips. The unchanged worker-bridge-health case
+`keeps mailbox recovery for 503 'service_shutting_down'` failed during initial
+catalog discovery at its 250-ms fixture request budget. The post-run load/core
+was 11.28; that observation does not prove the failure's cause.
+
+**Isolated passes:** the exact failed bridge case passed on unchanged source
+(3.220 seconds including fixture lifecycle); 16 other cases were not selected.
+The preceding root attempt was interrupted during lint when main advanced;
+it supplies no acceptance. No assertion, timeout or selection was weakened.
+
+The [combined canonical proof](clankie://evidence/sha256/d49f4d77378622b38c1875faf086edbe44174cac6a527f32f63e2f5c0a6b59d6)
+retains the actual nonzero gate, exact failure, isolated results and load sample.
+A timing-exception landing requires lead acceptance. This result is not a
+green root gate or a live deployment.
