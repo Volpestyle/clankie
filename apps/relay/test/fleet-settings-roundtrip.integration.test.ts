@@ -23,6 +23,15 @@ import {
   workerAccountsRoute,
 } from "../../../packages/protocol/src/index.ts";
 import { SettingsStore } from "../../../packages/settings/src/index.ts";
+import {
+  VIEWS_PATH,
+  ViewListSchema,
+  ViewRenderSchema,
+  ViewResultSchema,
+  viewPath,
+} from "../../../packages/protocol/src/views.ts";
+import { publicGatewayTargetFor } from "../../../packages/protocol/src/public-gateway.ts";
+import { ViewStore } from "../../clankie/src/views.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../../clankie/src/device-session.ts";
@@ -126,6 +135,7 @@ async function fixture(options: { unavailableAwakeRegistry?: boolean } = {}) {
       },
     }),
     settings,
+    views: new ViewStore(join(root, "views"), () => hf.now),
     ...(options.unavailableAwakeRegistry
       ? {
           applyKeepAwake: async () => {
@@ -227,6 +237,7 @@ async function fixture(options: { unavailableAwakeRegistry?: boolean } = {}) {
     revoke,
     relayUrl,
     controlUrl,
+    now: hf.now,
     captainCalls: () => captainCalls,
   };
 }
@@ -457,5 +468,57 @@ it("preserves a validated saved host receipt through device relay when runtime a
   expect(reconciled).toEqual(saved);
   expect((await new SettingsStore(f.settings.path).load()).host.keepAwake).toBe(false);
   expect(f.forwarded.every((entry) => entry.token === f.tokens.control)).toBe(true);
+  expect(f.captainCalls()).toBe(0);
+});
+
+it("carries the owner's views to a control device, unavailable sources included, and to no one else (VUH-2042)", async () => {
+  const f = await fixture();
+  const call = (path: string, body?: unknown, device: keyof typeof f.tokens = "control") =>
+    fetch(`${f.relayUrl}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { authorization: `Bearer ${f.tokens[device]}`, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  const spec = {
+    title: "Heavy queue",
+    sources: { fleet: { kind: "fleet_resources" } },
+    panels: [{ source: "fleet", show: "queue", resource: "heavy" }],
+  };
+  const created = await call(VIEWS_PATH, { action: "create", spec });
+  expect(created.status).toBe(200);
+  const { view } = ViewResultSchema.parse(await created.json());
+  expect(view.spec.refreshSeconds).toBe(5);
+  expect(ViewListSchema.parse(await (await call(VIEWS_PATH)).json()).views.map((v) => v.id)).toEqual([
+    view.id,
+  ]);
+  // This host runs no fleet resources: the source says why instead of failing the view.
+  const render = ViewRenderSchema.parse(await (await call(viewPath(view.id))).json());
+  expect(render.sources.fleet).toMatchObject({ state: "unavailable", kind: "fleet_resources" });
+  const pinned = ViewResultSchema.parse(
+    await (await call(VIEWS_PATH, { action: "pin", id: view.id })).json(),
+  );
+  expect(pinned.view).toMatchObject({ pinned: true, expiresAtMs: null });
+  const unpinned = ViewResultSchema.parse(
+    await (await call(VIEWS_PATH, { action: "unpin", id: view.id })).json(),
+  );
+  expect(unpinned.view.expiresAtMs).toBeGreaterThan(f.now);
+  expect(await (await call(VIEWS_PATH, { action: "expire", id: view.id })).json()).toEqual({
+    expired: view.id,
+  });
+  expect((await call(viewPath(view.id))).status).toBe(404);
+  // Every one of these is reachable from a remote device through the public gateway.
+  expect(publicGatewayTargetFor("GET", viewPath(view.id))).toBe("relay");
+  expect(publicGatewayTargetFor("GET", `${VIEWS_PATH}/../fleet-settings`)).toBeUndefined();
+  expect(f.forwarded.every((entry) => entry.token === f.tokens.control)).toBe(true);
+
+  const forwarded = f.forwarded.length;
+  // A spec the contract refuses never reaches the service; nor does a chat or steer device.
+  expect((await call(VIEWS_PATH, { action: "create", spec: { ...spec, panels: [] } })).status).toBe(400);
+  expect((await call(`${VIEWS_PATH}/view_NOTANID`)).status).toBe(404);
+  for (const device of ["chat", "steer"] as const) {
+    expect((await call(VIEWS_PATH, undefined, device)).status).toBe(403);
+    expect((await call(VIEWS_PATH, { action: "create", spec }, device)).status).toBe(403);
+  }
+  expect(f.forwarded).toHaveLength(forwarded);
   expect(f.captainCalls()).toBe(0);
 });

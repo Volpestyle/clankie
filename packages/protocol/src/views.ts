@@ -12,6 +12,8 @@ import { WorkItemPrioritySchema, WorkItemStatusSchema } from "./work-items.ts";
  */
 export const VIEWS_PATH = "/v1/operator/views";
 export const viewPath = (id: string) => `${VIEWS_PATH}/${encodeURIComponent(id)}`;
+/** One view's render route, the only parameterized views path a device may reach. */
+export const isViewRoute = (path: string) => /^\/v1\/operator\/views\/view_[a-z0-9]{12}$/u.test(path);
 
 const HOUR_MS = 3_600_000;
 /** Temporary views live 24 hours by default and at most 7 days; pinned views do not expire. */
@@ -137,6 +139,8 @@ export type ViewRequest = z.infer<typeof ViewRequestSchema>;
 export const ViewListSchema = z.strictObject({ views: z.array(ViewSchema).max(VIEW_LIMIT) });
 export const ViewResultSchema = z.strictObject({ view: ViewSchema });
 export const ViewExpiredSchema = z.strictObject({ expired: ViewIdSchema });
+/** Any answer from `VIEWS_PATH`: the list, a created or changed view, or an expiry. */
+export const ViewsResponseSchema = z.union([ViewListSchema, ViewResultSchema, ViewExpiredSchema]);
 
 /** The issue fields a view shows; a subset of the work-item contract. */
 export const ViewIssueSchema = z.strictObject({

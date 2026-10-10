@@ -69,6 +69,13 @@ import {
   StartHuddleSchema,
 } from "../../../packages/protocol/src/huddles.ts";
 import {
+  isViewRoute,
+  VIEWS_PATH,
+  ViewRenderSchema,
+  ViewRequestSchema,
+  ViewsResponseSchema,
+} from "../../../packages/protocol/src/views.ts";
+import {
   PROJECTS_PATH,
   PROJECT_UPDATE_SETTINGS_PATH,
   ProjectsSnapshotSchema,
@@ -169,6 +176,8 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "GET", path: HUDDLES_PATH },
   { method: "POST", path: HUDDLES_PATH },
   { method: "POST", path: HUDDLE_CLOSE_PATH },
+  { method: "GET", path: VIEWS_PATH },
+  { method: "POST", path: VIEWS_PATH },
   { method: "GET", path: LINEAR_FOLLOW_PATH },
   { method: "POST", path: LINEAR_FOLLOW_PATH },
   { method: "GET", path: LINEAR_WAKE_PATH },
@@ -251,12 +260,19 @@ const OWNER_SETTINGS_ROUTES: Readonly<
   },
   [HUDDLES_PATH]: { methods: ["GET", "POST"], update: StartHuddleSchema, snapshot: HuddlesResponseSchema },
   [HUDDLE_CLOSE_PATH]: { methods: ["POST"], update: CloseHuddleSchema, snapshot: HuddleSchema },
+  [VIEWS_PATH]: { methods: ["GET", "POST"], update: ViewRequestSchema, snapshot: ViewsResponseSchema },
   [PROJECTS_PATH]: { methods: ["GET"], snapshot: ProjectsSnapshotSchema },
   [PROJECT_UPDATE_SETTINGS_PATH]: {
     methods: ["POST"],
     update: UpdateProjectSettingsSchema,
     snapshot: ProjectsSnapshotSchema,
   },
+};
+
+/** `GET /v1/operator/views/:id`, the one parameterized owner route (VUH-2042). */
+const VIEW_RENDER_ROUTE: (typeof OWNER_SETTINGS_ROUTES)[string] = {
+  methods: ["GET"],
+  snapshot: ViewRenderSchema,
 };
 
 /**
@@ -273,7 +289,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     const path = requestUrl(request).pathname;
     const settingsRoute = Object.hasOwn(OWNER_SETTINGS_ROUTES, path)
       ? OWNER_SETTINGS_ROUTES[path]
-      : undefined;
+      : isViewRoute(path)
+        ? VIEW_RENDER_ROUTE
+        : undefined;
     if (settingsRoute !== undefined) {
       response.setHeader("cache-control", "no-store");
       const method = request.method;

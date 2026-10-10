@@ -11,6 +11,7 @@ import {
   WORKER_ACCOUNT_HOLDS_PATH,
 } from "./worker-accounts.ts";
 import { HUDDLE_CLOSE_PATH, HUDDLES_PATH } from "./huddles.ts";
+import { isViewRoute, VIEWS_PATH } from "./views.ts";
 import { RUNTIME_HEALTH_PATH } from "./runtime-health.ts";
 import { OFFICIAL_DISCORD_BODY_PATH } from "./official-discord.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
@@ -27,6 +28,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
   // Worker accounts read one machine through the only query that route accepts.
   if (isWorkerAccountsRoute(path)) return method === "GET";
   if (path === `${USAGE_PATH}?refresh=1`) return method === "GET";
+  if (isViewRoute(path)) return method === "GET";
   if (path === "/operator/v1/dispatch" && method === "POST") {
     let value: unknown;
     try {
@@ -108,6 +110,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       USAGE_PATH,
       USAGE_SETTINGS_PATH,
       HUDDLES_PATH,
+      VIEWS_PATH,
       LINEAR_FOLLOW_PATH,
       LINEAR_WAKE_PATH,
       "/v1/discord/rooms",
@@ -167,6 +170,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       USAGE_SETTINGS_PATH,
       HUDDLES_PATH,
       HUDDLE_CLOSE_PATH,
+      VIEWS_PATH,
       PROJECT_UPDATE_SETTINGS_PATH,
       "/v1/support/grants",
     ],

@@ -3055,6 +3055,9 @@ Owner HTTP routes: `GET /v1/operator/views` lists views,
 `{action:"unpin", id, ttlHours?}` (64 KiB limit; create answers 201). They use the
 fleet-resources owner boundary: the operator bearer or a paired device with
 terminal control. An unknown or expired id is 404, and the 50-view limit is 409.
+A paired phone or desktop reaches the same routes through the relay and the public
+gateway, which hold each request and answer to these schemas and answer a create
+with 200.
 Specs live in `~/.clankie/views/views.json`. Schemas are in
 `packages/protocol/src/views.ts`. Hosted share links are not part of this repository.
 
