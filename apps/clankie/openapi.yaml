@@ -3379,6 +3379,81 @@ paths:
         "403": { description: Owner authority required }
         "409": { description: Stale revision or changed owner authority }
         "503": { description: Settings unavailable }
+  /v1/operator/maximum-trust-mode:
+    get:
+      tags: [Operator]
+      operationId: getMaximumTrustMode
+      summary: Read whether maximum trust mode is on
+      description: While on, every harness Clankie launches next starts without its own permission and command guardrails, through its native flag (Claude --dangerously-skip-permissions, Codex approval_policy=never with sandbox_mode=danger-full-access, Grok --permission-mode bypassPermissions). Running seats keep the mode they launched with. Separate from the autonomy dial.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Current mode; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, enabled]
+                properties:
+                  schemaVersion: { type: integer, enum: [1] }
+                  enabled: { type: boolean }
+                  seatsOnOtherMode:
+                    type: array
+                    description: This machine's live seats still on the other mode until relaunched, read from their process flags; absent when unobservable
+                    items:
+                      type: object
+                      required: [seatId, title, harness, maximumTrust]
+                      properties:
+                        seatId: { type: string }
+                        title: { type: string }
+                        harness: { type: string }
+                        maximumTrust: { type: boolean }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+    post:
+      tags: [Operator]
+      operationId: updateMaximumTrustMode
+      summary: Turn maximum trust mode on or off
+      description: Owner-only. Applies to the next launches of the operator seat, hires and remote project leads.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schemaVersion, enabled]
+              properties:
+                schemaVersion: { type: integer, enum: [1] }
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Saved mode
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, enabled]
+                properties:
+                  schemaVersion: { type: integer, enum: [1] }
+                  enabled: { type: boolean }
+                  seatsOnOtherMode:
+                    type: array
+                    description: This machine's live seats still on the other mode until relaunched, read from their process flags; absent when unobservable
+                    items:
+                      type: object
+                      required: [seatId, title, harness, maximumTrust]
+                      properties:
+                        seatId: { type: string }
+                        title: { type: string }
+                        harness: { type: string }
+                        maximumTrust: { type: boolean }
+        "400": { description: Malformed update }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Changed owner authority }
+        "503": { description: Settings unavailable }
   /v1/operator/runtime-health:
     get:
       tags: [Operator]

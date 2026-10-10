@@ -288,6 +288,21 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/operator/maximum-trust-mode",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read whether maximum trust mode is on for the next harness launches.",
+      },
+    ],
+    [
+      "POST /v1/operator/maximum-trust-mode",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Turn maximum trust mode on or off. New seats, hires and project leads then start with or without each harness's permission prompts and sandbox; running seats keep their mode.",
+      },
+    ],
+    [
       "GET /v1/operator/voice",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

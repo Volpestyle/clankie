@@ -67,6 +67,8 @@ if (process.argv[2] === "--head") {
         autoMemoryEnabled: false,
         enabledPlugins: { [leadPlugin]: true, "clankie-worker@clankie": false, "clankie@clankie": false },
       }),
+      // The owner's maximum trust mode (VUH-2048), set by the service; MAXIMUM_TRUST_HARNESS_ARGS.claude.
+      ...(spec.maximumTrust === true ? ["--dangerously-skip-permissions"] : []),
     ],
     {
       cwd: spec.cwd,

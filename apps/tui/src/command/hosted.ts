@@ -261,6 +261,10 @@ export async function hostedCommand(
   if (command === "fleet" && ["set", "clear", "show"].includes(action ?? ""))
     return runFleetCommand(args.slice(1), { ownerFetcher });
   if (command === "autonomy") return runAutonomyCommand(args.slice(1), { ownerFetcher });
+  if (command === "maximum-trust-mode")
+    return (await import("./maximum-trust-mode.ts")).runMaximumTrustModeCommand(args.slice(1), {
+      ownerFetcher,
+    });
   if (command === "awake") {
     if (args.includes("--local-setup")) throw new Error("Local setup cannot target a hosted machine");
     return runAwakeCommand(args.slice(1), { ownerFetcher, repoRoot: process.cwd() });

@@ -288,10 +288,13 @@ process.stdin.on('end', () => {
       if (connection?.machine !== input.fleet)
         throw new Error("Remote lead requires an exact fleet/machine binding");
       const nativeSession = randomUUID();
+      // The owner's switch at launch (VUH-2048); a running lead keeps its mode.
+      const maximumTrust = settings.maximumTrustMode;
       Object.assign(record, {
         conversationId,
         nativeSession,
         plugin: prepared.directory,
+        maximumTrust,
         stage: "allocating",
       });
       await writeFile(path, JSON.stringify(record));
@@ -314,6 +317,7 @@ process.stdin.on('end', () => {
           account: input.account,
           nativeSession,
           plugin: prepared.directory,
+          maximumTrust,
         }) + "\n",
       );
       const allocated = await nextFrame(lines);

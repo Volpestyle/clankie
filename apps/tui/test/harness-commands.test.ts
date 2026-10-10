@@ -22,6 +22,13 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
+/** Service requests other than the read-only maximum trust mode read. */
+function conversationRequests(fetchImpl: { mock: { calls: unknown[][] } }) {
+  return fetchImpl.mock.calls.filter(
+    ([input]) => new URL(String(input)).pathname !== "/v1/operator/maximum-trust-mode",
+  );
+}
+
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "clankie-harness-command-"));
   roots.push(root);
@@ -47,6 +54,9 @@ async function fixture() {
   }));
   const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
     expect(init?.method).not.toBe("POST");
+    // A launch plan reads the owner's maximum trust mode to show its flags (VUH-2048).
+    if (new URL(String(input)).pathname === "/v1/operator/maximum-trust-mode")
+      return Response.json({ schemaVersion: 1, enabled: false });
     const id = new URL(String(input)).searchParams.get("conversationId");
     return Response.json({ conversationId: id, cwd: root });
   });
@@ -83,7 +93,7 @@ it.each(["claude", "claude2", "codex", "opencode"])(
     expect(code, f.error()).toBe(0);
     const plan = JSON.parse(f.output());
     expect(plan).toMatchObject({ command, conversationId: "chosen-chat", cwd: f.root, resumed: false });
-    expect(f.options.fetchImpl).toHaveBeenCalledOnce();
+    expect(conversationRequests(f.options.fetchImpl)).toHaveLength(1);
     expect(f.options.execFileImpl.mock.calls.every(([name]) => name === command)).toBe(true);
     if (harness !== "claude") expect(plan.plugin.path).toBe(plugin);
     if (command === "codex") {
@@ -103,7 +113,7 @@ it.each(["claude", "codex", "opencode"])(
       newConversation: { op: "create", scope: { kind: "workspace" } },
       resumed: false,
     });
-    expect(f.options.fetchImpl).not.toHaveBeenCalled();
+    expect(conversationRequests(f.options.fetchImpl)).toEqual([]);
   },
 );
 
@@ -147,7 +157,7 @@ it.each(["claude", "claude2", "codex", "opencode"])(
     const other = command === "codex" ? "opencode" : "codex";
     expect(await runHeadlessCaptainCommand([command, "--harness", other, "--dry-run"], f.options)).toBe(1);
     expect(f.options.execFileImpl).not.toHaveBeenCalled();
-    expect(f.options.fetchImpl).not.toHaveBeenCalled();
+    expect(conversationRequests(f.options.fetchImpl)).toEqual([]);
     expect(f.error()).toContain(`clankie ${command}`);
   },
 );
@@ -243,7 +253,7 @@ it.each(["codex3", "codex999"])(
     expect(await runHeadlessCaptainCommand([command, "--dry-run"], f.options)).toBe(1);
     expect(f.error()).toContain(`No Codex account labelled ${command}`);
     expect(f.options.execFileImpl).not.toHaveBeenCalled();
-    expect(f.options.fetchImpl).not.toHaveBeenCalled();
+    expect(conversationRequests(f.options.fetchImpl)).toEqual([]);
     expect(await readFile(f.options.env.CLANKIE_SETTINGS_FILE, "utf8")).toBe(before);
   },
 );
@@ -264,7 +274,7 @@ it("codex2 has an isolated resume record and refuses a rebound or removed home",
   );
   expect(await runHeadlessCaptainCommand(["codex2", "--resume", "--dry-run"], f.options)).toBe(1);
   expect(f.error()).toContain("clankie codex2");
-  expect(f.options.fetchImpl).not.toHaveBeenCalled();
+  expect(conversationRequests(f.options.fetchImpl)).toEqual([]);
   await writeFile(recordPath, JSON.stringify(record));
   expect(await runHeadlessCaptainCommand(["codex2", "--resume", "--dry-run"], f.options), f.error()).toBe(0);
   expect(JSON.parse(f.output())).toMatchObject({
@@ -281,7 +291,7 @@ it("codex2 has an isolated resume record and refuses a rebound or removed home",
   );
   expect(await runHeadlessCaptainCommand(["codex2", "--resume", "--dry-run"], f.options)).toBe(1);
   expect(f.error()).toContain("account home changed");
-  expect(f.options.fetchImpl).not.toHaveBeenCalled();
+  expect(conversationRequests(f.options.fetchImpl)).toEqual([]);
   await rm(f.other, { recursive: true });
   f.options.execFileImpl.mockClear();
   expect(await runHeadlessCaptainCommand(["codex2", "--dry-run"], f.options)).toBe(1);
@@ -423,7 +433,7 @@ it.each(["codex", "codex2"])(
       expect(message).toContain(`Clankie's Codex plugin is not installed. ${original}`);
       expect(message).not.toContain("set CODEX_HOME");
     }
-    expect(f.options.fetchImpl).not.toHaveBeenCalled();
+    expect(conversationRequests(f.options.fetchImpl)).toEqual([]);
     expect(spawnImpl).not.toHaveBeenCalled();
     expect(await readFile(f.options.env.CLANKIE_SETTINGS_FILE, "utf8")).toBe(settingsBefore);
   },

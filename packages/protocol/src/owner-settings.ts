@@ -182,6 +182,66 @@ export const UpdateAppearanceSettingsSchema = z
   })
   .strict();
 export type AppearanceSettingsSnapshot = z.infer<typeof AppearanceSettingsSnapshotSchema>;
+
+/**
+ * Maximum trust mode (VUH-2048): one owner switch. While on, every harness
+ * Clankie launches next starts without its own permission and command
+ * guardrails, through that harness's native flag. Seats already running keep
+ * the mode they launched with. It is not the autonomy dial: that decides what
+ * Clankie does without asking, this only what a launched harness may run
+ * without asking.
+ */
+export const MAXIMUM_TRUST_MODE_PATH = "/v1/operator/maximum-trust-mode";
+export const MAXIMUM_TRUST_MODE_WORDING = {
+  title: "Maximum trust mode",
+  off: "Off: each coding agent runs in its own auto mode and asks before risky commands.",
+  on: "On: new seats, hires and project leads skip every permission prompt and sandbox. Seats already running keep their mode until relaunched.",
+  warning:
+    "Agents run any command, edit any file and reach the network without asking, with your accounts and credentials. Only turn this on for machines and repositories you would let them change unsupervised.",
+} as const;
+/**
+ * Each harness's native flag for running without its permission and command
+ * guardrails. A harness absent here has none: OpenCode only takes them from
+ * its config, Pi and Prime Agent ask no approvals to begin with.
+ */
+export const MAXIMUM_TRUST_HARNESS_ARGS = {
+  claude: ["--dangerously-skip-permissions"],
+  codex: ["--dangerously-bypass-approvals-and-sandbox"],
+  grok: ["--permission-mode", "bypassPermissions"],
+} as const satisfies Record<string, readonly string[]>;
+/**
+ * Codex seats and hires run a dedicated app-server whose server and view share
+ * `-c` overrides, so the flag is applied as the two settings it sets.
+ */
+export const MAXIMUM_TRUST_CODEX_CONFIG = [
+  'approval_policy="never"',
+  'sandbox_mode="danger-full-access"',
+] as const;
+/** A live seat on this machine and the mode it launched with, read from its own process flags. */
+export const MaximumTrustSeatSchema = z
+  .object({
+    seatId: z.string().min(1).max(200),
+    title: z.string().max(200),
+    harness: z.string().min(1).max(64),
+    maximumTrust: z.boolean(),
+  })
+  .strict();
+export type MaximumTrustSeat = z.infer<typeof MaximumTrustSeatSchema>;
+/** Not strict, so later fields reach older readers as ignored keys. */
+export const MaximumTrustModeSnapshotSchema = z.object({
+  schemaVersion: z.literal(1),
+  enabled: z.boolean(),
+  /**
+   * Live seats still on the other mode until relaunched. Absent when the
+   * service could not observe its seats; remote machines are not listed.
+   */
+  seatsOnOtherMode: z.array(MaximumTrustSeatSchema).max(256).optional(),
+});
+export const UpdateMaximumTrustModeSchema = z
+  .object({ schemaVersion: z.literal(1), enabled: z.boolean() })
+  .strict();
+export type MaximumTrustModeSnapshot = z.infer<typeof MaximumTrustModeSnapshotSchema>;
+export type UpdateMaximumTrustMode = z.infer<typeof UpdateMaximumTrustModeSchema>;
 export type UpdateAppearanceSettings = z.infer<typeof UpdateAppearanceSettingsSchema>;
 export type UpdateHostSettings = z.infer<typeof UpdateHostSettingsSchema>;
 export const OwnerPersonaImageStatusSchema = z.object({

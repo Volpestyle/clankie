@@ -3191,6 +3191,57 @@ like any other wake.
 
 New hired Claude workers launch in `auto` mode, preserving managed and tracker
 denies and the permission hook, with no blanket `ask` rules or Bash allow.
+[Maximum trust mode](#maximum-trust-mode) replaces that mode at launch while it
+is on.
+
+<a id="maximum-trust-mode"></a>
+
+### `maximum-trust-mode [status|on|off]`
+
+The owner's one switch over the guardrails of every harness Clankie launches
+(VUH-2048). Off, the default, keeps each harness's own auto mode: `clankie claude`
+and Claude hires start with `--permission-mode auto`, whose classifier stops
+risky commands. On, the next launches start without their permission and
+command guardrails, through each harness's native flag:
+
+| Harness         | Flag while on                                                                                                      | Applied at launch                                    |
+| --------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| Claude          | `--dangerously-skip-permissions`                                                                                   | `clankie claude`, Claude hires, remote project leads |
+| Codex           | `--dangerously-bypass-approvals-and-sandbox`, as `-c approval_policy="never" -c sandbox_mode="danger-full-access"` | `clankie codex`, Codex hires (local and remote)      |
+| Grok            | `--permission-mode bypassPermissions`                                                                              | `clankie grok`, Grok hires                           |
+| OpenCode        | none: its permissions come only from config                                                                        | —                                                    |
+| Pi, Prime Agent | none: they ask no approvals                                                                                        | —                                                    |
+
+Codex seats and hires run a dedicated app-server whose server and view share
+`-c` overrides, so the flag is applied as the two settings it sets; on hires it
+replaces the `on-request` approval policy fleet gates otherwise select.
+
+What it bypasses: every permission prompt and Claude's auto-mode classifier.
+The agent runs any command, edits any file and reaches the network without
+asking, with the accounts and credentials its machine holds. Claude still
+enforces deny rules in every mode, so managed denies and the tracker denies
+Clankie adds stay, and a managed `disableBypassPermissionsMode: "disable"`
+refuses the mode outright. Native prompts that still appear remain the owner's.
+
+It applies to launches after the change. Running seats keep the mode they
+started with until relaunched: the snapshot's `seatsOnOtherMode` lists this
+machine's live seats (`seatId`, `title`, `harness`, `maximumTrust`) whose own
+process flags still show the other mode, read through Herdr. Remote machines
+are not listed; a remote lead's launch receipt records its `maximumTrust`. It is not the autonomy dial: [`autonomy`](#autonomy-dial)
+and [`auto`](#auto-switch) decide what Clankie does without asking, this only
+what a launched harness may run without asking, and neither implies the other.
+
+Owner-only: `GET` and `POST /v1/operator/maximum-trust-mode`
+(`{"schemaVersion":1,"enabled":true}`), authorized like the other owner
+settings (the operator credential, or a paired device with Take Control). No
+worker, peer, room or tool can set it. The command prints
+`{"ok":true,"enabled":…,"description":…}`, plus `warning` while on and
+`seatsOnOtherMode` when the service could observe its seats. In the console,
+`/maximum-trust-mode` opens the switch, and `/maximum-trust-mode on|off|status`
+sets or reads it; the hosted console lists it under `/settings`.
+`clankie claude|codex|grok --dry-run` shows the resulting flags and `maximumTrustMode`.
+When the service cannot report the mode, the seat launches in auto mode and
+says so.
 For a pending permission, `message_seat` accepts `questionAnswer` with its exact
 request and question IDs through the worker's existing private authenticated
 lead lane. Scoped ordinary file calls and literal `pwd`/`git status` can follow
@@ -5029,13 +5080,16 @@ later room message. See [ADR 0218](adr/0218-native-seats-drive-their-attached-co
     "--dangerously-load-development-channels",
     "plugin:clankie@inline",
     "--session-id",
-    "…"
+    "…",
+    "--permission-mode",
+    "auto"
   ],
   "plugin": { "source": "plugin-dir", "path": "…/skill-projections/launch-…" },
   "channel": true,
   "sessionId": "…",
   "resumed": false,
   "cwd": "/Users/me/dev/project",
+  "maximumTrustMode": false,
   "newConversation": {
     "op": "create",
     "schemaVersion": 1,

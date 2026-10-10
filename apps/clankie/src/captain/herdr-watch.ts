@@ -883,6 +883,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly fleetResources: FleetResourceRuntime | undefined;
   private readonly requireWorkerAccess: ((fleet?: string) => Promise<void>) | undefined;
   private readonly hireDefaults: (() => Promise<HireProfile>) | undefined;
+  private readonly maximumTrustMode: (() => Promise<boolean>) | undefined;
   private readonly resolveModel: ((harness: string, model: string) => Promise<string>) | undefined;
   private readonly claudeAccounts: (() => Promise<readonly CodexAccount[]>) | undefined;
   private readonly accounts: () => Promise<readonly CodexAccount[]>;
@@ -906,6 +907,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly projectHirePolicy?: ProjectHirePolicy;
       readonly fleetHireTools?: () => Promise<readonly string[]>;
       readonly hireDefaults?: () => Promise<HireProfile>;
+      /** The owner's maximum trust mode (VUH-2048), read at each launch. Absent, it is off. */
+      readonly maximumTrustMode?: () => Promise<boolean>;
       readonly resolveHireModel?: (harness: string, model: string) => Promise<string>;
       readonly claudeAccounts?: () => Promise<readonly CodexAccount[]>;
       readonly codexAccounts?: () => Promise<readonly CodexAccount[]>;
@@ -989,6 +992,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.hireReceipts = new DeliveryFence(`${path}.hire-receipts.json`);
     this.skillBundle = options.skillBundle;
     this.hireDefaults = options.hireDefaults;
+    this.maximumTrustMode = options.maximumTrustMode;
     this.resolveModel = options.resolveHireModel;
     this.claudeAccounts = options.claudeAccounts;
     this.accounts = options.codexAccounts ?? (async () => codexAccounts());
@@ -3488,6 +3492,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ...(input.effort === undefined ? {} : { effort: input.effort }),
           ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
           harnessArgs: skillLaunch.args,
+          ...((await this.maximumTrustMode?.()) === true ? { maximumTrust: true } : {}),
         };
         await this.assertRemoteHireAuthority(input, receiptKey, authority);
         nativePrepared = await adapter.prepare(nativeLaunch);
@@ -3712,6 +3717,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
                 ...(input.effort === undefined ? {} : { effort: input.effort }),
                 ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
                 harnessArgs: [...skillLaunch.args, ...chromeArgs],
+                ...((await this.maximumTrustMode?.()) === true ? { maximumTrust: true } : {}),
               },
               launchView,
             );

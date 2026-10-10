@@ -751,6 +751,13 @@ export const ClankieSettingsSchema = z
       .default(() => ({ connections: [] })),
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
     fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
+    /**
+     * Maximum trust mode (VUH-2048): every harness Clankie launches next runs
+     * without its own permission and command guardrails, through that
+     * harness's native flag. Owner-only, off by default (each harness's auto
+     * mode). Not the autonomy dial: neither implies the other.
+     */
+    maximumTrustMode: z.boolean().default(false),
     autonomy: AutonomySettingsSchema.default(() => AutonomySettingsSchema.parse({})),
     projects: ProjectsSettingsSchema.default(() => ProjectsSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),

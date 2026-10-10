@@ -13,6 +13,7 @@ import type {
   SeatRef,
 } from "@clankie/agent-hosts";
 import { bundledSkills } from "@clankie/settings";
+import { MAXIMUM_TRUST_HARNESS_ARGS } from "@clankie/protocol";
 import {
   connectGrokNative,
   GROK_NATIVE_VERSION,
@@ -164,6 +165,7 @@ export function createGrokSeatAdapter(options: {
           `You are a worker hired by Clankie. Send questions and final reports through message_clankie. Connected tools are available through clankie_tools and clankie_call. ${rules ?? `Load relevant skills from these paths:\n${grokSkillContext(options.repoRoot)}`}`,
           ...(launch.model ? ["--model", launch.model] : []),
           ...(launch.effort ? ["--reasoning-effort", launch.effort] : []),
+          ...(launch.maximumTrust === true ? MAXIMUM_TRUST_HARNESS_ARGS.grok : []),
         ],
         ...(launch.env ? { env: launch.env } : {}),
         dispose,

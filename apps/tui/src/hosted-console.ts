@@ -1,4 +1,4 @@
-import { HOST_SETTINGS_WORDING } from "@clankie/protocol/owner-settings";
+import { HOST_SETTINGS_WORDING, MAXIMUM_TRUST_MODE_WORDING } from "@clankie/protocol/owner-settings";
 import { runAwakeCommand } from "./command/awake.ts";
 import { runUpdateCommand } from "./command/update.ts";
 import { buildConsoleCommands } from "./commands.ts";
@@ -7,6 +7,8 @@ import { OwnerPersonaSnapshotSchema } from "@clankie/protocol/owner-settings";
 import { ownerSettingsApi } from "./command/owner-settings-api.ts";
 import { buildFleetCommands } from "./fleet-commands.ts";
 import { autonomyCommand } from "./autonomy-command.ts";
+import { maximumTrustModeCommand } from "./maximum-trust-mode-command.ts";
+import { runMaximumTrustModeCommand } from "./command/maximum-trust-mode.ts";
 import { runAutonomyCommand } from "./command/fleet.ts";
 import { runVoiceCommand } from "./command/voice.ts";
 import { splitQuotedArguments } from "./command/agents.ts";
@@ -356,6 +358,7 @@ export async function runHostedConsole() {
               { value: "discord", label: "Discord" },
               { value: "awake", label: HOST_SETTINGS_WORDING.keepAwake.label },
               { value: "update", label: HOST_SETTINGS_WORDING.autoUpdate.label },
+              { value: "maximum-trust-mode", label: MAXIMUM_TRUST_MODE_WORDING.title },
             ],
           });
         } finally {
@@ -366,6 +369,7 @@ export async function runHostedConsole() {
     },
     ...buildFleetCommands({ settings, ownerFetcher }),
     autonomyCommand({ level: (args) => runAutonomyCommand(args, { settings, ownerFetcher }) }),
+    maximumTrustModeCommand((args) => runMaximumTrustModeCommand(args, { ownerFetcher })),
     {
       name: "voice",
       aliases: [],

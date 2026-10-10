@@ -351,6 +351,8 @@ else console.log('{}');
           policyPath,
         }),
       ).rejects.toThrow("No existing signed-in");
+      // The second launch carries the owner's maximum trust mode (VUH-2048).
+      let maximumTrust = false;
       handoff.on("connection", (socket) =>
         socket.once("data", (chunk) => {
           expect(JSON.parse(chunk.toString()).ticket).toBe("fixture-ticket");
@@ -365,6 +367,7 @@ else console.log('{}');
               cwd: root,
               title: "KH2",
               nativeSession,
+              maximumTrust,
             }) + "\n",
           );
         }),
@@ -372,17 +375,23 @@ else console.log('{}');
       await new Promise<void>((r) => handoff.listen(0, "127.0.0.1", r));
       const address = handoff.address();
       if (!address || typeof address === "string") throw Error("Missing handoff address");
-      await execute(
-        process.execPath,
-        [
-          join(repo, "integrations/remote-lead/bootstrap.mjs"),
-          "--head",
-          String(address.port),
-          "fixture-ticket",
-        ],
-        { env: { ...env, HERDR_PANE_ID: binding.pane } },
-      );
-      const head = JSON.parse(await readFile(join(root, "head.json"), "utf8"));
+      const launchHead = async () => {
+        await execute(
+          process.execPath,
+          [
+            join(repo, "integrations/remote-lead/bootstrap.mjs"),
+            "--head",
+            String(address.port),
+            "fixture-ticket",
+          ],
+          { env: { ...env, HERDR_PANE_ID: binding.pane } },
+        );
+        return JSON.parse(await readFile(join(root, "head.json"), "utf8"));
+      };
+      const head = await launchHead();
+      expect(head.args).not.toContain("--dangerously-skip-permissions");
+      maximumTrust = true;
+      expect((await launchHead()).args).toContain("--dangerously-skip-permissions");
       expect(head.profile).toBe(profile);
       expect(head.hasToken).toBe(true);
       expect(head.args).toContain(`plugin:${leadPlugin}`);

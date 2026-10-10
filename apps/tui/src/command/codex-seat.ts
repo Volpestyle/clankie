@@ -8,7 +8,8 @@ import { bundledSkills, codexAccounts } from "@clankie/settings";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { clankieStateHome } from "../state-home.ts";
 import { commandHost, outputJson } from "./io.ts";
-import type { SeatCommandOptions, SeatPlan } from "./seat.ts";
+import { MAXIMUM_TRUST_CODEX_CONFIG } from "@clankie/protocol/owner-settings";
+import { readSeatMaximumTrust, type SeatCommandOptions, type SeatPlan } from "./seat.ts";
 import { resolveSeatContext } from "./seat-context.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import { startCodexAppServerSeat } from "../../../clankie/src/captain/codex-app-server.ts";
@@ -119,6 +120,7 @@ async function planSelectedCodexSeat(
   const skills = bundledSkills(options.repoRoot);
   // His Linear writes go through the connected account, not an inherited connector.
   const trackerOverrides = await (options.trackerOverrides ?? codexTrackerOverrides)(cwd, env);
+  const trust = await readSeatMaximumTrust(options);
   return {
     command: "codex",
     ...(account ? { account } : {}),
@@ -128,7 +130,11 @@ async function planSelectedCodexSeat(
       `marketplaces.clankie-seat={source_type="local",source=${JSON.stringify(source)}}`,
       "-c",
       `plugins.${JSON.stringify(PLUGIN)}.enabled=true`,
+      // `--dangerously-bypass-approvals-and-sandbox`, as config both server and view take.
+      ...(trust.enabled ? MAXIMUM_TRUST_CODEX_CONFIG.flatMap((setting) => ["-c", setting]) : []),
     ],
+    maximumTrustMode: trust.enabled,
+    ...(trust.unreadable === undefined ? {} : { maximumTrustModeUnreadable: trust.unreadable }),
     plugin: { source: "plugin-dir", path: source },
     skills,
     channel: true,

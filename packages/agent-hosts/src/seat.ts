@@ -55,6 +55,11 @@ export interface SeatLaunch {
   readonly env?: Readonly<Record<string, string>>;
   /** Extra harness CLI argv that applies in every mode (skill plugin dirs, `--chrome`). */
   readonly harnessArgs?: readonly string[];
+  /**
+   * The owner's maximum trust mode (VUH-2048), read by the service at launch:
+   * the harness starts without its own permission and command guardrails.
+   */
+  readonly maximumTrust?: boolean;
 }
 
 /**

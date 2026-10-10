@@ -23,7 +23,7 @@ import {
 import { codexTrackerOverrides } from "./tracker-isolation.ts";
 import { codexAsyncQuestion, codexQuestion } from "./codex-user-input.ts";
 import type { CodexToolCatalogReport } from "../../../../integrations/claude-plugin/worker/bin/codex-tool-catalog.mjs";
-import type { FleetGates } from "@clankie/protocol";
+import { MAXIMUM_TRUST_CODEX_CONFIG, type FleetGates } from "@clankie/protocol";
 import type { FleetSeatToolCatalogHealth } from "@clankie/protocol/tool-catalog";
 
 const exec = promisify(execFile);
@@ -298,9 +298,11 @@ export function createCodexSeatAdapter(
           if (options.fleetGates) {
             await options.fleetGates(launch.cwd, launch.env);
             // Codex has one approval envelope, not semantic categories. Keep
-            // native sandbox settings and require its supported approval path.
-            trackerOverrides.push('approval_policy="on-request"');
+            // native sandbox settings and require its supported approval path,
+            // unless the owner's maximum trust mode lifts both (VUH-2048).
+            if (launch.maximumTrust !== true) trackerOverrides.push('approval_policy="on-request"');
           }
+          if (launch.maximumTrust === true) trackerOverrides.push(...MAXIMUM_TRUST_CODEX_CONFIG);
           // Only this dedicated remote launch must bootstrap before Clankie's
           // project assignment exists. Other servers retain their required flags.
           const expectedToolNames = [...new Set(view.expectedToolNames ?? [])].sort();

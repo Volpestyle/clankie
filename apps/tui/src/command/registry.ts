@@ -421,6 +421,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["maximum-trust-mode"],
+    lines: [
+      "  maximum-trust-mode [status|on|off]",
+      "                           Launch every harness without its permission prompts and sandbox (JSON)",
+    ],
+  },
+  {
     nouns: ["fleet"],
     lines: [
       "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear",

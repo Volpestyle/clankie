@@ -94,6 +94,7 @@ import { createComposerTranscriptionRoutes } from "../composer-transcription.ts"
 import { createEvidenceRoutes } from "../evidence-store.ts";
 import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { createAppearanceRoutes } from "../appearance-routes.ts";
+import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
@@ -1055,6 +1056,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }),
   );
   app.route("/", createAppearanceRoutes(authorizeOwnerSecrets, settingsSource));
+  app.route(
+    "/",
+    createMaximumTrustModeRoutes(
+      authorizeOwnerSecrets,
+      settingsSource,
+      dependencies.captain.maximumTrustSeats ? () => dependencies.captain.maximumTrustSeats!() : undefined,
+    ),
+  );
   app.route("/", createMachineJoinRoutes(dependencies.machineJoins, authorizeOwnerSecrets));
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   app.route(

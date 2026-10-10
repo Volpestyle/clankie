@@ -155,6 +155,34 @@ describe("clankie seat", () => {
     expect(plan.args[0]).toBe("--name");
   });
 
+  it("shows maximum trust mode's flags on --dry-run, and auto mode while it is off", async () => {
+    for (const enabled of [true, false]) {
+      const env = await stateEnv();
+      const stdout = outputBuffer();
+      const exit = await runSeatCommand(["--conversation", "global-default", "--dry-run"], {
+        repoRoot,
+        env,
+        execFileImpl: fakeExec({}),
+        fetchImpl: async (input) =>
+          String(input instanceof Request ? input.url : input).endsWith("/v1/operator/maximum-trust-mode")
+            ? Response.json({ schemaVersion: 1, enabled })
+            : Response.json({ conversationId: "global-default", cwd: process.cwd() }),
+        stdout: stdout.stream,
+        stderr: outputBuffer().stream,
+      });
+      expect(exit).toBe(0);
+      const plan = JSON.parse(stdout.text()) as { args: string[]; maximumTrustMode: boolean };
+      expect(plan.maximumTrustMode).toBe(enabled);
+      if (enabled) {
+        expect(plan.args).toContain("--dangerously-skip-permissions");
+        expect(plan.args).not.toContain("--permission-mode");
+      } else {
+        expect(plan.args.slice(-2)).toEqual(["--permission-mode", "auto"]);
+        expect(plan.args).not.toContain("--dangerously-skip-permissions");
+      }
+    }
+  });
+
   it("launches, names the herdr pane clankie, records the session, and resumes it", async () => {
     const env = await stateEnv({
       HERDR_ENV: "1",
@@ -304,6 +332,8 @@ it("selects service project context, preserves it on resume and strips inherited
       get: async () => ({ type: "api", key: `clankie_op_${"a".repeat(43)}` }),
     } as unknown as CredentialStore,
     fetchImpl: (async (url: URL, init?: RequestInit) => {
+      if (url.pathname === "/v1/operator/maximum-trust-mode")
+        return Response.json({ schemaVersion: 1, enabled: false });
       if (init?.method === "POST")
         return Response.json({ conversationId: "fresh-seat", cwd: process.cwd() }, { status: 201 });
       if (url.searchParams.get("conversationId") === "global-default")

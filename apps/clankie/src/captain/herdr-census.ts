@@ -691,6 +691,75 @@ export async function readSeatIdForHerdrPane(
 }
 
 /**
+ * The argv of a local pane's foreground processes, as Herdr observes them, so
+ * the flags a seat actually launched with can be read. Undefined when Herdr
+ * cannot answer.
+ */
+export async function readPaneForegroundArgv(
+  paneId: string,
+  options: {
+    readonly runCommand?: HerdrCensusRunner;
+    readonly herdrSession?: string;
+    readonly bridgeSocket?: string;
+  } = {},
+): Promise<readonly (readonly string[])[] | undefined> {
+  try {
+    const response =
+      options.runCommand === undefined && options.bridgeSocket
+        ? await nativeRequest(
+            {
+              runtime: "external",
+              socketPath: options.bridgeSocket,
+              session: options.herdrSession ?? "default",
+            },
+            "pane.process_info",
+            { pane_id: paneId },
+            { timeoutMs: 2_000 },
+          )
+        : JSON.parse(
+            (await (options.runCommand ?? defaultRunner)("herdr", ["pane", "process-info", "--pane", paneId]))
+              .stdout,
+          );
+    const info = (
+      response as { result?: { process_info?: { pane_id?: unknown; foreground_processes?: unknown } } }
+    )?.result?.process_info;
+    if (info?.pane_id !== paneId || !Array.isArray(info.foreground_processes)) return undefined;
+    return info.foreground_processes.flatMap((item: { argv?: unknown }) =>
+      Array.isArray(item?.argv) && item.argv.every((arg) => typeof arg === "string")
+        ? [item.argv as string[]]
+        : [],
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether a harness's own argv launched it under maximum trust mode
+ * (VUH-2048). Undefined for a harness with no such mode.
+ */
+export function launchedWithMaximumTrust(
+  harness: string,
+  argvs: readonly (readonly string[])[],
+): boolean | undefined {
+  const any = (match: (argv: readonly string[], index: number) => boolean) =>
+    argvs.some((argv) => argv.some((_arg, index) => match(argv, index)));
+  const flag = (name: string) => any((argv, index) => argv[index] === name);
+  const option = (name: string, value: string) =>
+    any((argv, index) => argv[index] === name && argv[index + 1] === value) || flag(`${name}=${value}`);
+  if (harness === "claude")
+    return flag("--dangerously-skip-permissions") || option("--permission-mode", "bypassPermissions");
+  if (harness === "codex")
+    return (
+      flag("--dangerously-bypass-approvals-and-sandbox") ||
+      flag("--yolo") ||
+      (option("-c", 'approval_policy="never"') && option("-c", 'sandbox_mode="danger-full-access"'))
+    );
+  if (harness === "grok") return flag("--always-approve") || option("--permission-mode", "bypassPermissions");
+  return undefined;
+}
+
+/**
  * The pane the owner sits in as him (ADR 0152): a herdr agent named
  * `clankie`. It is never a fleet contact; its transcript is his own thread.
  */

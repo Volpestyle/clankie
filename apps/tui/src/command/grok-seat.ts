@@ -24,7 +24,8 @@ import { commandHost, outputJson } from "./io.ts";
 import { fetchLaneText } from "./prompt.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import { resolveSeatContext } from "./seat-context.ts";
-import type { SeatCommandOptions, SeatPlan } from "./seat.ts";
+import { MAXIMUM_TRUST_HARNESS_ARGS } from "@clankie/protocol/owner-settings";
+import { readSeatMaximumTrust, type SeatCommandOptions, type SeatPlan } from "./seat.ts";
 
 interface Flags {
   resume: boolean;
@@ -75,6 +76,7 @@ export async function planGrokSeat(
     options,
   );
   const sessionId = previous?.sessionId ?? randomUUID();
+  const trust = await readSeatMaximumTrust(options);
   return {
     command,
     version: GROK_NATIVE_VERSION,
@@ -85,7 +87,10 @@ export async function planGrokSeat(
       "--cwd",
       context.cwd,
       ...(previous ? ["--resume", sessionId] : ["--session-id", sessionId]),
+      ...(trust.enabled ? MAXIMUM_TRUST_HARNESS_ARGS.grok : []),
     ],
+    maximumTrustMode: trust.enabled,
+    ...(trust.unreadable === undefined ? {} : { maximumTrustModeUnreadable: trust.unreadable }),
     plugin: { source: "skill-paths", path: join(options.repoRoot, ".agents", "skills") },
     skills: bundledSkills(options.repoRoot),
     channel: true,
@@ -120,7 +125,18 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
       { cwd: plan.cwd, command: "grok", fresh: true, dryRun: false },
       options,
     );
-    plan = { ...plan, ...context, args: ["--leader", "--cwd", context.cwd, "--session-id", plan.sessionId] };
+    plan = {
+      ...plan,
+      ...context,
+      args: [
+        "--leader",
+        "--cwd",
+        context.cwd,
+        "--session-id",
+        plan.sessionId,
+        ...(plan.maximumTrustMode ? MAXIMUM_TRUST_HARNESS_ARGS.grok : []),
+      ],
+    };
   }
   const query = { lane: "operator", ...(plan.conversationId ? { conversationId: plan.conversationId } : {}) };
   const prompt = await fetchLaneText("/v1/captain/prompt", query, options);

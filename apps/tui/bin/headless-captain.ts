@@ -432,6 +432,15 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await (await import("../src/command/fleet.ts")).runAutonomyCommand(rest, options));
       return 0;
     }
+    if (command === "maximum-trust-mode") {
+      outputJson(
+        stdout,
+        await (
+          await import("../src/command/maximum-trust-mode.ts")
+        ).runMaximumTrustModeCommand(rest, options),
+      );
+      return 0;
+    }
     if (command === "fleet") {
       if (rest[0] === "processes") {
         outputJson(stdout, await (await import("../src/command/agents.ts")).runAgentsCommand(rest, options));

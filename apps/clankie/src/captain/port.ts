@@ -216,6 +216,8 @@ export interface CaptainPort {
   harnessProcesses?(retire?: boolean): Promise<unknown>;
   /** A live native operator bridge can answer independently of the fallback model (default: the global chat). */
   operatorSeatReady?(conversationId?: string): boolean;
+  /** This machine's live seats and whether each launched under maximum trust mode (VUH-2048). */
+  maximumTrustSeats?(): Promise<readonly import("@clankie/protocol").MaximumTrustSeat[]>;
   /** A native session's standing for a conversation, for an explicit seat resume (VUH-2045). */
   seatSessionState?(
     conversationId: string,

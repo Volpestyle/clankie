@@ -34,6 +34,7 @@ import type {
 import {
   CLAUDE_WORKER_PLUGIN,
   CLAUDE_WORKER_PLUGIN_ID,
+  MAXIMUM_TRUST_HARNESS_ARGS,
   OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   type FleetSeatHook,
@@ -146,6 +147,8 @@ export function claudeWorkerLaunchArgs(
     ...(launch.model === undefined ? [] : ["--model", launch.model]),
     ...(launch.effort === undefined ? [] : ["--effort", launch.effort]),
     ...(launch.harnessArgs ?? []),
+    // Overrides the settings' auto default mode; Claude still enforces deny rules in every mode.
+    ...(launch.maximumTrust === true ? MAXIMUM_TRUST_HARNESS_ARGS.claude : []),
   ];
 }
 

@@ -78,6 +78,17 @@ and sleep-assertion status before choosing a repair. Bootstrap machine wiring,
 local harness profiles and signed webhook URL setup retain their documented
 local paths; these are separate operations, not API-error fallbacks.
 
+Maximum trust mode (`clankie maximum-trust-mode [status|on|off]`) is the
+owner's switch, never yours or a worker's: read it, don't set it. While on,
+every seat, hire and remote project lead launched next skips its harness's
+permission prompts and sandbox (Claude `--dangerously-skip-permissions`, Codex
+`approval_policy="never"` with `sandbox_mode="danger-full-access"`, Grok
+`--permission-mode bypassPermissions`), so it
+runs any command, edits any file and reaches the network without asking. Deny
+rules still hold. Running seats keep the mode they started with; the switch's
+`seatsOnOtherMode` names the live ones still on the old mode. It is separate
+from the autonomy dial, which decides what you do without asking.
+
 `credential_unavailable` or `not_configured` means nobody connected it yet. Say
 that, and point at `clankie model`, `/connect`, or `/auth`, rather than implying
 you refused. Secrets go through `/auth`, the existing wizards or the credential

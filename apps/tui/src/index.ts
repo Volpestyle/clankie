@@ -538,6 +538,8 @@ const commands = [
       }),
     commandAutonomy: async (args) =>
       (await import("./command/fleet.ts")).runAutonomyCommand(args, brokeredCommands),
+    commandMaximumTrustMode: async (args) =>
+      (await import("./command/maximum-trust-mode.ts")).runMaximumTrustModeCommand(args, brokeredCommands),
     conversations: conversationsContext,
     laneTrace,
     presence: () => presence.snapshot,

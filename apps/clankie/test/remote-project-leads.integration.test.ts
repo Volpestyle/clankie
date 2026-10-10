@@ -36,6 +36,7 @@ it("launches an approved Windows workspace through the real conversation store w
   const settings = new SettingsStore(join(root, "settings.json"));
   await settings.update((current) => ({
     ...current,
+    maximumTrustMode: true,
     execution: {
       ...current.execution,
       connections: [{ ...fleet, machine: "pc", kind: "herdr", enabled: true, capabilities: ["code"] }],
@@ -194,6 +195,7 @@ it("launches an approved Windows workspace through the real conversation store w
             if(frame++===0) {
               if(input.cwd!==${JSON.stringify(cwd)}) process.exit(2);
               if(input.account!=='volpestyle') process.exit(4);
+              if(input.maximumTrust!==true) process.exit(5);
               console.log(JSON.stringify({stage:'allocated',pane:'w1:p1',shell:{pid:123,startTime:'2026-10-09T00:00:00Z'}}));
             } else {
               if(typeof input.token!=='string'||!input.conversationId) process.exit(3);
@@ -255,7 +257,7 @@ it("launches an approved Windows workspace through the real conversation store w
     expect(response.status).toBe(200);
     const launched = await response.json();
     if (launched.stage !== "dispatched") console.info("Launch acceptance receipt", launched);
-    expect(launched).toMatchObject({ stage: "dispatched", pane: "pc/w1:p1" });
+    expect(launched).toMatchObject({ stage: "dispatched", pane: "pc/w1:p1", maximumTrust: true });
     await expect(
       captain.serveOperatorConversation({
         op: "create",

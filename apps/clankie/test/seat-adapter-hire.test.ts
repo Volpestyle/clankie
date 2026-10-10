@@ -8,7 +8,11 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { HarnessSeatAdapter, SeatControl, SeatEvent, SeatStartResult } from "@clankie/agent-hosts";
 import { OperatorSeatSpawnResultSchema } from "@clankie/protocol";
-import { createClaudeWorkerSeatAdapter, SeatHookLog } from "../src/captain/claude-worker-seat.ts";
+import {
+  claudeWorkerLaunchArgs,
+  createClaudeWorkerSeatAdapter,
+  SeatHookLog,
+} from "../src/captain/claude-worker-seat.ts";
 import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import {
   HerdrWatchStore,
@@ -31,6 +35,7 @@ function deferred<T>() {
 
 async function fixture(
   start: (view: Parameters<HarnessSeatAdapter["start"]>[1]) => Promise<SeatStartResult>,
+  options: { readonly maximumTrustMode?: () => Promise<boolean> } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "seat-adapter-hire-"));
   roots.push(root);
@@ -77,7 +82,11 @@ async function fixture(
       entries: [{ type: "message" as const, id: "1", role: "operator" as const, text: "the brief" }],
     })),
   } satisfies HerdrWatchRunner;
-  const store = new HerdrWatchStore(join(root, "watches.json"), { runner, seatAdapters: [adapter] });
+  const store = new HerdrWatchStore(join(root, "watches.json"), {
+    runner,
+    seatAdapters: [adapter],
+    ...options,
+  });
   const hire = (brief?: string) =>
     store.spawnSeat(
       { schemaVersion: 1, harness: "claude", title: "worker", workingDirectory: root },
@@ -110,6 +119,19 @@ it("a briefed hire starts through the adapter under its agent name, and nothing 
     }),
   );
   expect(runner.promptAgent).not.toHaveBeenCalled();
+});
+
+it("a hire launches under the owner's maximum trust mode only while it is on (VUH-2048)", async () => {
+  for (const enabled of [true, false]) {
+    const { adapter, hire } = await fixture(
+      async () => ({ outcome: "started", control: {} as SeatControl }),
+      { maximumTrustMode: async () => enabled },
+    );
+    await hire("the brief");
+    const launch = vi.mocked(adapter.start).mock.calls[0]![0];
+    expect(launch.maximumTrust).toBe(enabled ? true : undefined);
+    expect(claudeWorkerLaunchArgs(launch).includes("--dangerously-skip-permissions")).toBe(enabled);
+  }
 });
 
 it("a hire without a brief never reaches the adapter", async () => {

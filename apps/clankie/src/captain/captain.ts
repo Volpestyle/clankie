@@ -187,8 +187,10 @@ import {
 import { createGrokSeatAdapter } from "./grok-seat-adapter.ts";
 import { createPrimeSeatAdapter } from "./prime-seat-adapter.ts";
 import {
+  launchedWithMaximumTrust,
   occupantIdForHerdrSession,
   readFleet,
+  readPaneForegroundArgv,
   type HerdrCensusFleet,
   type ObservedHeadSeat,
   type ObservedFleetSeat,
@@ -670,6 +672,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(options.fleetHireTools ? { fleetHireTools: options.fleetHireTools } : {}),
     validateOwner: validateConversationOwner,
     hireDefaults: async () => (await settings()).fleet.hire ?? {},
+    maximumTrustMode: async () => (await settings()).maximumTrustMode,
     resolveHireModel: async (harness, model) => {
       if (harness === "pi" && deps.piSeatModel) {
         const selected = await deps.piSeatModel();
@@ -5334,6 +5337,32 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       seatOutboxes.get(conversationId)?.bound() === true,
     seatSessionState: (conversationId, sessionId) =>
       conversations.nativeSeatSessionState(conversationId, sessionId),
+
+    async maximumTrustSeats() {
+      // This machine's live seats, read from the flags their processes launched with.
+      const binding = await deps.runtimes?.configuredBinding("default");
+      const fleet = await observeFleet(true);
+      const read = options.nativeCensusRunner
+        ? { runCommand: options.nativeCensusRunner }
+        : binding
+          ? { herdrSession: binding.session, bridgeSocket: binding.socketPath }
+          : {};
+      const seats = [
+        ...(fleet.head ? [{ ...fleet.head, title: "Clankie" }] : []),
+        ...fleet.seats.filter((seat) => seat.fleet === undefined),
+      ];
+      return (
+        await Promise.all(
+          seats.map(async (seat) => {
+            const argv = await readPaneForegroundArgv(seat.paneId, read);
+            const maximumTrust = argv && launchedWithMaximumTrust(seat.harness, argv);
+            return maximumTrust === undefined
+              ? []
+              : [{ seatId: seat.seatId, title: seat.title, harness: seat.harness, maximumTrust }];
+          }),
+        )
+      ).flat();
+    },
 
     async observeLanes(): Promise<readonly ObservableCaptainLane[]> {
       return laneLog.list();

@@ -18,7 +18,13 @@ import { promisify } from "node:util";
 import { readHerdrBinding } from "../session/herdr-connection.ts";
 import { clankieStateHome } from "../state-home.ts";
 import type { CredentialStore } from "@clankie/credential-broker";
+import {
+  MAXIMUM_TRUST_HARNESS_ARGS,
+  MAXIMUM_TRUST_MODE_PATH,
+  MaximumTrustModeSnapshotSchema,
+} from "@clankie/protocol/owner-settings";
 import { outputJson, type Writable } from "./io.ts";
+import { ownerSettingsApi } from "./owner-settings-api.ts";
 import { resolveSeatContext, type NewSeatConversation } from "./seat-context.ts";
 import { planExplicitResume } from "./seat-resume.ts";
 import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-isolation.ts";
@@ -80,6 +86,25 @@ export interface SeatPlan {
   readonly newConversation?: NewSeatConversation;
   readonly cwd: string;
   readonly herdrPaneId?: string;
+  /** The owner's maximum trust mode at plan time (VUH-2048); its flags are in `args`. */
+  readonly maximumTrustMode?: boolean;
+  /** Why the mode could not be read; the launch keeps the harness's own auto mode. */
+  readonly maximumTrustModeUnreadable?: string;
+}
+
+/**
+ * The owner's maximum trust mode, read through the owner API at launch. An
+ * unreadable mode never turns guardrails off: the seat keeps its auto mode.
+ */
+export async function readSeatMaximumTrust(
+  options: SeatCommandOptions,
+): Promise<{ readonly enabled: boolean; readonly unreadable?: string }> {
+  try {
+    const api = await ownerSettingsApi(options);
+    return { enabled: (await api.get(MAXIMUM_TRUST_MODE_PATH, MaximumTrustModeSnapshotSchema)).enabled };
+  } catch (error) {
+    return { enabled: false, unreadable: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 interface SeatRecord {
@@ -409,6 +434,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   // Session-only plugins have the native @inline identity. Keep wakes on the
   // same projected plugin, without enabling an older installed skill catalog.
   const channel = true;
+  const trust = await readSeatMaximumTrust(options);
   const args = [
     "--name",
     "Clankie",
@@ -419,6 +445,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     "--dangerously-load-development-channels",
     "plugin:clankie@inline",
     ...(previous === undefined ? ["--session-id", sessionId] : ["--resume", sessionId]),
+    ...(trust.enabled ? MAXIMUM_TRUST_HARNESS_ARGS.claude : ["--permission-mode", "auto"]),
   ];
   // This pane is his head only inside the fleet the service leads (ADR 0164):
   // a seat opened in any other Herdr session names no pane there.
@@ -445,6 +472,8 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     ...(context.newConversation === undefined ? {} : { newConversation: context.newConversation }),
     cwd,
     ...(herdrPaneId === undefined || herdrPaneId.length === 0 ? {} : { herdrPaneId }),
+    maximumTrustMode: trust.enabled,
+    ...(trust.unreadable === undefined ? {} : { maximumTrustModeUnreadable: trust.unreadable }),
   };
 }
 
@@ -547,12 +576,11 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   seatEnv.CLANKIE_SEAT_HARNESS = "claude";
   seatEnv.CLANKIE_SEAT_SESSION_ID = plan.sessionId;
   if (plan.conversationId !== undefined) seatEnv.CLANKIE_CONVERSATION_ID = plan.conversationId;
-  const running = (options.spawnImpl ?? defaultSpawn)(
-    plan.command,
-    [...plan.args, "--permission-mode", "auto"],
-    plan.cwd,
-    seatEnv,
-  );
+  if (plan.maximumTrustModeUnreadable !== undefined)
+    stderr.write(
+      `clankie ${plan.command}: maximum trust mode is unreadable (${plan.maximumTrustModeUnreadable}); launching in auto mode.\n`,
+    );
+  const running = (options.spawnImpl ?? defaultSpawn)(plan.command, plan.args, plan.cwd, seatEnv);
   const claim =
     plan.herdrPaneId === undefined
       ? Promise.resolve()

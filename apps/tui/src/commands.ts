@@ -22,6 +22,8 @@ import { runRivalsMenu } from "./rivals-menu.ts";
 import { onOff, runSettingsMenu } from "./settings-menu.ts";
 import { autoCommand, autonomyCommand } from "./autonomy-command.ts";
 import type { AutonomyCommandResult } from "./command/fleet.ts";
+import type { MaximumTrustModeResult } from "./command/maximum-trust-mode.ts";
+import { maximumTrustModeCommand } from "./maximum-trust-mode-command.ts";
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
 import { runWorkCommand } from "./command/work.ts";
@@ -142,6 +144,8 @@ export interface ConsoleCommandContext {
   readonly commandHuddle?: (args: readonly string[]) => ReturnType<typeof runHuddleCommand>;
   /** The owner's autonomy dial (ADR 0263). */
   readonly commandAutonomy?: (args: readonly string[]) => Promise<AutonomyCommandResult>;
+  /** The owner's maximum trust mode (VUH-2048). */
+  readonly commandMaximumTrustMode?: (args: readonly string[]) => Promise<MaximumTrustModeResult>;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
@@ -1184,6 +1188,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       goals: conversations?.autonomy,
       formatGoals: formatAutonomyStatus,
     }),
+    maximumTrustModeCommand(context.commandMaximumTrustMode),
     {
       name: "cd",
       aliases: ["workspace"],
