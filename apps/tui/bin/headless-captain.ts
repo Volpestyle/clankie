@@ -423,6 +423,10 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await (await import("../src/command/access.ts")).runAccessCommand(rest, options));
       return 0;
     }
+    if (command === "autonomy") {
+      outputJson(stdout, await (await import("../src/command/fleet.ts")).runAutonomyCommand(rest, options));
+      return 0;
+    }
     if (command === "fleet") {
       if (rest[0] === "processes") {
         outputJson(stdout, await (await import("../src/command/agents.ts")).runAgentsCommand(rest, options));

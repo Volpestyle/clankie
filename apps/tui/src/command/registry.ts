@@ -398,6 +398,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["autonomy"],
+    lines: [
+      "  autonomy [status|off|low|high|full]",
+      "                           Read or set how many decisions Clankie takes on his own (JSON)",
+    ],
+  },
+  {
     nouns: ["fleet"],
     lines: [
       "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear",

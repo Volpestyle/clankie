@@ -212,13 +212,15 @@ credential holder.
   native question-ID maps. `/question cancel` marks it moot. Cards show what waits,
   recommendation, steps and source; answers resolve everywhere and wake that
   source without granting credentials or changing room trust.
-- Goal activation, acceptance, resume and `/autonomy on` use the owner
+- Goal activation, acceptance, resume and `/autonomy resume` use the owner
   credential; the captain bearer receives HTTP 403. The headless equivalents
   are `clankie conversations goal ID accept|resume` and
   `clankie conversations goal ID set --tokens N <objective>`.
-- `/autonomy on|off` controls autonomous goal continuations and scheduled
-  self-wakes globally. `/autonomy clear` removes the selected conversation's
-  pending wake without changing its goal.
+- `/autonomy off|low|high|full` sets the owner's autonomy dial, how much
+  Clankie decides without asking (ADR 0263). `/autonomy pause|resume` controls
+  autonomous goal continuations and scheduled self-wakes globally.
+  `/autonomy clear` removes the selected conversation's pending wake without
+  changing its goal.
 - `/cd` opens the conversation for another directory and moves the console's
   shell escape and completion with it.
 - Type `/skill-name` for direct skill invocation or `$` at a token boundary for

@@ -20,6 +20,8 @@ import { planSeat, parseSeatArgs } from "./command/seat.ts";
 import { formatRivals, formatSeatPlan } from "./command-format.ts";
 import { runRivalsMenu } from "./rivals-menu.ts";
 import { onOff, runSettingsMenu } from "./settings-menu.ts";
+import { autonomyCommand } from "./autonomy-command.ts";
+import type { AutonomyCommandResult } from "./command/fleet.ts";
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
 import { runWorkCommand } from "./command/work.ts";
@@ -131,6 +133,8 @@ export interface ConsoleCommandContext {
   /** `clankie usage`: account usage meters and the overlay's show/hide choice (VUH-1961). */
   readonly commandUsage?: (args: readonly string[]) => ReturnType<typeof runUsageCommand>;
   readonly commandHuddle?: (args: readonly string[]) => ReturnType<typeof runHuddleCommand>;
+  /** The owner's autonomy dial (ADR 0263). */
+  readonly commandAutonomy?: (args: readonly string[]) => Promise<AutonomyCommandResult>;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
@@ -1129,81 +1133,11 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         }
       },
     },
-    {
-      name: "autonomy",
-      aliases: [],
-      description: "Show or switch Clankie's autonomous goal and wake runner",
-      argumentHint: "[on|off|clear]",
-      takesArgument: true,
-      async run(argument, shell): Promise<void> {
-        if (conversations?.autonomy === undefined) {
-          shell.insertCommandResult("/autonomy", "Autonomy controls are unavailable.", "error");
-          return;
-        }
-        const input = argument.trim().toLowerCase();
-        if (input === "") {
-          const autonomy = conversations.autonomy;
-          await runSettingsMenu(shell, "/autonomy", async () => {
-            const status = await autonomy({ action: "status" });
-            const [title, ...details] = formatAutonomyStatus(status).split("\n");
-            return {
-              title: `${title} · ${details.join(" · ")}`,
-              actions: [
-                {
-                  value: "toggle",
-                  label: status.enabled ? "Turn autonomy off" : "Turn autonomy on",
-                  hint: "goal and wake runner",
-                  async run() {
-                    await autonomy({ action: "set_enabled", enabled: !status.enabled });
-                    return `Autonomy ${onOff(!status.enabled)}.`;
-                  },
-                },
-                ...(status.wake === undefined
-                  ? []
-                  : [
-                      {
-                        value: "clear",
-                        label: "Clear the scheduled wake",
-                        hint: status.wake.at,
-                        async run() {
-                          await autonomy({ action: "clear_wake" });
-                          return "Wake cleared.";
-                        },
-                      },
-                    ]),
-              ],
-            };
-          });
-          return;
-        }
-        const command: OperatorAutonomyCommand | undefined =
-          input.length === 0 || input === "status"
-            ? { action: "status" }
-            : input === "on" || input === "off"
-              ? { action: "set_enabled", enabled: input === "on" }
-              : input === "clear"
-                ? { action: "clear_wake" }
-                : undefined;
-        if (command === undefined) {
-          shell.insertCommandResult("/autonomy", "Usage: /autonomy [on|off|clear]", "error");
-          return;
-        }
-        try {
-          const status = await conversations.autonomy(command);
-          shell.insertCommandResult(
-            "/autonomy",
-            formatAutonomyStatus(status),
-            status.error === undefined ? "success" : "error",
-          );
-        } catch (error) {
-          shell.insertCommandResult(
-            "/autonomy",
-            error instanceof Error ? error.message : String(error),
-            "error",
-          );
-        }
-      },
-    },
+    autonomyCommand({
+      level: context.commandAutonomy,
+      goals: conversations?.autonomy,
+      formatGoals: formatAutonomyStatus,
+    }),
     {
       name: "cd",
       aliases: ["workspace"],
@@ -2221,7 +2155,7 @@ function formatAutonomyStatus(status: OperatorAutonomyStatus): string {
   const goal = status.goal;
   const wake = status.wake;
   return [
-    `Autonomy: ${status.enabled ? "on" : "off"}`,
+    `Goals and self-wakes: ${status.enabled ? "on" : "paused"}`,
     ...(status.error === undefined ? [] : ["State: unreadable · autonomy is fail-closed"]),
     goal === undefined ? "Goal: none" : `Goal: ${goal.status} · ${goal.objective}`,
     ...(goal?.status === "proposed" ? ["Confirm: /goal accept"] : []),

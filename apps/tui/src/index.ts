@@ -536,6 +536,8 @@ const commands = [
         ...(ownerFetcher === undefined ? {} : { ownerFetcher }),
         host: serviceUrl,
       }),
+    commandAutonomy: async (args) =>
+      (await import("./command/fleet.ts")).runAutonomyCommand(args, brokeredCommands),
     conversations: conversationsContext,
     laneTrace,
     presence: () => presence.snapshot,

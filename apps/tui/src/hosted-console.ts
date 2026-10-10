@@ -6,6 +6,8 @@ import { PersonaAttentionSnapshotSchema } from "@clankie/protocol/discord-attent
 import { OwnerPersonaSnapshotSchema } from "@clankie/protocol/owner-settings";
 import { ownerSettingsApi } from "./command/owner-settings-api.ts";
 import { buildFleetCommands } from "./fleet-commands.ts";
+import { autonomyCommand } from "./autonomy-command.ts";
+import { runAutonomyCommand } from "./command/fleet.ts";
 import { runVoiceCommand } from "./command/voice.ts";
 import { splitQuotedArguments } from "./command/agents.ts";
 import { formatPlain } from "./command-format.ts";
@@ -363,6 +365,7 @@ export async function runHostedConsole() {
       },
     },
     ...buildFleetCommands({ settings, ownerFetcher }),
+    autonomyCommand({ level: (args) => runAutonomyCommand(args, { settings, ownerFetcher }) }),
     {
       name: "voice",
       aliases: [],

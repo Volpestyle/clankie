@@ -11,6 +11,8 @@ import {
   type FleetHireDefaultsSnapshot,
   FleetSettingsContextRequestSchema,
   FleetAutonomySchema,
+  autonomyLevelFleet,
+  matchingAutonomyLevel,
   UpdateFleetSettingsSchema,
   type FleetSettingsSnapshot,
   type FleetResourcePolicy,
@@ -35,6 +37,7 @@ function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot
     fleetGates: true,
     revision: createHash("sha256").update(JSON.stringify(fleet)).digest("hex"),
     fleet,
+    autonomyLevel: matchingAutonomyLevel(settings.autonomy.fleet),
   };
 }
 class InvalidHireDefaults extends Error {}
@@ -84,7 +87,7 @@ export function createFleetSettingsRoutes(
           if (fleetSettingsSnapshot(current).revision !== input.data.expectedRevision)
             throw new Error("Fleet settings changed");
           before = JSON.stringify(current);
-          const { size, models, resources, notes, tools, peerMessages, hire, ...preferences } =
+          const { size, models, resources, notes, tools, peerMessages, hire, autonomyLevel, ...preferences } =
             input.data.changes;
           const defaults = FleetAutonomySchema.parse({});
           const resolved = Object.fromEntries(
@@ -109,6 +112,7 @@ export function createFleetSettingsRoutes(
               ...current.autonomy,
               fleet: FleetAutonomySchema.parse({
                 ...current.autonomy.fleet,
+                ...(autonomyLevel === undefined ? {} : autonomyLevelFleet(autonomyLevel)),
                 ...resolved,
               }),
             },

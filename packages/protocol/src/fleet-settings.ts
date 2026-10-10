@@ -4,6 +4,8 @@ import {
   FleetAutonomyPatchSchema,
   FleetWorkingPreferencesSchema,
   FleetGatesSchema,
+  AutonomyLevelSchema,
+  AutonomyLevelReadingSchema,
 } from "./autonomy.ts";
 import { ProjectIdSchema } from "./projects.ts";
 import { FleetResourcePolicySchema } from "./fleet-resources.ts";
@@ -32,6 +34,8 @@ export const FleetSettingsSnapshotSchema = z
     /** Advertises support explicitly; absence identifies an older service. */
     workingPreferences: z.literal(true).optional(),
     fleetGates: z.literal(true).optional(),
+    /** The owner's autonomy dial read back from the leaves (ADR 0263); absent on an older service. */
+    autonomyLevel: AutonomyLevelReadingSchema.optional(),
   })
   .strict()
   .refine(
@@ -56,7 +60,12 @@ export const UpdateFleetSettingsSchema = z
     schemaVersion: z.literal(1),
     expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
     changes: FleetPolicySchema.partial()
-      .extend({ ...FleetAutonomyPatchSchema.shape, hire: HireProfileSchema.nullable().optional() })
+      .extend({
+        ...FleetAutonomyPatchSchema.shape,
+        hire: HireProfileSchema.nullable().optional(),
+        /** Writes the level's leaves first; explicit leaves in the same change win. */
+        autonomyLevel: AutonomyLevelSchema.optional(),
+      })
       .refine(
         (value) => Object.values(value).some((field) => field !== undefined),
         "No fleet settings changes supplied",
