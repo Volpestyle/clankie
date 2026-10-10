@@ -363,12 +363,21 @@ it("an installed façade missing its real native helper remains constructible an
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const execute = promisify(execFile);
   const bundle = join(root, "runtime.mjs");
+  const entry = join(root, "entry.ts");
+  // The façade plus the governor it builds, so the probe can point that
+  // governor at a fresh registry instead of this machine's live one.
+  await writeFile(
+    entry,
+    `export { createFleetResourceRuntime } from ${JSON.stringify(fileURLToPath(new URL("../src/fleet-resource-runtime.ts", import.meta.url)))};
+export { createResourceGovernor } from ${JSON.stringify(fileURLToPath(new URL("../../../packages/fleet-resources/src/governor.ts", import.meta.url)))};
+`,
+  );
   // Bundle the actual production façade into an isolated install-shaped
   // location. Deliberately omit native.py; no shared source/env is modified.
   await execute(
     fileURLToPath(new URL("../../../node_modules/.bin/esbuild", import.meta.url)),
     [
-      fileURLToPath(new URL("../src/fleet-resource-runtime.ts", import.meta.url)),
+      entry,
       "--bundle",
       "--format=esm",
       "--platform=node",
@@ -382,9 +391,10 @@ it("an installed façade missing its real native helper remains constructible an
   await writeFile(
     probe,
     `
-import { createFleetResourceRuntime } from ${JSON.stringify(bundle)};
+import { createFleetResourceRuntime, createResourceGovernor } from ${JSON.stringify(bundle)};
 let errors = 0;
-const runtime = await createFleetResourceRuntime({policy: async () => undefined, onError: () => { errors++; }});
+const governor = createResourceGovernor({directory: ${JSON.stringify(join(root, "registry"))}});
+const runtime = await createFleetResourceRuntime({governor, policy: async () => undefined, onError: () => { errors++; }});
 runtime.bindSeats({resolve: async () => undefined, proof: async () => undefined, isLocalFleet: async () => true});
 let admission;
 try { await runtime.admitHire({}); admission = {allowed: true}; }
@@ -396,10 +406,12 @@ await runtime.close();
   const result = JSON.parse(
     (await execute(process.execPath, [probe], { cwd: root, timeout: 10_000 })).stdout,
   );
+  // An empty registry reads without the helper, so status is honest rather
+  // than absent: the pressure probe is reported unavailable.
   expect(result).toMatchObject({
     constructed: true,
-    status: null,
-    errors: 1,
+    status: { leases: [], pressure: { healthy: false, reason: "probe-unavailable" } },
+    errors: 0,
     admission: {
       allowed: false,
       reason: "probe-unavailable",

@@ -5,6 +5,14 @@ import { promisify } from "node:util";
 import type { ProcessIdentity, ProcessProof } from "./model.ts";
 
 const execute = promisify(execFile);
+/**
+ * One native helper read. A timeout is uncertainty, which refuses admission,
+ * so this is sized for a cold Python start on a loaded machine: the first
+ * `native.py identity` on a clean macOS CI runner took 5.5 s (VUH-2059), and
+ * three simulator cases there failed at the earlier 3 s limit (about 3,030 ms). Warm reads take
+ * about 0.1 s.
+ */
+const helperTimeoutMs = 10_000;
 export const resourcePython = process.platform === "darwin" ? "/usr/bin/python3" : "python3";
 /** Source modules and installed entrypoints share the bounded repo-shaped helper path. */
 export function resourceNativeHelperPath(): string {
@@ -27,7 +35,7 @@ export function resourceNativeHelperPath(): string {
 export async function nativeBoundaryAvailable(): Promise<boolean> {
   const { stdout } = await execute(resourcePython, ["-I", resourceNativeHelperPath(), "available"], {
     encoding: "utf8",
-    timeout: 3_000,
+    timeout: helperTimeoutMs,
     maxBuffer: 16_384,
   });
   return JSON.parse(stdout) === true;
@@ -68,7 +76,7 @@ export async function processIdentity(pid = process.pid): Promise<ProcessIdentit
   const { stdout } = await execute(
     resourcePython,
     ["-I", resourceNativeHelperPath(), "identity", String(pid)],
-    { encoding: "utf8", timeout: 3_000, maxBuffer: 16_384 },
+    { encoding: "utf8", timeout: helperTimeoutMs, maxBuffer: 16_384 },
   );
   return (JSON.parse(stdout) as ProcessIdentity | null) ?? undefined;
 }
@@ -134,7 +142,7 @@ export async function observeProcesses(pids: readonly number[]): Promise<Map<num
         ["-I", resourceNativeHelperPath(), "observe"],
         {
           encoding: "utf8",
-          timeout: 3_000,
+          timeout: helperTimeoutMs,
           maxBuffer: 1_048_576,
           killSignal: "SIGKILL",
         },
@@ -232,7 +240,7 @@ export async function processSnapshot(): Promise<ProcessIdentity[]> {
   if (pendingSnapshot) return pendingSnapshot;
   pendingSnapshot = execute(resourcePython, ["-I", resourceNativeHelperPath(), "snapshot"], {
     encoding: "utf8",
-    timeout: 3_000,
+    timeout: helperTimeoutMs,
     maxBuffer: 2_000_000,
   })
     .then(({ stdout }) => {
