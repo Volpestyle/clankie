@@ -507,6 +507,11 @@ export class GoogleVideoAdapter extends FetchVideoAdapter {
     if (request.durationSeconds !== undefined && ![4, 6, 8].includes(request.durationSeconds))
       throw new Error("media_connector_duration_unsupported:google:4|6|8");
     if (request.resolution === "480p") throw new Error("media_connector_resolution_unsupported:google");
+    // Veo answers a last frame or reference images at any other length with
+    // "use case not supported" (measured 2026-10-10), so say so before paying a round trip.
+    const eightOnly = request.lastFrame !== undefined || request.referenceImages !== undefined;
+    if (eightOnly && request.durationSeconds !== undefined && request.durationSeconds !== 8)
+      throw new Error("media_connector_duration_unsupported:google:8 with a last frame or reference images");
     const response = await this.send(
       `${this.endpoint}/models/${encodeURIComponent(request.model)}:predictLongRunning`,
       {
@@ -516,12 +521,12 @@ export class GoogleVideoAdapter extends FetchVideoAdapter {
           instances: [
             {
               prompt: request.prompt,
-              ...(request.firstFrame ? { image: inlineDataPart(request.firstFrame) } : {}),
-              ...(request.lastFrame ? { lastFrame: inlineDataPart(request.lastFrame) } : {}),
+              ...(request.firstFrame ? { image: veoImage(request.firstFrame) } : {}),
+              ...(request.lastFrame ? { lastFrame: veoImage(request.lastFrame) } : {}),
               ...(request.referenceImages
                 ? {
                     referenceImages: request.referenceImages.map((image) => ({
-                      image: inlineDataPart(image),
+                      image: veoImage(image),
                       referenceType: "asset",
                     })),
                   }
@@ -559,6 +564,15 @@ export class GoogleVideoAdapter extends FetchVideoAdapter {
     const reason = body.success ? `:${body.data.error.message.slice(0, 300)}` : "";
     throw new Error(`media_connector_provider_error:${String(response.status)}${reason}`);
   }
+}
+
+/**
+ * `predictLongRunning` takes Vertex-style image bytes; it refuses the
+ * `inlineData` part `generateContent` uses, whatever the guide's example shows.
+ */
+function veoImage(dataUri: string): { bytesBase64Encoded: string; mimeType: string } {
+  const { inlineData } = inlineDataPart(dataUri);
+  return { bytesBase64Encoded: inlineData.data, mimeType: inlineData.mimeType };
 }
 
 const GoogleErrorSchema = z.object({ error: z.object({ message: z.string() }) });

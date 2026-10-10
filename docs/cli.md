@@ -2569,7 +2569,8 @@ model. Prompt-only video keeps the configured model.
 optional `firstFrame`, `lastFrame` (needs `firstFrame`), up to three
 `referenceImages`, `aspectRatio` and `durationSeconds`. Each picture is an
 `artifactRef` he made or a PNG, JPEG or WebP data URI. The same picture as both
-frames makes a seamless loop. A `pending` result is resumed with `requestId`
+frames makes a seamless loop; Veo renders a last frame or reference images at 8
+seconds only. A `pending` result is resumed with `requestId`
 alone. Fleet workers call `clankie_generate_video` through `clankie_call`. On
 this machine they may pass absolute image paths, and an `ok` result adds the
 video's local `path`.

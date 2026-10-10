@@ -278,8 +278,8 @@ describe("Veo frames-to-video", () => {
         instances: [
           {
             prompt: "A garden robot waving",
-            image: { inlineData: { mimeType: "image/png", data: "ZnJhbWU=" } },
-            lastFrame: { inlineData: { mimeType: "image/png", data: "ZnJhbWU=" } },
+            image: { bytesBase64Encoded: "ZnJhbWU=", mimeType: "image/png" },
+            lastFrame: { bytesBase64Encoded: "ZnJhbWU=", mimeType: "image/png" },
           },
         ],
         parameters: { aspectRatio: "9:16", durationSeconds: 8, resolution: "720p" },

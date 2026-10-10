@@ -62,8 +62,9 @@ const rendered = await video.retrieve(job, request);
 ```
 
 A video request may carry `firstFrame`, `lastFrame` and `referenceImages` as PNG, JPEG
-or WebP data URIs; a last frame needs a first. The same image as both frames makes a
-loop. Veo takes 4, 6 or 8 seconds (8 with reference images or 1080p) at 720p or
+or WebP data URIs; a last frame needs a first. Veo's `predictLongRunning` takes them as
+`bytesBase64Encoded` plus `mimeType`, not the `inlineData` parts `generateContent` uses. The same image as both frames makes a
+loop. Veo takes 4, 6 or 8 seconds (only 8 with a last frame, reference images or 1080p) at 720p or
 1080p, 16:9 or 9:16. Its download URL may redirect once to a Google content host;
 the redirect is followed without the API key.
 
