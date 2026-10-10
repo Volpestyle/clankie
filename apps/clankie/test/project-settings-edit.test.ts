@@ -144,7 +144,17 @@ it("a saved A→B binding changes the actual existing tracker adapter, rejects s
     ]);
   const gh = vi.fn(async (args: readonly string[]) => {
     (calls as string[][]).push([...args]);
-    if (args.some((arg) => arg.includes("fixture/a"))) {
+    const parentPath = args.find((arg) => arg.endsWith("/parent"));
+    if (parentPath !== undefined) {
+      expect(args[args.indexOf("-X") + 1]).toBe("GET");
+      const match = /^repos\/fixture\/(a|b)\/issues\/1\/parent$/u.exec(parentPath);
+      expect(match).not.toBeNull();
+      return JSON.stringify({
+        number: 2,
+        repository_url: `https://api.github.com/repos/fixture/${match![1]!}`,
+      });
+    }
+    if (args.includes("--paginate") && args.some((arg) => arg.includes("fixture/a"))) {
       entered();
       return new Promise<string>((r) => {
         release = r;
@@ -179,9 +189,14 @@ it("a saved A→B binding changes the actual existing tracker adapter, rejects s
     expect(await oldResult).toMatchObject({ code: "backend_unavailable" });
     expect(await service.handle({ action: "list", repo: ref }, false)).toMatchObject({
       repo: { root: f.b },
-      items: [{ title: "B" }],
+      items: [{ title: "B", parent: "#2" }],
     });
-    expect(gh).toHaveBeenCalledTimes(2);
+    expect(gh).toHaveBeenCalledTimes(4);
+    expect(calls.filter((args) => args.includes("--paginate"))).toHaveLength(2);
+    expect(calls.flatMap((args) => args.filter((arg) => arg.endsWith("/parent")))).toEqual([
+      "repos/fixture/a/issues/1/parent",
+      "repos/fixture/b/issues/1/parent",
+    ]);
     expect(githubToken).toHaveBeenCalledTimes(2);
     for (const action of ["discover", "init", "create", "update", "attach"] as const) {
       await expect(
@@ -197,7 +212,7 @@ it("a saved A→B binding changes the actual existing tracker adapter, rejects s
     await expect(service.handle({ action: "list", repo: ref }, false)).rejects.toMatchObject({
       code: "backend_unavailable",
     });
-    expect(gh).toHaveBeenCalledTimes(2); // Remote uses the SAME local path; it must still never read it.
+    expect(gh).toHaveBeenCalledTimes(4); // Remote uses the SAME local path; it must still never read it.
     expect(run).not.toHaveBeenCalled();
     expect(existsSync(join(f.directory, "work-repos.json"))).toBe(false);
     expect(existsSync(join(f.a, ".clankie/work"))).toBe(false);
