@@ -117,7 +117,6 @@ import { createConversationRunner, runAutonomyTurn } from "./captain-conversatio
 import { createDiscordTurns } from "./captain-discord-turns.ts";
 import { RoomForkReceipts } from "./room-forks.ts";
 import { roomForkTool } from "./room-fork-tool.ts";
-import { NATIVE_GOAL_UNSUPPORTED } from "./captain-goals.ts";
 import { captainModelExtension, modelCard, sessionPurpose } from "./captain-model.ts";
 import { createOperatorService } from "./captain-operator-service.ts";
 import {
@@ -955,13 +954,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     request: string,
   ): void {
     if (!evaluator.isEnabled()) return;
-    const candidateGoal = autonomy.getGoal(conversationId);
-    const goal = candidateGoal?.status === "active" ? candidateGoal : undefined;
     const scope = conversations.conversation(conversationId)?.scope;
     const context = {
       request,
       workingDirectory: scope?.kind === "workspace" ? scope.workspaceId : workingDirectory,
-      goal: structuredClone(goal),
       tools: session.getAllTools(),
       activeTools: session.getActiveToolNames(),
       systemPromptHash: createHash("sha256").update(session.systemPrompt).digest("hex"),
@@ -971,11 +967,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     evaluationStarts.set(runId, () => ({
       runId,
       conversationId,
-      ...(goal === undefined ? {} : { taskId: `goal:${conversationId}:${goal.createdAt}` }),
       context: {
         ...context,
-        goalAtSettlement: autonomy.getGoal(conversationId),
-        decisions: autonomy.recentDecisions(conversationId),
         fleet: liveEdgeSeats,
       },
       ...(session.sessionFile === undefined ? {} : { transcriptPath: session.sessionFile }),
@@ -1669,20 +1662,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return seatEventKindFor(context, true);
   }
 
-  function goalExecutionReason(conversationId: string): string | undefined {
-    return conversations.hasNativeSeat(conversationId) ||
-      conversationDriver(conversationId) !== undefined ||
-      seatOutboxes.get(conversationId)?.uncertain() === true
-      ? NATIVE_GOAL_UNSUPPORTED
-      : undefined;
-  }
-
-  function refuseNativeGoal(conversationId: string): boolean {
-    if (goalExecutionReason(conversationId) === undefined) return false;
-    autonomy.pauseGoal(conversationId);
-    return true;
-  }
-
   const credentialHealthPath = modelCredentialHealthPath(options.stateDir);
   const credentialHealth = new ModelCredentialHealthLog(credentialHealthPath, deps.onModelCredentialEvent);
   const rejectedProviders = new Set(
@@ -1767,12 +1746,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         },
         get turnSettled() {
           return turnSettled;
-        },
-        get goalExecutionReason() {
-          return goalExecutionReason;
-        },
-        get refuseNativeGoal() {
-          return refuseNativeGoal;
         },
       }),
     ),
@@ -2882,7 +2855,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   function bindHeadSeat(head: ObservedHeadSeat | undefined): void {
     if (head !== undefined) {
       conversations.rememberNativeHead(conversations.defaultGlobalConversationId(), head.occupantId);
-      autonomy.pauseGoal(conversations.defaultGlobalConversationId());
     }
     if (head?.seatId === headSeat?.seatId) {
       headSeat = head;
@@ -2907,7 +2879,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return undefined;
       }
     }
-    return autonomy.getGoal(conversationId);
+    return undefined;
   }
 
   /** Who takes this conversation's turns when it is not pi: a polling seat, or the head pane. */
@@ -2965,7 +2937,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // delivery, which a bare bearer does not carry, and the tools that need
     // one already say so.
     const capture: TurnContext = {};
-    if (lane === "operator") capture.goalExecutionReason = () => NATIVE_GOAL_UNSUPPORTED;
     let toolLane = lane;
     if (lane === "operator") {
       const binding = seatContext(conversationId);
@@ -3854,27 +3825,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
-  autonomy.start(async (conversationId, prompt, origin, expectedGoal) => {
+  autonomy.start(async (conversationId, prompt) => {
     // A remote lead's wake reaches its native head; its runner never falls back to Pi.
-    if (
-      !conversations.runsCaptainTurns(conversationId) &&
-      !(origin === "wake" && conversations.runsOnRemoteSeat(conversationId))
-    ) {
+    if (!conversations.runsCaptainTurns(conversationId) && !conversations.runsOnRemoteSeat(conversationId)) {
       autonomy.clearConversation(conversationId);
       return;
     }
-    if (origin === "goal") {
-      if (
-        expectedGoal === undefined ||
-        autonomy.getGoal(conversationId) !== expectedGoal ||
-        expectedGoal.status !== "active"
-      )
-        return;
-      await refreshFleet({ force: true });
-      if (refuseNativeGoal(conversationId)) return;
-      if (autonomy.getGoal(conversationId) !== expectedGoal || expectedGoal.status !== "active") return;
-    }
-    await runAutonomyTurn(conversations, conversationId, prompt, origin, expectedGoal);
+    await runAutonomyTurn(conversations, conversationId, prompt);
   });
   // Owner-defined recurring jobs (ADR 0265), each acting as its target conversation.
   const routines = new RoutineStore({
@@ -3888,7 +3845,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       runTurn: async (conversationId, prompt) => {
         if (!conversations.runsCaptainTurns(conversationId))
           throw new Error("That conversation no longer takes turns");
-        await runAutonomyTurn(conversations, conversationId, prompt, "wake");
+        await runAutonomyTurn(conversations, conversationId, prompt);
       },
       hire: (conversationId, seat, brief) => {
         const owner = { conversationId };
@@ -5334,9 +5291,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       get reportSummaries() {
         return reportSummaries;
       },
-      get goalExecutionReason() {
-        return goalExecutionReason;
-      },
     }),
 
     invalidateQuestionPrincipal: (deviceId) => conversations.invalidateQuestionPrincipal(deviceId),
@@ -5433,7 +5387,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     conversationHasNativeSeat: (conversationId) => conversations.hasNativeSeat(conversationId),
     syncSeatTranscript: (id, transcript) => {
       if (!conversations.syncNativeSeatTranscript(id, transcript.sessionId, transcript.entries)) return false;
-      autonomy.pauseGoal(id);
       if (
         transcript.activity !== undefined &&
         seatOutbox(id).observeTurn(transcript.sessionId, transcript.activity)
@@ -5620,8 +5573,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // Register pending native intent before asynchronous policy preparation;
       // conversation driver admission still fences actual delivery.
       const outbox = seatOutbox(binding.conversationId);
-      if (waitMs > 0 || goalExecutionReason(binding.conversationId) !== undefined)
-        autonomy.pauseGoal(binding.conversationId);
       // Owner asks remain pending in their source conversation across driver takeover.
       void recoverWorkerReports(binding.conversationId).catch(() => undefined);
       // A wake held after model failures can go to the seat that just bound.
@@ -6302,7 +6253,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 }
 
 export { createDraftPacer } from "./captain-draft.ts";
-export { enforceGoalBudget } from "./captain-goals.ts";
 export { captainModelExtension, modelCard, sessionPurpose } from "./captain-model.ts";
 export {
   formatOperatorToolDetail,

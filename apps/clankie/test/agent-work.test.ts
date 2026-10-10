@@ -12,7 +12,6 @@ import type { ObservedFleetSeat } from "../src/captain/herdr-census.ts";
 import * as census from "../src/captain/herdr-census.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
-import type { QuestionAuthority } from "../src/captain/conversation-questions.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 
 const roots: string[] = [];
@@ -191,52 +190,6 @@ it("publishes assignments and native goal changes through fleet cursors, indepen
     });
     expect((await fleet()).assignments).toEqual([]);
     db.exec("DELETE FROM thread_goals");
-    expect((await fleet()).goals).toEqual([]);
-
-    observed.mockResolvedValue({ seats: [] });
-    await fleet();
-    // The previously observed native head stays native-bound after disappearance.
-    // Exercise service-owned goals in a new Pi-owned conversation instead.
-    const created = await captain.serveOperatorConversation({
-      op: "create",
-      schemaVersion: 1,
-      scope: { kind: "global" },
-      title: "Captain work",
-    });
-    if (created.op !== "create") throw new Error("Expected a captain conversation");
-    const conversationId = created.conversation.conversationId;
-    const owner: QuestionAuthority = {
-      principal: { kind: "operator", id: "fixture-owner" },
-      current: () => true,
-      authorize: async () => true,
-    };
-    await captain.serveOperatorConversation(
-      {
-        op: "autonomy",
-        schemaVersion: 1,
-        conversationId,
-        command: { action: "set_goal", objective: "Verify captain work", tokenBudget: 1000 },
-      },
-      owner,
-    );
-    expect((await fleet()).goals?.[0]?.goal.status).toBe("active");
-    await captain.serveOperatorConversation({
-      op: "autonomy",
-      schemaVersion: 1,
-      conversationId,
-      command: { action: "set_goal_status", status: "paused" },
-    });
-    expect((await fleet()).goals?.[0]?.goal).toMatchObject({
-      objective: "Verify captain work",
-      status: "paused",
-      tokenBudget: 1000,
-    });
-    await captain.serveOperatorConversation({
-      op: "autonomy",
-      schemaVersion: 1,
-      conversationId,
-      command: { action: "clear_goal" },
-    });
     expect((await fleet()).goals).toEqual([]);
   } finally {
     await captain.close();

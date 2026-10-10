@@ -24,7 +24,7 @@ Running Claude Code as a worker in Clankie's Herdr fleet does not require
 replacing the lead with this seat. Eligible signed Linear webhooks wake one
 configured ordinary global chat, `global-default` by default. Its bound Claude
 seat receives the wake through the existing channel; with no bound seat, Pi
-handles the turn in that chat. Goal continuations remain with their service Pi loop.
+handles the turn in that chat.
 
 Like the [herdr plugin](../herdr-plugin/README.md), this carries only what a
 plugin can uniquely declare. Everything else lives in the service and the

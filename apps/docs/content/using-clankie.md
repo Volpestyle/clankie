@@ -121,9 +121,8 @@ decides which calls he makes alone; anything left to you arrives as one ask.
 Turn Auto off for a project and he starts nothing new on it.
 
 `/auto off` (or [`clankie auto off`](/cli/#auto-switch)) pauses everything
-unprompted: projects on Auto, goals and the wake-ups he schedules. `/auto on`
-resumes it. Older `/goal` commands still work while goals give way to
-Auto. On a local Mac,
+unprompted: projects on Auto and the wake-ups he schedules. `/auto on`
+resumes it. On a local Mac,
 [`clankie autostart enable`](/cli/#autostart-enable-autostart-disable-autostart-status)
 keeps the service running after login.
 

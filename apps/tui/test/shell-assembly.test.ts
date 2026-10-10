@@ -563,7 +563,7 @@ describe("shell assembly", () => {
     expect(cleared).toBe(true);
   });
 
-  it("routes goal budgets and the autonomy kill switch through the selected conversation", async () => {
+  it("routes the Auto switch through the selected conversation and offers no /goal", async () => {
     const commands: unknown[] = [];
     const conversations = {
       conversationId: "global-default",
@@ -577,15 +577,10 @@ describe("shell assembly", () => {
     const built = buildConsoleCommands({ conversations });
     const shell = { insertCommandResult() {} } as unknown as ClankieFaceShell;
 
-    await built.find((command) => command.name === "goal")!.run("--tokens 5000 inspect the release", shell);
-    await built.find((command) => command.name === "goal")!.run("accept", shell);
+    expect(built.find((command) => command.name === "goal")).toBeUndefined();
     await built.find((command) => command.name === "auto")!.run("off", shell);
 
-    expect(commands).toEqual([
-      { action: "set_goal", objective: "inspect the release", tokenBudget: 5000 },
-      { action: "accept_goal" },
-      { action: "set_enabled", enabled: false },
-    ]);
+    expect(commands).toEqual([{ action: "set_enabled", enabled: false }]);
   });
 
   it("lets an active setup prompt handle Escape", () => {

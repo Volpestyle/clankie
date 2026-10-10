@@ -470,7 +470,7 @@ it("the attached project receives worker reports, watches, self wakes and escala
   expect(watch).toMatchObject({ kind: "watch", conversationId: id, content: "Harvest the watched worker" });
   await captain.acknowledgeSeatEvent(watch!.id, id);
   poll = captain.pollSeatEvents(10_000, undefined, id);
-  const wakeRun = autonomous(id, "Due self wake", "wake");
+  const wakeRun = autonomous(id, "Due self wake");
   const [wake] = await poll;
   expect(wake).toMatchObject({ kind: "wake", conversationId: id, content: "Due self wake" });
   await captain.acknowledgeSeatEvent(wake!.id, id);

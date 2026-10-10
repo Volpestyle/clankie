@@ -31,18 +31,18 @@ in force.
 
 ## Evidence
 
-- [HTTP authority integration](../../../apps/clankie/test/goal-activation-authority.integration.test.ts)
+- [HTTP authority integration](https://github.com/Volpestyle/clankie/blob/b79e2fb32335a2e04a7ce8d73aafd4e8a6843bc2/apps/clankie/test/goal-activation-authority.integration.test.ts)
   uses the real HTTP app, captain, credential-backed authenticator, temporary
   file broker, signed device sessions and durable autonomy store. It proves
   captain/direct-call refusal, console and CLI accept/resume/set, device grant and
   expiry/revocation denial, and credential rotation during awaited census.
-- [Native goal integration](../../../apps/clankie/test/native-goal-refusal.integration.test.ts)
+- [Native goal integration](https://github.com/Volpestyle/clankie/blob/b79e2fb32335a2e04a7ce8d73aafd4e8a6843bc2/apps/clankie/test/native-goal-refusal.integration.test.ts)
   retains native ownership refusal through real HTTP/MCP with distinct owner
   and captain authenticators.
 - [Console transport coverage](../../../apps/tui/test/operator-conversations.test.ts)
   and [CLI coverage](../../../apps/tui/test/conversations-cli.test.ts) prove routing,
   useful owner-auth failures, command validation and absence of captain fallback.
-- [Pi execution integration](../../../apps/clankie/test/goal-execution-integration.test.ts)
+- [Pi execution integration](https://github.com/Volpestyle/clankie/blob/b79e2fb32335a2e04a7ce8d73aafd4e8a6843bc2/apps/clankie/test/goal-execution-integration.test.ts)
   covers existing budget enforcement and zero-token failure/retry behavior.
 
 ## Checks

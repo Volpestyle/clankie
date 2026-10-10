@@ -59,7 +59,7 @@ Work boundaries live in three places:
   Enforce protected-branch writes there, including direct pushes and bypass
   permissions; a brief saying “never push to main” is not enforcement.
 - Clankie's pi runtime uses lane grants and has no native permission prompts.
-  An unseated operator turn, including Linear wakes, goals and self-wakes,
+  An unseated operator turn, including Linear wakes, Auto rounds and self-wakes,
   can use its granted shell and connected accounts without a per-action prompt.
 
 Under [ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md), any admitted

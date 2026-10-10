@@ -33,8 +33,6 @@ const USAGE = [
   "Usage: clankie conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
   "       clankie conversations pending ID [list|remove|send-now|edit] [MESSAGE_ID --version N] [--text TEXT]",
   "       clankie conversations stop-task ID",
-  "       clankie conversations goal ID [status|accept|pause|resume|clear]",
-  "       clankie conversations goal ID set [--tokens N] <objective>",
   "       clankie conversations project-proposal ID --request UUID --incarnation UUID",
   "       clankie conversations confirm-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
   "       clankie conversations accept-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
@@ -71,7 +69,6 @@ export async function runConversationsCommand(
   if (["pending", "stop-task"].includes(args[0] ?? "")) return runNativeMessageAction(args, options);
   if (["updates", "read-update", "dismiss-update"].includes(args[0] ?? ""))
     return runOwnerUpdateAction(args, options);
-  if (args[0] === "goal") return runGoalAction(args.slice(1), options);
   if (args[0] === "auto") return runAutoAction(args.slice(1), options);
   if (
     [
@@ -160,46 +157,6 @@ export async function runConversationsCommand(
 
 type ConversationsCommandOptions = Parameters<typeof runConversationsCommand>[1];
 
-async function runGoalAction(args: readonly string[], options: ConversationsCommandOptions): Promise<number> {
-  const { values, positionals } = parseArgs({
-    args: [...args],
-    allowPositionals: true,
-    options: { tokens: { type: "string" } },
-  });
-  const [conversationId, action = "status", ...objective] = positionals;
-  if (
-    !conversationId ||
-    !["status", "set", "accept", "pause", "resume", "clear"].includes(action) ||
-    (action !== "set" && (objective.length > 0 || values.tokens !== undefined))
-  )
-    throw new Error(USAGE);
-  const tokenBudget = values.tokens === undefined ? undefined : Number(values.tokens);
-  if (tokenBudget !== undefined && (!Number.isSafeInteger(tokenBudget) || tokenBudget <= 0))
-    throw new Error("--tokens must be a positive integer.");
-  const command = OperatorAutonomyCommandSchema.parse(
-    action === "set"
-      ? {
-          action: "set_goal",
-          objective: objective.join(" "),
-          ...(tokenBudget === undefined ? {} : { tokenBudget }),
-        }
-      : action === "accept"
-        ? { action: "accept_goal" }
-        : action === "pause" || action === "resume"
-          ? { action: "set_goal_status", status: action === "pause" ? "paused" : "active" }
-          : action === "clear"
-            ? { action: "clear_goal" }
-            : { action: "status" },
-  );
-  const client = await autonomyClient(
-    command,
-    options,
-    "Owner operator credential required to start, accept, or resume a goal.",
-  );
-  outputJson(options.stdout ?? process.stdout, await client.autonomy(conversationId, command));
-  return 0;
-}
-
 /** Turning unprompted work on needs the owner credential; reading it or turning it off does not. */
 async function autonomyClient(
   command: OperatorAutonomyCommand,
@@ -224,8 +181,8 @@ async function autonomyClient(
 const AUTO_USAGE = "Usage: clankie auto [status|on|off]";
 
 /**
- * The master switch for unprompted work (ADR 0264): projects on Auto, goal runs
- * and self-wakes all stop while it is off. It is the global autonomy runner
+ * The master switch for unprompted work (ADR 0264): projects on Auto and
+ * self-wakes both stop while it is off. It is the global autonomy runner
  * switch, so any conversation can carry it; the default global chat does.
  */
 async function runAutoAction(args: readonly string[], options: ConversationsCommandOptions): Promise<number> {

@@ -70,7 +70,6 @@ message `stored`, delete runtime state, or send a replacement to bypass this gap
 - What he heard/said per room: `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`
 - Tool calls he made in a room: `~/.clankie/captain/rooms/<sessionKey>/`, `~/.clankie/captain/voice/<sessionKey>/`, `~/.clankie/captain/turns/<lane>~<encoded-target>/*.jsonl`
 - Presence + system events: `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)
-- Goal decision journal: `~/.clankie/captain/goal-journal/<encoded-conversation>.jsonl`
 - Durable memory: `~/.clankie/memory/discord-people/*.json`, `captain-episodes/*.jsonl`
 - Play sessions (GBA): `~/.local/state/clankie/gba-play/*.jsonl`, `.screenshots/<journal-stem>/*.png`
 - Historical shared-body artifacts: `~/.local/state/clankie/gba-body/possession-events.jsonl` and `body.lock`, when left by an older build

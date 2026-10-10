@@ -212,8 +212,7 @@ receipt first, and never fall back to typing into a terminal.
 
 ## Long-horizon work
 
-Overnight or all-day work does not need a service goal, and a native harness
-seat cannot hold one. Carry it across turns on wakes:
+Standing work comes from projects on Auto (ADR 0264). Carry it across turns on wakes:
 
 | Wakes you when                    | Source                                     | Limits                                                                                  |
 | --------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------- |
@@ -260,7 +259,7 @@ management across conversations is in [launcher details](reference/launcher.md#m
 - [Linear activity and wakes](reference/linear.md): Follow Linear, wake rules,
   project lead chats, wake consumption receipts, request budget.
 - [Leading work](reference/work.md): wakes and long-horizon loops, lead review
-  rounds, watching workers, cost evidence, `work-on`, service goals, tidying,
+  rounds, watching workers, cost evidence, `work-on`, turning Auto on, tidying,
   project onboarding and worktree roots.
 - [Fleet, hires and agent history](reference/fleet.md): working preferences,
   `hire_agent` outcomes, roles, skill selection, Codex accounts, Codex, Claude,

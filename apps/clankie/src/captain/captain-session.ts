@@ -370,10 +370,7 @@ export async function runOneShotDiscordTurn(
  * 0107). The persona still comes from owner-authored settings, never from the
  * caller.
  */
-/**
- * Wakes, watches, worker messages, Linear activity and human sends reach their
- * conversation seat. Goal continuations stay with their Pi loop.
- */
+/** Wakes, watches, worker messages, Linear activity and human sends reach their conversation seat. */
 export function seatEventKindFor(
   context: Pick<ConversationTurnContext, "internal" | "origin" | "ownerAuthority">,
   isHeadConversation: boolean,

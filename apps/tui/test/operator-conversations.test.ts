@@ -382,7 +382,7 @@ describe("TUI operator conversation selection", () => {
     expect(await resolveCaptainRouteToken({ env: {}, store })).toBe(stored);
   });
 
-  it("uses owner HTTP authentication for goal activation and never falls back to captain", async () => {
+  it("uses owner HTTP authentication to turn Auto on and never falls back to captain", async () => {
     const requests: Array<{ command: OperatorAutonomyCommand; authorization: string | undefined }> = [];
     const server = createServer((request, response) => {
       void (async () => {
@@ -416,16 +416,9 @@ describe("TUI operator conversation selection", () => {
       const captain = createCaptainRouteClient({ host, captainToken: "goal-captain" });
       const owner = createCaptainRouteClient({ host, captainToken: "goal-owner" });
       const connected = createCaptainOperatorConversationClient(captain, owner);
-      const activation: OperatorAutonomyCommand[] = [
-        { action: "set_goal", objective: "An explicitly accepted task", tokenBudget: 100 },
-        { action: "accept_goal" },
-        { action: "set_goal_status", status: "active" },
-        { action: "set_enabled", enabled: true },
-      ];
+      const activation: OperatorAutonomyCommand[] = [{ action: "set_enabled", enabled: true }];
       const passive: OperatorAutonomyCommand[] = [
         { action: "status" },
-        { action: "set_goal_status", status: "paused" },
-        { action: "clear_goal" },
         { action: "clear_wake" },
         { action: "set_enabled", enabled: false },
       ];

@@ -317,7 +317,6 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       owner.conversationId,
       notification,
       "watch",
-      undefined,
       waitForCompletion ? "queue" : undefined,
     );
     if (result.status !== "accepted") return false;

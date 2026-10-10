@@ -50,6 +50,12 @@ a follow-up once two projects on Auto have run unattended with evidence (the
 VUH-2029 live proof). `schedule_wake` stays: it is how he carries long work
 between rounds.
 
+(2026-10-10: removed after the live proof, run on one project by the lead's call. `get_wake` replaces `get_goal` as the
+model's read of the switch and its pending wake. An `autonomy.json` that still
+holds a goal loads with its switch and wakes, and the goal is dropped on the next
+save; `goal-journal/` is no longer written. Native Codex thread goals are the
+harness's own and still show on fleet seats.)
+
 ## Consequences
 
 - The head conversation leads every Auto project. A project with its own lead

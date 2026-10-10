@@ -44,7 +44,6 @@ An unresolved delivery refuses only its own resend; other inputs keep arriving,
 and the seat gets one alert naming it. `clankie seat-delivery list` shows them
 with their age; the owner settles one that never arrived with `clankie
 seat-delivery settle ID abandoned-unknown`, which claims no receipt.
-Pi goal continuations keep their existing service loop.
 
 Room replies keep the original actor's route and mouth lease. Attachment never
 adds grants: a cached room MCP bank stays social without generic operator body

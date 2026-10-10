@@ -1515,7 +1515,6 @@ export const OperatorAutonomyStatusSchema = z
   .object({
     enabled: z.boolean(),
     error: z.literal("state_unreadable").optional(),
-    goal: OperatorGoalSchema.optional(),
     wake: OperatorWakeSchema.optional(),
   })
   .strict();
@@ -1524,28 +1523,13 @@ export type OperatorAutonomyStatus = z.infer<typeof OperatorAutonomyStatusSchema
 export const OperatorAutonomyCommandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("status") }).strict(),
   z.object({ action: z.literal("set_enabled"), enabled: z.boolean() }).strict(),
-  z
-    .object({
-      action: z.literal("set_goal"),
-      objective: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
-      tokenBudget: z.number().int().positive().optional(),
-    })
-    .strict(),
-  z.object({ action: z.literal("accept_goal") }).strict(),
-  z.object({ action: z.literal("set_goal_status"), status: z.enum(["active", "paused"]) }).strict(),
-  z.object({ action: z.literal("clear_goal") }).strict(),
   z.object({ action: z.literal("clear_wake") }).strict(),
 ]);
 export type OperatorAutonomyCommand = z.infer<typeof OperatorAutonomyCommandSchema>;
 
-/** Starting or re-enabling autonomous work requires the owner transport. */
+/** Turning unprompted work back on requires the owner transport. */
 export function operatorAutonomyCommandRequiresOwner(command: OperatorAutonomyCommand): boolean {
-  return (
-    command.action === "set_goal" ||
-    command.action === "accept_goal" ||
-    (command.action === "set_goal_status" && command.status === "active") ||
-    (command.action === "set_enabled" && command.enabled)
-  );
+  return command.action === "set_enabled" && command.enabled;
 }
 
 /**

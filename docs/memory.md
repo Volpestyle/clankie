@@ -2,7 +2,7 @@
 
 This is the storage and authority reference. For using memory in a conversation,
 start with [Memory and personality](https://docs.clankie.bot/using-clankie/#memory-and-personality).
-Conversation history, goal state, and game saves have their own owners; this
+Conversation history, project settings, and game saves have their own owners; this
 document covers selected memories that can inform a later turn.
 
 Clankie keeps two durable memories under `~/.clankie/memory/`

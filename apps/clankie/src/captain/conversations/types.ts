@@ -14,7 +14,6 @@ import {
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
   type OperatorDeliveredFile,
-  type OperatorGoal,
   type RoomHandoffMetadata,
   type CaptainChannelTurnResult,
 } from "@clankie/protocol";
@@ -271,14 +270,12 @@ export interface ConversationTurnContext {
   readonly seat?: ConversationTurnSeat;
   readonly internal?: true;
   /**
-   * What queued an internal turn: a goal continuation, a due self-wake, a
+   * What queued an internal turn: a due self-wake, a
    * settled herdr watch, an authenticated worker message, or a signed inbound
    * hook. A hook is its own origin rather than another wake because its turn
    * concerns something outside this machine, and the prompt says so.
    */
-  readonly origin?: "goal" | "wake" | "watch" | "message" | "hook" | "input";
-  /** Host-only goal identity; queued work cannot claim a replacement goal. */
-  readonly expectedGoal?: OperatorGoal;
+  readonly origin?: "wake" | "watch" | "message" | "hook" | "input";
   /** The surface a human send arrived from, as it named itself. */
   readonly surfaceClientId?: string;
   /** Side conversations inherit a Pi branch but never continue their parent's active task. */

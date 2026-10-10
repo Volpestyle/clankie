@@ -1,11 +1,9 @@
 # Leading work across turns
 
-Long-horizon work on wakes, lead review rounds, watching workers, cost evidence, showing current work, service goals, tidying, and project onboarding and membership.
+Long-horizon work on wakes, lead review rounds, watching workers, cost evidence, showing current work, turning Auto on, tidying, and project onboarding and membership.
 
-## Long-horizon work without a goal
+## Long-horizon work
 
-Overnight or all-day work does not need a service goal, and a native harness
-seat cannot hold one (`create_goal` refuses with `native_goal_unsupported`).
 The owner hands you standing work by putting a project on Auto with an optional
 one-line focus (ADR 0264). The Auto round names those projects; work their
 backlogs without waiting to be asked, within each project's worker cap and the
@@ -36,8 +34,8 @@ covers the worker. Do not start a second lead in another conversation to get
 continuation. Do not use a harness's own scheduler (Claude Code `/loop` or cron
 tools, Codex `/goal`) to keep the lead going: it is tied to one native session,
 and the owner's `/auto off` does not reach it. A worker may still use its
-harness's goal for its own ticket. `/auto off` stops the Auto round, wakes and
-goal turns; while it is off, tell the owner what is left open instead of working around it.
+harness's goal for its own ticket. `/auto off` stops the Auto round and wakes;
+while it is off, tell the owner what is left open instead of working around it.
 Separately, the owner's autonomy dial (`off`, `low`, `high` by default, or
 `full`; `clankie autonomy` reads it) sets which decisions you take without
 asking; the effective gates arrive in your fleet guidance.
@@ -109,23 +107,12 @@ working --activity testing --for 60` to state work a generic shell cannot descri
 A replacement stance without `--activity` clears it; an idle/offline seat or a
 changed occupying session has no activity. Unknown means no bubble.
 
-## Service goals
+## Turning Auto on
 
-Service goals require a Pi-owned conversation. Pi's `create_goal` stores an
-inactive proposal for the owner to confirm with `/goal accept`; only owner
-commands activate it. Native harness MCP seats refuse service `create_goal`
-with `native_goal_unsupported`, since the service cannot enforce their goal
-continuations or usage. Every service goal has a finite token budget (default
-1,000,000; owner override `/goal --tokens <n> <objective>`), including restored
-goals. A refused native goal is a boundary to explain, not a cue to start a
-second lead through another conversation.
-
-Starting, accepting or resuming service goals and enabling autonomy require the
-owner/device transport; the ambient captain bearer receives `goal_owner_required`
-(HTTP 403). Owners may also use `clankie conversations goal ID accept|resume` or
-`clankie conversations goal ID set --tokens N <objective>`. This separates API
-authority, not local OS identities: a same-UID shell can still read the operator
-credential or device signing key. See ADR 0130 for that remaining boundary.
+Turning Auto on requires the owner/device transport; the ambient captain bearer
+receives `goal_owner_required` (HTTP 403). Owners may also use `clankie auto on`.
+This separates API authority, not local OS identities: a same-UID shell can still
+read the operator credential or device signing key.
 [Proposed ADR 0253](../../../../docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md)
 requires an isolated authority as well as a protected signer; it is not implemented.
 Do not claim that a Keychain bearer, device token or same-user helper proves

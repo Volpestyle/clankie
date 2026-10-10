@@ -248,8 +248,6 @@ async function fixture(
     censusFleets: async () => [],
     deps: {} as CaptainDeps,
     turnSettled: new TurnSettledLog(join(root, "turns.jsonl")),
-    goalExecutionReason: () => undefined,
-    refuseNativeGoal: () => false,
   });
   let store = new ConversationStore(join(root, "conversations"), runner);
   store.onLinearWakeReceived = (references) => reader.received(references);
