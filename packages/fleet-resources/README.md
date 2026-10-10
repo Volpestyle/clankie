@@ -61,7 +61,13 @@ no process, lease or signaling authority. Linux retains `/proc/meminfo`'s
 The heavy runner registers its process birth under the journal's kernel file lock
 before receiving execution permission. A dead claim owner cannot authorize a late
 runner. A registered runner owns its process group independently of its wrapper;
-surviving group members retain capacity after either process is killed. Native
+surviving group members retain capacity after either process is killed. Status
+shows a lease whose runner is proven dead as `orphaned` while live members remain.
+Once a census proves no live member is left (zombies excluded), reconciliation
+reaps the lease, admits the next queued job on its next tick, and appends a
+receipt to `reaped.jsonl` beside the journal: reason (`runner_exited` or
+`claim_owner_exited`), lease, seat, holder, executable and PID, never arguments.
+The journal's own schema is unchanged, so older readers keep working. Native
 read failures remain unknown. Reconciliation batches only the current journal
 owner and runner PIDs under the OS lock; it never treats a missing census row as
 exit or reuses a cached observation as admission authority. Unrelated protected
@@ -108,8 +114,11 @@ exact flag, resolved existing device, creation time and five-minute stale deadli
 The manager blocks on that ticket; notifications wake local waits, with bounded
 journal checks for pressure and other processes. A restart preserves live tickets.
 An atomic grant consumes only the front ticket for its device and pins that device
-in the reservation before preparation. Other device queues and the heavy FIFO are
-independent. `tryAcquireSimulator` remains the nonblocking atomic admission step;
+in the reservation before preparation. A freed slot goes to the oldest ticket
+waiting for a slot, whatever device it names: a holder that releases one device
+and asks for another queues like anyone else (VUH-2008). An older ticket whose
+device another lease holds waits for that device, so other device queues proceed;
+the heavy FIFO is independent. `tryAcquireSimulator` remains the nonblocking atomic admission step;
 external clients use one blocking CLI/API acquire, not repeated acquire requests.
 The API accepts `waitMs` (0 for an immediate ticket receipt) and optional `ticketId`
 for resuming. The CLI defaults to a one-hour wait and sends acquire only once.

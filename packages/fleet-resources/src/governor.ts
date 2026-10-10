@@ -1,8 +1,10 @@
 import { observeSimulatorUsage, simulatorUsageFor } from "./simulator-usage.ts";
 import { randomUUID } from "node:crypto";
+import { appendFile, rename, stat } from "node:fs/promises";
 import { constants, userInfo } from "node:os";
 import { basename, join } from "node:path";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import {
@@ -40,6 +42,7 @@ const ticketOwner = (
   entry.holderId === owner.holderId &&
   entry.simulator?.occupantId === owner.occupantId &&
   (entry.simulator?.fleet ?? "default") === (owner.fleet ?? "default");
+const execute = promisify(execFile);
 const abort = () => new DOMException("Fleet resource wait cancelled", "AbortError");
 type SimulatorBlock = "simulator_capacity" | "shared_capacity" | "pressure";
 /** The owner's simulator limit is zero; distinct from an unavailable registry. */
@@ -86,6 +89,8 @@ export function createResourceGovernor(
   const pressure = new ResourcePressureSampler(options.probe);
   const shutdown = new AbortController();
   const active = new Set<Promise<unknown>>();
+  // Heavy leases whose runner is proven dead while group members survive.
+  const orphaned = new Set<string>();
   async function reconcile(state: ResourceState): Promise<void> {
     if (!state.leases.some((lease) => lease.kind === "heavy") && state.queue.length === 0) return;
     // This state and its exact recorded PIDs belong to the held OS lock. Avoid
@@ -118,6 +123,7 @@ export function createResourceGovernor(
     }
     state.queue = queue;
     const retained: ResourceState["leases"] = [];
+    const reaped: ReapReceipt[] = [];
     for (const lease of state.leases) {
       if (lease.kind === "simulator") {
         retained.push(lease);
@@ -128,6 +134,7 @@ export function createResourceGovernor(
           // The runner checks this same identity while holding this OS lock.
           // A dead owner therefore cannot have an unregistered future launch.
           if (matches(observe(lease.claimOwner), lease.claimOwner)) retained.push(lease);
+          else reaped.push(reapReceipt(lease, "claim_owner_exited", lease.claimOwner.pid));
           continue;
         }
         if (!lease.runner) {
@@ -137,19 +144,65 @@ export function createResourceGovernor(
         const root = observe(lease.runner);
         if (matches(root, lease.runner)) {
           retained.push(lease);
-        } else if (root && root.pgid === root.pid) {
-          // The original process group ended before this reused PID became a
-          // new group leader. It is not authority to signal that new process.
-        } else if (groupAlive(lease.runner.pgid)) {
-          // A dead runner can leave living descendants in its process group.
-          // Kernel group existence prevents early reclamation without a census.
-          retained.push(lease);
+          continue;
         }
+        // The original process group ended before a reused PID became a new
+        // group leader; that is not authority to signal the new process.
+        // Otherwise a dead runner can leave living descendants in its group:
+        // they keep the permit until a census proves no live member remains
+        // (zombies do not count). The runner's own settlement cannot happen,
+        // so this reconciliation is what frees the slot (VUH-2006).
+        if (!(root && root.pgid === root.pid) && (await groupOccupied(lease.runner.pgid))) {
+          orphaned.add(lease.id);
+          retained.push(lease);
+          continue;
+        }
+        reaped.push(reapReceipt(lease, "runner_exited", lease.runner.pid));
       } catch {
         retained.push(lease);
       }
     }
     state.leases = retained;
+    for (const id of orphaned) if (!retained.some((lease) => lease.id === id)) orphaned.delete(id);
+    if (reaped.length) await recordReaped(reaped);
+  }
+  /** Kernel group existence, confirmed by a census that excludes zombies; failures retain. */
+  async function groupOccupied(pgid: number): Promise<boolean> {
+    if (!groupAlive(pgid)) return false;
+    const { stdout } = await execute(
+      resourcePython,
+      ["-I", resourceNativeHelperPath(), "group-occupied", String(pgid)],
+      { encoding: "utf8", timeout: 5_000, maxBuffer: 16_384, killSignal: "SIGKILL" },
+    );
+    const occupied: unknown = JSON.parse(stdout);
+    if (typeof occupied !== "boolean") throw new Error("Process group observation unavailable");
+    return occupied;
+  }
+  type ReapReceipt = ReturnType<typeof reapReceipt>;
+  function reapReceipt(lease: HeavyLease, reason: "claim_owner_exited" | "runner_exited", pid: number) {
+    return {
+      reapedAtMs: Date.now(),
+      leaseId: lease.id,
+      kind: lease.kind,
+      reason,
+      pid,
+      executable: lease.executable,
+      ...(lease.seatId ? { seatId: lease.seatId } : {}),
+      ...(lease.holderId ? { holderId: lease.holderId } : {}),
+      createdAtMs: lease.createdAtMs,
+    };
+  }
+  /** Append-only beside the journal, so older readers of the strict journal are unaffected. */
+  async function recordReaped(receipts: ReapReceipt[]): Promise<void> {
+    const path = join(directory, "reaped.jsonl");
+    try {
+      if ((await stat(path)).size > 262_144) await rename(path, `${path}.1`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await appendFile(path, receipts.map((receipt) => `${JSON.stringify(receipt)}\n`).join(""), {
+      mode: 0o600,
+    });
   }
   async function project(state: ResourceState): Promise<ResourceSnapshot> {
     const usage = state.leases.some((lease) => lease.kind === "simulator" && lease.deviceId)
@@ -169,7 +222,7 @@ export function createResourceGovernor(
       leases: state.leases.map((lease) => ({
         id: lease.id,
         kind: lease.kind,
-        state: lease.kind === "heavy" ? lease.state : lease.phase,
+        state: lease.kind === "heavy" ? (orphaned.has(lease.id) ? "orphaned" : lease.state) : lease.phase,
         ...(lease.seatId ? { seatId: lease.seatId } : {}),
         ...(lease.holderId ? { holderId: lease.holderId } : {}),
         ...(lease.kind === "heavy"
@@ -589,10 +642,24 @@ export function createResourceGovernor(
             options.deviceId?.toUpperCase() !== ticket.simulator.targetDeviceId
           )
             throw new Error("Simulator ticket target changed");
+          // A freed slot goes to the oldest ticket waiting for a slot, whatever
+          // device it names (VUH-2008). An older ticket whose device another
+          // lease holds waits for that device, so other devices proceed.
+          const leased = new Set(
+            state.leases.flatMap((entry) =>
+              entry.kind === "simulator" && entry.deviceId ? [entry.deviceId.toUpperCase()] : [],
+            ),
+          );
           if (
             state.queue
               .slice(0, index)
-              .some((entry) => entry.simulator && sameQueue(entry.simulator, ticket.simulator!))
+              .some(
+                (entry) =>
+                  entry.simulator &&
+                  (sameQueue(entry.simulator, ticket.simulator!) ||
+                    !entry.simulator.targetDeviceId ||
+                    !leased.has(entry.simulator.targetDeviceId)),
+              )
           )
             return blocked("simulator_capacity");
           if (

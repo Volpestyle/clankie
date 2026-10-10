@@ -559,7 +559,7 @@ describe("machine shared heavy permits with actual OS children", () => {
     }
   }, 20_000);
 
-  it("retains a surviving process group after runner death rather than reclaiming only its dead PID", async () => {
+  it("a SIGKILLed runner's living child keeps the slot as orphaned; once it exits the lease is reaped with a receipt", async () => {
     const f = await fixture();
     try {
       const first = f.start("runner-orphan");
@@ -569,20 +569,40 @@ describe("machine shared heavy permits with actual OS children", () => {
       if (lease.kind !== "heavy" || !lease.runner) throw new Error("Owned runner absent");
       const proof = await processIdentity(lease.runner.pid);
       expect(proof?.startTime).toBe(lease.runner.startTime);
-      await f.governor.snapshot();
-      process.kill(lease.runner.pid, "SIGKILL");
-      expect(await first.done).toBe(137);
-      const { pid } = JSON.parse(await readFile(first.receipt, "utf8")) as { pid: number };
-      expect(await processIdentity(pid)).toBeDefined();
-      expect((await f.governor.snapshot()).capacity.used).toBe(1);
       const second = f.start("after-runner");
       await eventually(
         () => f.governor.snapshot(),
         (value) => value.queue.length === 1,
       );
+      process.kill(lease.runner.pid, "SIGKILL");
+      expect(await first.done).toBe(137);
+      // The command survives in the dead runner's group: still real work.
+      const { pid } = JSON.parse(await readFile(first.receipt, "utf8")) as { pid: number };
+      expect((await processIdentity(pid))?.pgid).toBe(lease.runner.pgid);
+      const held = await f.governor.snapshot();
+      expect(held.capacity.used).toBe(1);
+      expect(held.leases).toEqual([expect.objectContaining({ id: lease.id, state: "orphaned" })]);
       expect(await exists(second.receipt)).toBe(false);
+      expect(await exists(join(f.directory, "reaped.jsonl"))).toBe(false);
+      // VUH-2006: nothing remains to settle the dead runner's lease once its
+      // group ends, so reconciliation reaps it and admits the queued job.
       await f.release(first.release);
       await second.ready();
+      expect((await f.governor.snapshot()).leases.map((entry) => entry.seatId)).toEqual(["after-runner"]);
+      const reaped = (await readFile(join(f.directory, "reaped.jsonl"), "utf8"))
+        .trim()
+        .split("\n")
+        .map((row) => JSON.parse(row));
+      expect(reaped).toEqual([
+        expect.objectContaining({
+          leaseId: lease.id,
+          kind: "heavy",
+          reason: "runner_exited",
+          pid: lease.runner.pid,
+          seatId: "runner-orphan",
+        }),
+      ]);
+      expect(JSON.stringify(reaped)).not.toContain("Bearer-secret");
       await f.release(second.release);
       expect(await second.done).toBe(0);
     } finally {

@@ -28,7 +28,10 @@ before `--` labels the seat in status; `--holder ID` identifies its native child
 after `--`, including flags such as `--chat`, belong to the child. The wrapper
 preserves its exit status and forwards interruption. Nested commands with the same holder in the same
 verified process group reuse its permit. Detached surviving children retain the
-permit until the kernel proves they have exited.
+permit until the kernel proves they have exited; status shows that lease as
+`orphaned` once its runner is dead. Stop a leaked server or watcher your own
+command left behind, or it holds a slot indefinitely. When the group ends the
+governor reaps the lease and records why in `reaped.jsonl` in the registry.
 
 `clankie fleet resources` and `clankie doctor --json` show capacity, actual holders,
 queue and pressure. Status includes executable names and labels, never arguments

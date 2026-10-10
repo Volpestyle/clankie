@@ -1078,6 +1078,40 @@ it("grants three holders of one device in persisted FIFO order with one blocking
   expect((await f.governor.snapshot()).queue).toEqual([]);
 }, 30_000);
 
+it("a holder moving to another device queues behind the oldest ticket waiting for the freed slot", async () => {
+  const f = await fixture();
+  const a = lease(await f.http("/acquire", f.request));
+  const [ipad, waited] = [randomUUID().toUpperCase(), randomUUID().toUpperCase()];
+  await f.mutate((state) => {
+    state.devices[runtime]!.push(
+      ...[ipad, waited].map((udid) => ({
+        udid,
+        name: udid,
+        state: "Shutdown",
+        isAvailable: true,
+        deviceTypeIdentifier: deviceType,
+      })),
+    );
+  });
+  // B's ticket is first in line between polls (a bounded wait ended), so no
+  // live waiter can win the race for it.
+  const bRequest = { ...f.request, holderId: "first-in-line", deviceId: waited, exact: true };
+  expect((await f.http("/acquire", { ...bRequest, waitMs: 0 })).outcome).toBe("waiting");
+  const ticket = await queued(f, "first-in-line");
+  expect(ticket).toMatchObject({ deviceId: waited, position: 1 });
+  // Holder A releases device 1 and at once asks for device 2 (VUH-2008).
+  expect((await f.http("/release", { id: a.id, owner: f.owner })).outcome).toBe("released");
+  const moved = { ...f.request, deviceId: ipad, exact: true };
+  expect((await f.http("/acquire", moved)).outcome).toBe("waiting");
+  const bLease = lease(await f.http("/acquire", { ...bRequest, ticketId: ticket.id }));
+  expect(bLease).toMatchObject({ holderId: "first-in-line", deviceId: waited });
+  expect((await f.http("/acquire", moved)).outcome).toBe("waiting");
+  await f.http("/release", { id: bLease.id, owner: { ...f.owner, holderId: "first-in-line" } });
+  const aLease = lease(await f.http("/acquire", moved));
+  expect(aLease).toMatchObject({ holderId: f.owner.holderId, deviceId: ipad });
+  await f.http("/release", { id: aLease.id, owner: f.owner });
+}, 30_000);
+
 it("keeps exact-device FIFO across a restart while another device and heavy work proceed independently", async () => {
   const f = await fixture();
   await f.governor.configure({

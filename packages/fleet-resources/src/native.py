@@ -649,6 +649,10 @@ if __name__ == "__main__":
             if len(sys.argv) != 2:
                 raise RuntimeError("Simulator usage request unavailable")
             print(json.dumps(simulator_usage(), separators=(",", ":")))
+        elif mode == "group-occupied":
+            if len(sys.argv) != 3 or int(sys.argv[2]) < 2:
+                raise RuntimeError("Process group request unavailable")
+            print(json.dumps(group_occupied(int(sys.argv[2]))))
         elif mode == "lock":
             locked_pipe(sys.argv[2])
         elif mode == "run":
