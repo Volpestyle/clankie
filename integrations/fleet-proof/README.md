@@ -13,8 +13,17 @@ bounded, cycle-free parent chain. Duplicate descriptors in one process remain
 valid; descriptors held by two processes refuse admission. Lifetimes are checked
 around observations. Protected processes outside the effective user are skipped
 only when the kernel establishes that identity; unavailable same-user process
-observations fail closed. Process, descriptor, ancestry and elapsed-time bounds
-also refuse access rather than returning a partial proof.
+observations fail closed. Process, ancestry and elapsed-time bounds also refuse
+access rather than returning a partial proof.
+
+Every descriptor table is read whole, because a second holder of the target
+socket could be any process. The first read holds 16,384 records; a larger table
+is re-read at the size the kernel reports, up to its per-process limit
+(`kern.maxfilesperproc`). Only a table beyond that limit refuses
+(`fd_list_bounds`). A table past the first read is recorded as `fd_list_large`,
+with its PID and count in private request logs only, so one unrelated process
+holding tens of thousands of descriptors neither refuses every caller nor hides a
+sharer (VUH-2070).
 
 The socket owner requires full `PROC_PIDTBSDINFO` observation and the body's
 user identity. Other ancestors use `sysctl(KERN_PROC_PID)` for exact PID, parent

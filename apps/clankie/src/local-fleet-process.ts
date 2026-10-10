@@ -215,6 +215,17 @@ export const NativeProcessDiagnosticSchema = z
         claimantBirth: birth,
       })
       .optional(),
+    // A table read whole past the first 16,384 records, never skipped (VUH-2070).
+    largeFdTable: z
+      .strictObject({
+        pid,
+        fds: z
+          .number()
+          .int()
+          .min(16_385)
+          .max(1 << 22),
+      })
+      .optional(),
   })
   .strict();
 

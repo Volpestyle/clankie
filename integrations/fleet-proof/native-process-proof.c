@@ -23,8 +23,11 @@
 #include <time.h>
 #include <unistd.h>
 
-enum { MAX_PIDS = 16384, MAX_FDS = 16384, MAX_CHAIN = 64, MAX_SCAN_MS = 200,
-       MAX_ATTEMPTS = 32, MAX_TOTAL_MS = 600 };
+/* MAX_FDS is each descriptor table's first read, not a limit: tables are read
+ * whole up to the kernel's per-process limit (FD_TABLE_CEILING caps a corrupt
+ * sysctl). A larger table is recorded as fd_list_large (VUH-2070). */
+enum { MAX_PIDS = 16384, MAX_FDS = 16384, FD_TABLE_CEILING = 1 << 22, MAX_CHAIN = 64,
+       MAX_SCAN_MS = 200, MAX_ATTEMPTS = 32, MAX_TOTAL_MS = 600 };
 _Static_assert(sizeof(pid_t) == 4 && sizeof(uid_t) == 4, "Unsupported process ABI");
 _Static_assert(sizeof(struct proc_bsdinfo) == 136, "Unsupported proc_bsdinfo ABI");
 _Static_assert(offsetof(struct proc_bsdinfo, pbi_start_tvsec) == 120, "Unsupported birth ABI");
@@ -69,6 +72,11 @@ struct ancestry_failure_observation {
   const char *claimant_status;
 };
 static const struct ancestry_failure_observation *failure_observation;
+struct large_table_observation {
+  pid_t pid;
+  int fds;
+};
+static const struct large_table_observation *large_table_observation;
 
 /* Fixed vocabulary only: this observation is never an admission input. */
 static void diagnostic(const char *stage, const char *reason, int error, int retry) {
@@ -86,6 +94,9 @@ static void diagnostic(const char *stage, const char *reason, int error, int ret
             f->phase, f->index, f->failed_pid, f->claimant_status, f->owner->process.pid,
             f->owner->process.sec, f->owner->process.usec);
   }
+  if (large_table_observation)
+    fprintf(proof_error, ",\"largeFdTable\":{\"pid\":%d,\"fds\":%d}",
+            large_table_observation->pid, large_table_observation->fds);
   fputs("}\n", proof_error);
   errno = saved_error;
 }
@@ -308,6 +319,58 @@ static int list_pids(uint32_t kind, pid_t *out, int *count) {
 
 static int contains(const pid_t *pids, int count, pid_t pid) {
   return bsearch(&pid, pids, (size_t)count, sizeof(pid), compare_pid) != NULL;
+}
+
+struct fd_table {
+  struct proc_fdinfo *items;
+  int capacity;
+};
+
+static int fd_table_limit(void) {
+  int limit = 0;
+  size_t size = sizeof(limit);
+  if (sysctlbyname("kern.maxfilesperproc", &limit, &size, NULL, 0) != 0 || size != sizeof(limit) ||
+      limit < MAX_FDS)
+    return MAX_FDS;
+  return limit > FD_TABLE_CEILING ? FD_TABLE_CEILING : limit;
+}
+
+/* A second holder of the target socket can be any process, so no table is
+ * skipped or truncated: one process with a huge table must not hide a sharer,
+ * nor refuse every other caller. Returns 1 with the whole table, 0 for a table
+ * beyond the kernel's per-process limit, -1 for an unavailable list (errno
+ * kept) and -2 when the larger buffer cannot be allocated. */
+static int list_fds(pid_t pid, struct fd_table *table, int *count) {
+  const int record = (int)sizeof(*table->items);
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    errno = 0;
+    int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, table->items, table->capacity * record);
+    if (bytes < 0 || (bytes == 0 && errno != 0)) return -1;
+    if (bytes % record) return 0;
+    if (bytes < table->capacity * record) {
+      *count = bytes / record;
+      if (*count > MAX_FDS) {
+        struct large_table_observation large = {pid, *count};
+        large_table_observation = &large;
+        diagnostic("fd_list", "fd_list_large", 0, 0);
+        large_table_observation = NULL;
+      }
+      return 1;
+    }
+    /* Possibly truncated: the kernel sizes the table (with slack) for a NULL buffer. */
+    errno = 0;
+    int needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, NULL, 0);
+    if (needed < 0 || (needed == 0 && errno != 0)) return -1;
+    int limit = fd_table_limit();
+    if (table->capacity >= limit) return 0;
+    int wanted = needed / record > table->capacity ? needed / record : table->capacity * 2;
+    if (wanted > limit) wanted = limit;
+    struct proc_fdinfo *grown = realloc(table->items, (size_t)wanted * sizeof(*grown));
+    if (grown == NULL) return -2;
+    table->items = grown;
+    table->capacity = wanted;
+  }
+  return 0;
 }
 
 static int socket_info(pid_t pid, int fd, struct socket_fdinfo *out) {
@@ -658,21 +721,19 @@ static int capture_codex_server(pid_t pid, const char *endpoint, const char *pat
     return refuse_at("executable", "executable_unavailable", 0);
   result = arguments(pid, NULL, endpoint, 0);
   if (result != 0) return result;
-  struct proc_fdinfo *fds = calloc(MAX_FDS, sizeof(*fds));
-  if (fds == NULL) return refuse_at("fd_list", "allocation_failed", errno);
-  if (!within_budget()) { free(fds); return refuse(); }
-  errno = 0;
-  int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds, MAX_FDS * (int)sizeof(*fds));
-  if (bytes < 0 || (bytes == 0 && errno != 0)) {
+  struct fd_table table = {calloc(MAX_FDS, sizeof(*table.items)), MAX_FDS};
+  if (table.items == NULL) return refuse_at("fd_list", "allocation_failed", errno);
+  if (!within_budget()) { free(table.items); return refuse(); }
+  int count = 0, found = 0;
+  int listed = list_fds(pid, &table, &count);
+  if (listed != 1) {
     int error = errno;
-    free(fds);
-    return refuse_at("fd_list", "fd_list_unavailable", error);
+    free(table.items);
+    return listed == -1 ? refuse_at("fd_list", "fd_list_unavailable", error)
+         : listed == -2 ? refuse_at("fd_list", "allocation_failed", error)
+                        : refuse_at("fd_list", "fd_list_bounds", 0);
   }
-  if (bytes >= MAX_FDS * (int)sizeof(*fds) || bytes % sizeof(*fds)) {
-    free(fds);
-    return refuse_at("fd_list", "fd_list_bounds", 0);
-  }
-  int count = bytes / (int)sizeof(*fds), found = 0;
+  struct proc_fdinfo *fds = table.items;
   for (int i = 0; i < count; ++i) {
     if (invalid_fd_record(&fds[i], budget_expired)) { result = refuse(); break; }
     if (fds[i].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
@@ -694,7 +755,7 @@ static int capture_codex_server(pid_t pid, const char *endpoint, const char *pat
       found = 1;
     }
   }
-  free(fds);
+  free(table.items);
   if (result != 0) return result;
   if (!found) return refuse_at("socket_owner", "owner_not_found", 0);
   struct socket_fdinfo final_socket;
@@ -764,7 +825,7 @@ static int merge_pids(pid_t *all, int *count, const pid_t *extra, int extra_coun
 /* One PID-local transaction. Only a stable before/after lifetime contributes
  * an owner. Unrelated churn retries this PID. Once a target socket was seen,
  * instability returns 3: only a fresh census can find a new FD inheritor. */
-static int scan_process(pid_t pid, int same_uid, struct proc_fdinfo *fds,
+static int scan_process(pid_t pid, int same_uid, struct fd_table *table,
                         uint16_t client, uint16_t server, struct owner *candidate) {
   *candidate = (struct owner){0};
   struct identity before, after;
@@ -778,19 +839,20 @@ static int scan_process(pid_t pid, int same_uid, struct proc_fdinfo *fds,
     return retry ? 2 : refuse();
   }
   same_uid = same_uid || before.uid == getuid() || before.ruid == getuid();
-  errno = 0;
-  int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds, MAX_FDS * (int)sizeof(*fds));
+  int count = 0;
+  int listed = list_fds(pid, table, &count);
   int error = errno;
-  if (bytes < 0 || (bytes == 0 && error != 0)) {
+  if (listed == -2) return refuse_at("fd_list", "allocation_failed", error);
+  if (listed == -1) {
     if (exited(pid)) return 0;
     if (!same_uid && (error == EPERM || error == EACCES)) return 0;
     int retry = error == ESRCH;
     diagnostic("fd_list", "fd_list_unavailable", error, retry);
     return retry ? 2 : refuse();
   }
-  if (bytes >= MAX_FDS * (int)sizeof(*fds) || bytes % sizeof(*fds))
-    return refuse_at("fd_list", "fd_list_bounds", 0);
-  for (int j = 0; j < bytes / (int)sizeof(*fds); ++j) {
+  if (listed == 0) return refuse_at("fd_list", "fd_list_bounds", 0);
+  struct proc_fdinfo *fds = table->items;
+  for (int j = 0; j < count; ++j) {
     if (invalid_fd_record(&fds[j], budget_expired)) return refuse();
     if (fds[j].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
     struct socket_fdinfo socket;
@@ -859,8 +921,8 @@ static int prove(int argc, char **argv) {
       !merge_pids(all, &count, ruid_pids, ruid_count))
     return refuse_at("census", "process_census_unavailable", errno);
 
-  struct proc_fdinfo *fds = calloc(MAX_FDS, sizeof(*fds));
-  if (fds == NULL) return refuse_at("fd_list", "allocation_failed", errno);
+  struct fd_table table = {calloc(MAX_FDS, sizeof(*table.items)), MAX_FDS};
+  if (table.items == NULL) return refuse_at("fd_list", "allocation_failed", errno);
   struct owner owner = {0};
   int result = 0;
   for (int i = 0; result == 0 && i < count; ++i) {
@@ -868,7 +930,7 @@ static int prove(int argc, char **argv) {
     int same_uid = contains(uid_pids, uid_count, pid) || contains(ruid_pids, ruid_count, pid);
     struct owner candidate = {0};
     for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
-      result = scan_process(pid, same_uid, fds, (uint16_t)client, (uint16_t)server, &candidate);
+      result = scan_process(pid, same_uid, &table, (uint16_t)client, (uint16_t)server, &candidate);
       if (result != 2 || !within_budget()) break;
       if (attempt + 1 == MAX_ATTEMPTS) {
         diagnostic("completion", "attempts_exhausted", 0, 0);
@@ -889,7 +951,7 @@ static int prove(int argc, char **argv) {
     }
     owner = candidate;
   }
-  free(fds);
+  free(table.items);
   if (result == 3) return 2;
   if (result != 0) return budget_expired ? 2 : 1;
   if (owner.process.pid <= 1) return refuse_at("socket_owner", "owner_not_found", 0);
