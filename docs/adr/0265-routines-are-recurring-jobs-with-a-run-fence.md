@@ -51,8 +51,11 @@ policy, owned by the service in `<state>/routines/`.
   `catch_up`, `manual`), slot, status, start, finish, duration, a one-sentence
   detail, links. History reads newest first.
 - **Surfaces.** One API, `POST /v1/captain/routines` with a `RoutineCommand`
-  (operator auth): `list`, `add`, `edit`, `pause`, `resume`, `run_now`,
-  `remove`, `history`. `clankie routines` is a thin client of it. The lead lane
+  (operator auth, or a Take Control device through the relay, as the fleet
+  roster): `list`, `add`, `edit`, `pause`, `resume`, `run_now`,
+  `remove`, `history`. `clankie routines` is a thin client of it, as are the
+  TUI's `/routines`, the app's Settings > Routines and the desktop pet's menu
+  ([VUH-2052](https://linear.app/vuhlp/issue/VUH-2052)). The lead lane
   gets one `routine` tool over the same store, scoped to routines that target
   its own conversation; it cannot create one that acts elsewhere. Remote
   project leads get the same tool. An owner's target that names no

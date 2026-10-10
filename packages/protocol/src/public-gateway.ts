@@ -73,6 +73,7 @@ import {
 } from "./worker-accounts.ts";
 import { HUDDLE_CLOSE_PATH, HUDDLES_PATH } from "./huddles.ts";
 import { isViewRoute, VIEWS_PATH } from "./views.ts";
+import { ROUTINES_PATH } from "./routines.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
 /** ADR 0151's host-to-gateway multiplexing protocol. */
@@ -205,6 +206,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: HUDDLE_CLOSE_PATH, target: "relay" },
   { method: "GET", path: VIEWS_PATH, target: "relay" },
   { method: "POST", path: VIEWS_PATH, target: "relay" },
+  { method: "GET", path: ROUTINES_PATH, target: "relay" },
+  { method: "POST", path: ROUTINES_PATH, target: "relay" },
   { method: "GET", path: HOST_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: HOST_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: APPEARANCE_SETTINGS_PATH, target: "relay" },

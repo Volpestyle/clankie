@@ -51,7 +51,8 @@
     "./owner-settings": "./src/owner-settings.ts",
     "./linear-settings": "./src/linear-settings.ts",
     "./evidence": "./src/evidence.ts",
-    "./huddles": "./src/huddles.ts"
+    "./huddles": "./src/huddles.ts",
+    "./routines": "./src/routines.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

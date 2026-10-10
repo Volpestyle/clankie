@@ -4201,14 +4201,17 @@ never run it twice; a run a restart cut short is logged `interrupted`, not
 replayed. A run never overlaps the same routine's previous run. `--paused` adds
 a routine disabled. Output is text; `--json` prints the `RoutinesStatus`.
 
-The local operator credential authorizes `GET /v1/captain/routines` (list) and
+The local operator credential, or a paired device with Take Control through the
+relay, authorizes `GET /v1/captain/routines` (list) and
 `POST /v1/captain/routines` with one `RoutineCommand`: `list`, `add`, `edit`,
 `pause`, `resume`, `run_now`, `remove`, `history` (schemas in
 `packages/protocol/src/routines.ts`). Invalid commands and unrecognised schedules
 return 400, an unknown id 404, and a run already going 409. In the TUI, bare
 `/routines` lists routines with run-now, pause/resume, history and remove, and
-adds a lead-turn routine; `/routines` also takes the CLI arguments. Leads manage
-routines that target their own conversation with the `routine` tool.
+adds a lead-turn routine; `/routines` also takes the CLI arguments. The app lists,
+adds, edits, pauses, runs and removes them under Settings > Routines, and the
+desktop pet's menu runs, pauses and resumes them. Leads manage routines that
+target their own conversation with the `routine` tool.
 
 <a id="conversation-commands"></a>
 
