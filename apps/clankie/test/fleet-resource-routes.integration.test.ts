@@ -531,7 +531,14 @@ it("keeps FIFO tickets across a real headers timeout and a blocking CLI wait bey
     env: { HOME: f.root, CLANKIE_OPERATOR_TOKEN: bearer },
     operatorCredentialStore: new FileCredentialStore(join(f.root, "credentials.json")),
   };
-  const shortFetch: typeof fetch = (url, init) => fetch(url, { ...init, dispatcher: short } as RequestInit);
+  // Only an acquire's held response gets the short headers deadline. A plan is
+  // answered promptly, but under load it can take over a second: it then timed
+  // out first, stopping the CLI before its acquire (or satisfying the timeout
+  // checks below with the wrong request).
+  const acquiring = (init?: RequestInit) =>
+    init?.body !== undefined && JSON.parse(String(init.body)).action === "acquire";
+  const shortFetch: typeof fetch = (url, init) =>
+    fetch(url, (acquiring(init) ? { ...init, dispatcher: short } : init) as RequestInit);
   const args = ["acquire", JSON.stringify(selection), "--wait", "20"];
   const failed = runSimulatorCommand(args, { ...options, fetchImpl: shortFetch }).catch(
     (error: unknown) => error,
@@ -575,10 +582,9 @@ it("keeps FIFO tickets across a real headers timeout and a blocking CLI wait bey
     {
       ...options,
       fetchImpl: (url, init) => {
-        if (init?.body && JSON.parse(String(init.body)).action === "acquire") {
-          acquirePosts++;
-          started();
-        }
+        if (!acquiring(init)) return fetch(url, init);
+        acquirePosts++;
+        started();
         return fetch(url, { dispatcher: short, ...init } as RequestInit);
       },
     },
