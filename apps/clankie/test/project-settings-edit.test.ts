@@ -160,6 +160,12 @@ it("a saved A→B binding changes the actual existing tracker adapter, rejects s
         release = r;
       });
     }
+    const issuePath = args.find((arg) => /^repos\/fixture\/(a|b)\/issues\/1$/u.test(arg));
+    if (issuePath !== undefined) {
+      expect(args[args.indexOf("-X") + 1]).toBe("GET");
+      const name = issuePath.includes("fixture/a") ? "A" : "B";
+      return JSON.stringify(JSON.parse(issue(name))[0][0]);
+    }
     return issue("B");
   });
   const run = vi.fn(async () => {
@@ -191,12 +197,20 @@ it("a saved A→B binding changes the actual existing tracker adapter, rejects s
       repo: { root: f.b },
       items: [{ title: "B", parent: "#2" }],
     });
-    expect(gh).toHaveBeenCalledTimes(4);
+    expect(gh).toHaveBeenCalledTimes(8);
     expect(calls.filter((args) => args.includes("--paginate"))).toHaveLength(2);
     expect(calls.flatMap((args) => args.filter((arg) => arg.endsWith("/parent")))).toEqual([
       "repos/fixture/a/issues/1/parent",
+      "repos/fixture/a/issues/1/parent",
+      "repos/fixture/b/issues/1/parent",
       "repos/fixture/b/issues/1/parent",
     ]);
+    expect(
+      calls.filter((args) => args.some((arg) => /^repos\/fixture\/(a|b)\/issues\/1$/u.test(arg))),
+    ).toHaveLength(2);
+    expect(calls.every((args) => args.includes("--paginate") || args[args.indexOf("-X") + 1] === "GET")).toBe(
+      true,
+    );
     expect(githubToken).toHaveBeenCalledTimes(2);
     for (const action of ["discover", "init", "create", "update", "attach"] as const) {
       await expect(
@@ -212,7 +226,7 @@ it("a saved A→B binding changes the actual existing tracker adapter, rejects s
     await expect(service.handle({ action: "list", repo: ref }, false)).rejects.toMatchObject({
       code: "backend_unavailable",
     });
-    expect(gh).toHaveBeenCalledTimes(4); // Remote uses the SAME local path; it must still never read it.
+    expect(gh).toHaveBeenCalledTimes(8); // Remote uses the SAME local path; it must still never read it.
     expect(run).not.toHaveBeenCalled();
     expect(existsSync(join(f.directory, "work-repos.json"))).toBe(false);
     expect(existsSync(join(f.a, ".clankie/work"))).toBe(false);

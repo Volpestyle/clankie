@@ -228,8 +228,10 @@ it("keeps the two-tool catalog when no account verifies, with no callable upstre
   }
 });
 
+// WorkerMcp observes resource bindings, which retain verified account identity
+// for connected providers and also admit the account-free local tracker.
 const admissionRaces = (["local", "stream", "bearer"] as const).flatMap((admission) =>
-  (["catalog", "authorization-account", "dispatch-account"] as const).map((phase) => ({ admission, phase })),
+  (["catalog", "authorization-binding", "dispatch-binding"] as const).map((phase) => ({ admission, phase })),
 );
 it.each(admissionRaces)(
   "refuses $admission admission invalidated during the $phase await",
@@ -249,7 +251,7 @@ it.each(admissionRaces)(
         release = resolve;
       });
       const catalog = f.host.catalog.bind(f.host);
-      const account = f.host.account.bind(f.host);
+      const binding = f.host.binding!.bind(f.host);
       let reads = 0;
       const catalogSpy = vi.spyOn(f.host, "catalog").mockImplementation(async (...args) => {
         const result = await catalog(...args);
@@ -259,12 +261,12 @@ it.each(admissionRaces)(
         }
         return result;
       });
-      const accountSpy = vi.spyOn(f.host, "account").mockImplementation(async (...args) => {
-        const result = await account(...args);
+      const bindingSpy = vi.spyOn(f.host, "binding").mockImplementation(async (...args) => {
+        const result = await binding(...args);
         if (
           args[0] === "linear" &&
           phase !== "catalog" &&
-          ++reads === (phase === "authorization-account" ? 2 : 3)
+          ++reads === (phase === "authorization-binding" ? 2 : 3)
         ) {
           entered();
           await barrier;
@@ -278,7 +280,7 @@ it.each(admissionRaces)(
       expect((await pending).isError).toBe(true);
       expect(f.calls).toHaveBeenCalledOnce();
       catalogSpy.mockRestore();
-      accountSpy.mockRestore();
+      bindingSpy.mockRestore();
     } finally {
       await f.close();
     }
@@ -286,18 +288,20 @@ it.each(admissionRaces)(
 );
 
 it.each(["local", "stream", "bearer"] as const)(
-  "rechecks tools off at %s dispatch after an account await",
+  "rechecks tools off at %s dispatch after a binding await",
   async (admission) => {
     const f = await fixture(admission);
     try {
-      const account = f.host.account.bind(f.host);
+      const binding = f.host.binding!.bind(f.host);
       let reads = 0;
-      const spy = vi.spyOn(f.host, "account").mockImplementation(async (...args) => {
-        const result = await account(...args);
+      const spy = vi.spyOn(f.host, "binding").mockImplementation(async (...args) => {
+        const result = await binding(...args);
         if (args[0] === "linear" && ++reads === 3) f.state.tools = "off";
         return result;
       });
-      expect((await f.call("clankie_call", { name: "linear_read_0", arguments: {} })).isError).toBe(true);
+      expect(
+        (await f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } })).isError,
+      ).toBe(true);
       expect(f.calls).not.toHaveBeenCalled();
       spy.mockRestore();
       expect((await (await f.rpc("tools/list")).json()).result.tools).toEqual([]);
@@ -310,10 +314,10 @@ it.each(["local", "stream", "bearer"] as const)(
 it("retains the host account-binding fence after the standing account snapshot", async () => {
   const f = await fixture();
   try {
-    const account = f.host.account.bind(f.host);
+    const binding = f.host.binding!.bind(f.host);
     let reads = 0;
-    const spy = vi.spyOn(f.host, "account").mockImplementation(async (...args) => {
-      const result = await account(...args);
+    const spy = vi.spyOn(f.host, "binding").mockImplementation(async (...args) => {
+      const result = await binding(...args);
       if (args[0] === "linear" && ++reads === 3)
         await f.credentials.set("linear", {
           type: "api",
@@ -322,7 +326,9 @@ it("retains the host account-binding fence after the standing account snapshot",
         });
       return result;
     });
-    expect((await f.call("clankie_call", { name: "linear_read_0", arguments: {} })).isError).toBe(true);
+    expect((await f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } })).isError).toBe(
+      true,
+    );
     expect(f.calls).not.toHaveBeenCalled();
     spy.mockRestore();
   } finally {

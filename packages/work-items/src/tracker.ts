@@ -207,6 +207,8 @@ export function trackerToolsFor(
 
 export function backendFor(root: string, convention: WorkConvention, deps: TrackerDeps): WorkBackend {
   if (convention.backend === "linear") return nativeBackendFor(root, convention, deps);
+  // Preserve the compatibility callers' eager backend-availability error boundary.
+  nativeBackendFor(root, convention, deps);
   const canonical = trackerToolsFor(root, convention, deps);
   const compatibility = createLinearBackend({
     team: "Local",
