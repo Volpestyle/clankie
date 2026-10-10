@@ -723,7 +723,8 @@ project and its team. A delegated write to an issue outside it, or a `project`
 argument naming another project, is refused. The scope uses the UUID, never the
 name. Workers keep the `linear_*` tools: a call with that project's `repo`, or
 `clankie work --repo`, reaches the built-in tracker with the host-stamped worker
-actor. Project details read the bound project by UUID. Release key matching keeps
+actor. A worker hired for the project reaches it without `repo` as well (see
+_Routing by the hire's project_ below). Project details read the bound project by UUID. Release key matching keeps
 the `VUH` prefix. An unbound `builtin` repo is unavailable and names the missing
 binding. It never falls back to Linear.
 
@@ -750,6 +751,31 @@ It refuses if the live store is not the one the cutover promoted. The mirror
 stays disabled. To cut over again, run a fresh `import linear` into a new scratch
 name, then cut over again.
 
+**Routing by the hire's project (VUH-2014).** Calls without `repo` still
+reached connected Linear, so a worker on a cut-over project could keep writing
+there. Now, when a delegated principal names no `repo`, its hire decides. That
+is a verified fleet pane's live project hire, or a `project:<id>` grant. The host
+reads the hire's registered project and its saved convention:
+
+- `builtin`, or any other non-Linear convention: the call goes to the project's
+  own repo, with the same scope as an explicit `repo`. Writes land in the
+  built-in store with the worker as the actor. Writes outside the project are
+  refused, and so is `linear_graphql`, because it would reach Linear directly.
+- `linear`: the call reaches Linear unchanged. This amendment narrows no Linear
+  project's existing scope. A project without a `trackerRef` counts as `linear`
+  when every saved convention in its local workspaces is `linear`, as with
+  today's `clankie` project.
+- If the project has no saved convention, is gone, or its tracker cannot be read
+  on this machine, the call is refused and names the fix. The host never guesses.
+
+An explicit `repo` always wins. Operator-lane calls with no hire, such as
+Clankie's own seat, behave as before. A bearer-linked worker without a verified
+pane, or a pane that is not a project hire, has no project context. Its calls
+behave as before. The pane's hire record supplies the project, never a tool
+argument. Only a confirmed hire routes. A hire that is not yet confirmed, a
+legacy hire whose process was never proved, or a finished (`gone`) hire keeps
+the old routing. A worker in that state passes `repo` for a cut-over project.
+
 **Interfaces and proof.** Before the live run, the device protocol's
 `WorkBackendKind` gains `builtin`, so app builds must include it before they read
 a `builtin` repo. `apps/clankie/test/linear-cutover.integration.test.ts` covers
@@ -763,4 +789,9 @@ these cases over the HTTP route:
 - one "check it works" ask on landing;
 - no wakes from imported history;
 - exact switch-back;
-- refusal on drift, with nothing changed.
+- refusal on drift, with nothing changed;
+- VUH-2014: a hired worker on the `builtin` project writes without `repo` into
+  the built-in store as itself; a cross-project write is refused; a worker on a
+  `linear` project, bound or unbound, reaches the Linear path (the local fallback
+  in tests); a worker whose project has no saved convention is refused; and an
+  explicit `repo` still wins.

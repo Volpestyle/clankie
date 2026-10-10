@@ -357,8 +357,12 @@ Cutting a World project over (VUH-1987) is the owner's decision. Run
 --dry-run` first and show the plan: counts against Linear, the mirror, the store,
 binding and convention changes, and the switch-back command. Without `--dry-run`
 it applies the plan, and it refuses on drift or a non-empty live store. Afterwards
-that project's convention is `backend: builtin`. Pass the project's `repo` on
-`linear_*` calls (or use `clankie work --repo`): its work is in the built-in
-tracker, not Linear. A call without `repo` still reaches connected Linear.
+that project's convention is `backend: builtin`: its work is in the built-in
+tracker, not Linear. A worker or lead hired for that project reaches it with
+`linear_*` calls without `repo` (VUH-2014). Writes outside the project are
+refused, and so is `linear_graphql`. Anyone else passes the project's `repo`, or
+uses `clankie work --repo`. Clankie's own unhired operator calls without `repo`
+still reach connected Linear. A hire whose project has no saved convention is
+refused rather than guessed; an explicit `repo` always wins.
 `... --switch-back [--dry-run]` restores Linear as the project's tracker and
 reports the pilot writes Linear never saw.

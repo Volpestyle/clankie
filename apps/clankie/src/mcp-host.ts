@@ -324,6 +324,12 @@ export interface McpHostOptions {
   readonly trackerReadClock?: () => number;
   /** Read-only lookup in already registered stores; never enrolls a repository. */
   readonly trackerRepoForCall?: (name: string, args: Record<string, unknown>) => Promise<string | undefined>;
+  /**
+   * The tracker repo a delegated principal's hire routes to when it names none (VUH-2014):
+   * its registered project's repo when that project's convention is not `linear`,
+   * undefined when it has no project or tracks in Linear. Throws to refuse.
+   */
+  readonly trackerRepoForWorker?: (principalId: string) => Promise<string | undefined>;
   /** Repository conventions are backends of the same public tracker vocabulary. */
   readonly trackerForRepo?: (input: {
     name: string;
@@ -1164,6 +1170,33 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         }
         let trackerRepo = input.arguments.repo;
         let inferredRepo = false;
+        // A hired worker's project decides its tracker; an explicit repo still wins (VUH-2014).
+        if (
+          server.id === "linear" &&
+          input.delegation !== undefined &&
+          trackerRepo === undefined &&
+          (trackerNames.has(input.tool) || graphqlCall) &&
+          options.trackerRepoForWorker
+        ) {
+          try {
+            trackerRepo = await options.trackerRepoForWorker(input.delegation.principalId);
+          } catch (error) {
+            return {
+              outcome: "refused",
+              reason: "lane_denied",
+              possiblyDispatched: false,
+              detail: error instanceof Error ? error.message.slice(0, 500) : "Tracker routing failed",
+            };
+          }
+          if (trackerRepo !== undefined && graphqlCall)
+            return {
+              outcome: "refused",
+              reason: "lane_denied",
+              possiblyDispatched: false,
+              detail:
+                "This worker's project tracks work outside Linear; use the linear_* tracker tools, which reach its saved tracker.",
+            };
+        }
         if (
           isLocalTracker(server) &&
           trackerNames.has(input.tool) &&

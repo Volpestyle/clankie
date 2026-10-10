@@ -315,6 +315,19 @@ Call the discovered name through `clankie_call({name, arguments})`:
 { "name": "linear_get_issue", "arguments": { "id": "VUH-1558", "includeRelations": true } }
 ```
 
+A `linear_*` tracker call without `repo` follows the caller's hire
+(VUH-2014). A worker hired for a registered project uses that project's saved
+convention. On a `builtin` project (one cut over from Linear), or any other
+non-Linear convention, the call goes to the project's own tracker, so the
+built-in store records the write as the worker. The tracker scope refuses writes
+outside the project, and `linear_graphql` is refused. On a `linear` project the
+call reaches Linear as before. A project with no tracker binding counts as
+`linear` when its local workspaces' saved conventions are all `linear`. A project with no saved convention, one that is
+gone, or one whose tracker cannot be read here refuses the call. Pass `repo` to
+name another tracker; an explicit `repo` always wins. A bearer-linked worker
+without a verified pane, or a pane that is not a confirmed project hire, keeps the old
+routing.
+
 Unverified or unavailable accounts contribute no upstream tools; one failing
 server does not remove the others. Fleet discovery still lists the two bridge
 tools when no account verifies, but searches return no upstream names and calls

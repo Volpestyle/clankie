@@ -75,6 +75,8 @@ export type ProjectHireMembershipCandidate =
   | {
       state: "confirmed";
       revision: string;
+      /** The registered project this pane was hired for. */
+      projectId: string;
       seat: string;
       nativeOccupantId: string;
       harness: string;
@@ -395,6 +397,7 @@ export class ProjectHires {
     return {
       state: "confirmed",
       revision: createHash("sha256").update(JSON.stringify(entry)).digest("hex"),
+      projectId: entry.projectId,
       seat: entry.seat,
       nativeOccupantId: entry.occupantId,
       harness: entry.request.harness ?? "codex",

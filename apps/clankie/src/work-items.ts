@@ -848,6 +848,45 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       return matches.size === 1 ? [...matches][0] : undefined;
     },
     /**
+     * The tracker repo a worker hired for this registered project routes to when its call
+     * names none (VUH-2014). A `linear` convention returns undefined, so the call reaches
+     * Linear as before; any other convention returns the project's repo. A project that is
+     * gone, has no saved convention, or cannot be read here refuses instead of guessing.
+     */
+    async trackerRepoForProject(projectId: string): Promise<string | undefined> {
+      const project = (await options.projects?.())?.projects.find((entry) => entry.id === projectId);
+      if (project === undefined)
+        throw new WorkRequestError(
+          "unknown_repo",
+          "This worker's hire names a project that no longer exists. Pass repo explicitly.",
+        );
+      if (project.trackerRef === undefined) {
+        // An unbound project's saved conventions live in its local workspaces. All `linear`:
+        // Linear, as before. None, or another backend, needs a trackerRef to say which.
+        const machine = options.localMachineId ?? "local";
+        const backends = await Promise.all(
+          project.workspaces
+            .filter((workspace) => workspace.machineId === machine)
+            .map(async (workspace) => (await readConvention(workspace.path).catch(() => undefined))?.backend),
+        );
+        const saved = backends.filter((backend) => backend !== undefined);
+        if (saved.length > 0 && saved.every((backend) => backend === "linear")) return undefined;
+      }
+      if (project.trackerRef === undefined || !projectReader)
+        throw new WorkRequestError(
+          "needs_decision",
+          `${project.name} has no saved work tracker, so this worker's tracker call has nowhere safe to go. Choose one with clankie project update, or pass repo explicitly.`,
+        );
+      const repo = projectWorkRepoId(project.id);
+      const read = await projectReader.prepare(repo).catch(() => {
+        throw new WorkRequestError(
+          "backend_unavailable",
+          `${project.name}'s saved work tracker can't be read here. Pass repo explicitly.`,
+        );
+      });
+      return read.convention.backend === "linear" ? undefined : repo;
+    },
+    /**
      * A repository's shipped versions and the item keys each one's commits name
      * (VUH-1930), for the built-in tracker's release sync. Read-only: git only.
      */

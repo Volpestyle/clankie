@@ -8,6 +8,7 @@ import { ProjectsSettingsSchema } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker, writeConvention, type LinearImportSnapshot } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
+import { ProjectHires } from "../src/captain/project-hires.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { LinearCutover } from "../src/linear-cutover.ts";
@@ -16,6 +17,7 @@ import { LinearMirrors } from "../src/linear-mirror.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { projectWorkRepoId } from "../src/project-work-items.ts";
 import { startTrackerOwnerLoop } from "../src/tracker-owner-loop.ts";
+import { trackerRepoForPrincipal } from "../src/tracker-runner.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 import { captured, OWNER_ID } from "./helpers/linear-mirror.ts";
@@ -43,6 +45,22 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     decidedBy: "owner",
     decidedAt: "2026-10-09T12:13:36.731Z",
   });
+  // Two neighbours for VUH-2014: a project still on Linear, and one with no saved tracker.
+  const linearWorkspace = join(root, "linear-work");
+  const looseWorkspace = join(root, "loose");
+  // Like the live `clankie` project: no trackerRef, a `linear` convention in its workspace.
+  const unboundWorkspace = join(root, "unbound-linear");
+  await mkdir(linearWorkspace);
+  await mkdir(looseWorkspace);
+  await mkdir(unboundWorkspace);
+  for (const path of [linearWorkspace, unboundWorkspace])
+    await writeConvention(path, {
+      schemaVersion: 1,
+      backend: "linear",
+      linear: { team: "VUH", project: "Still On Linear" },
+      decidedBy: "owner",
+      decidedAt: "2026-10-09T12:13:36.731Z",
+    });
   const settings = new SettingsStore(join(root, "settings.json"));
   await settings.update((current) => ({
     ...current,
@@ -54,9 +72,47 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
           workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: workspace }],
           trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
         },
+        {
+          id: "linear-work",
+          name: "Linear Work",
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: linearWorkspace }],
+          trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+        },
+        {
+          id: "loose",
+          name: "Loose",
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: looseWorkspace }],
+        },
+        {
+          id: "unbound-linear",
+          name: "Unbound Linear",
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: unboundWorkspace }],
+        },
       ],
     }),
   }));
+  // The host's own hire records: which project each fleet pane was hired for.
+  const hires = new ProjectHires(join(root, "project-hires.json"));
+  const hire = async (projectId: string, pane: string, directory: string) => {
+    const projects = (await settings.load()).projects;
+    const { id } = hires.reserve(projects, projectId, {
+      schemaVersion: 1,
+      workingDirectory: directory,
+      title: `Work on ${projectId}`,
+      harness: "claude",
+    });
+    hires.launch(id, projects);
+    hires.pane(id, pane);
+    hires.confirmed(id);
+    hires.observe(id, `seat-${pane}`, `occupant-${pane}`, {
+      nativeOccupantId: `occupant-${pane}`,
+      fleet: "default",
+      pane,
+      binding: { socketPath: join(root, "herdr.sock") },
+      processes: [{ pid: 22, startTime: "today" }],
+      shell: { pid: 11, startTime: "earlier" },
+    });
+  };
   const source = await captured();
   const projectId = source.projects[0]!.id;
   const imports = join(root, "tracker-imports");
@@ -109,6 +165,12 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     trackerForRepo: ({ name, args, repo, local, ...publication }) =>
       workItems.callTracker(name, args, { repo, local, ...publication }),
     trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
+    trackerRepoForWorker: (principalId) =>
+      trackerRepoForPrincipal(
+        principalId,
+        (fleet, pane) => hires.membershipCandidate(fleet, pane),
+        (projectId) => workItems.trackerRepoForProject(projectId),
+      ),
     logger: { info() {}, warn() {} },
   });
   workItems = createWorkItemsService({
@@ -162,6 +224,15 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
       identity: () => undefined,
       authenticate: (token) => (token === "local-fleet-test" ? "test-fleet" : undefined),
     },
+    // Stands in for the local socket's pane proof (LocalFleetLink); the hire records stay real.
+    localFleet: {
+      identity: (request) => {
+        const pane = request.headers.get("x-test-local-pane");
+        return pane === null
+          ? undefined
+          : { fleet: "default", pane, validate: async () => true, current: () => true };
+      },
+    },
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
   });
@@ -186,28 +257,41 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     return { status: response.status, body: (await response.json()) as Record<string, any> };
   };
   let sequence = 0;
-  let session: string | undefined;
-  const rpc = (method: string, params: unknown) =>
+  const sessions = new Map<string, string>();
+  const rpc = (method: string, params: unknown, pane?: string) =>
     app.app.request("/v1/fleet/mcp", {
       method: "POST",
       headers: {
         authorization: "Bearer local-fleet-test",
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
-        ...(session ? { "mcp-session-id": session } : {}),
+        ...(pane === undefined ? {} : { "x-test-local-pane": pane }),
+        ...(sessions.has(pane ?? "") ? { "mcp-session-id": sessions.get(pane ?? "")! } : {}),
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: ++sequence, method, params }),
     });
-  /** A fleet worker's clankie_call, as a hired seat makes it. */
-  const workerCall = async (name: string, args: Record<string, unknown>) => {
-    session ??= (
-      await rpc("initialize", {
-        protocolVersion: "2025-06-18",
-        capabilities: {},
-        clientInfo: { name: "linear-cutover-integration", version: "1" },
-      })
-    ).headers.get("mcp-session-id")!;
-    const response = await rpc("tools/call", { name: "clankie_call", arguments: { name, arguments: args } });
+  /** A fleet worker's clankie_call: bearer-linked, or from a verified local pane. */
+  const workerCall = async (name: string, args: Record<string, unknown>, pane?: string) => {
+    if (!sessions.has(pane ?? ""))
+      sessions.set(
+        pane ?? "",
+        (
+          await rpc(
+            "initialize",
+            {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "linear-cutover-integration", version: "1" },
+            },
+            pane,
+          )
+        ).headers.get("mcp-session-id")!,
+      );
+    const response = await rpc(
+      "tools/call",
+      { name: "clankie_call", arguments: { name, arguments: args } },
+      pane,
+    );
     const result = (await response.json()).result as { content: { text: string }[] };
     return JSON.parse(result.content[0]!.text) as { outcome: string; content?: string; detail?: string };
   };
@@ -235,6 +319,10 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     files,
     wakes,
     linearReads,
+    hire,
+    linearWorkspace,
+    looseWorkspace,
+    unboundWorkspace,
     repo: projectWorkRepoId("clankie-work"),
   };
 }
@@ -426,4 +514,102 @@ it("refuses to cut over when the copy has drifted from Linear, and changes nothi
   expect(refused.body.counts.issues).toMatchObject({ missing: 1, stale: 1 });
   expect(refused.body.refusals.join(" ")).toMatch(/drifted from Linear/u);
   expect(await f.files()).toEqual(before);
+});
+
+it("routes a hired worker's tracker calls without repo by its project's saved convention (VUH-2014)", async () => {
+  const f = await cutoverFixture();
+  const cut = await f.post("/v1/tracker/cutover/linear", {
+    worldProject: "clankie-work",
+    scratch: "work",
+    linearProjectId: f.projectId,
+  });
+  expect(cut.status, JSON.stringify(cut.body)).toBe(200);
+  await f.hire("clankie-work", "w1:p1", f.workspace);
+  await f.hire("linear-work", "w1:p2", f.linearWorkspace);
+  await f.hire("loose", "w1:p3", f.looseWorkspace);
+  await f.hire("unbound-linear", "w1:p4", f.unboundWorkspace);
+  const store = async () => JSON.parse(await readFile(join(f.trackerDirectory, "tracker.json"), "utf8"));
+
+  // The builtin project's worker writes without repo: it lands in the built-in store,
+  // in the bound project, as that worker.
+  const created = await f.workerCall("linear_save_issue", { title: "Routed by my hire" }, "w1:p1");
+  expect(created, JSON.stringify(created)).toMatchObject({ outcome: "ok" });
+  const issue = (await store()).issues.find(
+    (entry: { title: string }) => entry.title === "Routed by my hire",
+  );
+  expect(issue).toMatchObject({ projectId: f.projectId });
+  const comment = await f.workerCall(
+    "linear_save_comment",
+    { issueId: issue.identifier, body: "Routed comment" },
+    "w1:p1",
+  );
+  expect(comment, JSON.stringify(comment)).toMatchObject({ outcome: "ok" });
+  expect(
+    (await store()).comments.find((entry: { body: string }) => entry.body === "Routed comment")
+      .createdByActor,
+  ).toMatchObject({ type: "agent-worker", id: "fleet:default:pane:w1:p1" });
+
+  // A cross-project write from that worker is refused, and nothing is written.
+  await f.post("/v1/tracker/owner/call", {
+    name: "save_project",
+    arguments: { name: "Elsewhere", addTeams: ["VUH"] },
+  });
+  const elsewhere = await f.post("/v1/tracker/owner/call", {
+    name: "save_issue",
+    arguments: { team: "VUH", project: "Elsewhere", title: "Not Clankie Work" },
+  });
+  const outside = await f.workerCall(
+    "linear_save_comment",
+    { issueId: elsewhere.body.result.identifier, body: "Cross-project" },
+    "w1:p1",
+  );
+  expect(outside.outcome).not.toBe("ok");
+  expect(JSON.stringify(outside)).toMatch(/not proven to belong to this repo's tracker/u);
+  const moved = await f.workerCall(
+    "linear_save_issue",
+    { title: "Into another project", project: "Elsewhere" },
+    "w1:p1",
+  );
+  expect(moved.outcome).not.toBe("ok");
+  const after = await store();
+  expect(after.comments.some((entry: { body: string }) => entry.body === "Cross-project")).toBe(false);
+  expect(after.issues.some((entry: { title: string }) => entry.title === "Into another project")).toBe(false);
+
+  // A Linear project's worker keeps today's path: Linear, here its durable local fallback,
+  // unscoped by any project repo, so its write into another project is not refused.
+  const onLinear = await f.workerCall(
+    "linear_save_issue",
+    { team: "VUH", project: "Elsewhere", title: "Linear worker write" },
+    "w1:p2",
+  );
+  expect(onLinear, JSON.stringify(onLinear)).toMatchObject({ outcome: "ok" });
+  expect(
+    (await store()).issues.find((entry: { title: string }) => entry.title === "Linear worker write"),
+  ).toMatchObject({ projectId: elsewhere.body.result.projectId });
+  // So does a project with no trackerRef whose workspace convention is `linear`.
+  const unbound = await f.workerCall(
+    "linear_save_issue",
+    { team: "VUH", project: "Elsewhere", title: "Unbound Linear write" },
+    "w1:p4",
+  );
+  expect(unbound, JSON.stringify(unbound)).toMatchObject({ outcome: "ok" });
+
+  // A hire whose project has no saved tracker is refused rather than guessed.
+  const loose = await f.workerCall("linear_save_issue", { team: "VUH", title: "Nowhere safe" }, "w1:p3");
+  expect(loose.outcome).toBe("refused");
+  expect(loose.detail).toMatch(/Loose has no saved work tracker/u);
+  expect((await store()).issues.some((entry: { title: string }) => entry.title === "Nowhere safe")).toBe(
+    false,
+  );
+
+  // An explicit repo still wins over the hire's project.
+  const explicit = await f.workerCall(
+    "linear_save_issue",
+    { repo: projectWorkRepoId("linear-work"), title: "Explicit repo" },
+    "w1:p3",
+  );
+  expect(explicit, JSON.stringify(explicit)).toMatchObject({ outcome: "ok" });
+  expect((await store()).issues.some((entry: { title: string }) => entry.title === "Explicit repo")).toBe(
+    false,
+  );
 });

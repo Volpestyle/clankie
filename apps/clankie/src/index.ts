@@ -207,7 +207,7 @@ import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { EvidenceStore } from "./evidence-store.ts";
 import { startTrackerOwnerLoop } from "./tracker-owner-loop.ts";
-import { trackerRunner } from "./tracker-runner.ts";
+import { trackerRepoForPrincipal, trackerRunner } from "./tracker-runner.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import {
   collectLinearImport,
@@ -716,6 +716,13 @@ const mcpHost = createMcpHost({
   trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
   trackerForRepo: ({ name, args, repo, local, actor, beforeWrite, onDispatch, effectConfirmed }) =>
     workItems.callTracker(name, args, { repo, local, actor, beforeWrite, onDispatch, effectConfirmed }),
+  // A hired worker's tracker calls follow its project's saved convention (VUH-2014).
+  trackerRepoForWorker: (principalId) =>
+    trackerRepoForPrincipal(
+      principalId,
+      (fleet, pane) => captain.projectHireMembershipCandidate(fleet, pane),
+      (projectId) => workItems.trackerRepoForProject(projectId),
+    ),
   // A fleet worker is named by the seat it was hired into, as the host recorded it.
   trackerWorkerName: (principalId) => {
     const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
