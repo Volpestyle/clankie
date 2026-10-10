@@ -3822,7 +3822,10 @@ export interface TrackerStoreSummary {
   readonly team?: { readonly id: string; readonly key: string; readonly name: string };
   /** Native record counts by collection. */
   readonly counts: Readonly<Record<string, number>>;
-  /** No record anyone wrote or imported: only the seeded team, user and statuses. */
+  /**
+   * No record anyone wrote or imported: only the seeded team, user and statuses, and
+   * releases, which are derived from repository tags (`syncReleases`), not authored.
+   */
   readonly empty: boolean;
   readonly mirror?: {
     readonly workspaceId: string;
@@ -3860,7 +3863,7 @@ function summarizeStore(store: Store | undefined): TrackerStoreSummary {
     storeId: store.storeId ?? store.team.id,
     team: { id: store.team.id, key: store.team.key, name: store.team.name },
     counts,
-    empty: Object.values(counts).every((count) => count === 0),
+    empty: Object.entries(counts).every(([type, count]) => type === "releases" || count === 0),
     ...(store.linearMirror === undefined
       ? {}
       : {
@@ -3915,6 +3918,8 @@ async function writeExclusive(path: string, content: string): Promise<void> {
  * Under both store locks the live store's exact bytes go to `backup`, then the copy
  * replaces it, marked cut over: writable, authoritative, its Linear records kept as
  * provenance. The copy keeps its own storeId, so clients rebootstrap (VUH-1971).
+ * Releases are derived from repository tags, so the live store's carry over, each
+ * item relinked to the copy's built-in issues as a sync would; nothing authored merges.
  */
 export async function promoteLinearImport(options: {
   readonly source: string;
@@ -3952,12 +3957,27 @@ export async function promoteLinearImport(options: {
         scratch: options.scratch,
       };
       store.lastWriteAt = now;
+      const carried = (previous?.releases ?? []).filter(
+        (release) => !store.releases?.some((entry) => entry.id === release.id),
+      );
+      for (const release of carried)
+        (store.releases ??= []).push({
+          ...release,
+          items: release.items.map((item) => {
+            const issue = store.issues.find((entry) => norm(entry.identifier) === norm(item.key));
+            return {
+              key: item.key,
+              ...(issue === undefined ? {} : { issueId: issue.id }),
+              commits: item.commits,
+            };
+          }),
+        });
       appendAudit(store, {
         at: now,
         tool: "cutover_linear",
         outcome: "applied",
         actor: options.actor,
-        fields: ["linearMirror"],
+        fields: carried.length ? ["linearMirror", "releases"] : ["linearMirror"],
         entities: [{ type: "projects", id: options.linearProjectId }],
         target: `scratch:${options.scratch}`,
       });

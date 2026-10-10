@@ -516,6 +516,73 @@ it("refuses to cut over when the copy has drifted from Linear, and changes nothi
   expect(await f.files()).toEqual(before);
 });
 
+it("carries releases synced from repository tags into the promoted store, and still refuses an authored record", async () => {
+  // Like the live store: `clankie work releases sync` has run, nothing else.
+  const history = {
+    repository: "github.com/Volpestyle/clankie",
+    lane: "repository",
+    releases: [
+      {
+        version: "v0.2.0",
+        tag: "v0.2.0",
+        commit: "a".repeat(40),
+        date: "2026-09-01T00:00:00.000Z",
+        dateKind: "tag" as const,
+        items: [{ key: "VUH-1905", commits: ["b".repeat(40)] }],
+      },
+      {
+        version: "v0.3.0",
+        tag: "v0.3.0",
+        commit: "c".repeat(40),
+        date: "2026-09-20T00:00:00.000Z",
+        dateKind: "tag" as const,
+        items: [],
+      },
+    ],
+  };
+  const request = { worldProject: "clankie-work", scratch: "work", linearProjectId: "" };
+  const f = await cutoverFixture();
+  await f.live.syncReleases(history);
+  const synced = JSON.parse((await f.files()).live);
+  expect(synced.releases).toHaveLength(2);
+
+  const dry = await f.post("/v1/tracker/cutover/linear", {
+    ...request,
+    linearProjectId: f.projectId,
+    dryRun: true,
+  });
+  expect(dry.status, JSON.stringify(dry.body)).toBe(200);
+  expect(dry.body).toMatchObject({ ready: true, refusals: [] });
+  expect(dry.body.changes.find((change: { what: string }) => change.what === "releases")).toMatchObject({
+    count: 2,
+  });
+
+  const applied = await f.post("/v1/tracker/cutover/linear", { ...request, linearProjectId: f.projectId });
+  expect(applied.status, JSON.stringify(applied.body)).toBe(200);
+  const promoted = JSON.parse((await f.files()).live);
+  expect(promoted.storeId).not.toBe(synced.storeId);
+  const issue = promoted.issues.find((entry: { identifier: string }) => entry.identifier === "VUH-1905");
+  // Same releases; an item now names the built-in issue the copy holds, as a sync would.
+  expect(promoted.releases).toEqual([
+    { ...synced.releases[0], items: [{ ...synced.releases[0].items[0], issueId: issue.id }] },
+    synced.releases[1],
+  ]);
+
+  // One authored record next to the releases still refuses, and nothing changes.
+  const g = await cutoverFixture();
+  await g.live.syncReleases(history);
+  const authored = await g.post("/v1/tracker/owner/call", {
+    name: "save_issue",
+    arguments: { team: JSON.parse((await g.files()).live).team.key, title: "Authored before cutover" },
+  });
+  expect(authored.status, JSON.stringify(authored.body)).toBe(200);
+  const before = await g.files();
+  const refused = await g.post("/v1/tracker/cutover/linear", { ...request, linearProjectId: g.projectId });
+  expect(refused.status).toBe(409);
+  expect(refused.body.refusals.join(" ")).toMatch(/already holds authored records/u);
+  expect(await g.files()).toEqual(before);
+});
+
 it("routes a hired worker's tracker calls without repo by its project's saved convention (VUH-2014)", async () => {
   const f = await cutoverFixture();
   const cut = await f.post("/v1/tracker/cutover/linear", {

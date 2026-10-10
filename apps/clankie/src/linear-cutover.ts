@@ -236,7 +236,7 @@ export class LinearCutover {
     const live = await readTrackerStoreSummary(this.options.trackerDirectory);
     if (!live.empty)
       refusals.push(
-        "The live built-in tracker already holds records; cutover replaces only an empty store (no merge)",
+        "The live built-in tracker already holds authored records; cutover replaces only a store holding none (no merge)",
       );
     const bound = settings.projects.projects.find(
       (entry) => entry.trackerProjectId === linearProjectId && entry.id !== project.id,
@@ -337,6 +337,15 @@ export class LinearCutover {
           },
           backup: join(directory, "before.json"),
         },
+        ...(live.counts.releases
+          ? [
+              {
+                what: "releases",
+                count: live.counts.releases,
+                note: `${live.counts.releases} releases derived from repository tags carry over into the promoted store`,
+              },
+            ]
+          : []),
         {
           what: "setting",
           worldProject: project.id,
@@ -390,7 +399,8 @@ export class LinearCutover {
       actor: { ...TRACKER_OWNER, onBehalfOf: [] },
       ...(this.options.clock === undefined ? {} : { clock: this.options.clock }),
       verify: (source, target) => {
-        if (!target.empty) throw new Error("The live built-in tracker gained records; cutover stopped");
+        if (!target.empty)
+          throw new Error("The live built-in tracker gained authored records; cutover stopped");
         if (source.storeId !== copy.storeId || source.localWrites > 0)
           throw new Error("The scratch import changed since the plan; cutover stopped");
       },

@@ -6836,7 +6836,9 @@ capture of the Linear project through the connected account, and prints this pla
 - `changes`: the mirror is disabled, the live `tracker/tracker.json` is replaced by
   the scratch import (with its storeId, counts and backup path), the settings
   project's `trackerProjectId` is set, and the convention file switches from
-  `linear` to `builtin`;
+  `linear` to `builtin`; when the live store holds releases (derived from
+  repository tags by `work releases sync`), a `releases` change says how many
+  carry over into the promoted store;
 - `refusals` and `warnings`;
 - the exact `switchBack` command.
 
@@ -6846,7 +6848,7 @@ with HTTP 409 and changes nothing. It refuses when:
 
 - the copy has drifted from Linear (missing or stale records);
 - the mirror recorded failed events or unrepaired drift;
-- the live store already holds records;
+- the live store already holds authored records (anything but synced releases);
 - the convention is not `linear`;
 - another cutover is active.
 
