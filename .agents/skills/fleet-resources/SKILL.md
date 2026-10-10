@@ -72,7 +72,10 @@ admitted in the last minute counting four cores of load, as the
 supports. Each job above that starts only while the measured machine (the busier
 of load and kernel CPU, plus a full four-core share for every job admitted in
 the last minute) stays under 70% of the cores, with memory to spare. A wait
-that names `busy` is this rule; `slots` is the ceiling. Task-specific owner budgets still bind;
+that names `busy` is this rule; `slots` is the ceiling; `queued` is a FIFO turn.
+The service judges admission for every waiter from one view of the machine, so
+don't run `clankie heavy` itself under a shim that changes what Node reports
+about the machine (cores, memory); put such shims on the child command. Task-specific owner budgets still bind;
 a source/default change does not authorize increasing live capacity.
 Heavy and simulator leases have independent budgets. Automatic simulator
 capacity gives simulators half the machine at the measured cost of one

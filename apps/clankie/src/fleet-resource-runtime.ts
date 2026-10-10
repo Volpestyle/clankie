@@ -93,6 +93,8 @@ export async function createFleetResourceRuntime(input: {
   /** Injectable for tests; the shipped helper scans this user's processes. */
   referents?: (needles: readonly string[]) => Promise<SimulatorReferents>;
   refreshMs?: number;
+  /** How often the service admits queued heavy work on its waiters' behalf. */
+  arbitrateMs?: number;
   /** How often the refresh loop checks for simulators booted outside leases. */
   externalNoticeMs?: number;
   /** Pause between a simulator request's first-proof attempts. */
@@ -107,6 +109,8 @@ export async function createFleetResourceRuntime(input: {
   let policyFingerprint: string | undefined;
   let refreshing: Promise<void> | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let arbiter: ReturnType<typeof setInterval> | undefined;
+  let arbitrating: Promise<unknown> | undefined;
   let closed = false;
   /** `${udid}:${seatId}` pairs already told; forgotten once the device is no longer external. */
   const noticed = new Set<string>();
@@ -418,11 +422,26 @@ export async function createFleetResourceRuntime(input: {
         void runtime.noticeExternalSimulators().catch(() => {});
       }, input.refreshMs ?? 5_000);
       timer.unref();
+      // The service judges heavy admission once for every waiter, so one
+      // waiter's wrong view of the machine cannot hold the FIFO (VUH-2080).
+      arbiter = setInterval(() => {
+        if (arbitrating) return;
+        arbitrating = governor
+          .arbitrate()
+          .catch(input.onError ?? (() => {}))
+          .finally(() => {
+            arbitrating = undefined;
+          });
+      }, input.arbitrateMs ?? 1_000);
+      arbiter.unref();
     },
     async close() {
       closed = true;
       if (timer) clearInterval(timer);
       timer = undefined;
+      if (arbiter) clearInterval(arbiter);
+      arbiter = undefined;
+      await arbitrating;
       simulators.close();
       await refreshing?.catch(() => {});
       listeners.clear();

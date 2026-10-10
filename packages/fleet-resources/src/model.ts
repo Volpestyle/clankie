@@ -289,6 +289,12 @@ export type SimulatorAdmission =
       snapshot: ResourceSnapshot;
     };
 export interface FleetResourceGovernor {
+  /**
+   * One arbiter pass: admits queue heads in FIFO order under this process's
+   * view of pressure and refreshes the heartbeat waiters defer to (VUH-2080).
+   * Returns how many requests it admitted.
+   */
+  arbitrate(): Promise<number>;
   configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
   snapshot(): Promise<ResourceSnapshot>;
   /** Hire admission: refuses only on low available memory or an unverifiable probe. */

@@ -25,6 +25,19 @@ it misses short-lived compilers and test workers, and on 2026-10-10 read 6–10
 busy cores while the kernel counted 13–14. Automatic `heavySlots` is
 `max(1, min(floor(cores/2), floor(RAM_GiB/12)))`: nine on the 18-core, 128 GiB Mac.
 
+Admission is judged once, by the service (VUH-2080). Its runtime calls
+`arbitrate()` every second: under its one pressure sample it grants queue heads
+in FIFO order, carrying each waiter's own identity and token, and refreshes
+`arbiter.json`. While that heartbeat is under five seconds old, waiters only
+watch for their grant, so a waiter that misreads the machine (on 2026-10-10 a
+shimmed process counted 3 of 18 cores and held the queue for 20 minutes) cannot
+hold the FIFO, and one that misreads it as calm cannot jump it. A waiter marks
+its ticket in `grants/` before queueing; an unmarked ticket, from a client older
+than this, is never granted and judges for itself. Without a fresh heartbeat,
+or when the arbiter's own probe is unavailable, every waiter judges for itself
+as before. A grant its waiter never took up is returned with the ticket, and
+one whose waiter died is reaped like any starting lease.
+
 The governor shares one OS-account registry in `~/.clankie/fleet-resources` across
 Clankie worktrees and native worker environments. Owner-authenticated control
 calls `configure`; command callers read that policy. `HOME`, `CLANKIE_STATE`,
