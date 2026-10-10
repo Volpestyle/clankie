@@ -37,6 +37,7 @@ if (!token || !pane || !fleet || !conversationId || !binding.success)
 const closing = new AbortController();
 const HOOK_LOG = join(homedir(), ".clankie", "remote-leads", "hooks.log");
 const SYNC_FAILURE_THRESHOLD = 3;
+const PROMPT_RETRY_BUDGET_MS = 50_000;
 const request: typeof fetch = async (resource, init) => {
   const original = new Request(resource, init);
   const link = JSON.parse(await readFile(join(homedir(), ".clankie", "links", `${fleet}.json`), "utf8"));
@@ -88,9 +89,25 @@ const request: typeof fetch = async (resource, init) => {
 if (process.argv.includes("--sync")) {
   process.exitCode = await syncQuietly();
 } else if (process.argv.includes("--prompt")) {
-  const response = await request("http://127.0.0.1/v1/fleet/lead/prompt");
-  if (!response.ok) throw new Error("Remote lead prompt unavailable");
-  process.stdout.write(await response.text());
+  // SessionStart may land while the service restarts or the lead's proof
+  // settles: keep asking inside the hook's 60-second budget (VUH-2075).
+  const deadline = Date.now() + PROMPT_RETRY_BUDGET_MS;
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await request("http://127.0.0.1/v1/fleet/lead/prompt", {
+      signal: AbortSignal.timeout(10_000),
+    }).catch((error: unknown) => {
+      if (closing.signal.aborted) throw error;
+      return undefined;
+    });
+    if (response?.ok) {
+      process.stdout.write(await response.text());
+      break;
+    }
+    await response?.body?.cancel();
+    const wait = Math.min(2_000 * 2 ** attempt, 10_000);
+    if (Date.now() + wait >= deadline) throw new Error("Remote lead prompt unavailable");
+    await delay(wait);
+  }
 } else {
   let reconnectNeeded = false;
   const connect = () =>
@@ -163,7 +180,8 @@ async function syncQuietly(): Promise<number> {
       stdin: (async function* () {
         yield input;
       })(),
-      retryDelaysMs: [2_000, 5_000],
+      // A session's first sync rides out a service restart; later hooks stay brief.
+      retryDelaysMs: event === "SessionStart" ? [2_000, 5_000, 10_000] : [2_000, 5_000],
     });
   } catch (error) {
     failure = error;

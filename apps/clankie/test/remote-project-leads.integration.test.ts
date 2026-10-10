@@ -432,12 +432,16 @@ it("launches an approved Windows workspace through the real conversation store w
       expect(events).toContain("local captain fallback is forbidden");
     });
     malformedReply = true;
-    const malformedInput = { ...input, requestId: randomUUID() };
+    // A relaunch into the same conversation, whose first head never attached.
+    const malformedInput = { ...input, requestId: randomUUID(), conversationId };
     const malformed = await leads.launch(malformedInput, async () => {});
     expect(malformed).toMatchObject({
       stage: "unconfirmed",
       failedStage: "dispatching",
       error: "Remote lead reply is not valid JSON",
+      // VUH-2075: the lead hears which panes were left behind, this one included.
+      leftBehind: [{ requestId: input.requestId, pane: "pc/w1:p1", stage: "dispatched" }],
+      detail: expect.stringContaining("left pane pc/w1:p1 open"),
     });
     const failedGrant = await issue.mock.results[1]!.value;
     expect(leads.delegations.revoke(failedGrant.id)).toBe(false); // Failure already revoked it.
@@ -459,6 +463,7 @@ it("launches an approved Windows workspace through the real conversation store w
       stage: "unconfirmed",
       failedStage: "reserved",
       error: "Preparation failed: authorization: [REDACTED]",
+      detail: expect.stringContaining("before allocating a pane"),
     });
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({ failedStage: "reserved", error: failed.error }),

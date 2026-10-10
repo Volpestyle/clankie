@@ -67,6 +67,9 @@ if (process.argv[2] === "--head") {
         autoMemoryEnabled: false,
         enabledPlugins: { [leadPlugin]: true, "clankie-worker@clankie": false, "clankie@clankie": false },
       }),
+      // A lead never drives a browser; answering here keeps the Chrome-extension
+      // question off a fresh profile's first screen (VUH-2075).
+      "--no-chrome",
       // The owner's maximum trust mode (VUH-2048), set by the service; MAXIMUM_TRUST_HARNESS_ARGS.claude.
       ...(spec.maximumTrust === true ? ["--dangerously-skip-permissions"] : []),
     ],
