@@ -9,7 +9,7 @@ import {
   type WorkerBridgeStatus,
 } from "@clankie/protocol";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { withFleetAgentHealth } from "../src/session/herdr-connection.ts";
 import { occupantIdForHerdrSession } from "../../clankie/src/captain/herdr-census.ts";
 import { doctorCommand } from "../src/command/doctor.ts";
@@ -312,4 +312,20 @@ it("adds report health to native agent-list JSON only for the same fleet and occ
   ).toEqual(row);
   f.setSeats([seat]);
   expect(JSON.parse(await withFleetAgentHealth(stdout, f.options)).result.agents[0]).toEqual(row);
+  // A roster that cannot be read leaves the native rows and says why on stderr.
+  const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    const unavailable = await withFleetAgentHealth(stdout, {
+      ...f.options,
+      connectionId: "pc",
+      fetchImpl: async () => {
+        throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      },
+    });
+    expect(JSON.parse(unavailable).result.agents[0]).toEqual(row);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("Clankie's roster is unavailable"));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("timeout"));
+  } finally {
+    stderr.mockRestore();
+  }
 });

@@ -174,7 +174,16 @@ export async function withFleetAgentHealth(stdout: string, options: HerdrConnect
           (options.fetchImpl ?? fetch)(input, { ...init, signal: AbortSignal.timeout(5_000) }),
       }),
     );
-    const seats = await client.roster();
+    let seats: Awaited<ReturnType<typeof client.roster>>;
+    try {
+      seats = await client.roster();
+    } catch (error) {
+      // Say so: rows without owner and receiver fields must not read as unowned.
+      process.stderr.write(
+        `clankie: Clankie's roster is unavailable (${error instanceof Error ? error.message : String(error)}); rows show Herdr's native fields only, without owner, messageReceiver or report health.\n`,
+      );
+      return stdout;
+    }
     const fleet =
       options.connectionId && options.connectionId !== "default" ? options.connectionId : undefined;
     parsed.result.agents = parsed.result.agents.map((row) => {
