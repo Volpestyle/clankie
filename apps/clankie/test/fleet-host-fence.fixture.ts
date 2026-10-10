@@ -14,7 +14,12 @@ import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 type Admission = "local" | "stream" | "bearer";
-export async function fixture(admission: Admission = "bearer", wire = false, snapshot = true) {
+export async function fixture(
+  admission: Admission = "bearer",
+  wire = false,
+  snapshot = true,
+  options: { linearWrite?: boolean } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "clankie-fleet-bridge-"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const account = {
@@ -70,7 +75,10 @@ export async function fixture(admission: Admission = "bearer", wire = false, sna
               }
             : request.method === "tools/list"
               ? {
-                  tools: [{ name: "read_0", inputSchema: { type: "object" } }],
+                  tools: [
+                    { name: "read_0", inputSchema: { type: "object" } },
+                    ...(options.linearWrite ? [{ name: "save_issue", inputSchema: { type: "object" } }] : []),
+                  ],
                 }
               : await (async () => {
                   const called = await calls(request.params.name, request.params.arguments);
