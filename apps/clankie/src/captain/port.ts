@@ -186,6 +186,8 @@ export interface CaptainPort {
       hired?: boolean;
     }[]
   >;
+  /** One seat's row from its own Herdr record, without a census of every fleet. */
+  workerCatalogSeat?(paneId: string): Promise<{ harness: string; status?: string } | undefined>;
   refreshNativeWorkerCatalog?(
     paneId: string,
     input: { revision: string; beforeDispatch?: () => Promise<void> },

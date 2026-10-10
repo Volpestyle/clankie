@@ -237,8 +237,8 @@ localIt("reauthenticates the current HTTP socket after the initialize socket clo
     const proofsBeforeList = f.observedPorts.length;
     const listed = await f.rpc("tools/list", {}, { session });
     expect(listed.response.status).toBe(200);
-    // The HTTP boundary and SDK handler each authenticate the current request.
-    expect.soft(f.observedPorts.length - proofsBeforeList).toBe(2);
+    // The HTTP boundary admits the current request once; discovery reuses it.
+    expect.soft(f.observedPorts.length - proofsBeforeList).toBe(1);
     expect(listed.body.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
       "clankie_tools",
       "clankie_call",
