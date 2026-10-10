@@ -22,6 +22,7 @@ import {
   WorkerAccountHoldsSchema,
   workerAccountsRoute,
 } from "../../../packages/protocol/src/index.ts";
+import { ROUTINES_PATH, RoutinesStatusSchema } from "../../../packages/protocol/src/routines.ts";
 import { SettingsStore } from "../../../packages/settings/src/index.ts";
 import {
   VIEWS_PATH,
@@ -33,7 +34,8 @@ import {
 import { publicGatewayTargetFor } from "../../../packages/protocol/src/public-gateway.ts";
 import { ViewStore } from "../../clankie/src/views.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
-import { createStubCaptain } from "../../clankie/src/captain/port.ts";
+import { createStubCaptain, type CaptainPort } from "../../clankie/src/captain/port.ts";
+import { RoutineStore } from "../../clankie/src/captain/routines.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../../clankie/src/device-session.ts";
 import { HostedBodyClient } from "../../clankie/src/hosted-body.ts";
 import { HostedPairing } from "../../clankie/src/hosted-pairing.ts";
@@ -64,7 +66,9 @@ async function listen(handler: (request: IncomingMessage, response: ServerRespon
   if (!address || typeof address === "string") throw new Error("Fixture TCP listener unavailable");
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture(options: { unavailableAwakeRegistry?: boolean } = {}) {
+async function fixture(
+  options: { unavailableAwakeRegistry?: boolean; routineCommand?: CaptainPort["routineCommand"] } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "fleet-settings-relay-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const settings = new SettingsStore(join(root, "settings.json"));
@@ -133,6 +137,7 @@ async function fixture(options: { unavailableAwakeRegistry?: boolean } = {}) {
         captainCalls++;
         throw new Error("Settings cannot use captain conversations");
       },
+      ...(options.routineCommand ? { routineCommand: options.routineCommand } : {}),
     }),
     settings,
     views: new ViewStore(join(root, "views"), () => hf.now),
@@ -520,5 +525,58 @@ it("carries the owner's views to a control device, unavailable sources included,
     expect((await call(VIEWS_PATH, { action: "create", spec }, device)).status).toBe(403);
   }
   expect(f.forwarded).toHaveLength(forwarded);
+  expect(f.captainCalls()).toBe(0);
+});
+
+it("lets a Take Control device manage routines through the relay as the owner, and refuses chat and steer devices before the hop", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "routines-relay-"));
+  cleanups.push(() => rm(stateDir, { recursive: true, force: true }));
+  const routines = new RoutineStore({
+    stateDir,
+    execute: async () => ({ ok: true, detail: "The lead turn ran." }),
+    validateTarget: () => undefined,
+    defaultConversationId: () => "global-default",
+    defaultTimeZone: () => "America/Chicago",
+    now: () => Date.parse("2026-10-10T15:00:00.000Z"),
+  });
+  const f = await fixture({ routineCommand: (command) => routines.command(command, { kind: "owner" }) });
+  const call = (device: keyof typeof f.tokens, body?: unknown) =>
+    fetch(`${f.relayUrl}${ROUTINES_PATH}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { authorization: `Bearer ${f.tokens[device]}`, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  const added = await call("control", {
+    action: "add",
+    name: "Morning check-in",
+    schedule: { when: "every weekday at 9:00", timeZone: "America/Chicago" },
+    target: { kind: "turn", prompt: "Review open work." },
+  });
+  expect(added.status).toBe(200);
+  const routine = RoutinesStatusSchema.parse(await added.json()).routine!;
+  expect(routine).toMatchObject({
+    schedule: { cron: "0 9 * * 1-5", timeZone: "America/Chicago" },
+    target: { kind: "turn", conversationId: "global-default" },
+    nextRunAt: "2026-10-12T14:00:00.000Z",
+  });
+  const listed = await call("hosted");
+  expect(RoutinesStatusSchema.parse(await listed.json()).routines.map((entry) => entry.id)).toEqual([
+    routine.id,
+  ]);
+  // A refused command keeps its status; the service's words stay behind the relay.
+  expect((await call("control", { action: "pause", id: "rt_missing00" })).status).toBe(404);
+  expect(
+    f.forwarded.every((entry) => entry.token === f.tokens.control || entry.token === f.tokens.hosted),
+  ).toBe(true);
+
+  const forwarded = f.forwarded.length;
+  for (const device of ["chat", "steer", "hosted-read"] as const) {
+    expect((await call(device)).status).toBe(403);
+    expect((await call(device, { action: "remove", id: routine.id })).status).toBe(403);
+  }
+  expect((await call("control", { action: "remove" })).status).toBe(400);
+  expect(f.forwarded).toHaveLength(forwarded);
+  expect(routines.status({ kind: "owner" }).routines).toHaveLength(1);
   expect(f.captainCalls()).toBe(0);
 });

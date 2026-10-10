@@ -798,12 +798,19 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     }
   });
 
-  /** Routines (ADR 0265): GET lists; POST takes one RoutineCommand. Every UI uses this. */
+  /**
+   * Routines (ADR 0265): GET lists; POST takes one RoutineCommand. Every UI uses this:
+   * the owner directly, and a Take Control device through the relay, as the fleet roster.
+   */
   ctx.app.on(["GET", "POST"], ROUTINES_PATH, async (context) => {
+    context.header("cache-control", "no-store");
     const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!operator || operator === "unavailable") {
+      const device = await ctx.authenticateDevice(context.req.raw);
+      if (device === "unavailable" || "denied" in device)
+        return context.json({ error: "authentication_required" }, 401);
+      if (!device.grants.terminalControl) return context.json({ error: "forbidden" }, 403);
+    }
     const parsed =
       context.req.method === "GET"
         ? RoutineCommandSchema.safeParse({ action: "list" })
