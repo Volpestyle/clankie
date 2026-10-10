@@ -243,6 +243,27 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/huddles",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "List recent fleet huddles, newest first, each with its compiled landing board.",
+      },
+    ],
+    [
+      "POST /v1/huddles",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Start a huddle that asks every seat where it is, what blocks it and what it will land.",
+      },
+    ],
+    [
+      "POST /v1/huddles/close",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Stop collecting answers for one huddle and compile its board now.",
+      },
+    ],
+    [
       "POST /v1/operator/appearance",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
