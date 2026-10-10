@@ -51,6 +51,8 @@ export const InboundReportDeliverySchema = z
     offeredAt: z.string().datetime().optional(),
     takenAt: z.string().datetime().optional(),
     readAt: z.string().datetime().optional(),
+    /** When a message from this report's lead conversation reached its worker after the report. */
+    repliedAt: z.string().datetime().optional(),
     senderNotifications: z.boolean().optional(),
     senderEventAcks: z.array(z.enum(["stored", "taken", "acknowledged"])).optional(),
     acknowledgment: z

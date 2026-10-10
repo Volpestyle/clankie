@@ -1171,6 +1171,9 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
       acknowledged: z.number().int().min(0),
+      /** Acknowledged reports whose worker has had no reply from this conversation. */
+      unanswered: z.array(z.string().uuid()).max(100).optional(),
+      instruction: z.string().optional(),
     })
     .strict(),
   z
@@ -1358,7 +1361,7 @@ export interface OperatorConversationServiceClient {
     conversationId: string,
     deliveryIds: readonly string[],
     receipt?: { summary?: string | undefined; links?: string[] | undefined },
-  ): Promise<number>;
+  ): Promise<{ acknowledged: number; unanswered?: string[]; instruction?: string }>;
   /** Owner-only retirement of explicitly selected retained history. */
   acknowledgeWorkerReportHistory?(conversationId: string, deliveryIds: readonly string[]): Promise<number>;
   /** Park until the fleet cursor changes, then return one coherent snapshot. */
@@ -1650,7 +1653,11 @@ export function createOperatorConversationServiceClient(
       });
       if (result.op !== "acknowledge_worker_reports")
         throw new Error(`Unexpected ${result.op} result for worker report acknowledgment`);
-      return result.acknowledged;
+      return {
+        acknowledged: result.acknowledged,
+        ...(result.unanswered === undefined ? {} : { unanswered: result.unanswered }),
+        ...(result.instruction === undefined ? {} : { instruction: result.instruction }),
+      };
     },
     async acknowledgeWorkerReportHistory(conversationId, deliveryIds) {
       const result = await dispatch({

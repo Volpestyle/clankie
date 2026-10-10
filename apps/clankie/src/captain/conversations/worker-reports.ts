@@ -182,6 +182,50 @@ export function acknowledgeInboundReports(
   return true;
 }
 
+/**
+ * A lead message reached this worker, so its earlier reports to that lead have
+ * a reply (VUH-2065). Only a delivered message counts: an answer given
+ * elsewhere, such as the owner's chat, never reaches the worker.
+ */
+export function recordInboundReportReply(
+  ctx: ConversationStore,
+  conversationId: string,
+  paneId: string,
+  binding: string,
+): void {
+  const meta = ctx["metas"].get(conversationId);
+  const now = new Date().toISOString();
+  const replied = Object.values(meta?.inboundAcceptances ?? {}).filter(
+    (receipt) =>
+      receipt.paneId === paneId &&
+      receipt.binding === binding &&
+      receipt.reportDelivery !== undefined &&
+      receipt.reportDelivery.repliedAt === undefined,
+  );
+  if (!meta || replied.length === 0) return;
+  const before = structuredClone(meta.inboundAcceptances!);
+  for (const receipt of replied) receipt.reportDelivery = { ...receipt.reportDelivery!, repliedAt: now };
+  try {
+    ctx["saveMeta"](meta);
+  } catch (error) {
+    meta.inboundAcceptances = before;
+    throw error;
+  }
+  ctx["notifyInboundReportChange"]();
+}
+
+/** Reports whose worker has had no reply from this conversation since sending them. */
+export function unansweredInboundReports(
+  ctx: ConversationStore,
+  conversationId: string,
+  deliveryIds: readonly string[],
+): string[] {
+  const acceptances = ctx["metas"].get(conversationId)?.inboundAcceptances ?? {};
+  return [...new Set(deliveryIds)].filter(
+    (id) => acceptances[id] !== undefined && acceptances[id].reportDelivery?.repliedAt === undefined,
+  );
+}
+
 /** A native transport receipt is progress, never an acknowledgment that the lead read it. */
 export function recordInboundReportDelivery(
   ctx: ConversationStore,
@@ -266,9 +310,16 @@ export function senderReportEvents(
       return stages.flatMap(([stage, at]) => {
         if (!at || delivery.senderEventAcks?.includes(stage)) return [];
         const receipt = delivery.acknowledgment;
+        // The lead's summary is free text and may say a question was answered.
+        // Relay it only once a reply actually reached this worker (VUH-2065).
+        const summary = delivery.repliedAt
+          ? receipt?.summary
+            ? ` ${receipt.summary}`
+            : ""
+          : " No reply from Clankie has reached you for it, so any question or blocker in it is still open.";
         const content =
           stage === "acknowledged"
-            ? `Clankie acknowledged report ${report.deliveryId}.${receipt?.summary ? ` ${receipt.summary}` : ""}${receipt?.links?.length ? `\n${receipt.links.join("\n")}` : ""}`
+            ? `Clankie acknowledged report ${report.deliveryId}.${summary}${receipt?.links?.length ? `\n${receipt.links.join("\n")}` : ""}`
             : `Report ${report.deliveryId}: ${stage === "stored" ? "stored" : "taken into a lead turn"}.`;
         return [
           {

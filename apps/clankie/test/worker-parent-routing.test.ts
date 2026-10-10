@@ -1403,8 +1403,10 @@ it("reports applied IDs and every refusal reason in a mixed MCP acknowledgment",
         { deliveryId: unknown, reason: "unknown" },
         { deliveryId: already.id, reason: "already_acknowledged" },
       ],
+      unanswered: [offered.id],
       instruction:
         "Call worker_reports first, review the reports, then acknowledge only its offered deliveryIds.",
+      unansweredInstruction: expect.stringContaining("still open"),
     });
     expect(accepted(f.root, offered.id)[0].inboundAcceptances[offered.id].reportDelivery.state).toBe("read");
     expect(accepted(f.root, unoffered.id)[0].inboundAcceptances[unoffered.id].reportDelivery.state).not.toBe(

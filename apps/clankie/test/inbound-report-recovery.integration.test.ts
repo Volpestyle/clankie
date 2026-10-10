@@ -340,6 +340,8 @@ it.each(["unadopted", "adoption"] as const)(
       "taken into a lead turn",
     );
     const link = "https://linear.app/vuhlp/issue/VUH-1898";
+    // The lead's reply reached the worker, so its summary is relayed (VUH-2065).
+    store.recordInboundReportReply("global-default", "pane", delivery.binding);
     expect(
       store.acknowledgeInboundReports("global-default", page.ackDeliveryIds, {
         summary: "Filed the follow-up.",

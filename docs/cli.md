@@ -5260,7 +5260,13 @@ and works immediately for returned IDs through both local and remote fleet links
 Add `--receipt '{"summary":"Filed the follow-up.","links":["https://linear.app/vuhlp/issue/VUH-1898"]}'`
 to `reports ack`, or supply the equivalent `receipt` object to
 `acknowledge_worker_reports`, to include a short result and resulting chat/issue
-links in the automatic acknowledgment. Receipt events require no reply.
+links in the automatic acknowledgment. Receipt events require no reply. The
+worker sees the summary only after a `message_seat` reply from that conversation
+reached it following the report; otherwise its receipt says no reply has
+reached it and any question in the report is still open. The result lists those
+acknowledged reports as `unanswered`, with an instruction, so the lead can see
+an open question: an answer given elsewhere, such as the owner's chat, never
+reaches the worker (VUH-2065).
 You can pass the unmodified returned page on standard input with
 `clankie agents reports ack --json-stdin --conversation ID`; the page must name
 the same conversation. A page holds at most 100 IDs.

@@ -40,6 +40,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { type SeatLedger } from "./seat-ledger.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
 import type { createStanceStore } from "./stances.ts";
+import { UNANSWERED_REPORTS_INSTRUCTION } from "./worker-report-tools.ts";
 
 export interface CreateOperatorServiceContext {
   readonly prepareFreeAgentIntent: (
@@ -293,11 +294,16 @@ export function createOperatorService(
         )
       )
         throw new ConversationRefusedError("Only fully offered worker reports may be acknowledged");
+      const unanswered = ctx.conversations.unansweredInboundReports(
+        request.conversationId,
+        request.deliveryIds,
+      );
       return {
         op: request.op,
         schemaVersion: 1,
         conversationId: request.conversationId,
         acknowledged: new Set(request.deliveryIds).size,
+        ...(unanswered.length === 0 ? {} : { unanswered, instruction: UNANSWERED_REPORTS_INSTRUCTION }),
       };
     }
     if (request.op === "roster") {

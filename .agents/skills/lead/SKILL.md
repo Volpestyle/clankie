@@ -204,6 +204,9 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
   with `acknowledge_worker_reports`. Include a short `receipt.summary` and any
   resulting chat or issue URLs in `receipt.links`. The original sender receives
   the acknowledgment automatically; channel receipt transport is not lead review.
+  Answer a worker's question or blocker with `message_seat`: the worker sees
+  your summary only after a reply reached it, and the result lists acknowledged
+  reports still `unanswered`. An answer in the owner's chat never reaches it.
 - **Right-sized**: model and effort fit the job and the owner's mode. A worker
   that keeps struggling (repeated failed attempts, shallow fixes, going in
   circles) gets more, not more nudges: raise its effort or move the work to a

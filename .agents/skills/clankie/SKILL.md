@@ -94,7 +94,9 @@ native pane is `clankie agents message-status DELIVERY_ID`.
 Sender progress also arrives automatically as `worker-report-receipt` channel
 events: stored, taken into a lead turn, then acknowledged. These are receipts,
 not new assignments; no reply is needed. The acknowledgment includes the lead's
-short summary and resulting links when supplied. Transport acknowledgment of an
+short summary and resulting links when supplied, but only once a message from
+your lead has reached you after the report. Otherwise it says no reply has
+reached you, and any question or blocker in that report is still open. Transport acknowledgment of an
 event does not mark your report read by the lead.
 
 Never wait silently. When something only your lead or the owner can unblock

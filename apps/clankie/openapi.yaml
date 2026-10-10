@@ -3934,7 +3934,9 @@ paths:
         current operator authority and an exact conversationId. Re-adoption
         proves the original owner and same native thread. Worker reads return
         complete bounded unread payloads and ackDeliveryIds without acknowledging;
-        only fully offered IDs may be marked read. Roster/fleet report summaries
+        only fully offered IDs may be marked read, and the result lists
+        `unanswered` IDs whose worker has had no reply from that conversation.
+        Roster/fleet report summaries
         survive disappeared panes, and delivery receipts never establish reading.
         The TUI and relay both speak this.
         Built-in tracker sync uses additive op `tracker_sync`: bootstrap, batch,

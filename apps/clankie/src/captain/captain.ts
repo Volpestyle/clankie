@@ -2688,6 +2688,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (delivery.outcome === "offline")
       return { outcome: "seat_offline", seatId, deliveryStage: "unavailable" };
     if (delivery.outcome !== "delivered") return { ...delivery, seatId };
+    // A message that reached the worker answers its earlier reports to this
+    // lead; one only stored for later has not reached it yet (VUH-2065).
+    if (delivery.deliveryStage !== "stored") {
+      const recipient = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+      const binding = inboundBinding(recipient);
+      if (recipient && binding)
+        conversations.recordInboundReportReply(authority.owner.conversationId, recipient.paneId, binding);
+    }
     // Another lead's hire keeps its lead: its reports and wakes still go there.
     const led = ownerConversationId === undefined ? {} : { ownerConversationId };
     if (seat && ownerConversationId === undefined)

@@ -123,8 +123,50 @@ it.each([20, 100])("acknowledges %i exact IDs returned by a real CLI HTTP page",
     await runAgentsCommand(["reports", "ack", ...page.ackDeliveryIds, "--conversation", "global-default"], {
       env: f.env,
     }),
-  ).toEqual({ conversationId: "global-default", acknowledged: count });
+  ).toEqual({
+    conversationId: "global-default",
+    acknowledged: count,
+    unanswered: page.ackDeliveryIds,
+    instruction: expect.stringContaining("still open"),
+  });
   expect(f.store.inboundReports()).toEqual([]);
+});
+
+it("never tells a worker its question was answered when no reply reached it (VUH-2065)", async () => {
+  const f = await fixture(2);
+  const page = WorkerReportPageSchema.parse(
+    await runAgentsCommand(["reports", "--conversation", "global-default"], { env: f.env }),
+  );
+  const [question, answered] = page.ackDeliveryIds as [string, string];
+  const claim = { summary: "Already answered in this session's messages." };
+  // The lead answered elsewhere (the owner's chat): nothing reached the worker.
+  expect(
+    await runAgentsCommand(
+      ["reports", "ack", question, "--conversation", "global-default", "--receipt", JSON.stringify(claim)],
+      { env: f.env },
+    ),
+  ).toEqual({
+    conversationId: "global-default",
+    acknowledged: 1,
+    unanswered: [question],
+    instruction: expect.stringContaining("message_seat"),
+  });
+  const receiptFor = (id: string) =>
+    f.store
+      .senderReportEvents("w3Z:pCass", "a".repeat(64))
+      .find((event) => event.id === `report:${id}:acknowledged`)?.content;
+  expect(receiptFor(question)).not.toContain("Already answered");
+  expect(receiptFor(question)).toContain("No reply from Clankie has reached you");
+
+  // A lead message that reached the worker answers its earlier reports.
+  f.store.recordInboundReportReply("global-default", "w3Z:pCass", "a".repeat(64));
+  expect(
+    await runAgentsCommand(
+      ["reports", "ack", answered, "--conversation", "global-default", "--receipt", JSON.stringify(claim)],
+      { env: f.env },
+    ),
+  ).toEqual({ conversationId: "global-default", acknowledged: 1 });
+  expect(receiptFor(answered)).toContain("Already answered in this session's messages.");
 });
 
 it("accepts the returned JSON page verbatim and preserves conversation binding", async () => {
@@ -136,6 +178,7 @@ it("accepts the returned JSON page verbatim and preserves conversation binding",
       stdin: Readable.from([JSON.stringify(page)]),
     }),
   ).rejects.toThrow("different conversation");
+  f.store.recordInboundReportReply("global-default", "w3Z:pCass", "a".repeat(64));
   expect(
     await runAgentsCommand(
       [

@@ -226,8 +226,10 @@ import {
   notifyInboundReportChange,
   readInboundReports,
   recordInboundReportDelivery,
+  recordInboundReportReply,
   restoreInboundReports,
   retryInboundReport,
+  unansweredInboundReports,
 } from "./worker-reports.ts";
 
 /**
@@ -1850,6 +1852,16 @@ export class ConversationStore {
   /** A native transport receipt is progress, never an acknowledgment that the lead read it. */
   public recordInboundReportDelivery(deliveryId: string, stage: DeliveryStage): boolean {
     return recordInboundReportDelivery(this, deliveryId, stage);
+  }
+
+  /** A lead message reached this worker: its earlier reports to that lead now have a reply. */
+  public recordInboundReportReply(conversationId: string, paneId: string, binding: string): void {
+    recordInboundReportReply(this, conversationId, paneId, binding);
+  }
+
+  /** Reports whose worker has had no reply from this conversation since sending them. */
+  public unansweredInboundReports(conversationId: string, deliveryIds: readonly string[]): string[] {
+    return unansweredInboundReports(this, conversationId, deliveryIds);
   }
 
   /** Retry only definite non-dispatch; the host must revalidate the saved recipient first. */

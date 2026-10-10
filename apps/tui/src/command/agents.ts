@@ -254,16 +254,18 @@ export async function runAgentsCommand(
         throw new Error(
           `Supply ${args[1] === "ack-history" ? "1–1000" : "1–100"} exact delivery IDs from the returned report page`,
         );
+      if (args[1] === "ack-history")
+        return {
+          conversationId,
+          acknowledged: await client.acknowledgeWorkerReportHistory!(conversationId, deliveryIds),
+        };
       return {
         conversationId,
-        acknowledged:
-          args[1] === "ack-history"
-            ? await client.acknowledgeWorkerReportHistory!(conversationId, deliveryIds)
-            : await client.acknowledgeWorkerReports!(
-                conversationId,
-                deliveryIds,
-                parsed.data.op === "acknowledge_worker_reports" ? parsed.data.receipt : undefined,
-              ),
+        ...(await client.acknowledgeWorkerReports!(
+          conversationId,
+          deliveryIds,
+          parsed.data.op === "acknowledge_worker_reports" ? parsed.data.receipt : undefined,
+        )),
       };
     }
     if (first !== 1 || jsonInput) throw new Error(AGENTS_USAGE);

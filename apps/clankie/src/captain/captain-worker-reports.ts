@@ -49,7 +49,12 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
           .inboundReports(conversationId, { includeRead: true })
           .map((report) => [report.deliveryId, report]),
       );
-      const result: WorkerReportAcknowledgment = { acknowledged: false, appliedDeliveryIds: [], refused: [] };
+      const result: WorkerReportAcknowledgment = {
+        acknowledged: false,
+        appliedDeliveryIds: [],
+        refused: [],
+        unanswered: [],
+      };
       for (const deliveryId of new Set(ids)) {
         const report = reports.get(deliveryId);
         const reason = !report
@@ -70,6 +75,10 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
       )
         throw new Error("Worker reports could not be acknowledged; call worker_reports first.");
       result.acknowledged = result.appliedDeliveryIds.length > 0 && result.refused.length === 0;
+      result.unanswered = ctx.conversations.unansweredInboundReports(
+        conversationId,
+        result.appliedDeliveryIds,
+      );
       return result;
     },
   };
