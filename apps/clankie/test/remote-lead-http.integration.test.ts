@@ -489,6 +489,7 @@ else console.log('{}');
       const nativeEnv = {
         PATH: process.env.PATH!,
         HOME: root,
+        TMPDIR: root,
         CLANKIE_REMOTE_LEAD_TOKEN: issued.token,
         HERDR_PANE_ID: binding.pane,
         CLANKIE_REMOTE_LEAD_FLEET: "pc",
@@ -534,28 +535,42 @@ else console.log('{}');
         .toBe(true);
       expect(await droppedChannel).toMatchObject({ outcome: "delivered" });
       proofAvailable = false;
-      const sync = spawn(process.execPath, [join(repo, ".local/remote-lead/remote-lead-mcp.mjs"), "--sync"], {
-        env: nativeEnv,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      let syncError = "";
-      sync.stderr.on("data", (data: Buffer) => {
-        syncError += data.toString();
-      });
-      const synced = new Promise<number | null>((resolve, reject) => {
-        sync.once("error", reject);
-        sync.once("exit", resolve);
-      });
-      sync.stdin.end(
-        JSON.stringify({
-          hook_event_name: "SessionStart",
-          session_id: nativeSession,
-          transcript_path: join(root, `${nativeSession}.jsonl`),
-        }),
-      );
-      expect(await synced).toBe(1);
-      expect(syncError).toContain("Seat transcript sync failed (403)");
-      expect(syncError).not.toContain("AbortError");
+      // VUH-2036: the Stop hook retries quietly and logs each run on the remote machine;
+      // only repeated failures reach the lead's pane, as one line without a stack.
+      const runSync = async () => {
+        const sync = spawn(
+          process.execPath,
+          [join(repo, ".local/remote-lead/remote-lead-mcp.mjs"), "--sync"],
+          { env: nativeEnv, stdio: ["pipe", "pipe", "pipe"] },
+        );
+        let stderr = "";
+        sync.stderr.on("data", (data: Buffer) => {
+          stderr += data.toString();
+        });
+        const code = new Promise<number | null>((resolve, reject) => {
+          sync.once("error", reject);
+          sync.once("exit", resolve);
+        });
+        sync.stdin.end(
+          JSON.stringify({
+            hook_event_name: "Stop",
+            session_id: nativeSession,
+            transcript_path: join(root, `${nativeSession}.jsonl`),
+          }),
+        );
+        return { code: await code, stderr };
+      };
+      const hookLog = () => readFile(join(root, ".clankie/remote-leads/hooks.log"), "utf8");
+      expect(await runSync()).toEqual({ code: 0, stderr: "" });
+      expect(await runSync()).toEqual({ code: 0, stderr: "" });
+      const loud = await runSync();
+      expect(loud.code).toBe(1);
+      expect(loud.stderr.trim().split("\n")).toHaveLength(1);
+      expect(loud.stderr).toContain("failed 3 hooks in a row: Seat transcript sync failed (403)");
+      expect(loud.stderr).not.toContain("AbortError");
+      expect((await hookLog()).match(/Stop exit=\d .*consecutiveFailures=\d/gu)).toHaveLength(3);
+      expect(await hookLog()).toContain("Seat transcript sync failed (403)");
+      expect(await hookLog()).not.toContain(issued.token);
       await expect(client.listTools()).rejects.toThrow();
       await expect
         .poll(() => outbox.bridgeStatus(binding.conversationId).state, { timeout: 8000 })
@@ -573,6 +588,9 @@ else console.log('{}');
           { timeout: 15000 },
         )
         .toBe(true);
+      // A recovered service resets the count; the run is logged and the pane stays quiet.
+      expect(await runSync()).toEqual({ code: 0, stderr: "" });
+      expect((await hookLog()).trim().split("\n").at(-1)).toMatch(/ Stop exit=0 ms=\d+$/u);
       const beforeRestart = catalogChanges;
       await bridge.close();
       outbox.close();
@@ -659,7 +677,7 @@ else console.log('{}');
       await new Promise<void>((r) => host.close(() => r()));
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 90_000);
   test("binds chat/session, excludes owner routes and refuses revoked calls on an existing MCP session", async () => {
     const grants = new RemoteLeadDelegations(async () => {});
     const issued = await grants.issue(binding);

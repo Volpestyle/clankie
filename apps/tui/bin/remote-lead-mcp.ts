@@ -3,8 +3,17 @@
 // wrapped protocol imports can leave ZodCustom uninitialized at SDK startup.
 import { z } from "zod";
 import { setTimeout as delay } from "node:timers/promises";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { connectLaneUpstream, createSeatBridge, pumpSeatEvents } from "../src/command/mcp.ts";
@@ -26,6 +35,8 @@ const binding = z
 if (!token || !pane || !fleet || !conversationId || !binding.success)
   throw new Error("Remote lead launch binding missing");
 const closing = new AbortController();
+const HOOK_LOG = join(homedir(), ".clankie", "remote-leads", "hooks.log");
+const SYNC_FAILURE_THRESHOLD = 3;
 const request: typeof fetch = async (resource, init) => {
   const original = new Request(resource, init);
   const link = JSON.parse(await readFile(join(homedir(), ".clankie", "links", `${fleet}.json`), "utf8"));
@@ -75,11 +86,7 @@ const request: typeof fetch = async (resource, init) => {
   return response;
 };
 if (process.argv.includes("--sync")) {
-  await runSeatSyncCommand([], {
-    env: { ...process.env, CLANKIE_OPERATOR_TOKEN: token },
-    host: "http://127.0.0.1",
-    fetchImpl: request,
-  });
+  process.exitCode = await syncQuietly();
 } else if (process.argv.includes("--prompt")) {
   const response = await request("http://127.0.0.1/v1/fleet/lead/prompt");
   if (!response.ok) throw new Error("Remote lead prompt unavailable");
@@ -134,4 +141,74 @@ if (process.argv.includes("--sync")) {
   await health;
   await upstream.close();
   await server.close();
+}
+
+/**
+ * Hook entry (VUH-2036). A service stall must not read as a crash in the lead's
+ * pane: the upload retries with backoff, every run is logged on this machine,
+ * and the pane hears one line only after repeated failures.
+ */
+async function syncQuietly(): Promise<number> {
+  const started = Date.now();
+  let input = "";
+  let event = "unknown";
+  let failure: unknown;
+  try {
+    for await (const chunk of process.stdin) input += chunk.toString();
+    event = String((JSON.parse(input) as { hook_event_name?: unknown }).hook_event_name ?? "unknown");
+    await runSeatSyncCommand([], {
+      env: { ...process.env, CLANKIE_OPERATOR_TOKEN: token },
+      host: "http://127.0.0.1",
+      fetchImpl: request,
+      stdin: (async function* () {
+        yield input;
+      })(),
+      retryDelaysMs: [2_000, 5_000],
+    });
+  } catch (error) {
+    failure = error;
+  }
+  const counter = join(tmpdir(), `clankie-remote-lead-sync-${conversationId}`);
+  let failures = 0;
+  try {
+    if (failure === undefined) rmSync(counter, { force: true });
+    else {
+      failures = Number(readFileSync(counter, "utf8").trim() || 0) + 1;
+    }
+  } catch {
+    failures = failure === undefined ? 0 : 1;
+  }
+  try {
+    if (failure !== undefined) writeFileSync(counter, String(failures));
+  } catch {
+    /* An unwritable counter only makes the next failure quiet again. */
+  }
+  const loud = failure !== undefined && failures >= SYNC_FAILURE_THRESHOLD;
+  hookLog(
+    `${event} exit=${loud ? 1 : 0} ms=${Date.now() - started}` +
+      (failure === undefined
+        ? ""
+        : ` consecutiveFailures=${failures}\n${failure instanceof Error ? (failure.stack ?? failure.message) : String(failure)}`),
+  );
+  if (!loud) return 0;
+  const reason = failure instanceof Error ? failure.message : String(failure);
+  process.stderr.write(
+    `Clankie seat sync failed ${failures} hooks in a row: ${reason.split("\n")[0]} (log: ${HOOK_LOG})\n`,
+  );
+  return 1;
+}
+
+/** Bounded, rotated record of every hook run on this machine; never holds the launch secret. */
+function hookLog(entry: string): void {
+  try {
+    mkdirSync(join(homedir(), ".clankie", "remote-leads"), { recursive: true });
+    try {
+      if (statSync(HOOK_LOG).size > 256 * 1024) renameSync(HOOK_LOG, `${HOOK_LOG}.1`);
+    } catch {
+      /* No log yet. */
+    }
+    appendFileSync(HOOK_LOG, `${new Date().toISOString()} ${conversationId} ${entry}\n`);
+  } catch {
+    /* Logging never changes the hook result. */
+  }
 }

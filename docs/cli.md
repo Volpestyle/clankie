@@ -3973,6 +3973,13 @@ channel access fail; an already dispatched effect cannot be undone. Explicit
 revocation survives restart. Temporary bridge, relay or native-observation loss
 is retried; a service restart re-arms only a previously proved launch with the
 same machine, pane, shell and harness process lifetimes, native session and chat.
+
+The head's transcript hooks retry a failed seat sync after 2 and 5 seconds and
+stay silent until three hook runs in a row fail; the lead's pane then shows one
+line naming the error. Every hook run is recorded on the PC in
+`~/.clankie/remote-leads/hooks.log` (rotated at 256 KiB, never holding the launch
+secret) with its event, exit code, duration and full error. A running head picks
+up new hooks only when it is launched again on the updated plugin.
 An exited or replaced head is never re-armed. The bridge keeps the native MCP
 connection open and refreshes its idle upstream without replaying tool effects.
 Private service records store only token hashes and host proof. The bearer token

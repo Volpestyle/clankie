@@ -22,6 +22,10 @@ interface RemoteProjectLeadOptions {
   captain: CaptainPort;
 }
 
+// The bridge bundles node:sqlite, experimental on the PC's Node 22. Its warning is
+// the first stderr line a hook shows, hiding the real outcome (VUH-2036).
+const NO_SQLITE_WARNING = "--disable-warning=ExperimentalWarning";
+
 export class RemoteLeadBuildMissing extends Error {
   constructor() {
     super(
@@ -102,7 +106,7 @@ export class RemoteProjectLeads {
           mcpServers: {
             lead: {
               command: "node",
-              args: ["${CLAUDE_PLUGIN_ROOT}/bridge.mjs"],
+              args: [NO_SQLITE_WARNING, "${CLAUDE_PLUGIN_ROOT}/bridge.mjs"],
             },
           },
         }),
@@ -129,7 +133,7 @@ export class RemoteProjectLeads {
                           {
                             type: "command",
                             command: "node",
-                            args: ["${CLAUDE_PLUGIN_ROOT}/bridge.mjs", "--prompt"],
+                            args: [NO_SQLITE_WARNING, "${CLAUDE_PLUGIN_ROOT}/bridge.mjs", "--prompt"],
                             timeout: 60,
                           },
                         ]
@@ -137,7 +141,7 @@ export class RemoteProjectLeads {
                     {
                       type: "command",
                       command: "node",
-                      args: ["${CLAUDE_PLUGIN_ROOT}/bridge.mjs", "--sync"],
+                      args: [NO_SQLITE_WARNING, "${CLAUDE_PLUGIN_ROOT}/bridge.mjs", "--sync"],
                       timeout: 60,
                     },
                   ],

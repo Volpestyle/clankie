@@ -1,4 +1,5 @@
 import { statSync, writeFileSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import {
@@ -20,6 +21,8 @@ export async function runSeatSyncCommand(
     fetchImpl?: typeof fetch;
     operatorCredentialStore?: CredentialStore;
     stdin?: AsyncIterable<string | Buffer>;
+    /** Waits before each retry of a failed upload; a retired seat is never retried. */
+    retryDelaysMs?: readonly number[];
   } = {},
 ): Promise<number> {
   if (args.length) throw new Error("Usage: clankie seat-sync (native seat hook JSON on stdin)");
@@ -92,7 +95,7 @@ export async function runSeatSyncCommand(
   const url = new URL("/v1/seat/transcript", commandHost({ ...options, env }));
   if (env.CLANKIE_CONVERSATION_ID) url.searchParams.set("conversationId", env.CLANKIE_CONVERSATION_ID);
   // One upload budget for the whole transcript, not ten seconds per page.
-  const signal = AbortSignal.timeout(10_000);
+  let signal = AbortSignal.timeout(10_000);
   const send = async (entries: SeatTranscriptUpload["entries"], final = false) => {
     signal.throwIfAborted();
     const body = SeatTranscriptUploadSchema.parse({
@@ -109,7 +112,7 @@ export async function runSeatSyncCommand(
     // Release the response connection before uploading another page.
     await response.body?.cancel();
     if (response.status === 409)
-      throw new Error(
+      throw new SeatSessionRetiredError(
         "Seat session is bound elsewhere or retired by reset; launch a new seat for this conversation",
       );
     if (!response.ok)
@@ -117,23 +120,38 @@ export async function runSeatSyncCommand(
         `Seat transcript sync failed (${response.status}); the next hook retries retained records`,
       );
   };
-  let page: SeatTranscriptUpload["entries"] = [],
-    bytes = 0;
-  for (const entry of transcript?.entries ?? []) {
-    // A remote service must never resolve an image path from another host.
-    if (entry.type === "viewed_image") continue;
-    // Channel envelopes are native delivery metadata, not operator chat.
-    // Keep the display-only upload compatible with the service's strict schema.
-    if (entry.type === "message" && entry.internal) continue;
-    const size = Buffer.byteLength(JSON.stringify(entry));
-    if (page.length && (page.length === 100 || bytes + size > 512 * 1024)) {
-      await send(page);
-      page = [];
+  const upload = async () => {
+    let page: SeatTranscriptUpload["entries"] = [],
       bytes = 0;
+    for (const entry of transcript?.entries ?? []) {
+      // A remote service must never resolve an image path from another host.
+      if (entry.type === "viewed_image") continue;
+      // Channel envelopes are native delivery metadata, not operator chat.
+      // Keep the display-only upload compatible with the service's strict schema.
+      if (entry.type === "message" && entry.internal) continue;
+      const size = Buffer.byteLength(JSON.stringify(entry));
+      if (page.length && (page.length === 100 || bytes + size > 512 * 1024)) {
+        await send(page);
+        page = [];
+        bytes = 0;
+      }
+      page.push(entry);
+      bytes += size;
     }
-    page.push(entry);
-    bytes += size;
+    if (page.length || activity !== undefined) await send(page, true);
+  };
+  // The service accepts a repeated page idempotently, so a retry resends the whole transcript.
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await upload();
+      return 0;
+    } catch (error) {
+      const wait = options.retryDelaysMs?.[attempt];
+      if (wait === undefined || error instanceof SeatSessionRetiredError) throw error;
+      await delay(wait);
+      signal = AbortSignal.timeout(10_000);
+    }
   }
-  if (page.length || activity !== undefined) await send(page, true);
-  return 0;
 }
+
+export class SeatSessionRetiredError extends Error {}
