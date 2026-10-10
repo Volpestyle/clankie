@@ -211,6 +211,8 @@ type Plan =
       detail: string;
       alternatives?: { deviceType: string; name: string; udid?: string }[];
     };
+/** A reservation with no native effect after this long is stalled, not booting. */
+const RESERVED_LIMIT_MS = 300_000;
 const BOOTING_PHASES = new Set([
   "reserved",
   "create-submitted",
@@ -1122,19 +1124,45 @@ export function createSimulatorManager(input: {
       owner: SimulatorOwner,
       authority?: SimulatorRequestOptions,
     ): Promise<SimulatorResult> {
-      return serial(async () => {
-        const lease = await find(id);
-        if (!lease) return rejected("lease_unavailable");
+      const owned = async (lease: SimulatorReservation): Promise<SimulatorResult | undefined> => {
         const current = await prove(owner);
         if (!(await authorized(authority))) return revoked();
         if (!current || !matchesOwner(lease, owner) || !matchesOwner(lease, current))
           return rejected("stale_owner");
+        return undefined;
+      };
+      const settled = serial(async () => {
+        const lease = await find(id);
+        if (!lease) return rejected("lease_unavailable");
+        const refused = await owned(lease);
+        if (refused) return refused;
         try {
           return await reconcile(lease, true, authority);
         } catch {
           return held(lease);
         }
       });
+      // A release always answers within the bound (VUH-2053). The serial
+      // section can be busy behind another seat's native work; a reservation
+      // that submitted no native effect is freed directly, and an in-flight
+      // preparation then fails its next journal update.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), respondWithinMs);
+      });
+      try {
+        const result = await Promise.race([settled, late]);
+        if (result) return result;
+      } finally {
+        clearTimeout(timer);
+      }
+      const lease = await find(id);
+      if (!lease) return { outcome: "released" };
+      const refused = await owned(lease);
+      if (refused) return refused;
+      if (lease.phase === "reserved") return forget(lease);
+      // A native effect is in flight; the queued release settles it.
+      return { outcome: "held", lease: view(lease), retryAfterMs: RETRY_MS };
     },
     async observeSeatState(identity: SimulatorOwner, _status: string): Promise<void> {
       // Harness turns do not renew simulator use. Only touch/acquire is activity.
@@ -1196,6 +1224,12 @@ export function createSimulatorManager(input: {
       return { external: externals(devices, await reservations()), inventory: devices };
     },
     async tick(): Promise<void> {
+      // A reservation that never submitted a native effect is freed after five
+      // minutes even while the serial section is busy, so a stalled stage
+      // cannot hold the only slot until idle expiry (VUH-2053).
+      for (const lease of await reservations().catch(() => [] as SimulatorReservation[]))
+        if (lease.phase === "reserved" && now() - lease.createdAtMs >= RESERVED_LIMIT_MS)
+          await forget(lease).catch(() => undefined);
       await serial(async () => {
         const { policy } = await input.governor.snapshot();
         for (const lease of await reservations()) {
@@ -1204,7 +1238,7 @@ export function createSimulatorManager(input: {
             const exited =
               processes.length > 0 &&
               (await Promise.all(processes.map(probe))).every((state) => state === "exited");
-            const stale = lease.phase === "reserved" && now() - lease.createdAtMs >= 300_000;
+            const stale = lease.phase === "reserved" && now() - lease.createdAtMs >= RESERVED_LIMIT_MS;
             await reconcile(lease, exited || stale || now() - lease.lastUsedAtMs >= policy.simulatorIdleMs);
           } catch {
             /* Unknown inventory or command outcome never frees a slot. */

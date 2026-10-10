@@ -187,7 +187,8 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
     revoke: () => {
       ownerAuthorized = false;
     },
-    pauseInventory: (afterCreate = false) => {
+    /** `afterReservation` passes admission's own inventory read and wedges the preparation's. */
+    pauseInventory: (afterCreate = false, afterReservation = false) => {
       let entered!: () => void, resume!: () => void;
       const waiting = new Promise<void>((resolve) => {
         entered = resolve;
@@ -198,7 +199,11 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
       nativeReplyBarrier = async (args) => {
         if (
           args[0] !== "list" ||
-          (afterCreate && !(await commands()).some((command) => command[0] === "create"))
+          (afterCreate && !(await commands()).some((command) => command[0] === "create")) ||
+          (afterReservation &&
+            !(await new ResourceStore(join(directory, "governor")).read()).leases.some(
+              (entry) => entry.kind === "simulator",
+            ))
         )
           return;
         nativeReplyBarrier = undefined;
@@ -1210,3 +1215,35 @@ it("allows only the ticket holder to cancel, refuses changed selections, and exp
   });
   await f.manager.release(a.id, f.owner);
 }, 30_000);
+
+it("release answers within its bound for a reservation stuck behind busy native work, and nothing boots after", async () => {
+  const f = await fixture({ respondWithinMs: 100 });
+  // Wedge the serial section inside the reservation's own preparation.
+  const paused = f.pauseInventory(false, true);
+  const first = await f.manager.acquire(f.request);
+  await paused.waiting;
+  expect(first).toMatchObject({ outcome: "booting", lease: { phase: "reserved" } });
+  const released = await f.http("/release", { id: lease(first).id, owner: f.owner });
+  expect(released).toEqual({ outcome: "released" });
+  expect(await f.governor.simulatorReservations()).toEqual([]);
+  paused.resume();
+  await f.manager.settled();
+  expect(await f.governor.simulatorReservations()).toEqual([]);
+  expect((await f.commands()).filter((args) => args[0] === "create" || args[0] === "boot")).toEqual([]);
+});
+
+it("a reservation stalled past its limit frees the slot even while the serial section is busy", async () => {
+  const f = await fixture({ respondWithinMs: 100 });
+  const paused = f.pauseInventory(false, true);
+  const first = await f.manager.acquire(f.request);
+  await paused.waiting;
+  expect(lease(first).phase).toBe("reserved");
+  // The fixture clock started before admission; pass the limit with margin.
+  f.advance(310_000);
+  const ticking = f.manager.tick();
+  await expect.poll(() => f.governor.simulatorReservations(), { timeout: 10_000 }).toEqual([]);
+  paused.resume();
+  await ticking;
+  await f.manager.settled();
+  expect((await f.commands()).filter((args) => args[0] === "create" || args[0] === "boot")).toEqual([]);
+});

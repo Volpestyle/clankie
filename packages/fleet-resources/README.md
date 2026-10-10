@@ -34,7 +34,13 @@ installed CLI can read. A new simulator is refused with `pressure` for three min
 admission, because a cold boot's burst outruns the one-minute load average.
 Heavy
 commands wait in a FIFO queue; tickets are removed on cancellation or a proven
-requester exit. Simulator requests never queue: they take a free slot when they
+requester exit. A waiting command reads the journal without the lock and
+locks only when it is the head with a free slot, or on a jittered full pass
+about every five seconds that reconciles dead holders. Process and group
+censuses and pressure samples run before a transaction, never while the OS
+lock is held; an exit is permanent for an exact PID and start time, so a fact
+read just before the lock can only retain a lease longer (VUH-2053). A queue
+of waiters therefore no longer starves the service's own transactions. Simulator requests never queue: they take a free slot when they
 ask or are told what holds the slots. High pressure delays heavy admission
 and refuses simulator admission with that reason. Hire admission
 (`admitBuilder`) refuses only below the memory floor; unavailable native

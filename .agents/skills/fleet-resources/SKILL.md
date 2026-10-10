@@ -195,7 +195,12 @@ Whole-machine admission includes these costs and bounds Darwin's memory estimate
 by free and file-backed pages; do not subtract a device's charge a second time.
 
 Touch the lease while actively using it; its default idle timeout is ten
-minutes. Release when finished. Release, idle expiry or a verified seat exit
+minutes. Release when finished; it answers within about twenty seconds. A
+reservation that never started its device is released at once; `held` with
+`retryAfterMs` means a native boot or shutdown is in flight and the release
+settles it, so read status after the retry rather than releasing again. A
+reservation that starts no device within five minutes frees its slot by itself.
+Release, idle expiry or a verified seat exit
 shuts the leased device down and keeps it for later reuse, including devices
 Clankie created. Deletion requires a separate, explicit owner tidy naming the
 exact stopped UDIDs; release and expiry never delete devices. Clankie

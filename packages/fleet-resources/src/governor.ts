@@ -14,6 +14,7 @@ import {
   type FleetResourcePolicy,
   type HeavyLease,
   type ProcessIdentity,
+  type ResourcePressure,
   type ResourcePressureInput,
   type ResourceSnapshot,
   type ResourceState,
@@ -155,6 +156,12 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
     signal?.addEventListener("abort", cancelled, { once: true });
   });
 }
+/** How often a waiting heavy command peeks at the journal without the lock. */
+const PEEK_MS = 500;
+/** How often a waiter takes the lock anyway, so dead holders are reconciled. */
+const FULL_PASS_MS = 5_000;
+/** Spread waiters so they do not wake together. */
+const jittered = (ms: number) => Math.round(ms * (0.6 + Math.random() * 0.8));
 /** One canonical machine registry; runtime/worktree environment cannot increase capacity. */
 export function createResourceGovernor(
   options: {
@@ -183,24 +190,57 @@ export function createResourceGovernor(
   const active = new Set<Promise<unknown>>();
   // Heavy leases whose runner is proven dead while group members survive.
   const orphaned = new Set<string>();
-  async function reconcile(state: ResourceState): Promise<void> {
+  /** Process facts gathered before a transaction, so no fork runs under the lock. */
+  type Seen = {
+    observations: Awaited<ReturnType<typeof observeProcesses>>;
+    groups: Map<number, boolean>;
+  };
+  const watchedPids = (state: ResourceState) => [
+    ...state.queue.map((entry) => entry.owner.pid),
+    ...state.leases.flatMap((lease) =>
+      lease.kind !== "heavy"
+        ? []
+        : lease.state === "starting"
+          ? [lease.claimOwner.pid]
+          : lease.runner
+            ? [lease.runner.pid]
+            : [],
+    ),
+  ];
+  /**
+   * Observe the journal's processes from a lock-free read (VUH-2053). Every
+   * queued client used to fork these censuses while holding the registry lock,
+   * starving the service. An exit is permanent for an exact PID and start
+   * time, so a fact read before the lock can only retain a lease longer; a PID
+   * the read missed is unknown and retained.
+   */
+  async function look(from: ResourceStore): Promise<Seen> {
+    const seen: Seen = { observations: new Map(), groups: new Map() };
+    const state = await from.read().catch(() => undefined);
+    if (!state) return seen;
+    const pids = watchedPids(state);
+    if (!pids.length) return seen;
+    seen.observations = await observeProcesses(pids).catch(() => new Map());
+    for (const lease of state.leases) {
+      if (lease.kind !== "heavy" || lease.state === "starting" || !lease.runner) continue;
+      const observation = seen.observations.get(lease.runner.pid);
+      if (!observation || observation.status === "unknown") continue;
+      const root = observation.status === "live" ? observation.identity : undefined;
+      if (matches(root, lease.runner) || (root && root.pgid === root.pid)) continue;
+      try {
+        seen.groups.set(lease.runner.pgid, await groupOccupied(lease.runner.pgid));
+      } catch {
+        // Unknown occupancy retains the lease.
+      }
+    }
+    return seen;
+  }
+  async function reconcile(state: ResourceState, seen: Seen): Promise<void> {
     if (!state.leases.some((lease) => lease.kind === "heavy") && state.queue.length === 0) return;
-    // This state and its exact recorded PIDs belong to the held OS lock. Avoid
-    // broad census authority, cross-transaction caches and one fork per ticket.
-    const observations = await observeProcesses([
-      ...state.queue.map((entry) => entry.owner.pid),
-      ...state.leases.flatMap((lease) =>
-        lease.kind !== "heavy"
-          ? []
-          : lease.state === "starting"
-            ? [lease.claimOwner.pid]
-            : lease.runner
-              ? [lease.runner.pid]
-              : [],
-      ),
-    ]);
+    // This state and its exact recorded PIDs belong to the held OS lock; the
+    // facts about them were observed just before it, never under it.
     const observe = (proof: ProcessIdentity) => {
-      const observation = observations.get(proof.pid);
+      const observation = seen.observations.get(proof.pid);
       if (!observation || observation.status === "unknown") throw new Error("Process identity unavailable");
       return observation.status === "live" ? observation.identity : undefined;
     };
@@ -244,7 +284,9 @@ export function createResourceGovernor(
         // they keep the permit until a census proves no live member remains
         // (zombies do not count). The runner's own settlement cannot happen,
         // so this reconciliation is what frees the slot (VUH-2006).
-        if (!(root && root.pgid === root.pid) && (await groupOccupied(lease.runner.pgid))) {
+        const occupied = root && root.pgid === root.pid ? false : seen.groups.get(lease.runner.pgid);
+        if (occupied === undefined) throw new Error("Process group observation unavailable");
+        if (occupied) {
           orphaned.add(lease.id);
           // Nobody else will ever stop these leftovers: after the grace, the reaper
           // does, and a later pass releases the lease once the census is empty (VUH-2027).
@@ -416,8 +458,9 @@ export function createResourceGovernor(
   async function reconciled(from: ResourceStore): Promise<ResourceState> {
     const state = await from.read();
     if (!state.leases.some((lease) => lease.kind === "heavy") && !state.queue.length) return state;
+    const seen = await look(from);
     return from.transaction(async (current) => {
-      await reconcile(current);
+      await reconcile(current, seen);
       return structuredClone(current);
     });
   }
@@ -443,9 +486,10 @@ export function createResourceGovernor(
       throw new Error("Invalid fleet holder identity");
     const id = randomUUID(),
       token = randomUUID();
+    const seen = await look(store);
     await store.transaction(
       async (state) => {
-        await reconcile(state);
+        await reconcile(state, seen);
         if (state.queue.length >= 512) throw new Error("Fleet resource queue is full");
         state.queue.push({
           id,
@@ -461,34 +505,65 @@ export function createResourceGovernor(
       { signal },
     );
     let admitted = false;
+    // The owner's policy lives in the main journal for both lanes.
+    const policyFor = async (state: ResourceState) =>
+      options.lane === "light" ? (await mainStore.read()).policy : state.policy;
+    const admits = (state: ResourceState, policy: FleetResourcePolicy) =>
+      state.queue.find((entry) => entry.kind === "heavy")?.id === id &&
+      state.leases.filter((lease) => lease.kind === "heavy").length < resourceCapacity(policy);
+    // A light job is small and capped, so only the memory floor holds it;
+    // load already holds the full gates it runs beside (VUH-2023).
+    const pressured = (sampled: ResourcePressure, policy: FleetResourcePolicy) =>
+      options.lane === "light"
+        ? sampled.reason === "probe-unavailable" || sampled.availableMemoryMb < policy.minAvailableMemoryMb
+        : !sampled.healthy;
+    let fullPassAt = Date.now() + jittered(FULL_PASS_MS);
+    let reportedAt = 0;
+    const report = async (state: ResourceState) => {
+      if (!options.onWait || Date.now() - reportedAt < FULL_PASS_MS) return;
+      reportedAt = Date.now();
+      options.onWait(
+        options.lane === "light" ? await project(await mainStore.read(), state) : await project(state),
+      );
+    };
     try {
       for (;;) {
         if (signal.aborted) throw abort();
+        // Waiters take the registry lock only when they could be admitted, or
+        // on a jittered full pass that reconciles dead holders (VUH-2053).
+        const peek = await store.read().catch(() => undefined);
+        const due = Date.now() >= fullPassAt;
+        let sampled: ResourcePressure | undefined;
+        if (peek && !due) {
+          const policy = await policyFor(peek);
+          if (!admits(peek, policy)) {
+            await report(peek);
+            await wait(jittered(PEEK_MS), signal);
+            continue;
+          }
+          sampled = await pressure.sample(policy);
+          if (pressured(sampled, policy)) {
+            await report(peek);
+            await wait(jittered(PEEK_MS), signal);
+            continue;
+          }
+        }
+        if (due) fullPassAt = Date.now() + jittered(FULL_PASS_MS);
+        if (!sampled && peek) sampled = await pressure.sample(await policyFor(peek));
+        const seen = await look(store);
         let advisory: ResourceState | undefined;
         const lease = await store.transaction(
           async (state) => {
-            await reconcile(state);
+            await reconcile(state, seen);
             const blocked = () => {
-              if (options.onWait) advisory = structuredClone(state);
+              advisory = structuredClone(state);
               return undefined;
             };
-            // The owner's policy lives in the main journal for both lanes.
-            const policy = options.lane === "light" ? (await mainStore.read()).policy : state.policy;
-            if (
-              state.queue.find((entry) => entry.kind === "heavy")?.id !== id ||
-              state.leases.filter((lease) => lease.kind === "heavy").length >= resourceCapacity(policy)
-            )
-              return blocked();
-            const sampled = await pressure.sample(policy);
-            // A light job is small and capped, so only the memory floor holds it;
-            // load already holds the full gates it runs beside (VUH-2023).
-            if (
-              options.lane === "light"
-                ? sampled.reason === "probe-unavailable" ||
-                  sampled.availableMemoryMb < policy.minAvailableMemoryMb
-                : !sampled.healthy
-            )
-              return blocked();
+            const policy = await policyFor(state);
+            if (!admits(state, policy)) return blocked();
+            // Sampled before the lock when the peek ran; the sampler caches a
+            // fresh reading, so the full pass's sample forks nothing here.
+            if (pressured(sampled ?? (await pressure.sample(policy)), policy)) return blocked();
             if (signal.aborted) throw abort();
             const at = Date.now();
             const next: HeavyLease = {
@@ -513,15 +588,10 @@ export function createResourceGovernor(
           admitted = true;
           return lease;
         }
-        // This is advisory status from the same attempt, projected after the
+        // Advisory status from the same attempt, projected after the
         // transaction commits; publishing a wait must not acquire another lock.
-        if (advisory)
-          options.onWait?.(
-            options.lane === "light"
-              ? await project(await mainStore.read(), advisory)
-              : await project(advisory),
-          );
-        await wait(500, signal);
+        if (advisory) await report(advisory);
+        await wait(jittered(PEEK_MS), signal);
       }
     } finally {
       if (!admitted)
@@ -676,10 +746,12 @@ export function createResourceGovernor(
       if (killTimer) clearTimeout(killTimer);
       process.removeListener("SIGINT", onInt);
       process.removeListener("SIGTERM", onTerm);
-      if (lease)
+      if (lease) {
+        const seen = await look(store);
         await store.transaction(async (state) => {
-          await reconcile(state);
+          await reconcile(state, seen);
         });
+      }
     }
   }
   return {
@@ -725,8 +797,9 @@ export function createResourceGovernor(
       const owner = proof && (await processIdentity(proof.pid));
       if (!owner || owner.startTime !== proof?.startTime || !options.holderId)
         throw new Error("Simulator ticket owner unavailable");
+      const seen = await look(store);
       return store.transaction(async (state) => {
-        await reconcile(state);
+        await reconcile(state, seen);
         const existing = state.queue.find((entry) => ticketOwner(entry, options));
         if (options.ticketId && existing?.id !== options.ticketId)
           throw new Error("Simulator ticket unavailable");
@@ -784,8 +857,11 @@ export function createResourceGovernor(
         throw new Error("Simulator requires an exact named seat owner");
       if (shutdown.signal.aborted) throw abort();
       let refusal: { reason: SimulatorBlock; state: ResourceState } | undefined;
+      const seen = await look(store);
+      // Sampled before the lock, like the process facts (VUH-2053).
+      const sampled = await pressure.sample((await store.read()).policy);
       const lease = await store.transaction(async (state) => {
-        await reconcile(state);
+        await reconcile(state, seen);
         if (state.policy.simulatorSlots === 0) throw new SimulatorsDisabledError();
         const blocked = (reason: SimulatorBlock) => {
           refusal = { reason, state: structuredClone(state) };
@@ -842,7 +918,7 @@ export function createResourceGovernor(
           state.policy.simulatorSlots
         )
           return blocked("simulator_capacity");
-        if (!(await pressure.sample(state.policy)).healthy) return blocked("pressure");
+        if (!sampled.healthy) return blocked("pressure");
         const at = Date.now();
         // A boot's CPU burst outruns the one-minute load average; two at once
         // drove this Mac to load 340 (VUH-1988).
