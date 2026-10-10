@@ -34,6 +34,7 @@ import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { RuntimeCanary, RUNTIME_CANARY_HOLDER } from "./runtime-canary.ts";
 import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
 import { IntegrationQueue, integrationSources } from "./integrate.ts";
+import { gitBundle, placeRemoteGate } from "./integrate-remote.ts";
 import { DeployHolds } from "./deploy-holds.ts";
 import { ViewStore } from "./views.ts";
 import { deployHoldPresence } from "./deploy-hold-presence.ts";
@@ -902,6 +903,16 @@ const integration =
     ? new IntegrationQueue({
         directory: integrationDirectory,
         ...(await integrationSources(repoRoot)),
+        // A saturated Mac may gate on a linked machine's fleet workspace (VUH-2066).
+        placeGate: async (batch) =>
+          placeRemoteGate({
+            batch,
+            settings: await settingsStore.load(),
+            local: fleetResources.status(),
+            fleets: await runtimes.fleets(),
+            stream: (fleet) => runtimes.fleetStream(fleet),
+            bundle: gitBundle,
+          }),
       })
     : undefined;
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.

@@ -77,6 +77,7 @@ describe("clankie fleet", () => {
         models: "optimal",
         tools: "connected",
         peerMessages: "on",
+        remoteGates: "off",
       },
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
@@ -146,6 +147,7 @@ describe("clankie fleet", () => {
       models: "efficient",
       tools: "off",
       peerMessages: "off",
+      remoteGates: "off",
     });
     expect(read().autonomy.fleet).toEqual(
       FleetAutonomySchema.parse({
@@ -177,6 +179,7 @@ describe("clankie fleet budget", () => {
       models: "optimal",
       tools: "off",
       peerMessages: "on",
+      remoteGates: "off",
       ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain("fleet tool access disabled");
@@ -197,6 +200,7 @@ describe("clankie fleet budget", () => {
       models: "optimal",
       tools: "connected",
       peerMessages: "on",
+      remoteGates: "off",
     });
     const lines = formatFleetLines(status.fleet).join("\n");
     expect(lines).toContain("fleet size: max");
@@ -217,6 +221,7 @@ describe("clankie fleet budget", () => {
       models: "efficient",
       tools: "connected",
       peerMessages: "on",
+      remoteGates: "off",
       ...FleetAutonomySchema.parse({}),
     });
     await runFleetCommand(["set", "--models", "optimal"], fleetSettingsClient(settings));
@@ -226,6 +231,7 @@ describe("clankie fleet budget", () => {
       models: "optimal",
       tools: "connected",
       peerMessages: "on",
+      remoteGates: "off",
     });
     expect((await runFleetCommand(["clear"], fleetSettingsClient(settings))).fleet).toEqual({
       notes: "",
@@ -233,6 +239,7 @@ describe("clankie fleet budget", () => {
       models: "optimal",
       tools: "connected",
       peerMessages: "on",
+      remoteGates: "off",
       ...FleetAutonomySchema.parse({}),
     });
   });
@@ -256,6 +263,7 @@ describe("clankie fleet budget", () => {
       models: "optimal",
       tools: "connected",
       peerMessages: "on",
+      remoteGates: "off",
     });
   });
 });
@@ -271,6 +279,7 @@ describe("clankie fleet peer messages", () => {
       models: "optimal",
       tools: "off",
       peerMessages: "off",
+      remoteGates: "off",
       ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain(
