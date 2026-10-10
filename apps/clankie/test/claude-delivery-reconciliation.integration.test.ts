@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import { createFleetSeatControl } from "../src/captain/fleet-seat-control.ts";
-import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+import { SeatOutbox, type SeatDeliveryEvent } from "../src/captain/seat-outbox.ts";
 import {
   createOperatorService,
   type CreateOperatorServiceContext,
@@ -21,7 +21,12 @@ afterEach(() => {
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "claude-exact-receipt-"));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
-  const mailbox = new SeatOutbox({ uncertaintyPath: join(root, "mailbox.json"), boundGraceMs: 30 });
+  const deliveryEvents: SeatDeliveryEvent[] = [];
+  const mailbox = new SeatOutbox({
+    uncertaintyPath: join(root, "mailbox.json"),
+    boundGraceMs: 30,
+    onDeliveryEvent: (event) => deliveryEvents.push(event),
+  });
   cleanups.push(() => mailbox.close());
   let agent: HerdrAgentSnapshot = {
     paneId: "w1:p1",
@@ -87,6 +92,7 @@ function fixture() {
     root,
     runner,
     mailbox,
+    deliveryEvents,
     create,
     sends: () => sends,
     replace: () => {
@@ -114,6 +120,16 @@ it("delivers two consecutive exact acknowledgments without waiting for a remote 
   }
   expect(f.sends()).toBe(2);
   expect(native.unresolvedDeliveries()).toEqual([]);
+  // The service log gets timings and identifiers, never the message (VUH-2034).
+  expect(f.deliveryEvents).toMatchObject([
+    { outcome: "delivered", source: "service", parkedPoll: true },
+    { outcome: "delivered", source: "service", parkedPoll: true },
+  ]);
+  for (const event of f.deliveryEvents) {
+    expect(event.takenAfterMs).toBeGreaterThanOrEqual(0);
+    expect(event.ackAfterMs).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(event)).not.toMatch(/first|second/u);
+  }
 });
 it("retains the exact blocking event across restart and reconciles a late acknowledgment without replay", async () => {
   const f = fixture();

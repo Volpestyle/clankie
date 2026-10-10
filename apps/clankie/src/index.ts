@@ -1322,6 +1322,8 @@ const captain = createCaptain(
       ? {}
       : { onTurnSettled: (metrics) => bodyTelemetry.emit(turnTelemetry(metrics)) }),
     onModelCredentialEvent: modelCredentialEventLogger(logger),
+    onSeatDeliveryEvent: (delivery) =>
+      logger.info({ ...delivery, event: "fleet.seat_delivery" }, "worker channel delivery settled"),
     ...(hostedBody === undefined
       ? {}
       : {

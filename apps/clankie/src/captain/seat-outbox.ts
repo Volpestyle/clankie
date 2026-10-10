@@ -63,6 +63,25 @@ const REPLY_TIMEOUT_MS = 10 * 60_000;
 /** Source of the service's own notice about an unresolved delivery; it never alerts about itself. */
 export const SEAT_DELIVERY_ALERT_SOURCE = "seat-delivery-alert";
 
+/**
+ * One delivery's transport timings for the service log (VUH-2034). Identifiers,
+ * labels and durations only: never content.
+ */
+export interface SeatDeliveryEvent {
+  readonly eventId: string;
+  readonly source: string;
+  readonly outcome: string;
+  /** Delivery start to the bridge's take; absent if it was never taken. */
+  readonly takenAfterMs?: number;
+  /** Take to the exact ack; absent if no ack arrived in time. */
+  readonly ackAfterMs?: number;
+  /** True when an ack arrived after the delivery had already settled. */
+  readonly lateAck?: boolean;
+  /** Whether a poll was parked, and the last finished poll's age, when it began. */
+  readonly parkedPoll: boolean;
+  readonly lastPollAgeMs?: number;
+}
+
 /** One delivery whose receipt never resolved; only its own resend is refused (VUH-1779). */
 export interface UnresolvedSeatReceipt {
   readonly receiptId: string;
@@ -137,6 +156,9 @@ interface Pending {
   readonly event: OperatorSeatEvent;
   readonly wantsReply: boolean;
   readonly recipientBinding?: string;
+  readonly startedAt: number;
+  takenAt?: number;
+  ackedAt?: number;
   taken: boolean;
   acknowledged: boolean;
   settled: boolean;
@@ -165,6 +187,7 @@ export class SeatOutbox {
   private lastBridgePollAt: number | undefined;
   private readonly bridgeIssues = new Set<string>();
   private readonly onBridgeIssue: ((detail: string) => void) | undefined;
+  private readonly onDeliveryEvent: ((event: SeatDeliveryEvent) => void) | undefined;
   private lastPollAt: number | undefined;
   private lastPollBinding: string | undefined;
   private readonly presencePath: string | undefined;
@@ -217,10 +240,12 @@ export class SeatOutbox {
       /** Tell the lead about an unresolved receipt instead of failing silently. Called once per receipt. */
       readonly onUnresolved?: (receipt: UnresolvedSeatReceipt) => void;
       readonly onBridgeIssue?: (detail: string) => void;
+      readonly onDeliveryEvent?: (event: SeatDeliveryEvent) => void;
     } = {},
   ) {
     this.onUnresolved = options.onUnresolved;
     this.onBridgeIssue = options.onBridgeIssue;
+    this.onDeliveryEvent = options.onDeliveryEvent;
     this.fence = new DeliveryFence(options.uncertaintyPath);
     this.delivered = new DeliveryFence(
       options.uncertaintyPath === undefined ? undefined : `${options.uncertaintyPath}.delivered`,
@@ -278,6 +303,14 @@ export class SeatOutbox {
             ? "Seat bridge supports owner turns."
             : "Clankie's seat needs a reconnect: /mcp. The bridge does not declare the current seat protocol; owner turns use a compatible wire format when supported.",
     };
+  }
+
+  private deliveryEvent(event: SeatDeliveryEvent): void {
+    try {
+      this.onDeliveryEvent?.(event);
+    } catch {
+      /* Diagnostics never change delivery. */
+    }
   }
 
   private bridgeIssue(detail: string): void {
@@ -478,7 +511,13 @@ export class SeatOutbox {
         messageId: abandoned[1].messageId,
         detail: "The owner settled this original as abandoned-unknown; it is never resent.",
       });
-    if (!this.bound()) return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
+    const parkedPoll = this.pollers.size > 0;
+    const lastPollAgeMs = this.lastPollAt === undefined ? undefined : this.now() - this.lastPollAt;
+    const observed = { parkedPoll, ...(lastPollAgeMs === undefined ? {} : { lastPollAgeMs }) };
+    if (!this.bound()) {
+      this.deliveryEvent({ eventId: "", source: input.source, outcome: "unbound", ...observed });
+      return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
+    }
     if (input.source !== SEAT_DELIVERY_ALERT_SOURCE) this.alertUnresolved();
     if (input.signal?.aborted === true)
       return Promise.resolve({ outcome: "aborted", deliveryStage: "expired" });
@@ -533,12 +572,23 @@ export class SeatOutbox {
         event,
         wantsReply: input.wantsReply,
         ...(input.recipientBinding === undefined ? {} : { recipientBinding: input.recipientBinding }),
+        startedAt: this.now(),
         taken: false,
         acknowledged: false,
         settled: false,
         settle: (outcome) => {
           if (pending.settled) return;
           pending.settled = true;
+          this.deliveryEvent({
+            eventId: event.id,
+            source: input.source,
+            outcome: outcome.outcome,
+            ...(pending.takenAt === undefined ? {} : { takenAfterMs: pending.takenAt - pending.startedAt }),
+            ...(pending.takenAt === undefined || pending.ackedAt === undefined
+              ? {}
+              : { ackAfterMs: pending.ackedAt - pending.takenAt }),
+            ...observed,
+          });
           this.active.delete(event.id);
           if (
             outcome.outcome !== "unconfirmed" &&
@@ -677,6 +727,13 @@ export class SeatOutbox {
       }
       if (original.sessionId !== undefined && original.sessionId !== (recipientBinding ?? "")) return false;
       if (!this.delivered.pending(eventId)) this.delivered.begin(eventId, original);
+      this.deliveryEvent({
+        eventId,
+        source: "late-ack",
+        outcome: "acknowledged",
+        lateAck: true,
+        parkedPoll: this.pollers.size > 0,
+      });
       return this.fence.reconcile(eventId, eventId);
     }
     if (!this.matchesRecipient(pending, recipientBinding)) return false;
@@ -764,6 +821,7 @@ export class SeatOutbox {
 
   private ackPending(pending: Pending): void {
     pending.acknowledged = true;
+    pending.ackedAt = this.now();
     const index = this.inFlight.indexOf(pending);
     if (index >= 0) this.inFlight.splice(index, 1);
     try {
@@ -848,6 +906,7 @@ export class SeatOutbox {
       pending.admission = this.turnActive ? "steered" : "started";
       this.turnActive = true;
       pending.taken = true;
+      pending.takenAt = this.now();
       if (pending.timer !== undefined) clearTimeout(pending.timer);
       this.inFlight.push(pending);
       pending.timer = setTimeout(

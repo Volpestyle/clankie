@@ -521,6 +521,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           fleetMailboxes,
           seatId,
           join(options.stateDir, "delivery-receipts", "fleet"),
+          deps.onSeatDeliveryEvent,
         );
         return mailbox.bound() || mailbox.uncertain();
       },
@@ -529,6 +530,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           fleetMailboxes,
           seatId,
           join(options.stateDir, "delivery-receipts", "fleet"),
+          deps.onSeatDeliveryEvent,
         ).deliver({
           kind: "message",
           conversationId: conversations.conversationIdForSeat(seatId) ?? seatId,
@@ -1177,7 +1179,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ids.add(seatId);
         }
       }
-    return [...ids].map((seatId) => [seatId, fleetSeatMailbox(fleetMailboxes, seatId, directory)] as const);
+    return [...ids].map(
+      (seatId) =>
+        [seatId, fleetSeatMailbox(fleetMailboxes, seatId, directory, deps.onSeatDeliveryEvent)] as const,
+    );
   }
 
   const nextTurnMailboxes = new NextTurnMailbox(join(options.stateDir, "next-turn-mailboxes.json"));
@@ -2507,6 +2512,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       fleetMailboxes,
       seatId,
       join(options.stateDir, "delivery-receipts", "fleet"),
+      deps.onSeatDeliveryEvent,
     );
     if (deliveryOptions?.reconcileOnly) {
       const receipt = mailbox.receipt(message);
@@ -3678,6 +3684,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         fleetMailboxes,
         target.terminalId,
         join(options.stateDir, "delivery-receipts", "fleet"),
+        deps.onSeatDeliveryEvent,
       );
       if (mailbox.uncertainFor(text)) return outcome(false, "native_receipt_unresolved");
       let blocked = false;
@@ -5938,6 +5945,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         fleetMailboxes,
         seatId,
         join(options.stateDir, "delivery-receipts", "fleet"),
+        deps.onSeatDeliveryEvent,
       );
       const binding = native?.terminalId === seatId ? inboundBinding(native) : undefined;
       const live = binding !== undefined && mailbox.boundTo(binding);
@@ -5987,6 +5995,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           fleetMailboxes,
           seatId,
           join(options.stateDir, "delivery-receipts", "fleet"),
+          deps.onSeatDeliveryEvent,
         ).acknowledge(eventId, native?.terminalId === seatId ? inboundBinding(native) : undefined)
       );
     },

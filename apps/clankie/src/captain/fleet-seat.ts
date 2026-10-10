@@ -5,7 +5,7 @@
  */
 import { join } from "node:path";
 import { headSeatDeliveryStage, type DeliveryStage } from "@clankie/protocol";
-import { SeatOutbox } from "./seat-outbox.ts";
+import { SeatOutbox, type SeatDeliveryEvent } from "./seat-outbox.ts";
 
 export interface FleetSeatMessageContext {
   readonly conversationId: string;
@@ -114,6 +114,7 @@ export function fleetSeatMailbox(
   mailboxes: Map<string, SeatOutbox>,
   seatId: string,
   uncertaintyDir?: string,
+  onDeliveryEvent?: (event: SeatDeliveryEvent & { readonly seatId: string }) => void,
 ): SeatOutbox {
   const existing = mailboxes.get(seatId);
   if (existing !== undefined) return existing;
@@ -123,6 +124,9 @@ export function fleetSeatMailbox(
     ackTimeoutMs: FLEET_ACK_TIMEOUT_MS,
     // A report change ends every parked poll (VUH-2034).
     abortKeepsGrace: true,
+    ...(onDeliveryEvent === undefined
+      ? {}
+      : { onDeliveryEvent: (event) => onDeliveryEvent({ ...event, seatId }) }),
     ...(uncertaintyDir === undefined
       ? {}
       : { uncertaintyPath: join(uncertaintyDir, `${encodeURIComponent(seatId)}.json`) }),
