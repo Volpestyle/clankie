@@ -385,6 +385,11 @@ export const FleetSettingsSchema = z
     tools: z.enum(["connected", "off"]).default("connected"),
     /** Proven native workers may message their own fleet unless the owner turns this off. */
     peerMessages: z.enum(["on", "off"]).default("on"),
+    /**
+     * Integrate gates may run on a linked machine's fleet-owned workspace while this
+     * one is saturated (VUH-2066). Off until the owner or lead turns it on.
+     */
+    remoteGates: z.enum(["on", "off"]).default("off"),
     /** Physical machine capacity is separate from the fleet-size staffing preference. */
     resources: FleetResourcePolicySchema.optional(),
   })

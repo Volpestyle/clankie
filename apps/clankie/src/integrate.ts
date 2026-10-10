@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { syncOwnerCheckout } from "@clankie/settings";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, open, readdir } from "node:fs/promises";
+import { mkdir, readFile, open, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@clankie/protocol/integrate";
 import { durableJson, withDirectoryLock, type LockOwner } from "./deploy-holds.ts";
 import { integrationEnvironment } from "./integrate-environment.ts";
+import { darwinOnlySkips, type GateRunner } from "./integrate-remote.ts";
 
 const execute = promisify(execFile);
 const now = () => new Date().toISOString();
@@ -26,6 +27,11 @@ interface IntegrationOptions {
   directory: string;
   core: string;
   app?: string;
+  /**
+   * Where a core-only batch's install and gate run when not here (VUH-2066):
+   * a linked machine's runner when this one is saturated and that one has room.
+   */
+  placeGate?: (batch: { id: string; origin: string }) => Promise<GateRunner | undefined>;
 }
 /** Main moved after the gate and its recorded selection no longer covers the result. */
 class GateNotCovering extends Error {}
@@ -382,13 +388,16 @@ export class IntegrationQueue {
     env: NodeJS.ProcessEnv,
     evidence: string,
     base = repo.base,
+    runner?: GateRunner,
   ): Promise<NonNullable<IntegrationRepo["gate"]>> {
     // Install and gate run once per batch; revalidation runs each time main moves.
     const log = join(
       evidence,
       name === "revalidate"
         ? `${repo.name}-revalidate-${now().replaceAll(":", "-")}.log`
-        : `${repo.name}-${name}.log`,
+        : runner
+          ? `${repo.name}-${name}-${runner.machine.replaceAll(/[^\w-]/gu, "_")}.log`
+          : `${repo.name}-${name}.log`,
     );
     const startedAt = now();
     const head = await this.head(repo);
@@ -397,6 +406,17 @@ export class IntegrationQueue {
       (resolve, reject) => {
         const out = createWriteStream(log, { flags: "wx", mode: 0o600 });
         out.on("error", reject);
+        // A linked machine streams the same output into the same log.
+        if (runner && name !== "revalidate") {
+          runner.run(name, base, out).then(
+            (result) => out.end(() => resolve(result)),
+            (error: unknown) => {
+              out.end(String(error));
+              reject(error);
+            },
+          );
+          return;
+        }
         const args =
           name === "install"
             ? [
@@ -431,7 +451,14 @@ export class IntegrationQueue {
     } finally {
       await file.close();
     }
-    return { head, ...result, startedAt, finishedAt: now(), log };
+    return {
+      head,
+      ...result,
+      startedAt,
+      finishedAt: now(),
+      log,
+      ...(runner && name !== "revalidate" ? { machine: runner.machine } : {}),
+    };
   }
 
   private async composeAndGate(batch: IntegrationBatch): Promise<void> {
@@ -556,14 +583,48 @@ export class IntegrationQueue {
       await this.save(batch);
       return;
     }
+    // A core-only batch may gate on a linked machine; an app pair gates together here.
+    const runner = await this.place(batch);
+    try {
+      await this.installAndGate(batch, root, runner);
+    } finally {
+      await runner?.dispose().catch(() => undefined);
+    }
+  }
+
+  /** The linked machine that will gate this batch, staged at its exact HEAD, or here. */
+  private async place(batch: IntegrationBatch): Promise<GateRunner | undefined> {
+    const repo = batch.repos[0];
+    if (!this.options.placeGate || batch.repos.length !== 1 || repo?.name !== "core") return undefined;
+    let runner: GateRunner | undefined;
+    try {
+      runner = await this.options.placeGate({ id: batch.id, origin: repo.origin });
+      if (!runner) return undefined;
+      await this.clean(repo);
+      await runner.stage(repo);
+      batch.placement = { machine: runner.machine };
+      await this.save(batch);
+      return runner;
+    } catch (error) {
+      // The gate still runs: here, with the reason it could not go there.
+      await runner?.dispose().catch(() => undefined);
+      batch.placement = { machine: "local", reason: String(error).slice(0, 500) };
+      await this.save(batch);
+      return undefined;
+    }
+  }
+
+  private async installAndGate(batch: IntegrationBatch, root: string, runner?: GateRunner): Promise<void> {
     // Install every sibling before either gate; both gates validate the exact composed pair.
     batch.state = "installing";
     await this.save(batch);
     for (const repo of batch.repos) {
       const env = await integrationEnvironment(join(root, "isolation", repo.name));
       await this.clean(repo);
-      repo.install = await this.command(repo, "install", env, root);
+      repo.install = await this.command(repo, "install", env, root, repo.base, runner);
       await this.save(batch);
+      if (runner && repo.install.exitCode !== 0)
+        return this.regateHere(batch, root, runner, `install exited ${repo.install.exitCode}`);
       if (repo.install.exitCode !== 0) {
         batch.state = "failed";
         await this.save(batch);
@@ -574,8 +635,18 @@ export class IntegrationQueue {
     await this.save(batch);
     for (const repo of batch.repos) {
       const env = await integrationEnvironment(join(root, "isolation", repo.name));
-      repo.gate = await this.command(repo, "gate", env, root);
+      repo.gate = await this.command(repo, "gate", env, root, repo.base, runner);
+      // Its recorded selection comes home, so revalidation and push read it here.
+      if (runner) await runner.collect(repo.directory);
       await this.save(batch);
+    }
+    if (runner) {
+      const repo = batch.repos[0]!;
+      if (repo.gate?.exitCode !== 0)
+        return this.regateHere(batch, root, runner, `gate exited ${repo.gate?.exitCode}`);
+      const skipped = await darwinOnlySkips(repo.directory);
+      if (skipped.length)
+        return this.regateHere(batch, root, runner, `skipped darwin-only tests in ${skipped.join(", ")}`);
     }
     for (const repo of batch.repos) {
       if (
@@ -588,6 +659,32 @@ export class IntegrationQueue {
     }
     batch.state = "passed";
     await this.save(batch);
+  }
+
+  /**
+   * A linked machine's gate counts only when it is green and skipped no darwin-only
+   * test; anything else gates again here, keeping that machine's logs (VUH-2066).
+   */
+  private async regateHere(
+    batch: IntegrationBatch,
+    root: string,
+    runner: GateRunner,
+    why: string,
+  ): Promise<void> {
+    const repo = batch.repos[0]!;
+    batch.placement = {
+      machine: "local",
+      reason:
+        `${runner.machine} ${why}; regated here (its log: ${repo.gate?.log ?? repo.install?.log})`.slice(
+          0,
+          500,
+        ),
+    };
+    delete repo.install;
+    delete repo.gate;
+    await rm(join(repo.directory, ".local"), { recursive: true, force: true });
+    await this.save(batch);
+    await this.installAndGate(batch, root);
   }
 
   /**

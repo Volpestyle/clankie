@@ -87,8 +87,18 @@ export function createFleetSettingsRoutes(
           if (fleetSettingsSnapshot(current).revision !== input.data.expectedRevision)
             throw new Error("Fleet settings changed");
           before = JSON.stringify(current);
-          const { size, models, resources, notes, tools, peerMessages, hire, autonomyLevel, ...preferences } =
-            input.data.changes;
+          const {
+            size,
+            models,
+            resources,
+            notes,
+            tools,
+            peerMessages,
+            remoteGates,
+            hire,
+            autonomyLevel,
+            ...preferences
+          } = input.data.changes;
           const defaults = FleetAutonomySchema.parse({});
           const resolved = Object.fromEntries(
             Object.entries(preferences).map(([field, value]) => [
@@ -106,6 +116,7 @@ export function createFleetSettingsRoutes(
               ...(notes === undefined ? {} : { notes }),
               ...(tools === undefined ? {} : { tools }),
               ...(peerMessages === undefined ? {} : { peerMessages }),
+              ...(remoteGates === undefined ? {} : { remoteGates }),
               ...(hire === undefined ? {} : { hire: hire ?? undefined }),
             },
             autonomy: {

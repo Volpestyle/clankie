@@ -111,6 +111,32 @@ the same checks. Select the last known good batch; the tool does not decide
 whether a production failure invalidates a previously passed tree. History
 remains intact; no force push is used.
 
+## Gates on a linked machine
+
+With `clankie fleet set --remote-gates on` (off by default), a core-only batch
+may install and gate on a linked machine instead of this one (VUH-2066). The
+queue places it there only when this machine is saturated (every heavy slot
+held, a heavy job queued, or pressure unhealthy) and the linked machine has at
+least `workers` access and answers that it is provisioned, runs no other gate,
+and is under the same load and memory guards plus 8 GiB. Otherwise, or when
+staging fails, the gate runs here and the batch's `placement` records why.
+
+The linked machine runs the gate in WSL under `~/.clankie-fleet`: its own Node,
+pnpm, Rust and ffmpeg, one clone of the public origin, and one directory per
+batch with a private home, temp and package store. The queue sends the composed
+HEAD as a git bundle over the fleet's existing SSH connection, verifies the
+remote HEAD before install, streams the install and gate output into
+`core-install-<machine>.log` and `core-gate-<machine>.log`, and copies the gate's
+`.local/landing-gate.json` back, so revalidation and push stay here. No
+credentials go to that machine. `workers` access suffices because hired workers
+there already run repository code in their own workspaces; the gate never runs
+in the owner's panes, Herdr session, shell profile or checkouts.
+
+That machine's green stands only when its gate skipped no test in a file that
+names darwin: the suite has macOS-only cases a Linux run skips. Any other
+outcome (a failed install or gate, or a darwin-only skip) installs and gates
+the batch again here, keeping that machine's logs beside the local ones.
+
 ## Native delivery contract checks
 
 For changes to native seat delivery, mailbox receipts or their bridge, run the

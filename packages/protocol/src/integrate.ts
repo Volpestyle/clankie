@@ -108,6 +108,8 @@ const CommandRecordSchema = z.object({
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
   log: z.string(),
+  /** The linked machine that ran it; absent when it ran here (VUH-2066). */
+  machine: z.string().optional(),
 });
 const IntegrationRepoSchema = z.object({
   name: z.enum(["core", "app"]),
@@ -193,6 +195,11 @@ export const IntegrationBatchSchema = z.object({
     .optional(),
   /** Why the queue gates these requests again: main moved somewhere the held attempt's gate checked. */
   regateReason: z.string().optional(),
+  /**
+   * Where the gate ran when a linked machine was considered (VUH-2066): its ID, or
+   * `local` with the reason it could not go there.
+   */
+  placement: z.object({ machine: z.string(), reason: z.string().optional() }).optional(),
   /** Who withdrew a request before its gate started, and why. */
   cancelled: z.object({ actor: Text, reason: Text, at: z.iso.datetime() }).optional(),
 });

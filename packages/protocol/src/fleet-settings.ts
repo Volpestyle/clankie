@@ -22,6 +22,7 @@ const FleetPolicySchema = z
     notes: z.string().max(4000).optional(),
     tools: z.enum(["connected", "off"]).optional(),
     peerMessages: z.enum(["on", "off"]).optional(),
+    remoteGates: z.enum(["on", "off"]).optional(),
     hire: HireProfileSchema.optional(),
     ...FleetAutonomyWireSchema.shape,
   })
