@@ -25,7 +25,14 @@ import {
 import { processIdentity, observeProcesses, resourceNativeHelperPath, resourcePython } from "./process.ts";
 import { resourceCapacity, ResourcePressureSampler, simulatorBootSettleMs } from "./pressure.ts";
 import { ResourceStore } from "./store.ts";
-import { heavyJobArgs, heavyJobEnvironment } from "./parallelism.ts";
+import {
+  heavyJobArgs,
+  heavyJobEnvironment,
+  heavyJobLane,
+  heavyJobParallelism,
+  lightJobParallelism,
+  type HeavyJobLane,
+} from "./parallelism.ts";
 
 const sameQueue = (
   a: NonNullable<ResourceQueueEntry["simulator"]>,
@@ -158,13 +165,19 @@ export function createResourceGovernor(
 ): FleetResourceGovernor {
   const bootSettleMs = options.simulatorBootSettleMs ?? simulatorBootSettleMs;
   const directory = options.directory ?? join(userInfo().homedir, ".clankie/fleet-resources");
-  const store = new ResourceStore(directory, {
+  const retrying = {
     // Bounded causes only (stage and errno); never journal contents or paths.
-    onRetry: (error, attempt) =>
+    onRetry: (error: Error, attempt: number) =>
       process.stderr.write(
         `clankie: retrying a fleet resource transaction (${attempt}/2): ${error.message}\n`,
       ),
-  });
+  };
+  const store = new ResourceStore(directory, retrying);
+  // The light lane is its own journal, so installs that predate it never read
+  // a lease shape they do not know. Its policy comes from the main journal.
+  const lightStore = new ResourceStore(join(directory, "light"), retrying);
+  const mainStore = store;
+  const laneStore = (lane: HeavyJobLane) => (lane === "light" ? lightStore : store);
   const pressure = new ResourcePressureSampler(options.probe);
   const shutdown = new AbortController();
   const active = new Set<Promise<unknown>>();
@@ -290,7 +303,8 @@ export function createResourceGovernor(
       mode: 0o600,
     });
   }
-  async function project(state: ResourceState): Promise<ResourceSnapshot> {
+  async function project(state: ResourceState, light?: ResourceState): Promise<ResourceSnapshot> {
+    light ??= await lightStore.read();
     const usage = state.leases.some((lease) => lease.kind === "simulator" && lease.deviceId)
       ? await observeSimulatorUsage()
       : new Map();
@@ -303,6 +317,8 @@ export function createResourceGovernor(
         simulatorSlots: state.policy.simulatorSlots,
         used: state.leases.filter((lease) => lease.kind === "heavy").length,
         simulatorUsed: state.leases.filter((lease) => lease.kind === "simulator").length,
+        lightSlots: resourceCapacity(state.policy),
+        lightUsed: light.leases.length,
       },
       pressure: sampledPressure,
       leases: state.leases.map((lease) => ({
@@ -328,6 +344,29 @@ export function createResourceGovernor(
         createdAtMs: lease.createdAtMs,
         lastUsedAtMs: lease.lastUsedAtMs,
         ...(lease.kind === "heavy" && lease.runner ? { pid: lease.runner.pid } : {}),
+      })),
+      lightLeases: light.leases.flatMap((lease) =>
+        lease.kind === "heavy"
+          ? [
+              {
+                id: lease.id,
+                state: lease.state,
+                ...(lease.seatId ? { seatId: lease.seatId } : {}),
+                ...(lease.holderId ? { holderId: lease.holderId } : {}),
+                executable: lease.executable,
+                createdAtMs: lease.createdAtMs,
+                ...(lease.runner ? { pid: lease.runner.pid } : {}),
+              },
+            ]
+          : [],
+      ),
+      lightQueue: light.queue.map(({ id, seatId, holderId, executable, queuedAtMs, owner }) => ({
+        id,
+        ...(seatId ? { seatId } : {}),
+        ...(holderId ? { holderId } : {}),
+        ...(executable ? { executable } : {}),
+        queuedAtMs,
+        pid: owner.pid,
       })),
       queue: state.queue.map(
         ({ id, kind, seatId, executable, queuedAtMs, owner, holderId, simulator }, index) => ({
@@ -374,18 +413,26 @@ export function createResourceGovernor(
       ),
     };
   }
+  async function reconciled(from: ResourceStore): Promise<ResourceState> {
+    const state = await from.read();
+    if (!state.leases.some((lease) => lease.kind === "heavy") && !state.queue.length) return state;
+    return from.transaction(async (current) => {
+      await reconcile(current);
+      return structuredClone(current);
+    });
+  }
   async function snapshot() {
-    let state = await store.read();
-    if (state.leases.some((lease) => lease.kind === "heavy") || state.queue.length)
-      state = await store.transaction(async (current) => {
-        await reconcile(current);
-        return structuredClone(current);
-      });
-    return project(state);
+    return project(await reconciled(store), await reconciled(lightStore));
   }
   async function acquire(
-    options: ResourceWaitOptions & { seatId?: string; holderId?: string; executable: string },
+    options: ResourceWaitOptions & {
+      seatId?: string;
+      holderId?: string;
+      executable: string;
+      lane: HeavyJobLane;
+    },
   ): Promise<HeavyLease> {
+    const store = laneStore(options.lane);
     const owner = await processIdentity();
     if (!owner) throw new Error("Fleet resource process identity unavailable");
     const signal = options.signal ? AbortSignal.any([options.signal, shutdown.signal]) : shutdown.signal;
@@ -425,12 +472,23 @@ export function createResourceGovernor(
               if (options.onWait) advisory = structuredClone(state);
               return undefined;
             };
+            // The owner's policy lives in the main journal for both lanes.
+            const policy = options.lane === "light" ? (await mainStore.read()).policy : state.policy;
             if (
               state.queue.find((entry) => entry.kind === "heavy")?.id !== id ||
-              state.leases.filter((lease) => lease.kind === "heavy").length >= resourceCapacity(state.policy)
+              state.leases.filter((lease) => lease.kind === "heavy").length >= resourceCapacity(policy)
             )
               return blocked();
-            if (!(await pressure.sample(state.policy)).healthy) return blocked();
+            const sampled = await pressure.sample(policy);
+            // A light job is small and capped, so only the memory floor holds it;
+            // load already holds the full gates it runs beside (VUH-2023).
+            if (
+              options.lane === "light"
+                ? sampled.reason === "probe-unavailable" ||
+                  sampled.availableMemoryMb < policy.minAvailableMemoryMb
+                : !sampled.healthy
+            )
+              return blocked();
             if (signal.aborted) throw abort();
             const at = Date.now();
             const next: HeavyLease = {
@@ -457,7 +515,12 @@ export function createResourceGovernor(
         }
         // This is advisory status from the same attempt, projected after the
         // transaction commits; publishing a wait must not acquire another lock.
-        if (advisory) options.onWait?.(await project(advisory));
+        if (advisory)
+          options.onWait?.(
+            options.lane === "light"
+              ? await project(await mainStore.read(), advisory)
+              : await project(advisory),
+          );
         await wait(500, signal);
       }
     } finally {
@@ -474,10 +537,9 @@ export function createResourceGovernor(
     } catch {
       return undefined;
     }
-    const lease = (await store.read()).leases.find(
-      (entry): entry is HeavyLease =>
-        entry.kind === "heavy" && entry.id === ref.id && entry.token === ref.token,
-    );
+    const found = (entry: ResourceState["leases"][number]): entry is HeavyLease =>
+      entry.kind === "heavy" && entry.id === ref.id && entry.token === ref.token;
+    const lease = (await store.read()).leases.find(found) ?? (await lightStore.read()).leases.find(found);
     if (!lease?.runner || lease.state !== "running") return undefined;
     // A native child in the same group is a distinct holder, not nested work
     // belonging to the parent that acquired this permit.
@@ -508,6 +570,8 @@ export function createResourceGovernor(
     let lease: HeavyLease | undefined;
     let child: ReturnType<typeof spawn> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const lane = heavyJobLane(command, args);
+    const store = laneStore(lane);
     try {
       const parentLease = await inherited(options.holderId);
       if (signal.aborted) throw abort();
@@ -541,16 +605,17 @@ export function createResourceGovernor(
       lease = await acquire({
         ...options,
         signal,
+        lane,
         executable: basename(command).slice(0, 128),
       });
       if (signal.aborted) throw abort();
       child = spawn(
         resourcePython,
-        ["-I", resourceNativeHelperPath(), "run", directory, lease.id, lease.token],
+        ["-I", resourceNativeHelperPath(), "run", store.directory, lease.id, lease.token],
         {
           detached: true,
           stdio: ["inherit", "inherit", "inherit", "pipe", "pipe"],
-          env: heavyJobEnvironment(process.env),
+          env: heavyJobEnvironment(process.env, lane === "light" ? lightJobParallelism : heavyJobParallelism),
         },
       );
       const done = new Promise<number>((resolve, reject) => {

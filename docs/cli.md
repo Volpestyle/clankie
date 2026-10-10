@@ -2824,13 +2824,22 @@ test suites, builds and entire owned runtime lifetimes inside the wrapper, and
 serialize multi-package compilers with `--workspace-concurrency=1`. Native local
 hire briefs include this contract automatically. Nested verified commands reuse
 the same permit; surviving descendants retain it after a wrapper exits.
+
+`heavy` sizes each command itself. A focused check — Vitest naming up to eight
+test files, `tsc` without `--build`, or `pnpm --filter ONE typecheck` — runs in
+the light lane: its own journal under `light/`, as many slots as `heavySlots`,
+two cores per job (the same variables capped at two), held only by the memory
+floor, so it starts beside full gates even at high load. Everything else, and
+anything wrapped in a shell, is a full job. Workers keep the same command form.
 Brief registry-lock contention waits internally without discarding the queue
 ticket. Actual native failures identify their cause; see the
 [resource governor reference](../packages/fleet-resources/README.md).
 
 `fleet resources` returns current capacity, pressure, holders and queue as JSON.
 `capacity.used` counts heavy leases against `heavySlots`; `simulatorUsed` counts
-simulator reservations against `simulatorSlots`. Simulator status also reports
+simulator reservations against `simulatorSlots`; `lightUsed` counts light-lane
+jobs against `lightSlots`, whose holders and waiters are `lightLeases` and
+`lightQueue`. Simulator status also reports
 external active devices against the simulator budget. The budgets are independent;
 load and available-memory guards gate both.
 The operator fleet snapshot also carries recent confirmed native peer exchanges

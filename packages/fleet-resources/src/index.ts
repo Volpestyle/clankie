@@ -22,3 +22,4 @@ export type {
 export { createSimctlAdapter } from "./simctl.ts";
 export type { SimulatorAdapter, SimulatorDevice, SimctlRun } from "./simctl.ts";
 export { resourceHolderIdentity } from "./holder.ts";
+export { heavyJobLane, type HeavyJobLane } from "./parallelism.ts";

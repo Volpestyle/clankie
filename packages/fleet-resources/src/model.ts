@@ -203,7 +203,15 @@ export const ResourceStateSchema = z
 export interface ResourceSnapshot {
   schemaVersion: 1;
   policy: FleetResourcePolicy;
-  capacity: { heavySlots: number; simulatorSlots: number; used: number; simulatorUsed: number };
+  capacity: {
+    heavySlots: number;
+    simulatorSlots: number;
+    used: number;
+    simulatorUsed: number;
+    /** Focused checks run in their own capped lane beside full gates (VUH-2023). */
+    lightSlots: number;
+    lightUsed: number;
+  };
   pressure: ResourcePressure;
   leases: {
     id: string;
@@ -233,6 +241,23 @@ export interface ResourceSnapshot {
     expiresAtMs?: number;
     position?: number;
     estimatedWaitMs?: number | null;
+  }[];
+  lightLeases: {
+    id: string;
+    state: string;
+    seatId?: string;
+    holderId?: string;
+    executable: string;
+    createdAtMs: number;
+    pid?: number;
+  }[];
+  lightQueue: {
+    id: string;
+    seatId?: string;
+    holderId?: string;
+    executable?: string;
+    queuedAtMs: number;
+    pid: number;
   }[];
 }
 export interface ResourceWaitOptions {

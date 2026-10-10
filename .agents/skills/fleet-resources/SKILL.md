@@ -23,7 +23,12 @@ through strict environment filtering (this repo's `turbo.json` does).
 Do not override Turbo's limit with a higher `--concurrency` or `--parallel`.
 These tool-native limits do not restrict arbitrary subprocesses or CPU affinity;
 serialize compilers and other tools that do not honor them.
-Serialize multi-package compilers inside one permit. An optional `--seat LABEL`
+Serialize multi-package compilers inside one permit.
+`clankie heavy` sizes the command for you. Vitest naming up to eight test files,
+`tsc` without `--build`, or `pnpm --filter ONE typecheck` runs in the light lane:
+two cores, its own slots, held only by the memory floor, so it starts beside full
+gates. Name the files rather than a directory, and don't wrap a focused check
+in `sh -c`; either makes it a full job. An optional `--seat LABEL`
 before `--` labels the seat in status; `--holder ID` identifies its native child. Neither grants seat authority. Arguments
 after `--`, including flags such as `--chat`, belong to the child. The wrapper
 preserves its exit status and forwards interruption. Nested commands with the same holder in the same

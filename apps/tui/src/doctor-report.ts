@@ -203,7 +203,7 @@ function formatResourceLines(resources: InstallDoctorReport["resources"]): strin
     (entry.seatId ? clean(entry.seatId) : entry.pid ? `PID ${entry.pid}` : "unattributed") +
     (entry.holderId ? ` / ${clean(entry.holderId)}` : "");
   return [
-    `  ${mark(resources.pressure.healthy)} Fleet resources · ${resources.capacity.used}/${resources.capacity.heavySlots} heavy · ${resources.capacity.simulatorUsed ?? resources.leases.filter((lease) => lease.kind === "simulator").length}/${resources.capacity.simulatorSlots} simulators · ${resources.queue.length} queued`,
+    `  ${mark(resources.pressure.healthy)} Fleet resources · ${resources.capacity.used}/${resources.capacity.heavySlots} heavy · ${resources.capacity.simulatorUsed ?? resources.leases.filter((lease) => lease.kind === "simulator").length}/${resources.capacity.simulatorSlots} simulators · ${resources.queue.length} queued${resources.capacity.lightSlots === undefined ? "" : ` · ${resources.capacity.lightUsed ?? 0}/${resources.capacity.lightSlots} light, ${resources.lightQueue?.length ?? 0} queued`}`,
     ...(!resources.pressure.healthy ? [`    Pressure · ${resources.pressure.reason ?? "unavailable"}`] : []),
     ...resources.leases.map(
       (lease) =>
@@ -212,6 +212,13 @@ function formatResourceLines(resources: InstallDoctorReport["resources"]): strin
     ...resources.queue.map(
       (entry) =>
         `    Queued ${holder(entry)} · ${entry.kind}${entry.executable ? ` ${clean(entry.executable)}` : ""}${entry.deviceId ? ` ${clean(entry.deviceId)}` : ""}${entry.position ? ` · position ${entry.position}` : ""}${entry.estimatedWaitMs === undefined ? "" : entry.estimatedWaitMs === null ? " · wait unknown" : ` · estimated wait ${Math.ceil(entry.estimatedWaitMs / 1000)}s`}`,
+    ),
+    ...(resources.lightLeases ?? []).map(
+      (lease) => `    ${holder(lease)} · light ${clean(lease.executable)} · ${clean(lease.state)}`,
+    ),
+    ...(resources.lightQueue ?? []).map(
+      (entry) =>
+        `    Queued ${holder(entry)} · light${entry.executable ? ` ${clean(entry.executable)}` : ""}`,
     ),
   ];
 }

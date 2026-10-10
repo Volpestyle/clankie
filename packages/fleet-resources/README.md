@@ -35,9 +35,19 @@ admission, because a cold boot's burst outruns the one-minute load average.
 Heavy
 commands wait in a FIFO queue; tickets are removed on cancellation or a proven
 requester exit. Simulator requests never queue: they take a free slot when they
-ask or are told what holds the slots. High pressure delays heavy admission,
-refuses simulator admission with that reason and refuses new builders;
-unavailable native observations fail closed. A zero simulator limit refuses
+ask or are told what holds the slots. High pressure delays heavy admission
+and refuses simulator admission with that reason. Hire admission
+(`admitBuilder`) refuses only below the memory floor; unavailable native
+observations fail closed.
+
+`runHeavy` sizes each command with `heavyJobLane`. Focused checks (Vitest
+naming up to eight test files, `tsc` without `--build`, one package's
+`pnpm --filter … typecheck`) take the light lane: a second journal in
+`light/` with the same schema and native runner, so installs that predate it
+never read it. Its capacity equals `heavySlots`, its jobs are capped at two
+cores, and only the memory floor (not load) holds it, because the full gates
+it runs beside already answer to load. Status adds `capacity.lightSlots`,
+`capacity.lightUsed`, `lightLeases` and `lightQueue`. A zero simulator limit refuses
 simulator admission without disturbing the heavy queue.
 Python 3 and the shipped native helper are required for OS locking and
 process observations on macOS or Linux. Availability probes the helper

@@ -1,5 +1,6 @@
 import {
   createResourceGovernor,
+  heavyJobLane,
   resourceHolderIdentity,
   type FleetResourceGovernor,
 } from "@clankie/fleet-resources";
@@ -26,6 +27,7 @@ export async function runHeavyCommand(
     throw new Error("Usage: clankie heavy [--seat LABEL] [--holder ID] -- <command> [args...]");
   const governor = options.governor ?? createResourceGovernor();
   let waiting = false;
+  const lane = heavyJobLane(args[separator + 1]!, args.slice(separator + 2));
   try {
     return await governor.runHeavy(args[separator + 1]!, args.slice(separator + 2), {
       ...(seatId === undefined ? {} : { seatId }),
@@ -34,7 +36,9 @@ export async function runHeavyCommand(
         if (waiting) return;
         waiting = true;
         (options.stderr ?? process.stderr).write(
-          `clankie heavy: waiting for machine capacity (${snapshot.pressure.reason ?? "slots"}; ${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
+          lane === "light"
+            ? `clankie heavy: light lane waiting (${snapshot.capacity.lightUsed}/${snapshot.capacity.lightSlots} held, ${snapshot.lightQueue.length} queued)\n`
+            : `clankie heavy: waiting for machine capacity (${snapshot.pressure.reason ?? "slots"}; ${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
         );
       },
     });

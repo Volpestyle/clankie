@@ -1828,6 +1828,22 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                           `${roster.resources.capacity.simulatorUsed ?? roster.resources.leases.filter((lease) => lease.kind === "simulator").length}/${roster.resources.capacity.simulatorSlots}`,
                           "normal",
                         ),
+                        ...(roster.resources.capacity.lightSlots === undefined
+                          ? []
+                          : [
+                              s.line(
+                                "light slots",
+                                `${roster.resources.capacity.lightUsed ?? 0}/${roster.resources.capacity.lightSlots} · ${roster.resources.lightQueue?.length ?? 0} waiting`,
+                                "normal",
+                              ),
+                            ]),
+                        ...(roster.resources.lightLeases ?? []).map((lease) =>
+                          s.line(
+                            "resource holder",
+                            `${lease.seatId ?? (lease.pid === undefined ? "unidentified" : `pid ${lease.pid}`)}${lease.holderId ? ` / ${lease.holderId}` : ""} · light · ${lease.executable}`,
+                            "normal",
+                          ),
+                        ),
                         ...roster.resources.leases.map((lease) =>
                           s.line(
                             "resource holder",

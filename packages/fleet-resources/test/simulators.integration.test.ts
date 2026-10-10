@@ -924,6 +924,8 @@ it("two real heavy runners and a simulator use independent budgets in either adm
       simulatorSlots: 1,
       used: 2,
       simulatorUsed: 1,
+      lightSlots: 2,
+      lightUsed: 0,
     });
     expect(
       (await f.governor.snapshot()).leases
