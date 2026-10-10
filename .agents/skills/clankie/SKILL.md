@@ -97,6 +97,16 @@ not new assignments; no reply is needed. The acknowledgment includes the lead's
 short summary and resulting links when supplied. Transport acknowledgment of an
 event does not mark your report read by the lead.
 
+Never wait silently. When something only your lead or the owner can unblock
+stops you (a decision, a refused or broken tool, a failing check outside your
+change, missing access), tell your lead that same turn with `message_clankie`:
+what blocks you, what you tried, what you need and your recommendation. If the
+send returns uncertain, unconfirmed or `not_sent`, post the same blocker on your
+work item, which reaches the lead through the tracker, and check
+`message_clankie_status` again before your turn ends. Keep doing any unblocked
+work meanwhile. Never end a turn idle on a blocker your lead has not seen
+through one of those two routes.
+
 Ask your lead with `message_clankie`. Your harness's own ask-the-user prompt
 reaches the lead only on a managed seat that routes it; otherwise it waits
 unseen in your pane. Durable state (what landed and at which commit, evidence,
