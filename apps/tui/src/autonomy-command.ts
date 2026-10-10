@@ -30,7 +30,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
     name: "autonomy",
     aliases: [],
     description: "Set how many decisions Clankie takes on his own",
-    argumentHint: `[${AutonomyLevelSchema.options.join("|")}|clear]`,
+    argumentHint: "[off|low|high|full|clear]",
     takesArgument: true,
     async run(argument, shell): Promise<void> {
       if (level === undefined && goals === undefined) {
