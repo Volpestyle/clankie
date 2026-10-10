@@ -8,7 +8,7 @@ export async function integrationEnvironment(root: string): Promise<NodeJS.Proce
   const home = join(root, "home");
   await mkdir(home, { recursive: true, mode: 0o700 });
   const temp = await privateTemp(root);
-  let path = process.env.PATH;
+  let path = ownerPath(process.env.PATH);
   try {
     // Locate existing compiler binaries without installing or updating the owner's toolchain.
     // Calling a rustup shim under the new HOME would otherwise lose its default toolchain.
@@ -47,6 +47,24 @@ export async function integrationEnvironment(root: string): Promise<NodeJS.Proce
     CI: "1",
     LANG: "en_US.UTF-8",
   };
+}
+
+/**
+ * The owner's own PATH, as the service inherited it. A service launched
+ * through pnpm carries the pinned checkout's `node_modules/.bin` (and pnpm's
+ * node-gyp shim) at the front, once per relaunch; inheriting them made a
+ * batch's `pi` resolve to the service's bundled Pi SDK instead of the owner's
+ * install, and could run the pinned checkout's tools instead of the batch's.
+ * pnpm adds each batch worktree's own `.bin` when it runs that worktree's
+ * scripts (VUH-2057).
+ */
+export function ownerPath(path: string | undefined): string | undefined {
+  if (path === undefined) return undefined;
+  const injected = (entry: string) =>
+    /[\\/]node_modules[\\/]\.bin$/u.test(entry) || /[\\/]pnpm[\\/]dist[\\/]node-gyp-bin$/u.test(entry);
+  return [...new Set(path.split(delimiter).filter((entry) => entry !== "" && !injected(entry)))].join(
+    delimiter,
+  );
 }
 
 /**
