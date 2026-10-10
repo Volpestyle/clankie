@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { changePatchId, sourceFingerprint } from "../../../scripts/testing/landing-validity.mjs";
+import { changedLockfileImporters } from "../../../scripts/testing/lockfile-importers.mjs";
 
 // VUH-2024: a green landing gate survives a base move that touches nothing it
 // checked. Real git history and the real gate entrypoint; the recorded gate is
@@ -182,4 +183,44 @@ it("refuses a gate that was not green or predates selection recording", async ()
   expect(revalidate(repo.root, repo.base).verdict.reasons).toContain(
     "the recorded gate predates selection recording; run the gate",
   );
+});
+
+it("revalidates a manifest change against the tests that can see it, not Vitest's forced full rerun", async () => {
+  // VUH-2044: a changed package.json reruns every test, so the recorded graph
+  // spans the repository; the gate narrows it to the tests that load the change.
+  const repo = repository();
+  await recordGreenGate(repo.root, repo.base, repo.head, {
+    tests: {
+      testModules: ["apps/one/test/changed.test.ts", "apps/two/test/unrelated.test.ts"],
+      dependencies: [
+        "apps/one/src/changed.ts",
+        "apps/one/test/changed.test.ts",
+        "apps/two/src/unrelated.ts",
+        "apps/two/test/unrelated.test.ts",
+      ],
+      relevantDependencies: ["apps/one/src/changed.ts", "apps/one/test/changed.test.ts"],
+    },
+  });
+  const moved = moveMainAndRebase(repo, () =>
+    repo.write("apps/two/src/unrelated.ts", "export const unrelated = 2;\n"),
+  );
+  expect(revalidate(repo.root, moved)).toMatchObject({ status: 0, verdict: { valid: true, overlaps: [] } });
+});
+
+it("scopes a real lockfile change to the importers whose resolved dependencies changed", () => {
+  // Golden from history: 2245c30c8 added undici to apps/clankie and apps/tui only.
+  const repository = fileURLToPath(new URL("../../..", import.meta.url));
+  const show = (revision: string) =>
+    execFileSync("git", ["show", `${revision}:pnpm-lock.yaml`], {
+      cwd: repository,
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+    });
+  expect([...changedLockfileImporters(show("2245c30c8~1"), show("2245c30c8"))!].sort()).toEqual([
+    "apps/clankie",
+    "apps/tui",
+  ]);
+  const unchanged = show("2245c30c8");
+  expect(changedLockfileImporters(unchanged, unchanged)).toEqual(new Set());
+  expect(changedLockfileImporters(unchanged, "lockfileVersion: '10.0'\n")).toBeUndefined();
 });

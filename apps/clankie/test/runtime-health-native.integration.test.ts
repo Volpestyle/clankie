@@ -5,7 +5,6 @@ import { promisify } from "node:util";
 import type { Server as HttpServer } from "node:http";
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { performance } from "node:perf_hooks";
 import { serve } from "@hono/node-server";
 import { SettingsStore } from "@clankie/settings";
 import { OPERATOR_SEAT_EVENTS_PATH, RuntimeHealthSettingsSchema, type HerdrBinding } from "@clankie/protocol";
@@ -17,6 +16,7 @@ import { createCaptainMemory } from "../src/captain-memory.ts";
 import { createFileMemory } from "../src/memory.ts";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { localFleetProof, localProjectProof } from "../src/local-fleet-proof.ts";
+import { Worker } from "node:worker_threads";
 import { ExecutionConnections } from "../src/herdr-session.ts";
 import { RuntimeHealthObserver } from "../src/runtime-health.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
@@ -136,6 +136,7 @@ it.skipIf(process.platform !== "darwin")(
     );
     let hot = false;
     let burn: ReturnType<typeof setInterval> | undefined;
+    const burners: Worker[] = [];
     let observer: RuntimeHealthObserver;
     const body = await createClankieApp({
       captain,
@@ -219,11 +220,22 @@ it.skipIf(process.platform !== "darwin")(
       await until(async () => captain.operatorSeatReady!());
       hot = true;
       observer.start();
+      // Burn CPU time, not wall time: under machine load a wall-clock spin is
+      // descheduled and the sampler sees far less than the threshold. Extra
+      // spinning threads count toward process CPU (100% = one core), so the
+      // observed share stays above the threshold at any realistic load.
+      for (const _ of [0, 1]) {
+        const worker = new Worker("for(;;);", { eval: true });
+        burners.push(worker);
+      }
       burn = setInterval(() => {
         if (!hot) return;
-        const start = performance.now();
-        while (performance.now() - start < 25) Math.sqrt(performance.now());
-      }, 40);
+        const start = process.cpuUsage();
+        while (true) {
+          const used = process.cpuUsage(start);
+          if (used.user + used.system >= 25_000) break;
+        }
+      }, 5);
       const rows = async () =>
         (await readFile(notices, "utf8").catch(() => ""))
           .trim()
@@ -240,6 +252,7 @@ it.skipIf(process.platform !== "darwin")(
       expect(await rows()).toHaveLength(1);
       hot = false;
       clearInterval(burn);
+      await Promise.all(burners.splice(0).map((worker) => worker.terminate()));
       await until(
         async () => (await rows()).length === 2 && observer.snapshot().state === "healthy",
         fullDuration ? 60000 : 12000,
@@ -270,6 +283,7 @@ it.skipIf(process.platform !== "darwin")(
       await writeFile(join(logs, "proof-diagnostics.json"), JSON.stringify(diagnostics, null, 2));
       observer.stop();
       if (burn) clearInterval(burn);
+      await Promise.all(burners.splice(0).map((worker) => worker.terminate()));
       await captain.close();
       body.close();
       await link.close();

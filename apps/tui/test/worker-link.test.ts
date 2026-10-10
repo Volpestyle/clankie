@@ -1097,7 +1097,28 @@ it("two raw bridges sharing a pane claim at most one original POST", async () =>
   const second = rawReceiptBridge("seat", home, service.url);
   await Promise.all([first.init(), second.init()]);
   const results = await Promise.all([first.message(), second.message()]);
-  expect(results.map((r) => r.deliveryStage)).toEqual(["uncertain", "uncertain"]);
+  // The claim file is exclusive, so exactly one bridge reaches the server with an original. The
+  // loser reconciles by GET, and which of the two reaches the service first is the scheduler's
+  // choice: a lookup that lands before the original's POST seals that ID as definitively
+  // "unavailable"/not_sent (the POST then sees the seal), while one that lands after leaves it
+  // "uncertain". Both are the contract; nothing may report stored or reach the runner.
+  for (const result of results) {
+    expect(result).toMatchObject({ received: false });
+    expect(["uncertain", "unavailable"]).toContain(result.deliveryStage);
+  }
+  expect(service.seen.filter((r) => r.method === "POST")).toHaveLength(1);
+  expect(service.runner).not.toHaveBeenCalled();
+});
+it("a second raw bridge sequenced after the original's claim only reconciles it", async () => {
+  const service = await receiptService();
+  service.setPending();
+  const home = await linkedHome(service.url, true);
+  const first = rawReceiptBridge("fleet", home, service.url);
+  const second = rawReceiptBridge("seat", home, service.url);
+  await Promise.all([first.init(), second.init()]);
+  // Ordered, not timed: the original's POST has completed before the second bridge starts.
+  expect((await first.message()).deliveryStage).toBe("uncertain");
+  expect((await second.message()).deliveryStage).toBe("uncertain");
   expect(service.seen.filter((r) => r.method === "POST")).toHaveLength(1);
   expect(service.runner).not.toHaveBeenCalled();
 });

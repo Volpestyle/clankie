@@ -104,9 +104,9 @@ async function fixture(count: number) {
   cleanups.push(async () => {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    service.close();
+    await service.close();
     await store.close();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
   return { store, service, ids, env, root, serve };
 }

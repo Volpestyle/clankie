@@ -364,5 +364,5 @@ export interface ClankieApp {
     owner: import("../captain/conversation-owner.ts").ConversationOwner,
   ): boolean;
   stopBodyRequests(): Promise<void>;
-  close(): void;
+  close(): Promise<void>;
 }

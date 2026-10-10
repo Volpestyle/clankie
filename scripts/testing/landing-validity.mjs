@@ -105,7 +105,7 @@ export async function revalidateLanding({ root, report, base }) {
     reasons.push(`the gate typechecked everything (${report.typecheckScope.reason})`);
   const checked = new Set([
     ...report.change.files,
-    ...report.tests.dependencies,
+    ...(report.tests.relevantDependencies ?? report.tests.dependencies),
     ...report.typecheckScope.affectedInputs,
   ]);
   const overlaps = files.filter((path) => checked.has(path));
