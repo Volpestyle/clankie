@@ -51,7 +51,8 @@ CLI. This table is generated from the console's command registry.
 | `Ctrl+G`                      | Open the full live-agent modal; Up/Down selects, Enter opens its conversation, Escape closes                                                                                               |
 | `Ctrl+Y` in an expanded agent | Focus that agent's pane in its Herdr workspace (over SSH for another machine); never starts a Herdr server                                                                                 |
 | `Esc` in an expanded agent    | Return to the previous conversation; leave the worker running                                                                                                                              |
-| `Ctrl+O`                      | Toggle every tool and bash block between preview and full output                                                                                                                           |
+| `Ctrl+O`                      | Open or close every tool row and bash block at once                                                                                                                                        |
+| `Alt+Up` / `Alt+Down`         | Select a tool row, newest first; Enter opens or closes it, Escape or any other key returns to the prompt                                                                                   |
 | `Ctrl+Shift+F`                | Search the transcript                                                                                                                                                                      |
 | `Ctrl+Shift+V`                | Toggle the live voice-transcript overlay (same as `/vt`)                                                                                                                                   |
 | `Esc`                         | Interrupt the in-flight turn; the service aborts the model turn and settles the run as cancelled. A second `Esc`, or an older service, detaches the console instead and the turn continues |
@@ -59,7 +60,8 @@ CLI. This table is generated from the console's command registry.
 | `Ctrl+X` inside `/btw`        | Switch between the side conversation and the main thread, keeping both                                                                                                                     |
 | `!` on empty input            | Open the inline shell in the conversation's directory                                                                                                                                      |
 | `$`                           | Open the skill picker                                                                                                                                                                      |
-| Click a tool or bash block    | Toggle just that block                                                                                                                                                                     |
+| Hover or click a tool row     | Hovering highlights the row; clicking opens its full call and output beneath it, or closes it                                                                                              |
+| Click a bash block            | Toggle just that block                                                                                                                                                                     |
 | Click a herdr pane id         | Jump the session to that pane (same as `/jump`)                                                                                                                                            |
 | Mouse wheel, drag             | Scroll the transcript, select text                                                                                                                                                         |
 

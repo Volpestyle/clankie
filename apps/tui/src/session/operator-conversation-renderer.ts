@@ -13,7 +13,6 @@ import type { OperatorConversationEventSink, PendingOperatorPrompt } from "./ope
  */
 export interface OperatorConversationRenderTarget {
   renderHistory?(position: "replace" | "prepend", render: () => void): void;
-  endToolGroup?(): void;
   setPendingPrompts?(prompts: readonly PendingOperatorPrompt[]): void;
   insertUserMessage(text: string): void;
   insertAssistantMarkdown(text: string): void;
@@ -190,7 +189,6 @@ export function createOperatorConversationShellSink(
         // the words on screen but must stop owning the block, or the next
         // message would be typed into the middle of the last one.
         if (event.phase !== "accepted") {
-          shell.endToolGroup?.();
           shell.clearLiveAssistant();
         }
         if (!options.historical) shell.refreshStatus(`conversation turn ${event.phase}`);

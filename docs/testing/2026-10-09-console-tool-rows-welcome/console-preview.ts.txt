@@ -1,0 +1,30 @@
+// Drives the real ClankieFaceShell with a fixed transcript, for before/after captures.
+// usage: node console-preview.ts <checkout root> [fresh|transcript]
+const root = process.argv[2];
+const mode = process.argv[3] ?? "transcript";
+const { ClankieFaceShell } = await import(`${root}/apps/tui/src/shell/shell.ts`);
+const shell = new ClankieFaceShell({
+  commands: [],
+  cwd: `${root}/apps/tui`,
+  env: process.env,
+  bannerFields: { title: "Clankie" },
+  footerData: () => ({ model: "claude-opus-5-5 · medium", title: "Console preview" }),
+});
+shell.start();
+if (mode === "transcript") {
+  shell.insertUserMessage("Where does the console draw tool calls?");
+  const calls: [string, string, object, string, boolean][] = [
+    ["t1", "grep", { pattern: "beginToolCall", path: "apps/tui/src" }, "apps/tui/src/shell/shell.ts:657\napps/tui/src/session/operator-conversation-renderer.ts:172", false],
+    ["t2", "read", { path: "apps/tui/src/shell/shell.ts", offset: 640, limit: 40 }, Array.from({ length: 40 }, (_, i) => `line ${640 + i}`).join("\n"), false],
+    ["t3", "read", { path: "apps/tui/src/shell/missing.ts" }, "ENOENT: no such file or directory, open 'apps/tui/src/shell/missing.ts'", true],
+    ["t4", "bash", { command: "rg -n 'ToolExecutionComponent' apps/tui/src | wc -l" }, "6", false],
+    ["t5", "linear_get_issue", { id: "VUH-2022" }, '{"outcome":"ok","content":"{\\"identifier\\":\\"VUH-2022\\",\\"state\\":\\"In Progress\\"}"}', false],
+  ];
+  for (const [id, name, args, detail, failed] of calls) {
+    shell.beginToolCall(id, name, JSON.stringify(args));
+    shell.completeToolCall(id, name, { failed, detail });
+  }
+  shell.insertAssistantMarkdown(
+    "Tool calls arrive through `beginToolCall` and `completeToolCall` in `shell.ts`; the renderer maps each durable tool event onto them.",
+  );
+}

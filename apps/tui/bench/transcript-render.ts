@@ -1,8 +1,8 @@
-/** Compare the same Pi read blocks before and after exploration grouping. */
+/** Compare the same Pi read blocks drawn bare and as Clankie's one-line tool rows. */
 import { performance } from "node:perf_hooks";
 import { ProcessTerminal, TuiAltScreen, type Component } from "@earendil-works/pi-tui";
 import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { ClankieToolGroup } from "../src/shell/tool-group.ts";
+import { ClankieToolRow } from "../src/shell/tool-row.ts";
 import { createClankieFaceAnsiTheme } from "../src/face/clankie-face-theme.ts";
 
 initTheme("dark");
@@ -20,7 +20,7 @@ function measure(blocks: readonly Component[]): { rows: number; milliseconds: nu
 }
 for (const count of counts) {
   const plain: ToolExecutionComponent[] = [];
-  const grouped: ClankieToolGroup[] = [];
+  const rows: ClankieToolRow[] = [];
   for (let i = 0; i < count; i++) {
     const args = { path: `src/file-${i}.ts` };
     const block = new ToolExecutionComponent("read", `call-${i}`, args, {}, undefined, ui, process.cwd());
@@ -28,10 +28,9 @@ for (const count of counts) {
     block.setArgsComplete();
     block.updateResult({ content: [{ type: "text", text: "Read output\n".repeat(10) }], isError: false });
     plain.push(block);
-    if (i % 5 === 0) grouped.push(new ClankieToolGroup(ansi));
-    const group = grouped.at(-1)!;
-    group.add(block, "read", args);
-    group.complete(block, false);
+    const row = new ClankieToolRow(block, "read", args, { ansi, unicode: true });
+    row.complete(false, undefined);
+    rows.push(row);
   }
-  console.log(JSON.stringify({ blocks: count, plain: measure(plain), grouped: measure(grouped) }));
+  console.log(JSON.stringify({ blocks: count, plain: measure(plain), rows: measure(rows) }));
 }

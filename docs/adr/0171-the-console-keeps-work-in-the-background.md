@@ -1,6 +1,7 @@
 # 0171. The console keeps work in the background
 
-Accepted 2026-09-20.
+Accepted 2026-09-20. Amended 2026-10-09: tool calls render one per row; see
+[Amendment](#amendment-2026-10-09-one-row-per-tool-call).
 
 ## Context
 
@@ -56,3 +57,23 @@ completions, turn boundaries, and preview bounds. The prompt-session test
 covers concurrent startup admissions, settlement racing receipts, and removal
 by run ID. Footer tests cover compact and narrow layouts. The transcript
 benchmark compares the same Pi read components ungrouped and grouped.
+
+## Amendment 2026-10-09: one row per tool call
+
+VUH-2022 models the console on Prime Agent's transcript. The Exploring /
+Explored group is replaced: every tool call, exploration or not, renders as
+one row with a status mark, its name and its main argument. Hovering
+highlights a row and clicking opens the original Pi component beneath it;
+`Alt+↑`/`Alt+↓` select a row and Enter toggles it, and `Ctrl+O` still toggles
+every row. A failed row keeps its first error line visible while closed. The
+rows keep work in the background as the groups did, but each call stays
+individually reachable, which a three-line group summary could not offer. The
+app keeps its own condensed tool summaries with an inspect drawer.
+
+```mermaid
+flowchart TD
+    events[Tool events] --> row[One-line tool row]
+    row -->|hover| lit[Highlighted]
+    row -->|click, Enter on selection, Ctrl+O| pi[Pi tool component beneath the row]
+    row -->|failed| error[First error line stays visible]
+```

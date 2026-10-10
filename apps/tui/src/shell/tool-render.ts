@@ -16,6 +16,13 @@
 import { formatToolOutput } from "@clankie/protocol/tool-output";
 import { Text, type Component } from "@earendil-works/pi-tui";
 import {
+  createBashToolDefinition,
+  createEditToolDefinition,
+  createFindToolDefinition,
+  createGrepToolDefinition,
+  createLsToolDefinition,
+  createReadToolDefinition,
+  createWriteToolDefinition,
   keyHint,
   type Theme,
   type ToolDefinition,
@@ -23,20 +30,36 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 /**
- * pi renders these itself (`core/tools/index.ts`) and its definitions are the
- * better-looking ones, so they keep the row. A tool pi adds later falls through
- * to the generic renderer, which is duller than a bespoke one but never worse
- * than the fallback it replaces.
+ * pi's own definitions (`core/tools/index.ts`) draw these better than the
+ * generic renderer, but `ToolExecutionComponent` only uses one it is handed.
+ * A tool pi adds later falls through to the generic renderer, which is duller
+ * than a bespoke one but never worse than the fallback it replaces.
  */
-const PI_BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
-  "bash",
-  "edit",
-  "find",
-  "grep",
-  "ls",
-  "read",
-  "write",
+const PI_BUILT_IN_TOOLS: ReadonlyMap<string, (cwd: string) => unknown> = new Map<
+  string,
+  (cwd: string) => unknown
+>([
+  ["bash", createBashToolDefinition],
+  ["edit", createEditToolDefinition],
+  ["find", createFindToolDefinition],
+  ["grep", createGrepToolDefinition],
+  ["ls", createLsToolDefinition],
+  ["read", createReadToolDefinition],
+  ["write", createWriteToolDefinition],
 ]);
+
+/** pi's own renderer for its built-in tools; only its render half is ever called here. */
+export function piToolRenderer(name: string, cwd: string): ToolDefinition | undefined {
+  const definition = PI_BUILT_IN_TOOLS.get(name)?.(cwd) as ToolDefinition | undefined;
+  const renderCall = definition?.renderCall;
+  if (definition === undefined || renderCall === undefined || name !== "bash") return definition;
+  // pi times bash from when this console saw it start, so replayed history
+  // would read "Took 0.0s"; tool events carry no real duration to show instead.
+  return {
+    ...definition,
+    renderCall: (args, theme, context) => renderCall(args, theme, { ...context, executionStarted: false }),
+  };
+}
 
 /** Matches pi's own `FALLBACK_PREVIEW_LINES`, so collapsed rows stay a uniform height. */
 const PREVIEW_LINES = 10;

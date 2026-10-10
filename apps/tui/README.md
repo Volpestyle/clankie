@@ -312,8 +312,11 @@ credential holder.
   is clickable for the same jump. Only a refusal reaches the transcript; a
   working jump moves the session, which says it better. `/status` lists the
   pane ids to aim at.
-- `!` on empty input opens the inline shell. `Ctrl+O` toggles tool and bash
-  output between preview and full; clicking a block toggles just that one.
+- `!` on empty input opens the inline shell. Each tool call is one row:
+  hovering highlights it, and clicking opens its full call and output beneath
+  it. `Alt+↑`/`Alt+↓` select a row from the keyboard and Enter opens or closes
+  it. `Ctrl+O` opens or closes every tool row and bash block at once; clicking
+  a bash block toggles just that one.
   Esc interrupts an in-flight turn: the service aborts Clankie's live model
   turn and the run settles as `cancelled` in the durable log. When the run
   cannot be cancelled (an older service, or it already settled) — or on a
@@ -325,11 +328,18 @@ credential holder.
 
 ## Transcript rendering
 
-Adjacent `read`, `grep`, `find`, and `ls` calls share an **Exploring / Explored**
-block. The collapsed view shows the last three operations; click or `Ctrl+O`
-expands the original Pi tool components. Failed output stays visible when
-collapsed. Messages, other tools, and turn boundaries separate groups; shell
-commands are never classified by guessing what their text does.
+A conversation opens on Clankie's welcome: his lead look in terminal pixels
+(`face/clankie-sprout.ts`, copied from the desktop pet's idle frame) beside his
+name and how to start. The look follows the owner's `appearance.leadSkin`
+setting; an id the console does not bundle draws his default sprout. Narrow
+or short terminals get one condensed line. The input line starts with a `❯`
+caret (`!` in shell mode).
+
+Every tool call renders as one row: a status mark, the tool's name, and its
+main argument (the command, path, or pattern). Opening a row shows the original
+Pi tool component beneath it. A failed row keeps its first error line visible
+while closed. Hover needs the terminal's all-motion mouse reporting, which pi
+turns off under tmux and screen; selection from the keyboard works everywhere.
 
 Hired-seat results unwrap native Codex text parts and MCP envelopes. Exec results
 show the command, exit code (or running session), elapsed seconds, and output on
@@ -355,7 +365,7 @@ re-pays its own cost every frame.
 Measure before and after any change to the render path:
 
 ```bash
-node apps/tui/bench/transcript-render.ts          # plain Pi vs grouped, 10..500 read blocks
+node apps/tui/bench/transcript-render.ts          # plain Pi vs tool rows, 10..500 read blocks
 node apps/tui/bench/transcript-render.ts 1000     # a specific scrollback size
 ```
 

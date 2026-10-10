@@ -1,14 +1,14 @@
 /**
- * Clankie's welcome banner.
- *
- * A compact text header with identity on one line and working context on the next.
+ * Clankie's welcome screen, the first thing in every transcript: his lead look
+ * drawn in terminal pixels beside his name and how to start.
  *
  * Degrades on capability: truecolor -> 256-color -> no color, and a Unicode
- * support check. On narrow terminals it collapses to a single condensed line
+ * support check. Narrow or short terminals get one condensed line instead,
  * so the header never wraps into noise.
  */
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { paintClankieFaceText, type ClankieFaceColor } from "./clankie-face-theme.ts";
+import { ASCII_SPROUT, leadSprite, renderSprite, spriteColumns } from "./clankie-sprout.ts";
 
 export type BannerCapabilities = {
   /** Emit ANSI color (false for NO_COLOR / non-TTY / dumb terminals). */
@@ -23,19 +23,36 @@ export type BannerCapabilities = {
 
 export type BannerFields = {
   title: string;
+  /** `appearance.leadSkin`; ids the console does not bundle draw the default sprout. */
+  leadSkin?: string | undefined;
 };
+
+/** The full welcome needs this many terminal rows; fewer gets the condensed line. */
+const WELCOME_MIN_ROWS = 26;
+const WELCOME_MIN_COLUMNS = 44;
 
 export class ClankieBannerComponent implements Component {
   private readonly caps: BannerCapabilities;
-  private readonly fields: BannerFields;
+  private fields: BannerFields;
+  private readonly terminalRows: () => number;
   private visible: boolean;
   private topPaddingRows = 1;
   private bottomPaddingRows = 1;
 
-  constructor(fields: BannerFields, caps: BannerCapabilities, visible = true) {
+  constructor(
+    fields: BannerFields,
+    caps: BannerCapabilities,
+    visible = true,
+    terminalRows: () => number = () => Number.POSITIVE_INFINITY,
+  ) {
     this.fields = fields;
     this.caps = caps;
     this.visible = visible;
+    this.terminalRows = terminalRows;
+  }
+
+  setLeadSkin(leadSkin: string | undefined): void {
+    this.fields = { ...this.fields, leadSkin };
   }
 
   setVisible(visible: boolean): void {
@@ -56,7 +73,11 @@ export class ClankieBannerComponent implements Component {
   render(width: number): string[] {
     if (!this.visible) return [];
     const renderWidth = Math.max(1, width);
-    const lines = renderClankieBanner(this.fields, { ...this.caps, columns: renderWidth });
+    const lines = renderClankieBanner(
+      this.fields,
+      { ...this.caps, columns: renderWidth },
+      this.terminalRows(),
+    );
     return [
       ...Array.from({ length: this.topPaddingRows }, () => ""),
       ...lines.map((line) => truncateToWidth(line, renderWidth, "", true)),
@@ -65,14 +86,39 @@ export class ClankieBannerComponent implements Component {
   }
 }
 
-export function renderClankieBanner(fields: BannerFields, caps: BannerCapabilities): string[] {
-  if (caps.columns < 44) {
+export function renderClankieBanner(
+  fields: BannerFields,
+  caps: BannerCapabilities,
+  terminalRows = Number.POSITIVE_INFINITY,
+): string[] {
+  if (caps.columns < WELCOME_MIN_COLUMNS || terminalRows < WELCOME_MIN_ROWS) {
     return renderCondensed(fields, caps);
   }
+  const sprite = leadSprite(fields.leadSkin);
+  const art = caps.unicode ? renderSprite(sprite, caps) : [...ASCII_SPROUT];
+  const artWidth = caps.unicode
+    ? spriteColumns(sprite)
+    : Math.max(...ASCII_SPROUT.map((line) => line.length));
+  const dim = (text: string) => paint(text, { fg: "dim" }, caps);
+  const text = [
+    paint(fields.title.toLowerCase(), { fg: "accent", bold: true }, caps),
+    "",
+    dim("Ask for anything, or type / for commands."),
+    dim(`Click a tool row to open it ${caps.unicode ? "·" : "-"} ctrl+o opens them all.`),
+  ];
+  // The words sit beside his face, not his sprout.
+  const textTop = Math.max(0, Math.floor((art.length - text.length) / 2) + (caps.unicode ? 1 : 0));
+  return art.map((line, row) => {
+    const words = text[row - textTop];
+    if (words === undefined || words === "") return ` ${line}`;
+    const gap = " ".repeat(Math.max(0, artWidth - visibleColumns(line)) + 4);
+    return ` ${line}${gap}${words}`;
+  });
+}
 
-  const mascot = paint(clankieMascot(caps), { fg: "accent", bold: true }, caps);
-  const name = paint(fields.title.toLowerCase(), { fg: "accent", bold: true }, caps);
-  return [` ${mascot}  ${name}`, renderRule(caps)];
+function visibleColumns(line: string): number {
+  // oxlint-disable-next-line no-control-regex -- strips the sprite's SGR colors
+  return [...line.replace(/\x1b\[[0-9;]*m/gu, "")].length;
 }
 
 /** A full-width colored rule that underlines the header block. */

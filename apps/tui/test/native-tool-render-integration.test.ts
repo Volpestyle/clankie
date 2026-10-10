@@ -44,26 +44,43 @@ function renderTranscript(jsonl: string) {
         detail: entry.detail,
       });
   }
+  const text = (width = 120) => stripVTControlCharacters(view.chat.render(width).join("\n"));
+  const expand = () => view.routeInput("\x0f");
   return {
-    text: (width = 120) => stripVTControlCharacters(view.chat.render(width).join("\n")),
-    expand: () => view.routeInput("\x0f"),
+    text,
+    expand,
+    /** Tool rows are one line until opened; decoded results show beneath an opened row. */
+    opened: (width = 120) => {
+      expand();
+      return text(width);
+    },
   };
 }
 
 describe("native seat tool results in the real shell", () => {
-  it("matches the retained collapsed and expanded native-seat evidence", () => {
+  it("shows the retained expanded native-seat evidence beneath opened rows", () => {
     const evidence = (name: string) =>
       readFileSync(new URL(`../../../docs/testing/vuh-1661-tool-results/${name}`, import.meta.url), "utf8");
     const view = renderTranscript(evidence("native-fixture.jsonl"));
-    const text = () =>
-      view
-        .text(100)
+    const lines = (text: string) =>
+      text
         .split("\n")
         .map((line) => line.trimEnd())
-        .join("\n") + "\n";
-    expect(text()).toBe(evidence("collapsed.txt"));
-    view.expand();
-    expect(text()).toBe(evidence("expanded.txt"));
+        .filter((line) => line !== "");
+    // VUH-2022: closed, each call is one row.
+    expect(lines(view.text(100))).toEqual([
+      " ✓ exec_command · pnpm --filter @clankie/tui typecheck",
+      " ✓ mcp__clankie__message_clankie · text=Progress",
+      " ✓ exec_command · example of long output",
+    ]);
+    // Opened, every line of the retained VUH-1661 render appears in order.
+    const opened = lines(view.opened(100));
+    let at = 0;
+    for (const line of lines(evidence("expanded.txt"))) {
+      at = opened.indexOf(line, at);
+      expect(at, line).toBeGreaterThanOrEqual(0);
+      at += 1;
+    }
   });
 
   it("unwraps input_text and repeated JSON encoding, then shows command, exit, time and actual newlines", () => {
@@ -72,7 +89,7 @@ describe("native seat tool results in the real shell", () => {
     const view = renderNative(
       JSON.stringify([{ type: "input_text", text: JSON.stringify(JSON.stringify(exec)) }]),
     );
-    const text = view.text();
+    const text = view.opened();
     expect(text).toContain("Command: pnpm typecheck");
     expect(text).toContain("exit 0 · 0.4s");
     for (const line of output.trimEnd().split("\n")) expect(text).toContain(line);
@@ -81,17 +98,16 @@ describe("native seat tool results in the real shell", () => {
     expect(text).not.toContain('\\"');
   });
 
-  it("keeps long output collapsed and reveals the ending through the existing Ctrl+O", () => {
+  it("keeps long output closed and reveals all of it through the existing Ctrl+O", () => {
     const output = Array.from({ length: 25 }, (_, index) => `output line ${index}`).join("\n");
     const view = renderNative([
       { type: "input_text", text: JSON.stringify({ exit_code: 1, wall_time_seconds: 2, output }) },
     ]);
-    expect(view.text()).toContain("exit 1 · 2s");
-    expect(view.text()).toContain("17 more lines");
-    expect(view.text()).not.toContain("output line 24");
-    view.expand();
-    expect(view.text()).toContain("output line 24");
-    expect(view.text()).not.toContain("more lines");
+    expect(view.text()).not.toContain("output line 0");
+    const opened = view.opened();
+    expect(opened).toContain("exit 1 · 2s");
+    expect(opened).toContain("output line 24");
+    expect(opened).not.toContain("more lines");
   });
 
   it("keeps a yielded command's running session and a finished empty output visible", () => {
@@ -101,12 +117,12 @@ describe("native seat tool results in the real shell", () => {
           type: "input_text",
           text: JSON.stringify({ session_id: 20810, wall_time_seconds: 1, output: "still working" }),
         },
-      ]).text(),
+      ]).opened(),
     ).toContain("running · session 20810 · 1s");
     expect(
       renderNative([
         { type: "input_text", text: JSON.stringify({ exit_code: 0, wall_time_seconds: 0.1, output: "" }) },
-      ]).text(),
+      ]).opened(),
     ).toContain("(no output)");
   });
 
@@ -129,9 +145,9 @@ describe("native seat tool results in the real shell", () => {
       "mcp__clankie__message_clankie",
       { text: "Progress" },
     );
-    expect(view.text()).toContain("report stored");
-    expect(view.text()).not.toContain("fixture-delivery");
-    view.expand();
+    const opened = view.opened();
+    expect(opened).toContain("report stored");
+    expect(opened).not.toContain("fixture-delivery");
     expect(view.text()).toContain("report stored");
     expect(view.text()).not.toContain("deliveryStage");
   });
@@ -141,7 +157,7 @@ describe("native seat tool results in the real shell", () => {
     '[{"type":"input_text","text":"truncated',
     '{"output":"partial',
   ])("retains unparseable payload %s", (output) => {
-    for (const line of output.split("\n")) expect(renderNative(output).text()).toContain(line);
+    for (const line of output.split("\n")) expect(renderNative(output).opened()).toContain(line);
   });
 
   it("keeps unknown blocks, arbitrary JSON and text parts in order", () => {

@@ -3,13 +3,14 @@
  * asserts the basic wiring: setup flow idle, default layout, and the console
  * command set feeding the typeahead/workbench.
  */
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { buildConsoleCommands } from "../src/commands.ts";
 import { ClankieFaceShell, clickedTranscriptBlock } from "../src/shell/shell.ts";
 import { OperatorConversationSendError } from "../src/session/operator-conversations.ts";
 
 describe("shell assembly", () => {
-  it("groups adjacent exploration, preserves errors and expands through Ctrl+O", () => {
+  it("renders one row per tool call that opens individually from the keyboard or all through Ctrl+O", () => {
     const shell = new ClankieFaceShell({
       commands: [],
       cwd: process.cwd(),
@@ -20,30 +21,39 @@ describe("shell assembly", () => {
       chat: { children: unknown[]; render(width: number): string[] };
       routeInput(data: string): unknown;
     };
-    const render = () => internal.chat.render(80).join("\n");
+    const render = () => stripVTControlCharacters(internal.chat.render(80).join("\n"));
     shell.beginToolCall("a", "read", '{"path":"first.ts"}');
-    shell.completeToolCall("a", "read", { failed: false, detail: "hidden contents" });
-    shell.clearLiveAssistant(); // A cleared streaming draft is not a turn boundary.
+    expect(render()).toContain("read · first.ts · running");
+    shell.completeToolCall("a", "read", { failed: false, detail: "first contents" });
     shell.beginToolCall("b", "grep", '{"pattern":"needle","path":"src"}');
-    expect(internal.chat.children).toHaveLength(1);
-    expect(render()).toContain("Exploring");
     shell.completeToolCall("b", "grep", { failed: true, detail: "permission denied" });
-    expect(render()).toContain("Explored");
-    expect(render()).toContain("permission denied");
-    expect(render()).not.toContain("hidden contents");
-    const group = internal.chat.children[0] as { render(width: number): string[] };
-    expect(group.render(80)).toBe(group.render(80));
+    shell.beginToolCall("c", "bash", '{"command":"echo one"}');
+    shell.completeToolCall("c", "bash", { failed: false, detail: "shell output" });
+    // Closed rows: one line each, stacked, with only a failure's first line beneath.
+    expect(
+      render()
+        .split("\n")
+        .filter((line) => line.trim() !== ""),
+    ).toEqual([
+      " ✓ read · first.ts",
+      " ✗ grep · needle · failed",
+      "   ╰ permission denied",
+      " ✓ bash · echo one",
+    ]);
+    expect(render()).not.toContain("first contents");
+
+    // Alt+Up selects the newest row, again the one before it; Enter opens only that one.
+    internal.routeInput("\x1b[1;3A");
+    internal.routeInput("\x1b[1;3A");
+    expect(render()).toContain("grep · needle · failed  enter to open");
+    internal.routeInput("\r");
+    expect(render()).toContain("enter to close");
+    expect(render()).not.toContain("shell output");
+    internal.routeInput("\x1b");
+    expect(render()).not.toContain("enter to");
+
     internal.routeInput("\x0f");
-    expect(render()).toContain("hidden contents");
-    shell.endToolGroup();
-    shell.beginToolCall("c", "read", '{"path":"next-turn.ts"}');
-    expect(internal.chat.children).toHaveLength(2);
-    shell.completeToolCall("c", "read", { failed: false, detail: "next contents" });
-    shell.insertAssistantMarkdown("A boundary");
-    shell.completeToolCall("replay", "read", { failed: false, detail: "restored contents" });
-    expect(render()).toContain("restored contents");
-    shell.beginToolCall("bash", "bash", '{"command":"cat first.ts"}');
-    shell.completeToolCall("bash", "bash", { failed: false, detail: "shell output" });
+    expect(render()).toContain("first contents");
     expect(render()).toContain("shell output");
   });
 

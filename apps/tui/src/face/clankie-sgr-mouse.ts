@@ -1,4 +1,4 @@
-type ClankieSgrMouseKind = "press" | "drag" | "release" | "wheel";
+type ClankieSgrMouseKind = "press" | "drag" | "move" | "release" | "wheel";
 
 export type ClankieSgrMouseEvent = {
   readonly kind: ClankieSgrMouseKind;
@@ -38,7 +38,10 @@ export function parseClankieSgrMouse(data: string): ClankieSgrMouseEvent | undef
   const kind: ClankieSgrMouseKind = release
     ? "release"
     : (button & MOTION_FLAG) === MOTION_FLAG
-      ? "drag"
+      ? // Motion with no button held (low bits 3) is the pointer moving: hover.
+        (button & 3) === 3
+        ? "move"
+        : "drag"
       : "press";
   return { button, col, kind, release, row };
 }

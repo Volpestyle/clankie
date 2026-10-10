@@ -29,6 +29,8 @@ import {
 import { loadConfig, type ClankieConfig } from "@clankie/model-provider";
 import { SettingsStore } from "@clankie/settings";
 import type { HerdrBinding, OperatorConversationContextUsage } from "@clankie/protocol";
+import { APPEARANCE_SETTINGS_PATH, AppearanceSettingsSnapshotSchema } from "@clankie/protocol/owner-settings";
+import { ownerSettingsApi } from "./command/owner-settings-api.ts";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
 import {
@@ -814,6 +816,11 @@ if (conversationSelection.conversationId !== undefined) {
   }
 }
 shell.start();
+// The welcome wears the owner's chosen look (ADR 0248); unreadable or unknown means his default sprout.
+void ownerSettingsApi(brokeredCommands)
+  .then((api) => api.get(APPEARANCE_SETTINGS_PATH, AppearanceSettingsSnapshotSchema))
+  .then((snapshot) => shell.setLeadSkin(snapshot.appearance.leadSkin))
+  .catch(() => undefined);
 if (seatEnv !== undefined && seatPaneId !== undefined) {
   void reportHerdrMetadata({
     source: "clankie",

@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "after-click.png",
+      "size": 130489,
+      "sha256": "c72663664ed8644b74f15dd3a6adc1d54624be2efe65801104f1197548ea5517",
+      "url": "clankie://evidence/sha256/c72663664ed8644b74f15dd3a6adc1d54624be2efe65801104f1197548ea5517"
+    },
+    {
+      "path": "after-fresh.png",
+      "size": 51644,
+      "sha256": "68bd9794295214ede98a5dbc1977953df322e9ea0b05c64a5f414f33ae6af04a",
+      "url": "clankie://evidence/sha256/68bd9794295214ede98a5dbc1977953df322e9ea0b05c64a5f414f33ae6af04a"
+    },
+    {
+      "path": "after-hover.png",
+      "size": 132069,
+      "sha256": "63df7d9e71bf188b0e106b5d36695a48fdcd59b6fd2976e8dd9e61aa80d94f7e",
+      "url": "clankie://evidence/sha256/63df7d9e71bf188b0e106b5d36695a48fdcd59b6fd2976e8dd9e61aa80d94f7e"
+    },
+    {
+      "path": "after-keyboard-open.png",
+      "size": 143269,
+      "sha256": "659a22612cdecce578e28d5e70f9587a7b819c3bf5867034ceac4524248aafda",
+      "url": "clankie://evidence/sha256/659a22612cdecce578e28d5e70f9587a7b819c3bf5867034ceac4524248aafda"
+    },
+    {
+      "path": "after-keyboard-select.png",
+      "size": 143821,
+      "sha256": "1fa9bbb4e0d324f8e78813200fd0efbffb26626e9b8d330a0b3c73fd0d1b1136",
+      "url": "clankie://evidence/sha256/1fa9bbb4e0d324f8e78813200fd0efbffb26626e9b8d330a0b3c73fd0d1b1136"
+    },
+    {
+      "path": "after-transcript.png",
+      "size": 129275,
+      "sha256": "47f3b57c3a5cd87a9b8f276b205ba7a0b5fd936f3ea69daaab1bb0998aec2740",
+      "url": "clankie://evidence/sha256/47f3b57c3a5cd87a9b8f276b205ba7a0b5fd936f3ea69daaab1bb0998aec2740"
+    },
+    {
+      "path": "before-fresh.png",
+      "size": 26992,
+      "sha256": "7859c7091401fb5db88de77d3991137df7c7e60ef7478d08b703243d99341e3a",
+      "url": "clankie://evidence/sha256/7859c7091401fb5db88de77d3991137df7c7e60ef7478d08b703243d99341e3a"
+    },
+    {
+      "path": "before-transcript.png",
+      "size": 146038,
+      "sha256": "cfcfae922c15eacd29deb990dccb2ec6b94028b9fd7d712f44afbf7ecc6b9520",
+      "url": "clankie://evidence/sha256/cfcfae922c15eacd29deb990dccb2ec6b94028b9fd7d712f44afbf7ecc6b9520"
+    }
+  ]
+}

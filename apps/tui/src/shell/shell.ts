@@ -5,8 +5,9 @@
  * selection, Ctrl+Shift+F search) above a dock that pins the working
  * indicator, editor, typeahead, and footer to the bottom of the terminal.
  * Messages render with pi's own components (user boxes, assistant markdown,
- * bordered tool executions), clicking a tool or bash block toggles its
- * output between preview and full, and clicking a herdr pane id he wrote
+ * tool calls one per row), hovering a tool row highlights it, clicking a
+ * tool row opens or closes it (Alt+↑/↓ then Enter from the keyboard),
+ * clicking a bash block toggles its output, and clicking a herdr pane id he wrote
  * jumps the session to that pane. Clankie's banner, slash-command typeahead,
  * Ctrl+/ workbench, guided-flow modals, and inline `!` shell escape stay
  * intact. Dynamic data flows in through `FaceShellOptions` (commands,
@@ -18,7 +19,6 @@ import type { LiveAgent } from "../observation/herdr-roster.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   Container,
-  Editor,
   isKeyRelease,
   Key,
   Loader,
@@ -46,10 +46,11 @@ import {
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { ClankieBannerComponent, type BannerFields } from "../face/clankie-banner.ts";
 import { isClankieLeftMouseButton, parseClankieSgrMouse } from "../face/clankie-sgr-mouse.ts";
-import { ClankieToolGroup } from "./tool-group.ts";
+import { ClankieToolRow } from "./tool-row.ts";
+import { ClankieEditor } from "./editor.ts";
 import { ClankiePendingPrompts } from "./pending-prompts.ts";
 import type { PendingOperatorPrompt } from "../session/operator-conversations.ts";
-import { genericToolRenderer } from "./tool-render.ts";
+import { genericToolRenderer, piToolRenderer } from "./tool-render.ts";
 import {
   formatHerdrJumpResult,
   herdrPaneRefAtColumn,
@@ -303,9 +304,13 @@ export class ClankieFaceShell {
   private readonly freshPageTail = new Container();
   private historyLoading = false;
   private readonly statusContainer = new Container();
-  private readonly editor: Editor;
+  private readonly editor: ClankieEditor;
   private readonly pendingPrompts: ClankiePendingPrompts;
-  private readonly toolGroups = new WeakMap<ToolExecutionComponent, ClankieToolGroup>();
+  private readonly toolRows = new WeakMap<ToolExecutionComponent, ClankieToolRow>();
+  /** The tool row under the mouse pointer. */
+  private hoveredToolRow: ClankieToolRow | undefined;
+  /** The tool row Alt+↑/↓ selected; Enter opens or closes it. */
+  private selectedToolRow: ClankieToolRow | undefined;
   private readonly commandTypeaheadPanel: ClankieCommandTypeaheadPanel;
   private readonly footer: ClankieFooterComponent;
   private readonly liveAgents: LiveAgentStrip;
@@ -401,6 +406,7 @@ export class ClankieFaceShell {
       options.bannerFields,
       this.theme.capabilities,
       this.headerVisibleState,
+      () => this.tui.terminal.rows,
     );
     this.transcriptScrollView = new ConversationScrollView(this.document, () => this.loadOlderHistory(), {
       follow: "end",
@@ -410,7 +416,17 @@ export class ClankieFaceShell {
       scrollbarThumbStyle: selectionBg,
     });
     this.pendingPrompts = new ClankiePendingPrompts(this.theme.ansi);
-    this.editor = new Editor(this.tui, this.theme.editorTheme, { autocompleteMaxVisible: 12 });
+    this.editor = new ClankieEditor(this.tui, this.theme.editorTheme, {
+      autocompleteMaxVisible: 12,
+      // Shell mode and an agent's conversation tint the caret like the border; otherwise it is his accent.
+      caret: () => {
+        if (this.bashMode) return this.editorBorder()("!");
+        const glyph = caps.unicode ? "❯" : ">";
+        return this.options.expandedAgent?.() === undefined
+          ? this.theme.ansi.accent(glyph)
+          : this.editorBorder()(glyph);
+      },
+    });
     this.commandTypeaheadPanel = new ClankieCommandTypeaheadPanel(
       options.commands,
       this.theme.commandUiTheme,
@@ -637,11 +653,6 @@ export class ClankieFaceShell {
     this.liveAssistantBlock = undefined;
   }
 
-  endToolGroup(): void {
-    const last = this.chat.children.at(-1);
-    if (last instanceof ClankieToolGroup) last.sealed = true;
-  }
-
   insertReasoning(text: string): void {
     this.appendChatBlock(
       new AssistantMessageComponent(assistantEnvelope([{ thinking: text, type: "thinking" }])),
@@ -666,7 +677,7 @@ export class ClankieFaceShell {
         toolCallId,
         parseToolArguments(argumentsDetail),
         {},
-        genericToolRenderer(name),
+        piToolRenderer(name, this.cwdValue) ?? genericToolRenderer(name),
         this.tui,
         this.cwdValue,
       );
@@ -690,7 +701,7 @@ export class ClankieFaceShell {
         toolCallId,
         undefined,
         {},
-        genericToolRenderer(name),
+        piToolRenderer(name, this.cwdValue) ?? genericToolRenderer(name),
         this.tui,
         this.cwdValue,
       );
@@ -703,25 +714,19 @@ export class ClankieFaceShell {
       content: [{ text: outcome.detail ?? "", type: "text" }],
       isError: outcome.failed,
     });
-    this.toolGroups.get(component)?.complete(component, outcome.failed);
+    this.toolRows.get(component)?.complete(outcome.failed, outcome.detail);
     this.tui.requestRender();
   }
 
+  /** One row per call; consecutive calls stack without blank lines between them. */
   private appendToolComponent(component: ToolExecutionComponent, name: string, args: unknown): void {
-    if (ClankieToolGroup.accepts(name)) {
-      const last = this.chat.children.at(-1);
-      const group =
-        last instanceof ClankieToolGroup && !last.sealed ? last : new ClankieToolGroup(this.theme.ansi);
-      if (group !== last) {
-        this.registerExpandable(group);
-        this.chat.addChild(group);
-      }
-      group.add(component, name, args);
-      this.toolGroups.set(component, group);
-    } else {
-      this.registerExpandable(component);
-      this.chat.addChild(component);
-    }
+    const row = new ClankieToolRow(component, name, args, {
+      ansi: this.theme.ansi,
+      unicode: this.theme.capabilities.unicode,
+    });
+    this.toolRows.set(component, row);
+    this.registerExpandable(row);
+    this.appendChatBlock(row, { spacer: !(this.chat.children.at(-1) instanceof ClankieToolRow) });
   }
 
   setPendingPrompts(prompts: readonly PendingOperatorPrompt[]): void {
@@ -772,6 +777,8 @@ export class ClankieFaceShell {
     this.liveAssistantBlock = undefined;
     this.activeToolBlocks.clear();
     this.expandableBlocks.clear();
+    this.hoveredToolRow = undefined;
+    this.selectedToolRow = undefined;
     this.transcriptScrollView.scrollToEnd();
     this.tui.requestRender();
   }
@@ -924,6 +931,8 @@ export class ClankieFaceShell {
     this.historyGeneration += 1;
     this.historyLoading = false;
     this.chat.clear();
+    this.setHoveredToolRow(undefined);
+    this.selectToolRow(undefined);
     for (const child of snapshot.children) this.chat.addChild(child);
     this.activeToolBlocks.clear();
     for (const [id, block] of snapshot.activeToolBlocks) this.activeToolBlocks.set(id, block);
@@ -953,6 +962,11 @@ export class ClankieFaceShell {
    */
   private observeTerminalData(data: string): void {
     const mouse = parseClankieSgrMouse(data);
+    if (mouse?.kind === "move") {
+      const target = this.transcriptTarget(mouse.col - 1, mouse.row - 1);
+      this.setHoveredToolRow(target?.block instanceof ClankieToolRow ? target.block : undefined);
+      return;
+    }
     if (mouse === undefined || mouse.kind === "wheel" || !isClankieLeftMouseButton(mouse)) return;
     if (mouse.kind === "press") {
       this.clickPress = { col: mouse.col, row: mouse.row };
@@ -966,31 +980,115 @@ export class ClankieFaceShell {
     const press = this.clickPress;
     this.clickPress = undefined;
     if (press === undefined || this.clickDragged) return;
-    this.handleTranscriptClick(mouse.col - 1, mouse.row - 1);
+    // The observer runs before pi reads the same release; moving content under
+    // it first would turn the click into a text selection.
+    setImmediate(() => this.handleTranscriptClick(mouse.col - 1, mouse.row - 1));
   }
 
-  private handleTranscriptClick(x: number, y: number): void {
-    if (this.tui.hasOverlayEntries || this.setupFlow.isWaitingForInput()) return;
+  /** The transcript block under a zero-based screen cell, when the transcript is what is there. */
+  private transcriptTarget(
+    x: number,
+    y: number,
+  ): { readonly block: Component; readonly row: number; readonly width: number } | undefined {
+    if (this.tui.hasOverlayEntries || this.setupFlow.isWaitingForInput()) return undefined;
+    // The conversation header sits above the transcript viewport.
+    const top = this.conversationHeader.render(Math.max(1, this.tui.terminal.columns)).length;
     const viewportHeight = this.transcriptScrollView.viewportHeight;
-    if (x < 0 || y < 0 || viewportHeight <= 0 || y >= viewportHeight) return;
+    const row = y - top;
+    if (x < 0 || row < 0 || viewportHeight <= 0 || row >= viewportHeight) return undefined;
     const width = this.transcriptScrollView.getContentWidth(this.tui.terminal.columns);
-    if (x >= width) return;
+    if (x >= width) return undefined;
     const target = clickedTranscriptBlock(
       [this.banner, ...this.chat.children],
       width,
-      this.transcriptScrollView.scrollTop + y,
+      this.transcriptScrollView.scrollTop + row,
     );
+    return target === undefined ? undefined : { ...target, width };
+  }
+
+  private handleTranscriptClick(x: number, y: number): void {
+    const target = this.transcriptTarget(x, y);
     if (target === undefined) return;
-    const paneRef = herdrPaneRefAtColumn(target.block.render(width)[target.row] ?? "", x);
+    const paneRef = herdrPaneRefAtColumn(target.block.render(target.width)[target.row] ?? "", x);
     if (paneRef !== undefined) {
       this.jumpToHerdrPane(paneRef);
       return;
     }
-    const entry = this.expandableBlocks.get(target.block);
+    this.toggleBlock(target.block);
+  }
+
+  private toggleBlock(block: Component): void {
+    const entry = this.expandableBlocks.get(block);
     if (entry === undefined) return;
     entry.expanded = !entry.expanded;
     entry.setExpanded(entry.expanded);
+    // Opening a row near the end must not let follow-to-end push its header off screen.
+    if (block instanceof ClankieToolRow) this.scrollBlockIntoView(block);
     this.tui.requestRender();
+  }
+
+  private setHoveredToolRow(row: ClankieToolRow | undefined): void {
+    if (row === this.hoveredToolRow) return;
+    if (this.hoveredToolRow !== this.selectedToolRow) this.hoveredToolRow?.setHighlighted(undefined);
+    this.hoveredToolRow = row;
+    if (row !== undefined && row !== this.selectedToolRow) row.setHighlighted("mouse");
+    this.tui.requestRender();
+  }
+
+  private selectToolRow(row: ClankieToolRow | undefined): void {
+    const previous = this.selectedToolRow;
+    if (row === previous) return;
+    this.selectedToolRow = row;
+    previous?.setHighlighted(previous === this.hoveredToolRow ? "mouse" : undefined);
+    row?.setHighlighted("key");
+    if (row !== undefined) this.scrollBlockIntoView(row);
+    this.tui.requestRender();
+  }
+
+  /** Alt+↑/↓ walk the tool rows, newest first; Enter opens or closes the selected one. */
+  private routeToolRowInput(data: string): { consume: true } | undefined {
+    const up = matchesKey(data, Key.alt("up"));
+    if (up || matchesKey(data, Key.alt("down"))) {
+      const rows = this.chat.children.filter((child) => child instanceof ClankieToolRow);
+      const current = this.selectedToolRow === undefined ? rows.length : rows.indexOf(this.selectedToolRow);
+      // Up stops at the oldest row; down past the newest hands the keys back to the editor.
+      const next = up ? Math.max(0, current - 1) : current + 1;
+      this.selectToolRow(rows[next]);
+      return { consume: true };
+    }
+    const selected = this.selectedToolRow;
+    if (selected === undefined) return undefined;
+    if (matchesKey(data, Key.enter)) {
+      this.toggleBlock(selected);
+      return { consume: true };
+    }
+    if (matchesKey(data, Key.escape)) {
+      this.selectToolRow(undefined);
+      return { consume: true };
+    }
+    if (!isKeyRelease(data)) this.selectToolRow(undefined);
+    return undefined;
+  }
+
+  /** Shows as much of the block as fits, its first row first; follow-to-end stays on when it already does. */
+  private scrollBlockIntoView(block: Component): void {
+    const scroll = this.transcriptScrollView;
+    const viewport = scroll.viewportHeight;
+    if (viewport <= 0) return;
+    const width = scroll.getContentWidth(this.tui.terminal.columns);
+    // ScrollView clamps against its last layout; measure the changed block first.
+    const total = this.document.render(width).length;
+    scroll.updateLayout(total, viewport, () => this.requestRender());
+    let top = 0;
+    for (const child of [this.banner, ...this.chat.children]) {
+      if (child === block) break;
+      top += child.render(width).length;
+    }
+    const height = Math.min(block.render(width).length, viewport);
+    const shownTop = scroll.isFollowingEnd ? Math.max(0, total - viewport) : scroll.scrollTop;
+    if (top < shownTop) scroll.scrollTo(top, { disableFollow: true });
+    else if (top + height > shownTop + viewport)
+      scroll.scrollTo(top + height - viewport, { disableFollow: true });
   }
 
   /**
@@ -1065,6 +1163,12 @@ export class ClankieFaceShell {
     return this.headerVisibleState;
   }
 
+  /** Draw the welcome in the owner's chosen look (`appearance.leadSkin`). */
+  setLeadSkin(leadSkin: string | undefined): void {
+    this.banner.setLeadSkin(leadSkin);
+    this.tui.requestRender();
+  }
+
   setHeaderVisible(visible: boolean): void {
     this.headerVisibleState = visible;
     this.banner.setVisible(visible);
@@ -1122,6 +1226,8 @@ export class ClankieFaceShell {
     if (this.liveAgentOverlay?.isFocused() === true) return undefined;
     if (!this.setupFlow.isWaitingForInput() && !this.tui.hasOverlay()) {
       if (this.agentNavigationBusy) return { consume: true };
+      const toolRow = this.routeToolRowInput(data);
+      if (toolRow !== undefined) return toolRow;
       const agentList = this.routeAgentListInput(data);
       if (agentList !== undefined) return agentList;
       if (matchesKey(data, Key.ctrl("g")) && this.liveAgents.selectedItem()) {
