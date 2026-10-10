@@ -178,6 +178,23 @@ run(
 if (!exit && existsSync(graphPath)) {
   report.tests = JSON.parse(readFileSync(graphPath, "utf8"));
   rmSync(graphPath, { force: true });
+  // A changed manifest makes Vitest rerun every test, so the recorded graph
+  // spans the repository. The tests this change can affect are the ones that
+  // load a changed file or compile against it, plus any outside the compiler
+  // graph (VUH-2044).
+  const scope = report.typecheckScope;
+  if (
+    report.tests.modules &&
+    scope?.reason === "real compiler import graph" &&
+    report.change.files.some((path) => /(?:^|\/)package\.json$/u.test(path))
+  ) {
+    const changed = new Set(report.change.files);
+    const relevant = new Set();
+    for (const [module, dependencies] of Object.entries(report.tests.modules))
+      if (!scope.owns(module) || dependencies.some((path) => changed.has(path) || scope.affects(path)))
+        for (const path of dependencies) relevant.add(path);
+    report.tests.relevantDependencies = [...relevant].sort();
+  }
 }
 report.sourceStable = git("rev-parse", "HEAD") === head && (await fingerprint()) === source;
 if (!report.sourceStable) {

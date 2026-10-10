@@ -164,11 +164,21 @@ async function fixture() {
     async function release(path: string) {
       await lifetime.run(() => writeFile(path, "release"));
     }
-    function killGroup(pgid: number, signal: NodeJS.Signals) {
+    // The target was proven ours moments ago; if it exits in between, macOS
+    // answers EPERM for the zombie group leader. Accept that only once a fresh
+    // observation shows this exact identity is no longer live.
+    async function killGroup(
+      target: { pid: number; pgid: number; startTime: string },
+      signal: NodeJS.Signals,
+    ) {
       try {
-        process.kill(-pgid, signal);
+        process.kill(-target.pgid, signal);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ESRCH") return;
+        if (code !== "EPERM") throw error;
+        const now = await confirmedIdentity(target.pid);
+        if (now?.startTime === target.startTime) throw error;
       }
     }
     let closing: Promise<void> | undefined;
@@ -181,14 +191,14 @@ async function fixture() {
         const birth = await births.get(child);
         const current = birth ? await confirmedIdentity(birth.pid) : undefined;
         if (birth && current?.startTime === birth.startTime && current.pgid === birth.pid)
-          killGroup(birth.pgid, "SIGTERM");
+          await killGroup(birth, "SIGTERM");
       }
       const state = await new ResourceStore(directory).read();
       for (const lease of state.leases) {
         if (lease.kind !== "heavy" || !lease.runner) continue;
         const current = await confirmedIdentity(lease.runner.pid);
         if (current?.startTime === lease.runner.startTime && current.pgid === lease.runner.pgid)
-          killGroup(lease.runner.pgid, "SIGKILL");
+          await killGroup(lease.runner, "SIGKILL");
       }
       // Cleanup uses exact receipts from commands this fixture started, including
       // survivors of a killed runner; journal census bookkeeping is not authority.
@@ -201,7 +211,7 @@ async function fixture() {
         };
         const survivor = await confirmedIdentity(proof.pid);
         if (survivor?.startTime === proof.startTime && survivor.pgid === proof.pgid)
-          killGroup(proof.pgid, "SIGKILL");
+          await killGroup(proof, "SIGKILL");
         await eventually(
           async () => (await observeProcesses([proof.pid])).get(proof.pid)!,
           (observation) =>

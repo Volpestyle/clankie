@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rename, rm } from "node:fs/promises";
 import { join, dirname, delimiter } from "node:path";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,7 +39,15 @@ async function fixture(mode = "tui", packaged = false) {
     exit: false,
     tools: [tool("message_clankie"), tool("clankie_call")],
   };
-  const save = () => writeFile(statePath, JSON.stringify(state));
+  // The fixture server polls this file every 25ms. writeFile truncates before it
+  // writes, so a poll landing in that window reads "" and crashes the server
+  // (an unrelated "process loss"). Rename publishes complete contents atomically.
+  let saves = 0;
+  const save = async () => {
+    const pending = `${statePath}.${saves++}.tmp`;
+    await writeFile(pending, JSON.stringify(state));
+    await rename(pending, statePath);
+  };
   await save();
   await writeFile(callsPath, "");
   // Drive the exact installed native SDK, not the captain's patched SDK.

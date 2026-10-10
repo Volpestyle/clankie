@@ -2767,8 +2767,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     },
     conversationBodyRouteAuthorized,
     stopBodyRequests,
-    close: () => {
-      void remoteLeads.close();
+    close: async (): Promise<void> => {
+      const closing = [remoteLeads.close()];
       dependencies.modelKeys?.close?.();
       managedDiscordClosed = true;
       if (managedDiscordTimer !== undefined) clearInterval(managedDiscordTimer);
@@ -2783,9 +2783,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       stopObservingRoomFailures?.();
       pushDispatcher?.close();
       captainPresence.close();
-      void laneMcp.close();
-      void dependencies.workerMcp?.close();
+      closing.push(laneMcp.close(), dependencies.workerMcp?.close());
       dependencies.activitySharing?.close();
+      // Owners of in-flight handlers settle before the caller removes state they write.
+      await Promise.allSettled(closing);
     },
   };
 }

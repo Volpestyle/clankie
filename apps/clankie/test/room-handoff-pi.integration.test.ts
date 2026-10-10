@@ -471,7 +471,7 @@ it("real Pi room children bound admission fairly, keep grants under a bound Code
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }, 30_000);
 
@@ -518,6 +518,6 @@ it("durable retention prunes abandoned pending children while preserving admitte
     ).toBe(admitted.conversationId);
   } finally {
     await store.close();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });

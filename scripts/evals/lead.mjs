@@ -347,6 +347,48 @@ export function prepareReference(task, output, revision) {
   return result;
 }
 
+/** Every path a patch names (rename sources included), read without any working tree. */
+function patchPaths(patch) {
+  const fields = command("/usr/bin/git", ["apply", "--numstat", "-z", "--binary", "-"], repo, patch)
+    .toString()
+    .split("\0");
+  const paths = [];
+  for (let i = 0; i < fields.length; i++) {
+    const [, , path] = fields[i].split("\t");
+    if (path === undefined) continue;
+    if (path) paths.push(path);
+    else paths.push(fields[++i], fields[++i]);
+  }
+  if (paths.some((path) => !path || path.startsWith("/") || path.split("/").includes("..")))
+    throw Error("Candidate patch names a path outside the grading tree");
+  return paths;
+}
+
+function refuseTrustedPaths(task, changed) {
+  const protectedPaths = new Set([
+    ...task.graders.map((g) => g.path),
+    "lead-grader.json",
+    "candidate.patch",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "vitest.config.ts",
+  ]);
+  if (
+    changed.some(
+      (path) =>
+        protectedPaths.has(path) ||
+        /(^|\/)(test|tests|__tests__)(\/|$)/.test(path) ||
+        /(^|\/)(vitest|vite)\.[^/]+$/.test(path) ||
+        /(^|\/)(package\.json|tsconfig[^/]*\.json)$/.test(path) ||
+        /^(fixture-(home|tmp|state)|scripts\/evals)(\/|$)/.test(path),
+    )
+  )
+    throw Error(
+      "Candidate changes trusted grader/tooling paths; separate reviewed grading support is required",
+    );
+}
+
 /** Apply a retained candidate diff in a fresh trusted grading tree, never execute it.
  * The patch is untrusted code. This is preparation, not sandboxed grading.
  */
@@ -355,6 +397,8 @@ export function prepareCandidate(task, patchPath, output) {
   const patch = readFileSync(patchPath);
   if (!patch.length || patch.length > 32 * 1024 * 1024)
     throw Error("Candidate patch must be 1..33554432 bytes");
+  // Refuse protected or escaping targets from the patch headers, before any tree is materialized.
+  refuseTrustedPaths(task, patchPaths(patch));
   const sandbox = freshDirectory(output);
   const root = join(sandbox, "worktree");
   const result = prepareReference(task, root, "before");
@@ -379,28 +423,7 @@ export function prepareCandidate(task, patchPath, output) {
   // Include newly created files, without trusting the candidate's ignore rules.
   local("add", "--all", "--force", ".");
   const changed = local("diff", "--cached", "--name-only", "-z").toString().split("\0").filter(Boolean);
-  const protectedPaths = new Set([
-    ...task.graders.map((g) => g.path),
-    "lead-grader.json",
-    "candidate.patch",
-    "package.json",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml",
-    "vitest.config.ts",
-  ]);
-  if (
-    changed.some(
-      (path) =>
-        protectedPaths.has(path) ||
-        /(^|\/)(test|tests|__tests__)(\/|$)/.test(path) ||
-        /(^|\/)(vitest|vite)\.[^/]+$/.test(path) ||
-        /(^|\/)(package\.json|tsconfig[^/]*\.json)$/.test(path) ||
-        /^(fixture-(home|tmp|state)|scripts\/evals)(\/|$)/.test(path),
-    )
-  )
-    throw Error(
-      "Candidate changes trusted grader/tooling paths; separate reviewed grading support is required",
-    );
+  refuseTrustedPaths(task, changed);
   // Retain the exact submitted diff separately; neither imported green events nor
   // successful application are a test pass.
   writeFileSync(join(root, "candidate.patch"), patch, { mode: 0o600 });

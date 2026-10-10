@@ -17,17 +17,21 @@ export default class LandingGraphReporter {
     const root = this.vitest.config.root;
     const local = (path) => relative(root, path).replaceAll("\\", "/");
     const dependencies = new Set();
+    const modules = {};
     for (const module of testModules) {
-      dependencies.add(local(module.moduleId));
+      const own = new Set([local(module.moduleId)]);
       const specification = module.project.createSpecification(module.moduleId);
       for (const path of await this.vitest.specifications.getTestDependencies(specification))
-        dependencies.add(local(path));
+        own.add(local(path));
+      for (const path of own) dependencies.add(path);
+      modules[local(module.moduleId)] = [...own].filter((path) => !path.startsWith("../")).sort();
     }
     writeFileSync(
       output,
       JSON.stringify({
         testModules: testModules.map((module) => local(module.moduleId)).sort(),
         dependencies: [...dependencies].filter((path) => !path.startsWith("../")).sort(),
+        modules,
       }),
     );
   }

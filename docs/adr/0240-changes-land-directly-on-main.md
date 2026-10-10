@@ -36,6 +36,18 @@ Agents and the owner commit to `main` and push it directly:
    Without an explicit base the gate checks the commit HEAD sits on (its
    merge-base with `origin/main`), so a ref moved by another worktree's fetch
    cannot make it check a base HEAD lacks; revalidation covers the newer base.
+   Dependency changes land the same way, with no main hold (amended
+   2026-10-10, VUH-2044). A lockfile change counts only for the workspace
+   packages whose resolved dependencies changed (their own entry, or anything
+   in their resolved closure), which are checked as if their manifest changed.
+   Because a changed `package.json` makes Vitest rerun every test, the gate
+   also records which of those tests can see the change: ones that load a
+   changed file or compile against it, plus any outside the compiler graph.
+   Revalidation checks incoming commits against those. Root dependency fields,
+   `pnpm-workspace.yaml`, compiler configuration, and a lockfile the gate
+   cannot read with certainty still typecheck everything, and any base move
+   then reruns the gate. An incoming lockfile or manifest commit is
+   repository-wide for everyone else's revalidation.
 
 If the root gate's only failures are unchanged timing-sensitive cases outside
 the change and its affected imports, the lead may accept the landing after

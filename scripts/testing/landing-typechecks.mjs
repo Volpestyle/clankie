@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
+import { changedLockfileImporters } from "./lockfile-importers.mjs";
 
 const text = (root, args) =>
   execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -44,12 +45,25 @@ export function landingTypechecks(root, base) {
   const all = projects.map((project) => project.name).sort();
   let allReason;
   // Compiler/installation settings can change resolution even without a source edit.
-  if (
-    [...changed].some((path) =>
-      /^(?:tsconfig[^/]*\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json)$/u.test(path),
-    )
-  )
+  if ([...changed].some((path) => /^(?:tsconfig[^/]*\.json|pnpm-workspace\.yaml|turbo\.json)$/u.test(path)))
     allReason = "compiler or dependency configuration";
+  // A lockfile change reaches only the packages whose resolved dependencies
+  // changed; they are checked as if their own manifest changed (VUH-2044).
+  let lockfileImporters = new Set();
+  if (changed.has("pnpm-lock.yaml")) {
+    let before;
+    try {
+      before = text(root, ["show", `${base}:pnpm-lock.yaml`]);
+    } catch {
+      before = undefined;
+    }
+    const after = existsSync(join(root, "pnpm-lock.yaml"))
+      ? readFileSync(join(root, "pnpm-lock.yaml"), "utf8")
+      : undefined;
+    const importers = changedLockfileImporters(before, after);
+    if (!importers || importers.has(".")) allReason ??= "compiler or dependency configuration";
+    else lockfileImporters = importers;
+  }
   if (changed.has("package.json")) {
     const current = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
     const previous = JSON.parse(text(root, ["show", `${base}:package.json`]));
@@ -100,13 +114,18 @@ export function landingTypechecks(root, base) {
   let modules = 0;
   for (const project of projects) {
     const prefix = `${project.directory}/`;
-    const metadataChanged = [...changed].some(
-      (path) =>
-        path === `${prefix}package.json` ||
-        (path.startsWith(prefix) && /(?:^|\/)tsconfig[^/]*\.json$/u.test(path)),
-    );
+    const metadataChanged =
+      lockfileImporters.has(project.directory) ||
+      [...changed].some(
+        (path) =>
+          path === `${prefix}package.json` ||
+          (path.startsWith(prefix) && /(?:^|\/)tsconfig[^/]*\.json$/u.test(path)),
+      );
     if (!project.parsed) {
-      if ([...changed].some((path) => path.startsWith(prefix) && !path.endsWith(".md")))
+      if (
+        lockfileImporters.has(project.directory) ||
+        [...changed].some((path) => path.startsWith(prefix) && !path.endsWith(".md"))
+      )
         selected.add(project.name);
       continue;
     }
@@ -225,6 +244,10 @@ export function landingTypechecks(root, base) {
       .filter((file) => !file.startsWith("../"))
       .sort(),
     reason: allReason ?? "real compiler import graph",
+    // Not serialized: which files the compiler graph covers, and which of them
+    // compile against the change (consumers of it).
+    owns: (path) => owners.has(normalize(resolve(root, path))),
+    affects: (path) => affected.has(normalize(resolve(root, path))),
     // Turbo's manifest task dependencies omit relative imports across packages.
     // Include the actual compiler inputs in its cache key as well as its task scope.
     cacheInputs,
