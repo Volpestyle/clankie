@@ -4248,6 +4248,14 @@ the installed lead plugin is disabled for ordinary sessions, and this launch
 enables it with `--settings` and `--channels`, without the development prompt.
 It also disables inherited Clankie worker/operator plugins for this session,
 so their hooks do not bind the lead as a worker or suggest its worker channel.
+Setup also installs Herdr's Claude integration into the selected profile when
+it is missing (`herdr integration install claude` under that
+`CLAUDE_CONFIG_DIR`): Herdr learns the lead's session only from that hook, and
+without it every lead request is refused as unproven. A profile Herdr cannot
+hook refuses before allocating a pane, naming that command. Setup clears a
+stale "needs auth" verdict that native Claude records for the lead's MCP server
+after an earlier bridge timed out, which would otherwise skip the bridge in
+every later session of that profile.
 
 `launch --json-stdin` reads an object with a fresh UUID `requestId`, `fleet`,
 `workingDirectory`, `title`, and optional `account` and `conversationId`. Omit the conversation

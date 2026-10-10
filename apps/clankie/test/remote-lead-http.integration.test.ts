@@ -16,6 +16,7 @@ import { serve } from "@hono/node-server";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { execFile, spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -23,6 +24,27 @@ import { promisify } from "node:util";
 import { prepareClaude, leadPlugin } from "../../../integrations/remote-lead/claude-setup.mjs";
 
 const execute = promisify(execFile);
+
+/** A herdr CLI fixture: its Claude integration lives in the CLAUDE_CONFIG_DIR it runs under. */
+async function fakeHerdr(root: string) {
+  const path = join(root, "herdr");
+  await writeFile(
+    path,
+    `#!${process.execPath}
+const fs = require('node:fs'), { join } = require('node:path');
+const args = process.argv.slice(2), profile = process.env.CLAUDE_CONFIG_DIR;
+fs.appendFileSync(${JSON.stringify(join(root, "herdr-calls.jsonl"))}, JSON.stringify({ args, profile }) + '\\n');
+const hook = join(profile, 'hooks', 'herdr-agent-state.ps1');
+if (args[1] === 'status') console.log('claude: ' + (fs.existsSync(hook) ? 'current (v10)' : 'not installed') + ' (' + hook + ')');
+else if (args[1] === 'install' && !fs.existsSync(join(profile, 'herdr-install-fails'))) {
+  fs.mkdirSync(join(profile, 'hooks'), { recursive: true });
+  fs.writeFileSync(hook, '# installed by herdr');
+} else process.exit(1);
+`,
+    { mode: 0o700 },
+  );
+  return path;
+}
 
 // Host-proof fixtures delimit this HTTP/MCP contract test. Native observation
 // and real hire adoption require the separate, deployed Windows live proof.
@@ -88,7 +110,12 @@ else console.log('{}');
 `,
       { mode: 0o700 },
     );
-    const options = { home: root, policyPath, env: { ...process.env, CLAUDE_CONFIG_DIR: other } };
+    const options = {
+      home: root,
+      policyPath,
+      herdr: await fakeHerdr(root),
+      env: { ...process.env, CLAUDE_CONFIG_DIR: other },
+    };
     const beforePolicy = await readFile(policyPath, "utf8");
     const beforeOther = await readdir(other);
     const credential = await readFile(join(selected, ".credentials.json"), "utf8");
@@ -102,6 +129,37 @@ else console.log('{}');
       expect(await readFile(join(selected, ".credentials.json"), "utf8")).toBe(credential);
       expect(await readdir(other)).toEqual(beforeOther);
       expect(await readFile(policyPath, "utf8")).toBe(beforePolicy);
+      // VUH-2074: herdr's session hook goes into the selected profile, so the
+      // pane can report the lead's session; a current one is left alone.
+      const herdrCalls = async () =>
+        (await readFile(join(root, "herdr-calls.jsonl"), "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as { args: string[]; profile: string });
+      expect(existsSync(join(selected, "hooks", "herdr-agent-state.ps1"))).toBe(true);
+      expect((await herdrCalls()).every((call) => call.profile === selected)).toBe(true);
+      await writeFile(join(root, "herdr-calls.jsonl"), "");
+      await prepareClaude(executable, plugin, { ...options, account: "volpestyle" });
+      expect((await herdrCalls()).map((call) => call.args.join(" "))).toEqual(["integration status"]);
+      // A lead bridge that once timed out is no longer skipped as needing auth; other verdicts stay.
+      const authCache = join(selected, "mcp-needs-auth-cache.json");
+      await writeFile(
+        authCache,
+        JSON.stringify({
+          "claude.ai Linear": { timestamp: 1, id: "linear" },
+          "plugin:clankie-remote-lead:lead": { timestamp: 2, id: "lead" },
+        }),
+      );
+      await prepareClaude(executable, plugin, { ...options, account: "volpestyle" });
+      expect(JSON.parse(await readFile(authCache, "utf8"))).toEqual({
+        "claude.ai Linear": { timestamp: 1, id: "linear" },
+      });
+      // A profile herdr cannot hook refuses before any pane exists, naming the owner step.
+      await writeFile(join(other, "herdr-install-fails"), "");
+      await expect(prepareClaude(executable, plugin, options)).rejects.toThrow(
+        `Herdr's Claude integration is not installed in ${other}`,
+      );
+      await rm(join(other, "herdr-install-fails"));
       // Omitted account preserves the SSH default and automatic ambiguity refusal.
       expect(await prepareClaude(executable, plugin, options)).toBe(other);
       await expect(
@@ -198,6 +256,7 @@ else console.log('{}');
       { mode: 0o700 },
     );
     const env = { ...process.env, HOME: root, CLAUDE_CONFIG_DIR: "" };
+    const herdr = await fakeHerdr(root);
     const grants = new RemoteLeadDelegations(async () => {});
     const issued = await grants.issue(binding);
     const bridge = createRemoteLeadBridge({
@@ -227,14 +286,14 @@ else console.log('{}');
     const handoff = createServer();
     const client = new Client({ name: "bundle-acceptance", version: "1" });
     try {
-      expect(await prepareClaude(executable, plugin, { env, home: root, policyPath })).toBe(profile);
+      expect(await prepareClaude(executable, plugin, { env, home: root, policyPath, herdr })).toBe(profile);
       // A relaunch updates the existing install, whose global activation is
       // already off even while the previous session has its channel enabled.
-      expect(await prepareClaude(executable, plugin, { env, home: root, policyPath })).toBe(profile);
+      expect(await prepareClaude(executable, plugin, { env, home: root, policyPath, herdr })).toBe(profile);
       const pluginState = join(root, "plugin-state.json");
       const installedLead = { id: leadPlugin, scope: "user", enabled: true };
       await writeFile(pluginState, JSON.stringify([installedLead]));
-      expect(await prepareClaude(executable, plugin, { env, home: root, policyPath })).toBe(profile);
+      expect(await prepareClaude(executable, plugin, { env, home: root, policyPath, herdr })).toBe(profile);
       expect(JSON.parse(await readFile(pluginState, "utf8"))[0].enabled).toBe(false);
       // Goal-state handling must not swallow permission or wrong-scope errors.
       for (const failure of [
@@ -248,9 +307,9 @@ else console.log('{}');
         },
       ]) {
         await writeFile(pluginState, JSON.stringify([{ ...installedLead, failure }]));
-        await expect(prepareClaude(executable, plugin, { env, home: root, policyPath })).rejects.toThrow(
-          "Native Claude plugin disable",
-        );
+        await expect(
+          prepareClaude(executable, plugin, { env, home: root, policyPath, herdr }),
+        ).rejects.toThrow("Native Claude plugin disable");
       }
       await writeFile(
         pluginState,
@@ -267,7 +326,7 @@ else console.log('{}');
           },
         ]),
       );
-      await expect(prepareClaude(executable, plugin, { env, home: root, policyPath })).rejects.toThrow(
+      await expect(prepareClaude(executable, plugin, { env, home: root, policyPath, herdr })).rejects.toThrow(
         "not disabled at user scope",
       );
       await writeFile(pluginState, JSON.stringify([{ ...installedLead, enabled: false }]));
@@ -281,7 +340,7 @@ else console.log('{}');
         ]),
       );
       await writeFile(policyPath, '{"private": "fixture-secret" BROKEN');
-      await expect(prepareClaude(executable, plugin, { env, home: root, policyPath })).rejects.toThrow(
+      await expect(prepareClaude(executable, plugin, { env, home: root, policyPath, herdr })).rejects.toThrow(
         "Invalid channel policy",
       );
       await writeFile(policyPath, JSON.stringify(policy));
