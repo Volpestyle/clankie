@@ -77,6 +77,13 @@ class HeldSettings extends SettingsStore {
 
 const wrappers = ["clankie_tools", "clankie_call"];
 const requestTimeoutMs = 250;
+// The service holds a slow binding lookup this long; the bridge's request budget
+// below must stay under it so that lookup times out deterministically.
+const bindingStallMs = 750;
+// The bridge's budget also bounds its first catalog: a fresh process's first
+// fetch plus the MCP initialize, initialized and tools/list round trips
+// (about 100ms warm here, over 250ms on a cold CI runner; VUH-2059).
+const bridgeRequestTimeoutMs = 500;
 
 async function fixture(
   slowBinding = false,
@@ -163,7 +170,7 @@ async function fixture(
           return receiptApp.app.fetch(request);
         } else {
           bindingGets++;
-          if (bindingSlow) await new Promise((resolve) => setTimeout(resolve, 750));
+          if (bindingSlow) await new Promise((resolve) => setTimeout(resolve, bindingStallMs));
         }
         return receiptApp.app.fetch(request);
       }
@@ -290,7 +297,7 @@ async function startBridge(f: Awaited<ReturnType<typeof fixture>>, polling = fal
     [
       "--input-type=module",
       "-e",
-      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:${JSON.stringify(polling ? "claude --channels plugin:clankie-worker@clankie" : harness)},requestTimeoutMs:250});`,
+      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:${JSON.stringify(polling ? "claude --channels plugin:clankie-worker@clankie" : harness)},requestTimeoutMs:${String(bridgeRequestTimeoutMs)}});`,
     ],
     { env: { PATH: process.env.PATH, HOME: f.root, HERDR_SOCKET_PATH: socket, HERDR_PANE_ID: f.pane } },
   );
