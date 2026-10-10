@@ -30,6 +30,7 @@ export const FleetNativeDiagnosticReasonSchema = z.enum([
   "process_changed",
   "fd_list_unavailable",
   "fd_list_bounds",
+  "fd_list_large",
   "fd_record_invalid",
   "socket_unavailable",
   "socket_identity_invalid",

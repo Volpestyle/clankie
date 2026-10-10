@@ -19,6 +19,7 @@ const enabled = process.platform === "darwin" && process.env.FLEET_PROOF_NATIVE_
 const local = resolve(".local/project-proof/churn/native/integration");
 const fixture = resolve(local, "processes");
 const fdChurn = resolve(local, "fd-churn");
+const fdBounds = resolve(local, "fd-bounds");
 type Birth = [string, string];
 interface Facts {
   schemaVersion: 1;
@@ -142,6 +143,17 @@ describe.skipIf(!enabled)("native socket proof under unrelated churn", () => {
       "-o",
       fdChurn,
     ]);
+    await exec("cc", [
+      "-std=c11",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-mmacosx-version-min=14.0",
+      "apps/clankie/test/helpers/native-proof-churn/fd-bounds.c",
+      "-o",
+      fdBounds,
+    ]);
     native = new Native();
   });
   afterAll(async () => {
@@ -173,6 +185,45 @@ describe.skipIf(!enabled)("native socket proof under unrelated churn", () => {
       for (const worker of workers) await stop(worker);
       await closeSockets(s);
     }
+  }, 15_000);
+
+  test("an unrelated huge FD table neither refuses a caller nor hides a second holder", async () => {
+    const s = await sockets();
+    // A real unrelated process past the old 16,384-record bound (VUH-2070).
+    const outsider = spawn(fdBounds, ["hold"], { stdio: "pipe" });
+    try {
+      expect(await ready(outsider)).toBe("ready");
+      const admitted = await observed(native, s.ports, (reply) => reply.ok);
+      expect(admitted.result!.owner.pid).toBe(process.pid);
+      const large = admitted.stderr
+        .split("\n")
+        .filter((line) => line.startsWith("Native process proof diagnostic: "))
+        .map((line) => JSON.parse(line.slice("Native process proof diagnostic: ".length)))
+        .find((event) => event.reason === "fd_list_large");
+      expect(large).toMatchObject({ retry: false, largeFdTable: { pid: outsider.pid } });
+      expect(large.largeFdTable.fds).toBeGreaterThan(16_384);
+    } finally {
+      await stop(outsider);
+    }
+    // The same huge table is read whole: holding the caller's socket still refuses.
+    const fd = (s.client as Socket & { _handle?: { fd?: number } })._handle?.fd;
+    if (fd === undefined || fd < 0) throw new Error("Missing actual connected FD");
+    const sharer = spawn(fdBounds, ["hold"], {
+      stdio: ["pipe", "pipe", "pipe", fd],
+    }) as ChildProcessWithoutNullStreams;
+    try {
+      expect(await ready(sharer)).toBe("ready");
+      const denied = await observed(
+        native,
+        s.ports,
+        (reply) => !reply.ok && reply.stderr.includes('"reason":"multiple_owners"'),
+      );
+      expect(denied.result).toBeNull();
+    } finally {
+      await stop(sharer);
+      await closeSockets(s);
+    }
+    expect(native.metrics.snapshot().totals.nativeDiagnostics.fd_list_large).toBeGreaterThan(0);
   }, 15_000);
 
   test("a second real PID holding the client FD never passes, including during FD churn", async () => {

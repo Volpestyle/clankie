@@ -69,7 +69,7 @@ it.skipIf(!manual)(
 );
 
 it.skipIf(!manual)(
-  "counts an actual oversized FD table on a real TCP owner",
+  "reads an actual oversized FD table whole on a real TCP owner and counts it",
   async () => {
     const directory = resolve(".local/1704", `fd-bounds-${Date.now()}`);
     await mkdir(directory, { recursive: true });
@@ -109,13 +109,23 @@ it.skipIf(!manual)(
         await new Promise((done) => setTimeout(done, 5));
       expect(output).toContain("ready");
       const metrics = new FleetHealthMetrics();
-      const events = await capture(
-        helper,
-        [String(peer!.remotePort), String(address.port), "--diagnostics"],
-        metrics,
-      );
-      expect(events.some((event) => event.reason === "fd_list_bounds")).toBe(true);
-      expect(metrics.snapshot().totals.nativeDiagnostics.fd_list_bounds).toBe(1);
+      // Past the first 16,384 records the table is read whole, never refused or skipped (VUH-2070).
+      const result = await run(helper, [String(peer!.remotePort), String(address.port), "--diagnostics"], {
+        timeout: 5_000,
+      });
+      expect(JSON.parse(result.stdout).owner.pid).toBe(child.pid);
+      const events = result.stderr
+        .split("\n")
+        .filter((line) => line.startsWith("Native process proof diagnostic: "))
+        .map((line) =>
+          NativeProcessDiagnosticSchema.parse(
+            JSON.parse(line.slice("Native process proof diagnostic: ".length)),
+          ),
+        );
+      for (const event of events)
+        metrics.observeProof("fleet", { source: "native", checkpoint: "initial", event });
+      expect(events.find((event) => event.reason === "fd_list_large")?.largeFdTable?.pid).toBe(child.pid);
+      expect(metrics.snapshot().totals.nativeDiagnostics.fd_list_large).toBe(1);
       await writeFile(
         resolve(directory, "evidence.json"),
         JSON.stringify({ events, metrics: metrics.snapshot() }, null, 2),

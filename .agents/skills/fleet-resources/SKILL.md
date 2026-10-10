@@ -84,6 +84,13 @@ admits no new simulator within three minutes of the last one and answers
 The registry belongs to the OS account and is shared across worktrees. Worker
 `HOME`, state-path or `HEAVY_SLOTS` overrides cannot increase capacity.
 
+Search with `rg`, or with `find` from a narrow directory and a `-maxdepth`.
+Never scan all worktrees, `node_modules` or `~/.clankie/integration` with an
+unbounded `find`, `bfs` or recursive listing. On 2026-10-10 one such scan held
+about 32,700 open descriptors and every fleet admission on the Mac refused until
+it was stopped (VUH-2070). Admission now reads such a table whole instead of
+refusing, but the scan still slows every worker's proof and the disk.
+
 # Lease a simulator
 
 Boot simulators only through `clankie simulator acquire`. Never `xcrun simctl

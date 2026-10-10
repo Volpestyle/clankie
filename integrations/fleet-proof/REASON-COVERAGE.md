@@ -82,6 +82,10 @@ cover `ancestry_bounds`, `process_census_unavailable`, `fd_list_unavailable`,
 `executable_changed`, `argv_changed`, `process_changed`,
 `ancestry_unavailable` and `ancestry_changed`. These direct helper observations
 are distinct from full HTTP admission proofs and do not claim a deployed check.
+Since VUH-2070 that oversized owner's table is read whole: the same manual test
+now proves the non-refusing `fd_list_large` diagnostic, and the opt-in
+`native-proof-churn.integration.test.ts` proves an unrelated oversized table
+neither refuses a caller nor hides a second holder of its socket.
 
 `fleet-final-os-native.integration.test.ts` adds a real `clock_unavailable`
 producer. The unchanged helper runs under a policy denying only its libc retry
