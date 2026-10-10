@@ -30,7 +30,8 @@ policy, owned by the service in `<state>/routines/`.
     so a native harness seat gets it over its own channel).
   - `hire`: `hire_agent`'s own path (`HireSeat`) with that conversation as the
     hiring authority, so admission, owner gates, account choice and the
-    first-breath watch are unchanged. The lead hears which seat was hired.
+    first-breath watch are unchanged. The lead hears which seat was hired, or
+    why none was.
   - `check`: a command run through `clankie heavy` in a directory, with a
     timeout; the conversation hears failures (or every result).
 - **Run fence.** Before a run starts the service creates

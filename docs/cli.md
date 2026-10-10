@@ -4189,7 +4189,7 @@ names an IANA zone. Targets:
 
 - `--turn PROMPT`: a turn in the conversation (default: Clankie's main chat).
 - `--hire JSON --brief TEXT`: a hire with `hire_agent`'s fields, led by that
-  conversation; the lead hears which seat was hired.
+  conversation; the lead hears which seat was hired, or why none was.
 - `--check --cwd DIR [--timeout SECONDS] [--report always|failure] -- CMD…`: the
   command runs through `clankie heavy`; the conversation hears failures, or every
   result with `--report always`.

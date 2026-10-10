@@ -36,8 +36,17 @@ export function createRoutineRunner(deps: RoutineRunnerDeps) {
           { schemaVersion: 1, ...target.hire },
           `${target.brief}\n\n(Hired by the routine "${routine.name}", run ${run.slot}.)`,
         );
-        if (result.outcome !== "spawned")
-          return { ok: false, detail: `Hire ${result.reason}${result.detail ? `: ${result.detail}` : ""}` };
+        if (result.outcome !== "spawned") {
+          const why = `${result.reason}${result.detail ? `: ${result.detail}` : ""}`;
+          // The lead relying on a recurring hire hears when it didn't happen, not only the run log.
+          await deps
+            .notify(
+              target.conversationId,
+              `${routineHeader(routine, run)}\n\nThis routine could not hire ${target.hire.title}, so no seat was started: ${why}`,
+            )
+            .catch(() => false);
+          return { ok: false, detail: `Hire ${why}` };
+        }
         const seat = result.seat.seatId;
         await deps
           .notify(

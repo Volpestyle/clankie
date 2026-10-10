@@ -44,6 +44,8 @@ function fixture(start: string) {
       new Promise<void>((resolve) => turns.push({ conversationId, prompt, finish: resolve })),
     hire: async (conversationId, seat, brief): Promise<OperatorSeatSpawnResult> => {
       hires.push({ conversationId, title: seat.title, brief });
+      if (seat.title === "Busy")
+        return { outcome: "failed", reason: "at_capacity", detail: "4 of 4 hired agents are running." };
       return {
         outcome: "spawned",
         seat: { seatId: `w9:p${String(hires.length)}` },
@@ -254,6 +256,35 @@ it("hires and checks run as their conversation, and leads only reach their own r
   });
   expect(f.notes.map((note) => note.conversationId)).toEqual(["lead-kh2", MAIN]);
   expect(f.notes[1]!.text).toContain("exited 3");
+
+  // A hire that didn't happen reaches the lead relying on it, not only the run log.
+  const busy = (
+    await store.command(
+      {
+        action: "add",
+        name: "Weekly review",
+        schedule: { when: "every friday at 18:00", timeZone: "UTC" },
+        target: {
+          kind: "hire",
+          hire: { title: "Busy", role: "reviewer", workingDirectory: f.root },
+          brief: "Review the week.",
+        },
+      },
+      lead,
+    )
+  ).routine!;
+  await store.command({ action: "run_now", id: busy.id }, lead);
+  await store.settled();
+  expect((await history(store)).find((run) => run.routineId === busy.id)).toMatchObject({
+    status: "failed",
+    detail: "Hire at_capacity: 4 of 4 hired agents are running.",
+  });
+  expect(f.notes[2]).toEqual({
+    conversationId: "lead-kh2",
+    text: expect.stringContaining(
+      "could not hire Busy, so no seat was started: at_capacity: 4 of 4 hired agents are running.",
+    ),
+  });
 });
 
 it("the CLI manages routines through the authenticated API", async () => {
