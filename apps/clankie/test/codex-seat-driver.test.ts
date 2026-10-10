@@ -65,13 +65,22 @@ function fixture(
         };
         if (message.method === "thread/loaded/list") result = { data: nativeLoaded ? [id] : [] };
         if (message.method === "thread/read") result = { thread: { id, turns: [turn] } };
+        if (message.method === "thread/turns/list") {
+          expect(message.params).toEqual({
+            threadId: id,
+            limit: 1,
+            sortDirection: "desc",
+            itemsView: "summary",
+          });
+          result = { data: persisted ? [{ ...turn, items: [] }] : [] };
+        }
         if (message.method === "thread/resume") {
           await beforeResume?.();
           if (!persisted) {
             socket.send(JSON.stringify({ id: message.id, error: { message: missingRollout } }));
             return;
           }
-          result = { thread: { id, turns: [turn] } };
+          result = { thread: { id, turns: message.params.excludeTurns ? [] : [turn] } };
         }
         if (message.method === "turn/start") {
           persisted = true;
@@ -142,6 +151,7 @@ it("lets the native TUI create a fresh thread before input and subscribes after 
   expect(f.requests.some((r) => r.method === "turn/start")).toBe(false);
   await expect(seat.send("first brief")).resolves.toEqual({ state: "started", turnId: "turn-one" });
   await expect(seat.send("follow-up")).resolves.toEqual({ state: "steered", turnId: "turn-one" });
+  expect(f.requests.filter((r) => r.method === "thread/turns/list")).toHaveLength(1);
   expect(f.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
   expect(f.requests.find((r) => r.method === "turn/steer")?.params).toMatchObject({
     expectedTurnId: "turn-one",
@@ -201,6 +211,12 @@ it("resumes the selected native thread and applies config to both clients withou
   expect(startView.mock.calls[0]?.[0]).toEqual(expect.arrayContaining(["-c", config[0], "resume", f.id]));
   expect(f.requests.some((r) => r.method === "turn/start")).toBe(false);
   await expect(seat.send("operator event")).resolves.toEqual({ state: "steered", turnId: "turn-one" });
+  expect(f.requests.filter((r) => r.method === "turn/start")).toHaveLength(0);
+  expect(f.requests.filter((r) => r.method === "thread/turns/list")).toHaveLength(1);
+  expect(f.requests.find((r) => r.method === "turn/steer")?.params).toMatchObject({
+    expectedTurnId: "turn-one",
+    threadId: f.id,
+  });
 });
 
 it("refuses a native view that resumes a different thread", async () => {
