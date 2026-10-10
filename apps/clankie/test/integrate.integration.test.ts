@@ -672,6 +672,8 @@ it("cancels a request still waiting for its gate with a receipt, and the request
   await expect(cancel(ids[1]!, "Ivy", "too late")).rejects.toThrow(`Request ${ids[1]} is pushed`);
 });
 
+// Six real install-and-gate batches: 32–38s on a loaded Mac and over 30s on a
+// cold CI runner, on base and head alike (VUH-2059). Sized to that work, with margin.
 it("bisects a failed shared real gate, reports the bad request, and lands both healthy requests", async () => {
   const f = await fixture((root) => barrier(root, "if (existsSync('broken')) process.exit(9);"));
   const initial = await commit(f.core.source, "initial", "one");
@@ -712,7 +714,7 @@ it("bisects a failed shared real gate, reports the bad request, and lands both h
       }) +
       "\n",
   );
-});
+}, 90_000);
 
 it("keeps gate-only requests separate from auto-push intent and reports interrupted receipts after process loss", async () => {
   const f = await fixture((root) => barrier(root));
