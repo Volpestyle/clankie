@@ -22,6 +22,7 @@ export interface NativeReply {
 }
 interface Job {
   id: number;
+  owner: NativeProcessTransport;
   args: readonly string[];
   resolve(value: NativeReply | undefined): void;
   report?(reason: NativeTransportReason): void;
@@ -49,8 +50,21 @@ class NativeProcessTransport {
   private failed = false;
   private closed: Promise<void> = Promise.resolve();
   private readonly helper: string;
-  constructor(helper: string) {
+  /** A successor spawns only after its timed-out predecessor's child has closed. */
+  private readonly predecessor: Promise<void> | undefined;
+  private waiting = false;
+  constructor(helper: string, predecessor?: { closed: Promise<void>; sequence: number; queue: Job[] }) {
     this.helper = helper;
+    if (!predecessor) return;
+    this.sequence = predecessor.sequence;
+    for (const job of predecessor.queue) job.owner = this;
+    this.queue = predecessor.queue;
+    this.predecessor = predecessor.closed;
+    this.waiting = true;
+    void predecessor.closed.then(() => {
+      this.waiting = false;
+      this.start();
+    });
   }
 
   request(
@@ -73,25 +87,28 @@ class NativeProcessTransport {
     return new Promise((resolve) => {
       const job: Job = {
         id: ++this.sequence,
+        owner: this,
         args,
         resolve,
         ...(report ? { report } : {}),
         ...(signal ? { signal } : {}),
-        abort: () => {
-          if (this.active === job) {
-            // Keep the serial frame and proof permit until completion. A caller's
-            // cancellation cannot kill another caller's independently queued proof.
-            job.cancelled = true;
-          } else {
-            this.queue = this.queue.filter((entry) => entry !== job);
-            this.finish(job, undefined, "cancelled");
-          }
-        },
+        abort: () => job.owner.cancel(job),
       };
       signal?.addEventListener("abort", job.abort, { once: true });
       this.queue.push(job);
       this.start();
     });
+  }
+
+  private cancel(job: Job) {
+    if (this.active === job) {
+      // Keep the serial frame and proof permit until completion. A caller's
+      // cancellation cannot kill another caller's independently queued proof.
+      job.cancelled = true;
+    } else {
+      this.queue = this.queue.filter((entry) => entry !== job);
+      this.finish(job, undefined, "cancelled");
+    }
   }
 
   private finish(job: Job, reply?: NativeReply, reason?: NativeTransportReason) {
@@ -107,7 +124,7 @@ class NativeProcessTransport {
   }
 
   private start() {
-    if (this.failed || this.active || this.queue.length === 0) return;
+    if (this.failed || this.waiting || this.active || this.queue.length === 0) return;
     if (!this.child) {
       const child = spawn(this.helper, ["--serve"], { stdio: "pipe" });
       this.child = child;
@@ -136,7 +153,7 @@ class NativeProcessTransport {
     this.active = this.queue.shift();
     if (!this.active) return;
     // Queue time is not kernel-proof time; a burst must not kill unrelated jobs.
-    this.active.timer = setTimeout(() => this.stop("timeout"), 1_000);
+    this.active.timer = setTimeout(() => this.timeout(), 1_000);
     this.child.stdin.write(`${this.active.id} ${this.active.args.join(" ")}\n`);
   }
 
@@ -168,6 +185,24 @@ class NativeProcessTransport {
     }
   }
 
+  /**
+   * One slow proof fails alone (VUH-2015). Its helper may still be mid-scan and
+   * cannot be trusted with another serial frame, so it is killed; queued jobs that
+   * were never dispatched move, unreplayed, to a fresh helper spawned after the old
+   * one closes, and new callers reach that successor instead of a refusal.
+   */
+  private timeout() {
+    if (this.failed) return;
+    const successor = new NativeProcessTransport(this.helper, {
+      closed: this.closed,
+      sequence: this.sequence,
+      queue: this.queue,
+    });
+    this.queue = [];
+    if (transports.get(this.helper) === this) transports.set(this.helper, successor);
+    this.stop("timeout");
+  }
+
   private failureReason: NativeTransportReason = "helper_unavailable";
   private stop(reason: NativeTransportReason) {
     if (this.failed) return;
@@ -187,7 +222,7 @@ class NativeProcessTransport {
   }
   async close() {
     this.stop("cancelled");
-    await this.closed;
+    await Promise.all([this.closed, this.predecessor]);
   }
 }
 

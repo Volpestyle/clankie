@@ -264,15 +264,53 @@ pipeIt("still kills a stalled helper at its active deadline after caller cancell
   const reasons: NativeTransportReason[] = [];
   const active = nativeProcessRequest(f.helper, ["timeout"], signal.signal, (reason) => reasons.push(reason));
   const pid = (await f.received())[0]!.pid;
-  const queued = nativeProcessRequest(f.helper, ["must-not-dispatch"], undefined, (reason) =>
-    reasons.push(reason),
-  );
+  const queued = nativeProcessRequest(f.helper, ["after-stall"], undefined, (reason) => reasons.push(reason));
   signal.abort();
   expect(await active).toBeUndefined();
-  expect(await queued).toBeUndefined();
+  expect(JSON.parse((await queued)!.stdout)).toMatchObject({ mode: "after-stall", sequence: 1 });
   expect(alive(pid)).toBe(false);
-  expect(reasons).toEqual(["cancelled", "timeout"]);
-  expect((await f.journal()).filter((row) => row.kind === "request")).toHaveLength(1);
+  expect(reasons).toEqual(["cancelled"]);
+  expect((await f.journal()).filter((row) => row.kind === "request").map((row) => row.mode)).toEqual([
+    "timeout",
+    "after-stall",
+  ]);
+});
+
+pipeIt("a stalled proof fails alone; queued and arriving callers are served by a fresh helper", async () => {
+  const f = await fixture();
+  const reasons: string[] = [];
+  const report = (label: string) => (reason: NativeTransportReason) => reasons.push(`${label}:${reason}`);
+  const stalled = nativeProcessRequest(f.helper, ["timeout"], undefined, report("stalled"));
+  const pid = (await f.received())[0]!.pid;
+  // VUH-2015: one slow scan used to SIGKILL the shared helper and refuse every
+  // queued proof with it.
+  const queued = Array.from({ length: 5 }, (_, index) =>
+    nativeProcessRequest(f.helper, [`queued-${index}`], undefined, report(`queued-${index}`)),
+  );
+  expect(await stalled).toBeUndefined();
+  // A caller arriving between the deadline and the old child's close is not refused.
+  const arriving = nativeProcessRequest(f.helper, ["arriving"], undefined, report("arriving"));
+  const served = (await Promise.all([...queued, arriving])).map((reply) => JSON.parse(reply!.stdout));
+  expect(served.map((value) => value.mode)).toEqual([
+    "queued-0",
+    "queued-1",
+    "queued-2",
+    "queued-3",
+    "queued-4",
+    "arriving",
+  ]);
+  expect(new Set(served.map((value) => value.pid)).size).toBe(1);
+  expect(served[0].pid).not.toBe(pid);
+  expect(alive(pid)).toBe(false);
+  expect(reasons).toEqual(["stalled:timeout"]);
+  const journal = await f.journal();
+  expect(journal.filter((row) => row.kind === "start")).toHaveLength(2);
+  // The stalled job is never replayed; queued frames keep their original ids.
+  expect(journal.filter((row) => row.kind === "request").map((row) => [row.id, row.mode])).toEqual([
+    [1, "timeout"],
+    ...[0, 1, 2, 3, 4].map((index) => [index + 2, `queued-${index}`]),
+    [7, "arriving"],
+  ]);
 });
 
 pipeIt(
