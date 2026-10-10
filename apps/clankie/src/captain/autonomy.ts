@@ -111,6 +111,11 @@ export class AutonomyStore {
     this.arm();
   }
 
+  /** The master switch for unprompted work; an unreadable state file reads as off. */
+  public get enabled(): boolean {
+    return this.state.enabled;
+  }
+
   public status(conversationId: string): OperatorAutonomyStatus {
     const record = this.state.conversations[conversationId];
     return {

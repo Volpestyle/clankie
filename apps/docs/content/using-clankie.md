@@ -102,19 +102,26 @@ online; hosted availability follows your plan.
 
 <a id="give-him-ongoing-work"></a>
 
-To keep him working across turns, give the conversation a goal:
+To keep him working without you, put a project on Auto. In the console,
+`/project` opens a project: turn on **Auto**, and set a one-line **Focus** for
+what matters now if you like. From a script:
 
-```text
-/goal Improve the project's onboarding guide and verify its examples
+```sh
+clankie project settings garden --auto on --focus "Ship offline mode"
 ```
 
-He keeps working toward it and can wake himself later, with no more tools or
-access than an ordinary turn. If he proposes a goal himself, `/goal accept`
-starts it. Goals default to a 1,000,000-token budget (`/goal --tokens N …` to
-change it), and `/goal pause`, `resume`, or `clear` controls one. From a script,
-use [`clankie conversations goal`](/cli/#conversations-list-show-id-tail-id-goal-id). Goals run in Clankie's
-own conversations, not in a harness seat. `/autonomy pause` stops goal runs
-and self-wakes everywhere, and `/autonomy resume` restarts them. On a local Mac,
+With Auto on, he works the project's backlog without being asked. He takes the
+next ready work from its tracker, staffs it within the project's worker cap and
+your machine and account limits, lands it and closes it with evidence. He
+carries long work across wake-ups and worker reports, whether
+he's in his own console or seated in Claude Code or Codex. The autonomy dial
+decides which calls he makes alone; anything left to you arrives as one ask.
+Turn Auto off for a project and he starts nothing new on it.
+
+`/auto off` (or [`clankie auto off`](/cli/#auto-switch)) pauses everything
+unprompted: projects on Auto, goals and the wake-ups he schedules. `/auto on`
+resumes it. Older `/goal` commands still work while goals give way to
+Auto. On a local Mac,
 [`clankie autostart enable`](/cli/#autostart-enable-autostart-disable-autostart-status)
 keeps the service running after login.
 

@@ -72,6 +72,10 @@ export interface CaptainOptions {
   readonly nativeCensusRunner?: HerdrCensusRunner;
   readonly nativeSummariesPath?: string;
   readonly fleetRoundIntervalMs?: number;
+  /** Auto round cadence (ADR 0264); defaults to the fleet round's. */
+  readonly autoRoundIntervalMs?: number;
+  /** How long an unchanged Auto round waits before waking again. */
+  readonly autoIdleRewakeMs?: number;
   readonly localCodexProcess?: (pid: number, pane: string) => LocalCodexRegistration;
   readonly localCodexSocket?: () => string | undefined;
   readonly remoteCodexProcess?: (launch: RemoteCodexLaunch) => RemoteCodexRegistration;

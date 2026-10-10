@@ -474,7 +474,7 @@ finite token budget (default 1,000,000) moves a goal to `budget_limited` before
 another provider request; failed turns retain recorded usage. Model calls persist
 inactive proposals, confirmed only by `/goal accept`. Native harness seats refuse
 service goals, and a queued goal pauses on discovering a native head.
-`/goal` owns activation, pause/resume, and clearing, while `/autonomy pause` stops new continuations and
+`/goal` owns activation, pause/resume, and clearing, while `/auto off` stops new continuations and
 wakes. A due wake queues one turn with Clankie's recorded reason and may be
 replaced by another. Neither path changes the conversation's tool set or
 authority ([ADR 0130](adr/0130-goals-and-self-wakes-share-the-operator-thread.md)).

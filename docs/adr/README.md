@@ -112,6 +112,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0261 — Hires go where capacity would otherwise go unused](0261-hires-go-where-capacity-would-go-unused.md)
 - [0262 — Prime Agent's operator seat is a resident daemon session](0262-prime-agent-operator-seat-is-a-resident-daemon-session.md)
 - [0263 — One autonomy dial over the decision leaves](0263-one-autonomy-dial-over-the-decision-leaves.md)
+- [0264 — Projects on Auto replace goals](0264-projects-on-auto-replace-goals.md)
 
 ## Archived decisions
 

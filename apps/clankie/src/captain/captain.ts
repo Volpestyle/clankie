@@ -103,6 +103,7 @@ import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
+import { autoProjectStates, autoRoundDue, autoRoundFingerprint, autoRoundPrompt } from "./auto-projects.ts";
 import { createConversationRunner, runAutonomyTurn } from "./captain-conversation-runner.ts";
 import { createDiscordTurns } from "./captain-discord-turns.ts";
 import { RoomForkReceipts } from "./room-forks.ts";
@@ -3962,6 +3963,49 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
     }
   }, options.fleetRoundIntervalMs);
+  // Projects on Auto (ADR 0264): the head hears every Auto project while the
+  // master switch is on, again when its evidence changes or after the idle rewake.
+  let autoRoundPending = false;
+  let lastAutoRound: { fingerprint: string; at: number } | undefined;
+  const stopAutoRounds = startFleetRounds(async () => {
+    if (shutdown.signal.aborted || autoRoundPending || !autonomy.enabled) return;
+    const states = autoProjectStates(
+      (await settings()).projects.projects,
+      (await refreshFleet())
+        .filter((seat) => seat.fleet === undefined && seat.workingDirectory !== undefined)
+        .map((seat) => seat.workingDirectory!),
+    );
+    if (!states.length) {
+      lastAutoRound = undefined;
+      return;
+    }
+    const fingerprint = autoRoundFingerprint(states);
+    if (!autoRoundDue(fingerprint, lastAutoRound, Date.now(), options.autoIdleRewakeMs)) return;
+    autoRoundPending = true;
+    const head = { conversationId: conversations.defaultGlobalConversationId() };
+    void wakeConversation(
+      head,
+      autoRoundPrompt(states),
+      async () => {
+        if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
+        if (!(await settings()).projects.projects.some((project) => project.auto === true))
+          throw new Error("No project is on Auto");
+      },
+      "machine",
+      true,
+      false,
+    )
+      .then((accepted) => {
+        if (accepted) lastAutoRound = { fingerprint, at: Date.now() };
+        else console.warn("Auto round was not delivered");
+      })
+      .catch((error: unknown) => {
+        if (!shutdown.signal.aborted) console.warn("Auto round unavailable", String(error));
+      })
+      .finally(() => {
+        autoRoundPending = false;
+      });
+  }, options.autoRoundIntervalMs ?? options.fleetRoundIntervalMs);
   herdrWatches.start(
     async (conversationId, prompt, discord, guard, original) => {
       const owner = { conversationId, ...(discord === undefined ? {} : { discord }) };
@@ -6107,6 +6151,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       shutdown.abort(new SeatLinkInterruptedError());
       seatEfficiency.close();
       stopFleetRounds();
+      stopAutoRounds();
       unsubscribeFleets?.();
       evaluator.close();
       for (const mailbox of fleetMailboxes.values()) mailbox.close();

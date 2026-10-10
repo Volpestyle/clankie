@@ -38,12 +38,18 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
       : {
           ...current.projects,
           projects: current.projects.projects.map(
-            ({ autonomy: _autonomy, trackerProjectId: _trackerProjectId, ...project }) => project,
+            ({
+              autonomy: _autonomy,
+              trackerProjectId: _trackerProjectId,
+              auto: _auto,
+              focus: _focus,
+              ...project
+            }) => project,
           ),
         },
     ...(current.fleet.hire ? { hireDefaults: current.fleet.hire } : {}),
     ...(includeAutonomy ? { autonomyDefaults: current.autonomy } : {}),
-    ...(includeAutonomy ? { workingPreferences: true, fleetGates: true } : {}),
+    ...(includeAutonomy ? { workingPreferences: true, fleetGates: true, projectsAuto: true } : {}),
     revision: projectsRevision(current.projects),
   };
 }

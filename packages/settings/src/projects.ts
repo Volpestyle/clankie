@@ -50,6 +50,10 @@ export function updateProjectSettings(
       throw new Error("Tracker project is already bound to another project");
     project.trackerProjectId = input.changes.trackerProjectId;
   }
+  if (input.changes.auto === false) delete project.auto;
+  else if (input.changes.auto === true) project.auto = true;
+  if (input.changes.focus === null) delete project.focus;
+  else if (input.changes.focus !== undefined) project.focus = input.changes.focus;
   if (input.changes.autonomy !== undefined) {
     const fleet = applyFleetAutonomyPatch(project.autonomy?.fleet, input.changes.autonomy.fleet);
     const autonomy = { ...project.autonomy };

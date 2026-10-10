@@ -92,14 +92,13 @@ with his recommendation
 [working preferences](https://docs.clankie.bot/cli/#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear),
 [asks](https://docs.clankie.bot/cli/#owner-asks-conversations-questions-id-and-conversations-answer)).
 
-**Has ideas of his own.** He schedules his own wake-ups to pick work back up,
-and in his own console he can hold a goal and keep at it within a token budget
-you set; a seat in Claude Code or Codex can't hold one. From his own
-conversations he can post into your Discord rooms: a find worth sharing, or an
-announcement in the server he runs. `/autonomy pause` stops goal runs and
-self-wakes; in Discord, chattiness and what wakes him set how readily he jumps
-in
-([goals](https://docs.clankie.bot/using-clankie/#give-him-ongoing-work)).
+**Works without being asked.** Put a project on Auto, give it a one-line
+focus, and he works its backlog unprompted, waking himself up to carry long work
+along. The autonomy dial decides which calls he takes alone. `/auto off` stops
+everything unprompted. From his own conversations he can post into your Discord
+rooms: a find worth sharing, or an announcement in the server he runs. In
+Discord, chattiness and what wakes him set how readily he jumps in
+([projects on Auto](https://docs.clankie.bot/using-clankie/#give-him-ongoing-work)).
 
 **Your right-hand man.** Think out loud with him and get pushed back on, hand
 him drafts and pictures to make, and ask what's moving, what's stuck, and what
