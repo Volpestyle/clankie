@@ -73,6 +73,13 @@ export class IntegrationQueue {
     return IntegrationBatchSchema.parse(JSON.parse(await readFile(this.path(id), "utf8")));
   }
   async status(id: string): Promise<IntegrationBatch> {
+    const batch = await this.stored(id);
+    // A push request's pass is one step: while its run continues, it is landing.
+    if (batch.state === "passed" && batch.request.push && this.running.has(batch.batchId ?? batch.id))
+      return { ...batch, state: "pushing" };
+    return batch;
+  }
+  private async stored(id: string): Promise<IntegrationBatch> {
     const receipt = await this.read(id);
     const shared = receipt.batchId ? await this.read(receipt.batchId) : receipt;
     const batch = receipt.batchId
@@ -506,7 +513,7 @@ export class IntegrationQueue {
 
   /** Deploy holds protect the running service, not main, so landing never waits for one (ADR 0240). */
   async land(id: string, guard: () => Promise<void>): Promise<IntegrationBatch> {
-    const batch = await this.status(id);
+    const batch = await this.stored(id);
     if (batch.batchId) {
       if (["conflict", "failed", "interrupted"].includes(batch.state))
         throw Error(`Request ${id} has no landable pass (${batch.state})`);
@@ -523,7 +530,7 @@ export class IntegrationQueue {
         try {
           await guard();
           // Read the persisted attestation rather than trusting an in-memory check result.
-          const recorded = await this.status(id);
+          const recorded = await this.stored(id);
           recorded.repos.sort((a, b) => (a.name === b.name ? 0 : a.name === "core" ? -1 : 1));
           if (!recorded.repos.length) throw Error("No repositories were gated");
           for (const repo of recorded.repos) {
@@ -609,7 +616,7 @@ export class IntegrationQueue {
           return recorded;
         } catch (error) {
           // Keep successful/uncertain individual repo landings; two origins have no atomic transaction.
-          const latest = await this.status(id);
+          const latest = await this.stored(id);
           latest.state = latest.repos.some((r) => r.push) ? "partial" : "held";
           const core = latest.repos.find((r) => r.name === "core");
           const app = latest.repos.find((r) => r.name === "app");

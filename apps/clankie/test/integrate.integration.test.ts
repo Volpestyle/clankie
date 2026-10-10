@@ -484,13 +484,13 @@ fs.writeFileSync(join(root, 'started'), 'gating');
 while (!existsSync(join(root, 'release'))) await new Promise(r => setTimeout(r, 20));
 ${extra}
 `;
-async function queueCli(f: Awaited<ReturnType<typeof fixture>>) {
+async function queueCli(f: Awaited<ReturnType<typeof fixture>>, authorized = guard) {
   return fixtureWork().run(async () => {
     const api = createIntegrationRoutes({
       queue: f.queue,
       holds: f.holds,
       authorize: async (request) =>
-        request.headers.get("authorization") === "Bearer fixture-owner" ? guard : undefined,
+        request.headers.get("authorization") === "Bearer fixture-owner" ? authorized : undefined,
     });
     const server = serve({ fetch: api.fetch, port: 0, hostname: "127.0.0.1" }) as Server;
     await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -506,6 +506,52 @@ async function queueCli(f: Awaited<ReturnType<typeof fixture>>) {
     return { host: `http://127.0.0.1:${address.port}`, env: { CLANKIE_OPERATOR_TOKEN: "fixture-owner" } };
   });
 }
+
+it("a push request reads pushing from its pass until it lands, and one whose push never started stays a landable pass", async () => {
+  const f = await fixture((root) => barrier(root));
+  const parkedId = randomUUID();
+  let parked = false;
+  let atPass!: () => void, resume!: () => void;
+  const reachedPass = new Promise<void>((resolve) => (atPass = resolve));
+  const resumed = new Promise<void>((resolve) => (resume = resolve));
+  cleanups.push(() => resume());
+  // The landing step re-checks the request's guard; park it once, right after the pass is stored.
+  const cli = await queueCli(f, async () => {
+    await guard();
+    const stored = await new IntegrationQueue(f.queue.options).status(parkedId).catch(() => undefined);
+    if (parked || stored?.state !== "passed") return;
+    parked = true;
+    atPass();
+    await resumed;
+  });
+
+  // A push that never starts (its lock is busy) rests at a landable pass.
+  const idle = randomUUID();
+  const started = await runIntegrationCommand(
+    [await commit(f.core.source, "idle", "one"), "--id", idle, "--push", "--no-wait"],
+    cli,
+  );
+  const lock = join(started.batch!.evidence, "..", "push.lock");
+  await mkdir(lock);
+  await writeFile(join(f.root, "release"), "go");
+  await f.queue.wait();
+  expect((await runIntegrationCommand(["status", idle], cli)).batch?.state).toBe("passed");
+  await rm(lock, { recursive: true });
+  expect((await runIntegrationCommand(["push", idle], cli)).batch?.state).toBe("pushed");
+
+  // Between the pass and the push, status already says the push is under way. With no
+  // poller, only the landing step reaches the guard; replaying the request then waits on it.
+  const parkedSha = await commit(f.core.source, "parked", "two");
+  await runIntegrationCommand([parkedSha, "--id", parkedId, "--push", "--no-wait"], cli);
+  await reachedPass;
+  const waiting = runIntegrationCommand([parkedSha, "--id", parkedId, "--push"], cli);
+  expect((await runIntegrationCommand(["status", parkedId], cli)).batch?.state).toBe("pushing");
+  resume();
+  expect((await waiting).batch?.state).toBe("pushed");
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(
+    (await f.queue.status(parkedId)).repos[0]!.head,
+  );
+});
 
 it("CLI/API coalesces arrivals during a real gate, isolating a cross-repo conflict and landing healthy members once", async () => {
   const f = await fixture((root) => barrier(root), true);

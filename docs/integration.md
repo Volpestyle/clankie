@@ -166,7 +166,10 @@ The operator API is `POST /v1/integrate` with typed `run`, `status`, `push`,
 `hold`, `holds` and `release` actions in
 [`packages/protocol/src/integrate.ts`](../packages/protocol/src/integrate.ts).
 `run` takes a caller-created UUID, core/app arrays, optional `restore` batch UUID
-and `push`. It returns immediately; poll `status`. `hold` requires `minutes`.
+and `push`. It returns immediately; poll `status`. A push request reads `pushing`
+from its pass until it lands, so polling ends at `pushed`, `held` or `partial`; one
+that rests at `passed` never started landing, and `push UUID` lands it.
+`hold` requires `minutes`.
 The [API client](../packages/api-client/src/index.ts) exposes `integrate`.
 The [local-bare-repo integration tests](../apps/clankie/test/integrate.integration.test.ts)
 exercise the gate and landing boundary without a live origin or live full check.
