@@ -36,7 +36,6 @@ public static class ClankieRelay {
   }
   static TcpListener listener;
   static volatile bool stopped;
-  static volatile bool draining;
   const int MAX_FRAME = 65536;
   static void Send(byte kind, uint id, byte[] bytes, int length) {
     lock (outputLock) {
@@ -69,9 +68,6 @@ public static class ClankieRelay {
     try {
       while (!stopped) {
         byte[] header = Read(9); byte kind = header[0]; uint id = BitConverter.ToUInt32(header, 1); int length = BitConverter.ToInt32(header, 5);
-        if (kind == 6 && id == 0 && length == 0 && !draining) {
-          draining = true; listener.Stop(); Send(6, 0, new byte[0], 0); continue;
-        }
         if (id == 0 || length < 0 || length > MAX_FRAME || (kind != 2 && kind != 3 && kind != 4) || (kind == 3 && length != 0)) throw new Exception("Invalid relay frame");
         byte[] bytes = Read(length);
         if (kind == 4) {
@@ -120,8 +116,7 @@ public static class ClankieRelay {
         Send(1, id, tuple, tuple.Length);
         ThreadPool.QueueUserWorkItem(delegate {Copy(id, client);});
       }
-    } catch { if (!draining) Stop(); }
-    finally { if (!draining) Stop(); }
+    } finally { Stop(); }
   }
 }
 '@
