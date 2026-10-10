@@ -1,4 +1,8 @@
-import type { Project } from "@clankie/protocol/projects";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import type { Project, ProjectStatus } from "@clankie/protocol/projects";
+
+const run = promisify(execFile);
 
 /** How long an unchanged Auto round waits before waking Clankie again (ADR 0264). */
 const AUTO_IDLE_REWAKE_MS = 2 * 60 * 60_000;
@@ -12,6 +16,20 @@ export interface AutoProjectState {
   readonly workers: number;
 }
 
+function localRoots(project: Project): string[] {
+  return [...project.workspaces, ...project.worktreeRoots]
+    .filter((root) => root.machineId === "local")
+    .map((root) => root.path.replace(/\/+$/u, ""));
+}
+
+function countInside(project: Project, directories: readonly (string | undefined)[]): number {
+  const roots = localRoots(project);
+  return directories.filter(
+    (directory) =>
+      directory !== undefined && roots.some((root) => directory === root || directory.startsWith(`${root}/`)),
+  ).length;
+}
+
 /** Projects on Auto with the live seats working in each; remote workspaces are their own lead's to count. */
 export function autoProjectStates(
   projects: readonly Project[],
@@ -19,21 +37,58 @@ export function autoProjectStates(
 ): AutoProjectState[] {
   return projects
     .filter((project) => project.auto === true)
-    .map((project) => {
-      const roots = [...project.workspaces, ...project.worktreeRoots]
-        .filter((root) => root.machineId === "local")
-        .map((root) => root.path.replace(/\/+$/u, ""));
-      const workers = seatDirectories.filter((directory) =>
-        roots.some((root) => directory === root || directory.startsWith(`${root}/`)),
-      ).length;
-      return {
-        id: project.id,
-        name: project.name,
-        ...(project.focus === undefined ? {} : { focus: project.focus }),
-        ...(project.trackerProjectId === undefined ? {} : { trackerProjectId: project.trackerProjectId }),
-        workers,
-      };
-    });
+    .map((project) => ({
+      id: project.id,
+      name: project.name,
+      ...(project.focus === undefined ? {} : { focus: project.focus }),
+      ...(project.trackerProjectId === undefined ? {} : { trackerProjectId: project.trackerProjectId }),
+      workers: countInside(project, seatDirectories),
+    }));
+}
+
+/**
+ * Commits that reached each local workspace's origin default branch since `since`,
+ * as last fetched; shared history counts once. Undefined when no workspace has one.
+ */
+async function landedSince(project: Project, since: Date): Promise<number | undefined> {
+  const commits = new Set<string>();
+  let read = false;
+  for (const workspace of project.workspaces) {
+    if (workspace.machineId !== "local") continue;
+    for (const ref of ["origin/HEAD", "origin/main"]) {
+      const listed = await run(
+        "git",
+        ["-C", workspace.path, "rev-list", `--since=${since.toISOString()}`, ref, "--"],
+        { timeout: 5_000, maxBuffer: 4 * 1024 * 1024 },
+      ).catch(() => undefined);
+      if (listed === undefined) continue;
+      read = true;
+      for (const commit of listed.stdout.split("\n")) if (commit) commits.add(commit);
+      break;
+    }
+  }
+  return read ? commits.size : undefined;
+}
+
+/** Every project's status line; `questionWorkspaces` holds one entry per pending owner question. */
+export async function projectStatuses(
+  projects: readonly Project[],
+  seatDirectories: readonly string[],
+  questionWorkspaces: readonly (string | undefined)[],
+  now = new Date(),
+): Promise<Record<string, ProjectStatus>> {
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const statuses: Record<string, ProjectStatus> = {};
+  for (const project of projects) {
+    const landedToday = await landedSince(project, midnight);
+    statuses[project.id] = {
+      agentsWorking: countInside(project, seatDirectories),
+      ...(landedToday === undefined ? {} : { landedToday }),
+      needsYou: countInside(project, questionWorkspaces),
+    };
+  }
+  return statuses;
 }
 
 /** What changes the round's evidence; an unchanged round waits out the idle rewake. */

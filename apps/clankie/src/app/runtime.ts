@@ -1078,6 +1078,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     "/",
     createProjectRoutes(authorizeOwnerSecrets, settingsSource, {
       ...(dependencies.projectWorktreeRoot ? { worktreeRoot: dependencies.projectWorktreeRoot } : {}),
+      ...(dependencies.captain.projectStatus
+        ? { status: (projects) => dependencies.captain.projectStatus!(projects) }
+        : {}),
       ...(dependencies.builtInTracker
         ? {
             // Exact UUID only: get_project also matches names, which never bind.

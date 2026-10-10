@@ -221,6 +221,11 @@ export interface CaptainPort {
     conversationId: string,
     sessionId: string,
   ): "current" | "retired" | "elsewhere" | "unknown";
+  /** Each project's live status line and the count of every pending owner question (ADR 0264). */
+  projectStatus?(projects: readonly import("@clankie/protocol/projects").Project[]): Promise<{
+    projects: Record<string, import("@clankie/protocol/projects").ProjectStatus>;
+    needsYou: number;
+  }>;
   /** Current host-bound persona for the exact native seat and occupant. */
   personaForFleetOccupant(seatId: string, occupantId: string): string | undefined;
   projectHireMembershipCandidate(fleet: string, pane: string): ProjectHireMembershipCandidate;

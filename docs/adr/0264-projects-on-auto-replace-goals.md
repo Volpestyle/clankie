@@ -59,3 +59,7 @@ between rounds.
   through their own lead.
 - The projects view status line (agents working, landed today, needs-you
   count) and the app's Auto controls are follow-up slices on this API.
+  (2026-10-10: the status line reads live seats, commits on each local
+  workspace's fetched origin branch since local midnight, and pending owner
+  questions by workspace. Asks raised in the head have no workspace, so the
+  view also counts every pending owner question.)

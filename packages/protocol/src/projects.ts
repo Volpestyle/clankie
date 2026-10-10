@@ -69,6 +69,19 @@ export const ProjectGrantRuleSchema = z
   })
   .strict();
 export const ProjectFocusSchema = z.string().trim().min(1).max(280);
+
+/** A project's status line in the projects view (ADR 0264), read live on each request. */
+export const ProjectStatusSchema = z
+  .object({
+    /** Live seats on this machine working in the project's local workspaces or worktree roots. */
+    agentsWorking: z.number().int().nonnegative(),
+    /** Commits on the local workspace repositories' origin default branch since local midnight; absent without one. */
+    landedToday: z.number().int().nonnegative().optional(),
+    /** Pending owner questions raised in the project's local workspaces. */
+    needsYou: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 export const ProjectSchema = z
   .object({
     id: ProjectIdSchema,
@@ -207,6 +220,10 @@ export const ProjectsSnapshotSchema = z
     fleetGates: z.literal(true).optional(),
     /** Advertises project Auto and focus (ADR 0264); absent on an older service. */
     projectsAuto: z.literal(true).optional(),
+    /** Each project's status line by project ID, in the autonomy-aware view of a current service. */
+    projectStatus: z.record(z.string(), ProjectStatusSchema).optional(),
+    /** Every pending owner question, including those no project claims. */
+    needsYou: z.number().int().nonnegative().optional(),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict()

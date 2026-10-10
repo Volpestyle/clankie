@@ -104,7 +104,9 @@ online; hosted availability follows your plan.
 
 To keep him working without you, put a project on Auto. In the console,
 `/project` opens a project: turn on **Auto**, and set a one-line **Focus** for
-what matters now if you like. From a script:
+what matters now if you like. The project list shows the Auto switch on top and
+a status line for each project: agents working, landed today and what needs
+you. From a script:
 
 ```sh
 clankie project settings garden --auto on --focus "Ship offline mode"

@@ -5565,7 +5565,13 @@ or focus. `auto: true` puts the project on Auto: Clankie works its backlog
 unprompted while [`auto`](#auto-switch) is on, and starts nothing new on it
 otherwise. `focus` is one line (at most 280 characters) on what matters now;
 it steers that work. Snapshots advertise both with `projectsAuto: true`, and like
-`trackerProjectId` they appear only in the `?includeAutonomy=true` view.
+`trackerProjectId` they appear only in the `?includeAutonomy=true` view. That
+view also carries `projectStatus`, each project's status line by ID, read live:
+`agentsWorking` (seats on this machine working in its local workspaces or
+worktree roots), `landedToday` (commits on each local workspace's fetched
+`origin` default branch since local midnight, absent without one) and `needsYou`
+(pending owner questions raised in its workspaces), plus a top-level `needsYou`
+counting every pending owner question.
 `trackerProjectId` binds the project to one built-in tracker project by its UUID
 (from `work sync` bootstrap or `work owner get_project`); the service refuses a
 UUID the tracker does not hold (`tracker_project_not_found`) or one already bound
