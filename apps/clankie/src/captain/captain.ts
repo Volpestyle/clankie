@@ -394,7 +394,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       createHerdrWatchRunner(
         deps.herdrAvailable,
         undefined,
-        (options.openCodeNative ?? options.grokNative ?? options.primeNative ?? options.piNative)?.createCommandTab,
+        (options.openCodeNative ?? options.grokNative ?? options.primeNative ?? options.piNative)
+          ?.createCommandTab,
         {
           localCodexBinding: () => deps.runtimes?.configuredBinding("default") ?? Promise.resolve(undefined),
           ...(deps.runtimes ? { localReadBinding: () => deps.runtimes!.configuredBinding("default") } : {}),

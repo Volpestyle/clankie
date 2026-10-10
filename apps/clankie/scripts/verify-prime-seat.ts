@@ -50,8 +50,9 @@ try {
   let socketPath: string | undefined;
   for (let attempt = 0; attempt < 100 && !socketPath; attempt++) {
     const rows = JSON.parse((await execute("herdr", ["session", "list", "--json"], { env })).stdout).sessions;
-    socketPath = rows.find((row: { name: string; running: boolean }) => row.name === session && row.running)
-      ?.socket_path;
+    socketPath = rows.find(
+      (row: { name: string; running: boolean }) => row.name === session && row.running,
+    )?.socket_path;
     if (!socketPath) await pause(100);
   }
   assert.ok(socketPath, "Owned Herdr server unavailable");
@@ -104,10 +105,14 @@ try {
   const idle = await control.send("Reply with exactly IDLE-OK.");
   evidence.idleSend = idle;
   assert.equal(idle.outcome, "accepted");
-  const idleDone = await control.settled(AbortSignal.timeout(120_000), idle.outcome === "accepted" ? idle.messageId : undefined);
+  const idleDone = await control.settled(
+    AbortSignal.timeout(120_000),
+    idle.outcome === "accepted" ? idle.messageId : undefined,
+  );
   evidence.idleDone = idleDone;
   assert.match((idleDone as { text?: string }).text ?? "", /IDLE-OK/u);
-  const visible = (await execute("herdr", ["pane", "read", paneId, "--source", "visible"], { env: herdrEnv })).stdout;
+  const visible = (await execute("herdr", ["pane", "read", paneId, "--source", "visible"], { env: herdrEnv }))
+    .stdout;
   evidence.draftPreserved = visible.includes("OWNER DRAFT KEEP");
   evidence.visibleAfterIdle = visible.slice(-3000);
 
@@ -135,7 +140,9 @@ try {
   assert.equal(longDone.type, "turn_completed");
 
   // Interrupt an owned running turn.
-  const interruptible = await control.send("In your Python REPL run `import time; time.sleep(60)` then say SLEPT.");
+  const interruptible = await control.send(
+    "In your Python REPL run `import time; time.sleep(60)` then say SLEPT.",
+  );
   evidence.interruptibleSend = interruptible;
   for (let index = 0; index < 100 && (await control.status()) !== "working"; index++) await pause(100);
   await pause(2000);
@@ -152,7 +159,11 @@ try {
   const daemon = await connectPrimeDaemon(await discoverPrimeAgent());
   const summary = await primeSessionState(daemon, activeSessionId!);
   evidence.workerPid = summary.workerPid;
-  evidence.allowsWorkerChain = await native.allows([summary.workerPid!, 1], control.ref.paneId, await binding());
+  evidence.allowsWorkerChain = await native.allows(
+    [summary.workerPid!, 1],
+    control.ref.paneId,
+    await binding(),
+  );
   evidence.refusesOtherChain = !(await native.allows([process.pid, 1], control.ref.paneId, await binding()));
   evidence.refusesOtherPane = !(await native.allows([summary.workerPid!, 1], "w9:p9", await binding()));
 

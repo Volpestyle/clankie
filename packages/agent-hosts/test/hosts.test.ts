@@ -61,8 +61,11 @@ test("POSIX wire commands execute safely with spaces, quotes, and shell substitu
       "--",
       "test-host",
     ]);
-    return (await promisify(execFile)("sh", ["-c", args.at(-1)!], { env: { ...process.env, PRIME_AGENT_CODING_AGENT_DIR: "", HOME: f.home } }))
-      .stdout;
+    return (
+      await promisify(execFile)("sh", ["-c", args.at(-1)!], {
+        env: { ...process.env, PRIME_AGENT_CODING_AGENT_DIR: "", HOME: f.home },
+      })
+    ).stdout;
   };
   const host = createSshAgentHost({ id: "test", ssh: "test-host", shell: "posix" }, { run });
   expect((await host.list())[0]).toMatchObject({ path: f.path, size: f.bytes.length, harness: "claude" });
@@ -134,8 +137,11 @@ test("Grok and Pi roots are discovered locally and over POSIX; unrelated Grok JS
     { id: "test", ssh: "test", shell: "posix" },
     {
       run: async (_command, args) =>
-        (await promisify(execFile)("sh", ["-c", args.at(-1)!], { env: { ...process.env, PRIME_AGENT_CODING_AGENT_DIR: "", HOME: f.home } }))
-          .stdout,
+        (
+          await promisify(execFile)("sh", ["-c", args.at(-1)!], {
+            env: { ...process.env, PRIME_AGENT_CODING_AGENT_DIR: "", HOME: f.home },
+          })
+        ).stdout,
     },
   );
   for (const host of [local, remote]) {

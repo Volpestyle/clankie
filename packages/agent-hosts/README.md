@@ -83,13 +83,13 @@ flowchart TD
   Session -->|"receipts and turn events"| Tools
 ```
 
-| Harness     | Mechanism                                            | Local hire adapter                                                    |
-| ----------- | ---------------------------------------------------- | --------------------------------------------------------------------- |
-| Claude Code | Native worker-plugin channel and turn hooks          | Implemented; requires the owner's channel consent                     |
-| Codex       | App-server shared with the native TUI's bound thread | Implemented; starts or steers a turn                                  |
-| Pi          | Process-bound native extension follow-up messages    | Opt-in on macOS/Linux; Pi 0.87.1; live acceptance held                |
-| OpenCode    | Injected SDK in the process-bound native worker TUI  | Implemented locally and on linked Mac POSIX fleets; pinned to 1.18.18 |
-| Grok Build  | Leader IPC/ACP on the exact interactive TUI session  | Implemented locally on macOS; pinned to Grok 1.0.46                   |
+| Harness     | Mechanism                                             | Local hire adapter                                                         |
+| ----------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| Claude Code | Native worker-plugin channel and turn hooks           | Implemented; requires the owner's channel consent                          |
+| Codex       | App-server shared with the native TUI's bound thread  | Implemented; starts or steers a turn                                       |
+| Pi          | Process-bound native extension follow-up messages     | Opt-in on macOS/Linux; Pi 0.87.1; live acceptance held                     |
+| OpenCode    | Injected SDK in the process-bound native worker TUI   | Implemented locally and on linked Mac POSIX fleets; pinned to 1.18.18      |
+| Grok Build  | Leader IPC/ACP on the exact interactive TUI session   | Implemented locally on macOS; pinned to Grok 1.0.46                        |
 | Prime Agent | Daemon session created by Clankie, TUI attached to it | Implemented locally on macOS/Linux (0.10.x); operator seat `clankie prime` |
 
 Transcript discovery and an available native CLI

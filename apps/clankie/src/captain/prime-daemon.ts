@@ -58,7 +58,9 @@ export async function discoverPrimeAgent(env: NodeJS.ProcessEnv = process.env): 
     const head = await readFile(resolved).then((bytes) => bytes.subarray(0, 2).toString("latin1"));
     // The curl installer writes a shell launcher that execs the binary beside it.
     const executable =
-      head === "#!" ? await realpath(join(dirname(resolved), "..", "share", "prime-agent", "prime-agent")) : resolved;
+      head === "#!"
+        ? await realpath(join(dirname(resolved), "..", "share", "prime-agent", "prime-agent"))
+        : resolved;
     await access(executable, constants.X_OK);
     const agentDir = env.PRIME_AGENT_CODING_AGENT_DIR ?? join(env.HOME ?? "", ".prime", "agent");
     const socketPath = primeDaemonSocket(env);
@@ -214,8 +216,12 @@ export class PrimeDaemonConnection {
   }
 
   /** Resolve with the response data; a refusal or a lost connection rejects. */
-  request(command: { readonly type: string } & Record<string, unknown>, timeoutMs = 30_000): Promise<unknown> {
-    if (this.closed) return Promise.reject(new PrimeDaemonError(command.type, "Prime Agent daemon disconnected"));
+  request(
+    command: { readonly type: string } & Record<string, unknown>,
+    timeoutMs = 30_000,
+  ): Promise<unknown> {
+    if (this.closed)
+      return Promise.reject(new PrimeDaemonError(command.type, "Prime Agent daemon disconnected"));
     const id = `clankie_${String(++this.sequence)}`;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -261,7 +267,10 @@ export class PrimeDaemonConnection {
         if (response.data.success) waiter.resolve(response.data.data);
         else
           waiter.reject(
-            new PrimeDaemonError(response.data.command, response.data.error ?? "Prime Agent refused the command"),
+            new PrimeDaemonError(
+              response.data.command,
+              response.data.error ?? "Prime Agent refused the command",
+            ),
           );
         continue;
       }

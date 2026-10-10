@@ -97,7 +97,9 @@ export function createPrimeSeatAdapter(options: {
     },
     async attach(ref) {
       const control = controls.get(ref.sessionId);
-      return ref.harness === "prime" && control?.ref.paneId === ref.paneId && (await control.status()) !== "offline"
+      return ref.harness === "prime" &&
+        control?.ref.paneId === ref.paneId &&
+        (await control.status()) !== "offline"
         ? control
         : undefined;
     },
@@ -106,7 +108,9 @@ export function createPrimeSeatAdapter(options: {
       if (launch.harness !== "prime" || launch.harnessArgs?.length)
         throw new Error("Prime Agent accepts no extra harness argv; nothing was started");
       if (launch.effort !== undefined && !(THINKING_LEVELS as readonly string[]).includes(launch.effort))
-        throw new Error(`Prime Agent effort must be one of ${THINKING_LEVELS.join(", ")}; no default substituted`);
+        throw new Error(
+          `Prime Agent effort must be one of ${THINKING_LEVELS.join(", ")}; no default substituted`,
+        );
       const prime = await install();
       const cwd = await realpath(launch.cwd);
       const daemon = await connectPrimeDaemon(prime);
@@ -171,7 +175,9 @@ export function createPrimeSeatAdapter(options: {
       };
       const state = async () => {
         if (disposed || daemon.isClosed) throw new Error("Prime Agent control ended");
-        const summary = PrimeSessionSummary.parse(await daemon.request({ type: "get_state", activeSessionId }));
+        const summary = PrimeSessionSummary.parse(
+          await daemon.request({ type: "get_state", activeSessionId }),
+        );
         // A respawned worker lost Clankie's session-scoped MCP server and may
         // no longer be the process this pane's identity was proven against.
         if (summary.sessionId !== sessionId || summary.workerInstanceId !== workerInstance)
@@ -214,7 +220,9 @@ export function createPrimeSeatAdapter(options: {
             const descriptor = primeDescriptor(sessionId);
             await root.report(descriptor, "idle", view.name);
             const herdrSocket = (await root.proof(descriptor)).binding.socketPath;
-            const rawPane = view.paneId.includes("/") ? view.paneId.slice(view.paneId.lastIndexOf("/") + 1) : view.paneId;
+            const rawPane = view.paneId.includes("/")
+              ? view.paneId.slice(view.paneId.lastIndexOf("/") + 1)
+              : view.paneId;
             await daemon.request({
               type: "replace_acp_mcp_servers",
               activeSessionId,
@@ -318,10 +326,18 @@ export function createPrimeSeatAdapter(options: {
                   await verify(selected);
                   busy = (await status()) === "working";
                 } catch {
-                  return { outcome: "offline", detail: "Original Prime Agent control unavailable", deliveryStage: "unavailable" };
+                  return {
+                    outcome: "offline",
+                    detail: "Original Prime Agent control unavailable",
+                    deliveryStage: "unavailable",
+                  };
                 }
                 if (input?.beforeDispatch && !(await input.beforeDispatch()))
-                  return { outcome: "offline", detail: "Prime Agent dispatch authority changed", deliveryStage: "unavailable" };
+                  return {
+                    outcome: "offline",
+                    detail: "Prime Agent dispatch authority changed",
+                    deliveryStage: "unavailable",
+                  };
                 const messageId = randomUUID();
                 fence.begin(sessionId, { messageId, fingerprint: deliveryFingerprint(text), sessionId });
                 const steer = busy && input?.delivery === "steer";
@@ -338,15 +354,23 @@ export function createPrimeSeatAdapter(options: {
                   );
                 } catch (error) {
                   // An explicit refusal proves Prime did not admit it; silence does not.
-                  if (error instanceof PrimeDaemonError && !/disconnected|No prompt response/u.test(error.message)) {
+                  if (
+                    error instanceof PrimeDaemonError &&
+                    !/disconnected|No prompt response/u.test(error.message)
+                  ) {
                     fence.reconcile(sessionId, messageId);
                     inflight.delete(messageId);
-                    return { outcome: "offline", detail: `Prime Agent refused the message: ${error.message}`, deliveryStage: "unavailable" };
+                    return {
+                      outcome: "offline",
+                      detail: `Prime Agent refused the message: ${error.message}`,
+                      deliveryStage: "unavailable",
+                    };
                   }
                   return {
                     outcome: "unconfirmed",
                     messageId,
-                    detail: "Prime Agent did not acknowledge the message; inspect the session before retrying",
+                    detail:
+                      "Prime Agent did not acknowledge the message; inspect the session before retrying",
                     deliveryStage: "uncertain",
                   };
                 }
@@ -369,10 +393,18 @@ export function createPrimeSeatAdapter(options: {
                   if (after) return after;
                   if (now === "offline") return { type: "released", at: new Date().toISOString() };
                   if (now === "blocked")
-                    return { type: "blocked", at: new Date().toISOString(), reason: "Prime Agent is waiting on provider quota" };
+                    return {
+                      type: "blocked",
+                      at: new Date().toISOString(),
+                      reason: "Prime Agent is waiting on provider quota",
+                    };
                   if (now === "idle" && wanted === undefined && latest) return latest;
                   if (now === "idle" && wanted !== undefined && !inflight.has(wanted))
-                    return { type: "settlement_unconfirmed", at: new Date().toISOString(), reason: "message_correlation_unavailable" };
+                    return {
+                      type: "settlement_unconfirmed",
+                      at: new Date().toISOString(),
+                      reason: "message_correlation_unavailable",
+                    };
                   await new Promise((resolve) => setTimeout(resolve, 250));
                 }
               },
