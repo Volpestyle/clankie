@@ -131,8 +131,11 @@ export class CodexAppServerClient {
     socket.on("close", () => this.fail(new Error("Codex app-server disconnected")));
   }
 
-  async initialize(): Promise<void> {
-    await this.request("initialize", { clientInfo: { name: "clankie", title: "Clankie", version: "0.2.1" } });
+  async initialize(experimentalApi = false): Promise<void> {
+    await this.request("initialize", {
+      clientInfo: { name: "clankie", title: "Clankie", version: "0.2.1" },
+      ...(experimentalApi ? { capabilities: { experimentalApi: true } } : {}),
+    });
     this.socket.send(JSON.stringify({ method: "initialized", params: {} }));
   }
 

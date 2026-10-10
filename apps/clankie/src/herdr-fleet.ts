@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { createServer } from "node:net";
 import type { HerdrSshTransport } from "@clankie/settings";
 
 /**
@@ -332,4 +333,38 @@ export function createFleetShellStream(
       stdio: ["pipe", "pipe", "pipe"],
     });
   };
+}
+
+export function freeLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port: 0 }, () => {
+      const address = server.address();
+      server.close(() =>
+        typeof address === "object" && address !== null
+          ? resolve(address.port)
+          : reject(new Error("No local port was assigned")),
+      );
+    });
+  });
+}
+
+/** The forward's own ssh connection: it must end exactly when this seat's link does. */
+export function forwardSshArgs(fleet: HerdrFleet, localPort: number, remotePort: number): string[] {
+  return [
+    ...SSH_BASE_OPTIONS,
+    "-o",
+    "ControlMaster=no",
+    "-o",
+    "ControlPath=none",
+    "-o",
+    "ExitOnForwardFailure=yes",
+    "-N",
+    "-L",
+    `127.0.0.1:${String(localPort)}:127.0.0.1:${String(remotePort)}`,
+    "--",
+    fleet.ssh.host,
+  ];
 }

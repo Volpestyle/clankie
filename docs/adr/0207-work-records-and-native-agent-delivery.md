@@ -92,3 +92,50 @@ an expired result, while uncertain originals remain retained. ID, scope and
 fingerprint tombstones survive result-body expiry and service restart. Reconciliation
 reports what the original receipt proves, preserving the distinction between
 native delivery, uncertainty and completed work.
+
+## Private Windows Codex control (VUH-1563)
+
+Windows Herdr Codex panes keep a private app-server. Joining the account's shared
+daemon loses the launch's private environment and can disconnect the worker MCP
+bridge from its pane. Elevated shells therefore used `--no-daemon`; that embedded
+server offers no external control endpoint, so active-turn sends had to queue.
+
+The native launcher now supervises one dedicated app-server and the original
+interactive TUI in the same pane's foreground process tree. The server inherits
+the launch's environment, `CODEX_HOME`, cwd and configuration. It binds only
+`ws://127.0.0.1:0`; the TUI uses `--remote` with the OS-assigned endpoint. Codex
+rejects `--no-daemon` together with `--remote`, so the private server replaces
+that flag for this launch without enabling the shared daemon. Other launches
+retain their existing behavior. Cleanup owns only these child processes.
+
+The native app-server cannot select a CLI named profile (`-p`/`--profile`),
+whose separate configuration file may carry different MCP and model settings.
+Those launches retain the native embedded `--no-daemon` path. Pane-targeted
+steer and queue delivery refuse until an endpoint and the same private home can
+be proven; they never fall through to an account-default queue. The launcher forwards only
+configuration flags accepted by both native commands; it preserves the TUI's
+prompt, model, approval, sandbox and resume arguments.
+
+Before opening the fleet's SSH transport, Clankie independently proves the
+current Herdr pane/session, installed native TUI and backend executables, full
+process creation order, common foreground ancestry, private-home consistency
+and the backend's actual loopback listener. A banner, title, saved session or
+endpoint file confers no authority. A dedicated native SSH loopback forward carries
+protocol bytes; a metadata-only host probe identifies its nearest live SSHD
+ancestor and sole established TCP tuple. After connecting, the kernel TCP table must
+prove the exact established connection terminates in that same backend lifetime.
+The complete pane proof and current caller authority are checked again before
+the native write. MCP children may join the same pane through the proven backend
+ancestry; existing project grants and per-call admission still apply.
+
+Reuse the existing read-only `thread/read` and latest-turn inspection, followed
+by `turn/steer` with the exact `expectedTurnId`. Never resume an unrelated thread
+or answer a native approval. A confirmed receipt reports `steered`; native queue
+acceptance reports `queued`. Private-backend queues reuse native `thread/queue/add`
+with its required experimental protocol negotiation on the same proven connection,
+so a private home never falls through to the account-default queue. Busy turns
+hold the submission until they settle; idle turns start it through that backend.
+Explicit Queue bypasses steering, and an impossible
+explicit Steer is a reasoned pre-send rejection under the existing delivery-mode
+contract. Once a mutation may have been written, a lost response remains
+unconfirmed and cannot authorize a queue, fallback model turn or second send.

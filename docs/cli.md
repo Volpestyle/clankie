@@ -2506,7 +2506,19 @@ An uncertain start or brief delivery retains its pane for inspection and reports
 uncertainty. The turn may already have started; reconcile its native session before
 retrying. `message_seat` distinguishes confirmed delivery, unconfirmed delivery,
 and unavailable control. External Codex messages first try the selected machine's
-existing app-server proxy. `state: steered` confirms the exact active turn;
+existing app-server connection. On Windows, new native Herdr launches use a
+dedicated loopback backend and a TUI attached with `--remote`, preserving their
+private environment, cwd, configuration and MCP bridge. This replaces the
+elevated-shell `--no-daemon` flag for those launches without joining the shared
+daemon. Existing embedded `--no-daemon` sessions and explicit named profiles
+retain that launch mode. Pane-targeted delivery refuses when no private endpoint
+can be proven; it never queues through the SSH account's default home.
+Clankie checks the current pane/session, native process lifetimes and ancestry,
+private-home consistency, listener and actual connected TCP owner before steering
+through the fleet's native SSH forwarding. Private queues reach the same proven
+backend and remain pending until its active turn settles, preserving custom
+`CODEX_HOME` sessions. These observations do not widen tool grants.
+`state: steered` confirms the exact active turn;
 `state: queued` and `status: queued_until_turn_end` mean native queue acceptance,
 not that the agent saw the message. A goal may hold it until the whole goal ends.
 No new setting or daemon is enabled. An unavailable connection does not promise an automatic

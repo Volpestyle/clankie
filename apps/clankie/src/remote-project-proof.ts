@@ -20,14 +20,31 @@ interface Process {
   startTime: string;
   executable: string | null;
 }
+interface SeatMarkers {
+  pane: string;
+  socketPath: string;
+  homeHash: string;
+}
+interface NativeProcess {
+  pid: number;
+  cwd: string;
+  executable: string;
+  /** Bounded kernel argv projection, absent only on legacy observations. */
+  role?: "tui" | "server" | "other" | "unavailable";
+  endpoint?: string | null;
+  markers?: SeatMarkers | null;
+  listeners?: { pid: number; address: string; port: number }[];
+  listenerOwners?: number[];
+}
 interface Observation {
   binding: { socketPath: string; session: string };
   info: { pane_id: string; shell_pid: number; foreground_process_group_id: number };
   agent: unknown;
   processes: Process[];
-  nativeProcesses: { pid: number; cwd: string; executable: string }[];
+  nativeProcesses: NativeProcess[];
   owners: number[];
   installed: string[];
+  foregroundMarkers?: SeatMarkers | null;
   privateServer?: {
     pid: number;
     startTime: string;
@@ -36,6 +53,31 @@ interface Observation {
     port: number;
     listeners: number[];
   } | null;
+}
+/** Host-observed identity. Never accepts an endpoint, PID or home from a request. */
+export interface RemoteCodexControlProof {
+  readonly fleet: string;
+  readonly pane: string;
+  readonly terminalId: string;
+  readonly sessionId: string;
+  readonly nativeOccupantId: string;
+  readonly binding: { readonly socketPath: string; readonly session: string };
+  readonly endpoint: string;
+  /** A zero argv port is resolved solely from the backend's single kernel listener. */
+  readonly listenEndpoint: string;
+  readonly homeHash: string;
+  /** Canonical current directory shared by the visible TUI and its private backend. */
+  readonly cwd: string;
+  readonly shell: { readonly pid: number; readonly startTime: string };
+  readonly foreground: { readonly pid: number; readonly startTime: string };
+  readonly tui: { readonly pid: number; readonly startTime: string; readonly executable: string };
+  readonly server: { readonly pid: number; readonly startTime: string; readonly executable: string };
+  readonly chains: { readonly tui: readonly Process[]; readonly server: readonly Process[] };
+}
+/** Actual socket endpoints captured by the native RPC helper, never model/request arguments. */
+export interface RemoteCodexControlConnection {
+  readonly clientPort: number;
+  readonly serverPort: number;
 }
 export interface RemoteStream {
   /** Ports are captured by trusted relay accept(), never copied from HTTP data. */
@@ -101,6 +143,7 @@ function select(observation: Observation, fleet: HerdrFleet, pane: string, strea
   if (!shell || shell.pid === foreground) return undefined;
   const candidates = observation.nativeProcesses.flatMap((native) => {
     if (
+      (native.role !== undefined && native.role !== "tui") ||
       !observation.installed.includes(native.executable) ||
       typeof native.cwd !== "string" ||
       !win32.isAbsolute(native.cwd) ||
@@ -163,6 +206,161 @@ function select(observation: Observation, fleet: HerdrFleet, pane: string, strea
   };
 }
 
+function loopbackPort(endpoint: unknown, allowZero = false): number | undefined {
+  if (typeof endpoint !== "string" || !/^ws:\/\/127\.0\.0\.1:(0|[1-9]\d{0,4})$/u.test(endpoint))
+    return undefined;
+  const port = Number(endpoint.slice(15));
+  return port <= 65535 && (allowZero || port > 0) ? port : undefined;
+}
+
+/** Both native processes must descend from this exact live foreground wrapper above the shell. */
+function selectCodexControl(
+  observation: Observation,
+  fleet: HerdrFleet,
+  pane: string,
+  sessionId: string,
+  connection?: RemoteCodexControlConnection,
+): RemoteCodexControlProof | undefined {
+  const view = select(observation, fleet, pane);
+  const agent = parseHerdrAgentResult(JSON.stringify({ result: { agent: observation.agent } }));
+  if (
+    !view ||
+    agent.agent !== "codex" ||
+    agent.session?.kind !== "id" ||
+    agent.session.value !== sessionId ||
+    !sessionId ||
+    view.proof.nativeSessionPending
+  )
+    return undefined;
+  const tuis = observation.nativeProcesses.filter((native) => native.role === "tui");
+  const servers = observation.nativeProcesses.filter((native) => native.role === "server");
+  // Unknown argv could conceal another native TUI or daemon; unavailable facts never authorize.
+  if (
+    tuis.length !== 1 ||
+    servers.length !== 1 ||
+    observation.nativeProcesses.some((native) => native.role === undefined || native.role === "unavailable")
+  )
+    return undefined;
+  const tui = tuis[0]!;
+  const server = servers[0]!;
+  const port = loopbackPort(tui.endpoint);
+  const listenPort = loopbackPort(server.endpoint, true);
+  const shell = view.proof.shell;
+  const tuiChain = ancestry(observation.processes, tui.pid, shell.pid);
+  const serverChain = ancestry(observation.processes, server.pid, shell.pid);
+  const foreground = observation.processes.find((process) => process.pid === view.foreground);
+  if (
+    port === undefined ||
+    listenPort === undefined ||
+    (listenPort !== 0 && listenPort !== port) ||
+    !tuiChain ||
+    !serverChain ||
+    !foreground ||
+    foreground.pid === shell.pid ||
+    !tuiChain.slice(1).some((process) => process.pid === foreground.pid) ||
+    !serverChain.slice(1).some((process) => process.pid === foreground.pid) ||
+    serverChain.slice(1).some((process) => process.pid === tui.pid) ||
+    tui.pid !== view.proof.processes[0]?.pid ||
+    server.pid === tui.pid ||
+    !observation.installed.includes(server.executable) ||
+    server.executable !== tui.executable ||
+    serverChain[0]?.executable !== server.executable ||
+    tuiChain[0]?.executable !== tui.executable ||
+    creationTicks(serverChain[0]!.startTime)! > creationTicks(tuiChain[0]!.startTime)! ||
+    [...tuiChain, ...serverChain].some(
+      (process) => !process.executable || !win32.isAbsolute(process.executable),
+    ) ||
+    server.cwd !== tui.cwd ||
+    server.listeners?.length !== 1 ||
+    server.listeners[0]?.pid !== server.pid ||
+    server.listeners[0]?.address !== "127.0.0.1" ||
+    server.listeners[0]?.port !== port ||
+    server.listenerOwners?.length !== 1 ||
+    server.listenerOwners[0] !== server.pid
+  )
+    return undefined;
+  const markers = observation.foregroundMarkers;
+  if (
+    !markers ||
+    markers.pane !== pane ||
+    markers.socketPath !== observation.binding.socketPath ||
+    !/^[a-f0-9]{64}$/u.test(markers.homeHash) ||
+    !isDeepStrictEqual(markers, tui.markers) ||
+    !isDeepStrictEqual(markers, server.markers)
+  )
+    return undefined;
+  if (
+    connection &&
+    (!Number.isSafeInteger(connection.clientPort) ||
+      connection.clientPort < 1 ||
+      connection.clientPort > 65535 ||
+      connection.serverPort !== port ||
+      observation.owners.length !== 1 ||
+      observation.owners[0] !== server.pid)
+  )
+    return undefined;
+  return {
+    fleet: fleet.id,
+    pane,
+    terminalId: agent.terminalId,
+    sessionId,
+    nativeOccupantId: view.proof.nativeOccupantId,
+    binding: observation.binding,
+    endpoint: tui.endpoint!,
+    listenEndpoint: server.endpoint!,
+    homeHash: markers.homeHash,
+    cwd: tui.cwd,
+    shell,
+    foreground: { pid: foreground.pid, startTime: foreground.startTime },
+    tui: { pid: tui.pid, startTime: tuiChain[0]!.startTime, executable: tui.executable },
+    server: { pid: server.pid, startTime: serverChain[0]!.startTime, executable: server.executable },
+    chains: { tui: tuiChain, server: serverChain },
+  };
+}
+
+/** Fresh discovery and an optional exact established TCP server-half proof through the same reader. */
+export function createRemoteCodexControlObserver(options: Pick<Options, "fleet" | "shell">) {
+  return async (
+    fleetId: string,
+    pane: string,
+    sessionId: string,
+    connection?: RemoteCodexControlConnection,
+  ): Promise<RemoteCodexControlProof | undefined> => {
+    if (
+      !/^w[\w]+:p[\w]+$/u.test(pane) ||
+      fleetId === "default" ||
+      (connection &&
+        [connection.clientPort, connection.serverPort].some(
+          (port) => !Number.isSafeInteger(port) || port < 1 || port > 65535,
+        ))
+    )
+      return undefined;
+    try {
+      const fleet = await options.fleet(fleetId);
+      if (!fleet || fleet.id !== fleetId || fleet.ssh.shell !== "powershell") return undefined;
+      const snapshots = JSON.parse(
+        await options.shell(fleet)(
+          windowsProcessCommand({
+            session: fleet.session,
+            pane,
+            codexControl: true,
+            // Reverse the helper's tuple: the listener's accepted socket owns the server half.
+            ...(connection ? { clientPort: connection.serverPort, serverPort: connection.clientPort } : {}),
+          }),
+          10_000,
+        ),
+      ) as { first: Observation; last: Observation };
+      const first = selectCodexControl(snapshots.first, fleet, pane, sessionId, connection);
+      const last = selectCodexControl(snapshots.last, fleet, pane, sessionId, connection);
+      return first && isDeepStrictEqual(first, last) && isDeepStrictEqual(await options.fleet(fleetId), fleet)
+        ? first
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+}
+
 /** Fresh initial/final observations over the registered fleet's existing SSH transport. */
 export function createRemoteProjectObserver(options: Options) {
   return async (
@@ -179,6 +377,7 @@ export function createRemoteProjectObserver(options: Options) {
       const command = windowsProcessCommand({
         session: fleet.session,
         pane,
+        codexControl: true,
         ...(privateServer ? { privateServer } : {}),
         ...(stream ? { clientPort: stream.clientPort, serverPort: stream.serverPort } : {}),
       });
@@ -186,7 +385,21 @@ export function createRemoteProjectObserver(options: Options) {
       const snapshots = JSON.parse(await shell(command, 10_000)) as { first: Observation; last: Observation };
       const choose = async (snapshot: Observation) => {
         const direct = select(snapshot, fleet, pane, stream);
-        if (direct || !stream || !privateServer || !options.privateSeats) return direct;
+        if (direct || !stream) return direct;
+        // A hand-started dedicated backend is a sibling of the visible TUI. Its
+        // MCP children inherit that exact current pane only after the same kernel
+        // listener/argv/marker/lifetime proof used by native steering succeeds.
+        const native = parseHerdrAgentResult(JSON.stringify({ result: { agent: snapshot.agent } }));
+        const control =
+          native.session?.kind === "id"
+            ? selectCodexControl(snapshot, fleet, pane, native.session.value)
+            : undefined;
+        if (control && snapshot.owners.length === 1 && stream.alive()) {
+          const socketChain = ancestry(snapshot.processes, snapshot.owners[0]!, control.server.pid);
+          const view = select(snapshot, fleet, pane);
+          if (socketChain && view) return { ...view, socketChain, control };
+        }
+        if (!privateServer || !options.privateSeats) return undefined;
         const view = select(snapshot, fleet, pane);
         const server = snapshot.privateServer;
         if (

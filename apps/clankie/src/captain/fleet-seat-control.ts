@@ -26,6 +26,7 @@ export function createFleetSeatControl(
     sessionId: string,
     text: string,
     beforeDispatch?: () => Promise<boolean>,
+    paneId?: string,
   ) => Promise<boolean | FleetSeatDelivery>,
   remoteCodexControl?: (fleet: string, paneId: string) => ExternalCodexControl | undefined,
   uncertaintyPath?: string,
@@ -71,9 +72,13 @@ export function createFleetSeatControl(
         if (native !== undefined) return native;
         if (delivery === "steer") return modeUnavailable("steer");
         if (authorized && !(await authorized())) return refused();
-        const queuedResult = authorized
-          ? await remoteCodexQueue(remote, agent.session.value, text, authorized)
-          : await remoteCodexQueue(remote, agent.session.value, text);
+        const queuedResult = await remoteCodexQueue(
+          remote,
+          agent.session.value,
+          text,
+          authorized,
+          agent.paneId,
+        );
         if (typeof queuedResult === "object") return queuedResult;
         if (queuedResult) return queued();
         return {
