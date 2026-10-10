@@ -91,9 +91,10 @@ one ask with his recommendation
 ([working preferences](https://docs.clankie.bot/cli/#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear),
 [asks](https://docs.clankie.bot/cli/#owner-asks-conversations-questions-id-and-conversations-answer)).
 
-**Has ideas of his own.** Give a conversation a goal and he keeps at it, waking
-himself up later, within a token budget you set. He proposes goals too, and
-`/goal accept` starts one. From his own conversations he can post into your
+**Has ideas of his own.** He schedules his own wake-ups to pick work back up,
+and in his own console he can hold a goal and keep at it within a token budget
+you set; a seat in Claude Code or Codex can't hold one. From his own
+conversations he can post into your
 Discord rooms: a find worth sharing, or an announcement in the server he runs.
 `/autonomy off` stops goal runs and self-wakes; in Discord, chattiness and what
 wakes him set how readily he jumps in
