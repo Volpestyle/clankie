@@ -227,6 +227,10 @@ idle. The operator can request one or its own led/hired seats with `refresh_work
 `clankie harness refresh-tools [--pane PANE]`, or TUI `/refresh-tools`.
 No pane selects only the calling conversation's led/hired seats, including remote seats. Other panes return `skipped-not-owned` and require an explicit pane through the authenticated owner API/CLI. Ownership is rechecked before deferred effects.
 Read each `refreshed`, `catalog-refreshed`, `skipped-busy`, `skipped-not-owned`, or `failed` result.
+A Claude seat still on an older plugin fails with `original_claude_plugin_unchanged`:
+the catalog refresh reaches its running bridge, but a plugin loads only when its
+session starts. Its `detail` names that step: between tasks, close the pane and
+call `hire_agent` with `resume` set to its transcript ref.
 Local Codex `catalog-refreshed` proves the original connected MCP catalog,
 not next-turn model exposure or report delivery. Check `clankie_tools` in that
 same thread and send one new `message_clankie` report; keep its stored receipt.
