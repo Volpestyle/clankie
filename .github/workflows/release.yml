@@ -32,6 +32,11 @@ jobs:
         with:
           version: 0.15.2
       - run: pnpm install --frozen-lockfile
+      - name: Real test dependencies (ffmpeg, pinned Herdr)
+        run: |
+          brew install ffmpeg
+          pnpm herdr:build
+          echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
       - run: pnpm check
       - name: Fleet CPU and latency release gate
         run: pnpm check:load

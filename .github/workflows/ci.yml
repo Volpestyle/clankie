@@ -47,6 +47,16 @@ jobs:
       - name: Strict native MCP catalog contracts
         if: github.event_name != 'workflow_dispatch'
         run: pnpm mcp:check
+      - name: Real test dependencies (ffmpeg, pinned Herdr)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          brew install ffmpeg
+          pnpm herdr:build
+          echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
+      - name: Native process observation on this runner
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        run: /usr/bin/python3 -I packages/fleet-resources/src/native.py identity $$
       - run: pnpm check
         if: github.event_name == 'workflow_dispatch'
       - name: Manual fleet load gate
