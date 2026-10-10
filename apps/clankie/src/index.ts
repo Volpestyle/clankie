@@ -149,6 +149,7 @@ import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
 import { createProjectProcessObserver, HarnessBinaryObservations } from "./project-process-proof.ts";
 import { createGrokNativeHost } from "./captain/grok-native-host.ts";
+import { createPrimeNativeHost } from "./captain/prime-native-host.ts";
 import { createOpenCodeNativeHost } from "./captain/opencode-native-host.ts";
 import { createPreparedNativeHost } from "./captain/prepared-native-host.ts";
 import { piNativeOptions } from "./captain/pi-seat-adapter.ts";
@@ -1044,6 +1045,10 @@ const grokNative = createGrokNativeHost({
   binding: localFleetBinding,
   processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
 });
+const primeNative = createPrimeNativeHost({
+  binding: localFleetBinding,
+  processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
+});
 const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-room-observations.json"));
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
@@ -1461,6 +1466,7 @@ const captain = createCaptain(
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
     grokNative,
+    primeNative,
     remoteOpenCode: remoteOpenCodeWorkers,
     openCodeNative: createOpenCodeNativeHost({
       binding: localFleetBinding,
@@ -1600,12 +1606,16 @@ const localFleet = new LocalFleetLink({
     privateSeat: async (chain, pane, binding, signal) => {
       if (await localCodexSeats.allows(chain, pane, binding, undefined, signal)) return true;
       signal?.throwIfAborted();
-      return grokNative.allows(chain, pane, binding);
+      if (await grokNative.allows(chain, pane, binding)) return true;
+      signal?.throwIfAborted();
+      return primeNative.allows(chain, pane, binding);
     },
     privateProjectSeat: async (chain, pane, binding, proof, signal) => {
       if (await localCodexSeats.allows(chain, pane, binding, proof.nativeOccupantId, signal)) return true;
       signal?.throwIfAborted();
-      return grokNative.allows(chain, pane, binding, proof.nativeOccupantId);
+      if (await grokNative.allows(chain, pane, binding, proof.nativeOccupantId)) return true;
+      signal?.throwIfAborted();
+      return primeNative.allows(chain, pane, binding, proof.nativeOccupantId);
     },
   }),
   prove: localFleetAdmissionProof({
@@ -1615,7 +1625,9 @@ const localFleet = new LocalFleetLink({
     privateSeat: async (chain, pane, binding, signal) => {
       if (await localCodexSeats.allowsAdmission(chain, pane, binding, undefined, signal)) return true;
       signal?.throwIfAborted();
-      return grokNative.allows(chain, pane, binding);
+      if (await grokNative.allows(chain, pane, binding)) return true;
+      signal?.throwIfAborted();
+      return primeNative.allows(chain, pane, binding);
     },
   }),
 });

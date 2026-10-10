@@ -13,6 +13,7 @@ import type { RuntimeProvider } from "../runtime-provider.ts";
 import type { FleetResourceRuntime } from "../fleet-resource-runtime.ts";
 import type { EvalSessionBoundary } from "./eval-session-boundary.ts";
 import type { GrokNativeHost } from "./grok-native-host.ts";
+import type { PrimeNativeHost } from "./prime-native-host.ts";
 import { type HerdrCensusRunner } from "./herdr-census.ts";
 import { type HerdrWatchRunner, type NativeLaunchPolicy } from "./herdr-watch.ts";
 import { type RoutedSelection } from "./model.ts";
@@ -43,6 +44,7 @@ export interface CaptainOptions {
   /** Override local harness control adapters (including deterministic test adapters). */
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
   readonly grokNative?: GrokNativeHost;
+  readonly primeNative?: PrimeNativeHost;
   readonly openCodeNative?: ReturnType<typeof createOpenCodeNativeHost>;
   readonly piNative?: ReturnType<typeof createPreparedNativeHost>;
   readonly remoteOpenCode?: RemoteOpenCodeWorkers;

@@ -1,6 +1,6 @@
 # Fleet, hires and agent history
 
-Owner working preferences, skill selection for hires, Codex accounts, hiring and roles, native worker control (Codex, Claude, Pi, OpenCode, Grok), uncertain hires, where workers run, peer messages and agent history. Bridges and connected tools are in [worker bridges and fleet tools](fleet-tools.md).
+Owner working preferences, skill selection for hires, Codex accounts, hiring and roles, native worker control (Codex, Claude, Pi, OpenCode, Grok, Prime Agent), uncertain hires, where workers run, peer messages and agent history. Bridges and connected tools are in [worker bridges and fleet tools](fleet-tools.md).
 
 ## Owner working preferences
 
@@ -319,6 +319,21 @@ Native permission prompts require the owner. Leader mode ignores `--allow` and
 and asks the owner to disable it in that Grok profile, then start a fresh seat.
 Do not change the account/configuration or use a headless/terminal-input fallback
 to repair that refusal. See the Grok section of `{repoRoot}/docs/cli.md`.
+
+## Prime Agent worker control
+
+Hire with `harness: "prime"` on this Mac (macOS or Linux, Prime Agent 0.10.x).
+The owner signs Prime in to its providers; a hire uses those sign-ins, never a
+key from Clankie. Name models as Prime does: `anthropic/claude-sonnet-5`,
+`openai-codex/gpt-5.5` for a ChatGPT subscription, or a bare id Prime resolves.
+`effort` is Prime's thinking level (`off` to `max`). Clankie creates the session,
+then the pane runs `prime-agent attach` on it, so the owner sees and can type into
+that exact session. Prime workers reach your tools from their Python REPL as MCP
+server `clankie` and report with `message_clankie`. `message_seat` to a busy
+worker queues by default and steers only when asked. Ending control leaves the
+session resident in Prime's agents view; it is not killed. Remote fleets,
+Windows, and reattaching after a service restart are unavailable; report that
+instead of retrying. Details: `{repoRoot}/packages/agent-hosts/README.md`.
 
 ## Worker execution locations
 

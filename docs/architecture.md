@@ -635,8 +635,8 @@ call-time revocation checks still apply.
   ([ADR 0199](adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)).
 - **Leading agents.** Native local hires use `hire_agent`, `message_seat`, and
   `herdr_watch` through [harness adapters](../packages/agent-hosts/README.md#tool-flow-and-current-support).
-  Claude, Codex, Pi, OpenCode, and Grok Build have local adapters; Prime Agent
-  remains researched. The adapter guide owns platform, version, consent, and
+  Claude, Codex, Pi, OpenCode, Grok Build, and Prime Agent have local adapters.
+  The adapter guide owns platform, version, consent, and
   restart-recovery limits. Skills explain tool use while delivery code enforces
   the no-terminal-fallback boundary. Remote agents use the per-fleet link
   and native harness delivery.

@@ -24,6 +24,7 @@ const Birth = z.object({
 });
 const NativeSession = z.discriminatedUnion("source", [
   z.object({ source: z.literal("herdr:grok"), kind: z.literal("id"), value: z.string().uuid() }),
+  z.object({ source: z.literal("herdr:prime"), kind: z.literal("id"), value: z.string().uuid() }),
   z.object({
     source: z.literal("herdr:opencode"),
     kind: z.literal("id"),
@@ -55,6 +56,7 @@ export interface PreparedCommandTab {
  * session need not have flushed its file. Saved-history validation is separate. */
 export type PreparedNativeSession =
   | { readonly source: "herdr:grok"; readonly kind: "id"; readonly value: string }
+  | { readonly source: "herdr:prime"; readonly kind: "id"; readonly value: string }
   | { readonly source: "herdr:opencode"; readonly kind: "id"; readonly value: string }
   | { readonly source: "herdr:pi"; readonly kind: "path"; readonly value: string };
 
@@ -74,7 +76,7 @@ export interface PreparedNativeRoot {
 
 /** Narrow local control transport. No generic method or caller-selected socket is exposed. */
 export interface PreparedNativeHostOptions {
-  readonly harness: "opencode" | "pi" | "grok";
+  readonly harness: "opencode" | "pi" | "grok" | "prime";
   readonly binding: () => Promise<HerdrBinding | undefined>;
   readonly processHelper: string;
   readonly platform?: string;
@@ -87,8 +89,16 @@ export interface PreparedNativeHostOptions {
   readonly socketOwner?: (socket: Socket, pid: number) => Promise<boolean>;
 }
 
+/** Herdr's own agent name where it differs from the harness id. */
+const herdrAgentName = (harness: PreparedNativeHostOptions["harness"]) =>
+  harness === "prime" ? "prime-agent" : harness;
+
 export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
   const harness = input.harness;
+  const herdrAgent = herdrAgentName(harness);
+  // Herdr 0.9.3 stores no session identity for `prime-agent`; Clankie's Prime
+  // host holds that pane binding instead and the runner restores it.
+  const herdrHoldsSession = harness !== "prime";
   const descriptor = (value: PreparedNativeSession): PreparedNativeSession => {
     const parsed = NativeSession.parse(value);
     if (parsed.source !== `herdr:${harness}`) throw new Error("Native descriptor harness mismatch");
@@ -208,13 +218,14 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
           (reportedSession !== undefined &&
             ((latestAllocation.agent === undefined
               ? latestAllocation.agent_session?.agent
-              : latestAllocation.agent) !== harness ||
-              (latestAllocation.agent !== undefined &&
-                latestAllocation.agent_session?.agent !== undefined &&
-                latestAllocation.agent !== latestAllocation.agent_session.agent) ||
-              latestAllocation.agent_session?.kind !== reportedSession.kind ||
-              latestAllocation.agent_session.source !== reportedSession.source ||
-              latestAllocation.agent_session.value !== reportedSession.value)) ||
+              : latestAllocation.agent) !== herdrAgent ||
+              (herdrHoldsSession &&
+                ((latestAllocation.agent !== undefined &&
+                  latestAllocation.agent_session?.agent !== undefined &&
+                  latestAllocation.agent !== latestAllocation.agent_session.agent) ||
+                  latestAllocation.agent_session?.kind !== reportedSession.kind ||
+                  latestAllocation.agent_session.source !== reportedSession.source ||
+                  latestAllocation.agent_session.value !== reportedSession.value)))) ||
           JSON.stringify(await facts()) !== JSON.stringify(birth)
         )
           throw new Error("Original native allocation changed");
@@ -268,11 +279,13 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
           await request(original, "pane.report_agent", {
             pane_id: paneId,
             source: session.source,
-            agent: harness,
+            agent: herdrAgent,
             state,
-            ...(session.kind === "id"
-              ? { agent_session_id: session.value }
-              : { agent_session_path: session.value }),
+            ...(!herdrHoldsSession
+              ? {}
+              : session.kind === "id"
+                ? { agent_session_id: session.value }
+                : { agent_session_path: session.value }),
           });
           reportedSession = session;
           await current();

@@ -174,6 +174,7 @@ import {
   type FleetSeatMessageContext,
 } from "./fleet-seat.ts";
 import { createGrokSeatAdapter } from "./grok-seat-adapter.ts";
+import { createPrimeSeatAdapter } from "./prime-seat-adapter.ts";
 import {
   occupantIdForHerdrSession,
   readFleet,
@@ -391,10 +392,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       createHerdrWatchRunner(
         deps.herdrAvailable,
         undefined,
-        (options.openCodeNative ?? options.grokNative ?? options.piNative)?.createCommandTab,
+        (options.openCodeNative ?? options.grokNative ?? options.primeNative ?? options.piNative)?.createCommandTab,
         {
           localCodexBinding: () => deps.runtimes?.configuredBinding("default") ?? Promise.resolve(undefined),
           ...(deps.runtimes ? { localReadBinding: () => deps.runtimes!.configuredBinding("default") } : {}),
+          ...(options.primeNative === undefined
+            ? {}
+            : {
+                boundSession: (agent: { paneId: string; terminalId: string; agent: string }) => {
+                  const session =
+                    agent.agent === "prime-agent"
+                      ? options.primeNative!.session(agent.paneId, agent.terminalId)
+                      : undefined;
+                  return session === undefined ? undefined : { harness: "prime", session };
+                },
+              }),
         },
       ),
     async () =>
@@ -642,6 +654,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (piSeatModelRefs(selected).includes(model)) return model;
         throw new Error("Requested Pi model is unavailable in the authenticated worker provider");
       }
+      // Prime Agent resolves models against its own providers and sign-ins
+      // (openai-codex, anthropic subscriptions); its adapter refuses a mismatch.
+      if (harness === "prime") return model;
       return resolveHireModel(await hireRegistry.catalog(), harness, model);
     },
     claudeAccounts: async () => [
@@ -723,6 +738,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               stateDir: options.stateDir,
               native: options.grokNative,
               processHelper: join(options.repoRoot, "integrations/opencode-plugin/process-birth.py"),
+            }),
+          ]),
+      ...(options.primeNative === undefined
+        ? []
+        : [
+            createPrimeSeatAdapter({
+              repoRoot: options.repoRoot,
+              stateDir: options.stateDir,
+              native: options.primeNative,
             }),
           ]),
       ...(options.openCodeNative === undefined

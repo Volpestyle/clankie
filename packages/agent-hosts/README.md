@@ -71,9 +71,11 @@ flowchart TD
   Adapter --> Claude["Claude worker channel"]
   Adapter --> Codex["Codex app-server"]
   Adapter --> Grok["Grok TUI leader IPC + ACP"]
+  Adapter --> Prime["Prime Agent daemon session"]
   Claude --> Session["Bound native session in Herdr"]
   Codex --> Session
   Grok --> Session
+  Prime --> Session
   Session -->|"receipts and turn events"| Tools
 ```
 
@@ -84,7 +86,7 @@ flowchart TD
 | Pi          | Process-bound native extension follow-up messages    | Opt-in on macOS/Linux; Pi 0.87.1; live acceptance held                |
 | OpenCode    | Injected SDK in the process-bound native worker TUI  | Implemented locally and on linked Mac POSIX fleets; pinned to 1.18.18 |
 | Grok Build  | Leader IPC/ACP on the exact interactive TUI session  | Implemented locally on macOS; pinned to Grok 1.0.46                   |
-| Prime Agent | Daemon-backed messages to the active session         | Researched for PrimeIntellect's CLI; not implemented here             |
+| Prime Agent | Daemon session created by Clankie, TUI attached to it | Implemented locally on macOS/Linux; Prime Agent 0.10.x, protocol 7    |
 
 Transcript discovery and an available native CLI
 do not imply a local hire adapter exists. Unsupported automated briefs fail
@@ -165,6 +167,47 @@ the [subagent verification](../../docs/testing/2026-10-04-opencode-subagents/REA
 and the
 [operator seat guide](../../integrations/opencode-plugin/README.md) for current
 capabilities and verification limits.
+
+### Prime Agent workers
+
+The Prime Agent adapter (`apps/clankie/src/captain/prime-seat-adapter.ts`, VUH-1556)
+speaks Prime's supervisor daemon over its JSONL socket (`prime-daemon.ts`). Clankie
+creates the worker's session itself (cwd, `provider/model`, effort as Prime's
+thinking level, worker rules as `appendSystemPrompt`, shipped skills as skill
+paths), so the session identity exists before any process starts. The Herdr pane
+then runs the native TUI attached to exactly that session
+(`prime-agent attach <id>`). Messages are daemon `prompt` commands to that
+session: an idle session starts a turn, a busy one queues a follow-up or, when
+asked, steers. Completion comes from Clankie's own attached client
+(`agent_start`/`agent_end`): a turn settles a message only when its run carries
+that message; a run that began after dispatch without it is reported as
+`settlement_unconfirmed` with the observed stop. An explicit daemon refusal means
+nothing was admitted; silence is `unconfirmed` and is never resent. Interrupt is
+the daemon's `abort`; ending control detaches Clankie only, and the session stays
+resident for the owner. Prime's own `send_message` is not used: it arrives as a
+Prime agent message that the model answers through Prime's family messaging.
+
+Clankie's tools reach the worker as a per-session MCP server named `clankie`
+(`replace_acp_mcp_servers`, `clankie mcp --fleet` with the pane's `HERDR_*`
+values). Prime calls MCP from its Python REPL, so the server runs under the
+session's daemon worker, outside the pane's process tree; fleet admission
+accepts it only while that exact worker of a session Clankie bound to the pane is
+in the caller's ancestry (`prime-native-host.ts`). Herdr 0.9.3 recognizes the
+process as `prime-agent` but stores no session identity for it, so the Prime host
+holds the pane binding and the Herdr runner restores it for panes Clankie bound.
+Hired Prime sessions use the owner's Prime sign-ins (`~/.prime/agent/auth.json`);
+Clankie never passes an API key on `create`, which Prime would persist in its
+worker descriptor. Models are checked against Prime's own providers
+(`openai-codex/...` for a ChatGPT subscription, for example), not Clankie's
+registry, and a session that did not select the requested model is refused.
+
+Limits: Prime's daemon supervisor descends from whichever process first started
+it, and per-session MCP servers do not survive a worker respawn; a changed worker
+instance reports control unavailable. Control is in memory, so a service restart
+does not reattach. Remote fleets and Windows are not supported yet. Live evidence:
+`pnpm -C apps/clankie verify-prime-seat OUT.json` (opt-in, uses the real daemon and
+an isolated Herdr session) covers hire with brief, idle and queued follow-ups,
+owner draft preservation, interrupt, close and the admission predicate.
 
 ### Prepared OpenCode workers
 

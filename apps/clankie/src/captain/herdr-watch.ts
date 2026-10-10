@@ -502,6 +502,10 @@ export function createHerdrWatchRunner(
     /** Current configured socket for local read-only roster/process observations. */
     readonly localReadBinding?: () => Promise<{ socketPath: string; session: string } | undefined>;
     readonly runLocalCommand?: HerdrCensusRunner;
+    /** Session identity Herdr cannot hold (Prime Agent), for panes the host itself bound. */
+    readonly boundSession?: (
+      agent: HerdrAgentSnapshot,
+    ) => { readonly harness: string; readonly session: HerdrAgentSession } | undefined;
   } = {},
 ): HerdrWatchRunner {
   const runHerdr = async (
@@ -523,6 +527,8 @@ export function createHerdrWatchRunner(
   };
   const createTab = createHireLayout(runHerdr, createCommandTab);
   const recover = async (agent: HerdrAgentSnapshot): Promise<HerdrAgentSnapshot> => {
+    const bound = agent.session === undefined ? observation.boundSession?.(agent) : undefined;
+    if (bound !== undefined) return { ...agent, agent: bound.harness, session: bound.session };
     if (observation.localCodexRecovery === false || agent.agent !== "codex" || agent.session !== undefined)
       return agent;
     const binding = await observation.localCodexBinding?.();
@@ -3259,7 +3265,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ? "pane_run_unavailable"
           : "adapter_unavailable";
     if (
-      (brief !== undefined || input.harness === "opencode" || input.harness === "grok") &&
+      (brief !== undefined ||
+        input.harness === "opencode" ||
+        input.harness === "grok" ||
+        input.harness === "prime") &&
       adapter === undefined
     ) {
       const detail = `No structured harness adapter is available (${unavailableReason}); no seat was started and no terminal input was sent.`;
