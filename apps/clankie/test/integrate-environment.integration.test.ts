@@ -27,14 +27,17 @@ async function root() {
   return directory;
 }
 
+/** The checkout running these tests stands in for the service's: pnpm puts its `.bin` folders first. */
+const checkout = join(import.meta.dirname, "../../..");
+const injected = [
+  join(checkout, "apps/clankie/node_modules/.bin"),
+  join(checkout, "node_modules/.bin"),
+  join(checkout, "node_modules/.pnpm/pnpm@11.11.0/node_modules/pnpm/dist/node-gyp-bin"),
+];
+
 /** PATH as `ps` showed the live service's on 2026-10-10: pnpm's entries, repeated, before the owner's own. */
-function servicePath(pinned: string, owner: string): string {
-  const injected = [
-    join(pinned, "apps/clankie/node_modules/.bin"),
-    join(pinned, "pnpm/dist/node-gyp-bin"),
-    join(pinned, "node_modules/.bin"),
-  ];
-  return [...injected, ...injected, ...injected, owner, ...(originalPath ?? "").split(delimiter)].join(
+function servicePath(...owner: string[]): string {
+  return [...injected, ...injected, ...injected, ...owner, ...(originalPath ?? "").split(delimiter)].join(
     delimiter,
   );
 }
@@ -46,20 +49,27 @@ it.skipIf(process.platform === "win32")(
   "resolves the owner's tools, not the service's injected node_modules/.bin, and keeps the owner's order",
   async () => {
     const base = await root();
-    const pinned = join(base, "pinned"),
-      owner = join(base, "owner-bin");
-    for (const directory of [join(pinned, "apps/clankie/node_modules/.bin"), owner]) {
+    const owner = join(base, "owner-bin");
+    // CI installs pnpm itself into a node_modules/.bin of its own (VUH-2059).
+    const setupPnpm = join(base, "setup-pnpm/node_modules/.bin");
+    for (const [directory, tool] of [
+      [owner, "pi"],
+      [setupPnpm, "pnpm"],
+    ] as const) {
       await mkdir(directory, { recursive: true });
-      await writeFile(join(directory, "pi"), "#!/bin/sh\nexit 0\n");
-      await chmod(join(directory, "pi"), 0o755);
+      await writeFile(join(directory, tool), "#!/bin/sh\nexit 0\n");
+      await chmod(join(directory, tool), 0o755);
     }
-    process.env.PATH = servicePath(pinned, owner);
-    // What the queue did before: the pinned SDK's shim first.
-    expect(resolve({ PATH: process.env.PATH }, "pi")).toBe(join(pinned, "apps/clankie/node_modules/.bin/pi"));
+    process.env.PATH = servicePath(setupPnpm, owner);
+    // What the queue did before: the service's bundled Pi SDK shim first.
+    expect(resolve({ PATH: process.env.PATH }, "pi")).toBe(
+      join(checkout, "apps/clankie/node_modules/.bin/pi"),
+    );
     const env = await integrationEnvironment(join(base, "batch"));
     expect(resolve(env, "pi")).toBe(join(owner, "pi"));
+    expect(resolve(env, "pnpm")).toBe(join(setupPnpm, "pnpm"));
     const entries = env.PATH!.split(delimiter);
-    expect(entries.some((entry) => entry.includes(pinned))).toBe(false);
+    expect(entries.some((entry) => injected.includes(entry))).toBe(false);
     expect(new Set(entries).size).toBe(entries.length);
     expect(entries.indexOf(owner)).toBeLessThan(entries.indexOf("/usr/bin"));
     expect(ownerPath(undefined)).toBeUndefined();
@@ -84,11 +94,7 @@ it.skipIf(!ownerPi || !["darwin", "linux"].includes(process.platform))(
   "a batch sandbox discovers the owner's supported native Pi through the service's PATH",
   async () => {
     const base = await root();
-    const pinned = join(base, "pinned");
-    await mkdir(join(pinned, "apps/clankie/node_modules/.bin"), { recursive: true });
-    await writeFile(join(pinned, "apps/clankie/node_modules/.bin/pi"), "#!/bin/sh\nexit 0\n");
-    await chmod(join(pinned, "apps/clankie/node_modules/.bin/pi"), 0o755);
-    process.env.PATH = servicePath(pinned, "/nonexistent");
+    process.env.PATH = servicePath();
     await expect(
       discoverPiNativeCapability({ harness: "pi", cwd: base, brief: "", env: {} }),
     ).rejects.toThrow("Unsupported Pi executable layout");

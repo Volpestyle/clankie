@@ -27,8 +27,15 @@ const execute = (file: string, args: string[], options: ExecFileOptions = {}) =>
 const roots: string[] = [];
 const queues: IntegrationQueue[] = [];
 const cleanups: (() => void | Promise<void>)[] = [];
-afterEach(async () => {
+afterEach(async (context) => {
   fixtureWork().stop();
+  // A batch's own install and gate output is the only record of why it failed (VUH-2059).
+  if (context.task.result?.state === "fail")
+    for (const root of roots)
+      for await (const log of glob("integration/batches/*/*.log", { cwd: root }))
+        console.error(
+          `--- ${log} (last 4000 bytes)\n${(await readFile(join(root, log), "utf8").catch(String)).slice(-4000)}`,
+        );
   // Release only our gate barriers; a cancelled test cannot leave a writer parked.
   for (const root of roots) await writeFile(join(root, "release"), "go");
   await fixtureWork().drain();

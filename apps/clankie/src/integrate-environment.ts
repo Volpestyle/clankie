@@ -1,7 +1,7 @@
 import { lstat, mkdir, mkdtemp, readlink, symlink } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 /** Launch isolation must precede Vitest's imports (including its owner-descriptor snapshot). */
 export async function integrationEnvironment(root: string): Promise<NodeJS.ProcessEnv> {
@@ -51,20 +51,29 @@ export async function integrationEnvironment(root: string): Promise<NodeJS.Proce
 
 /**
  * The owner's own PATH, as the service inherited it. A service launched
- * through pnpm carries the pinned checkout's `node_modules/.bin` (and pnpm's
- * node-gyp shim) at the front, once per relaunch; inheriting them made a
+ * through pnpm carries its own checkout's `node_modules/.bin` folders (and
+ * pnpm's node-gyp shim) at the front, once per relaunch; inheriting them made a
  * batch's `pi` resolve to the service's bundled Pi SDK instead of the owner's
  * install, and could run the pinned checkout's tools instead of the batch's.
  * pnpm adds each batch worktree's own `.bin` when it runs that worktree's
- * scripts (VUH-2057).
+ * scripts (VUH-2057). Only the running checkout's folders go: a `.bin` that
+ * holds the owner's tools stays, such as CI's `setup-pnpm/node_modules/.bin`,
+ * where pnpm itself lives (VUH-2059).
  */
-export function ownerPath(path: string | undefined): string | undefined {
+export function ownerPath(
+  path: string | undefined,
+  checkout: readonly string[] = [import.meta.dirname, process.cwd()],
+): string | undefined {
   if (path === undefined) return undefined;
-  const injected = (entry: string) =>
-    /[\\/]node_modules[\\/]\.bin$/u.test(entry) || /[\\/]pnpm[\\/]dist[\\/]node-gyp-bin$/u.test(entry);
-  return [...new Set(path.split(delimiter).filter((entry) => entry !== "" && !injected(entry)))].join(
-    delimiter,
-  );
+  const injected = new Set<string>();
+  for (const start of checkout)
+    for (let directory = resolve(start); ; directory = dirname(directory)) {
+      injected.add(join(directory, "node_modules", ".bin"));
+      if (dirname(directory) === directory) break;
+    }
+  const strip = (entry: string) =>
+    injected.has(resolve(entry)) || /[\\/]pnpm[\\/]dist[\\/]node-gyp-bin$/u.test(entry);
+  return [...new Set(path.split(delimiter).filter((entry) => entry !== "" && !strip(entry)))].join(delimiter);
 }
 
 /**
