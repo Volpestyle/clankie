@@ -1098,6 +1098,18 @@ export class ConversationStore {
     return hasNativeSeat(this, conversationId);
   }
 
+  /** Which conversation a native session's transcript belongs to, as transcript sync enforces it. */
+  public nativeSeatSessionState(
+    conversationId: string,
+    sessionId: string,
+  ): "current" | "retired" | "elsewhere" | "unknown" {
+    const own = this.metas.get(conversationId)?.nativeSeatSessions?.[sessionId];
+    if (own !== undefined) return own;
+    for (const meta of this.metas.values())
+      if (meta.nativeSeatSessions?.[sessionId] !== undefined) return "elsewhere";
+    return "unknown";
+  }
+
   /** A fresh service-session seed after a harness drove this conversation (ADR 0218). */
   public serviceContextSeed(
     conversationId: string,

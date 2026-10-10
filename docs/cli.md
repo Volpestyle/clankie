@@ -4757,7 +4757,7 @@ control remains available; normal agent messages do not use it. See
 
 <a id="seat-commands"></a>
 
-### `claude[N] | codex[N] | opencode [--resume] [--conversation ID | --new] [--plugin-dir PATH] [--dry-run]`
+### `claude[N] | codex[N] | opencode [--resume [SESSION_ID --conversation ID [--from-config-dir PATH]]] [--conversation ID | --new] [--plugin-dir PATH] [--dry-run]`
 
 Open Clankie in the selected native harness ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
 `clankie claude` opens this seat with `claude`; `clankie claude2` uses your
@@ -4806,6 +4806,15 @@ A running service and operator credential are required, including for
 `--dry-run` without `--new`; failure to resolve or create the chat stops the launch.
 `--resume` reopens the last seat for that Claude command and its chat. The
 conversation selection is retained on resume, and a different `--conversation` is refused.
+`clankie claude --resume SESSION_ID --conversation ID` reattaches one exact Claude
+session to its conversation with the seat identity set, the way a fresh launch sets
+it. The session must be in this launch's config home (`CLAUDE_CONFIG_DIR`, else
+`~/.claude`). With `--from-config-dir PATH` the launcher copies its transcript in
+from that config home first, never moving or overwriting a transcript. It opens in
+the session's own working directory. The launch is refused if the session belongs
+to another conversation or was retired by a reset, or if the conversation already
+has a live seat. Close the old seat's pane first. The session becomes that
+command's resumable seat. `--dry-run` checks everything and copies nothing.
 Skill selection is reapplied at launch, but resumed history can still contain previously loaded guidance.
 `--conversation ID` selects an existing global/workspace service conversation or
 Discord text/voice room, resolves its cwd through `/v1/captain/seat-context`, and

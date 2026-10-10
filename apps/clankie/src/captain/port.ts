@@ -214,6 +214,11 @@ export interface CaptainPort {
   harnessProcesses?(retire?: boolean): Promise<unknown>;
   /** A live native operator bridge can answer independently of the fallback model (default: the global chat). */
   operatorSeatReady?(conversationId?: string): boolean;
+  /** A native session's standing for a conversation, for an explicit seat resume (VUH-2045). */
+  seatSessionState?(
+    conversationId: string,
+    sessionId: string,
+  ): "current" | "retired" | "elsewhere" | "unknown";
   /** Current host-bound persona for the exact native seat and occupant. */
   personaForFleetOccupant(seatId: string, occupantId: string): string | undefined;
   projectHireMembershipCandidate(fleet: string, pane: string): ProjectHireMembershipCandidate;

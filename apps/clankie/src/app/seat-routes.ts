@@ -110,7 +110,13 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     if ("denial" in binding) return binding.denial;
     // A launcher without --conversation takes the global chat only while no live seat holds it.
     const occupied = ctx.dependencies.captain.operatorSeatReady?.(binding.conversationId) === true;
-    return context.json({ ...binding, occupied });
+    // An explicit resume asks which conversation that native session belongs to.
+    const sessionId = z.uuid().safeParse(context.req.query("sessionId"));
+    const session =
+      sessionId.success && binding.conversationId !== undefined
+        ? ctx.dependencies.captain.seatSessionState?.(binding.conversationId, sessionId.data)
+        : undefined;
+    return context.json({ ...binding, occupied, ...(session === undefined ? {} : { session }) });
   });
 
   // Native seats use the same registry as the app, with a fresh workspace chat

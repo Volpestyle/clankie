@@ -20,12 +20,14 @@ import { clankieStateHome } from "../state-home.ts";
 import type { CredentialStore } from "@clankie/credential-broker";
 import { outputJson, type Writable } from "./io.ts";
 import { resolveSeatContext, type NewSeatConversation } from "./seat-context.ts";
+import { planExplicitResume } from "./seat-resume.ts";
 import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-isolation.ts";
 import { operatorHarness } from "./harness-command.ts";
 
 const execFileAsync = promisify(execFileCallback);
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const SEAT_USAGE =
-  "Usage: clankie claude|codex|opencode|grok|prime [--resume] [--conversation ID | --new] [--plugin-dir PATH] [--model PROVIDER/MODEL] [--dry-run]";
+  "Usage: clankie claude|codex|opencode|grok|prime [--resume [SESSION_ID --conversation ID [--from-config-dir PATH]]] [--conversation ID | --new] [--plugin-dir PATH] [--model PROVIDER/MODEL] [--dry-run]";
 /** The plugin's id once installed from the repo's own marketplace. */
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
@@ -71,6 +73,8 @@ export interface SeatPlan {
   readonly channel: boolean;
   readonly sessionId: string;
   readonly resumed: boolean;
+  /** An exact session resumed by ID; it becomes this command's recorded seat. */
+  readonly explicitResume?: import("./seat-resume.ts").ExplicitResume;
   readonly conversationId?: string;
   /** A fresh chat to create at launch; --dry-run leaves the registry untouched. */
   readonly newConversation?: NewSeatConversation;
@@ -121,6 +125,10 @@ interface SeatFlags {
   /** A fresh workspace chat even when the global chat is free. */
   readonly newConversation?: boolean;
   readonly resume: boolean;
+  /** Claude only: resume this exact session into --conversation (VUH-2045). */
+  readonly resumeSessionId?: string;
+  /** With resumeSessionId: copy the transcript from this Claude config home. */
+  readonly fromConfigDir?: string;
   readonly dryRun: boolean;
   readonly pluginDir?: string;
   /** Prime Agent only: the new session's `provider/model`. */
@@ -136,6 +144,8 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
   let conversationId: string | undefined;
   let newConversation = false;
   let resume = false;
+  let resumeSessionId: string | undefined;
+  let fromConfigDir: string | undefined;
   let dryRun = false;
   let pluginDir: string | undefined;
   let model: string | undefined;
@@ -153,8 +163,18 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
         throw new Error(usage);
       if (selected !== undefined && value !== selected) throw new Error(usage);
       harness = value;
-    } else if (arg === "--resume") resume = true;
-    else if (arg === "--dry-run") dryRun = true;
+    } else if (arg === "--resume") {
+      resume = true;
+      const next = args[index + 1];
+      if (next !== undefined && SESSION_ID.test(next)) {
+        resumeSessionId = next.toLowerCase();
+        index += 1;
+      }
+    } else if (arg === "--from-config-dir") {
+      const value = args[++index]?.trim();
+      if (!value || value.startsWith("--")) throw new Error(usage);
+      fromConfigDir = value;
+    } else if (arg === "--dry-run") dryRun = true;
     else if (arg === "--conversation") {
       const value = args[++index]?.trim();
       if (!value || value.startsWith("--")) throw new Error(usage);
@@ -172,11 +192,20 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
     } else throw new Error(usage);
   }
   if (newConversation && (conversationId !== undefined || resume)) throw new Error(usage);
+  // An explicit session names its conversation; the record-based resume keeps its own.
+  if (
+    resumeSessionId !== undefined &&
+    (conversationId === undefined || (harness !== undefined && harness !== "claude"))
+  )
+    throw new Error(usage);
+  if (fromConfigDir !== undefined && resumeSessionId === undefined) throw new Error(usage);
   if (model !== undefined && harness !== "prime") throw new Error(usage);
   return {
     ...(harness === undefined ? {} : { harness }),
     ...(newConversation ? { newConversation } : {}),
     resume,
+    ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
+    ...(fromConfigDir === undefined ? {} : { fromConfigDir }),
     dryRun,
     ...(conversationId === undefined ? {} : { conversationId }),
     ...(pluginDir === undefined ? {} : { pluginDir }),
@@ -330,7 +359,29 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     path: await projectSkillPlugin(source, join(clankieStateHome(env), "clankie"), skills),
   };
 
-  const previous = flags.resume ? readSeatRecord(env, command) : undefined;
+  const explicit =
+    flags.resumeSessionId === undefined
+      ? undefined
+      : await planExplicitResume(
+          {
+            sessionId: flags.resumeSessionId,
+            conversationId: flags.conversationId!,
+            ...(flags.fromConfigDir === undefined ? {} : { fromConfigDir: flags.fromConfigDir }),
+            dryRun: flags.dryRun,
+          },
+          options,
+        );
+  const previous: SeatRecord | undefined =
+    explicit !== undefined
+      ? {
+          sessionId: explicit.sessionId,
+          cwd: explicit.cwd,
+          startedAt: "",
+          conversationId: explicit.conversationId,
+        }
+      : flags.resume
+        ? readSeatRecord(env, command)
+        : undefined;
   if (flags.resume && previous === undefined) {
     throw new Error(`No Claude chat to resume; run \`clankie ${command}\` first.`);
   }
@@ -352,7 +403,9 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     },
     options,
   );
-  const { conversationId, cwd } = context;
+  const { conversationId } = context;
+  // Claude finds a resumed session only from its own project directory.
+  const cwd = explicit?.cwd ?? context.cwd;
   // Session-only plugins have the native @inline identity. Keep wakes on the
   // same projected plugin, without enabling an older installed skill catalog.
   const channel = true;
@@ -387,6 +440,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     channel,
     sessionId,
     resumed: previous !== undefined,
+    ...(explicit === undefined ? {} : { explicitResume: explicit }),
     ...(conversationId === undefined ? {} : { conversationId }),
     ...(context.newConversation === undefined ? {} : { newConversation: context.newConversation }),
     cwd,
@@ -470,7 +524,7 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
       )),
     };
   }
-  if (!plan.resumed) {
+  if (!plan.resumed || plan.explicitResume !== undefined) {
     writeSeatRecord(
       env,
       {

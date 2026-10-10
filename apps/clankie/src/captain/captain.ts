@@ -5276,6 +5276,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     operatorSeatReady: (conversationId = conversations.defaultGlobalConversationId()) =>
       seatOutboxes.get(conversationId)?.bound() === true,
+    seatSessionState: (conversationId, sessionId) =>
+      conversations.nativeSeatSessionState(conversationId, sessionId),
 
     async observeLanes(): Promise<readonly ObservableCaptainLane[]> {
       return laneLog.list();
