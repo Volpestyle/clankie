@@ -21,9 +21,11 @@ import { runConversationsCommand } from "../../tui/src/command/conversations.ts"
 const exec = promisify(execFile);
 const roots: string[] = [];
 const stores: ConversationStore[] = [];
-afterEach(async () => {
+afterEach(async ({ signal }) => {
   await Promise.all(stores.splice(0).map((store) => store.close()));
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  // A cancelled or timed-out body may still be writing (scripts/testing/vitest-setup.ts).
+  const removed = roots.splice(0);
+  if (!signal.aborted) await Promise.all(removed.map((root) => rm(root, { recursive: true, force: true })));
 });
 // Governor snapshot recorded from `clankie fleet resources` on 2026-10-06.
 const resources: ResourceSnapshot = {
