@@ -7,6 +7,7 @@ import { afterEach, expect, it } from "vitest";
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
 import {
   ProjectsSettingsSchema,
+  ProjectsSnapshotSchema,
   FleetSettingsSnapshotSchema,
   FleetSettingsContextSchema,
   FleetAutonomySchema,
@@ -777,6 +778,44 @@ it("sets the autonomy dial's leaves in one owner write and reads hand-set leaves
     changes: { autonomyLevel: "custom" },
   });
   expect(custom.status).toBe(400);
+});
+
+it("puts a project on Auto with a focus through the owner project API, hidden from the plain view", async () => {
+  const f = await fixture();
+  const initial = await f.client.projects();
+  expect(initial.projectsAuto).toBe(true);
+  const auto = await f.client.updateProjectSettings({
+    projectId: "garden",
+    expectedRevision: initial.revision,
+    changes: { auto: true, focus: "Ship offline mode" },
+  });
+  expect(auto.settings.projects.find((project) => project.id === "garden")).toMatchObject({
+    auto: true,
+    focus: "Ship offline mode",
+  });
+  expect((await new SettingsStore(f.settings.path).load()).projects.projects[0]).toMatchObject({
+    auto: true,
+    focus: "Ship offline mode",
+  });
+  const plain = ProjectsSnapshotSchema.parse(await (await f.request(PROJECTS_PATH)).json());
+  expect(plain.projectsAuto).toBeUndefined();
+  expect(plain.settings.projects[0]).not.toHaveProperty("auto");
+  expect(plain.settings.projects[0]).not.toHaveProperty("focus");
+
+  const tooLong = await f.request(`${PROJECT_UPDATE_SETTINGS_PATH}?includeAutonomy=true`, {
+    projectId: "garden",
+    expectedRevision: auto.revision,
+    changes: { focus: "x".repeat(281) },
+  });
+  expect(tooLong.status).toBe(400);
+  const off = await f.client.updateProjectSettings({
+    projectId: "garden",
+    expectedRevision: auto.revision,
+    changes: { auto: false, focus: null },
+  });
+  const garden = off.settings.projects.find((project) => project.id === "garden");
+  expect(garden).not.toHaveProperty("auto");
+  expect(garden).not.toHaveProperty("focus");
 });
 
 it("sets hire defaults, talkativeness and worker-account holds through the owner API the app and TUI share", async () => {

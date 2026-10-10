@@ -36,6 +36,7 @@ function projectHint(project: Project): string {
     project.roles.length
       ? `${project.roles.length} role${project.roles.length === 1 ? "" : "s"}`
       : "built-in roles",
+    ...(project.auto === true ? ["Auto"] : []),
     ...(project.workerCap === undefined ? [] : [`cap ${project.workerCap}`]),
     ...(project.trackerRef ? ["tracker"] : []),
   ].join(" · ");
@@ -137,6 +138,16 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
     const choice = await flow.readSelect({
       message: `${project.name} · ${project.id}${fleet ? ` · fleet ${fleet}` : ""}`,
       options: [
+        ...(snapshot.projectsAuto === true
+          ? [
+              {
+                value: "auto",
+                label: "Auto",
+                hint: project.auto === true ? "on · Clankie works the backlog unprompted" : "off",
+              },
+              { value: "focus", label: "Focus", hint: project.focus ?? "none" },
+            ]
+          : []),
         { value: "name", label: "Name", hint: project.name },
         {
           value: "roles",
@@ -184,6 +195,23 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
         await update(
           { workerCap: cap.trim() === "" ? null : Number(cap.trim()) },
           cap.trim() === "" ? "Worker cap cleared." : `Worker cap ${cap.trim()}.`,
+        );
+    } else if (choice === "auto") {
+      await update(
+        { auto: project.auto !== true },
+        project.auto === true ? "Auto off: no new work starts on this project." : "Auto on.",
+      );
+    } else if (choice === "focus") {
+      const focus = await flow.readText({
+        message: "What matters now (one line; empty clears it)",
+        ...(project.focus === undefined ? {} : { defaultValue: project.focus }),
+        allowBack: true,
+        validate: (value) => (value.trim().length <= 280 ? undefined : "Keep it to 280 characters."),
+      });
+      if (focus !== undefined && focus.trim() !== (project.focus ?? ""))
+        await update(
+          { focus: focus.trim() === "" ? null : focus.trim() },
+          focus.trim() === "" ? "Focus cleared." : "Focus saved.",
         );
     } else if (choice === "tracker") {
       const workspace = project.workspaces[0]!;

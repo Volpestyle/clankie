@@ -21,6 +21,7 @@ import {
   OperatorConversationServiceRequestSchema,
   OperatorAutonomyCommandSchema,
   operatorAutonomyCommandRequiresOwner,
+  type OperatorAutonomyCommand,
   type OperatorConversationServiceClient,
   type UpsertOperatorChannel,
 } from "@clankie/protocol";
@@ -71,6 +72,7 @@ export async function runConversationsCommand(
   if (["updates", "read-update", "dismiss-update"].includes(args[0] ?? ""))
     return runOwnerUpdateAction(args, options);
   if (args[0] === "goal") return runGoalAction(args.slice(1), options);
+  if (args[0] === "auto") return runAutoAction(args.slice(1), options);
   if (
     [
       "questions",
@@ -189,25 +191,59 @@ async function runGoalAction(args: readonly string[], options: ConversationsComm
             ? { action: "clear_goal" }
             : { action: "status" },
   );
-  let client: OperatorConversationServiceClient;
-  if (operatorAutonomyCommandRequiresOwner(command)) {
-    const env = options.env ?? process.env;
-    const credential = await resolveOperatorCredential({
-      env,
-      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
-    });
-    if (credential === undefined)
-      throw new Error("Owner operator credential required to start, accept, or resume a goal.");
-    const owner = createCaptainRouteClient({
-      host: commandHost({ ...options, env }),
-      captainToken: credential.token,
-      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-    });
-    client = createCaptainOperatorConversationClient(owner, owner);
-  } else {
-    client = await serviceClient(options);
-  }
+  const client = await autonomyClient(
+    command,
+    options,
+    "Owner operator credential required to start, accept, or resume a goal.",
+  );
   outputJson(options.stdout ?? process.stdout, await client.autonomy(conversationId, command));
+  return 0;
+}
+
+/** Turning unprompted work on needs the owner credential; reading it or turning it off does not. */
+async function autonomyClient(
+  command: OperatorAutonomyCommand,
+  options: ConversationsCommandOptions,
+  ownerRequired: string,
+): Promise<OperatorConversationServiceClient> {
+  if (!operatorAutonomyCommandRequiresOwner(command)) return await serviceClient(options);
+  const env = options.env ?? process.env;
+  const credential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
+  if (credential === undefined) throw new Error(ownerRequired);
+  const owner = createCaptainRouteClient({
+    host: commandHost({ ...options, env }),
+    captainToken: credential.token,
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
+  return createCaptainOperatorConversationClient(owner, owner);
+}
+
+const AUTO_USAGE = "Usage: clankie auto [status|on|off]";
+
+/**
+ * The master switch for unprompted work (ADR 0264): projects on Auto, goal runs
+ * and self-wakes all stop while it is off. It is the global autonomy runner
+ * switch, so any conversation can carry it; the default global chat does.
+ */
+async function runAutoAction(args: readonly string[], options: ConversationsCommandOptions): Promise<number> {
+  const action = args[0] ?? "status";
+  if (args.length > 1 || !["status", "on", "off"].includes(action)) throw new Error(AUTO_USAGE);
+  const command = OperatorAutonomyCommandSchema.parse(
+    action === "status" ? { action: "status" } : { action: "set_enabled", enabled: action === "on" },
+  );
+  const client = await autonomyClient(
+    command,
+    options,
+    "Owner operator credential required to turn Auto on.",
+  );
+  const status = await client.autonomy("global-default", command);
+  outputJson(options.stdout ?? process.stdout, {
+    auto: status.enabled ? "on" : "off",
+    ...(status.error === undefined ? {} : { error: status.error }),
+  });
   return 0;
 }
 

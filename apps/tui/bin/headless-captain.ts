@@ -113,7 +113,7 @@ export async function runHeadlessCaptainCommand(
       // These existing commands are HTTP-only. The transport replaces their local
       // bearer inside the envelope; no Mac credential is read or transmitted.
       if (
-        ["conversations", "conversation", "send", "runtime-health", "join"].includes(command ?? "") ||
+        ["conversations", "conversation", "send", "runtime-health", "join", "auto"].includes(command ?? "") ||
         discordHttp
       )
         return runHeadlessCaptainCommand(args, {
@@ -557,6 +557,10 @@ export async function runHeadlessCaptainCommand(
       return await (await import("../src/command/reset.ts")).runResetCommand(rest, options);
     if (command === "conversations" || command === "conversation")
       return await (await import("../src/command/conversations.ts")).runConversationsCommand(rest, options);
+    if (command === "auto")
+      return await (
+        await import("../src/command/conversations.ts")
+      ).runConversationsCommand(["auto", ...rest], options);
     if (command === "send")
       return await (await import("../src/command/send.ts")).runSendCommand(rest, { ...options, stdout });
     if (command === "file")

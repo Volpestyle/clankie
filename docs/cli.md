@@ -3075,16 +3075,37 @@ release. Money and accounts always ask the owner. Verification and reporting
 style are never changed by a level. The command prints JSON with `level`,
 `description`, `revision` and every level's description. A level is computed
 from the saved leaves, so any hand-set leaf reads `custom`. Whether he works
-unprompted is a separate switch: the dial never starts or stops goal runs and
-self-wakes.
+unprompted is a separate switch, [`auto`](#auto-switch): the dial never starts or
+stops work.
 
 The API is `changes.autonomyLevel` on `POST /v1/operator/fleet-settings`. The
 level's leaves are written first, explicit leaves in the same change win, and
 snapshots report `autonomyLevel`. A snapshot without it comes from an older
 service, so the CLI refuses to set a level there. In the console, `/autonomy
-LEVEL` sets the dial, `/autonomy pause` and `/autonomy resume` stop and restart
-goal runs and self-wakes, and `/autonomy clear` cancels the selected chat's
-scheduled wake.
+LEVEL` sets the dial and `/autonomy clear` cancels the selected chat's scheduled
+wake.
+
+<a id="auto-switch"></a>
+
+### `auto [status|on|off]`
+
+The master switch for unprompted work
+([ADR 0264](adr/0264-projects-on-auto-replace-goals.md)). While it is on, Clankie
+works every project on Auto (`project settings PROJECT --auto on`), runs goals
+and fires the wakes he schedules. Off stops all three at once; nothing already
+running is cancelled. It is the global autonomy runner switch in
+`~/.clankie/captain/autonomy.json`, which reads as off when it cannot be read.
+Turning it on needs the owner operator credential; reading it or turning it off
+does not. Prints `{"auto":"on"|"off"}`. The console's `/auto on|off` is the same
+switch.
+
+Each fleet-round interval (30 minutes by default) the service checks the
+projects on Auto. When any are, it wakes Clankie's head conversation with each
+one's name, focus, bound tracker project and the live workers in its local
+workspaces and worktree roots. It wakes again when that evidence changes, or
+after two hours when it has not. The wake grants no tool or authority beyond an
+ordinary turn, and a native harness seat holding the head conversation receives it
+like any other wake.
 
 New hired Claude workers launch in `auto` mode, preserving managed and tracker
 denies and the permission hook, with no blanket `ask` rules or Bash allow.
@@ -4824,7 +4845,7 @@ an already running turn. Worker reports retain their original delivery IDs and
 require explicit read acknowledgment after delivery.
 Model calls in Pi create inactive
 proposals; `/goal accept` confirms one. `/goal <objective>` creates an active goal
-directly. Starting, accepting and resuming a goal, and `/autonomy resume`, require the
+directly. Starting, accepting and resuming a goal, and `/auto on`, require the
 owner/device credential; the shared captain bearer receives HTTP 403
 `goal_owner_required`. The console uses its owner transport, and headless owners
 can use `clankie conversations goal ID accept|resume` or
@@ -5399,8 +5420,13 @@ reviewed changes for an existing project through the authenticated service API.
 The console exposes the same verbs through `/project`.
 
 The changes file may contain `name`, `roles`, `workerCap`, `trackerRef`,
-`trackerProjectId` and `autonomy`.
-Omitted fields remain unchanged; `null` removes a worker cap or tracker binding.
+`trackerProjectId`, `autonomy`, `auto` and `focus`.
+Omitted fields remain unchanged; `null` removes a worker cap, tracker binding
+or focus. `auto: true` puts the project on Auto: Clankie works its backlog
+unprompted while [`auto`](#auto-switch) is on, and starts nothing new on it
+otherwise. `focus` is one line (at most 280 characters) on what matters now;
+it steers that work. Snapshots advertise both with `projectsAuto: true`, and like
+`trackerProjectId` they appear only in the `?includeAutonomy=true` view.
 `trackerProjectId` binds the project to one built-in tracker project by its UUID
 (from `work sync` bootstrap or `work owner get_project`); the service refuses a
 UUID the tracker does not hold (`tracker_project_not_found`) or one already bound
@@ -5420,7 +5446,8 @@ Stale revisions or removal of an in-use role fail without overwriting the saved
 settings. Read the settings again and review the changes before retrying.
 
 `clankie project settings PROJECT` prints stored autonomy overrides
-and their current effective values. Add `--closure lead|owner|inherit` or
+and their current effective values, plus `auto` and `focus`. `--auto on|off` and
+`--focus TEXT|clear` set those in the same revision-fenced update. Add `--closure lead|owner|inherit` or
 `--machine-setup lead|owner|inherit`, `--commit lead|owner|inherit`,
 `--push lead|owner|inherit`, `--release lead|owner|time_rule|inherit`
 (with `--release-rule TEXT` for `time_rule`),

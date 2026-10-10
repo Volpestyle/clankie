@@ -20,7 +20,7 @@ import { planSeat, parseSeatArgs } from "./command/seat.ts";
 import { formatRivals, formatSeatPlan } from "./command-format.ts";
 import { runRivalsMenu } from "./rivals-menu.ts";
 import { onOff, runSettingsMenu } from "./settings-menu.ts";
-import { autonomyCommand } from "./autonomy-command.ts";
+import { autoCommand, autonomyCommand } from "./autonomy-command.ts";
 import type { AutonomyCommandResult } from "./command/fleet.ts";
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
@@ -623,7 +623,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       async run(argument, shell): Promise<void> {
         if (!argument.trim()) {
           await runProjectsMenu(shell, {
-            settings: (args) => runProjectSettingsCommand(args),
+            // The autonomy-aware view carries Auto and focus (ADR 0264).
+            settings: (args) => runProjectSettingsCommand(args, { includeAutonomy: true }),
             workspace: (args) => runProjectCommand(args, settings ? { settings } : {}),
             roles: (projectId) => runProjectRolesMenu(shell, projectId),
             cwd: process.cwd(),
@@ -1133,6 +1134,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         }
       },
     },
+    autoCommand(conversations?.autonomy),
     autonomyCommand({
       level: context.commandAutonomy,
       goals: conversations?.autonomy,

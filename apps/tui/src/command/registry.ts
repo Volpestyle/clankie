@@ -398,6 +398,12 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["auto"],
+    lines: [
+      "  auto [status|on|off]     Master switch for unprompted work: projects on Auto, goals and self-wakes (JSON)",
+    ],
+  },
+  {
     nouns: ["autonomy"],
     lines: [
       "  autonomy [status|off|low|high|full]",

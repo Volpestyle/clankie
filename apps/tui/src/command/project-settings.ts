@@ -10,6 +10,7 @@ import {
   CreateProjectSettingsSchema,
   readFleetProjectMembership,
   PROJECT_UPDATE_SETTINGS_PATH,
+  ProjectFocusSchema,
   ProjectsSnapshotSchema,
   UpdateProjectSettingsSchema,
   type ProjectsSnapshot,
@@ -159,6 +160,9 @@ export async function runProjectSettingsCommand(
 
 interface ProjectFleetSettingsResult extends ProjectsSnapshot {
   projectId: string;
+  /** Present when the service supports project Auto (ADR 0264). */
+  auto?: boolean;
+  focus?: string;
   fleet: {
     closure: FleetAutonomyMode | "inherit";
     machineSetup: FleetAutonomyMode | "inherit";
@@ -182,9 +186,10 @@ async function runProjectFleetSettings(
 ): Promise<ProjectFleetSettingsResult> {
   if (!args[1] || args.length % 2 !== 0)
     throw new Error(
-      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit]",
+      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--auto on|off] [--focus TEXT|clear]",
     );
   const changes: FleetAutonomyPatch = {};
+  const work: { auto?: boolean; focus?: string | null } = {};
   let releaseMode: string | undefined;
   let releaseRule: string | undefined;
   for (let index = 2; index < args.length; index += 2) {
@@ -201,6 +206,10 @@ async function runProjectFleetSettings(
     const value = args[index + 1];
     if (field && !(field in changes) && ["lead", "owner", "inherit"].includes(value ?? ""))
       changes[field] = value === "inherit" ? null : (value as FleetAutonomyMode);
+    else if (args[index] === "--auto" && work.auto === undefined && (value === "on" || value === "off"))
+      work.auto = value === "on";
+    else if (args[index] === "--focus" && work.focus === undefined)
+      work.focus = value === "clear" ? null : ProjectFocusSchema.parse(value);
     else if (args[index] === "--release" && releaseMode === undefined) releaseMode = value;
     else if (args[index] === "--release-rule" && releaseRule === undefined) releaseRule = value;
     else if (args[index] === "--verification" && changes.verification === undefined)
@@ -258,13 +267,15 @@ async function runProjectFleetSettings(
     throw new Error("This service does not support working preferences; update it before editing them.");
   if (FLEET_GATE_FIELDS.some((field) => field in changes) && snapshot.fleetGates !== true)
     throw new Error("This service does not support fleet gates; update it before editing them.");
-  if (Object.keys(changes).length) {
+  if (Object.keys(work).length && snapshot.projectsAuto !== true)
+    throw new Error("This service does not support project Auto; update it before editing Auto or focus.");
+  if (Object.keys(changes).length || Object.keys(work).length) {
     snapshot = await runProjectSettingsCommand(
       [
         "update",
         args[1]!,
         "--changes-json",
-        JSON.stringify({ autonomy: { fleet: changes } }),
+        JSON.stringify({ ...(Object.keys(changes).length ? { autonomy: { fleet: changes } } : {}), ...work }),
         "--revision",
         snapshot.revision,
       ],
@@ -290,6 +301,9 @@ async function runProjectFleetSettings(
   return {
     ...snapshot,
     projectId: project.id,
+    ...(snapshot.projectsAuto === true
+      ? { auto: project.auto === true, ...(project.focus === undefined ? {} : { focus: project.focus }) }
+      : {}),
     fleet: {
       closure: project.autonomy?.fleet?.closure ?? "inherit",
       machineSetup: project.autonomy?.fleet?.machineSetup ?? "inherit",

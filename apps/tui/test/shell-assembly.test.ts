@@ -579,7 +579,7 @@ describe("shell assembly", () => {
 
     await built.find((command) => command.name === "goal")!.run("--tokens 5000 inspect the release", shell);
     await built.find((command) => command.name === "goal")!.run("accept", shell);
-    await built.find((command) => command.name === "autonomy")!.run("pause", shell);
+    await built.find((command) => command.name === "auto")!.run("off", shell);
 
     expect(commands).toEqual([
       { action: "set_goal", objective: "inspect the release", tokenBudget: 5000 },

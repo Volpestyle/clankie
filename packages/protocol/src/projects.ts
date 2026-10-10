@@ -68,6 +68,7 @@ export const ProjectGrantRuleSchema = z
       .max(64),
   })
   .strict();
+export const ProjectFocusSchema = z.string().trim().min(1).max(280);
 export const ProjectSchema = z
   .object({
     id: ProjectIdSchema,
@@ -86,6 +87,10 @@ export const ProjectSchema = z
     roles: z.array(ProjectRoleSchema).max(256).default([]),
     workerCap: z.number().int().min(0).max(1000).optional(),
     autonomy: ProjectAutonomySchema.optional(),
+    /** On Auto, Clankie works this project's backlog unprompted (ADR 0264); off or absent, he starts nothing new on it. */
+    auto: z.boolean().optional(),
+    /** One line on what matters now; it steers Auto work and replaces a goal's objective. */
+    focus: ProjectFocusSchema.optional(),
     fleet: z
       .object({
         size: z.enum(["max", "large", "small", "solo"]).optional(),
@@ -200,6 +205,8 @@ export const ProjectsSnapshotSchema = z
     /** Included by the current service only in the autonomy-aware project view. */
     workingPreferences: z.literal(true).optional(),
     fleetGates: z.literal(true).optional(),
+    /** Advertises project Auto and focus (ADR 0264); absent on an older service. */
+    projectsAuto: z.literal(true).optional(),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict()
@@ -368,6 +375,9 @@ export const UpdateProjectSettingsSchema = z
           .optional(),
         /** A built-in tracker project UUID; null unbinds. */
         trackerProjectId: z.string().uuid().nullable().optional(),
+        auto: z.boolean().optional(),
+        /** null clears the focus. */
+        focus: ProjectFocusSchema.nullable().optional(),
       })
       .strict()
       .refine(

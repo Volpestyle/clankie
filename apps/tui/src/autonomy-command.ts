@@ -16,12 +16,12 @@ export interface AutonomyCommandServices {
   readonly formatGoals?: (status: OperatorAutonomyStatus) => string;
 }
 
-const USAGE = `Usage: /autonomy [status|${AutonomyLevelSchema.options.join("|")}|pause|resume|clear]`;
+const USAGE = `Usage: /autonomy [status|${AutonomyLevelSchema.options.join("|")}|clear]`;
 
 /**
  * `/autonomy` is the dial: off, low, high or full sets how much Clankie decides
- * without asking. Whether he works unprompted is separate: `pause` and `resume`
- * switch goal runs and self-wakes, and `clear` cancels the chat's scheduled wake.
+ * without asking. Whether he works unprompted is `/auto`; `clear` cancels the
+ * chat's scheduled wake.
  */
 export function autonomyCommand(services: AutonomyCommandServices): FaceShellCommand {
   const { level, goals } = services;
@@ -30,7 +30,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
     name: "autonomy",
     aliases: [],
     description: "Set how many decisions Clankie takes on his own",
-    argumentHint: `[${AutonomyLevelSchema.options.join("|")}|pause|resume|clear]`,
+    argumentHint: `[${AutonomyLevelSchema.options.join("|")}|clear]`,
     takesArgument: true,
     async run(argument, shell): Promise<void> {
       if (level === undefined && goals === undefined) {
@@ -63,11 +63,11 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
                 : [
                     {
                       value: "goals",
-                      label: status.enabled ? "Pause goals and self-wakes" : "Resume goals and self-wakes",
-                      hint: "Whether he works unprompted; the level is how much he asks",
+                      label: status.enabled ? "Turn Auto off" : "Turn Auto on",
+                      hint: "Whether he works unprompted (/auto); the level is how much he asks",
                       async run() {
                         await goals!({ action: "set_enabled", enabled: !status.enabled });
-                        return `Goals and self-wakes ${onOff(!status.enabled)}.`;
+                        return `Auto ${onOff(!status.enabled)}.`;
                       },
                     },
                   ]),
@@ -102,11 +102,9 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
         const command: OperatorAutonomyCommand | undefined =
           input === "status"
             ? { action: "status" }
-            : input === "pause" || input === "resume"
-              ? { action: "set_enabled", enabled: input === "resume" }
-              : input === "clear"
-                ? { action: "clear_wake" }
-                : undefined;
+            : input === "clear"
+              ? { action: "clear_wake" }
+              : undefined;
         if (input === "status" && goals === undefined && level !== undefined) {
           shell.insertCommandResult(
             "/autonomy",
@@ -134,6 +132,46 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
           error instanceof Error ? error.message : String(error),
           "error",
         );
+      }
+    },
+  };
+}
+
+/** `/auto` is the master switch for unprompted work (ADR 0264): projects on Auto, goals and self-wakes. */
+export function autoCommand(
+  goals: ((command: OperatorAutonomyCommand) => Promise<OperatorAutonomyStatus>) | undefined,
+): FaceShellCommand {
+  return {
+    name: "auto",
+    aliases: [],
+    description: "Turn unprompted work on or off: projects on Auto, goals and self-wakes",
+    argumentHint: "[on|off]",
+    takesArgument: true,
+    async run(argument, shell): Promise<void> {
+      if (goals === undefined) {
+        shell.insertCommandResult("/auto", "Auto controls are unavailable.", "error");
+        return;
+      }
+      const input = argument.trim().toLowerCase();
+      if (!["", "status", "on", "off"].includes(input)) {
+        shell.insertCommandResult("/auto", "Usage: /auto [on|off]", "error");
+        return;
+      }
+      try {
+        const status = await goals(
+          input === "on" || input === "off"
+            ? { action: "set_enabled", enabled: input === "on" }
+            : { action: "status" },
+        );
+        shell.insertCommandResult(
+          "/auto",
+          status.enabled
+            ? "Auto is on: Clankie works projects on Auto, goals and self-wakes without being asked. Choose projects with /project."
+            : "Auto is off: nothing starts unprompted.",
+          status.error === undefined ? "success" : "error",
+        );
+      } catch (error) {
+        shell.insertCommandResult("/auto", error instanceof Error ? error.message : String(error), "error");
       }
     },
   };

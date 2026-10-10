@@ -106,12 +106,14 @@ changes, update this page.
 
 ### 5. Projects
 
-| Setting                                                                                   | API                                                    | CLI | TUI          | App                                                        | Dash | Tier     |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------ | --- | ------------ | ---------------------------------------------------------- | ---- | -------- |
-| Name, agent limit, tracker workspace, roles (name, model, effort, cap), autonomy override | `GET /v1/operator/projects`, `POST …/update` (relayed) | ✓   | ✓ `/project` | ✓ Project; role harness not editable; effort lacks `ultra` | —    | Common   |
-| Role harness and account; "no preference"                                                 | same                                                   | ✓   | ✓            | — (kept from the original)                                 | —    | Advanced |
-| Project fleet size/models override                                                        | create only; not in the update schema                  | ✓   | ✓            | —                                                          | —    | Advanced |
-| Workspaces, worktree roots                                                                | `POST …/remove-workspace`, `…/add-worktree-root`       | ✓   | ✓            | —                                                          | —    | Advanced |
+| Setting                                                                                   | API                                                    | CLI                                 | TUI          | App                                                        | Dash | Tier     |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------- | ------------ | ---------------------------------------------------------- | ---- | -------- |
+| Name, agent limit, tracker workspace, roles (name, model, effort, cap), autonomy override | `GET /v1/operator/projects`, `POST …/update` (relayed) | ✓                                   | ✓ `/project` | ✓ Project; role harness not editable; effort lacks `ultra` | —    | Common   |
+| Auto and focus (ADR 0264)                                                                 | same, `?includeAutonomy=true` view                     | ✓ `project settings --auto --focus` | ✓ `/project` | — (follow-up)                                              | —    | Common   |
+| Master switch for unprompted work (Auto)                                                  | `autonomy` dispatch op, `set_enabled`                  | ✓ `clankie auto`                    | ✓ `/auto`    | — (follow-up)                                              | —    | Common   |
+| Role harness and account; "no preference"                                                 | same                                                   | ✓                                   | ✓            | — (kept from the original)                                 | —    | Advanced |
+| Project fleet size/models override                                                        | create only; not in the update schema                  | ✓                                   | ✓            | —                                                          | —    | Advanced |
+| Workspaces, worktree roots                                                                | `POST …/remove-workspace`, `…/add-worktree-root`       | ✓                                   | ✓            | —                                                          | —    | Advanced |
 
 ### 6. Worker accounts
 

@@ -6,15 +6,21 @@ Long-horizon work on wakes, lead review rounds, watching workers, cost evidence,
 
 Overnight or all-day work does not need a service goal, and a native harness
 seat cannot hold one (`create_goal` refuses with `native_goal_unsupported`).
-Carry it across turns on wakes instead:
+The owner hands you standing work by putting a project on Auto with an optional
+one-line focus (ADR 0264). The Auto round names those projects; work their
+backlogs without waiting to be asked, within each project's worker cap and the
+autonomy dial, and bring the owner only the decisions the dial leaves to him.
+A project not on Auto gets no new work you start yourself. Carry work across
+turns on wakes:
 
-| Wakes you when                    | Source                                     | Limits                                                                                  |
-| --------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------- |
-| A worker finishes, blocks or asks | its `message_clankie` report               | only workers that report; read with `worker_reports`                                    |
-| A watched pane settles            | `herdr_watch SEAT`                         | one-shot; arm it again after each wake                                                  |
-| Owned seats need review           | the periodic fleet round, every 30 minutes | only while this conversation owns live seats; skipped when nothing changed              |
-| Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you     |
-| A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while autonomy is on |
+| Wakes you when                    | Source                                     | Limits                                                                              |
+| --------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------- |
+| A worker finishes, blocks or asks | its `message_clankie` report               | only workers that report; read with `worker_reports`                                |
+| A watched pane settles            | `herdr_watch SEAT`                         | one-shot; arm it again after each wake                                              |
+| Owned seats need review           | the periodic fleet round, every 30 minutes | only while this conversation owns live seats; skipped when nothing changed          |
+| Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you |
+| A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while Auto is on |
+| A project is on Auto              | the Auto round, on the fleet-round cadence | head chat only; on changed evidence or every two hours; only while Auto is on       |
 
 The loop: keep the objective, done criteria and boundaries on the work item
 (the handoff protocol is in `work-items`), because a wake starts from the conversation, not from a fixed
@@ -29,9 +35,9 @@ Do not poll with short `schedule_wake` intervals when a watch or report already
 covers the worker. Do not start a second lead in another conversation to get
 continuation. Do not use a harness's own scheduler (Claude Code `/loop` or cron
 tools, Codex `/goal`) to keep the lead going: it is tied to one native session,
-and the owner's `/autonomy pause` does not reach it. A worker may still use its
-harness's goal for its own ticket. `/autonomy pause` stops wakes and goal turns;
-while paused, tell the owner what is left open instead of working around it.
+and the owner's `/auto off` does not reach it. A worker may still use its
+harness's goal for its own ticket. `/auto off` stops the Auto round, wakes and
+goal turns; while it is off, tell the owner what is left open instead of working around it.
 Separately, the owner's autonomy dial (`off`, `low`, `high` by default, or
 `full`; `clankie autonomy` reads it) sets which decisions you take without
 asking; the effective gates arrive in your fleet guidance.
