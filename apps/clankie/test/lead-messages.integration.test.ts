@@ -110,20 +110,25 @@ async function fixture(remote: boolean) {
         }
       : {}),
   } as unknown as CaptainDeps;
-  const captain = createCaptain(deps, {
-    repoRoot: root,
-    stateDir: root,
-    workingDirectory: root,
-    nativeHerdrRunner: runner,
-    nativeCensusRunner: async (_command: string, args: readonly string[]) => ({
-      stdout: herdrResponse(args),
-      stderr: "",
-    }),
-    settings,
-    discordEnvironment: {},
-    seatAdapters: [],
-  });
-  cleanup.push(() => captain.close());
+  /** One service process over the same state directory; a second call is a restart. */
+  const open = () => {
+    const opened = createCaptain(deps, {
+      repoRoot: root,
+      stateDir: root,
+      workingDirectory: root,
+      nativeHerdrRunner: runner,
+      nativeCensusRunner: async (_command: string, args: readonly string[]) => ({
+        stdout: herdrResponse(args),
+        stderr: "",
+      }),
+      settings,
+      discordEnvironment: {},
+      seatAdapters: [],
+    });
+    cleanup.push(() => opened.close());
+    return opened;
+  };
+  const captain = open();
   // The lead's own hook sync attaches its native session to its conversation.
   expect(captain.syncSeatTranscript(leads[1]!, { sessionId, entries: [] })).toBe(true);
   const roster = await captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
@@ -159,7 +164,7 @@ async function fixture(remote: boolean) {
     const part = sent.content.find((item) => item.type === "text");
     return JSON.parse(part?.type === "text" ? part.text : "null");
   };
-  return { captain, leads, head, bridge, messageSeat, workerDelivery, adoption };
+  return { captain, open, leads, head, bridge, messageSeat, workerDelivery, adoption };
 }
 
 it.each([false, true])(
@@ -217,4 +222,40 @@ it("a lead cannot message itself", async () => {
     outcome: "undelivered",
     deliveryStage: "rejected",
   });
+});
+
+it("only the sender reconciles an unconfirmed lead message after a restart, once the recipient's bridge acknowledges it", async () => {
+  const f = await fixture(false);
+  const [global, work] = f.leads as [string, string];
+  // The recipient's bridge takes the event, then the service stops before its acknowledgment.
+  const taken = f.captain.pollSeatEvents(5000, undefined, work, capabilities);
+  await expect
+    .poll(() => f.captain.serveOperatorConversation({ op: "get", schemaVersion: 1, conversationId: work }))
+    .toMatchObject({ conversation: { driver: {} } });
+  const sending = f.messageSeat(global, f.head.terminalId, "Hold the deploy");
+  const [event] = await taken;
+  expect(event).toMatchObject({ kind: "message", source: "lead", conversationId: work });
+  await f.captain.close();
+  const original = await sending;
+  expect(original).toMatchObject({
+    outcome: "unconfirmed",
+    deliveryStage: "uncertain",
+    messageId: event!.id,
+  });
+
+  const restarted = f.open();
+  expect(await restarted.reconcileSeatDelivery!(event!.id, global)).toMatchObject({
+    outcome: "unconfirmed",
+    messageId: event!.id,
+  });
+  // The reconnecting bridge acknowledges the exact original it took; nothing is resent.
+  expect(await restarted.acknowledgeSeatEvent(event!.id, work)).toBe(true);
+  expect(await restarted.reconcileSeatDelivery!(event!.id, global)).toEqual({
+    outcome: "delivered",
+    deliveryStage: "delivered",
+    messageId: event!.id,
+  });
+  // Another conversation cannot read the sender's receipt.
+  expect(await restarted.reconcileSeatDelivery!(event!.id, work)).toBeUndefined();
+  expect(await restarted.pollSeatEvents(0, undefined, work, capabilities)).toEqual([]);
 });

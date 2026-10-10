@@ -250,6 +250,7 @@ import {
   SeatOutbox,
   seatDeliveryAlert,
 } from "./seat-outbox.ts";
+import { LeadMessageReceipts } from "./lead-message-receipts.ts";
 import { createServiceHandoffDelivery } from "./service-handoff-delivery.ts";
 import { withSeatSubagents } from "./seat-subagents.ts";
 import { CaptainResourceLoader, skillSearchExtension } from "./skill-catalog.ts";
@@ -2639,8 +2640,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
-  /** Unconfirmed lead messages by sender, so their receipts reconcile read-only. */
-  const leadMessages = new Map<string, { from: string; to: string }>();
+  /** Unconfirmed lead messages by sender, so their receipts reconcile read-only across restarts. */
+  const leadMessages = new LeadMessageReceipts(
+    join(options.stateDir, "delivery-receipts", "lead-messages.json"),
+  );
 
   /**
    * One lead's message to another rides the receiving conversation's own seat
@@ -2687,7 +2690,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         leadConversationId: to,
       };
     if (result.outcome === "unconfirmed") {
-      leadMessages.set(result.messageId, { from, to });
+      try {
+        leadMessages.record(result.messageId, from, to);
+      } catch {
+        // The original stays unconfirmed in its own receipt; only later reconciliation is lost.
+      }
       return {
         outcome: "unconfirmed",
         seatId,
