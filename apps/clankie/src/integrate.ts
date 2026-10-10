@@ -11,9 +11,8 @@ import {
   type IntegrationRepo,
   type IntegrationRun,
   type IntegrationQueueStatus,
-  type HoldOverride,
 } from "@clankie/protocol/integrate";
-import { DeployHolds, durableJson, withDirectoryLock } from "./deploy-holds.ts";
+import { durableJson, withDirectoryLock } from "./deploy-holds.ts";
 import { integrationEnvironment } from "./integrate-environment.ts";
 
 const execute = promisify(execFile);
@@ -27,7 +26,6 @@ interface IntegrationOptions {
   directory: string;
   core: string;
   app?: string;
-  holds: DeployHolds;
 }
 
 /** The running pin can be a nested linked worktree; app lives beside its source checkout. */
@@ -172,15 +170,10 @@ export class IntegrationQueue {
               const first = this.pending.shift()!;
               const members = [first];
               const request = first.batch.request;
-              // Preserve FIFO and keep restores / gate-only requests / distinct override intent apart.
+              // Preserve FIFO and keep restores and gate-only requests apart.
               while (!request.restore && this.pending.length) {
                 const next = this.pending[0]!.batch.request;
-                if (
-                  next.restore ||
-                  next.push !== request.push ||
-                  JSON.stringify(next.overrides) !== JSON.stringify(request.overrides)
-                )
-                  break;
+                if (next.restore || next.push !== request.push) break;
                 members.push(this.pending.shift()!);
               }
               try {
@@ -278,7 +271,7 @@ export class IntegrationQueue {
         batch.error = `${batch.error ?? "Shared gate failed"}; isolated members have separate results (use their request IDs)`;
         await this.save(batch);
       } else if (batch.state === "passed" && batch.request.push) {
-        await this.land(id, batch.request.overrides, async () => {
+        await this.land(id, async () => {
           for (const member of remaining) await member.guard();
         });
       }
@@ -511,12 +504,13 @@ export class IntegrationQueue {
     await this.save(batch);
   }
 
-  async land(id: string, overrides: HoldOverride[], guard: () => Promise<void>): Promise<IntegrationBatch> {
+  /** Deploy holds protect the running service, not main, so landing never waits for one (ADR 0240). */
+  async land(id: string, guard: () => Promise<void>): Promise<IntegrationBatch> {
     const batch = await this.status(id);
     if (batch.batchId) {
       if (["conflict", "failed", "interrupted"].includes(batch.state))
         throw Error(`Request ${id} has no landable pass (${batch.state})`);
-      await this.land(batch.batchId, overrides, guard);
+      await this.land(batch.batchId, guard);
       return this.status(id);
     }
     if (batch.state === "pushed") return batch;
@@ -527,94 +521,92 @@ export class IntegrationQueue {
     try {
       return await withDirectoryLock(join(dirname(batch.evidence), "push.lock"), async () => {
         try {
-          return await this.options.holds.landing(`integrate:${id}`, overrides, async () => {
-            await guard();
-            // Read the persisted attestation rather than trusting an in-memory check result.
-            const recorded = await this.status(id);
-            recorded.repos.sort((a, b) => (a.name === b.name ? 0 : a.name === "core" ? -1 : 1));
-            if (!recorded.repos.length) throw Error("No repositories were gated");
-            for (const repo of recorded.repos) {
-              if (
-                repo.gate?.exitCode !== 0 ||
-                repo.gate.head !== repo.head ||
-                repo.head !== (await this.head(repo))
-              )
-                throw Error(`${repo.name}: recorded gate is not a pass for exact HEAD`);
-              await this.clean(repo);
-              if ((await this.git(repo.directory, ["remote", "get-url", "origin"])) !== repo.origin)
-                throw Error(`${repo.name}: origin changed since composition`);
-              if ((await this.git(repo.directory, ["remote", "get-url", "--push", "origin"])) !== repo.origin)
-                throw Error(`${repo.name}: push destination changed since composition`);
-              const current = (
-                await this.git(repo.directory, ["ls-remote", "origin", "refs/heads/main"])
-              ).split(/\s/u)[0];
-              if (repo.push && repo.push.state !== "confirmed" && repo.push.state !== "rejected") {
-                // Reconcile an uncertain send, never replay it.
-                if (current !== repo.head)
-                  throw Error(
-                    `${repo.name}: previous push unconfirmed; inspect origin and start a fresh batch`,
-                  );
-                repo.push.state = "confirmed";
-                repo.ownerCheckoutSync = await syncOwnerCheckout(repo.source);
-                await this.save(recorded);
-              }
-              if (repo.push?.state === "confirmed") {
-                if (current !== repo.head)
-                  throw Error(`${repo.name}: origin advanced after landing; start a fresh batch`);
-              } else if (current !== repo.base)
+          await guard();
+          // Read the persisted attestation rather than trusting an in-memory check result.
+          const recorded = await this.status(id);
+          recorded.repos.sort((a, b) => (a.name === b.name ? 0 : a.name === "core" ? -1 : 1));
+          if (!recorded.repos.length) throw Error("No repositories were gated");
+          for (const repo of recorded.repos) {
+            if (
+              repo.gate?.exitCode !== 0 ||
+              repo.gate.head !== repo.head ||
+              repo.head !== (await this.head(repo))
+            )
+              throw Error(`${repo.name}: recorded gate is not a pass for exact HEAD`);
+            await this.clean(repo);
+            if ((await this.git(repo.directory, ["remote", "get-url", "origin"])) !== repo.origin)
+              throw Error(`${repo.name}: origin changed since composition`);
+            if ((await this.git(repo.directory, ["remote", "get-url", "--push", "origin"])) !== repo.origin)
+              throw Error(`${repo.name}: push destination changed since composition`);
+            const current = (
+              await this.git(repo.directory, ["ls-remote", "origin", "refs/heads/main"])
+            ).split(/\s/u)[0];
+            if (repo.push && repo.push.state !== "confirmed" && repo.push.state !== "rejected") {
+              // Reconcile an uncertain send, never replay it.
+              if (current !== repo.head)
                 throw Error(
-                  `${repo.name}: origin/main moved from ${repo.base} to ${current}; compose a fresh batch`,
+                  `${repo.name}: previous push unconfirmed; inspect origin and start a fresh batch`,
                 );
-            }
-            recorded.state = "pushing";
-            delete recorded.error;
-            await this.save(recorded);
-            for (const repo of recorded.repos) {
-              if (repo.push?.state === "confirmed") continue;
-              await guard();
-              // Recheck both HEADs after each network operation, including the sibling dependency.
-              for (const sibling of recorded.repos) {
-                if (sibling.head !== (await this.head(sibling)))
-                  throw Error(`${sibling.name}: HEAD changed after gate`);
-                await this.clean(sibling);
-              }
-              const log = join(
-                dirname(recorded.evidence),
-                `${repo.name}-push-${now().replaceAll(":", "-")}.log`,
-              );
-              repo.push = { state: "attempting", at: now(), exitCode: null, log };
-              await this.save(recorded);
-              try {
-                const output = await this.git(repo.directory, [
-                  "push",
-                  "--porcelain",
-                  "origin",
-                  `${repo.head}:refs/heads/main`,
-                ]);
-                await durableJson(log, { stdout: output });
-                repo.push.exitCode = 0;
-              } catch (error) {
-                const stdout = (error as { stdout?: string }).stdout ?? "";
-                await durableJson(log, { error: String(error), stdout });
-                const code = (error as { code?: unknown }).code;
-                repo.push.exitCode = typeof code === "number" ? code : null;
-                if (/^!\t.*\[(?:remote )?rejected\]/mu.test(stdout)) repo.push.state = "rejected";
-              }
-              if (repo.push.state !== "rejected") repo.push.state = "unconfirmed";
-              await this.save(recorded);
-              const landed = (
-                await this.git(repo.directory, ["ls-remote", "origin", "refs/heads/main"])
-              ).split(/\s/u)[0];
-              if (landed !== repo.head)
-                throw Error(`${repo.name}: push ${repo.push.state}; no automatic retry (see ${log})`);
               repo.push.state = "confirmed";
               repo.ownerCheckoutSync = await syncOwnerCheckout(repo.source);
               await this.save(recorded);
             }
-            recorded.state = "pushed";
+            if (repo.push?.state === "confirmed") {
+              if (current !== repo.head)
+                throw Error(`${repo.name}: origin advanced after landing; start a fresh batch`);
+            } else if (current !== repo.base)
+              throw Error(
+                `${repo.name}: origin/main moved from ${repo.base} to ${current}; compose a fresh batch`,
+              );
+          }
+          recorded.state = "pushing";
+          delete recorded.error;
+          await this.save(recorded);
+          for (const repo of recorded.repos) {
+            if (repo.push?.state === "confirmed") continue;
+            await guard();
+            // Recheck both HEADs after each network operation, including the sibling dependency.
+            for (const sibling of recorded.repos) {
+              if (sibling.head !== (await this.head(sibling)))
+                throw Error(`${sibling.name}: HEAD changed after gate`);
+              await this.clean(sibling);
+            }
+            const log = join(
+              dirname(recorded.evidence),
+              `${repo.name}-push-${now().replaceAll(":", "-")}.log`,
+            );
+            repo.push = { state: "attempting", at: now(), exitCode: null, log };
             await this.save(recorded);
-            return recorded;
-          });
+            try {
+              const output = await this.git(repo.directory, [
+                "push",
+                "--porcelain",
+                "origin",
+                `${repo.head}:refs/heads/main`,
+              ]);
+              await durableJson(log, { stdout: output });
+              repo.push.exitCode = 0;
+            } catch (error) {
+              const stdout = (error as { stdout?: string }).stdout ?? "";
+              await durableJson(log, { error: String(error), stdout });
+              const code = (error as { code?: unknown }).code;
+              repo.push.exitCode = typeof code === "number" ? code : null;
+              if (/^!\t.*\[(?:remote )?rejected\]/mu.test(stdout)) repo.push.state = "rejected";
+            }
+            if (repo.push.state !== "rejected") repo.push.state = "unconfirmed";
+            await this.save(recorded);
+            const landed = (await this.git(repo.directory, ["ls-remote", "origin", "refs/heads/main"])).split(
+              /\s/u,
+            )[0];
+            if (landed !== repo.head)
+              throw Error(`${repo.name}: push ${repo.push.state}; no automatic retry (see ${log})`);
+            repo.push.state = "confirmed";
+            repo.ownerCheckoutSync = await syncOwnerCheckout(repo.source);
+            await this.save(recorded);
+          }
+          recorded.state = "pushed";
+          await this.save(recorded);
+          return recorded;
         } catch (error) {
           // Keep successful/uncertain individual repo landings; two origins have no atomic transaction.
           const latest = await this.status(id);

@@ -61,6 +61,8 @@ export interface CaptainDeps {
   readonly minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;
   readonly desktop?: import("./desktop.ts").DesktopExpressions;
   readonly runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
+  /** Current deploy holds, shown in the lead round with holder, age and time left. */
+  readonly deployHolds?: () => Promise<import("@clankie/protocol/integrate").DeployHold[]>;
   readonly roomObservations?: import("../discord-room-observations.ts").DiscordRoomObservations;
   /** Host-proven original body account, presence, source receipt and opt-in. */
   readonly conversationRouteAuthorized?: (

@@ -55,8 +55,8 @@ including direct pushes; blocked edits are preserved and reported.
 waiting during a gate join the next batch, with one root landing gate for the composed
 core/app pair. Conflicting requests roll back as a whole; failed shared gates
 split into smaller batches until the failing request is reported. Each receipt
-keeps its original input, shared batch ID and attempted evidence. Restores,
-gate-only requests and distinct hold overrides keep their separate intent.
+keeps its original input, shared batch ID and attempted evidence. Restores and
+gate-only requests keep their separate intent.
 
 Read the receipt before claiming delivery: a passing gate is not a confirmed
 push, and a partial batch can land core while the app is still pending. Retry
@@ -67,11 +67,17 @@ for another HEAD, gate against live shared state, or force push a rollback:
 commit. Integration clones disable client hooks; the live checkout guard does
 not affect their attested landing.
 
-Protect live tests with `integrate hold --holder NAME --reason TEXT --pane ID`
-(or `--seat ID`). Holds never expire and appear in `integrate holds` even when
-the holder is gone. Push and runtime-update admission refuse a named hold; an
-owner override names each one with `--override-hold UUID --actor NAME --reason
-TEXT`. Release a finished hold explicitly with actor and reason.
+A deploy hold keeps `clankie update` from replacing the running service, for a
+live test against it: `integrate hold --holder NAME --reason TEXT --minutes N
+--pane ID` (or `--seat ID`), at most 60 minutes. It lifts on its own at expiry
+with a receipt naming the holder. It never holds `main`: pushes and integrate
+landings go ahead, and a gate main moved under keeps its result through
+`check:landing --revalidate`. Fleet status, your round and `update` refusals show
+each hold's holder, age and time left. Release a hold that has outlived its
+purpose, yours or a worker's, with `integrate release UUID --actor NAME --reason
+TEXT`; the receipt records who held it, who released it and why. The owner can
+instead override a hold for one update with `update --override-holds --reason
+TEXT`.
 
 ## Ownership while delivering
 

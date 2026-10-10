@@ -81,9 +81,10 @@ conflicting requests roll back and failed shared gates split to isolate failures
 `integrate status` and `/integrate` expose running/waiting work and the last result.
 Each batch has independent Git clones and detached sibling worktrees, private gate environments and durable tested-HEAD
 records. Exact passed trees land core before app; partial landings preserve each
-confirmed SHA. Named deploy holds guard landing and runtime-update admission,
-with explicit audited operator overrides. [Integration](integration.md) owns the
-contract, isolation boundary and recovery rules.
+confirmed SHA. Timed deploy holds guard runtime-update admission only, never
+landing; each lifts on its own within an hour with a receipt, and operator
+overrides are audited. [Integration](integration.md) owns the contract,
+isolation boundary and recovery rules.
 
 ```mermaid
 flowchart LR
@@ -94,8 +95,7 @@ flowchart LR
   Gate -->|shared failure| Split["Smaller batches / report failing request"]
   Split --> Compose
   Record --> Verify["Exact HEAD + clean tree + current origin"]
-  Verify --> Hold["Deploy holds / audited owner override"]
-  Hold --> Core["Fast-forward core"]
+  Verify --> Core["Fast-forward core"]
   Core --> App["Fast-forward app / retain partial result"]
 ```
 

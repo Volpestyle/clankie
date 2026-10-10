@@ -33,8 +33,14 @@ import {
   type FleetSize,
 } from "@clankie/settings";
 import { readWorkingPreferences, type WorkingPreferencesReport } from "./working-preferences.ts";
-import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
+import {
+  ownerSettingsApi,
+  type OwnerSettingsApi,
+  type OwnerSettingsApiOptions,
+} from "./owner-settings-api.ts";
 import { FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema } from "@clankie/protocol";
+import { DeployHoldSchema, describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
+import { z } from "zod";
 import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
@@ -70,6 +76,34 @@ export interface FleetCommandResult {
   readonly restart: string;
   /** The autonomy dial read back from the leaves; absent from an older service. */
   readonly autonomyLevel?: AutonomyLevelReading;
+  /** Status only: who holds deploys, for how long, and how long until each hold lifts. */
+  readonly deployHolds?:
+    | { readonly holds: ReadonlyArray<DeployHold & { readonly summary: string }> }
+    | { readonly unavailable: string };
+}
+
+/** Read through runtime-update status: a GET, and holds only matter where updates run. */
+async function deployHoldStatus(
+  api: OwnerSettingsApi,
+): Promise<NonNullable<FleetCommandResult["deployHolds"]>> {
+  try {
+    const { holds = [] } = await api.get(
+      "/v1/runtime-update",
+      z.object({ holds: z.array(DeployHoldSchema).optional() }),
+    );
+    const now = Date.now();
+    return { holds: holds.map((hold) => ({ ...hold, summary: describeDeployHold(hold, now) })) };
+  } catch (error) {
+    // A machine without runtime updates has nothing to hold; its status says so.
+    return { unavailable: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export function formatDeployHoldLines(deployHolds: FleetCommandResult["deployHolds"]): string[] {
+  if (!deployHolds) return [];
+  if ("unavailable" in deployHolds) return [`deploy holds: unavailable (${deployHolds.unavailable})`];
+  if (!deployHolds.holds.length) return ["deploy holds: none"];
+  return ["deploy holds:", ...deployHolds.holds.map((hold) => `  ${hold.id} · ${hold.summary}`)];
 }
 
 /** Any subset of the fleet settings; what is left out keeps its current value. */
@@ -194,9 +228,8 @@ async function result(
 
 export async function fleetStatus(options: FleetCommandOptions = {}): Promise<FleetCommandResult> {
   const settings = store(options);
-  const snapshot = await (
-    await ownerSettingsApi(options)
-  ).get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
+  const api = await ownerSettingsApi(options);
+  const snapshot = await api.get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
   const report = await result(
     settings,
     FleetSettingsSchema.parse(
@@ -209,6 +242,7 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
     revision: snapshot.revision,
     fleet: { ...report.fleet, ...FleetAutonomySchema.parse(fleetAutonomyFields(snapshot.fleet)) },
     ...(snapshot.autonomyLevel === undefined ? {} : { autonomyLevel: snapshot.autonomyLevel }),
+    deployHolds: await deployHoldStatus(api),
   };
 }
 

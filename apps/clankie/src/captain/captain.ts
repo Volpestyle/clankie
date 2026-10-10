@@ -3937,12 +3937,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (!(await validateConversationOwner(owner))) continue;
         const current = await ledSeats(owner);
         if (!current.length || shutdown.signal.aborted) continue;
-        const evidence = fleetRoundEvidence(current);
+        const holds = (await deps.deployHolds?.().catch(() => undefined)) ?? [];
+        const evidence = fleetRoundEvidence(current, holds);
         if (!evidence.flagged && completedFleetRounds.get(ownerKey) === evidence.fingerprint) continue;
         pendingFleetRounds.add(ownerKey);
         void wakeConversation(
           owner,
-          fleetReviewContext(current),
+          fleetReviewContext(current, undefined, holds),
           async () => {
             if (shutdown.signal.aborted || !(await ledSeats(owner)).length)
               throw new Error("Fleet review stopped or has no owned seats");

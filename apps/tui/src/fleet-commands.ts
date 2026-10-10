@@ -12,6 +12,7 @@ import {
 import {
   fleetStatus,
   fleetUpdate,
+  formatDeployHoldLines,
   formatFleetLines,
   runFleetCommand,
   type FleetCommandOptions,
@@ -88,6 +89,7 @@ async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandSe
       `settings file: ${result.settingsFile}`,
       "",
       ...formatFleetLines(result.fleet),
+      ...formatDeployHoldLines(result.deployHolds),
       "",
       ...formatWorkingPreferences(result.workingPreferences),
       ...result.roleProfiles.map((r) => `${r.projectId}/${r.role}: ${r.summary}`),

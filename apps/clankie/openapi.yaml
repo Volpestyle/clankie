@@ -450,8 +450,10 @@ paths:
         recorded zero-exit exact HEAD may land. Core pushes first; app failure retains
         partial core-landed/app-pending evidence. Revert selects a passed batch via restore
         and creates a new commit restoring its tree. No force push or automatic push retry.
-        Holds never expire; explicit overrides name every hold, actor and reason and are
-        durably audited. Only the authenticated operator can invoke this route.
+        Deploy holds protect the running service from runtime updates and never gate landing.
+        A hold names its minutes (1-60) and lifts on its own at expiresAt with an expire receipt;
+        the runtime canary's own holds end with their canary. Releases and expiries return
+        receipts naming the holder, actor and reason. Only the authenticated operator can invoke this route.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -481,12 +483,6 @@ paths:
                         description: Passed batch whose tree to restore; mutually exclusive with core/app commits,
                       }
                     push: { type: boolean, default: false }
-                    overrides:
-                      {
-                        type: array,
-                        maxItems: 32,
-                        items: { $ref: "#/components/schemas/DeployHoldOverride" },
-                      }
                 - type: object
                   additionalProperties: false
                   required: [action]
@@ -499,12 +495,6 @@ paths:
                   properties:
                     action: { const: push }
                     id: { type: string, format: uuid }
-                    overrides:
-                      {
-                        type: array,
-                        maxItems: 32,
-                        items: { $ref: "#/components/schemas/DeployHoldOverride" },
-                      }
                 - type: object
                   additionalProperties: false
                   required: [action]
@@ -512,12 +502,19 @@ paths:
                     action: { const: holds }
                 - type: object
                   additionalProperties: false
-                  required: [action, id, holder, reason]
+                  required: [action, id, holder, reason, minutes]
                   properties:
                     action: { const: hold }
                     id: { type: string, format: uuid }
                     holder: { type: string, minLength: 1, maxLength: 512 }
                     reason: { type: string, minLength: 1, maxLength: 512 }
+                    minutes:
+                      {
+                        type: integer,
+                        minimum: 1,
+                        maximum: 60,
+                        description: The hold lifts on its own after this,
+                      }
                     pane: { type: string, description: Herdr pane ID; fleet-qualified for remote holders }
                     seat:
                       {
@@ -544,6 +541,13 @@ paths:
                   ok: { type: boolean }
                   error: { type: string }
                   holds: { type: array, items: { $ref: "#/components/schemas/DeployHold" } }
+                  receipts:
+                    {
+                      type: array,
+                      items: { $ref: "#/components/schemas/DeployHoldReceipt" },
+                      description: The release this call made,
+                      or the latest release/override/expire receipts for holds,
+                    }
                   queue:
                     type: object
                     required: [running, waiting, interrupted]
@@ -6892,14 +6896,30 @@ components:
         holder: { type: string }
         reason: { type: string }
         createdAt: { type: string, format: date-time }
+        expiresAt:
+          {
+            type: string,
+            format: date-time,
+            description: When the hold lifts on its own; absent on the runtime canary's holds,
+          }
         pane: { type: string }
         seat: { type: string }
         presence:
           {
             type: string,
             enum: [present, gone, unknown, person],
-            description: Gone/unknown holds remain in force until explicitly released,
+            description: Gone/unknown holds remain in force until released or expired,
           }
+    DeployHoldReceipt:
+      type: object
+      required: [action, hold, actor, reason, at, operation]
+      properties:
+        action: { type: string, enum: [release, override, expire] }
+        hold: { $ref: "#/components/schemas/DeployHold" }
+        actor: { type: string, description: Audit label; Clankie for an expiry }
+        reason: { type: string }
+        at: { type: string, format: date-time }
+        operation: { type: string }
     FleetEfficiencyRequest:
       oneOf:
         - type: object

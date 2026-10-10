@@ -3,7 +3,7 @@ import type { BrowserCommandOptions } from "./browser.ts";
 import { outputJson, type Writable } from "./io.ts";
 import { parseUpdateArgs, runUpdateCommand, UPDATE_USAGE } from "./update.ts";
 import type { RuntimeCanaryResult, RuntimeUpdateResult } from "../../bin/runtime-update.ts";
-import type { DeployHold } from "@clankie/protocol/integrate";
+import { describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
 
 type Hold = DeployHold & { candidate?: string; canary?: RuntimeCanaryResult };
 type CpuComparison = {
@@ -219,7 +219,8 @@ export function formatUpdateOutput(input: unknown): string {
       lines.push(
         `${holds.length} ${label} hold${holds.length === 1 ? "" : "s"}${canaries.length ? `: ${measurements(canaries)}` : ""}`,
       );
-      lines.push(`  Holds: ${holds.map((h) => h.id).join(", ")}`);
+      // Holder, age and time left for each, so a stale hold is visible before anyone overrides it.
+      for (const hold of holds) lines.push(`  ${hold.id} · ${clean(describeDeployHold(hold))}`);
     }
     lines.push(
       'Review the holds, then as owner run: clankie update --override-holds --reason "why proceeding is safe"',

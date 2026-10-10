@@ -2,6 +2,8 @@
 
 Status: Accepted (James, 2026-10-07). Retires the mandatory landing queue in
 [integration](../integration.md); `clankie integrate` remains an optional tool.
+Amended 2026-10-10 for gate revalidation (VUH-2024) and timed deploy holds
+(VUH-2049).
 
 ## Context
 
@@ -61,6 +63,36 @@ The full `pnpm check` runs for releases and on request. `clankie integrate`
 stays available for anyone who wants a composed, gated batch, but nothing
 requires the queue. The root landing gate is required for direct pushes.
 
+### Deploy holds protect the running service, not main (amended 2026-10-10, VUH-2049)
+
+A deploy hold (`clankie integrate hold`) keeps runtime updates from replacing
+the running service while someone relies on it, such as a live test. It does
+not hold `main`: direct pushes and `clankie integrate --push` go ahead whatever
+holds exist, and pushing never deploys. Each hold names its minutes, at most 60,
+and lifts on its own at expiry with a receipt naming the holder. The lead or
+owner may release anyone's hold with an audited actor and reason. Fleet status,
+the lead's round and `update` refusals show every hold's holder, age and time
+left. The runtime canary's own holds end with their canary instead.
+
+Holds used to block deploys and integrate pushes but not direct pushes, so
+holders believed `main` was frozen when it was not. On 2026-10-10 a release hold
+said "~30 min max" and blocked every deploy for over 90 minutes. During another
+hold, three direct pushes landed under the holder's gate anyway. Making pushes
+honour holds was rejected for four reasons:
+
+- Direct pushes come from many worktrees and from remote machines that cannot
+  see this Mac's registry.
+- A client hook is skippable, and a check inside the gate races a hold placed
+  after it.
+- Freezing `main` for one seat's gate stalls every other seat, which this ADR
+  exists to avoid.
+- Since VUH-2024, `check:landing --revalidate` keeps a gate whose inputs the new
+  commits did not touch, and `clankie integrate` composes on fresh origin for
+  anyone who wants a serialized batch.
+
+So landing gives way to nothing, and holds guard only deploys, for a bounded
+time.
+
 ## Consequences
 
 - With many seats landing, `main` moved under almost every gate and green
@@ -77,3 +109,6 @@ requires the queue. The root landing gate is required for direct pushes.
 - Concurrent agents in a shared checkout must commit only their own files and
   rebase before pushing; a separate worktree avoids disturbing others'
   uncommitted work.
+- A forgotten or overrunning hold delays deploys for at most an hour. A holder
+  that needs longer places a new hold, which shows up as a new decision with its
+  own receipt.

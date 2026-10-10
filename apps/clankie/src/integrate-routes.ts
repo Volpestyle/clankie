@@ -28,17 +28,20 @@ export function createIntegrationRoutes(options: {
     try {
       await guard();
       const result = await (async () => {
-        if (request.action === "holds") return { ok: true, holds: await options.holds!.list() };
+        if (request.action === "holds")
+          return { ok: true, holds: await options.holds!.list(), receipts: await options.holds!.receipts() };
         if (request.action === "hold") return { ok: true, holds: await options.holds!.acquire(request) };
-        if (request.action === "release")
-          return { ok: true, holds: await options.holds!.release(request.id, request.actor, request.reason) };
+        if (request.action === "release") {
+          const { holds, receipt } = await options.holds!.release(request.id, request.actor, request.reason);
+          return { ok: true, holds, receipts: [receipt] };
+        }
         if (request.action === "status" && !request.id)
           return { ok: true, queue: await options.queue!.snapshot() };
         const batch =
           request.action === "run"
             ? await options.queue!.start(request, guard)
             : request.action === "push"
-              ? await options.queue!.land(request.id, request.overrides, guard)
+              ? await options.queue!.land(request.id, guard)
               : await options.queue!.status(request.id!);
         return { ok: !["conflict", "failed", "held", "partial", "interrupted"].includes(batch.state), batch };
       })();

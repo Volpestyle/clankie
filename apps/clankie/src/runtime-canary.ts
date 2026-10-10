@@ -16,7 +16,7 @@ import {
   runtimeIdentityMismatch,
   type RuntimeHealthSample,
 } from "./runtime-health-sample.ts";
-import { DeployHoldSchema, type DeployHold } from "@clankie/protocol/integrate";
+import { DeployHoldSchema, RUNTIME_CANARY_HOLDER, type DeployHold } from "@clankie/protocol/integrate";
 
 export const RuntimeCanaryPolicySchema = z
   .strictObject({
@@ -46,7 +46,7 @@ export interface RuntimeCanaryCpu {
   readonly ratioToPrevious?: number;
 }
 
-export const RUNTIME_CANARY_HOLDER = "Clankie runtime canary";
+export { RUNTIME_CANARY_HOLDER };
 const HOLDER = RUNTIME_CANARY_HOLDER;
 const CheckpointSchema = z.strictObject({ commit: z.string().regex(/^[a-f0-9]{40,64}$/u) });
 const ArmSchema = z.strictObject({

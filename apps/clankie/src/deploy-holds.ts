@@ -2,7 +2,16 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { DeployHoldSchema, type DeployHold, type HoldOverride } from "@clankie/protocol/integrate";
+import {
+  DEPLOY_HOLD_MAX_MINUTES,
+  DeployHoldReceiptSchema,
+  DeployHoldSchema,
+  deployHoldExpiry,
+  describeDeployHold,
+  type DeployHold,
+  type DeployHoldReceipt,
+  type HoldOverride,
+} from "@clankie/protocol/integrate";
 
 /** Atomic replacement plus fsync: a process exit cannot turn a pass into a partial JSON file. */
 export async function durableJson(path: string, value: unknown, guard?: () => Promise<void>): Promise<void> {
@@ -30,13 +39,16 @@ export async function durableJson(path: string, value: unknown, guard?: () => Pr
   }
 }
 
+/** Another operation holds the directory lock; nothing ran. */
+class IntegrationLockBusy extends Error {}
+
 export async function withDirectoryLock<T>(directory: string, work: () => Promise<T>): Promise<T> {
   await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
   try {
     await mkdir(directory, { mode: 0o700 });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST")
-      throw Error(`Integration operation busy; retained lock: ${directory}`);
+      throw new IntegrationLockBusy(`Integration operation busy; retained lock: ${directory}`);
     throw error;
   }
   try {
@@ -49,35 +61,38 @@ export async function withDirectoryLock<T>(directory: string, work: () => Promis
 
 const Registry = z.object({
   holds: z.array(DeployHoldSchema),
-  events: z.array(
-    z.object({
-      action: z.enum(["release", "override"]),
-      hold: DeployHoldSchema,
-      actor: z.string(),
-      reason: z.string(),
-      at: z.iso.datetime(),
-      operation: z.string(),
-    }),
-  ),
+  events: z.array(DeployHoldReceiptSchema),
 });
 export class DeployHeldError extends Error {
   readonly holds: DeployHold[];
-  constructor(holds: DeployHold[]) {
-    super(
-      `Deploy held: ${holds.map((h) => `${h.id} by ${h.holder}: ${h.reason} (since ${h.createdAt})`).join("; ")}`,
-    );
+  constructor(holds: DeployHold[], now = Date.now()) {
+    super(`Deploy held: ${holds.map((h) => `${h.id} by ${describeDeployHold(h, now)}`).join("; ")}`);
     this.holds = holds;
   }
 }
+/**
+ * Deploy holds keep the running service from being replaced while someone relies on it.
+ * Every hold but the runtime canary's lifts on its own within DEPLOY_HOLD_MAX_MINUTES, leaving
+ * a receipt; landing on main never waits for one (ADR 0240, VUH-2049).
+ */
 export class DeployHolds {
   readonly directory: string;
   private readonly presence: ((hold: DeployHold) => Promise<DeployHold["presence"]>) | undefined;
-  constructor(directory: string, presence?: (hold: DeployHold) => Promise<DeployHold["presence"]>) {
+  private readonly now: () => number;
+  constructor(
+    directory: string,
+    presence?: (hold: DeployHold) => Promise<DeployHold["presence"]>,
+    now: () => number = Date.now,
+  ) {
     this.directory = directory;
     this.presence = presence;
+    this.now = now;
   }
   private get path(): string {
     return join(this.directory, "holds.json");
+  }
+  private get lock(): string {
+    return join(this.directory, "landing.lock");
   }
   private async read(): Promise<z.infer<typeof Registry>> {
     try {
@@ -87,8 +102,34 @@ export class DeployHolds {
       throw error;
     }
   }
+  private expired(hold: DeployHold, now: number): number | undefined {
+    const expiry = deployHoldExpiry(hold);
+    return expiry !== undefined && expiry <= now ? expiry : undefined;
+  }
+  /** Moves every hold past its expiry into an `expire` receipt dated at that expiry. */
+  private lapse(registry: z.infer<typeof Registry>): DeployHoldReceipt[] {
+    const now = this.now();
+    const lapsed: DeployHoldReceipt[] = [];
+    registry.holds = registry.holds.filter((hold) => {
+      const expiry = this.expired(hold, now);
+      if (expiry === undefined) return true;
+      const minutes = Math.round((expiry - Date.parse(hold.createdAt)) / 60_000);
+      lapsed.push({
+        action: "expire",
+        hold,
+        actor: "Clankie",
+        reason: `${hold.holder}'s hold lifted on its own after ${minutes} minutes`,
+        at: new Date(expiry).toISOString(),
+        operation: "expire",
+      });
+      return false;
+    });
+    registry.events.push(...lapsed);
+    return lapsed;
+  }
   async list(): Promise<DeployHold[]> {
-    const { holds } = await this.read();
+    const now = this.now();
+    const holds = (await this.read()).holds.filter((hold) => this.expired(hold, now) === undefined);
     return Promise.all(
       holds.map(async (h) => ({
         ...h,
@@ -99,11 +140,25 @@ export class DeployHolds {
       })),
     );
   }
+  /** The latest receipts, oldest first. */
+  async receipts(limit = 20): Promise<DeployHoldReceipt[]> {
+    const registry = await this.read();
+    this.lapse(registry);
+    return registry.events.slice(-limit);
+  }
+  /** An operator hold names its minutes; without them a hold gets the ceiling, except the canary's. */
   async acquire(
-    input: Pick<DeployHold, "id" | "holder" | "reason" | "pane" | "seat">,
+    input: Pick<DeployHold, "id" | "holder" | "reason" | "pane" | "seat"> & { minutes?: number },
   ): Promise<DeployHold[]> {
-    return withDirectoryLock(join(this.directory, "landing.lock"), async () => {
+    const minutes = input.minutes;
+    if (
+      minutes !== undefined &&
+      (!Number.isInteger(minutes) || minutes < 1 || minutes > DEPLOY_HOLD_MAX_MINUTES)
+    )
+      throw Error(`A hold lasts 1 to ${DEPLOY_HOLD_MAX_MINUTES} minutes`);
+    return withDirectoryLock(this.lock, async () => {
       const registry = await this.read();
+      this.lapse(registry);
       const existing = registry.holds.find((h) => h.id === input.id);
       if (
         existing &&
@@ -113,22 +168,41 @@ export class DeployHolds {
           existing.seat !== input.seat)
       )
         throw Error("Hold ID already has a different owner/reason");
-      if (!existing)
-        registry.holds.push({ ...input, createdAt: new Date().toISOString(), presence: "unknown" });
+      if (!existing) {
+        const createdAt = this.now();
+        registry.holds.push({
+          id: input.id,
+          holder: input.holder,
+          reason: input.reason,
+          createdAt: new Date(createdAt).toISOString(),
+          ...(minutes === undefined
+            ? {}
+            : { expiresAt: new Date(createdAt + minutes * 60_000).toISOString() }),
+          ...(input.pane === undefined ? {} : { pane: input.pane }),
+          ...(input.seat === undefined ? {} : { seat: input.seat }),
+          presence: "unknown",
+        });
+      }
       await durableJson(this.path, registry);
       return this.list();
     });
   }
+  /** Anyone's hold, by its holder, the lead or the owner; the receipt names holder, actor and reason. */
   async release(
     id: string,
     actor: string,
     reason: string,
     expected?: Pick<DeployHold, "holder" | "reason" | "pane" | "seat"> & { createdAt?: string },
-  ): Promise<DeployHold[]> {
-    return withDirectoryLock(join(this.directory, "landing.lock"), async () => {
+  ): Promise<{ holds: DeployHold[]; receipt: DeployHoldReceipt }> {
+    return withDirectoryLock(this.lock, async () => {
       const registry = await this.read();
+      const lapsed = this.lapse(registry);
       const hold = registry.holds.find((h) => h.id === id);
-      if (!hold) throw Error("Unknown hold");
+      if (!hold) {
+        const ended = [...registry.events].reverse().find((e) => e.hold.id === id && e.action !== "override");
+        if (lapsed.length) await durableJson(this.path, registry);
+        throw Error(ended ? `Hold ${id} already ended (${ended.action} at ${ended.at})` : "Unknown hold");
+      }
       if (
         expected &&
         (hold.holder !== expected.holder ||
@@ -138,20 +212,56 @@ export class DeployHolds {
           (expected.createdAt !== undefined && hold.createdAt !== expected.createdAt))
       )
         throw Error("Hold ownership changed before release");
-      registry.events.push({
+      const receipt: DeployHoldReceipt = {
         action: "release",
         hold,
         actor,
         reason,
-        at: new Date().toISOString(),
+        at: new Date(this.now()).toISOString(),
         operation: "release",
-      });
+      };
+      registry.events.push(receipt);
       registry.holds = registry.holds.filter((h) => h.id !== id);
       await durableJson(this.path, registry);
-      return this.list();
+      return { holds: await this.list(), receipt };
     });
   }
-  /** Hold acquisition and landing share a lock; a hold cannot race the push/deploy admission. */
+  /** Records receipts for holds that reached their expiry; a busy lock leaves them for the next sweep. */
+  async expire(): Promise<DeployHoldReceipt[]> {
+    const now = this.now();
+    if (!(await this.read()).holds.some((hold) => this.expired(hold, now) !== undefined)) return [];
+    try {
+      return await withDirectoryLock(this.lock, async () => {
+        const registry = await this.read();
+        const lapsed = this.lapse(registry);
+        if (lapsed.length) await durableJson(this.path, registry);
+        return lapsed;
+      });
+    } catch (error) {
+      if (error instanceof IntegrationLockBusy) return [];
+      throw error;
+    }
+  }
+  /** Lifts holds at their expiry even when nothing reads the registry. */
+  watch(
+    onExpired: (receipt: DeployHoldReceipt) => void,
+    onError: (error: unknown) => void,
+    intervalMs = 15_000,
+  ): () => void {
+    let running = false;
+    const timer = setInterval(() => {
+      if (running) return;
+      running = true;
+      void this.expire()
+        .then((receipts) => receipts.forEach(onExpired), onError)
+        .finally(() => {
+          running = false;
+        });
+    }, intervalMs);
+    timer.unref();
+    return () => clearInterval(timer);
+  }
+  /** Runtime-update admission shares the hold lock, so a hold cannot race a deploy. */
   async landing<T>(
     operation: string,
     overrides: HoldOverride[],
@@ -161,11 +271,14 @@ export class DeployHolds {
       guard: () => Promise<void>;
     },
   ): Promise<T> {
-    return withDirectoryLock(join(this.directory, "landing.lock"), async () => {
+    return withDirectoryLock(this.lock, async () => {
       const registry = await this.read();
+      const lapsed = this.lapse(registry);
       await admission?.guard();
       if (admission?.overrideAll)
         overrides = registry.holds.map((hold) => ({ holdId: hold.id, ...admission.overrideAll! }));
+      // A reviewed hold that lifted meanwhile needs no override.
+      else overrides = overrides.filter((o) => !lapsed.some((receipt) => receipt.hold.id === o.holdId));
       const ids = new Set(overrides.map((o) => o.holdId));
       if (
         ids.size !== overrides.length ||
@@ -173,17 +286,20 @@ export class DeployHolds {
       )
         throw Error("Override must name each existing hold exactly once");
       const blocked = registry.holds.filter((h) => !ids.has(h.id));
-      if (blocked.length) throw new DeployHeldError(blocked);
+      if (blocked.length) {
+        if (lapsed.length) await durableJson(this.path, registry);
+        throw new DeployHeldError(blocked, this.now());
+      }
       for (const override of overrides)
         registry.events.push({
           action: "override",
           hold: registry.holds.find((h) => h.id === override.holdId)!,
           actor: override.actor,
           reason: override.reason,
-          at: new Date().toISOString(),
+          at: new Date(this.now()).toISOString(),
           operation,
         });
-      if (overrides.length) await durableJson(this.path, registry, admission?.guard);
+      if (overrides.length || lapsed.length) await durableJson(this.path, registry, admission?.guard);
       return work(registry.holds.filter((hold) => ids.has(hold.id)));
     });
   }

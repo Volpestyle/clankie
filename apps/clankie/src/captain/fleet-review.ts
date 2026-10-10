@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
 import type { OperatorFleetSeat } from "@clankie/protocol";
+import { describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
 
 /** Stable evidence for periodic rounds; observation clocks and report reads are not fresh work. */
-export function fleetRoundEvidence(seats: readonly OperatorFleetSeat[]): {
+export function fleetRoundEvidence(
+  seats: readonly OperatorFleetSeat[],
+  holds: readonly DeployHold[] = [],
+): {
   fingerprint: string;
   flagged: boolean;
 } {
@@ -57,14 +61,22 @@ export function fleetRoundEvidence(seats: readonly OperatorFleetSeat[]): {
     (left, right) =>
       left.seatId.localeCompare(right.seatId) || left.occupantId.localeCompare(right.occupantId),
   );
+  const deployHolds = holds.map((hold) => hold.id).sort();
   return {
-    fingerprint: createHash("sha256").update(JSON.stringify(rows)).digest("hex"),
+    fingerprint: createHash("sha256")
+      .update(JSON.stringify(deployHolds.length ? { rows, deployHolds } : rows))
+      .digest("hex"),
     flagged: seats.some((seat) => (seat.efficiency?.flags.length ?? 0) > 0),
   };
 }
 
 /** These are bounded observations, not new authority or a scripted intervention. */
-export function fleetReviewContext(seats: readonly OperatorFleetSeat[], budget = 10_000): string {
+export function fleetReviewContext(
+  seats: readonly OperatorFleetSeat[],
+  budget = 10_000,
+  holds: readonly DeployHold[] = [],
+  now = Date.now(),
+): string {
   const lines = [
     "Fleet lead round. Use the lead skill and fleet_efficiency to inspect every seat you lead before deciding how to act.",
     "The bounded observations below may omit details. Unknown telemetry is not healthy. Context is the latest native model-input snapshot.",
@@ -74,6 +86,17 @@ export function fleetReviewContext(seats: readonly OperatorFleetSeat[], budget =
   if (budget < lines.join("\n").length + 160)
     return "Use the lead skill and fleet_efficiency to inspect every seat you lead.".slice(0, budget);
   let remaining = budget - lines.join("\n").length;
+  // Holder text is untrusted too; the lead or owner may release a hold with an audited reason.
+  for (const hold of holds) {
+    const row = `> ${JSON.stringify({
+      deployHold: hold.id,
+      summary: describeDeployHold(hold, now).slice(0, 400),
+      release: `clankie integrate release ${hold.id} --actor NAME --reason TEXT`,
+    })}`;
+    if (row.length + 1 > remaining - 160) break;
+    lines.push(row);
+    remaining -= row.length + 1;
+  }
   let omitted = 0;
   for (const seat of seats) {
     const efficiency = seat.efficiency;

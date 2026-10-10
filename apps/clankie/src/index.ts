@@ -889,12 +889,19 @@ const deployHolds = new DeployHolds(integrationDirectory, (hold) =>
     ).stdout;
   }),
 );
+const stopDeployHoldExpiry = deployHolds.watch(
+  (receipt) =>
+    logger.info(
+      { event: "deploy_hold.expired", holdId: receipt.hold.id, holder: receipt.hold.holder, at: receipt.at },
+      receipt.reason,
+    ),
+  (error) => logger.warn({ event: "deploy_hold.expiry_failed", error }, "Deploy hold expiry sweep failed"),
+);
 const integration =
   hostedBody === undefined && existsSync(join(repoRoot, ".git"))
     ? new IntegrationQueue({
         directory: integrationDirectory,
         ...(await integrationSources(repoRoot)),
-        holds: deployHolds,
       })
     : undefined;
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
@@ -1308,6 +1315,7 @@ const captain = createCaptain(
               deployHolds.landing(`runtime-tool:${ref}`, [], () => runtimeUpdater.request(ref, authority)),
           },
         }),
+    deployHolds: () => deployHolds.list(),
     roomObservations,
     conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
     workItems,
@@ -2287,6 +2295,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
   playAbort.abort(signal);
   hostPower.stop();
+  stopDeployHoldExpiry();
   void fleetResources
     .close()
     .catch(() =>

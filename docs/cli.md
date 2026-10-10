@@ -655,11 +655,13 @@ CPU microseconds. Boot identity comes from the running updater's immutable
 identity; liveness probes do not reread update transaction files. The response
 carries no messages, prompts, tenant content or credentials.
 
-Deploy holds also block runtime-update admission. `update status` includes holds
-and holder presence. An operator may override explicitly with
+Deploy holds block runtime-update admission. `update status` and an `update`
+refusal list each hold's holder, how long it has held, the time left and the
+holder's presence. An operator may override explicitly with
 `--override-hold UUID --actor NAME --reason TEXT` (repeat the hold flag for every
-hold); the registry records the override and retains the hold. The API accepts
-an `overrides` array of `{holdId, actor, reason}`. See [integration](integration.md).
+hold); the registry records the override and retains the hold. A reviewed hold
+that lifts before admission needs no override. The API accepts an `overrides`
+array of `{holdId, actor, reason}`. See [integration](integration.md#deploy-holds).
 
 Supported `clankie mcp` operator bridges reinitialize after an explicit
 `unknown_session` rejection before tool admission and retry that rejected request
@@ -843,10 +845,10 @@ the service returned `spawned`; completion still needs the matching native event
 ```bash
 clankie integrate CORE_SHA... [--app APP_SHA]... [--push] [--id UUID] [--no-wait]
 clankie integrate status [UUID]
-clankie integrate push UUID [--override-hold UUID --actor NAME --reason TEXT]
+clankie integrate push UUID
 clankie integrate revert PASSED_BATCH_UUID [--push]
 clankie integrate holds
-clankie integrate hold --holder NAME --reason TEXT [--pane ID|--seat ID] [--id UUID]
+clankie integrate hold --holder NAME --reason TEXT --minutes 1-60 [--pane ID|--seat ID] [--id UUID]
 clankie integrate release UUID --actor NAME --reason TEXT
 ```
 
@@ -860,14 +862,18 @@ in the TUI.
 
 Requests arriving during a gate coalesce into the next compatible batch.
 Conflicting members roll back; failed shared gates split to isolate failing
-requests. Gate-only runs, restores and distinct owner overrides stay separate.
+requests. Gate-only runs and restores stay separate.
 An ordered approved batch composes on fresh origin in independent throwaway
 core/app worktrees, performs real installs and full checks with private home,
 state, credentials and package stores, and records tested HEAD and exit codes
 durably. It only lands a clean exact HEAD with a recorded pass. Core lands first;
 app rejection retains a partial record and retries skip already landed core.
-Revert creates a new commit restoring a passed tree. Named holds block push and
-deploy; explicit owner overrides name the hold, actor and reason and are audited.
+Revert creates a new commit restoring a passed tree. Deploy holds keep runtime
+updates off the running service and never block landing; each lifts on its own
+after its `--minutes` (at most 60) with an `expire` receipt naming the holder.
+`holds` lists current holds with their `expiresAt` and the latest receipts.
+The lead or owner may release anyone's hold; the receipt records holder, actor
+and reason.
 Requires a local source-checkout service. See [integration](integration.md) for
 evidence paths, isolation limits, uncertain sends and crash recovery.
 
@@ -3211,7 +3217,10 @@ on machine-authorized lanes, including the default `lead` responsibilities.
 
 JSON includes the global `fleet` projection and a separate workspace
 `workingPreferences` report, with either available resolved values or an
-unavailable detail. The TUI `/fleet` command opens the same editor (size, models,
+unavailable detail. `fleet status` also reports `deployHolds`: each current
+[deploy hold](integration.md#deploy-holds) with a `summary` of its holder, how
+long it has held and the time left, or an `unavailable` detail when the service
+cannot list them. The TUI `/fleet` command opens the same editor (size, models,
 worker harness, model, effort and account, connected tools, peer messages, closure, machine setup, working preferences, then notes)
 and `/fleet status` (also `/fleet show`) prints the same values. CLI `fleet show` aliases `fleet status`.
 

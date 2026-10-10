@@ -24,6 +24,7 @@ import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
 import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fence.ts";
 import { FleetReportFailureAlerts } from "../src/captain/fleet-review.ts";
+import { DeployHolds } from "../src/deploy-holds.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { registerSeatRoutes } from "../src/app/seat-routes.ts";
@@ -59,6 +60,7 @@ async function fixture(
   reportHealth?: Map<string, WorkerReportBridgeStatus>,
   oneOwner = false,
   bind = true,
+  deployHolds?: CaptainDeps["deployHolds"],
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-lead-round-"));
   const conversations = new ConversationStore(join(root, "conversations"), async () => {});
@@ -181,6 +183,7 @@ async function fixture(
       embodiment: {},
       browser: { catalog: async () => ({ available: false, tools: [] }) },
       mcp: { catalog: async () => [], call: async () => ({ outcome: "ok", content: "", isError: false }) },
+      ...(deployHolds === undefined ? {} : { deployHolds }),
     } as unknown as CaptainDeps,
     {
       repoRoot: root,
@@ -754,6 +757,32 @@ it("skips unchanged unflagged rounds despite fresh observation clocks, then wake
   await f.finish(fresh[0]!.id);
   expect(await f.captain.pollSeatEvents(650, undefined, "global-default")).toEqual([]);
   expect(accepted("global-default")).toHaveLength(2);
+});
+
+it("a new deploy hold wakes an unchanged round naming its holder, age and time left", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "fleet-round-holds-"));
+  resources.push(() => rm(directory, { recursive: true, force: true }));
+  const holds = new DeployHolds(directory);
+  const f = await fixture(200, undefined, false, true, undefined, undefined, false, true, () => holds.list());
+  const first = await Promise.all([
+    f.captain.pollSeatEvents(3000, undefined, "global-default"),
+    f.captain.pollSeatEvents(3000, undefined, f.other),
+  ]);
+  expect(first[0][0]?.content).not.toContain("deployHold");
+  await f.finish(first[0][0]!.id);
+  await f.finish(first[1][0]!.id, f.other);
+  expect(await f.captain.pollSeatEvents(650, undefined, "global-default")).toEqual([]);
+  const id = randomUUID();
+  await holds.acquire({ id, holder: "Saga w4:p1", reason: "release gate", minutes: 30 });
+  const [held, otherHeld] = await Promise.all([
+    f.captain.pollSeatEvents(3000, undefined, "global-default"),
+    f.captain.pollSeatEvents(3000, undefined, f.other),
+  ]);
+  expect(held[0]?.content).toContain(`"deployHold":"${id}"`);
+  expect(held[0]?.content).toContain("Saga w4:p1: release gate (held 1m, 30m left)");
+  expect(held[0]?.content).toContain(`clankie integrate release ${id} --actor NAME --reason TEXT`);
+  await f.finish(held[0]!.id);
+  await f.finish(otherHeld[0]!.id, f.other);
 });
 
 it("does not consume healthy evidence when a periodic native turn is canceled before delivery", async () => {

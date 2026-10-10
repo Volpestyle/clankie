@@ -112,7 +112,6 @@ ${name === "core" ? (typeof gateExtra === "function" ? gateExtra(root) : gateExt
       directory,
       core: core.source,
       ...(app ? { app: app.source } : {}),
-      holds,
     });
     queues.push(rawQueue);
     const queue = fixtureWork().wrap(rawQueue);
@@ -179,7 +178,7 @@ it("composes in order on fresh origin, installs real siblings, gates privately a
   }
   expect(await readFile(join(batch.repos[0]!.directory, "first"), "utf8")).toBe("one");
   expect(await f.queue.start(request, guard)).toMatchObject({ id: request.id, state: "passed" });
-  const landed = await f.queue.land(request.id, [], guard);
+  const landed = await f.queue.land(request.id, guard);
   expect(landed.state).toBe("pushed");
   expect(landed.repos[0]!.ownerCheckoutSync).toMatchObject({
     outcome: "blocked",
@@ -223,7 +222,7 @@ it.each(["process.exit(7);", "execFileSync('git', ['commit', '--allow-empty', '-
     expect(batch.state).toBe("failed");
     expect(batch.repos[0]!.gate?.exitCode).toBe(extra.startsWith("process") ? 7 : 0);
     expect(batch.repos[0]!.gate?.head).toBe(batch.repos[0]!.head);
-    await expect(f.queue.land(request.id, [], guard)).rejects.toThrow("no landable pass");
+    await expect(f.queue.land(request.id, guard)).rejects.toThrow("no landable pass");
     expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
   },
 );
@@ -243,18 +242,23 @@ it.each(["head", "dirty", "origin"])("refuses a saved pass after %s changes", as
     await commit(f.core.source, "other", "remote drift");
     await git(f.core.source, "push", "origin", "HEAD:main");
   }
-  const refused = await f.queue.land(request.id, [], guard);
+  const refused = await f.queue.land(request.id, guard);
   expect(refused.state).toBe("held");
   expect(refused.repos[0]!.push).toBeUndefined();
   expect(refused.error).toMatch(/exact HEAD|worktree changed|origin\/main moved/u);
 });
 
-it("CLI/API batch passes, a named gone hold blocks push and runtime update, and owner override is audited", async () => {
+it("a timed hold blocks runtime updates but not landing, shows its age and time left, and lifts with a receipt", async () => {
   const f = await fixture();
   const approved = await commit(f.core.source, "feature", "test");
   const emptySnapshot = JSON.stringify({ result: { snapshot: { workspaces: [], tabs: [], panes: [] } } });
-  const holds = new DeployHolds(f.directory, (hold) => deployHoldPresence(hold, async () => emptySnapshot));
-  const rawQueue = new IntegrationQueue({ ...f.queue.options, holds });
+  let clock = Date.now();
+  const holds = new DeployHolds(
+    f.directory,
+    (hold) => deployHoldPresence(hold, async () => emptySnapshot),
+    () => clock,
+  );
+  const rawQueue = new IntegrationQueue({ ...f.queue.options });
   queues.push(rawQueue);
   const queue = fixtureWork().wrap(rawQueue);
   // This real updater refuses an unpinned fixture checkout before ever spawning its helper.
@@ -275,60 +279,94 @@ it("CLI/API batch passes, a named gone hold blocks push and runtime update, and 
   });
   const fetchImpl: typeof fetch = async (input, init) => service.app.fetch(new Request(input, init));
   const cli = { host: "http://fixture.invalid", fetchImpl, env: { CLANKIE_OPERATOR_TOKEN: "fixture-owner" } };
-  const id = randomUUID();
-  const run = await runIntegrationCommand([approved, "--id", id, "--no-wait"], cli);
-  expect(run.ok).toBe(true);
-  await queue.wait();
-  expect((await runIntegrationCommand(["status", id], cli)).batch?.state).toBe("passed");
-  const holdId = randomUUID();
-  const acquired = await runIntegrationCommand(
-    ["hold", "--id", holdId, "--holder", "Bram w3Z:p2N", "--pane", "w3Z:p2N", "--reason", "live test"],
-    cli,
-  );
-  expect(acquired.holds).toMatchObject([
-    { id: holdId, holder: "Bram w3Z:p2N", reason: "live test", presence: "gone" },
-  ]);
-  expect(acquired.holds![0]!.createdAt).toMatch(/T/u);
-  const held = await runIntegrationCommand(["push", id], cli);
-  expect(held.ok).toBe(false);
-  expect(held.batch?.error).toContain("Bram w3Z:p2N");
-  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
-  const deploy = await fetchImpl("http://fixture.invalid/v1/runtime-update", {
+  const deploy = () =>
+    fetchImpl("http://fixture.invalid/v1/runtime-update", {
+      method: "POST",
+      headers: { authorization: "Bearer fixture-owner", "content-type": "application/json" },
+      body: "{}",
+    });
+  const hold = ["hold", "--holder", "Bram w3Z:p2N", "--pane", "w3Z:p2N", "--reason", "live test"];
+  // A hold names its minutes, at most the ceiling.
+  await expect(runIntegrationCommand(hold, cli)).rejects.toThrow("--minutes from 1 to 60");
+  await expect(runIntegrationCommand([...hold, "--minutes", "61"], cli)).rejects.toThrow("--minutes");
+  const unbounded = await fetchImpl("http://fixture.invalid/v1/integrate", {
     method: "POST",
     headers: { authorization: "Bearer fixture-owner", "content-type": "application/json" },
-    body: "{}",
+    body: JSON.stringify({ action: "hold", id: randomUUID(), holder: "Saga", reason: "release gate" }),
   });
-  expect(deploy.status).toBe(409);
-  expect(await deploy.text()).toContain("live test");
-  expect(
-    (
-      await fetchImpl("http://fixture.invalid/v1/integrate", {
-        method: "POST",
-        body: JSON.stringify({ action: "push", id }),
-      })
-    ).status,
-  ).toBe(403);
-  expect(
-    (
-      await runIntegrationCommand(
-        ["push", id, "--override-hold", holdId, "--actor", "James", "--reason", "ship approved batch"],
-        cli,
-      )
-    ).batch?.state,
-  ).toBe("pushed");
-  expect((await holds.list()).map((h) => h.id)).toEqual([holdId]);
-  const audit = JSON.parse(await readFile(join(f.directory, "holds.json"), "utf8"));
-  expect(audit.events).toMatchObject([
+  expect(unbounded.status).toBe(400);
+  const holdId = randomUUID();
+  const acquired = await runIntegrationCommand([...hold, "--id", holdId, "--minutes", "30"], cli);
+  expect(acquired.holds).toMatchObject([
     {
-      action: "override",
-      actor: "James",
-      reason: "ship approved batch",
-      operation: `integrate:${id}`,
-      hold: { id: holdId },
+      id: holdId,
+      holder: "Bram w3Z:p2N",
+      reason: "live test",
+      presence: "gone",
+      expiresAt: new Date(clock + 30 * 60_000).toISOString(),
     },
   ]);
-  await runIntegrationCommand(["release", holdId, "--actor", "James", "--reason", "test finished"], cli);
+
+  // Landing on main does not wait for a hold.
+  const id = randomUUID();
+  await runIntegrationCommand([approved, "--id", id, "--push", "--no-wait"], cli);
+  await rawQueue.wait();
+  expect((await runIntegrationCommand(["status", id], cli)).batch?.state).toBe("pushed");
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).not.toContain(f.core.base);
+
+  // The refusal names the holder, how long it has held and the time left.
+  clock += 12 * 60_000;
+  const refused = await deploy();
+  expect(refused.status).toBe(409);
+  expect((await refused.json()) as { detail: string }).toMatchObject({
+    detail: expect.stringContaining(`${holdId} by Bram w3Z:p2N: live test (held 12m, 18m left)`),
+  });
+
+  // At expiry it lifts on its own, with a receipt naming the holder.
+  clock += 18 * 60_000;
   expect(await holds.list()).toEqual([]);
+  expect(await holds.expire()).toMatchObject([
+    {
+      action: "expire",
+      actor: "Clankie",
+      reason: "Bram w3Z:p2N's hold lifted on its own after 30 minutes",
+      at: new Date(clock).toISOString(),
+      hold: { id: holdId, holder: "Bram w3Z:p2N" },
+    },
+  ]);
+  expect((await deploy().then((r) => r.json())) as { detail: string }).not.toMatchObject({
+    detail: expect.stringContaining("Deploy held"),
+  });
+  expect((await runIntegrationCommand(["holds"], cli)).receipts).toMatchObject([
+    { action: "expire", hold: { id: holdId } },
+  ]);
+  await expect(
+    runIntegrationCommand(["release", holdId, "--actor", "Clankie", "--reason", "late"], cli),
+  ).rejects.toThrow(/already ended \(expire at /u);
+
+  // The lead releases someone else's hold, and the receipt records holder, actor and reason.
+  const other = randomUUID();
+  await runIntegrationCommand(
+    ["hold", "--id", other, "--holder", "Saga w4:p1", "--reason", "release gate", "--minutes", "20"],
+    cli,
+  );
+  const released = await runIntegrationCommand(
+    ["release", other, "--actor", "Clankie (lead)", "--reason", "gate finished an hour ago"],
+    cli,
+  );
+  expect(released).toMatchObject({
+    holds: [],
+    receipts: [
+      {
+        action: "release",
+        actor: "Clankie (lead)",
+        reason: "gate finished an hour ago",
+        hold: { id: other, holder: "Saga w4:p1" },
+      },
+    ],
+  });
+  const audit = JSON.parse(await readFile(join(f.directory, "holds.json"), "utf8"));
+  expect(audit.events.map((event: { action: string }) => event.action)).toEqual(["expire", "release"]);
   expect(
     await deployHoldPresence(acquired.holds![0]!, async () => {
       throw Error("socket unavailable");
@@ -402,7 +440,7 @@ it("records core landed/app pending on app rejection and retries only app", asyn
   expect(await readFile(count, "utf8")).toBe("landed\n");
   expect(await git(f.app!.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.app!.base);
   await rm(appHook);
-  const landed = await f.queue.land(request.id, [], guard);
+  const landed = await f.queue.land(request.id, guard);
   expect(landed.state).toBe("pushed");
   expect(await readFile(count, "utf8")).toBe("landed\n");
   expect(landed.repos[0]!.push).toEqual(partial.repos[0]!.push);
@@ -417,7 +455,7 @@ it("a confirmed integration push fast-forwards clean owner main and persists the
   const request = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [approved] });
   await f.queue.start(request, guard);
   await f.queue.wait();
-  const landed = await f.queue.land(request.id, [], guard);
+  const landed = await f.queue.land(request.id, guard);
   expect(landed.state).toBe("pushed");
   expect(landed.repos[0]!.ownerCheckoutSync).toMatchObject({
     outcome: "updated",
@@ -509,7 +547,7 @@ it("CLI/API coalesces arrivals during a real gate, isolating a cross-repo confli
   expect(aResult.batchId).toBe(bResult.batchId);
   expect(aResult.members?.map((m) => m.id)).toEqual(ids.slice(1));
   expect((await runIntegrationCommand(["status", ids[2]!], cli)).batch?.state).toBe("conflict");
-  await expect(f.queue.land(ids[2]!, [], guard)).rejects.toThrow("no landable pass");
+  await expect(f.queue.land(ids[2]!, guard)).rejects.toThrow("no landable pass");
   const core = aResult.repos.find((r) => r.name === "core")!;
   for (const repo of aResult.repos)
     expect(await git(repo.directory, "config", "core.hooksPath")).toBe("/dev/null");
