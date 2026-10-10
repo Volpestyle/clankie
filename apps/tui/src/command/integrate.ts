@@ -11,7 +11,8 @@ import {
 import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 
-const usage = `Usage: clankie integrate [run] SHA... [--app SHA]... [--push] [--id UUID] [--no-wait] | status [UUID] | push UUID | revert PASSED_UUID [--push] | holds | hold --holder NAME --reason TEXT --minutes 1-${DEPLOY_HOLD_MAX_MINUTES} [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT
+const usage = `Usage: clankie integrate [run] SHA... [--app SHA]... [--push] [--id UUID] [--no-wait] | status [UUID] | push UUID | cancel UUID --actor NAME --reason TEXT | revert PASSED_UUID [--push] | holds | hold --holder NAME --reason TEXT --minutes 1-${DEPLOY_HOLD_MAX_MINUTES} [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT
+Cancel withdraws a request still waiting for its gate.
 A hold keeps deploys off the running service and lifts on its own when its minutes run out; landing on main never waits for one.`;
 
 function integrationRequest(args: readonly string[]): { request: IntegrationRequest; wait: boolean } {
@@ -46,6 +47,7 @@ function integrationRequest(args: readonly string[]): { request: IntegrationRequ
     revert: ["--id", "--push", "--no-wait"],
     status: [],
     push: [],
+    cancel: ["--actor", "--reason"],
     holds: [],
     hold: ["--id", "--holder", "--reason", "--minutes", "--pane", "--seat"],
     release: ["--actor", "--reason"],
@@ -61,12 +63,12 @@ function integrationRequest(args: readonly string[]): { request: IntegrationRequ
       ...(verb === "revert" ? { restore: rest[0] } : flags.has("--app") ? { app: flags.get("--app") } : {}),
       push: flags.has("--push"),
     };
-  } else if (["status", "push", "release"].includes(verb)) {
+  } else if (["status", "push", "cancel", "release"].includes(verb)) {
     if (verb === "status" ? rest.length > 1 : rest.length !== 1) throw Error(usage);
     input = {
       action: verb,
       ...(rest[0] ? { id: rest[0] } : {}),
-      ...(verb === "release" ? { actor, reason } : {}),
+      ...(verb === "release" || verb === "cancel" ? { actor, reason } : {}),
     };
   } else {
     if (rest.length) throw Error(usage);

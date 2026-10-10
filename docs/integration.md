@@ -11,6 +11,7 @@ clankie integrate CORE_SHA --id UUID --no-wait
 clankie integrate status
 clankie integrate status UUID
 clankie integrate push UUID
+clankie integrate cancel UUID --actor NAME --reason TEXT
 clankie integrate revert PASSED_BATCH_UUID --push
 ```
 
@@ -41,7 +42,10 @@ limits do not cap the combined batch. Requests retain their original UUID and in
 `batchId` points to the shared attestation and `attempts` retains previous batch
 IDs. A failed shared gate splits into smaller fresh batches until each failing
 request is reported; good subsets gate and land independently on fresh origin.
-A failed single request is terminal and cannot block later arrivals. Shared gate
+A failed single request is terminal and cannot block later arrivals. A request
+still waiting can be withdrawn with `cancel UUID --actor NAME --reason TEXT`: it
+reads `cancelled` with a receipt naming who and why, never joins a batch, and the
+requests behind it keep their order. Once its batch starts it can't be cancelled. Shared gate
 failures caused by the base or infrastructure may affect every member; diagnosis
 is bounded by smaller subsets, and every failure retains its logs.
 
@@ -163,7 +167,7 @@ worktrees, stores and evidence are retained for review; cleanup is manual after
 their processes have ended. Never move a tree while its gate is running.
 
 The operator API is `POST /v1/integrate` with typed `run`, `status`, `push`,
-`hold`, `holds` and `release` actions in
+`cancel`, `hold`, `holds` and `release` actions in
 [`packages/protocol/src/integrate.ts`](../packages/protocol/src/integrate.ts).
 `run` takes a caller-created UUID, core/app arrays, optional `restore` batch UUID
 and `push`. It returns immediately; poll `status`. A push request reads `pushing`

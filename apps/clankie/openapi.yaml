@@ -497,6 +497,15 @@ paths:
                     id: { type: string, format: uuid }
                 - type: object
                   additionalProperties: false
+                  required: [action, id, actor, reason]
+                  description: Withdraws a request still waiting for its gate; a running or finished one is refused (409)
+                  properties:
+                    action: { const: cancel }
+                    id: { type: string, format: uuid }
+                    actor: { type: string, minLength: 1, maxLength: 512 }
+                    reason: { type: string, minLength: 1, maxLength: 512 }
+                - type: object
+                  additionalProperties: false
                   required: [action]
                   properties:
                     action: { const: holds }
@@ -596,6 +605,7 @@ paths:
                               pushed,
                               partial,
                               interrupted,
+                              cancelled,
                             ],
                         }
                       evidence: { type: string, description: Durable local record.json path }
@@ -622,6 +632,14 @@ paths:
                           items: { type: object },
                           description: Conflicting or failed members rolled back before gating,
                         }
+                      cancelled:
+                        type: object
+                        description: Who withdrew this request before its gate started, and why
+                        required: [actor, reason, at]
+                        properties:
+                          actor: { type: string }
+                          reason: { type: string }
+                          at: { type: string, format: date-time }
                       repos:
                         type: array
                         items:

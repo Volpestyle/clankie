@@ -40,6 +40,7 @@ export const IntegrationRequestSchema = z.union([
   IntegrationRunSchema,
   z.object({ action: z.literal("status"), id: Id.optional() }).strict(),
   z.object({ action: z.literal("push"), id: Id }).strict(),
+  z.object({ action: z.literal("cancel"), id: Id, actor: Text, reason: Text }).strict(),
   z.object({ action: z.literal("holds") }).strict(),
   z
     .object({
@@ -156,6 +157,7 @@ export const IntegrationBatchSchema = z.object({
     "pushed",
     "partial",
     "interrupted",
+    "cancelled",
   ]),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
@@ -169,6 +171,8 @@ export const IntegrationBatchSchema = z.object({
   excluded: z
     .array(z.object({ id: Id, state: z.enum(["conflict", "failed"]), error: z.string() }))
     .optional(),
+  /** Who withdrew a request before its gate started, and why. */
+  cancelled: z.object({ actor: Text, reason: Text, at: z.iso.datetime() }).optional(),
 });
 export type IntegrationBatch = z.infer<typeof IntegrationBatchSchema>;
 export const IntegrationQueueStatusSchema = z.object({

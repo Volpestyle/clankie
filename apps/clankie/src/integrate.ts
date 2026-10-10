@@ -165,6 +165,21 @@ export class IntegrationQueue {
     this.schedule();
     return batch;
   }
+  /** Withdraws a request still waiting for its gate; one already running keeps going. */
+  async cancel(id: string, actor: string, reason: string): Promise<IntegrationBatch> {
+    const index = this.pending.findIndex((member) => member.batch.id === id);
+    if (index === -1) {
+      const { state } = await this.status(id);
+      throw Error(`Request ${id} is ${state}; only a request still waiting for its gate can be cancelled`);
+    }
+    // Leaving the pending list first means no batch can take it while the receipt is written.
+    const { batch } = this.pending.splice(index, 1)[0]!;
+    batch.state = "cancelled";
+    batch.cancelled = { actor, reason, at: now() };
+    await this.save(batch);
+    this.running.delete(batch.id);
+    return batch;
+  }
   private schedule(): void {
     if (this.draining) return;
     this.draining = true;

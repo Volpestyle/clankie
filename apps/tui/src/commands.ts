@@ -541,7 +541,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         const result = await runIntegrationCommand(args.length ? args : ["status"]);
         const queue = result.queue;
         const describe = (batch: import("@clankie/protocol/integrate").IntegrationBatch) =>
-          `${batch.id} · ${batch.state} · ${(batch.members ?? [batch.request]).map((m) => `${m.id}: ${[...m.core, ...(m.app ?? [])].join(", ")}`).join("; ")}${batch.error ? ` · ${batch.error}` : ""}`;
+          `${batch.id} · ${batch.state} · ${(batch.members ?? [batch.request]).map((m) => `${m.id}: ${[...m.core, ...(m.app ?? [])].join(", ")}`).join("; ")}${batch.error ? ` · ${batch.error}` : ""}${batch.cancelled ? ` · cancelled by ${batch.cancelled.actor}: ${batch.cancelled.reason}` : ""}`;
         shell.insertCommandResult(
           "/integrate",
           queue
