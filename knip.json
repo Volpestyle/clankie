@@ -21,6 +21,7 @@
         "scripts/evals/codex.mjs",
         "scripts/evals/report.mjs",
         "scripts/testing/evidence-landing-guard.mjs",
+        "scripts/testing/landing-graph-reporter.mjs",
         "docs/testing/2026-09-27-remote-fleet/connect/enroll-clankie.mjs",
         "docs/testing/2026-09-29-browser-bursts/flows/smoke.mjs",
         "docs/testing/2026-09-04-astra-terra-comparison/flows/assert-suite.mjs",

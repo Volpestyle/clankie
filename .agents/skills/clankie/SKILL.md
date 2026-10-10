@@ -21,8 +21,10 @@ For Clankie's own repository changes, use focused checks while iterating. Before
 pushing, commit your files, `git pull --rebase origin main`, then run
 `clankie heavy -- pnpm check:landing` from the repository root. Keep its own
 `--changed` selection against fetched `origin/main`; hand-picked subsets do not
-count as that gate. Push only after it passes. If source or base changes after
-the check, run the root gate again. Report the checked HEAD, fixed base, exit
+count as that gate. Push only after it passes. If source changes after the
+check, run the root gate again. If only `main` moved, rebase and run
+`pnpm check:landing --revalidate`: exit 0 means the gate still covers HEAD and
+you push; exit 1 names what overlapped, so run the root gate again. Report the checked HEAD, fixed base, exit
 status and gate evidence path to your lead. A zero-test check after pushing is
 not evidence for the landing.
 

@@ -32,8 +32,10 @@ clankie and clankie-app directly on `main` (ADR 0240). Brief workers to stage
 only their files, commit, and `git pull --rebase origin main`. Before pushing,
 require the repository-root `clankie heavy -- pnpm check:landing`, using its own
 `--changed` test selection against fetched `origin/main`. Focused checks are for
-iteration; a hand-picked subset is not the landing gate. A source/base change
-after the gate requires another root gate. Require the checked HEAD, fixed base,
+iteration; a hand-picked subset is not the landing gate. A source change after
+the gate requires another root gate. After a base-only move, the worker rebases
+and runs `pnpm check:landing --revalidate`; exit 0 keeps the green gate, exit 1
+names the overlapping incoming paths and requires another root gate. Require the checked HEAD, fixed base,
 exit status and evidence path in the worker's report; a clean-main zero-test run
 does not verify an earlier landing. Then `git push origin main`, reporting the SHA.
 If the root gate's only failures are unchanged timing-sensitive cases outside

@@ -33,7 +33,7 @@ reject both landings.
 AGENTS.md, ADRs 0240/0247, the lead delivery reference and the worker `clankie`
 skill now require repository-root `clankie heavy -- pnpm check:landing` after
 rebasing onto fetched `origin/main`, before push. Hand-picked subsets support
-iteration only. A source/base change requires another root gate. A zero-test
+iteration only. A source change requires another root gate; a base change alone requires one unless `pnpm check:landing --revalidate` passes (VUH-2024). A zero-test
 comparison after pushing is not landing evidence.
 
 The runner retains HEAD, the fixed base SHA, source fingerprint, phase wall

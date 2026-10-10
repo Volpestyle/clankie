@@ -18,13 +18,14 @@ one of them spending 15 minutes on 30-second timeouts.
 Both repositories define `pnpm check:landing`: formatting (core), lint,
 typecheck, cheap repository checks, and only the tests Vitest relates to files
 changed since a base, stopping at the first failure. The base is
-`CLANKIE_LANDING_BASE`, defaulting to `origin/main`. The app runs each
+`CLANKIE_LANDING_BASE`, defaulting to HEAD's merge-base with `origin/main` (VUH-2024). The app runs each
 package's own tests from inside that package, as its full suite does.
 
 The root command is required before every direct push. Hand-picked checks are
 for iteration and do not replace it. Rebase onto fetched `origin/main` first;
-the gate fixes that base SHA for its run. Source or base changes require another
-root gate before pushing. Report its checked HEAD, base, exit and evidence path.
+the gate fixes that base SHA for its run. Source changes require another root
+gate before pushing; a base change alone requires one unless
+`pnpm check:landing --revalidate` passes ([ADR 0240](0240-changes-land-directly-on-main.md), VUH-2024). Report its checked HEAD, base, exit and evidence path.
 A clean-main comparison after pushing may select zero tests and cannot prove
 the landing was checked.
 

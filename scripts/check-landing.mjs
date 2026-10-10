@@ -1,13 +1,19 @@
-import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { landingTypechecks } from "./testing/landing-typechecks.mjs";
+import {
+  changePatchId,
+  recordLandingHistory,
+  revalidateLanding,
+  sourceFingerprint,
+} from "./testing/landing-validity.mjs";
 
 const args = process.argv.slice(2);
 const separator = args.indexOf("--");
-const options = separator < 0 ? args : args.slice(0, separator);
+const revalidate = (separator < 0 ? args : args.slice(0, separator)).includes("--revalidate");
+const options = (separator < 0 ? args : args.slice(0, separator)).filter((arg) => arg !== "--revalidate");
 const vitestArgs = separator < 0 ? [] : args.slice(separator + 1);
 for (let index = 0; index < options.length; index += 2)
   if (!["--root", "--base", "--report"].includes(options[index]))
@@ -24,31 +30,66 @@ const value = (name, fallback) => {
 const root = resolve(value("--root", fileURLToPath(new URL("../", import.meta.url))));
 process.chdir(root);
 const git = (...command) => execFileSync("git", command, { cwd: root, encoding: "utf8" }).trim();
-const base = git(
-  "rev-parse",
-  "--verify",
-  `${value("--base", process.env.CLANKIE_LANDING_BASE ?? "origin/main")}^{commit}`,
-);
+const explicitBase = value("--base", process.env.CLANKIE_LANDING_BASE);
+// By default a gate checks the base HEAD actually sits on: origin/main is shared
+// by every worktree and can move between a rebase and the gate starting.
+// Revalidation then judges any newer origin/main (VUH-2024).
+const base =
+  explicitBase !== undefined || revalidate
+    ? git("rev-parse", "--verify", `${explicitBase ?? "origin/main"}^{commit}`)
+    : git("merge-base", "HEAD", "origin/main");
 const head = git("rev-parse", "HEAD");
-const fingerprint = async () => {
-  const hash = createHash("sha256");
-  const diff = spawn("git", ["diff", "--binary", "HEAD"], { stdio: ["ignore", "pipe", "inherit"] });
-  await Promise.all([
-    new Promise((resolve, reject) => {
-      diff.once("error", reject);
-      diff.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`git diff exited ${code}`))));
-    }),
-    (async () => {
-      for await (const chunk of diff.stdout) hash.update(chunk);
-    })(),
-  ]);
-  for (const path of git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean))
-    hash.update(path).update(readFileSync(path));
-  return hash.digest("hex");
-};
-const source = await fingerprint();
 const reportPath = resolve(value("--report", ".local/landing-gate.json"));
-const report = { head, base, source, phases: [], exitCode: null };
+if (revalidate) {
+  // A moved base keeps a green gate only when nothing it checked changed (VUH-2024).
+  let recorded;
+  try {
+    recorded = JSON.parse(readFileSync(reportPath, "utf8"));
+  } catch {
+    recorded = undefined;
+  }
+  const verdict = await revalidateLanding({ root, report: recorded, base });
+  recordLandingHistory(root, {
+    kind: "revalidate",
+    head,
+    base,
+    gateHead: recorded?.head,
+    gateBase: recorded?.base,
+    patchId: recorded?.change?.patchId,
+    valid: verdict.valid,
+  });
+  if (recorded) {
+    (recorded.revalidations ??= []).push({ at: new Date().toISOString(), ...verdict });
+    writeFileSync(reportPath, JSON.stringify(recorded, null, 2) + "\n");
+  }
+  console.log(JSON.stringify(verdict, null, 2));
+  console.log(
+    verdict.valid
+      ? `[landing] gate for ${verdict.gate.head} still covers HEAD ${head} on base ${base}; push without rerunning`
+      : "[landing] rerun the root gate: " + verdict.reasons.join("; "),
+  );
+  process.exit(verdict.valid ? 0 : 1);
+}
+const fingerprint = () => sourceFingerprint(root);
+const source = await fingerprint();
+const report = {
+  head,
+  base,
+  source,
+  // What this result covers, so a later base move can be judged without rerunning (VUH-2024).
+  change: {
+    rebased: spawnSync("git", ["merge-base", "--is-ancestor", base, head], { cwd: root }).status === 0,
+    patchId: changePatchId(root, base, head),
+    files: [
+      ...new Set([
+        ...git("diff", "--name-only", "-z", base).split("\0").filter(Boolean),
+        ...git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean),
+      ]),
+    ].sort(),
+  },
+  phases: [],
+  exitCode: null,
+};
 const save = () => {
   mkdirSync(dirname(reportPath), { recursive: true });
   writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n");
@@ -112,20 +153,32 @@ if (!exit) {
     exit = 1;
   }
 }
-run("tests", [
-  "pnpm",
-  "exec",
-  "vitest",
-  "run",
-  "--config",
-  "vitest.config.ts",
-  "--changed",
-  base,
-  "--bail",
-  "1",
-  "--passWithNoTests",
-  ...vitestArgs,
-]);
+const graphPath = `${reportPath}.graph.json`;
+rmSync(graphPath, { force: true });
+run(
+  "tests",
+  [
+    "pnpm",
+    "exec",
+    "vitest",
+    "run",
+    "--config",
+    "vitest.config.ts",
+    "--changed",
+    base,
+    "--bail",
+    "1",
+    "--passWithNoTests",
+    ...(vitestArgs.some((argument) => argument.startsWith("--reporter")) ? [] : ["--reporter=default"]),
+    "--reporter=./scripts/testing/landing-graph-reporter.mjs",
+    ...vitestArgs,
+  ],
+  { CLANKIE_LANDING_GRAPH: graphPath },
+);
+if (!exit && existsSync(graphPath)) {
+  report.tests = JSON.parse(readFileSync(graphPath, "utf8"));
+  rmSync(graphPath, { force: true });
+}
 report.sourceStable = git("rev-parse", "HEAD") === head && (await fingerprint()) === source;
 if (!report.sourceStable) {
   console.error("[landing] Source changed while the gate ran; this result cannot authorize a push.");
@@ -134,5 +187,6 @@ if (!report.sourceStable) {
 report.exitCode = exit;
 report.elapsedSeconds = (performance.now() - started) / 1000;
 save();
+recordLandingHistory(root, { kind: "gate", head, base, patchId: report.change.patchId, exitCode: exit });
 console.log(`[landing] exit ${exit}; ${report.elapsedSeconds.toFixed(2)}s; evidence ${reportPath}`);
 process.exitCode = exit;

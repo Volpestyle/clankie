@@ -88,8 +88,14 @@ This repository is public. Both neighbors are private and consume
   ([ADR 0240](docs/adr/0240-changes-land-directly-on-main.md)): stage only your
   files, commit, and `git pull --rebase origin main`. Then run
   `clankie heavy -- pnpm check:landing` from the repository root against the
-  fetched `origin/main`, and push only after it passes. If a rebase changes the
-  checked source or base, run the root gate again. Resolve conflicts only in your
+  fetched `origin/main`, and push only after it passes. If `main` moves after a
+  green gate, rebase and run `pnpm check:landing --revalidate`: it compares the
+  incoming commits with the gate's recorded selection and exits 0 when the gate
+  still covers HEAD, so push without rerunning. When an incoming commit touches
+  the change's files, a selected test's imports, the compiler inputs of an
+  affected file, repository-wide configuration or gate scripts, or deletes a
+  file, it exits 1: run the root gate again. A changed source always needs a new
+  gate. Don't judge overlap yourself. Resolve conflicts only in your
   own files. The full `pnpm check` runs for
   releases and on request; `clankie integrate` is optional, never required.
 - Under load, if the root gate's only failures are unchanged timing-sensitive

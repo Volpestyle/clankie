@@ -88,10 +88,14 @@ export function landingTypechecks(root, base) {
     const name = relative(root, path);
     return name !== ".." && !name.startsWith("../") && !name.includes("node_modules/");
   };
+  const imports = new Map();
   const edge = (dependency, consumer) => {
     let entries = consumers.get(dependency);
     if (!entries) consumers.set(dependency, (entries = new Set()));
     entries.add(consumer);
+    let dependencies = imports.get(consumer);
+    if (!dependencies) imports.set(consumer, (dependencies = new Set()));
+    dependencies.add(dependency);
   };
   let modules = 0;
   for (const project of projects) {
@@ -180,6 +184,16 @@ export function landingTypechecks(root, base) {
     for (const owner of owners.get(file) ?? []) selected.add(owner);
     for (const consumer of consumers.get(file) ?? []) pending.push(consumer);
   }
+  // Every file an affected file compiles against: an incoming edit to any of
+  // them can change this result, even when it imports nothing from the change.
+  const inputs = new Set();
+  const forward = [...affected];
+  while (forward.length) {
+    const file = forward.pop();
+    if (inputs.has(file)) continue;
+    inputs.add(file);
+    for (const dependency of imports.get(file) ?? []) forward.push(dependency);
+  }
   const cacheInputs = [
     ...new Set([
       ...[...owners]
@@ -205,6 +219,11 @@ export function landingTypechecks(root, base) {
     total: all.length,
     changed: [...changed].sort(),
     modules,
+    // Files whose compilation depends on the change, and everything they import.
+    affectedInputs: [...inputs]
+      .map((file) => relative(root, file))
+      .filter((file) => !file.startsWith("../"))
+      .sort(),
     reason: allReason ?? "real compiler import graph",
     // Turbo's manifest task dependencies omit relative imports across packages.
     // Include the actual compiler inputs in its cache key as well as its task scope.

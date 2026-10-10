@@ -25,8 +25,17 @@ Agents and the owner commit to `main` and push it directly:
    own files; coordinate with the owner of the rest.
 3. Run the repository-root `clankie heavy -- pnpm check:landing`, with its own
    `--changed` selection against fetched `origin/main`, then `git push origin main`.
-   Focused checks are for iteration, not a substitute for this gate. A source or
-   base change after checking requires another root gate (ADR 0247).
+   Focused checks are for iteration, not a substitute for this gate. A source
+   change after checking requires another root gate (ADR 0247). A base change
+   alone does not when `pnpm check:landing --revalidate` passes (amended
+   2026-10-10, VUH-2024): the gate records what it checked (the change's files,
+   the modules its selected tests imported, and the compiler inputs of every
+   file the change affects), and revalidation keeps the result only when the
+   incoming commits touch none of them, change no repository-wide configuration
+   or gate script, and delete nothing. Anything else exits 1 and the gate reruns.
+   Without an explicit base the gate checks the commit HEAD sits on (its
+   merge-base with `origin/main`), so a ref moved by another worktree's fetch
+   cannot make it check a base HEAD lacks; revalidation covers the newer base.
 
 If the root gate's only failures are unchanged timing-sensitive cases outside
 the change and its affected imports, the lead may accept the landing after
@@ -41,6 +50,14 @@ stays available for anyone who wants a composed, gated batch, but nothing
 requires the queue. The root landing gate is required for direct pushes.
 
 ## Consequences
+
+- With many seats landing, `main` moved under almost every gate and green
+  results were discarded (VUH-2011 passed three times and pushed none; VUH-1950's
+  second commit gated four times to push once). Revalidation keeps those results
+  when nothing they checked changed. Both sides passed their own gates, so a
+  merged result can only differ where a check depends on files from both; the
+  residual risk is a check that reads files outside its import graph, the same
+  blind spot `--changed` already has.
 
 - Fixes reach `main` after their root landing gate passes; focused checks support iteration.
 - A change that breaks something outside its own checks is not caught until a
