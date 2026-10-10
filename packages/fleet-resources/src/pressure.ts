@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { availableParallelism, freemem, loadavg, totalmem } from "node:os";
+import { availableParallelism, cpus, freemem, loadavg, totalmem } from "node:os";
 import type { FleetResourcePolicy, ResourcePressure, ResourcePressureInput } from "./model.ts";
 import { darwinAvailableMemoryMb, nativeBoundaryAvailable } from "./process.ts";
 import { heavyJobParallelism } from "./parallelism.ts";
@@ -37,23 +37,108 @@ async function defaultProbe(): Promise<ResourcePressureInput> {
       });
     await nativePending;
   }
+  const cpuRatio = busyCpuRatio();
   return {
     loadRatio: loadavg()[0]! / Math.max(1, availableParallelism()),
+    ...(cpuRatio === undefined ? {} : { cpuRatio }),
     availableMemoryMb: await availableMemoryMb(),
   };
 }
 
+/**
+ * The share of all cores busy, from the kernel's own per-core tick counters.
+ * Unlike load1 it has no one-minute lag, and unlike a per-process `ps` census
+ * it counts the short-lived compilers and test workers a gate spawns: on
+ * 2026-10-10 summed `ps` %cpu read 6–10 cores while the kernel had 13–14 busy.
+ */
+let cpuWindow: { at: number; busy: number; total: number; ratio?: number } | undefined;
+function cpuTicks() {
+  let busy = 0;
+  let total = 0;
+  for (const { times } of cpus()) {
+    const used = times.user + times.nice + times.sys + times.irq;
+    busy += used;
+    total += used + times.idle;
+  }
+  return { at: performance.now(), busy, total };
+}
+/** Never waits: the first call in a process, or after ten idle seconds, only opens a window. */
+function busyCpuRatio(): number | undefined {
+  const now = cpuTicks();
+  if (!cpuWindow || now.at - cpuWindow.at > 10_000) {
+    cpuWindow = now;
+    return undefined;
+  }
+  if (now.at - cpuWindow.at >= 250) {
+    const total = now.total - cpuWindow.total;
+    if (!(total > 0)) throw new Error("CPU ticks unavailable");
+    cpuWindow = { ...now, ratio: Math.min(1, Math.max(0, (now.busy - cpuWindow.busy) / total)) };
+  }
+  return cpuWindow.ratio;
+}
+/**
+ * Heavy slots sized for the worst case: every job using its full core share
+ * and 24 GiB. Up to this many run on the load guard alone (VUH-1981).
+ */
+export function baseHeavySlots(policy: FleetResourcePolicy): number {
+  return Math.min(
+    resourceCapacity(policy),
+    Math.max(
+      1,
+      Math.min(
+        Math.floor(availableParallelism() / heavyJobParallelism),
+        Math.floor(totalmem() / 1024 ** 3 / 24),
+      ),
+    ),
+  );
+}
+/**
+ * The automatic ceiling: two cores and 12 GiB per job. Jobs above the base
+ * slots are admitted only while measured pressure stays low (VUH-2054).
+ */
 export function automaticHeavySlots(): number {
   return Math.max(
     1,
-    Math.min(
-      Math.floor(availableParallelism() / heavyJobParallelism),
-      Math.floor(totalmem() / 1024 ** 3 / 24),
-    ),
+    Math.min(Math.floor(availableParallelism() / 2), Math.floor(totalmem() / 1024 ** 3 / 12)),
   );
 }
 export function resourceCapacity(policy: FleetResourcePolicy): number {
   return policy.heavySlots ?? automaticHeavySlots();
+}
+/**
+ * A job admitted this recently is charged its full core share: neither load1
+ * (a one-minute average) nor a CPU sample has seen it ramp up yet.
+ */
+export const heavyJobSettleMs = 60_000;
+/** Above the base slots, admit while the machine stays under this share of its cores. */
+const heavyBurstRatio = 0.7;
+/** Memory each unsettled job keeps in reserve above the floor; gates reached about 5 GiB RSS. */
+const heavyBurstMemoryMb = 8192;
+/**
+ * Whether the next queued heavy job may start. `heavySlots` is a ceiling: the
+ * base slots run on the load guard, and each one above it needs the measured
+ * machine (the busier of load and CPU, plus a full share for every job not yet
+ * settled) to stay under `heavyBurstRatio`, with memory to spare.
+ */
+export function heavyAdmission(
+  policy: FleetResourcePolicy,
+  pressure: ResourcePressure,
+  held: readonly { createdAtMs: number }[],
+  at: number,
+  settleMs = heavyJobSettleMs,
+): "admit" | "slots" | "pressure" {
+  if (held.length >= resourceCapacity(policy)) return "slots";
+  if (!pressure.healthy) return "pressure";
+  if (held.length < baseHeavySlots(policy)) return "admit";
+  // No CPU window yet (a fresh waiter, or an injected probe): base slots only.
+  if (pressure.cpuRatio === undefined) return "pressure";
+  const cores = Math.max(1, availableParallelism());
+  const unsettled = held.filter((lease) => at - lease.createdAtMs < settleMs).length;
+  const busy = Math.max(pressure.loadRatio, pressure.cpuRatio) * cores + unsettled * heavyJobParallelism;
+  if (busy >= heavyBurstRatio * cores) return "pressure";
+  if (pressure.availableMemoryMb < policy.minAvailableMemoryMb + (unsettled + 1) * heavyBurstMemoryMb)
+    return "pressure";
+  return "admit";
 }
 /**
  * What one booted iOS 27 simulator costs while an app and its UI-test driver
@@ -101,7 +186,8 @@ export class ResourcePressureSampler {
         !Number.isFinite(input.loadRatio) ||
         input.loadRatio < 0 ||
         !Number.isFinite(input.availableMemoryMb) ||
-        input.availableMemoryMb < 0
+        input.availableMemoryMb < 0 ||
+        (input.cpuRatio !== undefined && !(input.cpuRatio >= 0 && input.cpuRatio <= 1))
       )
         throw new Error("Invalid pressure sample");
       const minimum = policy.minAvailableMemoryMb;

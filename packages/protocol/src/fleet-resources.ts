@@ -54,6 +54,7 @@ export const FleetResourceSnapshotSchema = z
       .object({
         sampledAtMs: timestamp,
         loadRatio: z.number().finite().nonnegative(),
+        cpuRatio: z.number().finite().min(0).max(1).optional(),
         availableMemoryMb: z.number().finite().nonnegative(),
         healthy: z.boolean(),
         reason: z.enum(["load", "memory", "probe-unavailable"]).optional(),

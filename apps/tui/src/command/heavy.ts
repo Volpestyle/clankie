@@ -38,7 +38,7 @@ export async function runHeavyCommand(
         (options.stderr ?? process.stderr).write(
           lane === "light"
             ? `clankie heavy: light lane waiting (${snapshot.capacity.lightUsed}/${snapshot.capacity.lightSlots} held, ${snapshot.lightQueue.length} queued)\n`
-            : `clankie heavy: waiting for machine capacity (${snapshot.pressure.reason ?? "slots"}; ${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
+            : `clankie heavy: waiting for machine capacity (${snapshot.pressure.reason ?? (snapshot.capacity.used < snapshot.capacity.heavySlots ? "busy" : "slots")}; ${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
         );
       },
     });

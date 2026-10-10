@@ -8,10 +8,19 @@ Turbo CLI flags can override its environment: avoid higher `--concurrency` or
 `--parallel`. Arbitrary tools and subprocesses need their own limits; this is
 not an OS CPU quota.
 
-Automatic capacity is `max(1, min(floor(cores/4), floor(RAM_GiB/24)))`, allocating
-one four-worker budget per slot. The [alternating benchmark](../../docs/testing/2026-10-08-heavy-parallelism/README.md)
-supports four capped jobs for throughput on the 18-core, 128 GiB Mac, while
-preserving pressure guards and explicit owner capacity overrides.
+`heavySlots` is a ceiling, not a fixed pool (VUH-2054). The base slots,
+`min(heavySlots, max(1, min(floor(cores/4), floor(RAM_GiB/24))))`, give each job a full
+four-worker budget and run on the load and memory guards alone; the
+[alternating benchmark](../../docs/testing/2026-10-08-heavy-parallelism/README.md)
+supports four capped jobs for throughput on the 18-core, 128 GiB Mac. Above the
+base, the next queued job starts only while the measured machine stays under 70%
+of its cores, with 8 GiB per unsettled job above the memory floor. "Measured" is
+the busier of the load average and the kernel's per-core CPU ticks, plus a full
+four-core share for every job admitted in the last minute, which neither
+reading has seen ramp up yet. A summed per-process `ps` census is not used:
+it misses short-lived compilers and test workers, and on 2026-10-10 read 6–10
+busy cores while the kernel counted 13–14. Automatic `heavySlots` is
+`max(1, min(floor(cores/2), floor(RAM_GiB/12)))`: nine on the 18-core, 128 GiB Mac.
 
 The governor shares one OS-account registry in `~/.clankie/fleet-resources` across
 Clankie worktrees and native worker environments. Owner-authenticated control
@@ -22,9 +31,7 @@ increase capacity. Directory and pressure-probe injection exist for isolated tes
 Heavy commands count only against `heavySlots`; simulator reservations and
 unmanaged active devices count only against `simulatorSlots`. Status reports
 `capacity.used` for heavy leases and `capacity.simulatorUsed` for simulator
-reservations; simulator status separately counts external active devices. Automatic
-heavy capacity is the smaller of one permit per four available cores and one per 24GiB
-of RAM, with a minimum of one. Automatic simulator capacity is
+reservations; simulator status separately counts external active devices. Automatic simulator capacity is
 `max(1, min(floor(cores/2/2), floor(RAM_GiB/2/34)))`: half the machine at the
 measured cost of one simulator under test (see
 [the simulator run](../../docs/testing/2026-10-09-lean-simulators/README.md)).
@@ -50,7 +57,7 @@ observations fail closed.
 naming up to eight test files, `tsc` without `--build`, one package's
 `pnpm --filter … typecheck`) take the light lane: a second journal in
 `light/` with the same schema and native runner, so installs that predate it
-never read it. Its capacity equals `heavySlots`, its jobs are capped at two
+never read it. Its capacity is the base heavy slots (one per four cores), its jobs are capped at two
 cores, and only the memory floor (not load) holds it, because the full gates
 it runs beside already answer to load. Status adds `capacity.lightSlots`,
 `capacity.lightUsed`, `lightLeases` and `lightQueue`. A zero simulator limit refuses

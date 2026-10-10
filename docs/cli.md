@@ -2840,7 +2840,7 @@ the same permit; surviving descendants retain it after a wrapper exits.
 
 `heavy` sizes each command itself. A focused check — Vitest naming up to eight
 test files, `tsc` without `--build`, or `pnpm --filter ONE typecheck` — runs in
-the light lane: its own journal under `light/`, as many slots as `heavySlots`,
+the light lane: its own journal under `light/`, as many slots as the base heavy slots,
 two cores per job (the same variables capped at two), held only by the memory
 floor, so it starts beside full gates even at high load. Everything else, and
 anything wrapped in a shell, is a full job. Workers keep the same command form.
@@ -2852,7 +2852,9 @@ ticket. Actual native failures identify their cause; see the
 `capacity.used` counts heavy leases against `heavySlots`; `simulatorUsed` counts
 simulator reservations against `simulatorSlots`; `lightUsed` counts light-lane
 jobs against `lightSlots`, whose holders and waiters are `lightLeases` and
-`lightQueue`. Simulator status also reports
+`lightQueue`. `heavySlots` is a ceiling: one job per four cores runs on the
+load guard, and more start only while measured CPU and load stay under 70% of
+the cores (a waiting `clankie heavy` says `busy`). Simulator status also reports
 external active devices against the simulator budget. The budgets are independent;
 load and available-memory guards gate both.
 The operator fleet snapshot also carries recent confirmed native peer exchanges
@@ -2871,7 +2873,7 @@ The owner sets `fleet.resources` with these flags or the TUI `/fleet resources`:
 
 | Flag                                      | Default | Meaning                                                                               |
 | ----------------------------------------- | ------- | ------------------------------------------------------------------------------------- |
-| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Heavy capacity, 1–64; auto is min(floor(cores/4), floor(RAM GiB/24)), at least one    |
+| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Heavy ceiling, 1–64; auto is min(floor(cores/2), floor(RAM GiB/12)), at least one     |
 | `--simulator-slots auto` or `N`           | `auto`  | Simulator ceiling, 0–64; auto is min(floor(cores/4), floor(RAM GiB/68)), at least one |
 | `--simulator-idle-seconds N`              | `600`   | Lease heartbeat timeout, 1–86400 seconds                                              |
 | `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                       |

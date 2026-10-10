@@ -24,7 +24,14 @@ import {
   type ResourceQueueEntry,
 } from "./model.ts";
 import { processIdentity, observeProcesses, resourceNativeHelperPath, resourcePython } from "./process.ts";
-import { resourceCapacity, ResourcePressureSampler, simulatorBootSettleMs } from "./pressure.ts";
+import {
+  baseHeavySlots,
+  heavyAdmission,
+  heavyJobSettleMs,
+  resourceCapacity,
+  ResourcePressureSampler,
+  simulatorBootSettleMs,
+} from "./pressure.ts";
 import { ResourceStore } from "./store.ts";
 import {
   heavyJobArgs,
@@ -168,9 +175,11 @@ export function createResourceGovernor(
     directory?: string;
     probe?: () => Promise<ResourcePressureInput>;
     simulatorBootSettleMs?: number;
+    heavyJobSettleMs?: number;
   } = {},
 ): FleetResourceGovernor {
   const bootSettleMs = options.simulatorBootSettleMs ?? simulatorBootSettleMs;
+  const jobSettleMs = options.heavyJobSettleMs ?? heavyJobSettleMs;
   const directory = options.directory ?? join(userInfo().homedir, ".clankie/fleet-resources");
   const retrying = {
     // Bounded causes only (stage and errno); never journal contents or paths.
@@ -359,7 +368,7 @@ export function createResourceGovernor(
         simulatorSlots: state.policy.simulatorSlots,
         used: state.leases.filter((lease) => lease.kind === "heavy").length,
         simulatorUsed: state.leases.filter((lease) => lease.kind === "simulator").length,
-        lightSlots: resourceCapacity(state.policy),
+        lightSlots: baseHeavySlots(state.policy),
         lightUsed: light.leases.length,
       },
       pressure: sampledPressure,
@@ -508,15 +517,17 @@ export function createResourceGovernor(
     // The owner's policy lives in the main journal for both lanes.
     const policyFor = async (state: ResourceState) =>
       options.lane === "light" ? (await mainStore.read()).policy : state.policy;
+    const held = (state: ResourceState) => state.leases.filter((lease) => lease.kind === "heavy");
     const admits = (state: ResourceState, policy: FleetResourcePolicy) =>
       state.queue.find((entry) => entry.kind === "heavy")?.id === id &&
-      state.leases.filter((lease) => lease.kind === "heavy").length < resourceCapacity(policy);
+      held(state).length < (options.lane === "light" ? baseHeavySlots(policy) : resourceCapacity(policy));
     // A light job is small and capped, so only the memory floor holds it;
-    // load already holds the full gates it runs beside (VUH-2023).
-    const pressured = (sampled: ResourcePressure, policy: FleetResourcePolicy) =>
+    // load already holds the full gates it runs beside (VUH-2023). A full
+    // job above the base slots needs measured room (VUH-2054).
+    const pressured = (sampled: ResourcePressure, policy: FleetResourcePolicy, state: ResourceState) =>
       options.lane === "light"
         ? sampled.reason === "probe-unavailable" || sampled.availableMemoryMb < policy.minAvailableMemoryMb
-        : !sampled.healthy;
+        : heavyAdmission(policy, sampled, held(state), Date.now(), jobSettleMs) !== "admit";
     let fullPassAt = Date.now() + jittered(FULL_PASS_MS);
     let reportedAt = 0;
     const report = async (state: ResourceState) => {
@@ -542,7 +553,7 @@ export function createResourceGovernor(
             continue;
           }
           sampled = await pressure.sample(policy);
-          if (pressured(sampled, policy)) {
+          if (pressured(sampled, policy, peek)) {
             await report(peek);
             await wait(jittered(PEEK_MS), signal);
             continue;
@@ -563,7 +574,7 @@ export function createResourceGovernor(
             if (!admits(state, policy)) return blocked();
             // Sampled before the lock when the peek ran; the sampler caches a
             // fresh reading, so the full pass's sample forks nothing here.
-            if (pressured(sampled ?? (await pressure.sample(policy)), policy)) return blocked();
+            if (pressured(sampled ?? (await pressure.sample(policy)), policy, state)) return blocked();
             if (signal.aborted) throw abort();
             const at = Date.now();
             const next: HeavyLease = {

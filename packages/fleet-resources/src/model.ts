@@ -14,6 +14,8 @@ export type FleetResourcePolicy = z.infer<typeof FleetResourcePolicySchema>;
 export const defaultResourcePolicy = (): FleetResourcePolicy => FleetResourcePolicySchema.parse({});
 export interface ResourcePressureInput {
   loadRatio: number;
+  /** Share of all cores busy over the last sample window; absent from injected probes. */
+  cpuRatio?: number;
   availableMemoryMb: number;
 }
 export interface ResourcePressure extends ResourcePressureInput {
