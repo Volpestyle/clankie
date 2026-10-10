@@ -654,6 +654,15 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             settings: (args) => runProjectSettingsCommand(args, { includeAutonomy: true }),
             workspace: (args) => runProjectCommand(args, settings ? { settings } : {}),
             roles: (projectId) => runProjectRolesMenu(shell, projectId),
+            auto:
+              conversations?.autonomy === undefined
+                ? undefined
+                : async (enabled) =>
+                    (
+                      await conversations.autonomy!(
+                        enabled === undefined ? { action: "status" } : { action: "set_enabled", enabled },
+                      )
+                    ).enabled,
             cwd: process.cwd(),
           });
           return;

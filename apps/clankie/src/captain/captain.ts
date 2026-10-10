@@ -104,7 +104,13 @@ import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
-import { autoProjectStates, autoRoundDue, autoRoundFingerprint, autoRoundPrompt } from "./auto-projects.ts";
+import {
+  autoProjectStates,
+  autoRoundDue,
+  autoRoundFingerprint,
+  autoRoundPrompt,
+  projectStatuses,
+} from "./auto-projects.ts";
 import { RoutineError, RoutineStore } from "./routines.ts";
 import { createRoutineRunner, serviceLauncher } from "./routine-runner.ts";
 import { createConversationRunner, runAutonomyTurn } from "./captain-conversation-runner.ts";
@@ -5439,6 +5445,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return matches.length === 1 && personas.personaForOccupant(occupantId) === matches[0]!.personaId
         ? matches[0]!.personaId
         : undefined;
+    },
+    projectStatus: async (projects) => {
+      const questions = conversations.pendingOwnerQuestionWorkspaces();
+      const seats = (await refreshFleet())
+        .filter((seat) => seat.fleet === undefined && seat.workingDirectory !== undefined)
+        .map((seat) => seat.workingDirectory!);
+      return { projects: await projectStatuses(projects, seats, questions), needsYou: questions.length };
     },
     projectHireMembershipCandidate: (fleet, pane) => herdrWatches.projectHireMembershipCandidate(fleet, pane),
     confirmedProjectHireAssignment: (fleet, pane, revision, proof) =>

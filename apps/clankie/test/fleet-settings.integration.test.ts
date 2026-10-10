@@ -27,7 +27,8 @@ import {
   addProjectWorktreeRoot,
 } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
-import { createStubCaptain } from "../src/captain/port.ts";
+import { createStubCaptain, type CaptainPort } from "../src/captain/port.ts";
+import { projectStatuses } from "../src/captain/auto-projects.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
 
 const exec = promisify(execFile);
@@ -35,7 +36,7 @@ const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((close) => close()));
 });
-async function fixture() {
+async function fixture(captain: Partial<CaptainPort> = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "fleet-settings-api-")));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const cwd = join(root, "repo");
@@ -90,7 +91,7 @@ async function fixture() {
     },
   });
   const app = await createClankieApp({
-    captain: createStubCaptain(),
+    captain: createStubCaptain(captain),
     settings,
     runtimes,
     herdrBinding: () => binding,
@@ -816,6 +817,66 @@ it("puts a project on Auto with a focus through the owner project API, hidden fr
   const garden = off.settings.projects.find((project) => project.id === "garden");
   expect(garden).not.toHaveProperty("auto");
   expect(garden).not.toHaveProperty("focus");
+});
+
+it("reads each project's status line from live seats, landed commits and pending owner questions", async () => {
+  let workspace = "";
+  const f = await fixture({
+    projectStatus: async (projects) => ({
+      // Live seats and pending questions as the service reads them; one of each sits outside the project.
+      projects: await projectStatuses(
+        projects,
+        [join(workspace, "apps"), "/elsewhere"],
+        [workspace, undefined, "/elsewhere"],
+      ),
+      needsYou: 3,
+    }),
+  });
+  workspace = (await f.client.projects()).settings.projects[0]!.workspaces[0]!.path;
+  const git = (...args: string[]) =>
+    exec("git", [
+      "-C",
+      workspace,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      ...args,
+    ]);
+  const origin = join(workspace, "..", "origin.git");
+  await exec("git", ["init", "-q", "--bare", "-b", "main", origin]);
+  await git("init", "-q", "-b", "main");
+  await git("remote", "add", "origin", origin);
+  // Landed two days ago: not today.
+  await exec(
+    "git",
+    [
+      "-C",
+      workspace,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "old",
+    ],
+    {
+      env: { ...process.env, GIT_COMMITTER_DATE: new Date(Date.now() - 2 * 86_400_000).toISOString() },
+    },
+  );
+  await git("commit", "-q", "--allow-empty", "-m", "landed today");
+  await git("push", "-q", "origin", "main");
+  await git("commit", "-q", "--allow-empty", "-m", "local only");
+
+  const view = await f.client.projects();
+  expect(view.projectStatus?.garden).toEqual({ agentsWorking: 1, landedToday: 1, needsYou: 1 });
+  expect(view.needsYou).toBe(3);
+  const plain = ProjectsSnapshotSchema.parse(await (await f.request(PROJECTS_PATH)).json());
+  expect(plain.projectStatus).toBeUndefined();
+  expect(plain.needsYou).toBeUndefined();
 });
 
 it("sets hire defaults, talkativeness and worker-account holds through the owner API the app and TUI share", async () => {

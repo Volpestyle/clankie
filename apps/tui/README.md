@@ -219,7 +219,9 @@ credential holder.
 - `/autonomy off|low|high|full` sets the owner's autonomy dial, how much
   Clankie decides without asking (ADR 0263). `/auto on|off` is the master switch
   for unprompted work: projects on Auto, goal continuations and scheduled
-  self-wakes (ADR 0264). `/project` sets a project's Auto and focus.
+  self-wakes (ADR 0264). `/project` lists projects under the Auto switch, each
+  with its status line (agents working, landed today, needs you), and sets a
+  project's Auto and focus.
   `/autonomy clear` removes the selected conversation's pending wake without
   changing its goal.
 - `/cd` opens the conversation for another directory and moves the console's

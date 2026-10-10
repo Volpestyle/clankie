@@ -28,6 +28,8 @@ import {
   RemoveProjectWorktreeRootSchema,
   PROJECT_UPDATE_SETTINGS_PATH,
   UpdateProjectSettingsSchema,
+  type Project,
+  type ProjectStatus,
 } from "@clankie/protocol/projects";
 
 /** Legacy strict clients keep their existing view; the revision always binds full stored policy. */
@@ -62,6 +64,10 @@ export function createProjectRoutes(
     worktreeRoot?: ObserveProjectWorktreeRoot;
     /** True only when the built-in tracker holds a project with exactly this UUID. */
     trackerProjectExists?: (id: string) => Promise<boolean>;
+    /** Live status lines for the autonomy-aware view; a failed read omits them, never the settings. */
+    status?: (
+      projects: readonly Project[],
+    ) => Promise<{ projects: Record<string, ProjectStatus>; needsYou: number }>;
   } = {},
 ): Hono {
   const app = new Hono();
@@ -86,7 +92,15 @@ export function createProjectRoutes(
     const current = await settings.load();
     const authority = await authorize(context.req.raw);
     if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
-    return context.json(projectSnapshot(current, context.req.query("includeAutonomy") === "true"));
+    const includeAutonomy = context.req.query("includeAutonomy") === "true";
+    const status =
+      includeAutonomy && options.status
+        ? await options.status(current.projects.projects).catch(() => undefined)
+        : undefined;
+    return context.json({
+      ...projectSnapshot(current, includeAutonomy),
+      ...(status === undefined ? {} : { projectStatus: status.projects, needsYou: status.needsYou }),
+    });
   });
   app.post(PROJECT_CREATE_SETTINGS_PATH, async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);

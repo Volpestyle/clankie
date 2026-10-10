@@ -1290,6 +1290,15 @@ export class ConversationStore {
     };
   }
 
+  /** One entry per unanswered owner question: the workspace it was raised in, when it has one. */
+  public pendingOwnerQuestionWorkspaces(): (string | undefined)[] {
+    return [...this.metas.values()].flatMap((meta) =>
+      (meta.questions?.records ?? []).flatMap(({ question }) =>
+        question.status === "pending" ? [question.workspace] : [],
+      ),
+    );
+  }
+
   /** Oldest unanswered owner preference, read from canonical question receipts. */
   public pendingPresenceOwnerItem(): import("../../../../../packages/protocol/src/presence.ts").OperatorPresenceSnapshot["pendingOwnerItem"] {
     const questions = [...this.metas.values()].flatMap((meta) =>

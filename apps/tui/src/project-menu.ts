@@ -4,7 +4,12 @@
  * through the same revision-bearing clients as `clankie project`, so a stale
  * revision is refused here exactly as it is on the CLI.
  */
-import { ProjectIdSchema, ProjectsSnapshotSchema, type Project } from "@clankie/protocol/projects";
+import {
+  ProjectIdSchema,
+  ProjectsSnapshotSchema,
+  type Project,
+  type ProjectStatus,
+} from "@clankie/protocol/projects";
 import type { ClankieFaceShell } from "./shell/shell.ts";
 import type { SetupFlow } from "./shell/setup-flow.ts";
 
@@ -15,6 +20,8 @@ export interface ProjectsMenuServices {
   /** `clankie project add|remove-workspace` (runProjectCommand). */
   readonly workspace: Run;
   readonly roles: (projectId: string) => Promise<void>;
+  /** The master Auto switch: reads it, or sets it and returns the new state (ADR 0264). */
+  readonly auto?: ((enabled?: boolean) => Promise<boolean>) | undefined;
   readonly cwd?: string;
 }
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -29,9 +36,19 @@ async function attempt(flow: SetupFlow, work: () => Promise<unknown>, done: stri
   }
 }
 
-/** `id · 3 roles · cap 4 · tracker` — the facts worth seeing before opening a project. */
-function projectHint(project: Project): string {
+/** `2 working · 3 landed today · 1 needs you`, the project's status line. */
+function statusLine(status: ProjectStatus): string {
   return [
+    `${status.agentsWorking} working`,
+    ...(status.landedToday === undefined ? [] : [`${status.landedToday} landed today`]),
+    ...(status.needsYou ? [`${status.needsYou} need${status.needsYou === 1 ? "s" : ""} you`] : []),
+  ].join(" · ");
+}
+
+/** `id · 3 roles · cap 4 · tracker` — the facts worth seeing before opening a project. */
+function projectHint(project: Project, status: ProjectStatus | undefined): string {
+  return [
+    ...(status === undefined ? [] : [statusLine(status)]),
     project.id,
     project.roles.length
       ? `${project.roles.length} role${project.roles.length === 1 ? "" : "s"}`
@@ -52,13 +69,29 @@ export async function runProjectsMenu(
     for (;;) {
       const snapshot = ProjectsSnapshotSchema.parse(await services.settings(["list"]));
       const projects = snapshot.settings.projects;
+      const auto = await services.auto?.().catch(() => undefined);
       const choice = await flow.readSelect({
-        message: projects.length ? `Projects (${projects.length})` : "No projects yet",
+        message: [
+          projects.length ? `Projects (${projects.length})` : "No projects yet",
+          ...(auto === undefined ? [] : [`Auto ${auto ? "on" : "off"}`]),
+          ...(snapshot.needsYou
+            ? [`${snapshot.needsYou} need${snapshot.needsYou === 1 ? "s" : ""} you`]
+            : []),
+        ].join(" · "),
         options: [
+          ...(auto === undefined
+            ? []
+            : [
+                {
+                  value: "auto",
+                  label: auto ? "Turn Auto off" : "Turn Auto on",
+                  hint: auto ? "Stop all unprompted work" : "Work the projects on Auto without being asked",
+                },
+              ]),
           ...projects.map((project) => ({
             value: `project:${project.id}`,
             label: project.name,
-            hint: projectHint(project),
+            hint: projectHint(project, snapshot.projectStatus?.[project.id]),
             ...(project.workspaces[0] ? { description: home(project.workspaces[0].path) } : {}),
           })),
           { value: "create", label: "New project…", hint: "from a local folder" },
@@ -66,6 +99,14 @@ export async function runProjectsMenu(
         allowBack: true,
       });
       if (choice === undefined) return;
+      if (choice === "auto") {
+        await attempt(
+          flow,
+          () => services.auto!(!auto),
+          auto ? "Auto is off: nothing starts unprompted." : "Auto is on.",
+        );
+        continue;
+      }
       if (choice === "create") {
         await createProject(flow, services, snapshot.revision);
         continue;
