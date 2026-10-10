@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import {
@@ -42,17 +42,83 @@ export async function durableJson(path: string, value: unknown, guard?: () => Pr
 /** Another operation holds the directory lock; nothing ran. */
 class IntegrationLockBusy extends Error {}
 
-export async function withDirectoryLock<T>(directory: string, work: () => Promise<T>): Promise<T> {
+const LockOwnerSchema = z.object({ pid: z.number().int().positive(), at: z.iso.datetime() });
+export type LockOwner = z.infer<typeof LockOwnerSchema>;
+
+async function lockOwner(directory: string): Promise<LockOwner | undefined> {
+  try {
+    return LockOwnerSchema.parse(JSON.parse(await readFile(join(directory, "owner.json"), "utf8")));
+  } catch {
+    return undefined;
+  }
+}
+
+const busy = (directory: string, owner?: LockOwner) =>
+  new IntegrationLockBusy(
+    `Integration operation busy; retained lock: ${directory}${owner ? ` (pid ${owner.pid} since ${owner.at})` : ""}`,
+  );
+
+/**
+ * An owner that can never release its lock: it took the lock before this process started and
+ * its pid is dead. An earlier process with this process's pid counts as dead. A missing owner
+ * record means a crash between making the directory and writing the record.
+ */
+async function abandoned(directory: string, owner: LockOwner | undefined): Promise<boolean> {
+  const since = owner ? Date.parse(owner.at) : (await stat(directory)).mtimeMs;
+  if (since >= performance.timeOrigin) return false;
+  if (!owner || owner.pid === process.pid) return true;
+  try {
+    process.kill(owner.pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+/**
+ * Takes over a lock its owner died holding, such as a service restarted mid-operation
+ * (VUH-2073). The lock moves aside in one rename and its owner record is checked again
+ * there, so of two processes that find the same stale lock only one takes it.
+ */
+async function reclaim(directory: string): Promise<LockOwner | undefined> {
+  let owner: LockOwner | undefined;
+  try {
+    owner = await lockOwner(directory);
+    if (!(await abandoned(directory, owner))) throw busy(directory, owner);
+    const aside = `${directory}.abandoned-${randomUUID()}`;
+    await rename(directory, aside);
+    if (JSON.stringify(await lockOwner(aside)) !== JSON.stringify(owner)) {
+      // Someone took the lock over between the read and the move; hand it back.
+      await rename(aside, directory).catch(() => undefined);
+      throw busy(directory);
+    }
+    await rm(aside, { recursive: true, force: true });
+    await mkdir(directory, { mode: 0o700 });
+    return owner;
+  } catch (error) {
+    // Released, or taken by another process, while this one looked.
+    if (["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw busy(directory);
+    throw error;
+  }
+}
+
+/** `reclaimed` runs, holding the lock, after taking over one a dead owner left. */
+export async function withDirectoryLock<T>(
+  directory: string,
+  work: () => Promise<T>,
+  reclaimed?: (owner: LockOwner | undefined) => Promise<void>,
+): Promise<T> {
   await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
+  let previous: { owner: LockOwner | undefined } | undefined;
   try {
     await mkdir(directory, { mode: 0o700 });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST")
-      throw new IntegrationLockBusy(`Integration operation busy; retained lock: ${directory}`);
-    throw error;
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    previous = { owner: await reclaim(directory) };
   }
   try {
     await durableJson(join(directory, "owner.json"), { pid: process.pid, at: new Date().toISOString() });
+    if (previous) await reclaimed?.(previous.owner);
     return await work();
   } finally {
     await rm(directory, { recursive: true, force: true });

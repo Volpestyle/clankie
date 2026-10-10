@@ -160,9 +160,13 @@ requests read the existing batch, and different input under that ID is refused.
 No network mutation is automatically retried.
 
 After a service crash, an active record reports `interrupted`, not a pass.
-Retained `queue.lock`, `push.lock` or `landing.lock` directories name their PID
-and time; a PID alone cannot prove safe recovery. Inspect the record, logs,
-processes and origin before removing a lock or starting a fresh batch. Batch
+`queue.lock`, `push.lock` and `landing.lock` directories name their PID and
+time. A lock whose owner took it before the current process started and whose
+PID is dead is reclaimed: it moves aside in one rename and its owner is checked
+again, so only one process takes it over. When the queue reclaims `queue.lock`,
+the batches the dead owner left running are recorded `interrupted` with that
+reason; resubmit them. A lock with a live owner still refuses. Inspect the
+record, logs, processes and origin before starting a fresh batch. Batch
 worktrees, stores and evidence are retained for review; cleanup is manual after
 their processes have ended. Never move a tree while its gate is running.
 

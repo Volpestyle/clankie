@@ -12,7 +12,7 @@ import {
   type IntegrationRun,
   type IntegrationQueueStatus,
 } from "@clankie/protocol/integrate";
-import { durableJson, withDirectoryLock } from "./deploy-holds.ts";
+import { durableJson, withDirectoryLock, type LockOwner } from "./deploy-holds.ts";
 import { integrationEnvironment } from "./integrate-environment.ts";
 
 const execute = promisify(execFile);
@@ -187,24 +187,28 @@ export class IntegrationQueue {
       .catch(() => undefined)
       .then(async () => {
         try {
-          await withDirectoryLock(join(this.options.directory, "queue.lock"), async () => {
-            while (this.pending.length) {
-              const first = this.pending.shift()!;
-              const members = [first];
-              const request = first.batch.request;
-              // Preserve FIFO and keep restores and gate-only requests apart.
-              while (!request.restore && this.pending.length) {
-                const next = this.pending[0]!.batch.request;
-                if (next.restore || next.push !== request.push) break;
-                members.push(this.pending.shift()!);
+          await withDirectoryLock(
+            join(this.options.directory, "queue.lock"),
+            async () => {
+              while (this.pending.length) {
+                const first = this.pending.shift()!;
+                const members = [first];
+                const request = first.batch.request;
+                // Preserve FIFO and keep restores and gate-only requests apart.
+                while (!request.restore && this.pending.length) {
+                  const next = this.pending[0]!.batch.request;
+                  if (next.restore || next.push !== request.push) break;
+                  members.push(this.pending.shift()!);
+                }
+                try {
+                  await this.runMembers(members);
+                } finally {
+                  for (const member of members) this.running.delete(member.batch.id);
+                }
               }
-              try {
-                await this.runMembers(members);
-              } finally {
-                for (const member of members) this.running.delete(member.batch.id);
-              }
-            }
-          });
+            },
+            (owner) => this.interruptAbandoned(owner),
+          );
         } catch (error) {
           // A retained cross-process lock is a refusal, never permission to run a second gate.
           for (const member of this.pending.splice(0)) {
@@ -218,6 +222,22 @@ export class IntegrationQueue {
           if (this.pending.length) this.schedule();
         }
       });
+  }
+  /**
+   * Records what a dead queue owner left running as interrupted, with the reason
+   * (VUH-2073). Requests this service accepted are running here and stay untouched.
+   */
+  private async interruptAbandoned(owner: LockOwner | undefined): Promise<void> {
+    const ids = await readdir(join(this.options.directory, "batches")).catch(() => []);
+    for (const id of ids) {
+      if (!/^[a-f0-9-]{36}$/u.test(id) || this.running.has(id)) continue;
+      const record = await this.read(id).catch(() => undefined);
+      // A member's receipt follows its shared batch.
+      if (!record || record.batchId || !active.has(record.state)) continue;
+      record.error = `The queue stopped while this was ${record.state}: its lock owner (${owner ? `pid ${owner.pid} since ${owner.at}` : "unrecorded"}) died, and this service reclaimed the lock. Logs are retained; submit the request again`;
+      record.state = "interrupted";
+      await this.save(record);
+    }
   }
   async wait(): Promise<void> {
     do {

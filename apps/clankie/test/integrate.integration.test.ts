@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { execFile, type ExecFileOptions } from "node:child_process";
+import { execFile, spawn, type ExecFileOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import { chmod, glob, mkdir, mkdtemp, readFile, readlink, realpath, rm, writeFile } from "node:fs/promises";
@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, aroundEach, expect, it } from "vitest";
 import { IntegrationRunSchema } from "@clankie/protocol/integrate";
-import { DeployHolds } from "../src/deploy-holds.ts";
+import { DeployHolds, durableJson, withDirectoryLock } from "../src/deploy-holds.ts";
 import { IntegrationQueue, integrationSources } from "../src/integrate.ts";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -763,4 +763,91 @@ it("lands through the repository's change-scoped check:landing, told the batch b
   const batch = await new IntegrationQueue(f.queue.options).status(request.id);
   expect(batch.state).toBe("passed");
   expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toContain(`landing-gate base=${f.core.base}`);
+});
+
+it("reclaims a queue lock its dead earlier owner left, records that owner's batches interrupted, and still refuses a live owner", async () => {
+  const f = await fixture();
+  const lock = join(f.directory, "queue.lock");
+  const owner = (pid: number, at: string) => durableJson(join(lock, "owner.json"), { pid, at });
+  // Before this process started, as a lock from the service instance a deploy replaced.
+  const earlier = new Date(performance.timeOrigin - 60_000).toISOString();
+  const live = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60_000)"], { stdio: "ignore" });
+  cleanups.push(() => void live.kill());
+  const exited = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+  await new Promise((resolve) => exited.once("exit", resolve));
+  const dead = exited.pid!;
+  const request = async (name: string, push: boolean) =>
+    IntegrationRunSchema.parse({
+      action: "run",
+      id: randomUUID(),
+      core: [await commit(f.core.source, name, name)],
+      push,
+    });
+
+  // A live owner keeps its lock, however old.
+  await owner(live.pid!, earlier);
+  const refused = await request("refused", false);
+  await f.queue.start(refused, guard);
+  await f.queue.wait();
+  expect(await f.queue.status(refused.id)).toMatchObject({
+    state: "failed",
+    error: expect.stringContaining(`retained lock: ${lock} (pid ${live.pid} since ${earlier})`),
+  });
+
+  // The dead owner left a batch gating and a request waiting.
+  const leftover = async (state: "gating" | "queued") => {
+    const id = randomUUID();
+    const record = join(f.directory, "batches", id, "record.json");
+    await durableJson(record, {
+      schemaVersion: 1,
+      id,
+      request: { action: "run", id, core: [f.core.base], push: true },
+      state,
+      createdAt: earlier,
+      updatedAt: earlier,
+      evidence: record,
+      repos: [],
+    });
+    return { id, record };
+  };
+  const [gating, waiting] = [await leftover("gating"), await leftover("queued")];
+  await owner(dead, earlier);
+  const accepted = await request("accepted", true);
+  await f.queue.start(accepted, guard);
+  await f.queue.wait();
+  expect((await f.queue.status(accepted.id)).state).toBe("pushed");
+  for (const [left, state] of [
+    [gating, "gating"],
+    [waiting, "queued"],
+  ] as const) {
+    const recorded = JSON.parse(await readFile(left.record, "utf8")) as { state: string; error: string };
+    expect(recorded.state).toBe("interrupted");
+    expect(recorded.error).toContain(
+      `while this was ${state}: its lock owner (pid ${dead} since ${earlier}) died`,
+    );
+  }
+  expect((await f.queue.snapshot()).interrupted.map((b) => b.id).sort()).toEqual(
+    [gating.id, waiting.id].sort(),
+  );
+  expect((await f.queue.status(refused.id)).state).toBe("failed");
+  await expect(readFile(join(lock, "owner.json"))).rejects.toThrow();
+
+  // Of two takers that find the same stale lock, one runs; an earlier process with this pid is dead too.
+  let runs = 0;
+  const work = async () => {
+    runs++;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  };
+  for (const pid of [dead, process.pid]) {
+    await owner(pid, earlier);
+    const takers = await Promise.allSettled([withDirectoryLock(lock, work), withDirectoryLock(lock, work)]);
+    expect(takers.map((t) => t.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(String((takers.find((t) => t.status === "rejected") as PromiseRejectedResult).reason)).toContain(
+      "retained lock",
+    );
+  }
+  expect(runs).toBe(2);
+  // This process's own lock is live.
+  await owner(process.pid, new Date().toISOString());
+  await expect(withDirectoryLock(lock, work)).rejects.toThrow(`pid ${process.pid}`);
 });
