@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -151,6 +152,14 @@ it("shutdown rejects queued turns instead of falling through into a fresh model 
     expect(await receipt).toMatchObject({
       result: { status: "accepted", seatDelivery: { state: "started" } },
     });
+    // The seat reports its turn, so the next queued send waits for that turn to end.
+    expect(
+      captain.syncSeatTranscript?.("global-default", {
+        sessionId: randomUUID(),
+        entries: [],
+        activity: "responding",
+      }),
+    ).toBe(true);
     expect(await send(1)).toMatchObject({
       result: { status: "accepted", seatDelivery: { state: "queued" } },
     });

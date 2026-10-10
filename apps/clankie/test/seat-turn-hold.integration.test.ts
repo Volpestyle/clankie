@@ -55,7 +55,9 @@ it("a queued delivery behind a turn the seat never reports finishing is delivere
   const notifications = channel(outbox);
   await vi.waitFor(() => expect(outbox.bound()).toBe(true));
 
-  // A worker report starts the seat's turn; its hooks never report it ending.
+  // A worker report starts the seat's turn; its hooks report turns starting but
+  // never this one ending.
+  expect(outbox.observeTurn("session-a", "responding")).toBe(true);
   expect(await send(outbox, "Worker report: tests passed")).toMatchObject({ outcome: "delivered" });
   const admitted = vi.fn();
   const held = outbox.deliver({
@@ -76,6 +78,31 @@ it("a queued delivery behind a turn the seat never reports finishing is delivere
   expect(await held).toMatchObject({ outcome: "delivered" });
   expect(notifications).toEqual(["Worker report: tests passed", "Fleet review"]);
   // Expiry stops blocking delivery only: the turn is never reported idle.
+  expect(admitted).toHaveBeenLastCalledWith("steered");
+});
+
+it("a seat that never syncs its turns does not hold a queued delivery at all", async () => {
+  // The 12:00 wake that ran three hours late (VUH-2045): a seat launched without
+  // its session identity reports no turns, so nothing it takes can be ended.
+  const outbox = new SeatOutbox({ turnHoldStaleMs: 60_000 });
+  const notifications = channel(outbox);
+  await vi.waitFor(() => expect(outbox.bound()).toBe(true));
+  expect(await send(outbox, "Worker report: tests passed")).toMatchObject({ outcome: "delivered" });
+  const admitted = vi.fn();
+  expect(
+    await outbox.deliver({
+      kind: "watch",
+      conversationId: "global-default",
+      source: "service",
+      content: "Fleet review",
+      wantsReply: false,
+      delivery: "queue",
+      onAdmitted: admitted,
+    }),
+  ).toMatchObject({ outcome: "delivered" });
+  expect(notifications).toEqual(["Worker report: tests passed", "Fleet review"]);
+  // The taken report's turn is still live: the review steers it, never reports it idle.
+  expect(admitted).not.toHaveBeenCalledWith("queued");
   expect(admitted).toHaveBeenLastCalledWith("steered");
 });
 

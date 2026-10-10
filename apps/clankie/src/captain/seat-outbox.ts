@@ -993,8 +993,17 @@ export class SeatOutbox {
     return events;
   }
 
+  /**
+   * Only a seat that reports its turns can end one, so only its turn holds
+   * queued deliveries; a seat without seat-sync would hold every one until
+   * expiry (VUH-2045). Admission still reads the raw turn: never "idle".
+   */
   private turnHolds(): boolean {
-    return this.turnActive && this.now() - this.turnObservedAt < this.turnHoldStaleMs;
+    return (
+      this.turnActive &&
+      this.turnSessionId !== undefined &&
+      this.now() - this.turnObservedAt < this.turnHoldStaleMs
+    );
   }
 
   private wakePoller(): void {
