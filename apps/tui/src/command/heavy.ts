@@ -3,6 +3,7 @@ import {
   heavyJobLane,
   resourceHolderIdentity,
   type FleetResourceGovernor,
+  type ResourceSnapshot,
 } from "@clankie/fleet-resources";
 import type { Writable } from "./io.ts";
 
@@ -38,11 +39,20 @@ export async function runHeavyCommand(
         (options.stderr ?? process.stderr).write(
           lane === "light"
             ? `clankie heavy: light lane waiting (${snapshot.capacity.lightUsed}/${snapshot.capacity.lightSlots} held, ${snapshot.lightQueue.length} queued)\n`
-            : `clankie heavy: waiting for machine capacity (${snapshot.pressure.reason ?? (snapshot.capacity.used < snapshot.capacity.heavySlots ? "busy" : "slots")}; ${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
+            : `clankie heavy: waiting for machine capacity (${waitReason(snapshot)}; ${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
         );
       },
     });
   } finally {
     if (options.governor === undefined) await governor.close();
   }
+}
+
+/** Behind another waiter is a FIFO turn, not machine pressure (VUH-2054). */
+function waitReason(snapshot: ResourceSnapshot): string {
+  const heavy = snapshot.queue.filter((entry) => entry.kind === "heavy");
+  if (heavy.findIndex((entry) => entry.pid === process.pid) > 0) return "queued";
+  return (
+    snapshot.pressure.reason ?? (snapshot.capacity.used < snapshot.capacity.heavySlots ? "busy" : "slots")
+  );
 }

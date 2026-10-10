@@ -484,6 +484,52 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
   }, 15_000);
 });
 
+it("a heavy CLI behind another waiter says it is queued; the head of the queue names the slots", async () => {
+  const f = await fixture();
+  try {
+    await f.governor.configure({
+      ...defaultResourcePolicy(),
+      heavySlots: 1,
+      maxLoadRatio: 16,
+      minAvailableMemoryMb: 0,
+    });
+    const marker = join(f.directory, "queue-label-ready");
+    const release = join(f.directory, "queue-label-release");
+    const holder = await f.headless([
+      "heavy",
+      "--",
+      process.execPath,
+      "-e",
+      "const fs=require('node:fs');fs.writeFileSync(process.argv[1],'ready');const t=setInterval(()=>{if(fs.existsSync(process.argv[2]))clearInterval(t)},20)",
+      marker,
+      release,
+    ]);
+    await eventually(() => exists(marker), Boolean, holder);
+    const head = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"]);
+    await eventually(
+      () => f.governor.snapshot(),
+      (value) => value.queue.length === 1,
+    );
+    const behind = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"]);
+    await eventually(
+      async () => behind.output.join(""),
+      (text) => text.includes("waiting for machine capacity"),
+    );
+    await eventually(
+      async () => head.output.join(""),
+      (text) => text.includes("waiting for machine capacity"),
+    );
+    expect(head.output.join("")).toContain("(slots; 1/1 held");
+    expect(behind.output.join("")).toContain("(queued; 1/1 held, 2 queued)");
+    await writeFile(release, "done");
+    expect(await holder.done).toBe(0);
+    expect(await head.done).toBe(0);
+    expect(await behind.done).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
 it("native child heavy CLIs under the same pane keep separate holder labels and permits", async () => {
   const f = await fixture();
   try {
