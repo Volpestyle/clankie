@@ -731,6 +731,54 @@ it("round-trips fleet gates across owner API, disk, project inheritance and the 
   expect((await f.settings.load()).autonomy.fleet.release).toEqual(initial.fleet.release);
 });
 
+it("sets the autonomy dial's leaves in one owner write and reads hand-set leaves as custom", async () => {
+  const f = await fixture();
+  const initial = await f.client.fleetSettings();
+  expect(initial.autonomyLevel).toBe("high");
+  expect(initial.fleet.hardToUndo).toBe("lead");
+
+  const off = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: initial.revision,
+    changes: { autonomyLevel: "off" },
+  });
+  expect(off.autonomyLevel).toBe("off");
+  const stored = (await new SettingsStore(f.settings.path).load()).autonomy.fleet;
+  expect(stored).toMatchObject({
+    everydayWork: "owner",
+    leavesMac: "owner",
+    hardToUndo: "owner",
+    closure: "owner",
+    commit: "owner",
+    push: "owner",
+    release: { mode: "owner" },
+  });
+  expect(stored.verification).toBe(initial.fleet.verification);
+
+  const full = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: off.revision,
+    changes: { autonomyLevel: "full", release: { mode: "time_rule", rule: "weekly" } },
+  });
+  expect(full.autonomyLevel).toBe("custom");
+  expect(full.fleet).toMatchObject({ leavesMac: "allow", release: { mode: "time_rule", rule: "weekly" } });
+
+  const low = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: full.revision,
+    changes: { autonomyLevel: "low" },
+  });
+  expect(low.autonomyLevel).toBe("low");
+  expect(low.fleet).toMatchObject({ everydayWork: "lead", commit: "lead", push: "owner" });
+
+  const custom = await f.request("/v1/operator/fleet-settings", {
+    schemaVersion: 1,
+    expectedRevision: low.revision,
+    changes: { autonomyLevel: "custom" },
+  });
+  expect(custom.status).toBe(400);
+});
+
 it("sets hire defaults, talkativeness and worker-account holds through the owner API the app and TUI share", async () => {
   const f = await fixture();
   await f.settings.update((current) => ({

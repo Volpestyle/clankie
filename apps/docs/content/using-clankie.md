@@ -50,10 +50,13 @@ each issue once it lands. Ask who is doing what, open a helper's conversation,
 and steer as it develops.
 
 Tell him how agents should work: “Commit and push without asking, ask me before
-releases, and keep reports short.” A preset (hands-off, balanced or careful)
-sets who answers for everyday work, anything that leaves the machine, and
-changes that are hard to undo: the helper, Clankie, or you. Money and accounts
-always come to you. Owner defaults apply everywhere, a project
+releases, and keep reports short.” One autonomy dial sets how many calls he
+takes: off, low, high (the default) or full. At high he answers his helpers'
+questions, including changes that are hard to undo, commits, pushes and closes
+work, and asks you before releases. Money and accounts always come to you. Set
+it with `/autonomy`, in the app's fleet settings, or with
+[`clankie autonomy`](/cli/#autonomy-dial); the individual settings stay under
+Advanced. Owner defaults apply everywhere, a project
 can override them, and every helper receives the result. Change them by asking
 Clankie, in the app's project settings, or with `clankie fleet` on a DIY
 installation. Preferences never widen access.
@@ -110,8 +113,8 @@ access than an ordinary turn. If he proposes a goal himself, `/goal accept`
 starts it. Goals default to a 1,000,000-token budget (`/goal --tokens N …` to
 change it), and `/goal pause`, `resume`, or `clear` controls one. From a script,
 use [`clankie conversations goal`](/cli/#conversations-list-show-id-tail-id-goal-id). Goals run in Clankie's
-own conversations, not in a harness seat. Autonomy is on by default;
-`/autonomy off` stops goal runs and self-wakes everywhere. On a local Mac,
+own conversations, not in a harness seat. `/autonomy pause` stops goal runs
+and self-wakes everywhere, and `/autonomy resume` restarts them. On a local Mac,
 [`clankie autostart enable`](/cli/#autostart-enable-autostart-disable-autostart-status)
 keeps the service running after login.
 

@@ -3,7 +3,7 @@ import { runUpdateCommand } from "./update.ts";
 import { PersonaAttentionSnapshotSchema } from "@clankie/protocol/discord-attention";
 import { createCaptainRouteClient } from "../session/operator-conversations.ts";
 import { ownerSettingsApi } from "./owner-settings-api.ts";
-import { runFleetCommand } from "./fleet.ts";
+import { runAutonomyCommand, runFleetCommand } from "./fleet.ts";
 import { runVoiceCommand } from "./voice.ts";
 import { runLinearCommand } from "./linear.ts";
 import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
@@ -260,6 +260,7 @@ export async function hostedCommand(
   const ownerFetcher = createCaptainRouteClient(transport);
   if (command === "fleet" && ["set", "clear", "show"].includes(action ?? ""))
     return runFleetCommand(args.slice(1), { ownerFetcher });
+  if (command === "autonomy") return runAutonomyCommand(args.slice(1), { ownerFetcher });
   if (command === "awake") {
     if (args.includes("--local-setup")) throw new Error("Local setup cannot target a hosted machine");
     return runAwakeCommand(args.slice(1), { ownerFetcher, repoRoot: process.cwd() });

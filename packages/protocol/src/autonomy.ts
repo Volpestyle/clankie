@@ -48,13 +48,119 @@ export const FLEET_AUTONOMY_FIELDS = [
   ...FLEET_WORKING_PREFERENCE_FIELDS,
   ...FLEET_GATE_FIELDS,
 ] as const;
+
+/**
+ * One owner dial for how much Clankie decides without asking (ADR 0263).
+ * Choosing a level writes these leaves; the level itself is never stored, so a
+ * hand-set leaf reads back as `custom`. Whether he works at all is a separate
+ * switch. Verification and reporting style are how work is done, not who
+ * decides, and no level touches them.
+ */
+export const AutonomyLevelSchema = z.enum(["off", "low", "high", "full"]);
+export type AutonomyLevel = z.infer<typeof AutonomyLevelSchema>;
+export const AutonomyLevelReadingSchema = z.union([AutonomyLevelSchema, z.literal("custom")]);
+export type AutonomyLevelReading = z.infer<typeof AutonomyLevelReadingSchema>;
+export const DEFAULT_AUTONOMY_LEVEL = "high" satisfies AutonomyLevel;
+export const AUTONOMY_LEVEL_FLEET_FIELDS = [
+  ...FLEET_GATE_FIELDS,
+  "closure",
+  "machineSetup",
+  "commit",
+  "push",
+  "release",
+] as const;
+export type AutonomyLevelFleet = FleetGates & {
+  closure: FleetAutonomyMode;
+  machineSetup: FleetAutonomyMode;
+  commit: FleetAutonomyMode;
+  push: FleetAutonomyMode;
+  release: { mode: "lead" } | { mode: "owner" };
+};
+export const AUTONOMY_LEVELS = {
+  off: {
+    label: "Off",
+    description:
+      "Clankie decides nothing on his own: every worker question, commit, push, release, close and setup change waits for you.",
+    fleet: {
+      everydayWork: "owner",
+      leavesMac: "owner",
+      hardToUndo: "owner",
+      moneyAndAccounts: "owner",
+      closure: "owner",
+      machineSetup: "owner",
+      commit: "owner",
+      push: "owner",
+      release: { mode: "owner" },
+    },
+  },
+  low: {
+    label: "Low",
+    description:
+      "Clankie answers workers' everyday questions and commits; anything that leaves your Mac, is hard to undo, pushes, releases or closes work asks you.",
+    fleet: {
+      ...FLEET_GATE_PRESETS.careful.gates,
+      closure: "owner",
+      machineSetup: "owner",
+      commit: "lead",
+      push: "owner",
+      release: { mode: "owner" },
+    },
+  },
+  high: {
+    label: "High",
+    description:
+      "Clankie takes every call he can: workers handle everyday work, he decides on outward and hard-to-undo changes, commits, pushes, sets up workers and closes work. Releases, money and accounts ask you.",
+    fleet: {
+      ...FLEET_GATE_PRESETS["hands-off"].gates,
+      closure: "lead",
+      machineSetup: "lead",
+      commit: "lead",
+      push: "lead",
+      release: { mode: "owner" },
+    },
+  },
+  full: {
+    label: "Full",
+    description:
+      "Clankie decides everything but money and accounts, releases included, and workers act on outward work without stopping to ask.",
+    fleet: {
+      everydayWork: "allow",
+      leavesMac: "allow",
+      hardToUndo: "lead",
+      moneyAndAccounts: "owner",
+      closure: "lead",
+      machineSetup: "lead",
+      commit: "lead",
+      push: "lead",
+      release: { mode: "lead" },
+    },
+  },
+} as const satisfies Record<AutonomyLevel, { label: string; description: string; fleet: AutonomyLevelFleet }>;
+
+/** A fresh copy of the leaves a level writes. */
+export function autonomyLevelFleet(level: AutonomyLevel): AutonomyLevelFleet {
+  const { release, ...rest } = AUTONOMY_LEVELS[AutonomyLevelSchema.parse(level)].fleet;
+  return { ...rest, release: { ...release } };
+}
+
+/** The level whose every leaf matches; a time-rule release or any other hand-set leaf reads as `custom`. */
+export function matchingAutonomyLevel(
+  fleet: Pick<FleetAutonomyWire, (typeof AUTONOMY_LEVEL_FLEET_FIELDS)[number]>,
+): AutonomyLevelReading {
+  return (
+    AutonomyLevelSchema.options.find((level) => {
+      const target = AUTONOMY_LEVELS[level];
+      return AUTONOMY_LEVEL_FLEET_FIELDS.every((field) =>
+        field === "release"
+          ? fleet.release?.mode === target.fleet.release.mode
+          : fleet[field] === target.fleet[field],
+      );
+    }) ?? "custom"
+  );
+}
+
 export const FLEET_AUTONOMY_DEFAULTS = {
-  ...FLEET_GATE_PRESETS.balanced.gates,
-  closure: "lead",
-  machineSetup: "lead",
-  commit: "lead",
-  push: "lead",
-  release: { mode: "owner" },
+  ...AUTONOMY_LEVELS[DEFAULT_AUTONOMY_LEVEL].fleet,
   verification: "change_run_read",
   reportingStyle: "Short and plain.",
 } satisfies FleetWorkingPreferences &

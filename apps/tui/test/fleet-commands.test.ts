@@ -127,7 +127,7 @@ describe("clankie fleet", () => {
       { currentValue: "on" },
       { currentValue: "lead" },
       { currentValue: "lead" },
-      { currentValue: "balanced" },
+      { currentValue: "hands-off" },
       { currentValue: "lead" },
       { currentValue: "lead" },
       { currentValue: "owner" },

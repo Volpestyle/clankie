@@ -81,23 +81,24 @@ the time and tokens went
 ([efficiency](https://docs.clankie.bot/cli/#agents-efficiency-agents-tidy-worktrees),
 [metrics](https://docs.clankie.bot/cli/#metrics-issues-issue-id-worker-id-since-iso-until-iso)).
 
-**Decides as much as you let him.** Pick a preset, hands-off, balanced or
-careful, or set each gate yourself: everyday work, anything that leaves your
-Mac, and changes that are hard to undo each go to the worker, to Clankie, or
-to you. Money and accounts always come to you. Committing, pushing, releasing
-(even on a rule like "when the last release is a week old") and closing work
-are settings too, for every project or just one. When he needs you, he leaves
-one ask with his recommendation
-([working preferences](https://docs.clankie.bot/cli/#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear),
+**Decides as much as you let him.** One autonomy dial: off, low, high or full.
+At high, the default, he answers his workers, decides on changes that are hard
+to undo, commits, pushes and closes work, and asks you before a release. Money
+and accounts always come to you. Under Advanced, each gate, commit, push,
+release rule (even "when the last release is a week old") and close is its own
+setting, for every project or just one. When he needs you, he leaves one ask
+with his recommendation
+([autonomy](https://docs.clankie.bot/cli/#autonomy-dial),
+[working preferences](https://docs.clankie.bot/cli/#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear),
 [asks](https://docs.clankie.bot/cli/#owner-asks-conversations-questions-id-and-conversations-answer)).
 
 **Has ideas of his own.** He schedules his own wake-ups to pick work back up,
 and in his own console he can hold a goal and keep at it within a token budget
 you set; a seat in Claude Code or Codex can't hold one. From his own
-conversations he can post into your
-Discord rooms: a find worth sharing, or an announcement in the server he runs.
-`/autonomy off` stops goal runs and self-wakes; in Discord, chattiness and what
-wakes him set how readily he jumps in
+conversations he can post into your Discord rooms: a find worth sharing, or an
+announcement in the server he runs. `/autonomy pause` stops goal runs and
+self-wakes; in Discord, chattiness and what wakes him set how readily he jumps
+in
 ([goals](https://docs.clankie.bot/using-clankie/#give-him-ongoing-work)).
 
 **Your right-hand man.** Think out loud with him and get pushed back on, hand

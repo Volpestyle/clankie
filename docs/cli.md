@@ -3047,11 +3047,11 @@ remain independent. `fleet status` and `/fleet` show a summary generated from th
 saved categories, including custom combinations. Labels and descriptions come
 from `@clankie/protocol` so the TUI and app share their wording.
 
-| Preset             | Everyday work   | Leaves your Mac | Hard to undo    | Money and accounts |
-| ------------------ | --------------- | --------------- | --------------- | ------------------ |
-| Hands-off          | Just do it      | Clankie decides | Clankie decides | Ask me             |
-| Balanced (default) | Just do it      | Clankie decides | Ask me          | Ask me             |
-| Careful            | Clankie decides | Ask me          | Ask me          | Ask me             |
+| Preset              | Everyday work   | Leaves your Mac | Hard to undo    | Money and accounts |
+| ------------------- | --------------- | --------------- | --------------- | ------------------ |
+| Hands-off (default) | Just do it      | Clankie decides | Clankie decides | Ask me             |
+| Balanced            | Just do it      | Clankie decides | Ask me          | Ask me             |
+| Careful             | Clankie decides | Ask me          | Ask me          | Ask me             |
 
 Per-project settings accept the same category flags and `--gate-preset`, with
 `inherit` to clear their overrides, through `clankie project settings PROJECT`.
@@ -3059,6 +3059,32 @@ The existing owner API accepts category leaves in the revision-fenced
 `changes` object at `POST /v1/operator/fleet-settings` and
 `changes.autonomy.fleet` in project updates. Current snapshots advertise
 `fleetGates:true`; clients must not invent support on older hosts.
+
+<a id="autonomy-dial"></a>
+
+### `autonomy [status|off|low|high|full]`
+
+One dial over all of the above: how much Clankie decides without asking
+([ADR 0263](adr/0263-one-autonomy-dial-over-the-decision-leaves.md)). `off`
+sends every gate, commit, push, release, close and machine-setup decision to the
+owner. `low` uses the Careful gates, lead commits, and owner push, release and
+closure. `high`, the
+default, uses the Hands-off gates and lead closure, machine setup, commit and push,
+with owner releases. `full` also lets workers act on outward work and the lead
+release. Money and accounts always ask the owner. Verification and reporting
+style are never changed by a level. The command prints JSON with `level`,
+`description`, `revision` and every level's description. A level is computed
+from the saved leaves, so any hand-set leaf reads `custom`. Whether he works
+unprompted is a separate switch: the dial never starts or stops goal runs and
+self-wakes.
+
+The API is `changes.autonomyLevel` on `POST /v1/operator/fleet-settings`. The
+level's leaves are written first, explicit leaves in the same change win, and
+snapshots report `autonomyLevel`. A snapshot without it comes from an older
+service, so the CLI refuses to set a level there. In the console, `/autonomy
+LEVEL` sets the dial, `/autonomy pause` and `/autonomy resume` stop and restart
+goal runs and self-wakes, and `/autonomy clear` cancels the selected chat's
+scheduled wake.
 
 New hired Claude workers launch in `auto` mode, preserving managed and tracker
 denies and the permission hook, with no blanket `ask` rules or Bash allow.
@@ -4798,7 +4824,7 @@ an already running turn. Worker reports retain their original delivery IDs and
 require explicit read acknowledgment after delivery.
 Model calls in Pi create inactive
 proposals; `/goal accept` confirms one. `/goal <objective>` creates an active goal
-directly. Starting, accepting and resuming a goal, and `/autonomy on`, require the
+directly. Starting, accepting and resuming a goal, and `/autonomy resume`, require the
 owner/device credential; the shared captain bearer receives HTTP 403
 `goal_owner_required`. The console uses its owner transport, and headless owners
 can use `clankie conversations goal ID accept|resume` or
@@ -6195,7 +6221,7 @@ runs. The operator bridge's parent is Prime's Python kernel, which also runs
 model code, so the seat hands the bridge `CLANKIE_OPERATOR_TOKEN` explicitly.
 Prime keeps that server list in worker memory only, but code in the same
 session can read it back. The server list is lost if the worker restarts;
-`--resume` reapplies it. See [ADR 0262](adr/0262-prime-agent-operator-seat-is-a-resident-daemon-session.md).
+`--resume` reapplies it. See [ADR 0263](adr/0262-prime-agent-operator-seat-is-a-resident-daemon-session.md).
 
 ### Delivery receipt stages
 

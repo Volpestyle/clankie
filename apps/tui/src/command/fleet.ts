@@ -9,6 +9,10 @@ import {
   FleetReportingStyleSchema,
   formatFleetAutonomyGuidance,
   type FleetAutonomy,
+  AUTONOMY_LEVELS,
+  AutonomyLevelSchema,
+  type AutonomyLevel,
+  type AutonomyLevelReading,
   FleetResourcePolicySchema,
   withoutNoPreference,
 } from "@clankie/protocol";
@@ -64,10 +68,12 @@ export interface FleetCommandResult {
   }>;
   readonly settingsFile: string;
   readonly restart: string;
+  /** The autonomy dial read back from the leaves; absent from an older service. */
+  readonly autonomyLevel?: AutonomyLevelReading;
 }
 
 /** Any subset of the fleet settings; what is left out keeps its current value. */
-export type FleetUpdate = Partial<FleetSettings & FleetAutonomy>;
+export type FleetUpdate = Partial<FleetSettings & FleetAutonomy> & { autonomyLevel?: AutonomyLevel };
 
 function store(options: FleetCommandOptions): SettingsStore {
   return options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
@@ -202,6 +208,7 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
     ...report,
     revision: snapshot.revision,
     fleet: { ...report.fleet, ...FleetAutonomySchema.parse(fleetAutonomyFields(snapshot.fleet)) },
+    ...(snapshot.autonomyLevel === undefined ? {} : { autonomyLevel: snapshot.autonomyLevel }),
   };
 }
 
@@ -226,6 +233,7 @@ export async function fleetUpdate(
       changes: {
         ...fleetChange,
         ...fleetAutonomyFields(change),
+        ...(change.autonomyLevel === undefined ? {} : { autonomyLevel: change.autonomyLevel }),
         ...(Object.hasOwn(change, "hire") ? { hire: change.hire ?? null } : {}),
         ...(hirePatch === undefined ? {} : { hire: patchHireDefaults(snapshot.fleet.hire, hirePatch) }),
       },
@@ -244,7 +252,58 @@ export async function fleetUpdate(
     ...report,
     revision: updated.revision,
     fleet: { ...report.fleet, ...FleetAutonomySchema.parse(fleetAutonomyFields(updated.fleet)) },
+    ...(updated.autonomyLevel === undefined ? {} : { autonomyLevel: updated.autonomyLevel }),
   };
+}
+
+const AUTONOMY_USAGE = `Usage: clankie autonomy [status|${AutonomyLevelSchema.options.join("|")}]`;
+
+export interface AutonomyCommandResult {
+  readonly ok: true;
+  readonly revision: string;
+  readonly level: AutonomyLevelReading;
+  readonly description: string;
+  readonly levels: Record<AutonomyLevel, string>;
+}
+
+/** The owner's one autonomy dial (ADR 0263), over the same fleet settings API. */
+export async function runAutonomyCommand(
+  args: readonly string[],
+  options: FleetCommandOptions = {},
+): Promise<AutonomyCommandResult> {
+  const verb = args[0] ?? "status";
+  if (args.length > 1) throw new Error(AUTONOMY_USAGE);
+  let report: FleetCommandResult;
+  if (verb === "status") report = await fleetStatus(options);
+  else {
+    const level = AutonomyLevelSchema.safeParse(verb);
+    if (!level.success) throw new Error(AUTONOMY_USAGE);
+    const api = await ownerSettingsApi(options);
+    const snapshot = await api.get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
+    if (snapshot.autonomyLevel === undefined)
+      throw new Error("This Clankie service predates the autonomy dial. Update it, then try again.");
+    report = await fleetUpdate(
+      { autonomyLevel: level.data },
+      { ...options, expectedRevision: snapshot.revision },
+    );
+  }
+  if (report.autonomyLevel === undefined)
+    throw new Error("This Clankie service predates the autonomy dial. Update it, then try again.");
+  return {
+    ok: true,
+    revision: report.revision,
+    level: report.autonomyLevel,
+    description: autonomyLevelDescription(report.autonomyLevel),
+    levels: Object.fromEntries(
+      AutonomyLevelSchema.options.map((level) => [level, AUTONOMY_LEVELS[level].description]),
+    ) as Record<AutonomyLevel, string>,
+  };
+}
+
+export function autonomyLevelDescription(level: AutonomyLevelReading): string {
+  return level === "custom"
+    ? "Custom: individual settings differ from every level. Choose a level to reset them, or keep tuning them under Advanced."
+    : `${AUTONOMY_LEVELS[level].label}: ${AUTONOMY_LEVELS[level].description}`;
 }
 
 function isSize(value: string): value is FleetSize {

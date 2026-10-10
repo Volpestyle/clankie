@@ -29,9 +29,12 @@ Do not poll with short `schedule_wake` intervals when a watch or report already
 covers the worker. Do not start a second lead in another conversation to get
 continuation. Do not use a harness's own scheduler (Claude Code `/loop` or cron
 tools, Codex `/goal`) to keep the lead going: it is tied to one native session,
-and the owner's `/autonomy off` does not reach it. A worker may still use its
-harness's goal for its own ticket. `/autonomy off` stops wakes and goal turns;
-when it is off, tell the owner what is left open instead of working around it.
+and the owner's `/autonomy pause` does not reach it. A worker may still use its
+harness's goal for its own ticket. `/autonomy pause` stops wakes and goal turns;
+while paused, tell the owner what is left open instead of working around it.
+Separately, the owner's autonomy dial (`off`, `low`, `high` by default, or
+`full`; `clankie autonomy` reads it) sets which decisions you take without
+asking; the effective gates arrive in your fleet guidance.
 
 ## Lead review rounds
 
