@@ -183,25 +183,45 @@ async function fixture() {
       await emit("session.start", { isInteractive: true });
       await drain();
     },
-    tick: async () => {
-      now += 5_000;
+    tick: async (ms = 5_000) => {
+      now += ms;
       for (const entry of every) if (!entry.cancelled) await entry.callback();
       await drain();
     },
   };
 }
 
-test("original Claude mod reports its exact native server catalog repeatedly through the pane link", async () => {
+const statusTools = [
+  { name: "mcp__plugin_clankie-worker_clankie__message_clankie", mcp: true },
+  { name: "mcp__plugin_clankie-worker_clankie__message_clankie_status", mcp: true },
+];
+
+test("original Claude mod reports its exact native server catalog through the pane link when it changes", async () => {
   const f = await fixture();
   await f.start();
   await f.tick();
-  expect(f.reports).toHaveLength(2);
+  await f.emit("turn.start", { turnId: "turn" });
+  await f.emit("turn.complete", { turnId: "turn" });
+  await f.drain();
+  // An accepted, unchanged catalog is still observed natively but never resent.
   expect(f.reports).toEqual([
     expect.objectContaining({ sessionId: "original-session", tools: ["message_clankie"] }),
-    expect.objectContaining({ sessionId: "original-session", tools: ["message_clankie"] }),
   ]);
-  expect(f.api.mcp.connect).toHaveBeenCalledTimes(2);
+  expect(f.api.mcp.connect).toHaveBeenCalledTimes(3);
   expect(f.api.mcp.connect).toHaveBeenCalledWith("worker");
+  f.api.tool.list.mockResolvedValue(statusTools);
+  await f.tick();
+  expect(f.reports).toHaveLength(2);
+  expect(f.reports[1]).toMatchObject({ tools: ["message_clankie", "message_clankie_status"] });
+  // Plugin reload (like clear, resume and compaction) is a fresh check.
+  await f.emit("command.run", { command: "reload-plugins" });
+  await f.drain();
+  expect(f.reports).toHaveLength(3);
+  await f.tick();
+  expect(f.reports).toHaveLength(3);
+  // The heartbeat restores Clankie's in-memory verdict after a service restart.
+  await f.tick(300_000);
+  expect(f.reports).toHaveLength(4);
   expect(f.api.ui.log).not.toHaveBeenCalled();
 });
 
@@ -209,7 +229,7 @@ test("native pane refusals retain their code and print once across turns and int
   const f = await fixture();
   await f.start();
   f.reply(403, { error: "remote_pane_required", detail: "Bearer do-not-display" });
-  await f.tick();
+  await f.tick(300_000);
   const warning = f.api.ui.log.mock.calls[0]![0];
   expect(warning).toContain("HTTP 403, remote_pane_required");
   expect(warning).toContain("/mcp → reconnect clankie-worker");
@@ -226,7 +246,7 @@ test("native pane refusals retain their code and print once across turns and int
   for (let i = 0; i < 4; i++) await f.tick();
   expect(f.api.ui.status).toHaveBeenLastCalledWith(undefined);
   f.reply(403, { error: "remote_pane_required" });
-  await f.tick();
+  await f.tick(300_000);
   expect(f.api.ui.log).toHaveBeenCalledTimes(1);
   f.reply(403, { error: "native_session_required" });
   await f.tick();
@@ -244,7 +264,7 @@ test("helper distinguishes a refused loopback link and rereads replacement disco
   await new Promise<void>((resolve) => server.close(() => resolve()));
   // A genuinely closed local port, not a simulated fetch exception.
   await f.link(`http://127.0.0.1:${port}`);
-  await f.tick();
+  await f.tick(300_000);
   expect(f.api.ui.log).toHaveBeenCalledTimes(1);
   expect(f.api.ui.log.mock.calls[0]![0]).toContain("connection was refused");
   expect(f.api.ui.log.mock.calls[0]![0]).not.toContain("authenticated link");
@@ -259,7 +279,7 @@ test("remote observer timeout and ordinary HTTP refusal remain distinct safe war
   const f = await fixture();
   await f.start();
   f.reply(503, { error: "remote_observation_timeout", detail: "server secret" });
-  await f.tick();
+  await f.tick(300_000);
   expect(f.api.ui.log.mock.calls[0]![0]).toContain("timed out during remote pane verification");
   expect(f.api.ui.log.mock.calls[0]![0]).toContain("HTTP 503, remote_observation_timeout");
   expect(f.api.ui.log.mock.calls[0]![0]).not.toContain("server secret");
@@ -276,7 +296,7 @@ test("a real stalled report times out with a bounded diagnostic and cannot displ
   // Refusal headers arrive immediately; its stalled body still shares the
   // request deadline and must not swallow timeout into an ordinary HTTP error.
   f.reply(503, {}, true);
-  await f.tick();
+  await f.tick(300_000);
   expect(f.api.ui.log).toHaveBeenCalledTimes(1);
   expect(f.api.ui.log.mock.calls[0]![0]).toContain("timed out after 20s");
   expect(f.api.process.run.mock.calls.at(-1)![1].timeoutMs).toBe(25_000);
@@ -286,7 +306,7 @@ test("a real reset link is diagnosed separately and recovers through the same id
   const f = await fixture();
   await f.start();
   f.disconnect();
-  await f.tick();
+  await f.tick(300_000);
   expect(f.api.ui.log.mock.calls[0]![0]).toContain("lost its fleet link before a reply arrived");
   f.reply(200, { status: "matched" });
   await f.tick();
@@ -299,7 +319,7 @@ test("a reset while reading a refusal body retains the transport cause", async (
   await f.start();
   f.reply(503, {});
   f.disconnectBody();
-  await f.tick();
+  await f.tick(300_000);
   expect(f.api.ui.log.mock.calls[0]![0]).toContain("lost its fleet link before a reply arrived");
   expect(f.api.ui.log.mock.calls[0]![0]).not.toContain("was refused (HTTP 503)");
 });
@@ -308,11 +328,14 @@ test("native turns, in-flight tools and background agents hold probes without to
   const f = await fixture();
   await f.start();
   await f.emit("turn.start", { turnId: "root-turn" });
+  // Each hold below starts with a changed catalog, so only the hold delays its report.
+  f.api.tool.list.mockResolvedValue(statusTools);
   await f.tick();
   expect(f.reports).toHaveLength(1);
   await f.emit("turn.complete", { turnId: "root-turn" });
   await f.drain();
   expect(f.reports).toHaveLength(2);
+  f.api.tool.list.mockResolvedValue(statusTools.slice(0, 1));
   let finish = () => {};
   const result = { native: "result preserved" };
   const call = f.emit(
@@ -388,6 +411,7 @@ test("a downstream native completion error preserves its result and cannot wedge
   const f = await fixture();
   await f.start();
   await f.emit("turn.start", { turnId: "root-turn" });
+  f.api.tool.list.mockResolvedValue(statusTools);
   await expect(
     f.emit("turn.complete", { turnId: "root-turn" }, async () => {
       throw new Error("native downstream completion error");

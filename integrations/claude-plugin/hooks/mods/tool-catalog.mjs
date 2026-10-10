@@ -3,6 +3,10 @@
 const STARTUP_MS = 20_000;
 const RETRY_MS = 500;
 const WATCH_MS = 5_000;
+// Every report costs Clankie fresh process proofs, so an unchanged catalog it
+// already accepted is not resent. The heartbeat only restores his in-memory
+// verdict after a service restart (VUH-2062).
+const HEARTBEAT_MS = 300_000;
 let interactive = false;
 let generation = 0;
 let probing = false;
@@ -14,6 +18,7 @@ let nextWatchAfter = 0;
 const warnedCauses = new Set();
 let failures = 0;
 let retryAfter = 0;
+let accepted;
 const activeTurns = new Set();
 
 export function register(on) {
@@ -40,6 +45,7 @@ export function register(on) {
     nextWatchAfter = 0;
     retryAfter = 0;
     failures = 0;
+    accepted = undefined;
     warnedCauses.clear();
     return next(event);
   });
@@ -89,20 +95,20 @@ async function scheduleProbe($, startup = true) {
   const sessionId = await $.session.id();
   const probe = ++generation;
   // Let the session finish starting so its MCP clients can finish discovery.
-  $.clock.after(0, async () => checkCatalog($, deadline, sessionId, probe));
+  $.clock.after(0, async () => checkCatalog($, deadline, sessionId, probe, startup));
 }
 
-async function checkCatalog($, deadline, sessionId, probe) {
+async function checkCatalog($, deadline, sessionId, probe, force) {
   if (probing) return;
   probing = true;
   try {
-    await observeCatalog($, deadline, sessionId, probe);
+    await observeCatalog($, deadline, sessionId, probe, force);
   } finally {
     probing = false;
   }
 }
 
-async function observeCatalog($, deadline, sessionId, probe) {
+async function observeCatalog($, deadline, sessionId, probe, force) {
   const current = async () => {
     const observedSessionId = await $.session.id();
     return (
@@ -182,6 +188,19 @@ async function observeCatalog($, deadline, sessionId, probe) {
     report.error = "Native Claude tool catalog unavailable: original mod API unsupported or disconnected";
   }
   if (!(await current())) return;
+  const fingerprint = JSON.stringify([
+    report.sessionId,
+    report.bridge,
+    report.conversationId ?? null,
+    report.error ?? null,
+    [...report.tools].sort(),
+  ]);
+  const checkedAt = await $.clock.now();
+  if (!force && accepted?.fingerprint === fingerprint && checkedAt - accepted.at < HEARTBEAT_MS) {
+    nextWatchAfter = checkedAt + WATCH_MS;
+    return;
+  }
+  accepted = undefined;
   let result;
   try {
     const response = await $.process.run(["node", helper], {
@@ -201,6 +220,7 @@ async function observeCatalog($, deadline, sessionId, probe) {
   }
   if (!(await current())) return;
   if (result.status === "unlinked" || result.status === "matched") {
+    accepted = { fingerprint, at: checkedAt };
     nextWatchAfter = (await $.clock.now()) + WATCH_MS;
     failures = 0;
     retryAfter = 0;
@@ -208,7 +228,7 @@ async function observeCatalog($, deadline, sessionId, probe) {
     return;
   }
   if ((await $.clock.now()) < deadline) {
-    $.clock.after(RETRY_MS, async () => checkCatalog($, deadline, sessionId, probe));
+    $.clock.after(RETRY_MS, async () => checkCatalog($, deadline, sessionId, probe, force));
     return;
   }
   const message = [result.detail, result.remediation].filter(Boolean).join(" ");

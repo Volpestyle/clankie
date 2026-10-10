@@ -136,8 +136,12 @@ evidence. Operator and worker bridges report independently. Plugin reload,
 clear, resume and compaction trigger a fresh check. No native evidence stays
 explicitly unverified. The original interactive mod also observes the accepted
 catalog every five seconds while idle, after Claude's native MCP
-`tools/list_changed` handling. Running turns, tools and background agents hold
-these probes. Reports keep the exact current session and server namespace;
+`tools/list_changed` handling, and reports it only when it changes. Each report
+costs Clankie fresh process proofs, so an unchanged catalog he accepted is resent
+only every five minutes, which restores his in-memory verdict after a service
+restart (VUH-2062). A refused or failed report retries with backoff as before.
+Running turns, tools and background agents hold these probes. Reports keep the
+exact current session and server namespace;
 they never submit a prompt, create an SDK query, reconnect personal servers or
 restart the seat. A missing native mod/API remains an explicit failure in
 `clankie harness refresh-tools` and the roster. See
