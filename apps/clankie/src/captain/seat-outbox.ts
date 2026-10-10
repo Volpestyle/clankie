@@ -150,6 +150,8 @@ export class SeatOutbox {
   private readonly awaitingReply = new Map<string, Pending>();
   private readonly pollers = new Set<ParkedPoller>();
   private readonly boundGraceMs: number;
+  private readonly ackTimeoutMs: number;
+  private readonly abortKeepsGrace: boolean;
   private readonly explicitAcknowledgments: boolean;
   private readonly replyTimeoutMs: number;
   private readonly now: () => number;
@@ -192,6 +194,14 @@ export class SeatOutbox {
       /** Worker channels acknowledge an exact event, never implicitly on the next poll. */
       readonly explicitAcknowledgments?: boolean;
       readonly boundGraceMs?: number;
+      /** How long a taken event waits for its exact ack before settling unconfirmed; defaults to the bound grace. */
+      readonly ackTimeoutMs?: number;
+      /**
+       * Worker mailboxes end parked polls on every report change and re-park at
+       * once, so an aborted poll keeps the grace. A head seat's abort is its
+       * bridge leaving and unbinds at once.
+       */
+      readonly abortKeepsGrace?: boolean;
       readonly replyTimeoutMs?: number;
       readonly now?: () => number;
       /**
@@ -216,6 +226,8 @@ export class SeatOutbox {
       options.uncertaintyPath === undefined ? undefined : `${options.uncertaintyPath}.delivered`,
     );
     this.boundGraceMs = options.boundGraceMs ?? BOUND_GRACE_MS;
+    this.ackTimeoutMs = options.ackTimeoutMs ?? this.boundGraceMs;
+    this.abortKeepsGrace = options.abortKeepsGrace ?? false;
     this.explicitAcknowledgments = options.explicitAcknowledgments ?? false;
     this.replyTimeoutMs = options.replyTimeoutMs ?? REPLY_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
@@ -614,7 +626,7 @@ export class SeatOutbox {
           clearTimeout(timer);
           signal?.removeEventListener("abort", onAbort);
           this.pollers.delete(poller);
-          if (source === "timeout" || source === "wake") {
+          if (source === "timeout" || source === "wake" || (source === "abort" && this.abortKeepsGrace)) {
             this.lastPollAt = this.now();
             this.lastPollBinding = recipientBinding;
           }
@@ -846,7 +858,7 @@ export class SeatOutbox {
             detail:
               "The bridge took the event but did not acknowledge it; inspect the seat before resending.",
           }),
-        this.boundGraceMs,
+        this.ackTimeoutMs,
       );
       pending.timer.unref?.();
       events.push(wire);

@@ -5849,6 +5849,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (firstPoll && binding && !live) fleetChanges.touch();
         firstPoll = false;
         const events = await pending;
+        // A report change ends every seat's parked poll at once. Re-park an
+        // empty one without a Herdr lookup per seat (VUH-2034).
+        if (
+          binding &&
+          !events.length &&
+          changed.aborted &&
+          !signal?.aborted &&
+          Date.now() < deadline &&
+          !conversations.senderReportEvents(paneId, binding).length
+        )
+          continue;
         const current = await herdrRunner.get(paneId).catch(() => undefined);
         if (!binding || inboundBinding(current) !== binding) return [];
         const result = [...events, ...conversations.senderReportEvents(paneId, binding)].slice(0, 64);

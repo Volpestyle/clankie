@@ -176,6 +176,13 @@ to the hook once. A replacement occupant cannot take the old mail. An uncertain
 HTTP or output-pipe handoff is retained as a receipt, never replayed. A successful
 hook output acknowledgment means `delivered`, not model consumption.
 
+Each channel poll and ack passes a native process proof, which can take
+seconds or refuse under fleet load. A worker mailbox therefore stays bound for
+15 seconds between polls and waits 30 seconds for an event's exact ack. The
+bridge retries that same ack for up to 20 seconds and keeps polling once it
+lands (VUH-2034). It stops polling only when the ack names another event or
+never lands. A roster that shows the seat as not `live` is then accurate.
+
 The fleet roster's `messageReceiver` separates inbound delivery from installed
 tools and outbound reports. `next-turn-only` means a prompt hook is observed for
 this exact session but no live channel poll is bound; `live` means a native poll

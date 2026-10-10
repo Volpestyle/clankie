@@ -99,6 +99,16 @@ export function fleetSeatChromeArgs(harness: string): readonly string[] | undefi
   }
 }
 
+/**
+ * A worker bridge's poll and ack each pass a native process proof and a Herdr
+ * lookup, which take seconds or fail and retry under fleet load. The head
+ * seat's 2s windows turned live workers into `released` and `unconfirmed`
+ * (VUH-2034), so worker mailboxes allow the re-poll and the bridge's ack
+ * retries (20s) to finish.
+ */
+const FLEET_BOUND_GRACE_MS = 15_000;
+const FLEET_ACK_TIMEOUT_MS = 30_000;
+
 /** Create the seat's outbox on first poll (or any other first use). */
 export function fleetSeatMailbox(
   mailboxes: Map<string, SeatOutbox>,
@@ -109,6 +119,10 @@ export function fleetSeatMailbox(
   if (existing !== undefined) return existing;
   const created = new SeatOutbox({
     explicitAcknowledgments: true,
+    boundGraceMs: FLEET_BOUND_GRACE_MS,
+    ackTimeoutMs: FLEET_ACK_TIMEOUT_MS,
+    // A report change ends every parked poll (VUH-2034).
+    abortKeepsGrace: true,
     ...(uncertaintyDir === undefined
       ? {}
       : { uncertaintyPath: join(uncertaintyDir, `${encodeURIComponent(seatId)}.json`) }),

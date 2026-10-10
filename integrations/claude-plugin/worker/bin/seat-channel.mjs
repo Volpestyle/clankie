@@ -35,6 +35,8 @@ import { approvesWorkerChannel, authorization, readLink, seatRoute, TEXT_MAX } f
 
 const WAIT_MS = 25_000;
 const RETRY_MS = 2_000;
+// The service waits 30s for an exact ack (FLEET_ACK_TIMEOUT_MS); retries end first.
+const ACK_RETRY_MS = 20_000;
 // Native clients can retain only their first catalog. Let a newly started pane
 // settle, within Codex's 30-second startup timeout, without weakening proof.
 const FIRST_TOOLS_WAIT_MS = 20_000;
@@ -112,6 +114,7 @@ class FleetAdmissionUnavailable extends Error {}
 class FleetSessionExpired extends Error {}
 class FleetRpcError extends Error {}
 class FleetRequestTimeout extends Error {}
+class ChannelReceiptMismatch extends Error {}
 
 const operationSignal = (signal, timeoutMs = REQUEST_TIMEOUT_MS) =>
   signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
@@ -785,18 +788,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
               error ? reject(error) : resolve(),
             );
           });
-          const ack = await fetch(
-            `${seatRoute(link, paneId, "events")}/${encodeURIComponent(event.id)}/ack`,
-            {
-              method: "POST",
-              headers: linkHeaders(),
-              signal: AbortSignal.timeout(10_000),
-            },
-          );
-          await checkFleetMembership(ack);
-          const receipt = ack.ok ? await ack.json() : undefined;
-          if (receipt?.acknowledged !== true || receipt.eventId !== event.id)
-            throw new Error("Exact channel acknowledgment is unresolved");
+          await acknowledge(event.id);
           receiptUnresolved = false;
         }
       } catch (error) {
@@ -813,6 +805,38 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         log(`mailbox poll failed (${error instanceof Error ? error.message : String(error)}); retrying`);
         await delay(RETRY_MS);
       }
+    }
+  }
+
+  // The ack is an idempotent receipt for an event already written, never a
+  // replay. Under load its process proof or pane lookup can fail or stall
+  // (VUH-2034, VUH-2015), so retry the exact ack before giving up the channel.
+  // A 2xx naming another event is a protocol fault and is never retried.
+  async function acknowledge(eventId) {
+    const deadline = Date.now() + Math.min(ACK_RETRY_MS, requestTimeoutMs);
+    for (let backoff = 250; ; backoff = Math.min(backoff * 2, RETRY_MS)) {
+      let transient;
+      try {
+        const ack = await fetch(`${seatRoute(link, paneId, "events")}/${encodeURIComponent(eventId)}/ack`, {
+          method: "POST",
+          headers: linkHeaders(),
+          signal: AbortSignal.timeout(Math.max(1, Math.min(10_000, deadline - Date.now()))),
+        });
+        await checkFleetMembership(ack);
+        if (ack.ok) {
+          const receipt = await ack.json().catch(() => undefined);
+          if (receipt?.acknowledged === true && receipt.eventId === eventId) return;
+          throw new ChannelReceiptMismatch("Exact channel acknowledgment is unresolved");
+        }
+        transient = `ack answered ${String(ack.status)}`;
+      } catch (error) {
+        if (error instanceof FleetMembershipRefused || error instanceof ChannelReceiptMismatch) throw error;
+        transient = error instanceof Error ? error.message : String(error);
+      }
+      if (closed || Date.now() + backoff >= deadline)
+        throw new Error(`Exact channel acknowledgment is unresolved (${transient})`);
+      log(`channel ack for ${eventId} failed (${transient}); retrying the exact receipt`);
+      await delay(backoff);
     }
   }
 

@@ -30,12 +30,14 @@ afterEach(() => {
 
 /** A stand-in for Clankie's link listener: one event in the mailbox, then nothing. */
 async function fakeService(
-  dropAck = false,
+  /** Drop every ack, or the first N, as an overloaded proof or lost reply would. */
+  dropAck: boolean | number = false,
   mcpReply?: (method: string) => "deny" | "empty" | "stall" | "off" | undefined,
   ackEventId: string | null = "event-1",
 ) {
   const seen: Seen[] = [];
   let delivered = false;
+  let acks = 0;
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     let body = "";
     request.on("data", (chunk: Buffer) => (body += String(chunk)));
@@ -104,7 +106,8 @@ async function fakeService(
         return;
       }
       if (path.endsWith("/ack")) {
-        if (dropAck) response.destroy();
+        acks += 1;
+        if (dropAck === true || (typeof dropAck === "number" && acks <= dropAck)) response.destroy();
         else
           response.end(
             JSON.stringify({
@@ -1108,12 +1111,13 @@ it.each([
   async ({ dropAck, eventId }) => {
     const service = await fakeService(dropAck, undefined, eventId);
     const home = await linkedHome(service.url, true);
-    const bridge = rawReceiptBridge("fleet", home, service.url, true);
+    // A lost ack is retried within the request budget (VUH-2034); keep it short here.
+    const bridge = rawReceiptBridge("fleet", home, service.url, true, dropAck ? 1500 : undefined);
     await bridge.init();
     bridge.initialized();
     await expect
       .poll(() => service.seen.filter((r) => r.path.endsWith("/ack")).length, { timeout: 5000 })
-      .toBe(1);
+      .toBeGreaterThanOrEqual(1);
     expect(bridge.notifications).toMatchObject([
       { params: { meta: { event_id: "event-1" }, content: "Hello from Clankie" } },
     ]);
@@ -1123,6 +1127,15 @@ it.each([
       pane: "w8:p3",
       authorization: undefined,
     });
+    // Only a transport failure is retried, and only as the same exact receipt.
+    if (dropAck) {
+      await expect.poll(() => bridge.stderr(), { timeout: 5000 }).toContain("stopped polling without replay");
+      const acks = service.seen.filter((r) => r.path.endsWith("/ack"));
+      expect(acks.length).toBeGreaterThan(1);
+      expect(new Set(acks.map((r) => r.path))).toEqual(
+        new Set(["/v1/fleet/seats/w8%3Ap3/events/event-1/ack"]),
+      );
+    } else expect(service.seen.filter((r) => r.path.endsWith("/ack"))).toHaveLength(1);
     if (dropAck || eventId !== "event-1") {
       await expect.poll(() => bridge.stderr(), { timeout: 5000 }).toContain("stopped polling without replay");
       expect(service.seen.filter((r) => r.path.endsWith("/events"))).toHaveLength(1);
@@ -1133,6 +1146,21 @@ it.each([
         .toBeGreaterThan(1);
   },
 );
+
+it("keeps the channel after an ack that fails under load and then lands", async () => {
+  // The proof or pane lookup behind an ack can refuse under fleet load (VUH-2034).
+  const service = await fakeService(2);
+  const home = await linkedHome(service.url, true);
+  const bridge = rawReceiptBridge("fleet", home, service.url, true);
+  await bridge.init();
+  bridge.initialized();
+  await expect
+    .poll(() => service.seen.filter((r) => r.path.endsWith("/events")).length, { timeout: 10_000 })
+    .toBeGreaterThan(1);
+  expect(service.seen.filter((r) => r.path.endsWith("/ack"))).toHaveLength(3);
+  expect(bridge.notifications).toHaveLength(1);
+  expect(bridge.stderr()).not.toContain("stopped polling");
+});
 
 describe("a Codex session on the shared daemon", () => {
   it("tells the agent why Clankie's tools are missing and how to get them", async () => {
