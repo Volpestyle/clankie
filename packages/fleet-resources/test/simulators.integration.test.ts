@@ -10,6 +10,7 @@ import { afterEach, expect, it } from "vitest";
 import { FleetResourceSnapshotSchema } from "../../protocol/src/fleet-resources.ts";
 import { ResourceStore } from "../src/store.ts";
 import { createResourceGovernor } from "../src/governor.ts";
+import { baseHeavySlots } from "../src/pressure.ts";
 import { defaultResourcePolicy } from "../src/model.ts";
 import { processIdentity } from "../src/process.ts";
 import { createSimctlAdapter } from "../src/simctl.ts";
@@ -65,8 +66,12 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
   let loadRatio = 0;
   const governorOptions = {
     directory: join(directory, "governor"),
-    probe: async () => ({ loadRatio, availableMemoryMb: 32768 }),
+    // A measured CPU window and settled jobs: these cases test budgets, not
+    // admission pacing, so a small machine's single base slot doesn't hold the
+    // second heavy job (VUH-2054; a 3-core CI runner has one base slot).
+    probe: async () => ({ loadRatio, cpuRatio: 0, availableMemoryMb: 32768 }),
     simulatorBootSettleMs: settings.bootSettleMs ?? 0,
+    heavyJobSettleMs: 0,
   };
   let governor = createResourceGovernor(governorOptions);
   await governor.configure({
@@ -945,7 +950,8 @@ it("two real heavy runners and a simulator use independent budgets in either adm
       simulatorSlots: 1,
       used: 2,
       simulatorUsed: 1,
-      lightSlots: 2,
+      // The light lane is sized from the base slots, which depend on the machine.
+      lightSlots: baseHeavySlots({ ...defaultResourcePolicy(), heavySlots: 2 }),
       lightUsed: 0,
     });
     expect(
