@@ -35,7 +35,7 @@ export interface HuddleSeatTarget {
   readonly workingDirectory?: string;
 }
 
-export const newHuddleId = () =>
+const newHuddleId = () =>
   `hud_${randomBytes(9)
     .toString("base64url")
     .toLowerCase()
@@ -43,7 +43,7 @@ export const newHuddleId = () =>
     .slice(0, 12)}`;
 
 /** The one request each seat receives. */
-export function huddleRequest(huddle: Pick<Huddle, "id" | "project" | "dueAt">): string {
+function huddleRequest(huddle: Pick<Huddle, "id" | "project" | "dueAt">): string {
   const example = {
     huddle: huddle.id,
     on: "VUH-1234: wiring the usage route",
@@ -67,7 +67,7 @@ export function huddleRequest(huddle: Pick<Huddle, "id" | "project" | "dueAt">):
 }
 
 /** A huddle answer inside a seat's message, if the message is one. */
-export function parseHuddleAnswer(text: string): HuddleAnswer | undefined {
+function parseHuddleAnswer(text: string): HuddleAnswer | undefined {
   const fenced = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/u.exec(text)?.[1];
   const candidates = [fenced, text.trim()].filter((value): value is string => value !== undefined);
   for (const candidate of candidates) {
@@ -87,7 +87,7 @@ export function parseHuddleAnswer(text: string): HuddleAnswer | undefined {
  * (unknown last, then by answer). A seat touching a file an earlier seat also
  * touches lands after it; seats on disjoint files are independent.
  */
-export function compileLanding(seats: readonly HuddleSeat[]): {
+function compileLanding(seats: readonly HuddleSeat[]): {
   landingOrder: HuddleLandingStep[];
   blockers: HuddleBlocker[];
 } {
