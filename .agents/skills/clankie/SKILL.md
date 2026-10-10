@@ -17,6 +17,10 @@ Native hire briefs include its command contract. `clankie heavy -- COMMAND` shar
 machine capacity across worktrees; `clankie fleet resources` names current holders
 and waits. Preserve task-specific permission and verification requirements.
 
+When you spawn native subagents, choose each child's model and effort per job:
+the smallest that meets its acceptance, passed explicitly and adjusted as the
+work requires. A subagent profile in your hire brief overrides that.
+
 For Clankie's own repository changes, use focused checks while iterating. Before
 pushing, commit your files, `git pull --rebase origin main`, then run
 `clankie heavy -- pnpm check:landing` from the repository root. Keep its own

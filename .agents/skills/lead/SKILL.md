@@ -135,7 +135,10 @@ Do not apply one work project's restrictions to social/play lanes or other repos
 Hire with `hire_agent`, omitting harness, model and effort to inherit the
 project's profile, and follow up with `message_seat` on the returned seat ID.
 Where neither the role nor the fleet names a harness, choosing one is yours per
-job: a Claude or a Codex worker, each leading its own native subagents. The
+job: a Claude or a Codex worker, each leading its own native subagents. Every
+lead and worker picks its native children's model and effort per job, the
+smallest that meets the child's acceptance, adjusting as the work requires. A
+set subagent profile overrides that; ask before departing from it. The
 owner's guidance: Claude for visual and creative work; otherwise the best fit
 for the job, weighing `allocation` in `worker_accounts` (each harness's
 accounts ranked by plan size, what is left and pace against reset; `clankie
