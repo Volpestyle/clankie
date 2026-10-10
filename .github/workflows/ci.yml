@@ -15,7 +15,7 @@ permissions:
 jobs:
   check:
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'macos-26' || 'ubuntu-latest' }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 45 || 30 }}
     # The service typechecks need up to ~3.5 GB of heap (apps/clankie); the
     # runner's default Node heap is about 2 GB.
     env:
