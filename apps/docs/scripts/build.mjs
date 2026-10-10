@@ -236,6 +236,21 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/operator/appearance",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read which bundled skin Clankie wears on the owner's surfaces, and its revision.",
+      },
+    ],
+    [
+      "POST /v1/operator/appearance",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Choose Clankie's look with revision fencing; the id must be well formed, and apps fall back to the selected pack's own look for a skin they do not bundle.",
+      },
+    ],
+    [
       "GET /v1/operator/voice",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
