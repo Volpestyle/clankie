@@ -1324,6 +1324,8 @@ const captain = createCaptain(
     onModelCredentialEvent: modelCredentialEventLogger(logger),
     onSeatDeliveryEvent: (delivery) =>
       logger.info({ ...delivery, event: "fleet.seat_delivery" }, "worker channel delivery settled"),
+    onSeatBridgeState: (change) =>
+      logger.info({ event: "seat.bridge.state", ...change }, "seat bridge state changed"),
     ...(hostedBody === undefined
       ? {}
       : {

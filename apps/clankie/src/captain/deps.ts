@@ -77,6 +77,10 @@ export interface CaptainDeps {
   readonly onModelCredentialEvent?: (
     event: import("./model-credential-health.ts").ModelCredentialEvent,
   ) => void;
+  /** Service-log line per seat bridge bind/unbind/state change (VUH-2036). */
+  readonly onSeatBridgeState?: (
+    change: { readonly conversationId: string } & import("./seat-outbox.ts").SeatBridgeStateChange,
+  ) => void;
   readonly onModelCredentialRejection?: (event: {
     providerId: string;
     outcome: "refreshed" | "reconnect_required" | "operator_required";

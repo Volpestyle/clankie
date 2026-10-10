@@ -1103,6 +1103,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         onBridgeIssue: (detail) => {
           if (!shutdown.signal.aborted) conversations.recordServiceNotice(conversationId, detail);
         },
+        ...(deps.onSeatBridgeState === undefined
+          ? {}
+          : { onBridgeState: (change) => deps.onSeatBridgeState!({ conversationId, ...change }) }),
         onUnresolved: (receipt) => {
           if (shutdown.signal.aborted) return;
           void created

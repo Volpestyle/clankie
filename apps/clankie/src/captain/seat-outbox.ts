@@ -59,6 +59,12 @@ const RESTART_RECONNECT_GRACE_MS = 45_000;
 const PRESENCE_WRITE_INTERVAL_MS = 5_000;
 /** How long an escalation waits for the seat's `reply` before the run settles unanswered. */
 const REPLY_TIMEOUT_MS = 10 * 60_000;
+/**
+ * A turn the seat never reports finishing stops holding queued deliveries after
+ * this long without activity (VUH-2045). A seat whose hooks cannot sync, or a
+ * stale session that claimed the turn, must not strand the conversation's runs.
+ */
+const TURN_HOLD_STALE_MS = 3 * 60_000;
 
 /** Source of the service's own notice about an unresolved delivery; it never alerts about itself. */
 export const SEAT_DELIVERY_ALERT_SOURCE = "seat-delivery-alert";
@@ -116,6 +122,12 @@ export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
   | { readonly outcome: "unbound" }
   | { readonly outcome: "aborted" }
 );
+
+export interface SeatBridgeStateChange {
+  readonly from: OperatorSeatBridgeStatus["state"];
+  readonly to: OperatorSeatBridgeStatus["state"];
+  readonly reason: string;
+}
 
 export interface SeatDeliveryInput {
   readonly delivery?: "steer" | "queue";
@@ -188,6 +200,9 @@ export class SeatOutbox {
   private readonly bridgeIssues = new Set<string>();
   private readonly onBridgeIssue: ((detail: string) => void) | undefined;
   private readonly onDeliveryEvent: ((event: SeatDeliveryEvent) => void) | undefined;
+  private readonly onBridgeState: ((change: SeatBridgeStateChange) => void) | undefined;
+  private observedState: OperatorSeatBridgeStatus["state"] = "disconnected";
+  private stateTimer: ReturnType<typeof setTimeout> | undefined;
   private lastPollAt: number | undefined;
   private lastPollBinding: string | undefined;
   private readonly presencePath: string | undefined;
@@ -198,6 +213,8 @@ export class SeatOutbox {
   private closed = false;
   private turnActive = false;
   private turnSessionId: string | undefined;
+  private turnObservedAt = 0;
+  private readonly turnHoldStaleMs: number;
 
   /** Authenticated seat-sync activity; an unrelated session cannot release a hold. */
   public observeTurn(sessionId: string, activity: "responding" | "waiting", onlyIfUnknown = false): boolean {
@@ -207,6 +224,7 @@ export class SeatOutbox {
       return false;
     this.turnSessionId = sessionId;
     this.turnActive = activity === "responding";
+    this.turnObservedAt = this.now();
     if (!this.turnActive) this.wakePoller();
     return true;
   }
@@ -226,6 +244,8 @@ export class SeatOutbox {
        */
       readonly abortKeepsGrace?: boolean;
       readonly replyTimeoutMs?: number;
+      /** How long an unreported turn may hold queued deliveries; defaults to three minutes. */
+      readonly turnHoldStaleMs?: number;
       readonly now?: () => number;
       /**
        * Seat presence heartbeat. A seat that polled the previous service within
@@ -241,11 +261,14 @@ export class SeatOutbox {
       readonly onUnresolved?: (receipt: UnresolvedSeatReceipt) => void;
       readonly onBridgeIssue?: (detail: string) => void;
       readonly onDeliveryEvent?: (event: SeatDeliveryEvent) => void;
+      /** One call per bridge state change, for the service log (VUH-2036). */
+      readonly onBridgeState?: (change: SeatBridgeStateChange) => void;
     } = {},
   ) {
     this.onUnresolved = options.onUnresolved;
     this.onBridgeIssue = options.onBridgeIssue;
     this.onDeliveryEvent = options.onDeliveryEvent;
+    this.onBridgeState = options.onBridgeState;
     this.fence = new DeliveryFence(options.uncertaintyPath);
     this.delivered = new DeliveryFence(
       options.uncertaintyPath === undefined ? undefined : `${options.uncertaintyPath}.delivered`,
@@ -255,6 +278,7 @@ export class SeatOutbox {
     this.abortKeepsGrace = options.abortKeepsGrace ?? false;
     this.explicitAcknowledgments = options.explicitAcknowledgments ?? false;
     this.replyTimeoutMs = options.replyTimeoutMs ?? REPLY_TIMEOUT_MS;
+    this.turnHoldStaleMs = options.turnHoldStaleMs ?? TURN_HOLD_STALE_MS;
     this.now = options.now ?? Date.now;
     this.presencePath = options.presencePath;
     if (this.presencePath !== undefined) {
@@ -269,6 +293,36 @@ export class SeatOutbox {
         this.lastBridgePollAt = presence!.lastPollAt;
       }
     }
+    this.observeBridgeState("restart_presence");
+  }
+
+  /**
+   * State is derived from polls and grace windows, so a bridge can drop with no
+   * event. Each poll, poll end, close and grace lapse rechecks it; a change is
+   * reported once with what caused it.
+   */
+  private observeBridgeState(reason: string): void {
+    if (this.onBridgeState === undefined) return;
+    const to = this.bridgeStatus("").state;
+    const from = this.observedState;
+    this.observedState = to;
+    if (this.stateTimer !== undefined) clearTimeout(this.stateTimer);
+    this.stateTimer = undefined;
+    if (from !== to)
+      try {
+        this.onBridgeState({ from, to, reason });
+      } catch {
+        /* Diagnostics never change delivery. */
+      }
+    if (this.closed || this.pollers.size > 0) return;
+    const now = this.now();
+    const lapses = [
+      this.remainingGraceMs(),
+      this.lastBridgePollAt === undefined ? 0 : this.lastBridgePollAt + RESTART_RECONNECT_GRACE_MS - now,
+    ].filter((ms) => ms > 0);
+    if (lapses.length === 0) return;
+    this.stateTimer = setTimeout(() => this.observeBridgeState("grace_lapsed"), Math.min(...lapses) + 1);
+    this.stateTimer.unref?.();
   }
 
   /** A read observes loaded receiver capabilities, never installed files or receipts. */
@@ -625,14 +679,17 @@ export class SeatOutbox {
           if (pending.taken || pending.settled) return;
           // Held messages remain admitted while their bridge is polling. A
           // definite detach retains the existing pre-take fallback boundary.
-          if (pending.holdUntilTurnEnd && this.bound()) waitForReceiver();
-          else pending.settle({ outcome: "unbound" });
+          if (pending.holdUntilTurnEnd && this.bound()) {
+            // A turn that went quiet releases its hold on the next check.
+            this.wakePoller();
+            if (!pending.taken && !pending.settled) waitForReceiver();
+          } else pending.settle({ outcome: "unbound" });
         }, waitMs);
         pending.timer.unref?.();
       };
       waitForReceiver();
       this.queued.push(pending);
-      if (pending.holdUntilTurnEnd && this.turnActive) pending.onAdmitted?.("queued");
+      if (pending.holdUntilTurnEnd && this.turnHolds()) pending.onAdmitted?.("queued");
       this.wakePoller();
     });
   }
@@ -680,6 +737,8 @@ export class SeatOutbox {
             this.lastPollAt = this.now();
             this.lastPollBinding = recipientBinding;
           }
+          // A superseding poll replaces this one at once; it is not a state change.
+          if (source !== "supersede") this.observeBridgeState(`poll_${source}`);
           resolve(events);
         },
       };
@@ -690,6 +749,8 @@ export class SeatOutbox {
       // Each poller removes itself as it settles; a set never revisits a yielded entry.
       for (const older of this.pollers) older.finish([], "supersede");
       this.pollers.add(poller);
+      // Observed once parked: a poll that has not parked yet still reads as reconnecting.
+      this.observeBridgeState("poll");
     });
   }
 
@@ -772,6 +833,7 @@ export class SeatOutbox {
 
   public close(): void {
     this.closed = true;
+    this.observeBridgeState("close");
     for (const pending of [...this.queued, ...this.inFlight, ...this.awaitingReply.values()]) {
       // Closing the service's waiter cannot finish an independent native turn.
       // Preserve the fence when take happened without an exact receipt.
@@ -872,7 +934,7 @@ export class SeatOutbox {
         pending.settle({ outcome: "unbound" });
         continue;
       }
-      if (pending.holdUntilTurnEnd && this.turnActive) continue;
+      if (pending.holdUntilTurnEnd && this.turnHolds()) continue;
       const kinds: readonly OperatorSeatEventKind[] =
         capabilities?.eventKinds ?? LEGACY_OPERATOR_SEAT_EVENT_KINDS;
       const original = pending.event;
@@ -903,8 +965,10 @@ export class SeatOutbox {
         ...(capabilities?.ownerOrigin && !fallback && origin ? { ownerOrigin: origin } : {}),
       };
       this.queued.splice(this.queued.indexOf(pending), 1);
+      // Expiry only stops a quiet turn blocking delivery; it never proves the seat idle.
       pending.admission = this.turnActive ? "steered" : "started";
       this.turnActive = true;
+      this.turnObservedAt = this.now();
       pending.taken = true;
       pending.takenAt = this.now();
       if (pending.timer !== undefined) clearTimeout(pending.timer);
@@ -924,6 +988,10 @@ export class SeatOutbox {
     }
     if (events.length > 0) this.lastPollAt = this.now();
     return events;
+  }
+
+  private turnHolds(): boolean {
+    return this.turnActive && this.now() - this.turnObservedAt < this.turnHoldStaleMs;
   }
 
   private wakePoller(): void {

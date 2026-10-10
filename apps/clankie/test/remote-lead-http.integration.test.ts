@@ -4,7 +4,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+import { SeatOutbox, type SeatBridgeStateChange } from "../src/captain/seat-outbox.ts";
 import { createRemoteLeadBridge } from "../src/remote-lead-bridge.ts";
 import { RemoteLeadDelegations } from "../src/remote-lead-delegations.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
@@ -413,7 +413,10 @@ else console.log('{}');
     let observed = await fixtureProof();
     let effects = 0;
     const presencePath = join(root, "presence.json");
-    let outbox = new SeatOutbox({ presencePath });
+    // VUH-2036: each bridge state change reaches the service log with its cause.
+    const stateChanges: SeatBridgeStateChange[] = [];
+    const onBridgeState = (change: SeatBridgeStateChange) => void stateChanges.push(change);
+    let outbox = new SeatOutbox({ presencePath, onBridgeState });
     const captain = createStubCaptain({
       pollSeatEvents: (waitMs, signal, _chat, capabilities) =>
         outbox.poll(Math.min(waitMs, 25), signal, binding.nativeOccupantId, capabilities),
@@ -594,7 +597,7 @@ else console.log('{}');
       const beforeRestart = catalogChanges;
       await bridge.close();
       outbox.close();
-      outbox = new SeatOutbox({ presencePath });
+      outbox = new SeatOutbox({ presencePath, onBridgeState });
       expect(outbox.bridgeStatus(binding.conversationId).state).toBe("reconnecting");
       grants = new RemoteLeadDelegations(async () => {}, directory);
       bridge = makeBridge();
@@ -614,6 +617,21 @@ else console.log('{}');
       await expect
         .poll(() => outbox.bridgeStatus(binding.conversationId).state, { timeout: 15000 })
         .toBe("current");
+      // One line per change, each continuing from the last, with its cause.
+      expect(
+        stateChanges.every(
+          (change, i) => change.from !== change.to && (i === 0 || stateChanges[i - 1]!.to === change.from),
+        ),
+      ).toBe(true);
+      expect(stateChanges[0]).toEqual({ from: "disconnected", to: "current", reason: "poll" });
+      expect(stateChanges).toContainEqual(expect.objectContaining({ from: "current", to: "reconnecting" }));
+      expect(stateChanges).toContainEqual(expect.objectContaining({ to: "disconnected", reason: "close" }));
+      expect(stateChanges).toContainEqual({
+        from: "disconnected",
+        to: "reconnecting",
+        reason: "restart_presence",
+      });
+      expect(stateChanges.at(-1)).toEqual({ from: "reconnecting", to: "current", reason: "poll" });
       const restartedChannel = outbox.deliver({
         kind: "wake",
         conversationId: binding.conversationId,
