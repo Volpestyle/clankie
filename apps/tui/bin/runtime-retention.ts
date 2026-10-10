@@ -10,6 +10,7 @@ import {
   readSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeSync,
   constants,
@@ -17,8 +18,8 @@ import {
   fsyncSync,
   unlinkSync,
 } from "node:fs";
-import { readlink, readdir, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readlink, readdir, rm, stat } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { checkoutGit, matchesProjectWorktree, observeLocalProjectGitWorktree } from "@clankie/settings";
 import {
@@ -47,6 +48,8 @@ export interface RuntimeRetentionResult {
   readonly error?: string;
 }
 export const RUNTIME_RETENTION_PENDING = "retention-pending.json";
+/** Private, beside the journals: a removal moves its worktree here before deleting it. */
+const RUNTIME_RETENTION_TRASH = "retention-trash";
 
 export class RuntimeMaintenanceBusyError extends Error {
   constructor() {
@@ -75,8 +78,22 @@ export async function withRuntimeMaintenance<T>(updates: string, work: () => Pro
   }
 }
 
-/** Kernel cwd/executable observations plus live PIDs; arguments and secrets are never returned. */
+/**
+ * A process exiting mid-read can fail one observation, so a failed read is retried (it changes
+ * nothing); a timeout is not. Still failing, liveness is unknown and the caller retains.
+ */
 async function runtimeProcesses(): Promise<{ paths: string[]; pids: Set<number> }> {
+  for (let attempt = 1; ; attempt++)
+    try {
+      return await observeRuntimeProcesses();
+    } catch (error) {
+      if (attempt === 3 || (error as { killed?: unknown }).killed === true)
+        throw Error(`runtime_process_inventory_unavailable: ${failureText(error)}`);
+    }
+}
+
+/** Kernel cwd/executable observations plus live PIDs; arguments and secrets are never returned. */
+async function observeRuntimeProcesses(): Promise<{ paths: string[]; pids: Set<number> }> {
   const exec = promisify(execFile);
   const uid = process.getuid?.();
   if (uid === undefined) throw Error("runtime_process_inventory_unsupported");
@@ -214,6 +231,129 @@ interface UpdateRecord {
   raw: unknown;
 }
 
+const inside = (parent: string, child: string) => child === parent || child.startsWith(parent + "/");
+
+function auditRetention(updates: string, event: unknown): void {
+  const fd = openSync(
+    join(updates, "retention.log"),
+    constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.nlink !== 1 || stat.mode & 0o077 || stat.uid !== process.getuid?.())
+      throw Error("runtime_retention_audit_unverified");
+    writeSync(fd, JSON.stringify({ at: new Date().toISOString(), ...object(event) }) + "\n");
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** A failed command keeps its cause: timeout or signal, exit code and stderr. */
+function failureText(error: unknown): string {
+  const failure = error as {
+    cmd?: unknown;
+    killed?: unknown;
+    signal?: unknown;
+    code?: unknown;
+    stderr?: unknown;
+  };
+  const stderr =
+    typeof failure.stderr === "string" ? failure.stderr.trim().split("\n").slice(-3).join(" ") : "";
+  // The cause leads: a command line (an inline script) can fill the bounded reason by itself.
+  return [
+    failure.killed === true ? "timed out" : "",
+    typeof failure.signal === "string" ? `signal ${failure.signal}` : "",
+    typeof failure.code === "number" ? `exit ${failure.code}` : "",
+    stderr ? `stderr: ${stderr}` : "",
+    typeof failure.cmd === "string" ? errorText(error).split("\n")[0]! : errorText(error).trim(),
+  ]
+    .filter(Boolean)
+    .join("; ")
+    .slice(0, 1024);
+}
+
+async function registration(checkout: string, path: string): Promise<string[] | undefined> {
+  return (await checkoutGit(checkout, ["worktree", "list", "--porcelain", "-z"]))
+    .split("\0\0")
+    .map((record) => record.split("\0"))
+    .find((fields) => fields[0] === `worktree ${path}`);
+}
+
+interface PendingRemoval {
+  readonly path: string;
+  readonly head: string;
+  readonly operation: string;
+  readonly trash: string;
+}
+
+function trashFor(updates: string, operation: string, name: string): string {
+  return join(updates, RUNTIME_RETENTION_TRASH, `${operation}-${name}`);
+}
+
+/**
+ * Moves the worktree aside in one rename, drops its registration, then deletes it. Each
+ * step is idempotent, so a later run finishes whatever an interrupted one left.
+ */
+async function finishRemoval(updates: string, checkout: string, removal: PendingRemoval): Promise<void> {
+  if (existsSync(removal.path)) {
+    if (existsSync(removal.trash)) throw Error("runtime_retention_trash_occupied");
+    const trash = join(updates, RUNTIME_RETENTION_TRASH);
+    if (!existsSync(trash)) mkdirSync(trash, { mode: 0o700 });
+    privateDirectory(trash);
+    renameSync(removal.path, removal.trash);
+  }
+  // With its directory gone, `worktree remove` only drops the registration (no --force).
+  if (await registration(checkout, removal.path))
+    await checkoutGit(checkout, ["worktree", "remove", removal.path]);
+  if (existsSync(removal.path) || (await registration(checkout, removal.path)))
+    throw Error("runtime_retention_effect_unconfirmed");
+  // Off the event loop and with no timeout: a slow delete finishes; an interrupted one resumes.
+  await rm(removal.trash, { recursive: true, force: true });
+}
+
+/**
+ * Finishes the removal an earlier run recorded but did not confirm, including an older
+ * marker left when a timeout killed `git worktree remove` partway. Only a retention
+ * worktree of a recorded operation, at its recorded commit, unlocked and unused, qualifies.
+ * The caller holds the maintenance lock.
+ */
+export async function finishPendingRetention(updates: string, checkout: string): Promise<string> {
+  const marker = object(readPrivateJson(join(updates, RUNTIME_RETENTION_PENDING)));
+  const operation = operationId(marker.operation);
+  const name = typeof marker.path === "string" ? basename(marker.path) : "";
+  const path = join(updates, operation, name);
+  const head = commitString(marker.head);
+  const trash = trashFor(updates, operation, name);
+  if (
+    marker.path !== path ||
+    !["previous", "staged"].includes(name) ||
+    (marker.trash !== undefined && marker.trash !== trash)
+  )
+    throw Error("runtime_retention_pending_unverified");
+  const result = readRuntimeUpdate(join(updates, operation));
+  if (head !== (name === "previous" ? result.oldCommit : result.newCommit))
+    throw Error("runtime_retention_pending_unverified");
+  const latest = operationId(object(readPrivateJson(join(updates, "latest.json"))).id);
+  if (operation === latest && name === "previous") throw Error("runtime_retention_pending_unverified");
+  const registered = await registration(checkout, path);
+  if (
+    registered &&
+    (!registered.includes(`HEAD ${head}`) ||
+      !registered.includes("detached") ||
+      registered.some((field) => /^locked(?: |$)/u.test(field)))
+  )
+    throw Error("runtime_retention_pending_unverified");
+  if ((await runtimeProcesses()).paths.some((value) => inside(path, value) || inside(trash, value)))
+    throw Error("runtime_retention_pending_live");
+  auditRetention(updates, { event: "resuming", path, head, operation, trash });
+  await finishRemoval(updates, checkout, { path, head, operation, trash });
+  auditRetention(updates, { event: "removed", path, head, resumed: true });
+  unlinkSync(join(updates, RUNTIME_RETENTION_PENDING));
+  return path;
+}
+
 export async function retainRuntimeWorktrees(input: {
   home: string;
   checkout: string;
@@ -242,28 +382,11 @@ export async function retainRuntimeWorktrees(input: {
     }
     return value;
   };
-  const inside = (parent: string, child: string) => child === parent || child.startsWith(parent + "/");
-  const audit = (event: unknown) => {
-    const fd = openSync(
-      join(updates, "retention.log"),
-      constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
-      0o600,
-    );
-    try {
-      const stat = fstatSync(fd);
-      if (!stat.isFile() || stat.nlink !== 1 || stat.mode & 0o077 || stat.uid !== process.getuid?.())
-        throw Error("runtime_retention_audit_unverified");
-      writeSync(fd, JSON.stringify({ at: new Date().toISOString(), ...object(event) }) + "\n");
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-  };
+  const audit = (event: unknown) => auditRetention(updates, event);
   try {
     return await withRuntimeMaintenance(updates, async () => {
       try {
         const pendingPath = join(updates, RUNTIME_RETENTION_PENDING);
-        if (existsSync(pendingPath)) throw Error("runtime_retention_effect_unconfirmed");
         if (
           realpathSync(input.runtime) !== input.runtime ||
           input.boot.root !== input.runtime ||
@@ -288,6 +411,8 @@ export async function retainRuntimeWorktrees(input: {
           (await checkoutGit(input.runtime, ["status", "--porcelain", "--untracked-files=all"]))
         )
           throw Error("runtime_retention_live_pin_unverified");
+        // An unconfirmed removal is finished first, or this run refuses with the reason.
+        if (existsSync(pendingPath)) removed.push(await finishPendingRetention(updates, input.checkout));
         const root = {
           id: "runtime-retention",
           machineId: "local",
@@ -504,7 +629,13 @@ export async function retainRuntimeWorktrees(input: {
               if (!isDeepStrictEqual([...(await input.protectedUpdateIds())].sort(), held))
                 throw Error("runtime_retention_canary_holds_changed");
               guard();
-              writePrivateJson(pendingPath, { path, head, operation: row.result.id });
+              const removal = {
+                path,
+                head,
+                operation: row.result.id,
+                trash: trashFor(updates, row.result.id, name),
+              };
+              writePrivateJson(pendingPath, removal);
               const pendingFd = openSync(pendingPath, constants.O_RDONLY | constants.O_NOFOLLOW);
               try {
                 fsyncSync(pendingFd);
@@ -517,21 +648,14 @@ export async function retainRuntimeWorktrees(input: {
               } finally {
                 closeSync(directoryFd);
               }
-              audit({ event: "removing", path, head, operation: row.result.id });
-              // No --force, no recursive namespace deletion, no journal removal.
-              await checkoutGit(input.checkout, ["worktree", "remove", path]);
-              if (
-                existsSync(path) ||
-                (await checkoutGit(input.checkout, ["worktree", "list", "--porcelain", "-z"]))
-                  .split("\0")
-                  .includes(`worktree ${path}`)
-              )
-                throw Error("runtime_retention_effect_unconfirmed");
+              audit({ event: "removing", ...removal });
+              // No --force and no journal removal; only the moved-aside tree is deleted.
+              await finishRemoval(updates, input.checkout, removal);
               removed.push(path);
               audit({ event: "removed", path, head });
               unlinkSync(pendingPath);
             } catch (error) {
-              keep(errorText(error));
+              keep(failureText(error));
               if (existsSync(pendingPath)) throw Error("runtime_retention_effect_unconfirmed");
             }
           }

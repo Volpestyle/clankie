@@ -361,22 +361,70 @@ it("fails closed on pending latest canary, unreadable recovery, pin aliases and 
     error: "runtime_retention_live_pin_unverified",
     removedCount: 0,
   });
+  // A marker that does not name a retention worktree is never finished.
   writePrivateJson(join(f.updates, "retention-pending.json"), {
-    path: obsolete.previous,
+    path: f.checkout,
     head: f.commits[0],
     operation: obsolete.id,
   });
   expect(await retainRuntimeWorktrees(f.input())).toMatchObject({
     outcome: "blocked",
-    error: "runtime_retention_effect_unconfirmed",
+    error: "runtime_retention_pending_unverified",
     removedCount: 0,
   });
   await expect(
     updater.request(f.commits[4]!, { guard: async () => {}, current: () => true }),
   ).rejects.toThrow("Runtime retention removal requires owner reconciliation");
+  expect(existsSync(join(f.checkout, "version"))).toBe(true);
   expect(existsSync(obsolete.previous)).toBe(true);
   expect(existsSync(join(f.updates, "retention-pending.json"))).toBe(true);
   expect(updater.status()).toMatchObject({ retentionPending: { state: "unconfirmed" } });
+}, 60_000);
+
+it("finishes an interrupted removal on a later run, from an old-style marker or a failed delete", async () => {
+  const f = fixture();
+  f.git(f.runtime, "checkout", "--detach", f.commits[4]!);
+  const current = f.record(f.commits[3]!, f.commits[4]!);
+  writePrivateJson(join(f.updates, "latest.json"), { id: current.id });
+  const pending = join(f.updates, "retention-pending.json");
+  const registered = () => f.git(f.checkout, "worktree", "list", "--porcelain");
+
+  // What a timeout-killed `git worktree remove` left: still registered, partly deleted, old marker.
+  const killed = f.record(f.commits[0]!, f.commits[1]!);
+  rmSync(join(killed.previous, "apps"), { recursive: true });
+  rmSync(join(killed.previous, "version"));
+  writePrivateJson(pending, { path: killed.previous, head: f.commits[0], operation: killed.id });
+  const updater = createRuntimeUpdater({ repoRoot: f.runtime, env: { HOME: f.home } });
+  expect(updater.status()).toMatchObject({ retentionPending: { state: "unconfirmed" } });
+  const resumed = await retainRuntimeWorktrees(f.input());
+  expect(resumed).toMatchObject({ outcome: "completed", removed: [killed.previous] });
+  expect(existsSync(killed.previous)).toBe(false);
+  expect(registered()).not.toContain(killed.previous);
+  expect(existsSync(pending)).toBe(false);
+  expect(updater.status().retentionPending).toBeUndefined();
+  for (const file of ["plan.json", "result.json", "helper.log"])
+    expect(existsSync(join(killed.directory, file))).toBe(true);
+
+  // A delete that fails partway leaves moved-aside trash, never a registered half-runtime, and says why.
+  const stuck = f.record(f.commits[0]!, f.commits[1]!);
+  chmodSync(join(stuck.previous, "apps", "tui", "bin"), 0o555);
+  const failed = await retainRuntimeWorktrees(f.input());
+  expect(failed).toMatchObject({ outcome: "blocked", error: "runtime_retention_effect_unconfirmed" });
+  expect(failed.retained).toContainEqual({ path: stuck.previous, reason: expect.stringContaining("EACCES") });
+  expect(existsSync(stuck.previous)).toBe(false);
+  expect(registered()).not.toContain(stuck.previous);
+  const { trash } = JSON.parse(readFileSync(pending, "utf8")) as { trash: string };
+  expect(existsSync(trash)).toBe(true);
+  chmodSync(join(trash, "apps", "tui", "bin"), 0o755);
+
+  // Update admission finishes it, then continues to its own next check.
+  let checks = 0;
+  await expect(
+    updater.request(f.commits[4]!, { guard: async () => {}, current: () => ++checks === 1 }),
+  ).rejects.toThrow("Update authority expired before checkout sync");
+  expect(existsSync(trash)).toBe(false);
+  expect(existsSync(pending)).toBe(false);
+  expect(existsSync(current.previous)).toBe(true);
 }, 60_000);
 
 it("publishes bounded status with complete counts when many long-path candidates cannot be verified", async () => {
