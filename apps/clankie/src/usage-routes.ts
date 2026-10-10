@@ -34,11 +34,11 @@ function usageSettings(settings: ClankieSettings): UsageSettingsSnapshot {
 
 function usageAccounts(report: MachineWorkerAccounts, now: number): UsageAccount[] {
   return report.accounts.flatMap((account) => {
-    if (account.harness !== "claude" && account.harness !== "codex") return [];
+    if (account.harness === "pi") return [];
     const observed = account.usage === undefined ? undefined : Date.parse(account.usage.observedAt);
     const reason =
       account.reason ??
-      (account.usage === undefined && account.signedIn === true
+      (account.usage === undefined && account.signedIn === true && account.harness !== "prime"
         ? account.harness === "claude"
           ? `Claude Code did not report usage for this profile (it needs Claude Code ${CLAUDE_USAGE_MIN_VERSION} or newer)`
           : "Codex did not report usage for this account"
@@ -56,6 +56,9 @@ function usageAccounts(report: MachineWorkerAccounts, now: number): UsageAccount
         ...(account.usage === undefined ? {} : { usage: account.usage }),
         ...(observed === undefined ? {} : { ageSeconds: Math.max(0, Math.floor((now - observed) / 1000)) }),
         ...(account.held === undefined ? {} : { held: account.held }),
+        ...(account.credential === undefined ? {} : { credential: account.credential }),
+        ...(account.spend === undefined ? {} : { spend: account.spend }),
+        ...(account.sharesLimitsWith === undefined ? {} : { sharesLimitsWith: account.sharesLimitsWith }),
         ...(reason === undefined ? {} : { reason }),
       },
     ];
@@ -128,9 +131,7 @@ export function createUsageRoutes(
     const now = clock();
     machine = steady(machine, now);
     const unavailable = Object.fromEntries(
-      Object.entries(machine.unavailable ?? {}).filter(
-        ([harness]) => harness === "claude" || harness === "codex",
-      ),
+      Object.entries(machine.unavailable ?? {}).filter(([harness]) => harness !== "pi"),
     );
     const body: UsageReport = {
       schemaVersion: 1,

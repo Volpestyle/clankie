@@ -10,6 +10,8 @@ export const WORKER_ACCOUNT_HOLDS_PATH = "/v1/worker-accounts/holds";
 
 export const WorkerAccountHarnessSchema = z.enum(["claude", "codex", "pi"]);
 export type WorkerAccountHarness = z.infer<typeof WorkerAccountHarnessSchema>;
+/** Prime Agent's providers are read and shown, never held or allocated. */
+const ReportedHarnessSchema = z.enum([...WorkerAccountHarnessSchema.options, "prime"]);
 /** `local` (the body's own machine) or a runtime connection id. */
 export const WorkerAccountMachineSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u);
 export const WorkerAccountLabelSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
@@ -49,8 +51,32 @@ export const AccountUsageSchema = z.object({
 });
 export type AccountUsage = z.infer<typeof AccountUsageSchema>;
 
+const PrimeSpendPeriodSchema = z.object({ costUsd: z.number().min(0), tokens: z.number().int().min(0) });
+/**
+ * What a Prime Agent API key spent (VUH-1556), summed from Prime's own session
+ * transcripts. `costUsd` is Prime's per-message estimate at list price.
+ */
+export const PrimeSpendSchema = z.object({
+  source: z.literal("prime-transcripts"),
+  observedAt: z.iso.datetime(),
+  /** Since local midnight on the reading machine. */
+  today: PrimeSpendPeriodSchema,
+  /** The last seven days. */
+  week: PrimeSpendPeriodSchema,
+});
+export type PrimeSpend = z.infer<typeof PrimeSpendSchema>;
+/** Prime Agent fields shared by worker accounts and usage. */
+const PrimeAccountFields = {
+  /** How this provider is signed in to Prime; never the credential. Absent when Prime has no record of it. */
+  credential: z.enum(["api_key", "subscription"]).optional(),
+  /** An API key's spend. */
+  spend: PrimeSpendSchema.optional(),
+  /** The registered account whose limits this subscription draws from; its usage is that account's. */
+  sharesLimitsWith: z.object({ harness: z.enum(["claude", "codex"]), label: z.string() }).optional(),
+};
+
 export const WorkerAccountStatusSchema = z.object({
-  harness: WorkerAccountHarnessSchema,
+  harness: ReportedHarnessSchema,
   label: z.string(),
   /** The profile home on its own machine. */
   home: z.string(),
@@ -71,6 +97,7 @@ export const WorkerAccountStatusSchema = z.object({
   usable: z.boolean(),
   /** Pi: verified models in this native profile, not credentials. */
   models: z.array(z.string()).max(2048).optional(),
+  ...PrimeAccountFields,
   reason: z.string().optional(),
 });
 export type WorkerAccountStatus = z.infer<typeof WorkerAccountStatusSchema>;
@@ -156,7 +183,7 @@ export const MachineWorkerAccountsSchema = z.object({
   observedAt: z.string(),
   accounts: z.array(WorkerAccountStatusSchema).max(256),
   /** A harness the machine could not answer for, with why. */
-  unavailable: z.partialRecord(WorkerAccountHarnessSchema, z.string()).optional(),
+  unavailable: z.partialRecord(ReportedHarnessSchema, z.string()).optional(),
   /** How Clankie would spread hires over these accounts now. */
   allocation: MachineAllocationSchema.optional(),
 });
@@ -208,13 +235,15 @@ export const WORKER_ACCOUNTS_WORDING = {
 /**
  * Usage meters (VUH-1961): this machine's registered Claude and Codex
  * accounts with how much of each limit is left and when it resets, read
- * through each harness's own CLI. `GET /v1/usage`, owner credential.
+ * through each harness's own CLI, and Prime Agent's providers: an API key's
+ * spend, or the account whose limits a subscription draws from (VUH-1556).
+ * `GET /v1/usage`, owner credential.
  */
 export const USAGE_PATH = "/v1/usage";
 export const USAGE_SETTINGS_PATH = "/v1/usage/settings";
 
 export const UsageAccountSchema = z.object({
-  harness: z.enum(["claude", "codex"]),
+  harness: z.enum(["claude", "codex", "prime"]),
   label: z.string(),
   identity: z.string().optional(),
   plan: z.string().optional(),
@@ -227,6 +256,7 @@ export const UsageAccountSchema = z.object({
   /** Seconds between `usage.observedAt` and this response. */
   ageSeconds: z.number().int().min(0).optional(),
   held: z.object({ reason: z.string().optional() }).optional(),
+  ...PrimeAccountFields,
   /** Why usage is unknown or the account cannot take work. */
   reason: z.string().optional(),
 });
@@ -269,7 +299,7 @@ export const UsageReportSchema = z.object({
   machine: z.string(),
   observedAt: z.iso.datetime(),
   accounts: z.array(UsageAccountSchema).max(64),
-  unavailable: z.partialRecord(z.enum(["claude", "codex"]), z.string()).optional(),
+  unavailable: z.partialRecord(z.enum(["claude", "codex", "prime"]), z.string()).optional(),
   settings: UsageSettingsSnapshotSchema,
   /** Where the next automatic hires go and why (VUH-1974); absent from older bodies. */
   allocation: MachineAllocationSchema.optional(),
@@ -279,7 +309,8 @@ export type UsageReport = z.infer<typeof UsageReportSchema>;
 /** Shared wording for every surface that shows the meters. */
 export const USAGE_WORDING = {
   title: "Usage",
-  summary: "How much each Claude and Codex account has left, as each harness reports it.",
+  summary:
+    "How much each Claude and Codex account has left, as each harness reports it, and what Prime Agent's API keys spent.",
   overlay: {
     label: "Show usage beside Clankie",
     description: "Compact meters above the desktop pet. Click them for detail.",

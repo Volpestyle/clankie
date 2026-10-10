@@ -16,7 +16,8 @@ const USAGE_COMMAND_USAGE =
 
 /**
  * `clankie usage` (VUH-1961): this Mac's Claude and Codex accounts with each
- * limit's percent used and reset, from `GET /v1/usage`. `overlay on|off` is
+ * limit's percent used and reset, and Prime Agent's providers with an API
+ * key's spend or a subscription's shared limits, from `GET /v1/usage`. `overlay on|off` is
  * the owner's show/hide choice for the desktop meters. `warning on|off|HOURS`
  * sets when Clankie's lead hears that an account is on pace to run out
  * before its weekly reset (VUH-1974).
@@ -65,6 +66,19 @@ export function runOutWarningText(settings: UsageSettingsSnapshot): string {
     : "Run-out warning off.";
 }
 
+const HARNESS_NAMES = { claude: "Claude", codex: "Codex", prime: "Prime" } as const;
+
+/** `$1.24 · 3.1M tokens` */
+function spendText(period: { costUsd: number; tokens: number }): string {
+  const tokens =
+    period.tokens >= 1e6
+      ? `${(period.tokens / 1e6).toFixed(1)}M`
+      : period.tokens >= 1e3
+        ? `${(period.tokens / 1e3).toFixed(1)}k`
+        : String(period.tokens);
+  return `$${period.costUsd.toFixed(2)} · ${tokens} tokens`;
+}
+
 const BAR = 10;
 function bar(usedPercent: number): string {
   const filled = Math.max(0, Math.min(BAR, Math.round(usedPercent / (100 / BAR))));
@@ -105,18 +119,26 @@ export function formatUsageTable(report: UsageReport, now = Date.now(), timeZone
     const name = account.identity?.split("@")[0] ?? account.label;
     const note = account.held
       ? `held${account.held.reason ? `: ${account.held.reason}` : ""}`
-      : account.signedIn === false
-        ? `not signed in — ${(account.reason ?? "").replace(/^not signed in\.\s*/u, "")}`
-        : account.usage === undefined
-          ? (account.reason ?? "usage not reported")
-          : account.ageSeconds !== undefined && account.ageSeconds >= 600
-            ? `read ${Math.round(account.ageSeconds / 60)}m ago`
-            : "";
+      : account.spend !== undefined
+        ? `spent today ${spendText(account.spend.today)}; last 7 days ${spendText(account.spend.week)} (Prime's list-price estimate)`
+        : account.harness === "prime"
+          ? (account.reason ?? "")
+          : account.signedIn === false
+            ? `not signed in — ${(account.reason ?? "").replace(/^not signed in\.\s*/u, "")}`
+            : account.usage === undefined
+              ? (account.reason ?? "usage not reported")
+              : account.ageSeconds !== undefined && account.ageSeconds >= 600
+                ? `read ${Math.round(account.ageSeconds / 60)}m ago`
+                : "";
     return {
       cells: [
-        account.harness === "claude" ? "Claude" : "Codex",
+        HARNESS_NAMES[account.harness],
         name,
-        usagePlanLabel(account) ?? "—",
+        account.credential === undefined
+          ? (usagePlanLabel(account) ?? "—")
+          : account.credential === "api_key"
+            ? "API key"
+            : "Subscription",
         cell(windows.find((window) => window.id === "session")),
         cell(windows.find((window) => window.id === "week")),
       ],

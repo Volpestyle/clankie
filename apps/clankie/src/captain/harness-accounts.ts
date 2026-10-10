@@ -40,7 +40,21 @@ import {
  * uses to install the worker plugin into each Claude profile.
  */
 
-export type WorkerAccountHarness = "claude" | "codex" | "pi";
+export type WorkerAccountHarness = "claude" | "codex" | "pi" | "prime";
+
+/** Prime Agent API-key spend over one period, from its own transcripts. */
+export interface PrimeSpendPeriod {
+  costUsd: number;
+  tokens: number;
+}
+export interface PrimeSpend {
+  readonly source: "prime-transcripts";
+  readonly observedAt: string;
+  /** Since local midnight. */
+  readonly today: PrimeSpendPeriod;
+  /** The last seven days. */
+  readonly week: PrimeSpendPeriod;
+}
 const WORKER_ACCOUNT_HARNESSES: readonly WorkerAccountHarness[] = ["claude", "codex"];
 
 export interface WorkerAccountStatus {
@@ -66,6 +80,18 @@ export interface WorkerAccountStatus {
   /** Whether Clankie would hire on it now, and why not. */
   readonly usable: boolean;
   readonly models?: readonly string[];
+  /** Prime Agent: how this provider is signed in to Prime, never the credential. */
+  readonly credential?: "api_key" | "subscription";
+  /** Prime Agent: an API key's spend. */
+  readonly spend?: PrimeSpend;
+  /** Prime Agent: the registered account whose limits this subscription draws from. */
+  readonly sharesLimitsWith?: { readonly harness: "claude" | "codex"; readonly label: string };
+  /**
+   * The ChatGPT account a Codex home (as its app-server reports it) or Prime's
+   * ChatGPT sign-in belongs to. Only for matching inside the reader; no report
+   * leaves it with this.
+   */
+  readonly chatgptAccountId?: string;
   readonly reason?: string;
 }
 
@@ -187,6 +213,8 @@ const codex = (profile) => new Promise((resolve) => {
         if (account && typeof account.email === "string") result.identity = account.email;
         if (account && typeof account.planType === "string") result.plan = account.planType;
         else if (account && typeof account.type === "string") result.plan = account.type;
+        const routing = message.result && message.result.workspaceRouting;
+        if (routing && typeof routing.chatgptAccountId === "string") result.chatgptAccountId = routing.chatgptAccountId;
         pending -= 1;
       } else if (message.id === 3) {
         if (message.error) {
@@ -255,6 +283,7 @@ const ProbeOutput = z.object({
           .regex(/^[a-z0-9_]{1,64}$/u)
           .optional()
           .catch(undefined),
+        chatgptAccountId: z.string().max(128).optional(),
         usageError: z.string().max(16).optional(),
         usageBlocked: z.boolean().optional(),
         usageLines: z.array(z.string().max(300)).max(8).optional(),
@@ -427,6 +456,7 @@ function judgeWorkerAccount(
     ...(resetsAt === undefined ? {} : { resetsAt }),
     ...(usage === undefined ? {} : { usage }),
     ...(account.workerPlugin === undefined ? {} : { workerPlugin: account.workerPlugin }),
+    ...(account.chatgptAccountId === undefined ? {} : { chatgptAccountId: account.chatgptAccountId }),
     ...(hold === undefined ? {} : { held: hold.reason === undefined ? {} : { reason: hold.reason } }),
     usable: reason === undefined,
     ...(reason === undefined ? {} : { reason }),
@@ -521,7 +551,7 @@ export function chooseWorkerAccount(
         ? `${account.label}: held by the owner${account.held.reason ? ` (${account.held.reason})` : ""}`
         : `${account.label}: ${account.reason}`,
     );
-  const best = harness === "pi" ? undefined : rankedAccounts(report, harness)[0];
+  const best = harness === "pi" || harness === "prime" ? undefined : rankedAccounts(report, harness)[0];
   const chosen =
     best === undefined
       ? accounts.find((account) => account.usable && !account.held)
@@ -650,6 +680,8 @@ export function createWorkerAccountsReader(options: {
   >;
   readonly localFleet?: (id: string) => boolean;
   readonly piStatus?: () => Promise<WorkerAccountStatus>;
+  /** Prime Agent's providers on this Mac. */
+  readonly primeStatus?: () => readonly WorkerAccountStatus[];
   readonly fleet: (id: string) => Promise<HerdrFleet | undefined>;
   readonly shell?: (fleet: HerdrFleet) => FleetShellRun;
 }) {
@@ -684,23 +716,40 @@ export function createWorkerAccountsReader(options: {
           },
         },
       );
+      const accounts = [...report.accounts];
       if ((harnesses === undefined || harnesses.includes("pi")) && options.piStatus) {
         const pi = await options.piStatus();
         const hold = holds.find((entry) => entry.harness === "pi" && entry.label === pi.label);
-        return {
-          ...report,
-          accounts: [
-            ...report.accounts,
-            {
-              ...pi,
-              ...(hold === undefined
-                ? {}
-                : { held: hold.reason === undefined ? {} : { reason: hold.reason } }),
-            },
-          ],
-        };
+        accounts.push({
+          ...pi,
+          ...(hold === undefined ? {} : { held: hold.reason === undefined ? {} : { reason: hold.reason } }),
+        });
       }
-      return report;
+      if ((harnesses === undefined || harnesses.includes("prime")) && options.primeStatus) {
+        for (const prime of options.primeStatus()) {
+          // A ChatGPT sign-in Clankie also has as a Codex home shares that home's limits.
+          const pool =
+            prime.chatgptAccountId === undefined
+              ? undefined
+              : accounts.find(
+                  (account) =>
+                    account.harness === "codex" && account.chatgptAccountId === prime.chatgptAccountId,
+                );
+          accounts.push(
+            pool === undefined
+              ? prime
+              : {
+                  ...prime,
+                  sharesLimitsWith: { harness: "codex", label: pool.label },
+                  headroom: pool.headroom,
+                  ...(pool.usage === undefined ? {} : { usage: pool.usage }),
+                  ...(pool.resetsAt === undefined ? {} : { resetsAt: pool.resetsAt }),
+                  reason: `draws from Codex account ${pool.label}'s limits`,
+                },
+          );
+        }
+      }
+      return { ...report, accounts };
     }
     const fleet = await options.fleet(fleetId);
     if (fleet === undefined || options.shell === undefined)
@@ -711,7 +760,11 @@ export function createWorkerAccountsReader(options: {
     fleetId?: string,
     harnesses?: readonly WorkerAccountHarness[],
   ): Promise<MachineWorkerAccounts> => {
-    const report = await readAccounts(fleetId, harnesses);
+    const read = await readAccounts(fleetId, harnesses);
+    const report = {
+      ...read,
+      accounts: read.accounts.map(({ chatgptAccountId: _id, ...account }) => account),
+    };
     return { ...report, allocation: allocateAccounts(report) };
   };
 }

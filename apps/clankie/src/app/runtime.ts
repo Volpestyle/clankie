@@ -1323,7 +1323,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     createUsageRoutes(
       authorizeOwnerSecrets,
       settingsSource,
-      workerAccounts && (async () => workerAccounts(undefined, ["claude", "codex"])),
+      workerAccounts && (async () => workerAccounts(undefined, ["claude", "codex", "prime"])),
     ),
   );
 

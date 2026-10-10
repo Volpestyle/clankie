@@ -228,6 +228,7 @@ import {
 import { projectOnboarding } from "./project-onboarding.ts";
 import { createRemoteClaudeWorkerSeatAdapter } from "./remote-claude-worker.ts";
 import { createWorkerAccountsReader } from "./harness-accounts.ts";
+import { readPrimeAccounts } from "./prime-accounts.ts";
 import { createPiWorkerStatusReader, piSeatModelRefs } from "./pi-worker-account.ts";
 import {
   createRemoteCodexSeatAdapter,
@@ -370,6 +371,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       cwd: workingDirectory,
       seatModel: deps.piSeatModel,
     }),
+    primeStatus: () => readPrimeAccounts(),
     fleet: async (id) => (await refreshFleets()).find((entry) => entry.id === id),
     ...(deps.fleets?.shell === undefined ? {} : { shell: deps.fleets.shell }),
   });

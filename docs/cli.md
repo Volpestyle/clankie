@@ -1520,7 +1520,9 @@ them (`claude auth status`; Codex's app-server `account/read` and
 `account/rateLimits/read`), Codex `headroom`, whether Clankie's worker plugin is
 in each Claude profile, any owner hold, and `usable` or the `reason` with its
 fix. Tokens are never returned. Pi inspection reads its native profile without
-refreshing or changing credentials. Each Claude and Codex account also carries
+refreshing or changing credentials. Prime Agent's providers on this Mac are
+listed too, as described under `usage`; they are never `usable` here because a
+Prime seat picks its own provider, and they cannot be held. Each Claude and Codex account also carries
 `usage`: its windows (percent used, length, reset) with their source and
 observation time, read from the profile's own `claude -p /usage` or Codex's
 rate limits ([ADR 0260](adr/0260-usage-meters-come-from-each-harness.md)).
@@ -1623,11 +1625,28 @@ with a small bar and the reset in local time ("3pm", "Wed 6am"). Model-scoped
 limits in use follow on an indented line, as does "held: …", "not signed in — …"
 or why usage is unknown.
 
+Prime Agent's providers follow, one row each, from the kinds in Prime's
+`auth.json` (`PRIME_AGENT_CODING_AGENT_DIR` or `~/.prime/agent`) and the
+providers its transcripts used. An API key's row shows its spend since local
+midnight and over the last seven days: the sum of each assistant message's
+`usage.cost.total` and `totalTokens` in Prime's root and subagent transcripts.
+That cost is Prime's own estimate at list price, not a bill. A ChatGPT/Codex
+subscription (`openai-codex`) whose account is one of Clankie's Codex homes
+shows that home's windows, since both draw from one pool; any other
+subscription, including Claude's (Prime's sign-in does not say which account),
+says its limits are unknown. A provider Prime used but has no sign-in for is
+listed with its kind unknown. Only each sign-in's kind and ChatGPT account id
+are read; Prime's keys and tokens are never read into the report.
+
 ```text
-HARNESS  ACCOUNT      PLAN     5H                      WEEK
-Claude   jamescvolpe  Max 20x    5% █░░░░░░░░░ 3pm      84% ████████░░ Wed 6am
-Codex    volpestyle   Pro      —                        19% ██░░░░░░░░ Oct 16 7:04am
+HARNESS  ACCOUNT       PLAN          5H                          WEEK
+Claude   jamescvolpe   Max 20x         5% █░░░░░░░░░ 3pm          84% ████████░░ Wed 6am
+Codex    volpestyle    Pro           —                            29% ███░░░░░░░ Oct 16 7:04am
          gpt-reserve week 94% used, resets Oct 16 5:05am
+Prime    anthropic     API key       —                           —
+         spent today $27.58 · 57.9M tokens; last 7 days $27.58 · 57.9M tokens (Prime's list-price estimate)
+Prime    openai-codex  Subscription  —                            29% ███░░░░░░░ Oct 16 7:04am
+         draws from Codex account default's limits
 ```
 
 `--json` prints the raw report: identity, plan, `tier`, `headroom`, and each
@@ -1637,7 +1656,11 @@ weekly and model-scoped limits), `usedPercent`, `windowMinutes` and `resetsAt`.
 `usage.source` names the reading (`claude-usage` or `codex-rate-limits`),
 `usage.observedAt` when it was read and `ageSeconds` how old it is. An account
 whose usage was not reported has no `usage` and a `reason`; unknown is never
-shown as free quota. Readings come from `GET /v1/usage` (owner credential,
+shown as free quota. Prime rows (`harness: "prime"`, label = Prime's provider
+id) carry `credential` (`api_key` or `subscription`; absent when unknown),
+`spend` (`today` and `week`, each `{costUsd, tokens}`, source
+`prime-transcripts`) for API keys, and `sharesLimitsWith: {harness, label}` with
+that account's `usage` for a shared subscription. Readings come from `GET /v1/usage` (owner credential,
 relayed for the app), which shares one reading per minute across every surface;
 `--refresh` reads again now. No harness credential is read or returned
 ([ADR 0260](adr/0260-usage-meters-come-from-each-harness.md)). The report's
