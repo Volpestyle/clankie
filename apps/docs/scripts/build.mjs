@@ -264,6 +264,22 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/operator/views",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "List Clankie's live views: each one's spec, whether it is pinned, and when a temporary one expires. GET /v1/operator/views/:id renders one now, each source's data or why it could not be read, and is 404 once the view has expired.",
+      },
+    ],
+    [
+      "POST /v1/operator/views",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Create, pin, unpin or expire a view; the relay holds each request and answer to the views schemas.",
+      },
+    ],
+    [
       "POST /v1/operator/appearance",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
