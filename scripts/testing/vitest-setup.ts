@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, realpathSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll } from "vitest";
+import { afterAll, afterEach } from "vitest";
 
 // Paths only, for the regression's access trap; never open the original stores.
 export const ownerConfigRoots = [
@@ -60,5 +60,12 @@ if (process.env.CLANKIE_TEST_LIVE_STORES !== "1") {
 
   // Leave HOME pointing at the removed fixture until the next setup installs
   // its root; late callbacks must never fall back to the owner's home.
-  afterAll(() => rm(root, { recursive: true, force: true }));
+  // A test Vitest cancelled (`--bail`) or timed out keeps running after its
+  // signal aborts; removing the root under it fails with ENOTEMPTY and reports
+  // a second, unrelated failure. That failed run leaves its root behind.
+  let abandoned = false;
+  afterEach(({ signal }) => {
+    abandoned ||= signal.aborted;
+  });
+  afterAll(() => (abandoned ? undefined : rm(root, { recursive: true, force: true })));
 }
