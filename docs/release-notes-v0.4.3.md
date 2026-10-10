@@ -1,4 +1,4 @@
-# Clankie v0.4.2
+# Clankie v0.4.3
 
 Clankie now keeps his own record of the work, runs more kinds of agents on more
 machines, and reaches Discord through one official bot without any setup on
@@ -16,6 +16,21 @@ your side.
 - **Linear as the Clankie app.** Clankie writes to Linear as his own workspace
   app. `linear graphql` runs any Linear operation, connected requests stay
   under the rate limit, and issue status stays accurate when workers leave.
+- **Projects on Auto.** Put a project on Auto with a one-line focus
+  (`clankie project settings PROJECT --auto on --focus "…"`) and Clankie
+  works it unprompted, checking its tracker and workers as the fleet runs.
+  `clankie auto on|off` is the master switch. This replaces goals.
+- **Routines.** Schedule recurring lead turns, hires or checks in plain
+  language or cron. A run missed while the Mac slept catches up once, restarts
+  never run a slot twice, and every run is logged. Also `/routines`:
+
+  ```sh
+  clankie routines add "Morning triage" --when "every weekday at 9:00" --turn "Triage new issues"
+  ```
+
+- **Live views.** Clankie builds private live boards, such as a heavy-queue
+  or fleet capacity board, from a spec (`clankie views`, `/view`). Paired
+  phones and desktops open them too.
 - **One way to ask you.** Questions from Clankie and his workers arrive as one
   owner ask on every surface. Answering wakes the conversation that asked.
 
@@ -39,12 +54,17 @@ your side.
 - **Shared machine resources.** `clankie heavy` takes turns on builds and test
   suites, and `clankie simulator` leases iOS simulators first come, first
   served, so a busy fleet stops overloading the Mac.
-- **Working preferences.** Owners set who may commit, push, release and close
-  work, and which questions need them, in `clankie fleet set` or any settings
-  surface. Leads and workers read the same resolved rules.
+- **One autonomy dial.** `clankie autonomy off|low|high|full` (or `/autonomy`)
+  sets who may commit, push, release, close work and set up machines in one
+  step. The default is High: Clankie decides hard-to-undo steps himself. Finer
+  preferences stay in `clankie fleet set` and every settings surface, and
+  leads and workers read the same resolved rules.
 
 ## Easier to run
 
+- **Maximum trust mode.** `clankie maximum-trust-mode on` is one owner
+  switch that launches Claude, Codex and Grok seats and hires without their
+  permission guardrails. It is off by default.
 - **Services recover on their own.** The launcher restarts crashed services.
   `clankie update` moves to a new release, checks its health, and rolls back if
   it fails.
@@ -83,6 +103,8 @@ your side.
   effects stay with the conversation that started them.
 - Voice can recall and record episodes and read his own state. Memory notes
   are stored in full and shortened at recall.
+- `clankie claude --resume SESSION_ID --conversation ID` reattaches one exact
+  Claude Code seat to its conversation.
 - More reliable native delivery, completion wakes, report receipts, Linear wake
   cursors and remote hire proof.
 - Faster fleet liveness checks and deferred optional MCP discovery reduce idle
@@ -92,7 +114,14 @@ This is the macOS Apple silicon service bundle, plus Linux archives for hosted
 bodies. The companion app and hosted service have their own releases. Mailbox,
 official bot and hosted features depend on the hosted service and your account.
 
-The v0.4.0 and v0.4.1 tags stopped at release checks before publication. The
-service typecheck outgrew the build runner's default Node heap and now runs
-with a 6 GB heap. The new huddle routes were missing from the public API
-reference.
+The v0.4.0, v0.4.1 and v0.4.2 tags stopped at release checks before
+publication. The service typechecks outgrew the build runner's default Node
+heap; the release and CI checks now set one heap ceiling for every typecheck.
+The new huddle routes were also missing from the public API reference. The full
+release check now passes on the clean macOS build runner.
+
+Known issue: when two requests race for one iOS simulator, the one left
+waiting can occasionally say it is held "by an unknown holder" instead of
+naming the request ahead of it. It still gets the simulator in turn
+([VUH-2083](https://linear.app/vuhlp/issue/VUH-2083)). The matching test is a
+rare flake on the slow CI runner.
