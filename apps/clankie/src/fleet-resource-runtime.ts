@@ -3,6 +3,7 @@ import {
   createResourceGovernor,
   createSimulatorManager,
   observeSimulatorReferents,
+  unprovenSeatDetail,
   type FleetResourceGovernor,
   type ResourceSnapshot,
   type SimulatorDevice,
@@ -10,11 +11,16 @@ import {
   type SimulatorOwner,
   type SimulatorReferents,
 } from "@clankie/fleet-resources";
+import { setTimeout as delay } from "node:timers/promises";
 import type { FleetResourcePolicy, SpawnOperatorSeat } from "@clankie/protocol";
 import type { HerdrAgentSnapshot } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
 import type { ProjectHireProcessProof } from "./captain/project-hires.ts";
 import { fleetQualified, splitFleetQualified } from "./herdr-fleet.ts";
+
+/** A simulator request's first proof: three observations about two seconds apart (VUH-2055). */
+const PROOF_ATTEMPTS = 3;
+const PROOF_RETRY_MS = 2_000;
 
 const RESOURCE_BRIEF = [
   "Machine resource safety:",
@@ -64,7 +70,11 @@ export interface FleetResourceRuntime {
    */
   admitHire(input: Pick<SpawnOperatorSeat, "fleet">): Promise<string | undefined>;
   hireBrief(input: Pick<SpawnOperatorSeat, "fleet">, brief?: string): Promise<string | undefined>;
-  proveSimulatorSeat(input: { seatId: string; fleet?: string; holderId?: string }): Promise<SimulatorOwner>;
+  /** `retryUnproven` retries a failed observation briefly; a simulator request's first proof uses it. */
+  proveSimulatorSeat(
+    input: { seatId: string; fleet?: string; holderId?: string },
+    options?: { retryUnproven?: boolean },
+  ): Promise<SimulatorOwner>;
   observeSeats(seats: readonly ObservedSeat[]): Promise<void>;
   /** Notice seats whose panes use simulators booted outside leases. */
   noticeExternalSimulators(): Promise<void>;
@@ -85,6 +95,8 @@ export async function createFleetResourceRuntime(input: {
   refreshMs?: number;
   /** How often the refresh loop checks for simulators booted outside leases. */
   externalNoticeMs?: number;
+  /** Pause between a simulator request's first-proof attempts. */
+  proofRetryMs?: number;
   onError?(error: unknown): void;
 }): Promise<FleetResourceRuntime> {
   const governor = input.governor ?? createResourceGovernor();
@@ -146,7 +158,23 @@ export async function createFleetResourceRuntime(input: {
     } catch (error) {
       if (error instanceof SimulatorRequestError) throw error;
       // Herdr or the process observer failed: the owner check could not run.
-      throw owner("The seat could not be looked up in Herdr or its processes observed; retry.");
+      throw owner("The seat could not be looked up in Herdr or its processes observed.");
+    }
+  };
+  /**
+   * A request's first proof. Native observation fails in short bursts under
+   * load (right after a restart, every seat reconnects at once), so a failed
+   * observation is retried briefly before the seat is refused (VUH-2055).
+   */
+  const proveFirst = async (request: { seatId: string; fleet?: string; holderId?: string }) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await observe(request);
+      } catch (error) {
+        if (!(error instanceof SimulatorRequestError) || error.reason !== "owner_unavailable") throw error;
+        if (attempt >= PROOF_ATTEMPTS) throw owner(unprovenSeatDetail(error.message));
+        await delay(input.proofRetryMs ?? PROOF_RETRY_MS);
+      }
     }
   };
   const observeSeat = async (request: { seatId: string; fleet?: string; holderId?: string }) => {
@@ -271,9 +299,12 @@ export async function createFleetResourceRuntime(input: {
       try {
         const current = await observe(identity);
         return current.identity.occupantId === identity.occupantId ? current : undefined;
-      } catch {
+      } catch (error) {
         // Failed census/authority is uncertainty, never an exit receipt.
-        return undefined;
+        return {
+          unproven:
+            error instanceof SimulatorRequestError ? error.message : "The seat could not be observed.",
+        };
       }
     },
     onChange: () => void refresh().catch(input.onError ?? (() => {})),
@@ -324,7 +355,8 @@ export async function createFleetResourceRuntime(input: {
     async hireBrief(request, brief) {
       return (await local(request.fleet)) ? [brief, RESOURCE_BRIEF].filter(Boolean).join("\n\n") : brief;
     },
-    proveSimulatorSeat: async (request) => (await observe(request)).identity,
+    proveSimulatorSeat: async (request, options) =>
+      (await (options?.retryUnproven ? proveFirst(request) : observe(request))).identity,
     async observeSeats(seats) {
       seen = seats.map(({ seatId, status, paneId }) => ({ seatId, status, ...(paneId ? { paneId } : {}) }));
       // Only actual lease holders need process probes; an ordinary roster

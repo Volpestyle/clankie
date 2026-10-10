@@ -108,6 +108,7 @@ async function fixture(
       probe: async () => ({ loadRatio: 0.1, availableMemoryMb: 32768 }),
     }),
     policy: async () => ({ ...defaultResourcePolicy(), heavySlots: 2 }),
+    proofRetryMs: 50,
     simulator: {
       adapter: createSimctlAdapter({
         run: async (args, timeout) => {
@@ -271,9 +272,10 @@ async function fixture(
       };
       return gate;
     },
-    failProof: () => {
+    failProof: (times = Infinity) => {
+      let failures = 0;
       proofAction = async () => {
-        throw new Error(`fixture-secret-provider-error ${root}`);
+        if (failures++ < times) throw new Error(`fixture-secret-provider-error ${root}`);
       };
     },
   };
@@ -411,6 +413,23 @@ it("sanitizes native proof errors instead of returning private diagnostics", asy
   const response = await f.send("POST", FLEET_SIMULATORS_PATH, f.acquire);
   expect(response).toMatchObject({ status: 409, json: { outcome: "rejected", reason: "owner_unavailable" } });
   metadataOnly(response.text, f.root);
+});
+
+it("a seat whose first proof fails briefly is admitted; a lasting failure names the cause and the fix", async () => {
+  const f = await fixture();
+  f.failProof(1);
+  expect(await f.send("POST", FLEET_SIMULATORS_PATH, { ...f.acquire, action: "plan" })).toMatchObject({
+    status: 200,
+    json: { outcome: "planned" },
+  });
+  f.failProof();
+  const refused = await f.send("POST", FLEET_SIMULATORS_PATH, { ...f.acquire, action: "plan" });
+  expect(refused).toMatchObject({ status: 409, json: { outcome: "rejected", reason: "owner_unavailable" } });
+  const detail = (refused.json as { detail: string }).detail;
+  expect(detail).toContain("could not be looked up in Herdr or its processes observed");
+  expect(detail).toContain("Retry the same request");
+  expect(detail).toContain("still running in its Herdr pane");
+  metadataOnly(refused.text, f.root);
 });
 
 it("answers service_restarting (503) while seat proof is not bound, not owner_unavailable", async () => {

@@ -115,7 +115,11 @@ a holder stay root-owned. Claude Bash hooks carry session plus `agent_id` in
 labels. Claude scopes its holder to a command subshell and clears ancestor
 Codex metadata, so a persistent shell cannot retain a sibling identity. Other harnesses
 can pass explicit holder labels. The host still proves the original seat, occupant,
-binding and live processes; a holder label grants no authority. Child leases
+binding and live processes; a holder label grants no authority. A seat
+observation that fails is unproven, not disproven: a waiting acquire keeps its
+ticket through failed observations for `UNPROVEN_GRACE_MS` (two minutes), and an
+admitted lease is kept for its next resume rather than forgotten. Only an
+observed different occupant or exited process refuses at once (VUH-2055). Child leases
 retain the root’s process proof and idle timeout, so a parent exit cleans them up.
 
 Simulator reservations remain durable when request processes die. Only the
