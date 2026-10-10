@@ -105,6 +105,8 @@ import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { autoProjectStates, autoRoundDue, autoRoundFingerprint, autoRoundPrompt } from "./auto-projects.ts";
+import { RoutineError, RoutineStore } from "./routines.ts";
+import { createRoutineRunner, serviceLauncher } from "./routine-runner.ts";
 import { createConversationRunner, runAutonomyTurn } from "./captain-conversation-runner.ts";
 import { createDiscordTurns } from "./captain-discord-turns.ts";
 import { RoomForkReceipts } from "./room-forks.ts";
@@ -3841,6 +3843,36 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     await runAutonomyTurn(conversations, conversationId, prompt, origin, expectedGoal);
   });
+  // Owner-defined recurring jobs (ADR 0265), each acting as its target conversation.
+  const routines = new RoutineStore({
+    stateDir: options.stateDir,
+    defaultConversationId: () => conversations.defaultGlobalConversationId(),
+    validateTarget: (target) => {
+      if (!conversations.linearWakeTargetAllowed(target.conversationId))
+        throw new RoutineError("invalid", "A routine targets an existing ordinary global or workspace chat");
+    },
+    execute: createRoutineRunner({
+      runTurn: async (conversationId, prompt) => {
+        if (!conversations.runsCaptainTurns(conversationId))
+          throw new Error("That conversation no longer takes turns");
+        await runAutonomyTurn(conversations, conversationId, prompt, "wake");
+      },
+      hire: (conversationId, seat, brief) => {
+        const owner = { conversationId };
+        return hireSeat(seat, brief, {
+          owner,
+          current: () => !shutdown.signal.aborted,
+          authorize: () => validateConversationOwner(owner),
+        });
+      },
+      notify: (conversationId, text) =>
+        wakeConversation({ conversationId }, text, undefined, "machine", false, false),
+      launcher: serviceLauncher(options.repoRoot),
+    }),
+  });
+  herdrWatches.routines = (command, conversationId) =>
+    routines.command(command, { kind: "lead", conversationId });
+  routines.start();
 
   evaluator.start();
   async function ledSeats(owner: ConversationOwner, force = false) {
@@ -5287,6 +5319,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     evaluatorStatus: () => evaluator.status(),
     evaluatorCommand: (command) => evaluator.command(command),
+    routineCommand: (command) => routines.command(command, { kind: "owner" }),
 
     async readTurnMetrics(query: TurnMetricsQuery) {
       return turnSettled.read(query);
@@ -6186,6 +6219,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       await options.remoteOpenCode?.close();
       stopFleetChanges();
       autonomy.close();
+      routines.close();
       await roomHandoffs.close();
       await conversations.close();
       for (const pending of sessions.values()) {

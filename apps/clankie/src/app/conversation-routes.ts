@@ -3,6 +3,8 @@ import {
   CAPTAIN_LANE_OBSERVATION_PATH,
   CAPTAIN_TURN_METRICS_PATH,
   EVALUATOR_PATH,
+  ROUTINES_PATH,
+  RoutineCommandSchema,
   EvaluatorCommandSchema,
   HERDR_SOCKET_HEADER,
   ISSUE_METRICS_PATH,
@@ -31,6 +33,7 @@ import { WorkRequestError } from "../work-items.ts";
 import { CutoverRequestSchema } from "../linear-cutover.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
 import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
+import { RoutineError } from "../captain/routines.ts";
 import { z } from "zod";
 import { TRACKER_LEAD, TRACKER_OWNER, TrackerWriteRefused, type TrackerActor } from "@clankie/work-items";
 import { authenticateCaptain, authenticateOperator, readJson } from "./http-auth.ts";
@@ -792,6 +795,31 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       return context.json(await ctx.dependencies.captain.evaluatorCommand(parsed.data));
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
+  /** Routines (ADR 0265): GET lists; POST takes one RoutineCommand. Every UI uses this. */
+  ctx.app.on(["GET", "POST"], ROUTINES_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed =
+      context.req.method === "GET"
+        ? RoutineCommandSchema.safeParse({ action: "list" })
+        : RoutineCommandSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success)
+      return context.json(
+        { error: "invalid_routine_command", message: parsed.error.issues[0]?.message },
+        400,
+      );
+    try {
+      return context.json(await ctx.dependencies.captain.routineCommand(parsed.data));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = error instanceof RoutineError ? error.code : "refused";
+      const status = code === "not_found" ? 404 : code === "invalid" ? 400 : code === "forbidden" ? 403 : 409;
+      return context.json({ error: code, message }, status);
     }
   });
 

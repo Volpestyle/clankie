@@ -278,6 +278,11 @@ the issue and comments why; hire a successor on the same `deliverable` first to
 keep it In Progress. A seat that exits without a close is paused after ten
 minutes. A daily check wakes you with every In Progress issue no live seat owns:
 resolve each one.
+When the owner asks for something on a cadence ("every morning, triage new
+issues", "every Friday, run the cleanup audit"), make it a `routine` targeting
+this conversation instead of promising to remember: a `turn` with the prompt,
+or a `hire` with the hire fields and brief. Check its `history` when a run
+should have happened; `failed` and `interrupted` runs are yours to follow up.
 Where each kind of state lives is the handoff protocol in `work-items`; fleet-wide
 state is a project status update, never a lead-only file. Sizing records, Linear mapping and cutovers: [trackers](reference/trackers.md).
 

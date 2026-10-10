@@ -4101,6 +4101,50 @@ bound to an external seat refuses reset: end that seat first because its
 model context belongs to the external harness. The API's `reset` operation
 requires `expectedRevision`; stale requests refuse without changing history.
 
+<a id="routines"></a>
+
+### Routines
+
+```sh
+clankie routines                      # list, with next and last run
+clankie routines add "Morning triage" --when "every weekday at 9:00" --turn "Triage new KH2 issues"
+clankie routines add "Cleanup audit" --when "every friday at 17:30" --conversation ID \
+  --hire '{"title":"Ada","role":"builder","workingDirectory":"/path/to/repo"}' --brief "Run the codebase-cleanup audit."
+clankie routines add "Typecheck" --when "every 2 hours" --check --cwd /path/to/repo --report failure -- pnpm typecheck
+clankie routines edit ID [--name NAME] [--when WHEN] [--tz ZONE] [--missed catch_up|skip]
+clankie routines pause|resume|run-now|remove ID
+clankie routines history [ID] [--limit N]
+```
+
+A routine is a recurring job (ADR 0265). `--when` takes plain language ("every
+day|weekday|weekend|monday[, friday] [morning|evening] at 9:00|9am|17:30",
+"every N minutes", "every N hours", "hourly") or five cron fields; an
+unrecognised phrase is refused. The time zone is the machine's unless `--tz`
+names an IANA zone. Targets:
+
+- `--turn PROMPT`: a turn in the conversation (default: Clankie's main chat).
+- `--hire JSON --brief TEXT`: a hire with `hire_agent`'s fields, led by that
+  conversation; the lead hears which seat was hired.
+- `--check --cwd DIR [--timeout SECONDS] [--report always|failure] -- CMD…`: the
+  command runs through `clankie heavy`; the conversation hears failures, or every
+  result with `--report always`.
+
+`--missed catch_up` (default) runs once after the Mac slept through runs and
+says how many it stands in for; `skip` logs them and waits for the next slot.
+Each slot is claimed once before it runs, so restarts and overlapping deploys
+never run it twice; a run a restart cut short is logged `interrupted`, not
+replayed. A run never overlaps the same routine's previous run. `--paused` adds
+a routine disabled. Output is text; `--json` prints the `RoutinesStatus`.
+
+The local operator credential authorizes `GET /v1/captain/routines` (list) and
+`POST /v1/captain/routines` with one `RoutineCommand`: `list`, `add`, `edit`,
+`pause`, `resume`, `run_now`, `remove`, `history` (schemas in
+`packages/protocol/src/routines.ts`). Invalid commands and unrecognised schedules
+return 400, an unknown id 404, and a run already going 409. In the TUI, bare
+`/routines` lists routines with run-now, pause/resume, history and remove, and
+adds a lead-turn routine; `/routines` also takes the CLI arguments. Leads manage
+routines that target their own conversation with the `routine` tool.
+
 <a id="conversation-commands"></a>
 
 ### `conversations list | show ID | tail ID | goal ID`

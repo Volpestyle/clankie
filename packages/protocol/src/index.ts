@@ -27,6 +27,7 @@ export * from "./connections.ts";
 export * from "./work-item-write.ts";
 export * from "./device-push.ts";
 export * from "./evaluator.ts";
+export * from "./routines.ts";
 export * from "./issue-metrics.ts";
 export * from "./agent-roles.ts";
 export * from "./projects.ts";

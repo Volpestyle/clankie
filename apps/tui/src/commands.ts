@@ -36,6 +36,13 @@ import {
 } from "./connections-menu.ts";
 import { runAccessCommand } from "./command/access.ts";
 import { runEvaluatorCommand, formatEvaluatorStatus } from "./command/evaluator.ts";
+import {
+  formatRoutine,
+  formatRoutinesStatus,
+  formatRuns,
+  runRoutinesCommand,
+  splitRoutineWords,
+} from "./command/routines.ts";
 import { openHerdr, type HerdrConnectionOptions } from "./session/herdr-connection.ts";
 /**
  * The operator console's slash commands. Display fields feed the ported
@@ -523,6 +530,26 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         shell.insertCommandResult(
           "/evaluator",
           result.ok ? formatEvaluatorStatus(result.evaluator) : result.error,
+          result.ok ? "success" : "error",
+        );
+      },
+    },
+    {
+      name: "routines",
+      aliases: ["routine"],
+      description: "Recurring jobs: lead turns, hires and checks on a schedule",
+      argumentHint: "[list|add|edit|pause|resume|run-now|remove|history …]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const args = splitRoutineWords(argument);
+        if (args.length === 0) {
+          await runRoutinesMenu(shell);
+          return;
+        }
+        const result = await runRoutinesCommand(args);
+        shell.insertCommandResult(
+          "/routines",
+          result.ok ? formatRoutinesStatus(result.status) : result.error,
           result.ok ? "success" : "error",
         );
       },
@@ -2285,6 +2312,79 @@ async function runEvaluatorMenu(shell: ClankieFaceShell): Promise<void> {
       }
       result = await runEvaluatorCommand(args);
       if (result.ok) flow.renderLine(`Evaluator: ${args.join(" ")} done.`, "success");
+    }
+    if (!result.ok) flow.renderLine(result.error, "error");
+  } finally {
+    flow.end();
+  }
+}
+
+/** `/routines` with no arguments: the owner's routines and their runs, through the same API. */
+async function runRoutinesMenu(shell: ClankieFaceShell): Promise<void> {
+  const flow = shell.setupFlow;
+  flow.begin("routines");
+  try {
+    let result = await runRoutinesCommand(["list"]);
+    while (result.ok) {
+      const { routines } = result.status;
+      const selected = await flow.readSelect({
+        message: routines.length
+          ? "Routines"
+          : "Routines\nNone yet. A lead can also make one with its routine tool.",
+        options: [
+          ...routines.map((routine) => ({
+            value: `routine:${routine.id}`,
+            label: `${routine.enabled ? "●" : "○"} ${routine.name}`,
+            hint: routine.schedule.text ?? routine.schedule.cron,
+            description: formatRoutine(routine),
+          })),
+          {
+            value: "add",
+            label: "New routine: a lead turn",
+            description: "Hires and checks: /routines add … (see /routines help)",
+          },
+          { value: "history", label: "Recent runs" },
+        ],
+        statusActions: [{ value: "done", label: "Done" }],
+      });
+      if (selected === undefined || selected === "done") break;
+      let args: string[] | undefined;
+      if (selected === "history") args = ["history"];
+      else if (selected === "add") {
+        const name = await flow.readText({ message: "Name", allowBack: true });
+        if (!name) continue;
+        const when = await flow.readText({
+          message: "When (e.g. every weekday at 9:00, every friday at 17:30, every 2 hours)",
+          allowBack: true,
+        });
+        if (!when) continue;
+        const prompt = await flow.readText({ message: "What Clankie should do each time", allowBack: true });
+        if (!prompt) continue;
+        args = ["add", name, "--when", when, "--turn", prompt];
+      } else {
+        const routine = routines.find((candidate) => `routine:${candidate.id}` === selected);
+        if (routine === undefined) continue;
+        const action = await flow.readSelect({
+          message: formatRoutine(routine),
+          options: [
+            { value: "run-now", label: "Run now" },
+            { value: routine.enabled ? "pause" : "resume", label: routine.enabled ? "Pause" : "Resume" },
+            { value: "history", label: "Run history" },
+            { value: "remove", label: "Remove" },
+          ],
+          allowBack: true,
+        });
+        if (action === undefined) continue;
+        args = [action, routine.id];
+      }
+      const outcome = await runRoutinesCommand(args);
+      if (!outcome.ok) {
+        flow.renderLine(outcome.error, "error");
+        continue;
+      }
+      if (args[0] === "history") flow.renderLine(formatRuns(outcome.status.runs ?? []));
+      else flow.renderLine(`Routines: ${args[0]} done.`, "success");
+      result = await runRoutinesCommand(["list"]);
     }
     if (!result.ok) flow.renderLine(result.error, "error");
   } finally {

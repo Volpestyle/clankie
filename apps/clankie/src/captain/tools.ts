@@ -62,6 +62,7 @@ import { rivalsTools } from "./rivals-tools.ts";
 import { activityTools } from "./activity-tools.ts";
 import { minecraftTools } from "./minecraft-tools.ts";
 import { fleetEfficiencyTools } from "./fleet-efficiency-tools.ts";
+import { routineTool } from "./routine-tools.ts";
 import { minecraftHostTools } from "./minecraft-host-tools.ts";
 
 /**
@@ -274,6 +275,9 @@ export function captainTools(
         ]
       : deps.gameExtensions.projections().flatMap((projection) => projection.tools(turn))),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
+    ...(lane === "operator" && herdrWatches?.routines !== undefined
+      ? [routineTool(herdrWatches.routines, turn)]
+      : []),
     // A Discord room with a shell can start workers, so it watches and
     // harvests its own; its report belongs in the room that asked (ADR 0186).
     // Another agent's transcript is the operator's machine, so it rides shell authority.
