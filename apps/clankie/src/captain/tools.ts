@@ -1270,7 +1270,7 @@ function herdrWatchTools(
             name: "close_worker_pane",
             label: "Close a finished worker pane",
             description:
-              "Close a worker pane you judge finished, with a one-line reason. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts, owner-interactive/hand-started panes, unkept results, another lead's hire (not_owner, naming its conversation), and unlanded_work: the worker's worktree has commits not on origin/main by content (git cherry) or uncommitted files, or is unreadable (remote). Land the work or hand it to its owner first; pass unlandedReason only when leaving it behind is a deliberate decision, and it is kept with the close record. Unknown styled input or native hire provenance fails closed. Does not decide whether the work is done. Never bypass a refusal with a raw close.",
+              "Close a worker pane you judge finished, with a one-line reason; its issue moves to issueStatus with that reason as a comment. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts, owner-interactive/hand-started panes, unkept results, another lead's hire (not_owner, naming its conversation), and unlanded_work: the worker's worktree has commits not on origin/main by content (git cherry) or uncommitted files, or is unreadable (remote). Land the work or hand it to its owner first; pass unlandedReason only when leaving it behind is a deliberate decision, and it is kept with the close record. Unknown styled input or native hire provenance fails closed. Does not decide whether the work is done. Never bypass a refusal with a raw close.",
             parameters: Type.Object({
               pane: Type.String({ minLength: 1, maxLength: 256 }),
               reason: Type.String({ minLength: 1, maxLength: 512 }),
@@ -1290,12 +1290,37 @@ function herdrWatchTools(
                     "Absolute path to a nonempty saved report; omit if its authenticated worker report was already kept.",
                 }),
               ),
+              issueStatus: Type.Optional(
+                Type.Union([Type.Literal("done"), Type.Literal("verifying"), Type.Literal("paused")], {
+                  description:
+                    "Where the seat's issue goes: done (landed, with evidence), verifying (on main, proof pending) or paused (default). A live seat on the same issue keeps it In Progress as successor.",
+                }),
+              ),
+              evidence: Type.Optional(
+                Type.String({
+                  minLength: 1,
+                  maxLength: 1024,
+                  description:
+                    "Commit, checks and evidence link for done; without it done becomes verifying.",
+                }),
+              ),
             }),
             executionMode: "sequential",
-            execute: async (_id, input) =>
-              json(
-                await watches.tidy!.close(input, captureConversationAuthority(turn.conversationAuthority)),
-              ),
+            execute: async (_id, { issueStatus, evidence, ...input }) => {
+              const result = await watches.tidy!.close(
+                input,
+                captureConversationAuthority(turn.conversationAuthority),
+              );
+              if (result.outcome !== "closed" || !watches.issueStatus) return json(result);
+              const issue = await watches.issueStatus.closed({
+                seatId: result.entry.seatId,
+                reason: input.reason,
+                outcome: issueStatus,
+                evidence,
+                unlanded: result.entry.unlanded !== undefined,
+              });
+              return json({ ...result, issue });
+            },
           }),
           defineTool({
             name: "undo_worker_pane",

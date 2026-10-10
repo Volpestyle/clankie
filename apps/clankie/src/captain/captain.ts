@@ -213,6 +213,7 @@ import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
 import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { PaneTidy } from "./pane-tidy.ts";
+import { SeatIssueKeeper } from "./seat-issue-status.ts";
 import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
 import type { CaptainPort, FleetHealthAlertDelivery, HireSeat, MessageSeat } from "./port.ts";
@@ -2310,6 +2311,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     changed: () => fleetChanges.touch(),
   });
   herdrWatches.tidy = paneTidy;
+  const issueStatus = new SeatIssueKeeper(deps.mcp, join(options.stateDir, "seat-issue-status.json"));
+  herdrWatches.issueStatus = issueStatus;
 
   /**
    * The one lane into a seat — an operator DM, a room turn, and the captain's
@@ -3452,6 +3455,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     liveSeats = projected;
     observeReportFailureAlerts(projected);
+    void issueStatus
+      .observe(
+        projected.map((seat) => ({
+          seatId: seat.seatId,
+          title: seat.title,
+          keys: [seat.efficiency?.assignedDeliverable, seat.efficiency?.currentIssue],
+        })),
+      )
+      .then((results) => {
+        for (const result of results)
+          if (result.outcome === "failed")
+            console.warn("Seat issue status unavailable", result.issue, result.detail);
+      });
     return projected;
   }
 
@@ -3830,6 +3846,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     for (const ownerKey of completedFleetRounds.keys()) {
       if (!owners.has(ownerKey)) completedFleetRounds.delete(ownerKey);
     }
+    // Once a day the lead hears every In Progress issue no live seat owns (VUH-1990).
+    void issueStatus
+      .dailyCheck()
+      .then(async (text) => {
+        if (text === undefined || shutdown.signal.aborted) return;
+        const lead = { conversationId: conversations.defaultGlobalConversationId() };
+        if (!(await wakeConversation(lead, text, undefined, "machine", true, false)))
+          console.warn("Daily issue status check was not delivered");
+      })
+      .catch((error: unknown) => {
+        if (!shutdown.signal.aborted) console.warn("Daily issue status check unavailable", String(error));
+      });
     if (owners.size)
       await warnRunOuts(owners).catch((error: unknown) => {
         if (!shutdown.signal.aborted) console.warn("Usage warning unavailable", String(error));

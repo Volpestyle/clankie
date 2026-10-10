@@ -278,6 +278,8 @@ export type HerdrWatchArmResult =
 
 export interface HerdrWatchPort {
   tidy?: import("./pane-tidy.ts").PaneTidy;
+  /** Moves a leaving seat's issue to its next status (VUH-1990). */
+  issueStatus?: import("./seat-issue-status.ts").SeatIssueKeeper;
   efficiency?: import("./fleet-efficiency-tools.ts").FleetEfficiencyActions;
   /** A machine's Claude profiles and Codex accounts with sign-in and usage (VUH-1527). */
   workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
@@ -3883,6 +3885,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   public tidy?: import("./pane-tidy.ts").PaneTidy;
+  public issueStatus?: import("./seat-issue-status.ts").SeatIssueKeeper;
 
   /** Pane names and adopted ownership alone cannot authorize tidy. */
   public tidyProvenance(agent: HerdrAgentSnapshot) {

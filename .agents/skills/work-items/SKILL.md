@@ -141,6 +141,23 @@ not imply a prerequisite.
 5. **Keep it small.** Status, criteria, ownership and evidence only. No sprints,
    estimates or extra workflow.
 
+## Status stays true
+
+Status says who is working now (VUH-1990):
+
+- **In Progress**: a live seat is working on it right now.
+- **Verifying**: the core work is on main and a seat is finishing proof or polish.
+- **Paused**: real progress, no seat right now, with one line on where it stopped.
+- **Done**: landed, with an evidence comment (commit, checks, evidence link).
+- **Todo**: not started.
+
+When a seat closes, hands off or exits, Clankie moves the issue it owned (its
+hire `deliverable` key) to Done, Verifying or Paused with a one-line comment, or
+keeps it In Progress when another live seat holds the same key. Gaps only the
+owner or a physical device can close become linked follow-up issues and the
+original closes. Where Verifying or Paused does not exist yet, the issue falls
+back to In Progress or Todo and the comment names the intended status.
+
 ## Ownership and useful updates
 
 When work needs the user specifically (a decision, credentials, a physical or

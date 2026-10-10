@@ -767,6 +767,13 @@ export function createOperatorService(
         if (personaId !== undefined) ctx.seatByPersona.delete(personaId);
         ctx.liveSeats = ctx.liveSeats.filter((seat) => seat.seatId !== request.seatId);
         ctx.fleetChanges.touch();
+        const issue = await ctx.herdrWatches.issueStatus?.closed({
+          seatId: request.seatId,
+          reason: request.unlandedReason ?? "closed by the owner",
+          unlanded: held.length > 0,
+        });
+        if (issue?.outcome === "failed")
+          console.warn("Seat issue status unavailable", issue.issue, issue.detail);
       }
       return {
         op: "close_seat",

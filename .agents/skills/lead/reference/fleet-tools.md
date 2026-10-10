@@ -239,7 +239,7 @@ is `clankie agents efficiency review SEAT --conversation ID --json-stdin`.
 
 ## Closing panes and tidying worktrees
 
-`close_worker_pane({ pane, reason, reportPath?, unlandedReason? })` keeps the
+`close_worker_pane({ pane, reason, reportPath?, unlandedReason?, issueStatus?, evidence? })` keeps the
 last output and a report; `reportPath` is an absolute path to a nonempty report
 when no worker report was kept. It refuses unsent drafts, owner-interactive or
 hand-started panes, unkept results, and `unlanded_work`: the worker's start or
@@ -248,6 +248,10 @@ foreground worktree has commits not on `origin/main` by content
 Land the work or hand it to its owner; pass `unlandedReason` only when leaving
 it is deliberate, and it stays with the close record. The app's and TUI's
 close (`close_seat`) holds the same way. A refusal never authorizes a raw close.
+After the close, the seat's `deliverable` issue moves to `issueStatus`
+(`done` needs `evidence`, else it becomes `verifying`; default `paused`), or stays
+In Progress when another live seat holds the same key, and gets `reason` as a
+one-line comment. The result's `issue` field says what was set.
 `worker_pane_history({})` lists closes and `undo_worker_pane({ id })` reopens one
 within five minutes. Load `tidy` for the cleanup flow.
 

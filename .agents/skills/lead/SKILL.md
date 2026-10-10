@@ -253,6 +253,13 @@ piece lands. One canonical record per deliverable; workers, landing and delivery
 are distinct facts, so record the stage actually reached. The tracker account is
 Clankie's connected one for the whole fleet; never use a harness's own
 connector. Pane assignments, queues and usage limits stay in live messages.
+In Progress means a live seat owns the issue now; the full rule is "Status stays
+true" in `work-items`. Close a seat with `close_worker_pane` and its
+`issueStatus` (`done` with `evidence`, `verifying`, or `paused`) so Clankie moves
+the issue and comments why; hire a successor on the same `deliverable` first to
+keep it In Progress. A seat that exits without a close is paused after ten
+minutes. A daily check wakes you with every In Progress issue no live seat owns:
+resolve each one.
 Where each kind of state lives is the handoff protocol in `work-items`; fleet-wide
 state is a project status update, never a lead-only file. Sizing records, Linear mapping and cutovers: [trackers](reference/trackers.md).
 
