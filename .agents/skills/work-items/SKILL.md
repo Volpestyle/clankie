@@ -136,6 +136,11 @@ not imply a prerequisite.
    and commit links supporting the result. Reuse meaningful artifacts; when
    no visual adds information, use the decisive evidence without decorative
    filler. Large media belongs in an artifact store; attach the link.
+   Show it where people read: embed screenshots and clips inline in the
+   comment, issue description or status update body (`linear-issues` covers
+   the stable-URL form), not only as an attachment. A demo that shows a
+   milestone working also goes in the project's status update, so it plays in
+   project Activity.
 4. **One owner per item.** Set `--owner` when you take an item; do not edit an
    item another agent owns without telling them.
 5. **Keep it small.** Status, criteria, ownership and evidence only. No sprints,
