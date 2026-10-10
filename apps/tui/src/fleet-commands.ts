@@ -123,16 +123,16 @@ async function editFleetResources(shell: ClankieFaceShell, services: FleetComman
     if (capacity === undefined) return;
     resources.heavySlots = capacity === "auto" ? null : Number(capacity);
     const simulators = await flow.readText({
-      message: "Fleet — maximum booted simulators (0–64)",
-      defaultValue: String(resources.simulatorSlots),
+      message: "Fleet — maximum booted simulators (auto or 0–64)",
+      defaultValue: String(resources.simulatorSlots ?? "auto"),
       allowBack: true,
       validate: (value: string) =>
-        /^\d+$/u.test(value) && Number(value) >= 0 && Number(value) <= 64
+        value === "auto" || (/^\d+$/u.test(value) && Number(value) >= 0 && Number(value) <= 64)
           ? undefined
-          : "Use an integer from 0 to 64.",
+          : "Use auto or an integer from 0 to 64.",
     });
     if (simulators === undefined) return;
-    resources.simulatorSlots = Number(simulators);
+    resources.simulatorSlots = simulators === "auto" ? null : Number(simulators);
     const idle = await flow.readText({
       message: "Fleet — simulator idle timeout in seconds (1–86400)",
       defaultValue: String(resources.simulatorIdleMs / 1000),

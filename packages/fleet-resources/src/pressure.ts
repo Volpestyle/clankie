@@ -55,6 +55,24 @@ export function automaticHeavySlots(): number {
 export function resourceCapacity(policy: FleetResourcePolicy): number {
   return policy.heavySlots ?? automaticHeavySlots();
 }
+/**
+ * What one booted iOS 27 simulator costs while an app and its UI-test driver
+ * run in it: kernel footprint and CPU, measured on the 18-core, 128 GiB Mac
+ * (docs/testing/2026-10-09-lean-simulators). An idle lean one is 27 GiB.
+ */
+const simulatorCost = { memoryGiB: 34, cores: 2 } as const;
+/** A cold boot's CPU burst lasts about two minutes; admit the next simulator after it. */
+export const simulatorBootSettleMs = 180_000;
+/** Simulators share the machine with heavy slots, so they get at most half of it. */
+export function automaticSimulatorSlots(): number {
+  return Math.max(
+    1,
+    Math.min(
+      Math.floor(availableParallelism() / 2 / simulatorCost.cores),
+      Math.floor(totalmem() / 1024 ** 3 / 2 / simulatorCost.memoryGiB),
+    ),
+  );
+}
 export class ResourcePressureSampler {
   private pending: Promise<ResourcePressureInput> | undefined;
   private readonly probe: () => Promise<ResourcePressureInput>;

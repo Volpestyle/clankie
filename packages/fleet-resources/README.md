@@ -24,7 +24,15 @@ unmanaged active devices count only against `simulatorSlots`. Status reports
 `capacity.used` for heavy leases and `capacity.simulatorUsed` for simulator
 reservations; simulator status separately counts external active devices. Automatic
 heavy capacity is the smaller of one permit per four available cores and one per 24GiB
-of RAM, with a minimum of one. The simulator limit defaults to one. Heavy
+of RAM, with a minimum of one. Automatic simulator capacity is
+`max(1, min(floor(cores/2/2), floor(RAM_GiB/2/34)))`: half the machine at the
+measured cost of one lean simulator under test (see
+[the lean-simulator run](../../docs/testing/2026-10-09-lean-simulators/README.md)).
+Owner settings may say `auto`; the service resolves it to that count before
+configuring the shared registry, which always holds an exact integer every
+installed CLI can read. A new simulator is refused with `pressure` for three minutes after the previous
+admission, because a cold boot's burst outruns the one-minute load average.
+Leased devices boot with `leanSimulatorJobs` disabled. Heavy
 commands wait in a FIFO queue; tickets are removed on cancellation or a proven
 requester exit. Simulator requests never queue: they take a free slot when they
 ask or are told what holds the slots. High pressure delays heavy admission,

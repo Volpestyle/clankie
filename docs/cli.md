@@ -2730,13 +2730,13 @@ not run on `/health`. Resource metadata contains no arguments or credentials.
 
 The owner sets `fleet.resources` with these flags or the TUI `/fleet resources`:
 
-| Flag                                      | Default | Meaning                                                                            |
-| ----------------------------------------- | ------- | ---------------------------------------------------------------------------------- |
-| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Heavy capacity, 1–64; auto is min(floor(cores/4), floor(RAM GiB/24)), at least one |
-| `--simulator-slots N`                     | `1`     | Independent simulator ceiling, 0–64                                                |
-| `--simulator-idle-seconds N`              | `600`   | Lease heartbeat timeout, 1–86400 seconds                                           |
-| `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                    |
-| `--minimum-free-memory-mb N`              | `4096`  | Minimum OS available memory, 0–1048576 MiB                                         |
+| Flag                                      | Default | Meaning                                                                               |
+| ----------------------------------------- | ------- | ------------------------------------------------------------------------------------- |
+| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Heavy capacity, 1–64; auto is min(floor(cores/4), floor(RAM GiB/24)), at least one    |
+| `--simulator-slots auto` or `N`           | `auto`  | Simulator ceiling, 0–64; auto is min(floor(cores/4), floor(RAM GiB/68)), at least one |
+| `--simulator-idle-seconds N`              | `600`   | Lease heartbeat timeout, 1–86400 seconds                                              |
+| `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                       |
+| `--minimum-free-memory-mb N`              | `4096`  | Minimum OS available memory, 0–1048576 MiB                                            |
 
 Available memory on macOS is the smaller of the kernel's
 `kern.memorystatus_level` percentage of RAM and free plus file-backed resident

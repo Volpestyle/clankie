@@ -12,7 +12,7 @@ import { ResourceStore } from "../src/store.ts";
 import { createResourceGovernor } from "../src/governor.ts";
 import { defaultResourcePolicy } from "../src/model.ts";
 import { processIdentity } from "../src/process.ts";
-import { createSimctlAdapter } from "../src/simctl.ts";
+import { createSimctlAdapter, leanSimulatorJobs } from "../src/simctl.ts";
 import { createSimulatorManager, type SimulatorOwner, type SimulatorResult } from "../src/simulators.ts";
 
 const execute = promisify(execFile);
@@ -45,7 +45,7 @@ async function stop(child: ChildProcess) {
   child.kill("SIGTERM");
   await exited;
 }
-async function fixture(settings: { respondWithinMs?: number } = {}) {
+async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: number } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "clankie-simulator-fixture-"));
   const statePath = join(directory, "native.json");
   const logPath = join(directory, "commands.jsonl");
@@ -66,9 +66,15 @@ async function fixture(settings: { respondWithinMs?: number } = {}) {
   const governorOptions = {
     directory: join(directory, "governor"),
     probe: async () => ({ loadRatio, availableMemoryMb: 32768 }),
+    simulatorBootSettleMs: settings.bootSettleMs ?? 0,
   };
   let governor = createResourceGovernor(governorOptions);
-  await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1, minAvailableMemoryMb: 0 });
+  await governor.configure({
+    ...defaultResourcePolicy(),
+    heavySlots: 1,
+    simulatorSlots: 1,
+    minAvailableMemoryMb: 0,
+  });
   let nativeReplyBarrier: ((args: readonly string[]) => Promise<void>) | undefined;
   const adapter = createSimctlAdapter({
     run: async (args, timeout) => {
@@ -218,6 +224,11 @@ async function fixture(settings: { respondWithinMs?: number } = {}) {
     },
   };
 }
+const bootCommand = (udid: string) => [
+  "boot",
+  udid,
+  ...leanSimulatorJobs.map((job) => `--disabledJob=${job}`),
+];
 function lease(result: SimulatorResult) {
   if (!("lease" in result)) throw new Error(`Expected a simulator lease, got ${result.outcome}`);
   return result.lease;
@@ -241,11 +252,23 @@ it("crosses real HTTP, durable admission and child-process simctl boundaries; he
   expect((await f.http("/release", { id: created.id, owner: f.owner })).outcome).toBe("released");
   const commands = await f.commands();
   expect(commands.filter((args) => args[0] === "create")).toHaveLength(1);
-  expect(commands.filter((args) => args[0] === "bootstatus")).toEqual([
-    ["bootstatus", created.deviceId!, "-b"],
-  ]);
+  expect(commands.filter((args) => args[0] === "boot")).toEqual([bootCommand(created.deviceId!)]);
   expect(commands.filter((args) => args[0] === "shutdown")).toEqual([["shutdown", created.deviceId!]]);
   expect(commands.filter((args) => args[0] === "delete")).toEqual([]);
+});
+
+it("with two slots, a second simulator waits on pressure until the first boot settles", async () => {
+  const f = await fixture({ bootSettleMs: 60_000 });
+  await f.governor.configure({ ...defaultResourcePolicy(), simulatorSlots: 2, minAvailableMemoryMb: 0 });
+  const first = lease(await f.manager.acquire(f.request));
+  const second = await f.manager.acquire({
+    ...f.request,
+    seatId: "seat-other",
+    occupantId: "native-other",
+    deviceType: "com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4",
+  });
+  expect(second).toMatchObject({ outcome: "waiting", reason: "pressure" });
+  expect((await f.commands()).filter((args) => args[0] === "boot")).toEqual([bootCommand(first.deviceId!)]);
 });
 
 it("concurrent named seats reserve one global simulator slot; the other is told who holds it", async () => {
@@ -370,7 +393,7 @@ it("a lost boot receipt holds capacity and reconciles only a later booted observ
   });
   await f.manager.tick();
   expect((await f.governor.simulatorReservations())[0]!.phase).toBe("booted");
-  expect((await f.commands()).filter((args) => args[0] === "bootstatus")).toHaveLength(1);
+  expect((await f.commands()).filter((args) => args[0] === "boot")).toHaveLength(1);
   expect((await f.manager.release(acquired.id, f.owner)).outcome).toBe("released");
 });
 
@@ -520,10 +543,10 @@ it("a slow boot outlives a caller that hung up: the lease stays the seat's and i
   });
   const disconnected = expect(response).rejects.toThrow();
   try {
-    // Disconnect only after the executable native boundary receives bootstatus.
+    // Disconnect only after the executable native boundary receives boot.
     // Its file gate keeps boot in flight even when the shared machine is slow.
     const deadline = Date.now() + 8_000;
-    while (!(await f.commands()).some((args) => args[0] === "bootstatus")) {
+    while (!(await f.commands()).some((args) => args[0] === "boot")) {
       if (Date.now() > deadline) throw new Error("Fixture boot command was not submitted");
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -539,7 +562,7 @@ it("a slow boot outlives a caller that hung up: the lease stays the seat's and i
     expect(lease(again).phase).toBe("booted");
     const commands = await f.commands();
     expect(commands.filter((args) => args[0] === "create")).toHaveLength(1);
-    expect(commands.filter((args) => args[0] === "bootstatus")).toHaveLength(1);
+    expect(commands.filter((args) => args[0] === "boot")).toHaveLength(1);
   } finally {
     controller.abort();
     await disconnected.catch(() => undefined);
@@ -583,10 +606,7 @@ it("prefers an idle existing device of the exact type, and returns it stopped ra
   expect(acquired).toMatchObject({ deviceId: existing, origin: "existing", phase: "booted" });
   expect((await f.manager.release(acquired.id, f.owner)).outcome).toBe("released");
   const commands = (await f.commands()).filter((args) => args[0] !== "list");
-  expect(commands).toEqual([
-    ["bootstatus", existing, "-b"],
-    ["shutdown", existing],
-  ]);
+  expect(commands).toEqual([bootCommand(existing), ["bootstatus", existing], ["shutdown", existing]]);
   expect((await f.read()).devices[runtime]).toEqual([
     expect.objectContaining({ udid: existing, state: "Shutdown" }),
   ]);
@@ -659,7 +679,7 @@ it("a boot that failed is resubmitted by the seat's next acquire instead of stra
   expect((await f.read()).devices[runtime]![0]!.state).toBe("Shutdown");
   const again = await f.manager.acquire(f.request);
   expect(again).toMatchObject({ outcome: "acquired", lease: { id: first.id, phase: "booted" } });
-  expect((await f.commands()).filter((args) => args[0] === "bootstatus")).toHaveLength(2);
+  expect((await f.commands()).filter((args) => args[0] === "boot")).toHaveLength(2);
 });
 
 it.each([
@@ -738,9 +758,9 @@ it("two consecutive family leases across a manager restart boot the same retaine
   expect((await f.http("/release", { id: second.id, owner: f.owner })).outcome).toBe("released");
   const commands = await f.commands();
   expect(commands.filter((args) => args[0] === "create")).toHaveLength(1);
-  expect(commands.filter((args) => args[0] === "bootstatus")).toEqual([
-    ["bootstatus", first.deviceId!, "-b"],
-    ["bootstatus", first.deviceId!, "-b"],
+  expect(commands.filter((args) => args[0] === "boot")).toEqual([
+    bootCommand(first.deviceId!),
+    bootCommand(first.deviceId!),
   ]);
   expect(commands.filter((args) => args[0] === "delete")).toEqual([]);
 });

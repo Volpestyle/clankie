@@ -13,7 +13,12 @@ import {
   OPERATOR_CREDENTIAL_PROVIDER_ID,
 } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
-import { createResourceGovernor, defaultResourcePolicy, processIdentity } from "@clankie/fleet-resources";
+import {
+  automaticSimulatorSlots,
+  createResourceGovernor,
+  defaultResourcePolicy,
+  processIdentity,
+} from "@clankie/fleet-resources";
 import { FLEET_RESOURCES_PATH, FleetResourcePolicySchema } from "@clankie/protocol";
 import { createFleetResourceRuntime } from "../../clankie/src/fleet-resource-runtime.ts";
 import { createFleetResourceRoutes } from "../../clankie/src/fleet-resource-routes.ts";
@@ -313,8 +318,16 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       ).rejects.toThrow("Usage");
       expect(await readFile(f.settings.path, "utf8")).toBe(bytes);
       await runFleetCommand(["clear"], f.options);
-      expect((await f.governor.snapshot()).policy).toEqual(defaultResourcePolicy());
-      expect((await f.settings.load()).fleet.resources).toEqual(defaultResourcePolicy());
+      // Settings keep "automatic"; the shared registry, read by every installed
+      // CLI, holds the exact count it resolves to (VUH-1988).
+      expect((await f.governor.snapshot()).policy).toEqual({
+        ...defaultResourcePolicy(),
+        simulatorSlots: automaticSimulatorSlots(),
+      });
+      expect((await f.settings.load()).fleet.resources).toEqual({
+        ...defaultResourcePolicy(),
+        simulatorSlots: null,
+      });
     } finally {
       await f.close();
     }
@@ -331,7 +344,10 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       const status = await runFleetCommand(["status"], f.options);
       expect(status.fleet).toMatchObject({ notes: "legacy owner notes", size: "small" });
       expect(status.fleet.resources).toBeUndefined();
-      expect(FleetResourcePolicySchema.parse(status.fleet.resources ?? {})).toEqual(defaultResourcePolicy());
+      expect(FleetResourcePolicySchema.parse(status.fleet.resources ?? {})).toEqual({
+        ...defaultResourcePolicy(),
+        simulatorSlots: null,
+      });
       expect(await readFile(f.settings.path, "utf8")).toBe(bytes);
     } finally {
       await f.close();

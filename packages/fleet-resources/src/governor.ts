@@ -22,7 +22,7 @@ import {
   type ResourceQueueEntry,
 } from "./model.ts";
 import { processIdentity, observeProcesses, resourceNativeHelperPath, resourcePython } from "./process.ts";
-import { resourceCapacity, ResourcePressureSampler } from "./pressure.ts";
+import { resourceCapacity, ResourcePressureSampler, simulatorBootSettleMs } from "./pressure.ts";
 import { ResourceStore } from "./store.ts";
 import { heavyJobArgs, heavyJobEnvironment } from "./parallelism.ts";
 
@@ -82,8 +82,13 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
 }
 /** One canonical machine registry; runtime/worktree environment cannot increase capacity. */
 export function createResourceGovernor(
-  options: { directory?: string; probe?: () => Promise<ResourcePressureInput> } = {},
+  options: {
+    directory?: string;
+    probe?: () => Promise<ResourcePressureInput>;
+    simulatorBootSettleMs?: number;
+  } = {},
 ): FleetResourceGovernor {
+  const bootSettleMs = options.simulatorBootSettleMs ?? simulatorBootSettleMs;
   const directory = options.directory ?? join(userInfo().homedir, ".clankie/fleet-resources");
   const store = new ResourceStore(directory);
   const pressure = new ResourcePressureSampler(options.probe);
@@ -684,6 +689,10 @@ export function createResourceGovernor(
           return blocked("simulator_capacity");
         if (!(await pressure.sample(state.policy)).healthy) return blocked("pressure");
         const at = Date.now();
+        // A boot's CPU burst outruns the one-minute load average; two at once
+        // drove this Mac to load 340 (VUH-1988).
+        if (state.leases.some((entry) => entry.kind === "simulator" && at - entry.createdAtMs < bootSettleMs))
+          return blocked("pressure");
         const next: SimulatorReservation = {
           id: randomUUID(),
           token: randomUUID(),

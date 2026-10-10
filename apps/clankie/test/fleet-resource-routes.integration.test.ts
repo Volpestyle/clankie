@@ -351,9 +351,9 @@ it("serves validated metadata and crosses actual TCP/governor/process-based simu
   ).toEqual({ outcome: "released" });
   expect(
     (await f.commands())
-      .filter((command) => ["create", "bootstatus", "shutdown", "delete"].includes(command[0]!))
+      .filter((command) => ["create", "boot", "bootstatus", "shutdown", "delete"].includes(command[0]!))
       .map((command) => command[0]),
-  ).toEqual(["create", "bootstatus", "shutdown"]);
+  ).toEqual(["create", "boot", "bootstatus", "shutdown"]);
 });
 
 it.each([

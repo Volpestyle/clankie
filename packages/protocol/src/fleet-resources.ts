@@ -7,7 +7,7 @@ export const FLEET_SIMULATORS_PATH = `${FLEET_RESOURCES_PATH}/simulators`;
 export const FleetResourcePolicySchema = z
   .object({
     heavySlots: z.number().int().min(1).max(64).nullable().default(null),
-    simulatorSlots: z.number().int().min(0).max(64).default(1),
+    simulatorSlots: z.number().int().min(0).max(64).nullable().default(null),
     simulatorIdleMs: z.number().int().min(1000).max(86_400_000).default(600_000),
     maxLoadRatio: z.number().finite().positive().max(16).default(1.5),
     minAvailableMemoryMb: z.number().int().min(0).max(1_048_576).default(4096),

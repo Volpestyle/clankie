@@ -36,7 +36,7 @@ import type { machineSetupContext } from "./machine-setup.ts";
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH]]",
   `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]`,
-  "       clankie fleet set [--heavy-slots auto|N] [--simulator-slots N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N]",
+  "       clankie fleet set [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N]",
   "       clankie fleet resources",
   "       clankie fleet processes [retire]",
   "       clankie fleet clear",
@@ -116,7 +116,7 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
   return [
     `fleet size: ${fleet.size} — ${FLEET_SIZE_GUIDANCE[fleet.size]}`,
     `models: ${fleet.models} — ${FLEET_MODEL_GUIDANCE[fleet.models]}`,
-    `heavy capacity: ${resources.heavySlots ?? "automatic"} shared slots; simulators: ${resources.simulatorSlots}`,
+    `heavy capacity: ${resources.heavySlots ?? "automatic"} shared slots; simulators: ${resources.simulatorSlots ?? "automatic"}`,
     `simulator idle: ${resources.simulatorIdleMs / 1000}s; load limit: ${resources.maxLoadRatio} per core; minimum available memory: ${resources.minAvailableMemoryMb} MiB`,
     ...formatFleetAutonomyGuidance(FleetAutonomySchema.parse(fleetAutonomyFields(fleet))),
     `tools: ${fleet.tools} — ${fleet.tools === "off" ? "fleet tool access disabled" : "every verified connected server through clankie_tools and clankie_call"}`,
@@ -283,7 +283,7 @@ async function parseSet(
       resourceFlags.add(flag!);
       const number = Number(value);
       if (flag === "--heavy-slots") resources.heavySlots = value === "auto" ? null : number;
-      else if (flag === "--simulator-slots") resources.simulatorSlots = number;
+      else if (flag === "--simulator-slots") resources.simulatorSlots = value === "auto" ? null : number;
       else if (flag === "--simulator-idle-seconds") resources.simulatorIdleMs = number * 1000;
       else if (flag === "--max-load-ratio") resources.maxLoadRatio = number;
       else resources.minAvailableMemoryMb = number;

@@ -8,7 +8,7 @@ export {
   resourceNativeHelperPath,
 } from "./process.ts";
 export type { SimulatorReferents } from "./process.ts";
-export { automaticHeavySlots } from "./pressure.ts";
+export { automaticHeavySlots, automaticSimulatorSlots } from "./pressure.ts";
 export type { FleetResourcePolicy as ResourcePolicy } from "./model.ts";
 export { createSimulatorManager } from "./simulators.ts";
 export type {

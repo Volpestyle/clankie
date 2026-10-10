@@ -1,17 +1,16 @@
 import {
+  automaticSimulatorSlots,
   createResourceGovernor,
   createSimulatorManager,
-  defaultResourcePolicy,
   observeSimulatorReferents,
   type FleetResourceGovernor,
-  type FleetResourcePolicy,
   type ResourceSnapshot,
   type SimulatorDevice,
   type SimulatorHolder,
   type SimulatorOwner,
   type SimulatorReferents,
 } from "@clankie/fleet-resources";
-import type { SpawnOperatorSeat } from "@clankie/protocol";
+import type { FleetResourcePolicy, SpawnOperatorSeat } from "@clankie/protocol";
 import type { HerdrAgentSnapshot } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
 import type { ProjectHireProcessProof } from "./captain/project-hires.ts";
@@ -117,13 +116,22 @@ export async function createFleetResourceRuntime(input: {
     for (const listener of listeners) listener();
   };
   const configure = async (policy: FleetResourcePolicy) => {
-    const snapshot = await governor.configure(policy);
+    // The shared registry keeps an exact simulator count: every installed
+    // reader parses it, so the owner's automatic choice resolves here.
+    const snapshot = await governor.configure({
+      ...policy,
+      simulatorSlots: policy.simulatorSlots ?? automaticSimulatorSlots(),
+    });
     policyFingerprint = JSON.stringify(policy);
     publish(snapshot);
     return snapshot;
   };
   const ownerPolicy = async (): Promise<ResourceSnapshot | undefined> => {
-    const policy = (await input.policy()) ?? defaultResourcePolicy();
+    // No owner choice leaves the shared registry as it is. The registry
+    // ignores HOME, so a service under a scratch config (a test, an eval)
+    // must not reset the machine's live policy to defaults.
+    const policy = await input.policy();
+    if (!policy) return undefined;
     return JSON.stringify(policy) === policyFingerprint ? undefined : configure(policy);
   };
   const local = async (fleet?: string) => {
