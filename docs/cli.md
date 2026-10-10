@@ -571,7 +571,12 @@ Local Codex results also include bounded `detail` evidence:
 native catalog status/errors or the loaded thread inventory behind a scope
 refusal. Busy requests remain pending under their original authority.
 Roster `workerTools` and `/doctor` show observed/expected plugin versions and
-whether the observed runtime revision is behind. Local Codex seats started on
+whether the observed runtime revision is behind. A Claude seat still running an
+older plugin is never reported `refreshed`: it fails with
+`original_claude_plugin_unchanged`, because its plugin loads only when its session
+starts. Its `detail` and the pane's older-plugin notice name the step that loads
+it: between tasks, close the pane and resume its session with `hire_agent`
+(`resume` set to its transcript ref), keeping its context. Local Codex seats started on
 worker plugins before 0.6.5 show **restart needed** instead of an in-place refresh
 success. Automatic restart of those legacy seats is disabled. They retire
 naturally; deployment or refresh never quits them. The lead may close an idle

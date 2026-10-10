@@ -57,7 +57,8 @@ export class WorkerPluginNotices {
         older
           ? [
               "--token",
-              `clankie-plugin=Clankie plugin ${version} is older than ${expectedVersion}. Request an in-place worker tool refresh; busy seats refresh when idle. Check the per-seat result if refresh fails.`,
+              // An in-place tool refresh never reloads a plugin; only a resumed session does (VUH-2077).
+              `clankie-plugin=Clankie plugin ${version} is older than ${expectedVersion}, and this session keeps it until it is resumed. Between tasks, close this pane and resume its session (hire_agent with resume set to its transcript ref, or the owner's own claude --resume); it keeps its context and loads the current plugin.`,
             ]
           : ["--clear-token", "clankie-plugin"],
       );

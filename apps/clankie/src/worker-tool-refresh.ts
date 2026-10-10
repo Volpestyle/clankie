@@ -191,6 +191,20 @@ export function createWorkerToolRefresh(input: {
       if (!currentSeats?.some((row) => key(row) === key(seat)))
         return { ...base, outcome: "failed", reason: "original_native_session_changed" };
       await guard(authority);
+      // The catalog refresh reaches the running bridge, but its plugin loads
+      // only when the session starts; never call that seat refreshed (VUH-2077).
+      if (
+        seat.harness === "claude" &&
+        status.pluginVersion !== undefined &&
+        status.expectedPluginVersion !== undefined &&
+        status.pluginVersion !== status.expectedPluginVersion
+      )
+        return {
+          ...base,
+          outcome: "failed",
+          reason: "original_claude_plugin_unchanged",
+          detail: `It still runs Clankie plugin ${status.pluginVersion}; ${status.expectedPluginVersion} is current. Its tool catalog refresh was requested, but no in-place refresh loads a plugin. ${resumeOnCurrentPlugin(seat)}`,
+        };
       const nativeVerified =
         nativeConnected ||
         (health?.status === "matched" &&

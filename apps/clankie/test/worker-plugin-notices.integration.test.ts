@@ -122,7 +122,7 @@ it.skipIf(process.env.NATIVE_HARNESS_FIXTURES !== "1")(
       };
       await initialize("0.6.1");
       expect(reports).toHaveLength(1);
-      expect(reports[0]?.join(" ")).toContain("Save this session, then restart/resume this harness");
+      expect(reports[0]?.join(" ")).toContain("close this pane and resume its session");
       const snapshot = JSON.parse(await run(["api", "snapshot"])).result.snapshot;
       expect(
         JSON.stringify(snapshot.panes.find((entry: { pane_id: string }) => entry.pane_id === pane)),
@@ -167,6 +167,9 @@ it.skipIf(process.env.NATIVE_HARNESS_FIXTURES !== "1")(
       ).toBe(200);
       await initialize("0.6.2");
       expect(reports[2]?.join(" ")).toContain("is older than 0.6.3");
+      // VUH-2077: it names the step that loads a plugin, not an in-place refresh.
+      expect(reports[2]?.join(" ")).toContain("close this pane and resume its session");
+      expect(reports[2]?.join(" ")).not.toContain("in-place");
       expect(await processInfo()).toMatchObject({ shell_pid: pid });
       expect(reports.every((args) => !args.includes("restart") && !args.includes("send-keys"))).toBe(true);
     } finally {

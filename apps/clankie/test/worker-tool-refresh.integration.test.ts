@@ -173,3 +173,88 @@ it("remote Claude root health cannot certify replacement of its imported bridge"
     );
   }
 });
+
+// VUH-2077: a catalog refresh reaches a running Claude bridge, but its plugin
+// loads only when the session starts. Same surrogate observations as above.
+it("a local Claude seat on an older plugin is never refreshed; the result names the resume that loads it", async () => {
+  const token = `clankie_op_${"d".repeat(43)}`;
+  const sessionId = "original-local-claude-session";
+  let requested: string | undefined,
+    pluginVersion = "0.6.14";
+  const signals: string[] = [];
+  const coordinator = createWorkerToolRefresh({
+    captain: {
+      workerCatalogSeats: async () => [
+        { paneId: "w1:p1", seatId: "local-seat", harness: "claude", sessionId, status: "idle" },
+      ],
+      toolCatalogHealth: async () => ({
+        schemaVersion: 1,
+        seats: [
+          {
+            paneId: "w1:p1",
+            seatId: "local-seat",
+            toolCatalog: {
+              status: "matched",
+              harness: "claude",
+              bridge: "worker",
+              sessionId,
+              detail: "Surrogate observation",
+              missing: [],
+              checkedAt: new Date().toISOString(),
+            },
+          },
+        ],
+      }),
+    } as unknown as CaptainPort,
+    local: { close() {} } as ReturnType<typeof createLocalCodexCatalogCoordinator>,
+    remote: new RemoteCodexSeats(async () => undefined),
+    workerMcp: {
+      requestCatalogRefresh(_fleet: string, _pane: string, revision: string) {
+        requested = revision;
+        signals.push(revision);
+      },
+      bridgeStatus: () => ({
+        pluginVersion,
+        expectedPluginVersion: "0.6.15",
+        runtimeRevision: requested,
+        behind: pluginVersion !== "0.6.15",
+      }),
+    } as unknown as WorkerMcp,
+    revision: "fixture-service",
+    intervalMs: 60_000,
+  });
+  const app = createRuntimeUpdateRoutes({
+    authorize: async (request) =>
+      request.headers.get("authorization") === `Bearer ${token}`
+        ? { current: () => true, guard: async () => {} }
+        : undefined,
+    refreshWorkerCatalogs: coordinator.refresh,
+  });
+  const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("No refresh fixture port");
+  const options = { host: `http://127.0.0.1:${address.port}`, env: { CLANKIE_OPERATOR_TOKEN: token } };
+  try {
+    const older = await runWorkerToolRefreshCommand(["refresh-tools", "--pane", "w1:p1"], options);
+    expect(older.seats[0]).toMatchObject({
+      paneId: "w1:p1",
+      outcome: "failed",
+      reason: "original_claude_plugin_unchanged",
+      detail: expect.stringContaining("close pane w1:p1 and call hire_agent with resume"),
+    });
+    expect(older.seats[0]!.detail).toContain("Clankie plugin 0.6.14; 0.6.15 is current");
+    // The catalog still reaches the running bridge.
+    expect(signals).toHaveLength(1);
+    // Once the session runs the current plugin, the same request reads refreshed.
+    pluginVersion = "0.6.15";
+    const current = await runWorkerToolRefreshCommand(["refresh-tools", "--pane", "w1:p1"], options);
+    expect(current.seats[0]).toMatchObject({ outcome: "refreshed" });
+  } finally {
+    coordinator.close();
+    if ("closeAllConnections" in server) server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});

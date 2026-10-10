@@ -26,7 +26,8 @@ Codex worker plugins, including profiles on enabled SSH fleet machines, through
 the existing harness installer. First-time linking still uses interactive
 consent. Managed Codex profiles reuse a previously approved source-owned setup;
 missing setup or an unreachable machine returns an incomplete receipt. Native
-panes with an older plugin get a once-only save/restart/resume flag. Their
+panes with an older plugin get a once-only flag naming the resume that loads the
+current plugin. Their
 harnesses are never restarted by installation. See [harness linking](cli.md#linking-native-fleet-harnesses)
 for receipts, source setup and manual remediation.
 
