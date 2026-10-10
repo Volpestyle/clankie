@@ -37,7 +37,6 @@ export function heavyJobEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     GOMAXPROCS: cap(env.GOMAXPROCS),
     RAYON_NUM_THREADS: cap(env.RAYON_NUM_THREADS),
     OMP_NUM_THREADS: cap(env.OMP_NUM_THREADS),
-    npm_config_child_concurrency: cap(env.npm_config_child_concurrency),
   };
 }
 
