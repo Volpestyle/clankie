@@ -756,6 +756,9 @@ function claudeEntries(
     (entry) =>
       (entry.type === "user" || entry.type === "assistant" || queuedCommand(entry) !== undefined) &&
       entry.isSidechain !== true,
+    // A compacted session keeps its earlier history, including deliveries
+    // a receipt may need to find (VUH-2034).
+    "logicalParentUuid",
   );
   const active = new Set(chain);
   // A queued prompt Claude also wrote as its own user record renders once.
@@ -1063,6 +1066,8 @@ function activeChain(
   idKey: string,
   parentKey: string,
   include: (entry: Record<string, unknown>) => boolean,
+  /** Claude's compact boundary has no parent; its logical parent continues the history. */
+  logicalParentKey?: string,
 ): Record<string, unknown>[] {
   const candidates = entries.filter(include);
   const byId = new Map(
@@ -1072,10 +1077,14 @@ function activeChain(
     }),
   );
   const chain: Record<string, unknown>[] = [];
+  const visited = new Set<Record<string, unknown>>();
   let current = candidates.at(-1);
-  while (current !== undefined) {
+  while (current !== undefined && !visited.has(current)) {
+    visited.add(current);
     if (include(current)) chain.push(current);
-    const parent = string(current[parentKey]);
+    const parent =
+      string(current[parentKey]) ??
+      (logicalParentKey === undefined ? undefined : string(current[logicalParentKey]));
     current = parent === undefined ? undefined : byId.get(parent);
   }
   return chain.reverse();

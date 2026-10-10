@@ -1203,6 +1203,74 @@ describe("harness-native seat transcripts", () => {
     ]);
   });
 
+  it("keeps a compacted Claude session's earlier history, including a queued channel delivery (VUH-2034)", () => {
+    // Shape of a real worker transcript: a channel event queued mid-turn, then
+    // a compaction whose boundary has no parent, only a logical one.
+    const records = [
+      {
+        type: "user",
+        uuid: "u1",
+        parentUuid: null,
+        timestamp: "2026-10-10T04:00:00.000Z",
+        message: { role: "user", content: "Start VUH-2021" },
+      },
+      {
+        type: "attachment",
+        uuid: "q1",
+        parentUuid: "u1",
+        timestamp: "2026-10-10T04:10:49.406Z",
+        isSidechain: false,
+        attachment: {
+          type: "queued_command",
+          commandMode: "prompt",
+          prompt:
+            '<channel source="plugin:clankie-worker:worker" kind="message" event_id="seat-1">Fleet note</channel>',
+          source_uuid: "s1",
+          origin: { kind: "channel", server: "plugin:clankie-worker:worker" },
+          isMeta: true,
+        },
+      },
+      {
+        type: "assistant",
+        uuid: "a1",
+        parentUuid: "q1",
+        timestamp: "2026-10-10T04:11:00.000Z",
+        message: { role: "assistant", content: [{ type: "text", text: "Noted." }] },
+      },
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        uuid: "b1",
+        parentUuid: null,
+        logicalParentUuid: "a1",
+        timestamp: "2026-10-10T09:44:21.733Z",
+      },
+      {
+        type: "user",
+        uuid: "u2",
+        parentUuid: "b1",
+        timestamp: "2026-10-10T09:45:00.000Z",
+        message: { role: "user", content: "Continue" },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n");
+    expect(
+      parseHerdrSeatTranscript("claude", records, true).flatMap((entry) =>
+        entry.type === "message" ? [{ id: entry.id, role: entry.role, text: entry.text }] : [],
+      ),
+    ).toEqual([
+      { id: "claude:u1", role: "operator", text: "Start VUH-2021" },
+      {
+        id: "claude:q1",
+        role: "operator",
+        text: '<channel source="plugin:clankie-worker:worker" kind="message" event_id="seat-1">Fleet note</channel>',
+      },
+      { id: "claude:a1", role: "agent", text: "Noted." },
+      { id: "claude:u2", role: "operator", text: "Continue" },
+    ]);
+  });
+
   it("keeps Grok prompts and assistant text, not injected context or synthetic reminders", () => {
     const entries = parseHerdrSeatTranscript(
       "grok",
