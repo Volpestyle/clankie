@@ -124,6 +124,18 @@ run("deadcode", ["pnpm", "deadcode"]);
 run("doc-links", ["node", "scripts/check-doc-links.mjs"]);
 run("retired-claims", ["node", "scripts/check-retired-claims.mjs"]);
 run("evidence", ["node", "scripts/testing/evidence-landing-guard.mjs"]);
+// Every route the public gateway forwards needs a public-docs row. The table is
+// built from protocol path constants, so any protocol, docs or OpenAPI change
+// checks it here rather than first in the release run (VUH-2059).
+if (
+  report.change.files.some(
+    (file) =>
+      file.startsWith("packages/protocol/src/") ||
+      file.startsWith("apps/docs/") ||
+      file === "apps/clankie/openapi.yaml",
+  )
+)
+  run("public-docs", ["pnpm", "docs:public:check"]);
 if (!exit) {
   const before = performance.now();
   try {

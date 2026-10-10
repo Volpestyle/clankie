@@ -264,6 +264,22 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/captain/routines",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "List the owner's routines: each one's schedule, target, missed-run policy, next run and whether it is paused.",
+      },
+    ],
+    [
+      "POST /v1/captain/routines",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Add, edit, pause, resume, run now or remove a routine, or read one routine's run history; a routine runs with the authority of the conversation it targets.",
+      },
+    ],
+    [
       "GET /v1/operator/views",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
@@ -285,21 +301,6 @@ function buildNetworkRows() {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
         purpose:
           "Choose Clankie's look with revision fencing; the id must be well formed, and apps fall back to the selected pack's own look for a skin they do not bundle.",
-      },
-    ],
-    [
-      "GET /v1/operator/maximum-trust-mode",
-      {
-        access: "Encrypted active device bearer with terminalControl (Take Control)",
-        purpose: "Read whether maximum trust mode is on for the next harness launches.",
-      },
-    ],
-    [
-      "POST /v1/operator/maximum-trust-mode",
-      {
-        access: "Encrypted active device bearer with terminalControl (Take Control)",
-        purpose:
-          "Turn maximum trust mode on or off. New seats, hires and project leads then start with or without each harness's permission prompts and sandbox; running seats keep their mode.",
       },
     ],
     [
