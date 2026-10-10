@@ -87,7 +87,7 @@ specific release, including an older one, with an `older-than-current-pin` warni
 Install a specific release with:
 
 ```bash
-curl -fsSL https://clankie.bot/install | sh -s -- --version v0.4.1
+curl -fsSL https://clankie.bot/install | sh -s -- --version v0.4.2
 ```
 
 `https://clankie.bot/install` is a redirect to `install.sh` on this repository's
@@ -103,8 +103,8 @@ browser-downloaded package.
 
 ```text
 ~/.local/share/clankie/
-├── current -> releases/v0.4.1
-└── releases/v0.4.1/
+├── current -> releases/v0.4.2
+└── releases/v0.4.2/
     ├── bin/clankie
     ├── libexec/node
     ├── bin/clankie-herdr      # attach-only viewer shortcut
@@ -236,7 +236,7 @@ native Herdr worker and relay image; `pnpm hosted:smoke` checks isolated executi
 and persistence. The [hosted deployment guide](../infra/hosted/README.md) owns
 setup, supported capabilities and remaining managed-hosting requirements.
 
-Pushing a version tag matching `package.json` (for example `v0.4.1`) runs the
+Pushing a version tag matching `package.json` (for example `v0.4.2`) runs the
 full repository check and fleet load gate, builds and smoke-tests the archive on an Apple silicon
 GitHub runner, builds the `linux-arm64` and `linux-x64` archives that hosted bodies
 install ([ADR 0237](adr/0237-hosted-bodies-update-themselves-to-official-releases.md)),
