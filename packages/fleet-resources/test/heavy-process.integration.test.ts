@@ -168,7 +168,12 @@ async function fixture() {
       try {
         process.kill(-pgid, signal);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        // Darwin answers EPERM when a group's only members are exiting or unreaped
+        // zombies, for example a runner that exited between the identity check and
+        // this signal. These private fixture groups have no other-user members, so
+        // both mean nothing is left to stop (pre-existing flake, 1 in 5 on main).
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ESRCH" && code !== "EPERM") throw error;
       }
     }
     let closing: Promise<void> | undefined;
@@ -609,6 +614,155 @@ describe("machine shared heavy permits with actual OS children", () => {
       await f.close();
     }
   }, 20_000);
+
+  // VUH-2027: a command's leftovers must not hold the slot after it exits.
+  const leftovers = async (directory: string) =>
+    (await readFile(join(directory, "leftovers.jsonl"), "utf8").catch(() => ""))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  it.each([
+    { mode: "leave-orphan", signal: "TERM", outcome: "exited" },
+    { mode: "leave-stubborn", signal: "KILL", outcome: "killed" },
+  ])(
+    "frees the slot a short grace after the command exits, stopping and recording its $mode",
+    async ({ mode, signal, outcome }) => {
+      const f = await fixture();
+      try {
+        const run = f.start("leftover", mode);
+        const orphan = JSON.parse(
+          await eventually(() => readFile(`${run.receipt}.orphan`, "utf8").catch(() => ""), Boolean, 15_000),
+        ) as { pid: number; startTime: string };
+        // The command exited; only its leftover holds the lease, and status says so.
+        const held = await eventually(
+          () => f.governor.snapshot(),
+          (value) => value.leases.some((lease) => lease.state === "leftovers"),
+          15_000,
+        );
+        expect(held.capacity.used).toBe(1);
+        expect((await processIdentity(orphan.pid))?.startTime).toBe(orphan.startTime);
+        const exitedAt = Date.now();
+        expect(await run.done).toBe(0);
+        expect(Date.now() - exitedAt).toBeLessThan(25_000);
+        expect((await processIdentity(orphan.pid))?.startTime).not.toBe(orphan.startTime);
+        expect((await f.governor.snapshot()).capacity.used).toBe(0);
+        expect(await leftovers(f.directory)).toEqual([
+          expect.objectContaining({
+            seatId: "leftover",
+            executable: "node",
+            memberCount: 1,
+            members: [{ pid: orphan.pid, name: "node", startTime: orphan.startTime, signal, outcome }],
+          }),
+        ]);
+      } finally {
+        await f.close();
+      }
+    },
+    45_000,
+  );
+
+  it("reaps a dead runner's surviving group after the grace and records what it stopped", async () => {
+    const f = await fixture();
+    try {
+      const run = f.start("dead-runner");
+      await run.ready();
+      const { pid } = JSON.parse(await readFile(run.receipt, "utf8")) as { pid: number };
+      const state = await new ResourceStore(f.directory).read();
+      const lease = state.leases.find((entry) => entry.kind === "heavy");
+      if (lease?.kind !== "heavy" || !lease.runner) throw new Error("Owned runner absent");
+      process.kill(lease.runner.pid, "SIGKILL");
+      expect(await run.done).toBe(137);
+      // Nothing else will ever release this lease: the reaper must, after the grace.
+      const freed = await eventually(
+        () => f.governor.snapshot(),
+        (value) => value.capacity.used === 0,
+        30_000,
+      );
+      expect(freed.leases).toEqual([]);
+      expect(await processIdentity(pid)).toBeUndefined();
+      // The helper records after its last check; the lease can free a moment earlier.
+      expect(
+        await eventually(
+          () => leftovers(f.directory),
+          (records) => records.length > 0,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          leaseId: lease.id,
+          seatId: "dead-runner",
+          runnerPid: lease.runner.pid,
+          members: [expect.objectContaining({ pid, name: "node", signal: "TERM", outcome: "exited" })],
+        }),
+      ]);
+    } finally {
+      await f.close();
+    }
+  }, 45_000);
+
+  it("signals only leftovers proven born since their runner; unknown ownership stays held", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clankie-leftover-binding-"));
+    // A real detached group: its leader and one child, both alive.
+    const leader = spawn(
+      process.execPath,
+      [
+        "-e",
+        "require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); setInterval(() => {}, 1000)",
+      ],
+      { detached: true, stdio: "ignore" },
+    );
+    try {
+      const runner = await confirmedIdentity(leader.pid!);
+      if (!runner) throw new Error("Group leader identity unavailable");
+      const members = () =>
+        eventually(
+          async () => (await observeProcesses([leader.pid!])).get(leader.pid!)!,
+          (observation) => observation.status === "live",
+        );
+      await members();
+      const stop = async (startTime: string) => {
+        const helper = spawn(
+          resourcePython,
+          ["-I", resourceNativeHelperPath(), "stop-leftovers", directory, String(runner.pgid)],
+          { stdio: ["pipe", "pipe", "pipe"] },
+        );
+        let output = "";
+        helper.stdout.on("data", (bytes) => (output += String(bytes)));
+        helper.stdin.end(
+          `${JSON.stringify({ id: "binding-lease", executable: "node", runner: { ...runner, startTime } })}\n`,
+        );
+        await new Promise((resolve) => helper.once("close", resolve));
+        return JSON.parse(output) as { pid: number; outcome: string }[];
+      };
+      // Wait until the child exists, so both members are in the census.
+      await eventually(
+        async () => (await stop(String(Number(runner.startTime) + 3600))).length,
+        (count) => count === 2,
+      );
+      // A runner born after every member cannot have started them: nothing is signalled.
+      const unproven = await stop(String(Number(runner.startTime) + 3600));
+      expect(unproven.map((member) => member.outcome)).toEqual(["unknown_held", "unknown_held"]);
+      for (const member of unproven) expect(await processIdentity(member.pid)).toBeDefined();
+      // With the runner's true birth, both are proven, stopped and recorded.
+      const stopped = await stop(runner.startTime);
+      expect(stopped.map((member) => member.outcome)).toEqual(["exited", "exited"]);
+      for (const member of stopped) expect(await processIdentity(member.pid)).toBeUndefined();
+      const records = (await readFile(join(directory, "leftovers.jsonl"), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { leaseId: string; members: { outcome: string }[] });
+      expect(records.at(-1)).toMatchObject({ leaseId: "binding-lease", runnerPid: leader.pid });
+      expect(
+        records.slice(0, -1).flatMap((record) => record.members.map((member) => member.outcome)),
+      ).not.toContain("exited");
+    } finally {
+      try {
+        process.kill(-leader.pid!, "SIGKILL");
+      } catch {
+        /* Already stopped by the proof. */
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("a different native holder cannot reuse the parent's inherited heavy permit", async () => {
     const f = await fixture();

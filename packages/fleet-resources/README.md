@@ -51,7 +51,10 @@ request holds the lock. Queued heavy requests retain their original tickets
 through that wait. Cancellation terminates only the caller's waiting helper;
 queue cleanup still commits under the same lock. Native lock failures report the
 helper exit or signal and exception type/errno, without journal contents or
-paths; an acquired transaction deadline reports its own cause.
+paths; an acquired transaction deadline reports its own cause. The helper writes
+the journal only after reading its request, so a fault at any earlier stage
+(through `request-read`) committed nothing: the store reruns that transaction on
+a fresh helper, up to three attempts, instead of failing a queued job (VUH-2027).
 
 On macOS, available memory is the smaller of the kernel's
 `kern.memorystatus_level` percentage of RAM and free plus file-backed resident
@@ -69,8 +72,16 @@ no process, lease or signaling authority. Linux retains `/proc/meminfo`'s
 The heavy runner registers its process birth under the journal's kernel file lock
 before receiving execution permission. A dead claim owner cannot authorize a late
 runner. A registered runner owns its process group independently of its wrapper;
-surviving group members retain capacity after either process is killed. Status
-shows a lease whose runner is proven dead as `orphaned` while live members remain.
+surviving group members retain capacity after either process is killed, but only
+briefly once the command is gone (VUH-2027). When the command exits with members
+left in its group, status shows `leftovers`; after `LEFTOVER_GRACE_SECONDS` (10s)
+the runner TERMs the group, KILLs survivors five seconds later, appends what it
+stopped (names and signals, never arguments) to `leftovers.jsonl`, and frees the
+slot. Status shows a lease whose runner is proven dead as `orphaned` while live
+members remain; the governor gives it the same grace, then starts the native
+`stop-leftovers` helper outside the lock. Group IDs are not reused while a
+member lives, so the group stays that lease's signal authority. The grace marker
+lives in `leftovers/<lease>.json` beside the journal, never in it.
 Once a census proves no live member is left (zombies excluded), reconciliation
 reaps the lease, admits the next queued job on its next tick, and appends a
 receipt to `reaped.jsonl` beside the journal: reason (`runner_exited` or

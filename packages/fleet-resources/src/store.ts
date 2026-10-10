@@ -20,10 +20,15 @@ function parseState(raw: unknown): ResourceState {
   return parsed.data as ResourceState;
 }
 /** Kernel advisory locking releases automatically when the transaction process dies. */
+/** Native stages that precede the journal write; a fault there committed nothing. */
+const uncommittedHelperFault =
+  /^Fleet resource lock helper exited with code 1: Fleet resource lock helper failed: [A-Za-z][A-Za-z0-9_]*(?: \(errno -?\d+\))? at (?:directory-create|lock-open|lock-mode|lock-acquire|journal-read|request-read)$/u;
 export class ResourceStore {
   readonly directory: string;
-  constructor(directory: string) {
+  private readonly onRetry: ((error: Error, attempt: number) => void) | undefined;
+  constructor(directory: string, options: { onRetry?: (error: Error, attempt: number) => void } = {}) {
     this.directory = directory;
+    this.onRetry = options.onRetry;
   }
   async read(): Promise<ResourceState> {
     try {
@@ -35,7 +40,28 @@ export class ResourceStore {
       throw error;
     }
   }
+  /**
+   * A helper fault before it reads our request committed nothing: the journal is written only
+   * after that read. Rerun such a transaction on a fresh helper so a queued heavy job never dies
+   * from one helper fault (VUH-2027; seen as EBADF at request-read). Later faults stay errors.
+   */
   async transaction<T>(
+    apply: (state: ResourceState) => T | Promise<T>,
+    options: { signal?: AbortSignal; onRetry?: (error: Error, attempt: number) => void } = {},
+  ): Promise<T> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.attempt(apply, options);
+      } catch (error) {
+        if (attempt >= 3 || !(error instanceof Error) || !uncommittedHelperFault.test(error.message))
+          throw error;
+        (options.onRetry ?? this.onRetry)?.(error, attempt);
+        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        if (options.signal?.aborted) throw new DOMException("Fleet resource wait cancelled", "AbortError");
+      }
+    }
+  }
+  private async attempt<T>(
     apply: (state: ResourceState) => T | Promise<T>,
     { signal }: { signal?: AbortSignal } = {},
   ): Promise<T> {

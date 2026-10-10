@@ -10,6 +10,7 @@ import {
   type OperatorConversationStreamEvent,
 } from "@clankie/protocol";
 import { expect, it } from "vitest";
+import { ownProcess } from "../../../scripts/testing/owned-process.ts";
 
 const repo = resolve(import.meta.dirname, "../../..");
 const loader = join(repo, "apps/tui/node_modules/tsx/dist/loader.mjs");
@@ -220,6 +221,8 @@ it("opens the production console at the latest first frame, lazily anchors older
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    // A bailed or timed-out fork skips `finally`; its exit still stops the service (VUH-2027).
+    ownProcess(service);
     service.stdout?.on("data", (chunk) => {
       serviceLog += String(chunk);
     });
@@ -303,6 +306,7 @@ it("opens the production console at the latest first frame, lazily anchors older
           stdio: ["pipe", "pipe", "pipe"],
         },
       );
+      ownProcess(child);
       let pending = "";
       const decoder = new StringDecoder("utf8");
       child.stdout?.on("data", (chunk) => {

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { appendFile, rename, stat } from "node:fs/promises";
 import { constants, userInfo } from "node:os";
 import { basename, join } from "node:path";
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createInterface } from "node:readline";
@@ -61,6 +62,73 @@ function groupAlive(pgid: number): boolean {
     return (error as NodeJS.ErrnoException).code !== "ESRCH";
   }
 }
+/** Matches LEFTOVER_GRACE_SECONDS in native.py: leftovers get this long after their command exits. */
+const LEFTOVER_GRACE_MS = 10_000;
+/**
+ * When a lease's command exited (or its runner died) with members left in its group. Kept
+ * beside the journal, not in it, so strict readers of an older journal schema still parse it.
+ */
+function leftoverMarker(directory: string, id: string): string {
+  return join(directory, "leftovers", `${basename(id)}.json`);
+}
+function leftoversSince(directory: string, id: string): number | undefined {
+  try {
+    const value = (
+      JSON.parse(readFileSync(leftoverMarker(directory, id), "utf8")) as { commandExitedAtMs?: unknown }
+    ).commandExitedAtMs;
+    return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function markLeftovers(directory: string, id: string, at: number): void {
+  mkdirSync(join(directory, "leftovers"), { recursive: true, mode: 0o700 });
+  const path = leftoverMarker(directory, id);
+  writeFileSync(`${path}.tmp`, JSON.stringify({ commandExitedAtMs: at }), { mode: 0o600 });
+  renameSync(`${path}.tmp`, path);
+}
+/** Markers outlive nothing: drop any whose lease has left the journal. */
+function pruneLeftoverMarkers(directory: string, leases: readonly { id: string }[]): void {
+  let names: string[];
+  try {
+    names = readdirSync(join(directory, "leftovers"));
+  } catch {
+    return;
+  }
+  const live = new Set(leases.map((lease) => `${basename(lease.id)}.json`));
+  for (const name of names)
+    if (!live.has(name) && name.endsWith(".json"))
+      rmSync(join(directory, "leftovers", name), { force: true });
+}
+/** Groups this process is already stopping; another pass must not start a second stopper. */
+const stoppingGroups = new Set<number>();
+/**
+ * A dead runner can't stop its own leftovers, so the reaper does (VUH-2027). The group ID
+ * cannot be reused while it has members, so it remains this lease's authority. Runs outside
+ * the registry lock; a later reconcile drops the lease once the group is empty.
+ */
+function stopLeftovers(directory: string, lease: HeavyLease, pgid: number, since: number): void {
+  if (stoppingGroups.has(pgid)) return;
+  stoppingGroups.add(pgid);
+  const record = {
+    id: lease.id,
+    // The member-binding authority: each stopped process must be born since this runner.
+    runner: lease.runner,
+    executable: lease.executable,
+    ...(lease.seatId ? { seatId: lease.seatId } : {}),
+    ...(lease.holderId ? { holderId: lease.holderId } : {}),
+    commandExitedAtMs: since,
+  };
+  const child = spawn(
+    resourcePython,
+    ["-I", resourceNativeHelperPath(), "stop-leftovers", directory, String(pgid)],
+    { stdio: ["pipe", "ignore", "ignore"] },
+  );
+  child.once("error", () => stoppingGroups.delete(pgid));
+  child.once("exit", () => stoppingGroups.delete(pgid));
+  child.stdin.end(`${JSON.stringify(record)}\n`);
+  child.unref();
+}
 function matches(a: ProcessIdentity | undefined, b: ProcessIdentity): boolean {
   return a?.pid === b.pid && a.startTime === b.startTime;
 }
@@ -90,7 +158,13 @@ export function createResourceGovernor(
 ): FleetResourceGovernor {
   const bootSettleMs = options.simulatorBootSettleMs ?? simulatorBootSettleMs;
   const directory = options.directory ?? join(userInfo().homedir, ".clankie/fleet-resources");
-  const store = new ResourceStore(directory);
+  const store = new ResourceStore(directory, {
+    // Bounded causes only (stage and errno); never journal contents or paths.
+    onRetry: (error, attempt) =>
+      process.stderr.write(
+        `clankie: retrying a fleet resource transaction (${attempt}/2): ${error.message}\n`,
+      ),
+  });
   const pressure = new ResourcePressureSampler(options.probe);
   const shutdown = new AbortController();
   const active = new Set<Promise<unknown>>();
@@ -159,6 +233,12 @@ export function createResourceGovernor(
         // so this reconciliation is what frees the slot (VUH-2006).
         if (!(root && root.pgid === root.pid) && (await groupOccupied(lease.runner.pgid))) {
           orphaned.add(lease.id);
+          // Nobody else will ever stop these leftovers: after the grace, the reaper
+          // does, and a later pass releases the lease once the census is empty (VUH-2027).
+          let since = leftoversSince(directory, lease.id);
+          if (since === undefined) markLeftovers(directory, lease.id, (since = Date.now()));
+          if (Date.now() - since >= LEFTOVER_GRACE_MS)
+            stopLeftovers(directory, lease, lease.runner.pgid, since);
           retained.push(lease);
           continue;
         }
@@ -168,6 +248,7 @@ export function createResourceGovernor(
       }
     }
     state.leases = retained;
+    pruneLeftoverMarkers(directory, retained);
     for (const id of orphaned) if (!retained.some((lease) => lease.id === id)) orphaned.delete(id);
     if (reaped.length) await recordReaped(reaped);
   }
@@ -227,7 +308,16 @@ export function createResourceGovernor(
       leases: state.leases.map((lease) => ({
         id: lease.id,
         kind: lease.kind,
-        state: lease.kind === "heavy" ? (orphaned.has(lease.id) ? "orphaned" : lease.state) : lease.phase,
+        // `orphaned`: its runner died with members left; `leftovers`: its command exited
+        // and only leftovers hold the slot (VUH-2006, VUH-2027).
+        state:
+          lease.kind === "heavy"
+            ? orphaned.has(lease.id)
+              ? "orphaned"
+              : leftoversSince(directory, lease.id) !== undefined
+                ? "leftovers"
+                : lease.state
+            : lease.phase,
         ...(lease.seatId ? { seatId: lease.seatId } : {}),
         ...(lease.holderId ? { holderId: lease.holderId } : {}),
         ...(lease.kind === "heavy"

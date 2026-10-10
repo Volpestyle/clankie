@@ -348,6 +348,163 @@ def simulator_usage():
     return {"schemaVersion": 1, "sampledAtMs": int(time.time() * 1000), "devices": result}
 
 
+# A command's leftovers get this long to exit on their own once it has exited (VUH-2027).
+LEFTOVER_GRACE_SECONDS = 10
+LEFTOVER_TERM_SECONDS = 5
+
+
+def group_members(pgid):
+    """Live members of one process group with executable names only, never arguments."""
+    observer = subprocess.Popen(["/bin/ps", "-axo", "pid=,pgid=,stat=,comm="], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        output, _ = observer.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        observer.kill()
+        observer.communicate()
+        raise RuntimeError("Process group snapshot unavailable")
+    if observer.returncode != 0 or len(output) > 4 * 1024 * 1024:
+        raise RuntimeError("Process group snapshot unavailable")
+    members = []
+    for row in output.splitlines():
+        fields = row.split(None, 3)
+        if len(fields) < 3:
+            raise RuntimeError("Process group snapshot unavailable")
+        pid, group, status = int(fields[0]), int(fields[1]), fields[2]
+        # The observer is born inside the caller's group; it is not a member.
+        if group != pgid or pid == observer.pid or status.startswith(b"Z"):
+            continue
+        name = os.path.basename(os.fsdecode(fields[3])) if len(fields) == 4 else ""
+        members.append({"pid": pid, "name": name[:128]})
+    return members
+
+
+def born_since(start, runner_start):
+    """Whether a member started no earlier than the lease's runner; None when unprovable."""
+    try:
+        if ":" in start or ":" in runner_start:
+            boot, ticks = start.split(":")
+            runner_boot, runner_ticks = runner_start.split(":")
+            return boot == runner_boot and int(ticks) >= int(runner_ticks)
+        return float(start) >= float(runner_start)
+    except (ValueError, AttributeError):
+        return None
+
+
+def bound_members(pgid, runner, keep):
+    """Group members proven to be this lease's: same user, still in its group, born since its runner.
+
+    Group IDs cannot be reused while a member lives, but a PID can be after it exits, so every
+    member is bound by its own birth; anything unprovable is unknown and stays held."""
+    proven, unknown = [], []
+    for member in group_members(pgid):
+        if member["pid"] in (keep, os.getpid()):
+            continue
+        try:
+            proof = identity(member["pid"])
+        except RuntimeError:
+            unknown.append(member)
+            continue
+        if proof is None:
+            continue
+        if proof["pgid"] != pgid or born_since(proof["startTime"], runner["startTime"]) is not True:
+            unknown.append(member)
+            continue
+        proven.append({**member, "startTime": proof["startTime"]})
+    return proven, unknown
+
+
+def still_bound(member, pgid):
+    try:
+        proof = identity(member["pid"])
+    except RuntimeError:
+        return None
+    return proof is not None and proof["startTime"] == member["startTime"] and proof["pgid"] == pgid
+
+
+def signal_bound(member, pgid, sig):
+    """Signal one exact process lifetime, re-proven immediately before; never a group sweep."""
+    if still_bound(member, pgid) is not True:
+        return False
+    try:
+        os.kill(member["pid"], sig)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def stop_leftovers(directory, lease, pgid, keep):
+    """TERM, then KILL, a lease's proven leftovers after its command exited, and record each outcome.
+
+    `lease["runner"]` is the runner identity that owns `pgid`; `keep` is the live runner itself."""
+    runner = lease.get("runner")
+    if not runner or runner.get("pgid") != pgid or not runner.get("startTime"):
+        raise RuntimeError("Leftover owner unavailable")
+    proven, unknown = bound_members(pgid, runner, keep)
+    outcomes = {member["pid"]: "exited" for member in proven}
+    for member in proven:
+        if not signal_bound(member, pgid, signal.SIGTERM):
+            outcomes[member["pid"]] = "exited"
+    deadline = time.time() + LEFTOVER_TERM_SECONDS
+    alive = proven
+    while alive and time.time() < deadline:
+        time.sleep(0.2)
+        alive = [member for member in alive if still_bound(member, pgid) is not False]
+    for member in alive:
+        outcomes[member["pid"]] = "killed" if signal_bound(member, pgid, signal.SIGKILL) else "unknown"
+    deadline = time.time() + 2
+    while alive and time.time() < deadline:
+        time.sleep(0.1)
+        alive = [member for member in alive if still_bound(member, pgid) is not False]
+    for member in alive:
+        outcomes[member["pid"]] = "survived"
+    stopped = [{"pid": member["pid"], "name": member["name"], "startTime": member["startTime"],
+                "signal": "KILL" if outcomes[member["pid"]] in ("killed", "survived") else "TERM",
+                "outcome": outcomes[member["pid"]]} for member in proven]
+    held = [{"pid": member["pid"], "name": member["name"], "outcome": "unknown_held"} for member in unknown]
+    if stopped or held:
+        record_leftovers(directory, lease, pgid, stopped + held)
+    return stopped + held
+
+
+def leftover_marker(directory, lease_id):
+    if not lease_id or "/" in lease_id or lease_id.startswith("."):
+        raise RuntimeError("Leftover marker unavailable")
+    return os.path.join(directory, "leftovers", lease_id + ".json")
+
+
+def mark_leftovers(directory, lease_id, exited_at):
+    """Beside the journal, not in it: older strict journal readers must keep parsing it."""
+    path = leftover_marker(directory, lease_id)
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    temporary = path + ".tmp"
+    with open(temporary, "w") as file:
+        json.dump({"commandExitedAtMs": exited_at}, file)
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+
+
+def record_leftovers(directory, lease, pgid, members):
+    """Append what was stopped or held; names and start times only, never arguments or tokens."""
+    entry = {
+        "atMs": int(time.time() * 1000),
+        "leaseId": lease["id"],
+        "executable": lease.get("executable"),
+        "pgid": pgid,
+        "runnerPid": lease["runner"]["pid"],
+        "members": members[:64],
+        "memberCount": len(members),
+    }
+    for key in ("seatId", "holderId", "commandExitedAtMs"):
+        if lease.get(key) is not None:
+            entry[key] = lease[key]
+    path = os.path.join(directory, "leftovers.jsonl")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        os.write(fd, (json.dumps(entry, separators=(",", ":")) + "\n").encode())
+    finally:
+        os.close(fd)
+
+
 def group_occupied(pgid):
     """Count occupancy only, across all UIDs; this is never signal authority."""
     observer = subprocess.Popen(["/bin/ps", "-axo", "pid=,pgid=,stat="], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -601,8 +758,22 @@ def heavy_runner(directory, lease_id, token):
         environment["CLANKIE_RESOURCE_LEASE"] = json.dumps({"id": lease_id, "token": token})
         child = subprocess.Popen([request["command"], *request["args"]], env=environment)
         code = child.wait()
-        while group_occupied(mine["pgid"]):
-            time.sleep(0.5)
+        if group_occupied(mine["pgid"]):
+            # The command exited; whatever remains in its group is a leftover. Show it,
+            # give it a short grace to exit, then stop it so the slot frees (VUH-2027).
+            exited_at = int(time.time() * 1000)
+            with lock(directory):
+                state = read_state(directory)
+                lease = next((row for row in state["leases"] if row["id"] == lease_id and row["token"] == token), None)
+            mark_leftovers(directory, lease_id, exited_at)
+            deadline = time.time() + LEFTOVER_GRACE_SECONDS
+            while group_occupied(mine["pgid"]) and time.time() < deadline:
+                time.sleep(0.5)
+            if group_occupied(mine["pgid"]):
+                stop_leftovers(directory, {**(lease or {}), "id": lease_id, "runner": mine,
+                                           "commandExitedAtMs": exited_at}, mine["pgid"], mine["pid"])
+            while group_occupied(mine["pgid"]):
+                time.sleep(0.5)
         return code if code >= 0 else 128 - code
     finally:
         # No command is submitted twice. Cleanup only follows no launch or a
@@ -612,6 +783,10 @@ def heavy_runner(directory, lease_id, token):
                 state = read_state(directory)
                 state["leases"] = [row for row in state["leases"] if not (row["id"] == lease_id and row["token"] == token)]
                 write_state(directory, state)
+            try:
+                os.unlink(leftover_marker(directory, lease_id))
+            except FileNotFoundError:
+                pass
 
 
 if __name__ == "__main__":
@@ -653,6 +828,12 @@ if __name__ == "__main__":
             if len(sys.argv) != 3 or int(sys.argv[2]) < 2:
                 raise RuntimeError("Process group request unavailable")
             print(json.dumps(group_occupied(int(sys.argv[2]))))
+        elif mode == "stop-leftovers":
+            # The governor's reaper for a lease whose runner died with leftovers in its group.
+            if len(sys.argv) != 4:
+                raise RuntimeError("Leftover request unavailable")
+            lease = json.loads(sys.stdin.readline(1024 * 1024))
+            print(json.dumps(stop_leftovers(sys.argv[2], lease, int(sys.argv[3]), os.getpid()), separators=(",", ":")))
         elif mode == "lock":
             locked_pipe(sys.argv[2])
         elif mode == "run":

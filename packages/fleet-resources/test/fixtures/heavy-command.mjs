@@ -45,3 +45,16 @@ if (mode === "nested" || mode === "nested-other-holder") {
     }
   }
 } else if (mode === "exit") process.exitCode = Number(release);
+else if (mode === "leave-orphan" || mode === "leave-stubborn") {
+  // A test helper nobody stopped: it stays in this command's process group after
+  // the command exits, as a leaked fixture service does (VUH-2027).
+  const { spawn } = await import("node:child_process");
+  const body = `${mode === "leave-stubborn" ? "process.on('SIGTERM', () => {});" : ""}setInterval(() => {}, 1000)`;
+  const orphan = spawn(process.execPath, ["-e", body], { stdio: "ignore" });
+  orphan.unref();
+  const proof = await processIdentity(orphan.pid);
+  await writeFile(
+    `${receipt}.orphan`,
+    JSON.stringify({ pid: proof.pid, pgid: proof.pgid, startTime: proof.startTime }),
+  );
+}

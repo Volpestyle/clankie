@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
+import { ownProcess } from "../../../scripts/testing/owned-process.ts";
 import { IssueMetricsReportSchema } from "@clankie/protocol";
 import { expect, it } from "vitest";
 import { createSeatLedger } from "../src/captain/seat-ledger.ts";
@@ -27,15 +28,6 @@ async function unusedPort(): Promise<number> {
   if (!address || typeof address === "string") throw new Error("No loopback port");
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   return address.port;
-}
-
-async function stop(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  child.kill("SIGTERM");
-  const timer = setTimeout(() => child.kill("SIGKILL"), 5_000);
-  await exited;
-  clearTimeout(timer);
 }
 
 async function unchanged<T>(paths: string[], read: () => Promise<T>): Promise<T> {
@@ -67,6 +59,7 @@ it("serves the real VUH-1608 golden through the production service, client and C
   }
   const before = await readFile(linkPath);
   let child: ChildProcess | undefined;
+  let stop: (() => Promise<void>) | undefined;
   let output = "";
   try {
     const home = join(dir, "home");
@@ -211,6 +204,8 @@ it("serves the real VUH-1608 golden through the production service, client and C
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    // The service must not outlive a cancelled fork (VUH-2027).
+    stop = ownProcess(child);
     child.stdout?.on("data", (chunk) => {
       output += String(chunk);
     });
@@ -677,7 +672,7 @@ it("serves the real VUH-1608 golden through the production service, client and C
       );
     }
   } finally {
-    if (child) await stop(child);
+    await stop?.();
     const after = await readFile(linkPath);
     expect(after).toEqual(before);
     if (process.env.CLANKIE_METRICS_EVIDENCE !== undefined)

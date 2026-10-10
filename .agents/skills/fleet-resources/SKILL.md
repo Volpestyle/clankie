@@ -27,11 +27,16 @@ Serialize multi-package compilers inside one permit. An optional `--seat LABEL`
 before `--` labels the seat in status; `--holder ID` identifies its native child. Neither grants seat authority. Arguments
 after `--`, including flags such as `--chat`, belong to the child. The wrapper
 preserves its exit status and forwards interruption. Nested commands with the same holder in the same
-verified process group reuse its permit. Detached surviving children retain the
-permit until the kernel proves they have exited; status shows that lease as
-`orphaned` once its runner is dead. Stop a leaked server or watcher your own
-command left behind, or it holds a slot indefinitely. When the group ends the
-governor reaps the lease and records why in `reaped.jsonl` in the registry.
+verified process group reuse its permit. Once your command exits, anything it
+left in its process group (a test's server, watcher or fixture) is a leftover:
+status shows the lease as `leftovers`, or `orphaned` if its runner died. After a
+ten-second grace the runner, or the governor for a dead runner, sends the group
+SIGTERM, then SIGKILL after five more seconds, and frees the slot. What it
+stopped (process names and signals, never arguments) is recorded in
+`leftovers.jsonl`; the released lease, in `reaped.jsonl` when its runner died.
+Stop helpers in your own teardown anyway: a leftover is killed, not drained.
+A lock-helper fault before the journal write committed nothing and is retried
+on a fresh helper, so a queued job does not die from it.
 
 `clankie fleet resources` and `clankie doctor --json` show capacity, actual holders,
 queue and pressure. Status includes executable names and labels, never arguments
