@@ -4,14 +4,15 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const archive = resolve(process.argv[2] ?? join(repoRoot, "dist", "clankie-darwin-arm64.tar.gz"));
-const temporary = await mkdtemp("/tmp/clankie-release-smoke-");
+// macOS aliases /tmp as /private/tmp; private state directories must be canonical.
+const temporary = await realpath(await mkdtemp("/tmp/clankie-release-smoke-"));
 const extracted = join(temporary, "clankie");
 const workspace = join(temporary, "workspace");
 let directService;

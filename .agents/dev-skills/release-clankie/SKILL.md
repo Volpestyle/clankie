@@ -129,8 +129,8 @@ Every release requires a clean, committed release change and a tag exactly
 matching `v` plus the root `package.json` version. Push the new tag once, then
 run `clankie work releases sync` from the checkout. This records the release
 and moves the built-in items it shipped to delivered. Watch
-the Release workflow through completion, verify both uploaded assets and their
-checksum, then test the documented installer against that published version.
+the Release workflow through completion, verify every uploaded archive (macOS
+and both Linux targets) against its checksum, then test the documented installer against that published version.
 Never weaken or skip the workflow's repository gate to make a release pass.
 
 Developer ID signing, notarization, Intel macOS, Linux, package-manager
