@@ -149,6 +149,17 @@ the old/new commit and actual health or rollback. The TUI has `/update` and
 `/update status`. Never repeat an uncertain update; inspect its existing operation.
 A dirty pin or failed install leaves the old runtime untouched.
 
+New service liveness starts a five-minute CPU and `/health` latency canary;
+`healthy: true` alone does not mean it passed. Read `latest.canary` and deploy
+holds in update status. A pending canary holds further landings. A failed canary
+keeps the new pin running, retains its hold, names `previousHealthyCommit`, and
+records alert delivery state; do not claim a rollback or successful delivery
+from a claimed receipt. Rollback is the owner's decision. A pass clears only
+its own hold. `clankie update canary` reads its policy; configure the next
+observation with `--window-seconds`, `--sample-seconds`, `--cpu-percent`, and
+`--health-ms`, or use `/update` → Canary settings. A restart begins a full new
+window. CPU is the captain process, with 100% meaning one core.
+
 Social turns cannot update the machine. Older already-loaded MCP bridges may
 need their MCP process refreshed to understand newer protocols; repinning files
 cannot change running bridge code. A lost tool result is not permission to resend
@@ -220,6 +231,10 @@ index). Configure through the headless CLI:
 | Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                                                                                 |
 
 `clankie linear budget` and `clankie doctor --json` show account request usage.
+At 50%, a native warning remains pending until admission succeeds; refused or
+failed admission retries after 60 seconds without spending a provider request.
+An accepted but unconfirmed native receipt stops retries; it is not proof of
+alert receipt or model awareness. Usage below 50% rearms the warning.
 At 80%, the app's Work refresh and reads explicitly marked as background share
 a one-minute interval; honor refusal retry times. Automated operator scripts use
 `clankie linear read TOOL --json-stdin --background`; fleet polls use

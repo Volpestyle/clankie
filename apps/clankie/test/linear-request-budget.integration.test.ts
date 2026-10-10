@@ -89,7 +89,10 @@ async function setup(
     linearRequestBudget: budget,
     logger: { info: () => {}, warn: () => {} },
   });
-  cleanups.push(() => host.close());
+  cleanups.push(async () => {
+    budget.close();
+    await host.close();
+  });
   return { provider, host, tracker, credentials, directory };
 }
 
@@ -211,7 +214,13 @@ it.each(["synchronous", "asynchronous"] as const)(
 it("slows a once-per-second poller before the 5000/hour cap, warns once, and preserves priority writes", async () => {
   let now = start;
   const alerts: unknown[] = [];
-  const budget = new LinearRequestBudget({ clock: () => now, onAlert: (account) => alerts.push(account) });
+  const budget = new LinearRequestBudget({
+    clock: () => now,
+    onAlert: (account) => {
+      alerts.push(account);
+      return true;
+    },
+  });
   // Other clients have spent 1000 requests: 1/sec by itself uses only 3600/hour.
   const { provider, host, tracker } = await setup(1_000, () => now, budget);
   let deferred = 0;
@@ -736,9 +745,223 @@ it("does not restore headroom when an older HTTP response arrives after a newer 
   expect(provider.rateLimited()).toBe(0);
 });
 
+it.each(["false", "throw", "reject"] as const)(
+  "retries a warning refused by %s at 60 seconds and stops after native acceptance",
+  async (failure) => {
+    let now = start;
+    const attempts: number[] = [];
+    const budget = new LinearRequestBudget({
+      clock: () => now,
+      onAlert: () => {
+        attempts.push(now);
+        if (attempts.length > 1) return true;
+        if (failure === "throw") throw new Error("Native admission unavailable");
+        if (failure === "reject") return Promise.reject(new Error("Native admission rejected"));
+        return false;
+      },
+    });
+    const { provider, host } = await setup(2_499, () => now, budget);
+    expect(
+      await host.call({ lane: "operator", server: "linear", tool: "list_teams", arguments: {} }),
+    ).toMatchObject({ outcome: "ok", isError: false });
+    expect(attempts).toEqual([start]);
+    expect(budget.report().accounts[0]).toMatchObject({ used: 2_500, status: "warning" });
+
+    now = start + 59_999;
+    budget.report();
+    expect(attempts).toEqual([start]);
+    now++;
+    budget.report();
+    expect(attempts).toEqual([start, start + 60_000]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(provider.seen).toHaveLength(1);
+
+    now += 60_000;
+    budget.report();
+    expect(
+      await host.call({ lane: "operator", server: "linear", tool: "list_teams", arguments: {} }),
+    ).toMatchObject({ outcome: "ok", isError: false });
+    expect(attempts).toHaveLength(2);
+    expect(provider.seen).toHaveLength(2);
+    expect(provider.validationErrors).toEqual([]);
+  },
+);
+
+it.each([true, false])(
+  "serializes pending warning admission and handles its %s result from settlement time",
+  async (accepted) => {
+    let now = start;
+    let finish!: (accepted: boolean) => void;
+    const pending = new Promise<boolean>((resolve) => {
+      finish = resolve;
+    });
+    cleanups.push(async () => finish(true));
+    const attempts: number[] = [];
+    const budget = new LinearRequestBudget({
+      clock: () => now,
+      onAlert: () => {
+        attempts.push(now);
+        return attempts.length === 1 ? pending : true;
+      },
+    });
+    const { provider, host } = await setup(2_499, () => now, budget);
+    expect(
+      await host.call({ lane: "operator", server: "linear", tool: "list_teams", arguments: {} }),
+    ).toMatchObject({ outcome: "ok", isError: false });
+    now += 60_000;
+    budget.report();
+    expect(
+      await host.call({ lane: "operator", server: "linear", tool: "list_teams", arguments: {} }),
+    ).toMatchObject({ outcome: "ok", isError: false });
+    now += 60_000;
+    budget.report();
+    expect(attempts).toEqual([start]);
+
+    finish(accepted);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    now += 59_999;
+    budget.report();
+    expect(attempts).toEqual([start]);
+    now++;
+    budget.report();
+    expect(attempts).toEqual(accepted ? [start] : [start, start + 180_000]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    now += 60_000;
+    budget.report();
+    expect(attempts).toHaveLength(accepted ? 1 : 2);
+    expect(provider.seen).toHaveLength(2);
+    expect(provider.validationErrors).toEqual([]);
+  },
+);
+
+it("keeps a late accepted warning scoped to the old threshold crossing", async () => {
+  let now = start;
+  let finishOld!: (accepted: boolean) => void;
+  const oldAdmission = new Promise<boolean>((resolve) => {
+    finishOld = resolve;
+  });
+  cleanups.push(async () => finishOld(true));
+  const attempts: number[] = [];
+  const budget = new LinearRequestBudget({
+    clock: () => now,
+    onAlert: () => {
+      attempts.push(now);
+      if (attempts.length === 1) return oldAdmission;
+      return attempts.length > 2;
+    },
+  });
+  const { provider, host } = await setup(2_499, () => now, budget);
+  expect(
+    await host.call({ lane: "operator", server: "linear", tool: "list_teams", arguments: {} }),
+  ).toMatchObject({ outcome: "ok", isError: false });
+  now += 3_600_000;
+  expect(budget.report().accounts[0]).toMatchObject({ used: 0, status: "normal" });
+  provider.spendRequests(2_499);
+  expect(
+    await host.call({ lane: "operator", server: "linear", tool: "list_teams", arguments: {} }),
+  ).toMatchObject({ outcome: "ok", isError: false });
+  expect(budget.report().accounts[0]).toMatchObject({ used: 2_500, status: "warning" });
+  expect(attempts).toEqual([start]);
+
+  finishOld(true);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(attempts).toEqual([start, now]);
+  now += 59_999;
+  budget.report();
+  expect(attempts).toHaveLength(2);
+  now++;
+  budget.report();
+  expect(attempts).toEqual([start, start + 3_600_000, start + 3_660_000]);
+  expect(provider.seen).toHaveLength(2);
+  expect(provider.validationErrors).toEqual([]);
+});
+
+it("retries before exhausted-budget admission without a provider send or mutation receipt", async () => {
+  let now = start;
+  const attempts: number[] = [];
+  const budget = new LinearRequestBudget({
+    clock: () => now,
+    onAlert: () => {
+      attempts.push(now);
+      return attempts.length > 1;
+    },
+  });
+  const { provider, host } = await setup(4_998, () => now, budget);
+  expect(
+    await host.call({ lane: "operator", server: "linear", tool: "list_teams", arguments: {} }),
+  ).toMatchObject({ outcome: "ok", isError: false });
+  expect(attempts).toEqual([start]);
+  let dispatched = 0;
+  const refusedWrite = () =>
+    host.call({
+      lane: "operator",
+      server: "linear",
+      tool: "save_issue",
+      arguments: { id: ISSUE_ID, title: "No budget, no dispatch" },
+      onDispatch: () => {
+        dispatched++;
+      },
+    });
+  now += 59_999;
+  expect(await refusedWrite()).toMatchObject({
+    outcome: "refused",
+    reason: "linear_request_budget",
+    possiblyDispatched: false,
+  });
+  expect(attempts).toEqual([start]);
+  now++;
+  expect(await refusedWrite()).toMatchObject({
+    outcome: "refused",
+    reason: "linear_request_budget",
+    possiblyDispatched: false,
+  });
+  expect(attempts).toEqual([start, start + 60_000]);
+  expect(provider.seen).toHaveLength(1);
+  expect(provider.issue.title).toBe("Connect accounts");
+  expect(provider.rateLimited()).toBe(0);
+  expect(dispatched).toBe(0);
+});
+
+it("does not restart warning admission when a pending result settles after service close", async () => {
+  let now = start;
+  let finish!: (accepted: boolean) => void;
+  const pending = new Promise<boolean>((resolve) => {
+    finish = resolve;
+  });
+  cleanups.push(async () => finish(true));
+  let attempts = 0;
+  const budget = new LinearRequestBudget({
+    clock: () => now,
+    onAlert: () => {
+      attempts++;
+      return pending;
+    },
+  });
+  const { provider, host } = await setup(2_499, () => now, budget);
+  expect(
+    await host.call({ lane: "operator", server: "linear", tool: "list_teams", arguments: {} }),
+  ).toMatchObject({ outcome: "ok", isError: false });
+  budget.close();
+  finish(false);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  now += 60_000;
+  budget.report();
+  expect(
+    await host.call({ lane: "operator", server: "linear", tool: "list_teams", arguments: {} }),
+  ).toMatchObject({ outcome: "ok", isError: false });
+  expect(attempts).toBe(1);
+  expect(provider.seen).toHaveLength(2);
+});
+
 it("projects the warning through authenticated HTTP, CLI, and doctor without spending provider requests", async () => {
   const alerts: unknown[] = [];
-  const budget = new LinearRequestBudget({ clock: () => start, onAlert: (account) => alerts.push(account) });
+  const budget = new LinearRequestBudget({
+    clock: () => start,
+    onAlert: (account) => {
+      alerts.push(account);
+      return true;
+    },
+  });
   const { provider, host } = await setup(2_499, () => start, budget);
   expect(
     await host.call({ lane: "operator", server: "linear", tool: "list_teams", arguments: {} }),

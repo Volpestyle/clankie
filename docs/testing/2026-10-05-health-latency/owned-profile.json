@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "profileSha256": "db8497b008379b87382a4d8f50a9cc443de398651035b9d45fd63c31c8223ec5",
+  "profileBytes": 1686111,
+  "node": "v26.7.0",
+  "mode": "owned actual index with native CPUprof and10ms event-loop histogram",
+  "limitation": "Profiler/histogram wakeups can mask idle fetch dispatch stall; this is not recovery evidence. Time-sampled leaf frames include idle and startup.",
+  "policy": {
+    "windowMs": 30000,
+    "sampleIntervalMs": 1000,
+    "cpuPercent": 10,
+    "healthLatencyMs": 250
+  },
+  "canary": {
+    "state": "passed",
+    "policy": {
+      "windowMs": 30000,
+      "sampleIntervalMs": 1000,
+      "cpuPercent": 10,
+      "healthLatencyMs": 250
+    },
+    "previousHealthyCommit": "8fcf47a54b578629386bdbc306db3ae2205d57f4",
+    "holdId": "d8834f41-3418-4a2d-bc00-a5b2562dc225",
+    "holdEstablished": true,
+    "instanceId": "8e0c36da-3667-46ae-bfb4-91c9005c6a5d",
+    "pid": 1959,
+    "startedAt": "2026-10-06T03:59:56.815Z",
+    "samples": 31,
+    "cpuMeanPercent": 3.645607758153144,
+    "healthP95Ms": 6.207249999999476,
+    "completedAt": "2026-10-06T04:00:27.341Z",
+    "holdReleased": true
+  },
+  "sourceDigests": {
+    "apps/clankie/src/index.ts": "b3fd3b2b3706b3dac6c5486e4ccc7cc8bcbdd032964dc85c008cd1d525e5e9f4",
+    "apps/clankie/src/runtime-canary.ts": "ddf72d3cc809fc9ca94d049fe8c19f77cde355c8fd7aa204ea9fc176caa5e287",
+    "apps/clankie/src/runtime-health-sample.ts": "a2b07ac97461c2cc590746c77c6f40460bc18ece98d708e4262662fa0151122d",
+    "apps/clankie/src/app/runtime.ts": "13f0b61f7bbf2beb179d81a8209750dcc2b089afd704246dc2061704388d3595",
+    "apps/tui/bin/runtime-updater.ts": "7af44edf3453aaa444cc2e54ad3f1f65cfeaa000d2ff552466e5f568d822a290",
+    "apps/clankie/scripts/runtime-canary-live-proof.ts": "7c5a55ec11260d56754bd59d05b27b9dca8f558ff890364369dc28a40bc3ba40",
+    "apps/clankie/test/fixtures/runtime-canary-cpu-preload.mjs": "3b7abc98fc2251411b4f6bc97ed4bd665880dc4b5f2c48c8a04d13c7c7b73113"
+  },
+  "elapsedMs": 41855.296,
+  "sampleTimeMs": 41854.44,
+  "topLeafFrames": [
+    {
+      "function": "(idle)",
+      "location": "",
+      "sampledMs": 37828.229
+    },
+    {
+      "function": "runCallSync",
+      "location": "main.js",
+      "sampledMs": 768.01
+    },
+    {
+      "function": "readFileUtf8",
+      "location": "",
+      "sampledMs": 424.75
+    },
+    {
+      "function": "compileSourceTextModule",
+      "location": "node:internal/modules/esm/utils",
+      "sampledMs": 366.792
+    },
+    {
+      "function": "read",
+      "location": "",
+      "sampledMs": 297.419
+    },
+    {
+      "function": "(garbage collector)",
+      "location": "",
+      "sampledMs": 187.976
+    },
+    {
+      "function": "(program)",
+      "location": "",
+      "sampledMs": 184.212
+    },
+    {
+      "function": "dlopen",
+      "location": "",
+      "sampledMs": 130.095
+    },
+    {
+      "function": "internalModuleStat",
+      "location": "",
+      "sampledMs": 110.824
+    },
+    {
+      "function": "open",
+      "location": "",
+      "sampledMs": 82.365
+    },
+    {
+      "function": "lineLengths",
+      "location": "node:internal/source_map/source_map_cache",
+      "sampledMs": 78.408
+    },
+    {
+      "function": "wrapSafe",
+      "location": "node:internal/modules/cjs/loader",
+      "sampledMs": 72.188
+    },
+    {
+      "function": "I",
+      "location": "index-XurvG3JN.mjs",
+      "sampledMs": 59.022
+    },
+    {
+      "function": "parse",
+      "location": "",
+      "sampledMs": 47.19
+    },
+    {
+      "function": "<anonymous>",
+      "location": "schemas.js",
+      "sampledMs": 46.326
+    },
+    {
+      "function": "I",
+      "location": "index-D9F1FXzN.cjs",
+      "sampledMs": 44.313
+    },
+    {
+      "function": "realpathSync",
+      "location": "node:fs",
+      "sampledMs": 25.413
+    },
+    {
+      "function": "<anonymous>",
+      "location": "index-XurvG3JN.mjs",
+      "sampledMs": 22.84
+    }
+  ]
+}

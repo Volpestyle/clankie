@@ -136,6 +136,7 @@ export interface ClankieAppDependencies {
   integration?: IntegrationQueue;
   deployHolds?: DeployHolds;
   runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
+  runtimeCanary?: import("../runtime-canary.ts").RuntimeCanary;
   refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
   discordIngress?: DiscordIngress;
