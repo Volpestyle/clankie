@@ -20,14 +20,8 @@ mode emits the same diagnostic after recording a mutation, without the marker;
 the transport must surface the error without replaying that program.
 
 The successful relay mode uses actual loopback TCP forwarding and nonce-bound
-framed messages through child stdio. A proof response held by an owned control
-file crosses a scheduled link refresh; it is released only after the replacement
-is published and the old listener acknowledges draining. Event records establish
-that the replacement becomes ready before
-the old relay closes and the pending proof finishes before its process exits.
-The HTTP response is 256 KiB with delayed frame consumption; retirement waits
-for the remote close acknowledgment so buffered bytes cannot be truncated.
-The drain frame stops new accepts while existing clients and proofs finish.
-Failed-renewal coverage retains the old ready link until retry promotes its
-replacement, then an isolated control file stops only that fixture relay to
-verify a real outage revokes the old lifetime and the promoted link can recover.
+framed messages through child stdio. One resident relay keeps its published
+port; there is no scheduled replacement. An isolated control file stops only
+that fixture relay to verify a real outage revokes its lifetime and the link
+recovers on a fresh port. Program lookup against a refreshed machine and user
+PATH happens inside the real Windows relay, which this fixture does not run.

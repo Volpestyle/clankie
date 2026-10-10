@@ -249,7 +249,7 @@ export { posixQuote };
  * Retired masters keep existing clients and expire when idle; nothing closes
  * the owner's other SSH sessions.
  */
-export const SSH_CONTROL_MAX_AGE_MS = 10 * 60 * 1_000;
+const SSH_CONTROL_MAX_AGE_MS = 10 * 60 * 1_000;
 
 const controlConnections = new Map<string, { path: string; since: number }>();
 

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { join } from "node:path";
 
@@ -24,13 +24,9 @@ export async function startRelay(returnPort) {
   send(5, 0, nonce);
   const control = createConnection({ host: "127.0.0.1", port: returnPort });
   const clients = new Map();
-  const timers = new Set();
-  const heldProofs = new Set();
   let next = 0;
   let closed = false;
   let watcher;
-  let delayed = false;
-  let delayUsed = false;
   let input = Buffer.alloc(0);
   const remote = createServer((socket) => {
     const id = ++next;
@@ -54,7 +50,6 @@ export async function startRelay(returnPort) {
     closed = true;
     record("relay-exit");
     clearInterval(watcher);
-    for (const timer of timers) clearTimeout(timer);
     for (const socket of clients.values()) socket.destroy();
     control.destroy();
     if (remote.listening) remote.close();
@@ -64,53 +59,18 @@ export async function startRelay(returnPort) {
   control.once("close", close);
   control.once("connect", () => control.write(nonce));
   const consume = () => {
-    if (closed || delayed) return;
+    if (closed) return;
     while (input.length >= 9) {
       const kind = input[0];
       const id = input.readUInt32LE(1);
       const length = input.readUInt32LE(5);
       if (input.length < 9 + length) return;
-      if ((kind === 2 || kind === 3) && !delayUsed) {
-        const delay = JSON.parse(readFileSync(join(root, "login.json"), "utf8")).responseDelayMs ?? 0;
-        if (delay > 0) {
-          delayUsed = true;
-          delayed = true;
-          control.pause();
-          record("response-paused");
-          const timer = setTimeout(() => {
-            timers.delete(timer);
-            delayed = false;
-            record("response-resumed");
-            consume();
-            control.resume();
-          }, delay);
-          timers.add(timer);
-          return;
-        }
-      }
       const bytes = input.subarray(9, 9 + length);
       input = input.subarray(9 + length);
-      if (kind === 6 && id === 0 && length === 0) {
-        remote.close();
-        record("drain-ack");
-        send(6, 0);
-      } else if (kind === 4) {
+      if (kind === 4) {
         record("execute-start", { id, script: bytes.toString("utf8") });
-        const login = JSON.parse(readFileSync(join(root, "login.json"), "utf8"));
-        const complete = () => {
-          if (closed) return;
-          send(4, id, Buffer.from("proof-complete", "utf8"));
-          record("execute-result", { id });
-        };
-        if (login.holdProof) {
-          heldProofs.add(complete);
-          continue;
-        }
-        const timer = setTimeout(() => {
-          timers.delete(timer);
-          complete();
-        }, login.proofDelayMs ?? 0);
-        timers.add(timer);
+        send(4, id, Buffer.from("proof-complete", "utf8"));
+        record("execute-result", { id });
       } else if (kind === 2) clients.get(id)?.write(bytes);
       else if (kind === 3) {
         const client = clients.get(id);
@@ -133,10 +93,6 @@ export async function startRelay(returnPort) {
   record("relay-ready", { port });
   watcher = setInterval(() => {
     if (existsSync(join(root, `stop-relay-${process.pid}`))) close();
-    if (existsSync(join(root, `release-proof-${process.pid}`))) {
-      for (const complete of heldProofs) complete();
-      heldProofs.clear();
-    }
   }, 20);
   watcher.unref();
 }

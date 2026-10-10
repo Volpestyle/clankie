@@ -145,7 +145,7 @@ describe("trusted remote SSH relay", () => {
     child.stdout.write(frame(4, 1, Buffer.from("replayed-expired-proof")));
     expect(proof.alive()).toBe(false);
   });
-  it("expired observations keep their bounded capacity and drain identity until original replies settle", async () => {
+  it("expired observations keep their bounded capacity until original replies settle", async () => {
     const { child, relay } = await setup();
     // Distinct scripts: identical ones coalesce onto one run.
     const observation = (index: number) =>
@@ -156,12 +156,10 @@ describe("trusted remote SSH relay", () => {
     );
     expect(await Promise.all(attempts)).toEqual(Array(16).fill("Remote observation timed out"));
     await expect(relay.execute(observation(16))).rejects.toThrow("Remote observer unavailable");
-    const drained = vi.fn();
-    relay.drain(drained);
-    child.stdout.write(frame(6, 0));
-    expect(drained).not.toHaveBeenCalled();
     for (let id = 1; id <= 16; id++) child.stdout.write(frame(4, id, Buffer.from("late-proof")));
-    expect(drained).toHaveBeenCalledTimes(1);
+    const fresh = relay.execute(observation(17));
+    child.stdout.write(frame(4, 17, Buffer.from("fresh-proof")));
+    await expect(fresh).resolves.toBe("fresh-proof");
     expect(child.kill).not.toHaveBeenCalled();
   });
   it("identical concurrent observations share only a run dispatched after each caller arrived (VUH-1748)", async () => {
@@ -213,7 +211,7 @@ describe("trusted remote SSH relay", () => {
     child.stdout.write(frame(4, 1, Buffer.from("late")));
     await expect(first).resolves.toBe("late");
   });
-  it("a genuinely stalled observer has bounded grace and cannot retain a retired relay indefinitely", async () => {
+  it("a genuinely stalled observer has bounded grace before it closes the relay", async () => {
     const { child, relay, sockets } = await setup();
     child.stdout.write(frame(1, 1, ports(4321, 1234)));
     await settle(() => sockets.length === 1);
@@ -222,14 +220,9 @@ describe("trusted remote SSH relay", () => {
       "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
       Buffer.from("'read-only'", "utf16le").toString("base64");
     await expect(relay.execute(command, 10)).rejects.toThrow("Remote observation timed out");
-    const drained = vi.fn();
-    relay.drain(drained);
-    child.stdout.write(frame(6, 0));
     expect(proof.alive()).toBe(true);
-    expect(drained).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(child.kill).toHaveBeenCalledTimes(1), { timeout: 32_000 });
     expect(proof.alive()).toBe(false);
-    expect(drained).toHaveBeenCalledTimes(1);
     await expect(relay.execute(command)).rejects.toThrow("unavailable");
   }, 35_000);
   it("binds the return channel to a one-use nonce learned only from SSH stdout", async () => {

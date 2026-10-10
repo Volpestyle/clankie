@@ -182,6 +182,8 @@ export interface CaptainPort {
       sessionId?: string;
       status?: string;
       ownerConversationId?: string;
+      /** False for a hand-started seat a conversation adopted by messaging. */
+      hired?: boolean;
     }[]
   >;
   refreshNativeWorkerCatalog?(

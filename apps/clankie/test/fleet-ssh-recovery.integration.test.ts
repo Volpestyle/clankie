@@ -1,8 +1,4 @@
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
-import { createServer, type Server } from "node:http";
-import { createConnection } from "node:net";
-import type { HttpBindings } from "@hono/node-server";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -24,15 +20,8 @@ const fleet: HerdrFleet = {
 };
 const roots: string[] = [];
 const linksToClose: FleetLinks[] = [];
-const serversToClose: Server[] = [];
 afterEach(async () => {
   for (const links of linksToClose.splice(0)) links.close();
-  await Promise.all(
-    serversToClose.splice(0).map((server) => {
-      server.closeAllConnections();
-      return new Promise<void>((resolve) => server.close(() => resolve()));
-    }),
-  );
   vi.unstubAllEnvs();
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
@@ -46,15 +35,7 @@ interface SshCall {
   fresh?: boolean;
 }
 interface RelayCall {
-  kind:
-    | "relay-ready"
-    | "execute-start"
-    | "execute-result"
-    | "relay-exit"
-    | "response-paused"
-    | "response-resumed"
-    | "stream-ack"
-    | "drain-ack";
+  kind: "relay-ready" | "execute-start" | "execute-result" | "relay-exit" | "stream-ack";
   pid: number;
   port?: number;
   time: number;
@@ -75,11 +56,8 @@ async function fixture() {
   };
   await executable(bin, "ssh", "ssh.mjs");
   await executable(oldBin, "fixtureprobe", "program.mjs");
-  const login = (
-    path: string,
-    mode = "success",
-    options: { proofDelayMs?: number; responseDelayMs?: number; holdProof?: boolean } = {},
-  ) => writeFile(join(root, "login.json"), JSON.stringify({ path, mode, ...options }));
+  const login = (path: string, mode = "success") =>
+    writeFile(join(root, "login.json"), JSON.stringify({ path, mode }));
   await login(oldBin);
   // No real ssh is reachable even if the production runner selects its default.
   vi.stubEnv("PATH", bin);
@@ -109,7 +87,6 @@ async function fixture() {
     programs: () => lines<{ args: string[]; cwd: string }>("program"),
     relays: () => lines<RelayCall>("relay"),
     stopRelay: (pid: number) => writeFile(join(root, `stop-relay-${pid}`), "stop fixture relay"),
-    releaseProof: (pid: number) => writeFile(join(root, `release-proof-${pid}`), "release fixture proof"),
   };
 }
 
@@ -259,144 +236,7 @@ it.each(["herdr-business-error", "native-business-error", "native-business-launc
   },
 );
 
-it("replaces a ready relay without interrupting its in-flight proof or authenticated HTTP response", async () => {
-  const f = await fixture();
-  await f.install(f.oldBin);
-  await f.login(f.oldBin, "relay-success", { holdProof: true, responseDelayMs: 300 });
-  const responseBody = "held-http-response:".padEnd(256 * 1024, "proof-body-");
-  const responseHash = createHash("sha256").update(responseBody).digest("hex");
-  const log: string[] = [];
-  const links = new FleetLinks({
-    shell: () => createFleetShellRun(fleet, { controlDirectory: f.controlDirectory }),
-    stream: () => createFleetShellStream(fleet, { controlDirectory: f.controlDirectory }),
-    maxAgeMs: 1_200,
-    log: (message) => log.push(message),
-  });
-  linksToClose.push(links);
-  let releaseReply!: () => void;
-  const heldReply = new Promise<void>((resolve) => {
-    releaseReply = resolve;
-  });
-  let admitted: ReturnType<FleetLinks["identity"]>;
-  const linkedFetch = links.fetch(async (request) => {
-    admitted = links.identity(request);
-    await heldReply;
-    return new Response(responseBody);
-  });
-  const service = createServer((incoming, outgoing) => {
-    const pane = incoming.headers["x-clankie-pane"];
-    const request = new Request(`http://fixture${incoming.url}`, {
-      headers: { "x-clankie-pane": typeof pane === "string" ? pane : "" },
-    });
-    void Promise.resolve(linkedFetch(request, { incoming } as HttpBindings))
-      .then(async (response) => {
-        outgoing.statusCode = response.status;
-        outgoing.end(await response.text());
-      })
-      .catch((error: unknown) => {
-        outgoing.statusCode = 500;
-        outgoing.end(String(error));
-      });
-  });
-  serversToClose.push(service);
-  await new Promise<void>((resolve) => service.listen(0, "127.0.0.1", resolve));
-  const serviceAddress = service.address();
-  if (!serviceAddress || typeof serviceAddress === "string") throw new Error("Fixture HTTP listener missing");
-  links.start([fleet], serviceAddress.port);
-  await vi.waitFor(() => expect(links.status(fleet.id)).toMatchObject({ state: "ready" }), {
-    timeout: 4_000,
-  });
-  const oldReady = (await f.relays()).find((call) => call.kind === "relay-ready")!;
-  const lifetime = links.lifetime(fleet);
-  const reply = fetch(`http://127.0.0.1:${oldReady.port}/v1/fleet/mcp`, {
-    headers: { "x-clankie-pane": "w8:p1", connection: "close" },
-    signal: AbortSignal.timeout(15_000),
-  })
-    .then(async (response) => {
-      const body = await response.text();
-      return {
-        status: response.status,
-        bytes: body.length,
-        hash: createHash("sha256").update(body).digest("hex"),
-      };
-    })
-    .catch((error: unknown) => ({ error }));
-  await vi.waitFor(() => expect(admitted?.fleet).toBe(fleet.id));
-  const observer = links.observer(fleet)!;
-  const pending = observer(powershellScriptCommand("Write-Output 'proof-complete'"), 15_000).then(
-    (value) => ({ value }),
-    (error: unknown) => ({ error }),
-  );
-  await vi.waitFor(async () =>
-    expect((await f.relays()).some((call) => call.kind === "execute-start")).toBe(true),
-  );
-  const states: (string | undefined)[] = [];
-  const sampling = setInterval(() => states.push(links.status(fleet.id)?.state), 5);
-  try {
-    await vi.waitFor(
-      () => {
-        const status = links.status(fleet.id);
-        expect(status?.state).toBe("ready");
-        expect(status?.state === "ready" && status.port !== oldReady.port, log.join("\n")).toBe(true);
-      },
-      { timeout: 10_000 },
-    );
-    expect((await f.relays()).some((call) => call.kind === "relay-exit" && call.pid === oldReady.pid)).toBe(
-      false,
-    );
-    await vi.waitFor(async () =>
-      expect((await f.relays()).some((call) => call.kind === "drain-ack" && call.pid === oldReady.pid)).toBe(
-        true,
-      ),
-    );
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const socket = createConnection({ host: "127.0.0.1", port: oldReady.port! });
-        socket.once("connect", () => {
-          socket.destroy();
-          resolve();
-        });
-        socket.once("error", reject);
-      }),
-    ).rejects.toMatchObject({ code: "ECONNREFUSED" });
-    expect(lifetime()).toBe(true);
-    expect(
-      (await f.relays()).some((call) => call.kind === "execute-result" && call.pid === oldReady.pid),
-    ).toBe(false);
-    await f.releaseProof(oldReady.pid);
-    expect(await pending).toEqual({ value: "proof-complete" });
-    expect(await admitted!.validate()).toBe(true);
-    expect((await f.relays()).some((call) => call.kind === "relay-exit" && call.pid === oldReady.pid)).toBe(
-      false,
-    );
-    releaseReply();
-    expect(await reply).toEqual({ status: 200, bytes: responseBody.length, hash: responseHash });
-    await vi.waitFor(async () =>
-      expect((await f.relays()).some((call) => call.kind === "relay-exit" && call.pid === oldReady.pid)).toBe(
-        true,
-      ),
-    );
-    const calls = await f.relays();
-    const ready = calls.filter((call) => call.kind === "relay-ready");
-    const oldExit = calls.find((call) => call.kind === "relay-exit" && call.pid === oldReady.pid)!;
-    const oldResult = calls.find((call) => call.kind === "execute-result" && call.pid === oldReady.pid)!;
-    const resumed = calls.find((call) => call.kind === "response-resumed" && call.pid === oldReady.pid)!;
-    const acknowledged = calls.find((call) => call.kind === "stream-ack" && call.pid === oldReady.pid)!;
-    expect(ready.length).toBeGreaterThanOrEqual(2);
-    expect(ready[1]!.time).toBeLessThanOrEqual(oldExit.time);
-    expect(oldResult.time).toBeLessThanOrEqual(oldExit.time);
-    expect(resumed.time).toBeLessThanOrEqual(oldExit.time);
-    expect(acknowledged.time).toBeLessThanOrEqual(oldExit.time);
-    expect(states.every((state) => state === "ready")).toBe(true);
-    expect(log.join("\n")).not.toContain("link down");
-  } finally {
-    clearInterval(sampling);
-    await f.releaseProof(oldReady.pid);
-    releaseReply();
-  }
-});
-
-it("keeps the working link through a failed renewal, then recovers a real promoted-relay outage", async () => {
+it("keeps one resident relay until a real outage, then recovers on a fresh port", async () => {
   const f = await fixture();
   await f.install(f.oldBin);
   await f.login(f.oldBin, "relay-success");
@@ -404,7 +244,6 @@ it("keeps the working link through a failed renewal, then recovers a real promot
   const links = new FleetLinks({
     shell: () => createFleetShellRun(fleet, { controlDirectory: f.controlDirectory }),
     stream: () => createFleetShellStream(fleet, { controlDirectory: f.controlDirectory }),
-    maxAgeMs: 1_000,
     log: (message) => log.push(message),
   });
   linksToClose.push(links);
@@ -414,36 +253,19 @@ it("keeps the working link through a failed renewal, then recovers a real promot
   });
   const initial = (await f.relays()).find((call) => call.kind === "relay-ready")!;
   const lifetime = links.lifetime(fleet);
-  await f.login(f.oldBin, "relay-failure");
-  await vi.waitFor(
-    () => expect(log.some((message) => message.includes("link refresh pending:"))).toBe(true),
-    { timeout: 3_000 },
-  );
-  expect(links.status(fleet.id)).toMatchObject({ state: "ready", port: initial.port });
-  expect(lifetime()).toBe(true);
   await expect(
     links.observer(fleet)!(powershellScriptCommand("Write-Output 'proof-complete'")),
   ).resolves.toBe("proof-complete");
-  expect(log.join("\n")).not.toContain("link down");
+  expect((await f.relays()).filter((call) => call.kind === "relay-ready")).toHaveLength(1);
 
-  await f.login(f.oldBin, "relay-success");
+  await f.stopRelay(initial.pid);
+  await vi.waitFor(() => expect(links.status(fleet.id)).toMatchObject({ state: "unreachable" }));
+  expect(lifetime()).toBe(false);
+  expect(log.join("\n")).toContain("link down");
   await vi.waitFor(
     () => {
       const status = links.status(fleet.id);
       expect(status?.state === "ready" && status.port !== initial.port).toBe(true);
-    },
-    { timeout: 5_000 },
-  );
-  expect(lifetime()).toBe(true);
-  expect(log.join("\n")).not.toContain("link down");
-  const promoted = (await f.relays()).filter((call) => call.kind === "relay-ready").at(-1)!;
-  await f.stopRelay(promoted.pid);
-  await vi.waitFor(() => expect(links.status(fleet.id)).toMatchObject({ state: "unreachable" }));
-  expect(lifetime()).toBe(false);
-  await vi.waitFor(
-    () => {
-      const status = links.status(fleet.id);
-      expect(status?.state === "ready" && status.port !== promoted.port).toBe(true);
     },
     { timeout: 5_000 },
   );

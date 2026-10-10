@@ -61,9 +61,6 @@ export class RemoteFleetRelay {
   private nonce: Buffer | undefined;
   private response: Socket | undefined;
   private readonly candidates = new Map<Socket, Buffer>();
-  private drained: (() => void) | undefined;
-  private draining = false;
-  private drainAcknowledged = false;
   private commandId = 0;
   /**
    * Identical read-only observations in flight, by exact command. A caller that
@@ -170,28 +167,6 @@ export class RemoteFleetRelay {
     this.statsTimer.unref?.();
   }
 
-  /** Retain accepted HTTP streams and observations until their replies finish. */
-  drain(complete: () => void): void {
-    this.drained = complete;
-    this.draining = true;
-    this.send(6, 0);
-    this.finishDrain();
-  }
-
-  private finishDrain(): void {
-    if (
-      !this.drained ||
-      (this.open && !this.drainAcknowledged) ||
-      this.streams.size > 0 ||
-      this.closing.size > 0 ||
-      this.commands.size > 0
-    )
-      return;
-    const complete = this.drained;
-    this.drained = undefined;
-    complete();
-  }
-
   /**
    * Windows runs observations one at a time, so duplicates queue behind each
    * other and push latency-sensitive proofs past their timeout. Coalesce exact
@@ -270,8 +245,8 @@ export class RemoteFleetRelay {
         reject(new RemoteObservationError("remote_observation_timeout"));
         this.options.log?.(`remote observation ${id} timed out after ${timeoutMs} ms; relay retained`);
         // A truly hung script stops Windows' serial observer queue. Bound the
-        // original's late-reply grace, including retirement, so it cannot hold
-        // an old relay or consume its 16 slots forever. Never replay it.
+        // original's late-reply grace so it cannot consume the relay's 16
+        // slots forever. Never replay it.
         command.timer = setTimeout(() => {
           this.options.log?.(
             `remote observation ${id} remained unresolved for ${OBSERVATION_GRACE_MS} ms after timeout; closing stalled relay`,
@@ -344,11 +319,6 @@ export class RemoteFleetRelay {
   }
 
   private frame(kind: number, id: number, bytes: Buffer): void {
-    if (kind === 6 && id === 0 && bytes.length === 0 && this.draining && !this.drainAcknowledged) {
-      this.drainAcknowledged = true;
-      this.finishDrain();
-      return;
-    }
     if (
       kind === 5 &&
       id === 0 &&
@@ -366,7 +336,6 @@ export class RemoteFleetRelay {
       this.commands.delete(id);
       clearTimeout(command.timer);
       if (!command.expired) command.resolve(bytes.toString("utf8"));
-      this.finishDrain();
       return;
     }
     if (kind === 0 && id === 0 && bytes.length === 4 && this.remotePort === undefined) {
@@ -381,11 +350,6 @@ export class RemoteFleetRelay {
       if (bytes.length !== 8 || id <= this.lastId || this.streams.size + this.closing.size >= 64)
         throw new Error("Invalid relay stream");
       this.lastId = id;
-      if (this.draining) {
-        this.closing.add(id);
-        this.send(3, id);
-        return;
-      }
       const clientPort = bytes.readUInt32LE(),
         serverPort = bytes.readUInt32LE(4);
       if (serverPort !== this.remotePort || clientPort < 1 || clientPort > 65535)
@@ -418,7 +382,6 @@ export class RemoteFleetRelay {
         // close alone does not mean those bytes have reached the remote client.
         this.closing.add(id);
         this.send(3, id);
-        this.finishDrain();
       });
       return;
     }
@@ -428,7 +391,6 @@ export class RemoteFleetRelay {
       this.closing.delete(id);
       stream?.socket.destroy();
       this.streams.delete(id);
-      this.finishDrain();
       return;
     }
     if (kind !== 2) throw new Error("Invalid relay frame kind");
@@ -457,7 +419,6 @@ export class RemoteFleetRelay {
     this.commands.clear();
     if (this.statsTimer !== undefined) clearInterval(this.statsTimer);
     this.statsTimer = undefined;
-    this.finishDrain();
     this.options.child.stdin?.destroy();
     this.options.child.kill();
   }

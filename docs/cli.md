@@ -3890,9 +3890,10 @@ What crosses the link, and what cannot:
   connections older than ten minutes use a fresh socket. A failure before the
   remote program starts retries once with a fresh login environment; failures
   from an already running program are reported without replaying the command.
-  Resident fleet relays also refresh every ten minutes: the replacement becomes
-  ready before the old relay drains accepted requests and proof commands, so
-  routine renewal keeps link status ready. Retired masters retain
+  The resident Windows relay is not renewed: it keeps its published link port
+  until a real outage, and reads the machine and user PATH from the registry
+  before each command, so a remote install or PATH change applies to the next
+  observation. Retired masters retain
   existing clients and expire when idle, leaving other SSH sessions intact.
   PowerShell progress is suppressed and serialized errors are decoded before
   appearing in link status and logs.

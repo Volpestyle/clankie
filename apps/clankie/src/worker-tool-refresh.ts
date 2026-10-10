@@ -68,8 +68,11 @@ export function createWorkerToolRefresh(input: {
   });
   // An original remote controller cannot adopt the current plugin in place. Its
   // reports still reach this lead; the plugin changes only on a resumed session.
+  // An adopted seat was never hired, so close_worker_pane refuses it; only its owner can resume it.
   const resumeOnCurrentPlugin = (seat: Seat) =>
-    `This running worker keeps its current plugin until its session is resumed. Between tasks, close pane ${seat.paneId} and call hire_agent with resume set to its transcript ref${seat.sessionId ? ` (session ${seat.sessionId})` : ""}, the same harness and workingDirectory. The resumed session keeps its context and loads the current plugin.`;
+    seat.hired === false
+      ? `This running worker keeps its current plugin until its session is resumed. Clankie did not hire pane ${seat.paneId} (it was adopted), so close_worker_pane cannot free it for hire_agent. Between tasks, ask the owner to exit it and resume${seat.sessionId ? ` session ${seat.sessionId}` : " its session"} in place with the same harness and working directory. The resumed session keeps its context and loads the current plugin.`
+      : `This running worker keeps its current plugin until its session is resumed. Between tasks, close pane ${seat.paneId} and call hire_agent with resume set to its transcript ref${seat.sessionId ? ` (session ${seat.sessionId})` : ""}, the same harness and workingDirectory. The resumed session keeps its context and loads the current plugin.`;
   const run = async (
     seat: Seat,
     target: string,

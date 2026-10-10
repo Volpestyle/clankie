@@ -2,6 +2,9 @@ import { powershellScriptCommand } from "./herdr-fleet.ts";
 
 /** Trusted service-authored relay. SSH stdout carries frames; client TCP carries only bytes.
  * The peer tuple is taken from AcceptTcpClient's socket, never an HTTP field. EOF closes all peers.
+ * The relay outlives its SSH login environment, so each command first takes the machine and user
+ * PATH a fresh login would see: a remote install or PATH change applies without replacing the relay
+ * and moving its published port (VUH-1658, VUH-2050).
  */
 export function windowsFleetRelayCommand(returnPort: number): string {
   if (!Number.isInteger(returnPort) || returnPort < 1 || returnPort > 65535)
@@ -36,7 +39,6 @@ public static class ClankieRelay {
   }
   static TcpListener listener;
   static volatile bool stopped;
-  static volatile bool draining;
   const int MAX_FRAME = 65536;
   static void Send(byte kind, uint id, byte[] bytes, int length) {
     lock (outputLock) {
@@ -69,9 +71,6 @@ public static class ClankieRelay {
     try {
       while (!stopped) {
         byte[] header = Read(9); byte kind = header[0]; uint id = BitConverter.ToUInt32(header, 1); int length = BitConverter.ToInt32(header, 5);
-        if (kind == 6 && id == 0 && length == 0 && !draining) {
-          draining = true; listener.Stop(); Send(6, 0, new byte[0], 0); continue;
-        }
         if (id == 0 || length < 0 || length > MAX_FRAME || (kind != 2 && kind != 3 && kind != 4) || (kind == 3 && length != 0)) throw new Exception("Invalid relay frame");
         byte[] bytes = Read(length);
         if (kind == 4) {
@@ -120,8 +119,8 @@ public static class ClankieRelay {
         Send(1, id, tuple, tuple.Length);
         ThreadPool.QueueUserWorkItem(delegate {Copy(id, client);});
       }
-    } catch { if (!draining) Stop(); }
-    finally { if (!draining) Stop(); }
+    } catch { }
+    finally { Stop(); }
   }
 }
 '@
@@ -129,6 +128,10 @@ public static class ClankieRelay {
 while ([ClankieRelay]::Running) {
   $command = [ClankieRelay]::NextCommand()
   if ($null -eq $command) { continue }
+  try {
+    $fresh = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) | Where-Object { $_ }
+    if ($fresh) { $env:Path = $fresh -join ';' }
+  } catch { }
   try {
     $result = (& ([scriptblock]::Create($command.Script)) | Out-String).Trim()
     [ClankieRelay]::Result($command.Id, $result)

@@ -10,7 +10,6 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { FleetLinkFile } from "@clankie/protocol";
 import {
   SSH_BASE_OPTIONS,
-  SSH_CONTROL_MAX_AGE_MS,
   posixQuote,
   posixScriptCommand,
   powershellLiteral,
@@ -126,8 +125,6 @@ class FleetLink {
   private closed = false;
   private backoff = RESTART_MIN_MS;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  private retired: (() => void) | undefined;
   readonly token = randomBytes(32).toString("base64url");
   readonly fleet: HerdrFleet;
   private readonly options: {
@@ -136,9 +133,7 @@ class FleetLink {
     readonly stream?: (command: string) => ChildProcess;
     readonly spawn?: typeof spawn;
     readonly log?: (message: string) => void;
-    readonly maxAgeMs?: number;
     readonly ready?: () => void;
-    readonly refresh?: () => void;
     readonly disconnected?: () => void;
     readonly publish: (operation: () => Promise<void>) => Promise<void>;
   };
@@ -189,15 +184,6 @@ class FleetLink {
             this.current = { state: "ready", since: new Date().toISOString(), port: port! };
             this.options.log?.(`fleet ${this.fleet.id}: link ready on its port ${String(port)}`);
             this.options.ready?.();
-            // Only the resident relay inherits a login environment. Bare
-            // reverse forwards carry no remote program to refresh.
-            if (trustedRelay && !this.closed) {
-              this.refreshTimer = setTimeout(() => {
-                this.refreshTimer = undefined;
-                this.options.refresh?.();
-              }, this.options.maxAgeMs ?? SSH_CONTROL_MAX_AGE_MS);
-              this.refreshTimer.unref?.();
-            }
           })
           .catch((error: unknown) => {
             failure = `could not publish the link: ${decodeRemoteShellError(error instanceof Error ? error.message : String(error))}`;
@@ -296,24 +282,6 @@ class FleetLink {
       : Promise.reject(new RemoteObservationError("remote_observer_unavailable"));
   }
 
-  /** Replacement discovery is already live; accepted work keeps this relay alive. */
-  retire(complete: () => void): void {
-    if (this.refreshTimer !== undefined) clearTimeout(this.refreshTimer);
-    this.refreshTimer = undefined;
-    this.retired = () => {
-      this.close();
-      complete();
-    };
-    if (this.relay) this.relay.drain(() => this.finishRetirement());
-    else this.finishRetirement();
-  }
-
-  private finishRetirement(): void {
-    const complete = this.retired;
-    this.retired = undefined;
-    complete?.();
-  }
-
   close(): void {
     this.closed = true;
     this.relay?.close();
@@ -323,20 +291,13 @@ class FleetLink {
     this.responseServer?.close();
     this.responseServer = undefined;
     if (this.timer !== undefined) clearTimeout(this.timer);
-    if (this.refreshTimer !== undefined) clearTimeout(this.refreshTimer);
     this.child?.kill();
     this.child = undefined;
   }
 
   private lost(child: ChildProcess, error: string): void {
     if (this.child !== child) return;
-    if (this.retired) {
-      this.finishRetirement();
-      return;
-    }
     this.child = undefined;
-    if (this.refreshTimer !== undefined) clearTimeout(this.refreshTimer);
-    this.refreshTimer = undefined;
     this.relay?.close();
     this.relay = undefined;
     this.relayChild?.kill();
@@ -360,8 +321,6 @@ class FleetLink {
 /** Every ssh fleet's link, started with the service and closed with it. */
 export class FleetLinks {
   private readonly links = new Map<string, FleetLink>();
-  private readonly replacements = new Map<FleetLink, FleetLink>();
-  private readonly retiring = new Set<FleetLink>();
   private readonly lifetimes = new Map<string, { link: FleetLink; alive: () => boolean }>();
   private readonly publications = new Map<string, Promise<void>>();
   private readonly options: {
@@ -374,7 +333,6 @@ export class FleetLinks {
     ) => Promise<ProjectProcessProof | undefined>;
     readonly spawn?: typeof spawn;
     readonly log?: (message: string) => void;
-    readonly maxAgeMs?: number;
   };
 
   constructor(options: FleetLinks["options"]) {
@@ -387,15 +345,8 @@ export class FleetLinks {
       const fleet = fleets.find((entry) => entry.id === id);
       if (!fleet || JSON.stringify(fleet) !== JSON.stringify(link.fleet)) {
         link.close();
-        this.replacements.get(link)?.close();
-        this.replacements.delete(link);
         this.links.delete(id);
         this.lifetimes.delete(id);
-        for (const old of this.retiring) {
-          if (old.fleet.id !== id) continue;
-          old.close();
-          this.retiring.delete(old);
-        }
       }
     }
     for (const fleet of fleets) {
@@ -406,37 +357,21 @@ export class FleetLinks {
     }
   }
 
-  private create(fleet: HerdrFleet, localPort: number, ready?: () => void, refreshing = false): FleetLink {
+  private create(fleet: HerdrFleet, localPort: number): FleetLink {
     const link = new FleetLink(fleet, {
       localPort,
       shell: this.options.shell(fleet),
       ...(this.options.stream ? { stream: this.options.stream(fleet) } : {}),
       ...(this.options.spawn === undefined ? {} : { spawn: this.options.spawn }),
-      ...(this.options.log === undefined
-        ? {}
-        : {
-            log: (message: string) =>
-              this.options.log!(
-                refreshing && this.links.get(fleet.id) !== link
-                  ? message.replace("link down:", "link refresh pending:")
-                  : message,
-              ),
-          }),
-      ...(this.options.maxAgeMs === undefined ? {} : { maxAgeMs: this.options.maxAgeMs }),
+      ...(this.options.log === undefined ? {} : { log: this.options.log }),
       ready: () => {
-        ready?.();
-        if (this.links.get(fleet.id) !== link) return;
-        const lifetime = this.lifetimes.get(fleet.id);
-        if (lifetime) {
-          lifetime.link = link;
-          lifetime.alive = link.lifetime();
-        } else this.lifetimes.set(fleet.id, { link, alive: link.lifetime() });
+        if (this.links.get(fleet.id) === link) this.lifetimes.set(fleet.id, { link, alive: link.lifetime() });
       },
       disconnected: () => {
         if (this.links.get(fleet.id) === link) this.lifetimes.delete(fleet.id);
       },
-      // A retiring attempt's in-flight write must finish before a newer
-      // discovery write, including after configuration changes or real loss.
+      // An earlier attempt's in-flight write must finish before a newer
+      // discovery write, after configuration changes or real loss.
       publish: (operation) => {
         const pending = (this.publications.get(fleet.id) ?? Promise.resolve()).then(operation);
         const settled = pending.then(
@@ -449,36 +384,12 @@ export class FleetLinks {
         });
         return pending;
       },
-      refresh: () => this.refresh(link, localPort),
     });
     return link;
   }
 
-  private refresh(link: FleetLink, localPort: number): void {
-    if (this.links.get(link.fleet.id) !== link || this.replacements.has(link)) return;
-    const replacement = this.create(
-      link.fleet,
-      localPort,
-      () => {
-        // Once promoted, normal outage recovery belongs to this same link.
-        if (this.links.get(link.fleet.id) === replacement) return;
-        if (this.links.get(link.fleet.id) !== link || this.replacements.get(link) !== replacement) {
-          replacement.close();
-          return;
-        }
-        this.replacements.delete(link);
-        this.links.set(link.fleet.id, replacement);
-        this.retiring.add(link);
-        link.retire(() => this.retiring.delete(link));
-      },
-      true,
-    );
-    this.replacements.set(link, replacement);
-    replacement.start();
-  }
-
   private current(link: FleetLink): boolean {
-    return this.links.get(link.fleet.id) === link || this.retiring.has(link);
+    return this.links.get(link.fleet.id) === link;
   }
 
   private readonly admitted = new WeakMap<Request, LocalFleetIdentity>();
@@ -493,7 +404,7 @@ export class FleetLinks {
       const pane = request.headers.get("x-clankie-pane") ?? "";
       if (!/^w[\w]+:p[\w]+$/u.test(pane))
         return Response.json({ error: "remote_pane_required" }, { status: 403 });
-      for (const link of [...this.links.values(), ...this.retiring]) {
+      for (const link of this.links.values()) {
         const fleet = link.fleet.id;
         const stream = link.stream(env.incoming.socket);
         if (!stream) continue;
@@ -516,15 +427,7 @@ export class FleetLinks {
         };
         this.admitted.set(request, identity);
         try {
-          const response = await forward(request);
-          if (!this.retiring.has(link)) return response;
-          const headers = new Headers(response.headers);
-          headers.set("connection", "close");
-          return new Response(response.body, {
-            status: response.status,
-            statusText: response.statusText,
-            headers,
-          });
+          return await forward(request);
         } finally {
           this.admitted.delete(request);
         }
@@ -567,10 +470,6 @@ export class FleetLinks {
 
   close(): void {
     this.lifetimes.clear();
-    for (const link of this.replacements.values()) link.close();
-    this.replacements.clear();
-    for (const link of this.retiring) link.close();
-    this.retiring.clear();
     for (const link of this.links.values()) link.close();
     this.links.clear();
   }
