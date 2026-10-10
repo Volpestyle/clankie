@@ -109,6 +109,7 @@ fallback after an owner API error. See [ADR 0248](adr/0248-owner-settings-use-on
 | [Manage service lifecycle](#service-lifecycle)         | `start`, `stop`, `restart`, `recover`, `autostart`, `awake` |
 | [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                                |
 | [Connect accounts and track work](#account-setup)      | `accounts`, `work`, `evidence`                              |
+| [Build live views](#views)                             | `view`                                                      |
 | [List shipped skills](#skill-setup)                    | `skills`                                                    |
 | [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model`             |
 | [Connect machines](#runtime-setup)                     | `machines`, `connections`, `runtime`, `agents`, `herdr`     |
@@ -2865,6 +2866,48 @@ workload must finish within 30 seconds, with the empty-pool first start within
 five seconds; these are fixture regression budgets. It runs no coding model or
 CoreSimulator; the VUH-1706 release gate remains the worker-bridge load proof.
 The command is excluded from `pnpm check` and push, PR and scheduled CI.
+
+<a id="views"></a>
+
+### `view list` / `view create SPEC_JSON|--stdin [--ttl HOURS|Nd] [--pin]` / `view show ID [--text] [--watch]` / `view pin|unpin|expire ID`
+
+A view is a private board that Clankie or the owner builds from live data
+(VUH-2035). It is a **spec**, never page source: named data sources plus panels
+that each show one source. The service reads the sources under the owner's
+authority, and each surface renders the panels with its own components, so no
+model-written script runs. Two sources ship today:
+
+- `{"kind":"fleet_resources"}`: the snapshot `fleet resources` returns. Its
+  panels show `capacity`, `queue` or `leases`, and can narrow to one
+  `"resource": "heavy"|"simulator"`.
+- `{"kind":"tracker_issues","repo":ID_OR_ROOT,"status":[...],"owner":O,"label":L,"limit":N}`:
+  a `work list` filter through the repo's own tracker. Its panels show
+  `issues`. The CLI resolves a `./` or `../` repo path against the current directory.
+
+A spec has a `title`, 1–8 `sources`, 1–12 `panels` (`{source, show, title?, resource?}`)
+and `refreshSeconds` (2–300, default 5). `create` validates the spec, keeps it,
+and prints `{ view, render }`, where `render` is the first read. A view is
+temporary for 24 hours unless `--ttl` gives 24h to 7d (`48`, `72h`, `3d`) or
+`--pin` keeps it until expired. `unpin` makes a pinned view temporary again from
+now. `expire` deletes it. Expired views drop out of `list` and `show`.
+
+`show ID` prints the view with every source read now
+(`{schemaVersion, view, renderedAtMs, sources}`). A source that cannot be read
+returns `{"state":"unavailable","detail":...}` while the other sources still
+render. `--text` prints the board as the console draws it, and `--watch`
+redraws it every `refreshSeconds` until interrupted. In the console, `/view ID`
+opens the same board as a live panel, and `/view` lists your views. The
+shipped [`views` skill](../.agents/skills/views/SKILL.md) teaches Clankie and his
+workers when and how to make one.
+
+Owner HTTP routes: `GET /v1/operator/views` lists views,
+`GET /v1/operator/views/:id` renders one, and `POST /v1/operator/views` takes
+`{action:"create", spec, ttlHours?, pin?}`, `{action:"pin"|"expire", id}` or
+`{action:"unpin", id, ttlHours?}` (64 KiB limit; create answers 201). They use the
+fleet-resources owner boundary: the operator bearer or a paired device with
+terminal control. An unknown or expired id is 404, and the 50-view limit is 409.
+Specs live in `~/.clankie/views/views.json`. Schemas are in
+`packages/protocol/src/views.ts`. Hosted share links are not part of this repository.
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 

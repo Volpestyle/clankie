@@ -1473,6 +1473,29 @@ export class ClankieFaceShell {
 
   // --- overlays ---
 
+  /** Shows a live, focused panel; the returned close hands focus back to the editor once. */
+  openLivePanel(component: Component, onClose?: () => void): () => void {
+    this.closeCommandPalette();
+    const handle = this.showModalOverlay(component, {
+      anchor: "center",
+      maxHeight: "80%",
+      margin: { bottom: 2, left: 2, right: 2, top: 2 },
+      minWidth: 48,
+      width: "88%",
+    });
+    handle.focus();
+    this.tui.requestRender();
+    let closed = false;
+    return () => {
+      if (closed) return;
+      closed = true;
+      handle.hide();
+      onClose?.();
+      this.tui.setFocus(this.editor);
+      this.tui.requestRender();
+    };
+  }
+
   showModalOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
     return this.tui.showOverlay(component, options);
   }

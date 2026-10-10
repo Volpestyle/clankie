@@ -35,6 +35,7 @@ import { RuntimeCanary, RUNTIME_CANARY_HOLDER } from "./runtime-canary.ts";
 import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
 import { IntegrationQueue, integrationSources } from "./integrate.ts";
 import { DeployHolds } from "./deploy-holds.ts";
+import { ViewStore } from "./views.ts";
 import { deployHoldPresence } from "./deploy-hold-presence.ts";
 import { herdrConnection } from "../../tui/src/session/herdr-connection.ts";
 import { DiscordRoomVoice } from "./discord-room-voice.ts";
@@ -1803,6 +1804,7 @@ const clankie = await createClankieApp({
     captain,
   }),
   fleetResources,
+  views: new ViewStore(join(stateRoot, "views")),
   runtimeHealth: () => runtimeHealth.snapshot(),
   fleetHealthMetrics,
   linearRequestBudget,

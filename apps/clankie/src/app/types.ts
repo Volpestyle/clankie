@@ -137,6 +137,8 @@ export interface ClankieAppDependencies {
   /** Host-side voice environment validation; omitted uses the service process environment. */
   voiceSettingsEnv?: NodeJS.ProcessEnv;
   fleetResources?: import("../fleet-resource-runtime.ts").FleetResourceRuntime;
+  /** The owner's view specs (VUH-2035). */
+  views?: import("../views.ts").ViewStore;
   integration?: IntegrationQueue;
   deployHolds?: DeployHolds;
   runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;

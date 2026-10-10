@@ -44,6 +44,7 @@ import { buildConnectCommands, runLinearFollowMenu } from "./connect-commands.ts
 import { buildDiscordCommands, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import { buildPersonaCommands } from "./persona-commands.ts";
 import { buildFleetCommands } from "./fleet-commands.ts";
+import { buildViewCommands } from "./view-commands.ts";
 import { buildVoiceCommands } from "./voice-commands.ts";
 import { buildMemoryCommands } from "./memory-commands.ts";
 import { buildPairCommands, runConsolePair } from "./pair-commands.ts";
@@ -561,6 +562,7 @@ const commands = [
   ...buildDiscordCommands(brokeredCommands),
   ...buildPersonaCommands(brokeredCommands),
   ...buildFleetCommands(brokeredCommands),
+  ...buildViewCommands({ ...(ownerFetcher === undefined ? {} : { ownerFetcher }), host: serviceUrl }),
   ...buildVoiceCommands(brokeredCommands),
   ...buildMemoryCommands(operatorClient === undefined ? {} : { client: operatorClient }),
 ];

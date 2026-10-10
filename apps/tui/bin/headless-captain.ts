@@ -565,6 +565,13 @@ export async function runHeadlessCaptainCommand(
       return await (
         await import("../src/command/telemetry.ts")
       ).runTelemetryCommand(rest, { stdout, stderr });
+    if (command === "view") {
+      const result = await (
+        await import("../src/command/view.ts")
+      ).runViewCommand(rest, { ...options, stdout });
+      if (result !== undefined) outputJson(stdout, result);
+      return 0;
+    }
     if (command === "metrics") {
       const result = await (await import("../src/command/metrics.ts")).runMetricsCommand(rest, options);
       outputJson(stdout, result);

@@ -759,6 +759,7 @@ export {
 } from "./fleet-resources.ts";
 
 export * from "./work-items.ts";
+export * from "./views.ts";
 export {
   WorkerReportBridgeReasonSchema,
   WorkerReportBridgeStatusSchema,

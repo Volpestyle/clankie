@@ -8,6 +8,7 @@ import { createWorkerAccountHoldsRoutes } from "../worker-account-holds-routes.t
 import { createUsageRoutes } from "../usage-routes.ts";
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
 import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
+import { createViewRoutes } from "../view-routes.ts";
 import { createRuntimeHealthRoutes } from "../runtime-health-routes.ts";
 import { RuntimeHealthObservationSchema } from "@clankie/protocol";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
@@ -1060,6 +1061,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     createFleetResourceRoutes(authorizeOwnerSecrets, dependencies.fleetResources, (error) =>
       logger.warn({ error, event: "fleet_resources.simulator_failed" }, "Simulator request failed"),
     ),
+  );
+  app.route(
+    "/",
+    createViewRoutes(authorizeOwnerSecrets, dependencies.views, {
+      ...(dependencies.fleetResources === undefined
+        ? {}
+        : { fleetResources: () => dependencies.fleetResources!.status() }),
+      ...(dependencies.workItems === undefined
+        ? {}
+        : { listIssues: (request) => dependencies.workItems!.handle(request, true) }),
+    }),
   );
   app.route(
     "/",

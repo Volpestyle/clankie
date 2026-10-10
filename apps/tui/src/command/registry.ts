@@ -484,6 +484,14 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["view"],
+    lines: [
+      "  view list | create SPEC_JSON|--stdin [--ttl HOURS|Nd] [--pin] | show ID [--text] [--watch]",
+      "  view pin ID | unpin ID [--ttl HOURS|Nd] | expire ID",
+      "                           Private live boards from fleet resources and tracker issues (JSON)",
+    ],
+  },
+  {
     nouns: ["metrics"],
     lines: [
       "  metrics [--run ID] [--limit N]",
