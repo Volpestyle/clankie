@@ -76,6 +76,8 @@ export interface CaptainOptions {
   readonly autoRoundIntervalMs?: number;
   /** How long an unchanged Auto round waits before waking again. */
   readonly autoIdleRewakeMs?: number;
+  /** How long an operator head stays held after a completed poll; defaults to 30s (VUH-2045). */
+  readonly headBoundGraceMs?: number;
   readonly localCodexProcess?: (pid: number, pane: string) => LocalCodexRegistration;
   readonly localCodexSocket?: () => string | undefined;
   readonly remoteCodexProcess?: (launch: RemoteCodexLaunch) => RemoteCodexRegistration;
