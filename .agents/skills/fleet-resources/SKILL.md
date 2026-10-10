@@ -66,7 +66,8 @@ resubmitting a healthy queued request.
 The owner sets capacity through `clankie fleet set --heavy-slots auto|N` and
 `--simulator-slots auto|N`, or `/fleet resources`. `heavySlots` is a ceiling
 (automatic: one per two cores and per 12 GiB, nine on the 18-core, 128 GiB Mac).
-One job per four cores (four here) runs on the load and memory guards alone, as the
+One job per four cores (four here) runs on the load and memory guards, each job
+admitted in the last minute counting four cores of load, as the
 [alternating benchmark](../../../docs/testing/2026-10-08-heavy-parallelism/README.md)
 supports. Each job above that starts only while the measured machine (the busier
 of load and kernel CPU, plus a full four-core share for every job admitted in

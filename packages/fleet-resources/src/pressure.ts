@@ -116,7 +116,8 @@ const heavyBurstRatio = 0.7;
 const heavyBurstMemoryMb = 8192;
 /**
  * Whether the next queued heavy job may start. `heavySlots` is a ceiling: the
- * base slots run on the load guard, and each one above it needs the measured
+ * base slots run on the load guard, with a full share for every job not yet
+ * settled, and each one above it needs the measured
  * machine (the busier of load and CPU, plus a full share for every job not yet
  * settled) to stay under `heavyBurstRatio`, with memory to spare.
  */
@@ -129,11 +130,16 @@ export function heavyAdmission(
 ): "admit" | "slots" | "pressure" {
   if (held.length >= resourceCapacity(policy)) return "slots";
   if (!pressure.healthy) return "pressure";
-  if (held.length < baseHeavySlots(policy)) return "admit";
-  // No CPU window yet (a fresh waiter, or an injected probe): base slots only.
-  if (pressure.cpuRatio === undefined) return "pressure";
   const cores = Math.max(1, availableParallelism());
   const unsettled = held.filter((lease) => at - lease.createdAtMs < settleMs).length;
+  // Base slots answer to the load guard, counting the jobs load1 cannot see
+  // yet: at load 1.48 four waiters once started within a second (VUH-2054).
+  if (held.length < baseHeavySlots(policy))
+    return pressure.loadRatio * cores + unsettled * heavyJobParallelism > policy.maxLoadRatio * cores
+      ? "pressure"
+      : "admit";
+  // No CPU window yet (a fresh waiter, or an injected probe): base slots only.
+  if (pressure.cpuRatio === undefined) return "pressure";
   const busy = Math.max(pressure.loadRatio, pressure.cpuRatio) * cores + unsettled * heavyJobParallelism;
   if (busy >= heavyBurstRatio * cores) return "pressure";
   if (pressure.availableMemoryMb < policy.minAvailableMemoryMb + (unsettled + 1) * heavyBurstMemoryMb)

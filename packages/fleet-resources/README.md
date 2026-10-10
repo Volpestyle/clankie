@@ -10,7 +10,10 @@ not an OS CPU quota.
 
 `heavySlots` is a ceiling, not a fixed pool (VUH-2054). The base slots,
 `min(heavySlots, max(1, min(floor(cores/4), floor(RAM_GiB/24))))`, give each job a full
-four-worker budget and run on the load and memory guards alone; the
+four-worker budget and run on the load and memory guards, with a full four-core
+share charged against the load guard for every job admitted in the last minute,
+which load1 cannot see yet (at load 1.48, four waiters once started within a
+second); the
 [alternating benchmark](../../docs/testing/2026-10-08-heavy-parallelism/README.md)
 supports four capped jobs for throughput on the 18-core, 128 GiB Mac. Above the
 base, the next queued job starts only while the measured machine stays under 70%

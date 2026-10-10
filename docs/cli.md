@@ -2853,7 +2853,7 @@ ticket. Actual native failures identify their cause; see the
 simulator reservations against `simulatorSlots`; `lightUsed` counts light-lane
 jobs against `lightSlots`, whose holders and waiters are `lightLeases` and
 `lightQueue`. `heavySlots` is a ceiling: one job per four cores runs on the
-load guard, and more start only while measured CPU and load stay under 70% of
+load guard (each job started in the last minute counts four cores of load), and more start only while measured CPU and load stay under 70% of
 the cores (a waiting `clankie heavy` says `busy`). Simulator status also reports
 external active devices against the simulator budget. The budgets are independent;
 load and available-memory guards gate both.

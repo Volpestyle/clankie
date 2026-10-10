@@ -125,6 +125,25 @@ it("a job admitted under a minute ago is charged its full core share before load
   }
 });
 
+const twoBase = baseHeavySlots({ ...defaultResourcePolicy(), heavySlots: 2 }) >= 2;
+it.skipIf(!twoBase)(
+  "base slots charge unsettled jobs against the load guard, so waiters at a load dip start one at a time",
+  async () => {
+    const f = await fixture({ heavyJobSettleMs: 60_000 });
+    await f.governor.configure({ ...f.policy, heavySlots: 2, maxLoadRatio: 1.5 });
+    // Just under the guard: one more job fits, a second would not.
+    f.machine.loadRatio = 1.4;
+    f.machine.cpuRatio = 0.5;
+    f.start(2);
+    await f.held(1);
+    await delay(1_000);
+    expect((await f.governor.snapshot()).capacity.used).toBe(1);
+    // Once load has room for the unsettled job's share, the second starts.
+    f.machine.loadRatio = 0.2;
+    await f.held(2);
+  },
+);
+
 it("the real sampler reports busy cores the kernel counts", async () => {
   const policy = { ...defaultResourcePolicy(), maxLoadRatio: 16, minAvailableMemoryMb: 0 };
   const burners = Array.from(
