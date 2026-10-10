@@ -189,6 +189,18 @@ export class AutonomyStore {
     return goal;
   }
 
+  /**
+   * Whether a queued self-wake prompt is no longer this conversation's pending
+   * wake. A run queued behind a stalled conversation must not fire after its
+   * wake was replaced or cancelled (VUH-2045). Only this store's own self-wake
+   * prompts are judged; other internal wake runs are not its to drop.
+   */
+  public wakeSuperseded(conversationId: string, prompt: string): boolean {
+    if (!prompt.startsWith(SELF_WAKE_HEADER)) return false;
+    const wake = this.state.conversations[conversationId]?.wake;
+    return wake === undefined || wakePrompt(wake) !== prompt;
+  }
+
   public getGoal(conversationId: string): OperatorGoal | undefined {
     return this.state.conversations[conversationId]?.goal;
   }
@@ -579,9 +591,11 @@ function goalPrompt(goal: OperatorGoal): string {
   ].join("\n");
 }
 
+const SELF_WAKE_HEADER = "This is a self-wake you scheduled, not a new instruction from the owner.";
+
 function wakePrompt(wake: OperatorWake): string {
   return [
-    "This is a self-wake you scheduled, not a new instruction from the owner.",
+    SELF_WAKE_HEADER,
     `Reason you recorded: ${wake.reason}`,
     "Review the conversation and decide what is useful now. You may act, report, schedule another wake, or do nothing. Waking grants no additional authority or permissions.",
   ].join("\n\n");

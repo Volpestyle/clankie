@@ -167,6 +167,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
     const message = preparedMessage;
     if (message === undefined) return;
     signal.throwIfAborted();
+    if (context.origin === "wake" && ctx.autonomy.wakeSuperseded(conversationId, message)) return;
     if (context.origin === "goal") {
       if (ctx.refuseNativeGoal(conversationId)) return;
       if (
