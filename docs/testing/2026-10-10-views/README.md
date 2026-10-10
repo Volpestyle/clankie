@@ -26,6 +26,21 @@ two detached heavy holders, and the real work-items service. It covers create
 boundary (401 without a bearer), pin, unpin `--ttl 3d`, expire, and spec
 validation.
 
-## Live service
+## Live service (evidence/live-*)
 
-See the issue comment for the live proof on the deployed runtime.
+On the deployed runtime (04fe7c3f7, which includes 56dda5a3b), Clankie's lead
+seat got the one-line ask for a heavy-queue board and used the shipped `views`
+skill to create `view_746116a1690d`: one `fleet_resources` source with capacity,
+Waiting (heavy), Running (heavy) and Simulators panels, temporary for 24 h,
+refreshing every 5 s (`live-list.json`). The installed `clankie view show` then
+read the same view twice, 28 s apart, with no spec change:
+
+| Read     | Board                                                                                                                                                                   |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 04:29:24 | 8/8 heavy in use. `w47:p2E` was first and `w47:p1Z` second in the queue (`live-before.txt` / `.json`).                                                                  |
+| 04:29:52 | `w47:p2E` and `w47:p1Z` are now Running; `vuh-2046` leads the queue, and later arrivals (`vuh-2034`, `w48:p2`, `release-0.4`) have joined (`live-after.txt` / `.json`). |
+
+The ask was first sent to the owner conversation with
+`clankie send --delivery queue`, but it never reached the seat holding that
+conversation (VUH-2045, a delivery bug outside views), so the lead seat acted
+on the same one-line ask directly.

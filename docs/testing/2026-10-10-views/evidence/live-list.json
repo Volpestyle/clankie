@@ -1,0 +1,22 @@
+{
+  "views": [
+    {
+      "id": "view_746116a1690d",
+      "spec": {
+        "title": "Heavy queue",
+        "sources": { "fleet": { "kind": "fleet_resources" } },
+        "panels": [
+          { "source": "fleet", "show": "capacity" },
+          { "title": "Waiting", "source": "fleet", "show": "queue", "resource": "heavy" },
+          { "title": "Running", "source": "fleet", "show": "leases", "resource": "heavy" },
+          { "title": "Simulators", "source": "fleet", "show": "leases", "resource": "simulator" }
+        ],
+        "refreshSeconds": 5
+      },
+      "createdAtMs": 1791624549234,
+      "updatedAtMs": 1791624549234,
+      "pinned": false,
+      "expiresAtMs": 1791710949234
+    }
+  ]
+}

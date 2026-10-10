@@ -1,0 +1,29 @@
+Heavy queue  view_746116a1690d · expires in 23h59m · read 4:29:52 AM
+
+Capacity
+heavy       ████████  8/8 in use
+simulators  █  1/1 in use
+queue       8 waiting
+pressure    ok  load 1.48 · 36.0 GB free
+
+Waiting
+ 1. heavy     sh  seat vuh-2046  waiting 2m36s
+ 2. heavy     pnpm  seat vuh-2044  waiting 2m15s
+ 3. heavy     pnpm  seat w47:p1Y  waiting 1m54s
+ 4. heavy     react-native  seat vuh-2046-mac-metro  waiting 1m39s
+ 5. heavy     pnpm  seat vuh-2034  waiting 33s
+ 6. heavy     pnpm  seat w48:p2  waiting 28s
+ 7. heavy     pnpm  seat release-0.4  waiting 18s
+
+Running
+heavy     pnpm  seat w47:p25  orphaned  3h27m
+heavy     pnpm  seat prime  running  1h50m
+heavy     pnpm  seat w47:p1Y  running  1h30m
+heavy     sh  seat w47:p1V  running  1h18m
+heavy     pnpm  seat w47:p2B  running  43s
+heavy     pnpm  seat w47:p23  running  37s
+heavy     pnpm  seat w47:p2E  running  16s
+heavy     pnpm  seat w47:p1Z  running  13s
+
+Simulators
+simulator process  seat term_65d76b2c5a9ad12c  booted  43m13s  F30BBCD8

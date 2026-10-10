@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "view": {
+    "id": "view_746116a1690d",
+    "spec": {
+      "title": "Heavy queue",
+      "sources": { "fleet": { "kind": "fleet_resources" } },
+      "panels": [
+        { "source": "fleet", "show": "capacity" },
+        { "title": "Waiting", "source": "fleet", "show": "queue", "resource": "heavy" },
+        { "title": "Running", "source": "fleet", "show": "leases", "resource": "heavy" },
+        { "title": "Simulators", "source": "fleet", "show": "leases", "resource": "simulator" }
+      ],
+      "refreshSeconds": 5
+    },
+    "createdAtMs": 1791624549234,
+    "updatedAtMs": 1791624549234,
+    "pinned": false,
+    "expiresAtMs": 1791710949234
+  },
+  "renderedAtMs": 1791624592963,
+  "sources": {
+    "fleet": {
+      "state": "ok",
+      "kind": "fleet_resources",
+      "snapshot": {
+        "schemaVersion": 1,
+        "policy": {
+          "heavySlots": 8,
+          "simulatorSlots": 1,
+          "simulatorIdleMs": 600000,
+          "maxLoadRatio": 1.5,
+          "minAvailableMemoryMb": 4096
+        },
+        "capacity": { "heavySlots": 8, "simulatorSlots": 1, "used": 8, "simulatorUsed": 1 },
+        "pressure": {
+          "sampledAtMs": 1791624588149,
+          "loadRatio": 1.4835611979166667,
+          "availableMemoryMb": 36891.71875,
+          "healthy": true
+        },
+        "leases": [
+          {
+            "id": "7829bfc7-332d-4f5f-8d4e-07de6205b8f2",
+            "kind": "heavy",
+            "state": "orphaned",
+            "seatId": "w47:p25",
+            "holderId": "claude:ba006eb3-c947-46db-ba8e-e28f859ced8d",
+            "pid": 11544,
+            "executable": "pnpm",
+            "createdAtMs": 1791612116669,
+            "lastUsedAtMs": 1791612116669
+          },
+          {
+            "id": "1f7028e0-3e1c-46e1-bcb7-0ec557553dce",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "prime",
+            "pid": 35304,
+            "executable": "pnpm",
+            "createdAtMs": 1791617978909,
+            "lastUsedAtMs": 1791617978909
+          },
+          {
+            "id": "73f53692-ff1a-4f44-b3eb-083a8adb81c9",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p1Y",
+            "holderId": "claude:62a4abf7-616d-42f0-b52e-58e6bea98bcf",
+            "pid": 17628,
+            "executable": "pnpm",
+            "createdAtMs": 1791619160710,
+            "lastUsedAtMs": 1791619160710
+          },
+          {
+            "id": "364994f1-1471-407c-971d-95dd0196a8fd",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p1V",
+            "holderId": "claude:126f8209-ec1b-4681-936f-ce1e2c76ac31",
+            "pid": 94770,
+            "executable": "sh",
+            "createdAtMs": 1791619908927,
+            "lastUsedAtMs": 1791619908927
+          },
+          {
+            "id": "38209ffb-71d7-4c6c-a969-a237b1ff524c",
+            "kind": "simulator",
+            "state": "booted",
+            "seatId": "term_65d76b2c5a9ad12c",
+            "holderId": "claude:a60af2e7-6d7f-4126-869a-e74a3bac6c68",
+            "createdAtMs": 1791621999430,
+            "lastUsedAtMs": 1791624338673,
+            "deviceId": "F30BBCD8-BA00-4EFA-99C7-8484B579D193",
+            "usage": {
+              "sampledAtMs": 1791624587975,
+              "status": "available",
+              "processCount": 228,
+              "unavailableProcesses": 0,
+              "rssBytes": 26487980032,
+              "footprintBytes": 3267499464,
+              "cpuTimeMs": 187869.62320833342,
+              "cpuPercent": 1.3264696082630874,
+              "intervalMs": 7003
+            }
+          },
+          {
+            "id": "185ea41b-2585-4347-8ffe-1b95e8816552",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p2B",
+            "holderId": "claude:b9ebd1fd-1ccc-499b-a0d9-f3030af0fe0d",
+            "pid": 93840,
+            "executable": "pnpm",
+            "createdAtMs": 1791624549173,
+            "lastUsedAtMs": 1791624549173
+          },
+          {
+            "id": "42764af7-5e35-418a-bd98-a225b749f772",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p23",
+            "holderId": "claude:2b78d86e-753b-45bc-8210-45c360201a90",
+            "pid": 94989,
+            "executable": "pnpm",
+            "createdAtMs": 1791624555351,
+            "lastUsedAtMs": 1791624555351
+          },
+          {
+            "id": "350c1105-e4aa-4d38-9843-45fc4014663d",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p2E",
+            "holderId": "claude:f218e409-bce8-46a0-9784-3672d9dd0199",
+            "pid": 2872,
+            "executable": "pnpm",
+            "createdAtMs": 1791624576730,
+            "lastUsedAtMs": 1791624576730
+          },
+          {
+            "id": "876f6ea6-4071-4610-ad3a-64e1b18269a7",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p1Z",
+            "holderId": "claude:5a23b653-c250-44ef-9bcc-d9237c7a949b",
+            "pid": 3055,
+            "executable": "pnpm",
+            "createdAtMs": 1791624579227,
+            "lastUsedAtMs": 1791624579227
+          }
+        ],
+        "queue": [
+          {
+            "id": "8ab07850-921d-4665-9f13-5f8aab11b3fe",
+            "kind": "simulator",
+            "seatId": "term_65d70a2f4b888fe",
+            "holderId": "claude:b8787002-27ca-4630-a25f-c62c89160b54",
+            "pid": 32514,
+            "queuedAtMs": 1791622326734,
+            "deviceId": "88349963-10DB-4C29-91DA-AD1B417DF3DD",
+            "exact": false,
+            "expiresAtMs": 1791624878219,
+            "position": 1,
+            "estimatedWaitMs": null
+          },
+          {
+            "id": "e2a7feb5-641f-47ac-9ea1-19d702e4eb2e",
+            "kind": "heavy",
+            "seatId": "vuh-2046",
+            "holderId": "claude:f19087d5-4bb2-44ab-ba6c-e3f08e20df3d:agent:a46d65c91b70539c5",
+            "pid": 79300,
+            "executable": "sh",
+            "queuedAtMs": 1791624436744
+          },
+          {
+            "id": "dd5e2c0e-61f0-4003-9929-7aeb4ea30e3c",
+            "kind": "heavy",
+            "seatId": "vuh-2044",
+            "holderId": "claude:b8787002-27ca-4630-a25f-c62c89160b54",
+            "pid": 82308,
+            "executable": "pnpm",
+            "queuedAtMs": 1791624457153
+          },
+          {
+            "id": "2d50db38-a16a-4b9e-a1da-47bb3bf51d6e",
+            "kind": "heavy",
+            "seatId": "w47:p1Y",
+            "holderId": "claude:62a4abf7-616d-42f0-b52e-58e6bea98bcf",
+            "pid": 85005,
+            "executable": "pnpm",
+            "queuedAtMs": 1791624478353
+          },
+          {
+            "id": "f29d00ff-d2c2-4dbc-bfe8-0619b8e704fa",
+            "kind": "heavy",
+            "seatId": "vuh-2046-mac-metro",
+            "holderId": "claude:f19087d5-4bb2-44ab-ba6c-e3f08e20df3d:agent:a46d65c91b70539c5",
+            "pid": 86797,
+            "executable": "react-native",
+            "queuedAtMs": 1791624493563
+          },
+          {
+            "id": "4e681d9d-4a6c-4b59-86c9-73c69f06af2c",
+            "kind": "heavy",
+            "seatId": "vuh-2034",
+            "holderId": "claude:deaaf26c-c6f4-4fe6-b9bd-3adcc6f1e5d5",
+            "pid": 94432,
+            "executable": "pnpm",
+            "queuedAtMs": 1791624559305
+          },
+          {
+            "id": "beb9b2f8-3557-4283-8246-c4b437d5b69f",
+            "kind": "heavy",
+            "seatId": "w48:p2",
+            "holderId": "claude:f19087d5-4bb2-44ab-ba6c-e3f08e20df3d:agent:a455d90965624a4e3",
+            "pid": 97297,
+            "executable": "pnpm",
+            "queuedAtMs": 1791624564176
+          },
+          {
+            "id": "693f6420-a055-4192-9749-63253f0daaf0",
+            "kind": "heavy",
+            "seatId": "release-0.4",
+            "holderId": "claude:2bbabd3f-161a-48ec-80dc-1cb030cc6d71",
+            "pid": 2025,
+            "executable": "pnpm",
+            "queuedAtMs": 1791624574505
+          }
+        ]
+      }
+    }
+  }
+}
