@@ -91,6 +91,8 @@ it("opens the production console at the latest first frame, lazily anchors older
   const olderTaken = gate(),
     releaseOlder = gate();
   const requests: unknown[] = [];
+  /** Backward pages the proxy has answered; the console applies one after this. */
+  let backwardServed = 0;
   let snapshotHeld = false,
     olderHeld = false;
   const proxy = createServer();
@@ -280,6 +282,7 @@ it("opens the production console at the latest first frame, lazily anchors older
           response.writeHead(upstream.status, { "content-type": "application/json" });
           response.end(bytes);
         }
+        if (operation?.op === "replay" && operation.replay.direction === "backward") backwardServed += 1;
       } catch (error) {
         if (!response.destroyed) {
           response.writeHead(500);
@@ -404,11 +407,24 @@ it("opens the production console at the latest first frame, lazily anchors older
     for (const marker of ["live-during-open-A", "live-during-backfill-B", "live-during-backfill-C"])
       expect(bottom.split(marker)).toHaveLength(2);
     // Traverse every remaining page to the retained origin with real scroll input.
+    // A Home pressed while a page is still loading joins that load (asserted above),
+    // so a press that lands before the last page is applied asks for nothing. Press
+    // again, as a reader would, once every requested page has been answered.
     for (let page = 0; page < 20 && !frames.latest().includes("history-0000"); page += 1) {
       const count = backwardRequests().length;
-      input("\x1b[H");
-      await until(() => backwardRequests().length > count || frames.latest().includes("history-0000"));
-      await pause(100);
+      let pressedAt = 0;
+      await until(
+        () => {
+          if (backwardRequests().length > count || frames.latest().includes("history-0000")) return true;
+          if (backwardServed === backwardRequests().length && Date.now() - pressedAt >= 250) {
+            pressedAt = Date.now();
+            input("\x1b[H");
+          }
+          return false;
+        },
+        () =>
+          `page ${page}: ${backwardRequests().length} backward requests, ${backwardServed} answered\n${frames.latest()}`,
+      );
     }
     input("\x1b[H");
     await until(
