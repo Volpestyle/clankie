@@ -55,8 +55,12 @@ including direct pushes; blocked edits are preserved and reported.
 waiting during a gate join the next batch, with one root landing gate for the composed
 core/app pair. Conflicting requests roll back as a whole; failed shared gates
 split into smaller batches until the failing request is reported. Each receipt
-keeps its original input, shared batch ID and attempted evidence. Restores and
-gate-only requests keep their separate intent. A mistaken request that is still
+keeps its original input, shared batch ID and attempted evidence. Push requests
+coalesce past gate-only ones, which batch among themselves; restores run alone.
+A green batch whose main moved lands without a new gate when `check:landing
+--revalidate` says its gate still covers the rebased HEAD (its `revalidations`
+name the incoming commits); otherwise the queue gates it again and says why.
+A mistaken request that is still
 waiting, yours or a worker's, is withdrawn with `integrate cancel UUID --actor
 NAME --reason TEXT`. The receipt keeps who and why; a request already gating
 runs on.

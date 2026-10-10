@@ -567,8 +567,16 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           throw Error("Use /integrate status [UUID]; submit with clankie integrate <sha> --push --no-wait");
         const result = await runIntegrationCommand(args.length ? args : ["status"]);
         const queue = result.queue;
-        const describe = (batch: import("@clankie/protocol/integrate").IntegrationBatch) =>
-          `${batch.id} · ${batch.state} · ${(batch.members ?? [batch.request]).map((m) => `${m.id}: ${[...m.core, ...(m.app ?? [])].join(", ")}`).join("; ")}${batch.error ? ` · ${batch.error}` : ""}${batch.cancelled ? ` · cancelled by ${batch.cancelled.actor}: ${batch.cancelled.reason}` : ""}`;
+        const describe = (batch: import("@clankie/protocol/integrate").IntegrationBatch) => {
+          const revalidated = batch.repos.flatMap((repo) =>
+            (repo.revalidations ?? [])
+              .filter((r) => r.covered)
+              .map(
+                (r) => ` · ${repo.name} revalidated over ${r.incoming.map((c) => c.slice(0, 9)).join(", ")}`,
+              ),
+          );
+          return `${batch.id} · ${batch.state} · ${(batch.members ?? [batch.request]).map((m) => `${m.id}: ${[...m.core, ...(m.app ?? [])].join(", ")}`).join("; ")}${batch.error ? ` · ${batch.error}` : ""}${batch.cancelled ? ` · cancelled by ${batch.cancelled.actor}: ${batch.cancelled.reason}` : ""}${batch.regateReason ? ` · gating again: ${batch.regateReason}` : ""}${revalidated.join("")}`;
+        };
         shell.insertCommandResult(
           "/integrate",
           queue

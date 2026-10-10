@@ -36,8 +36,10 @@ paths remain in the batch record. Healthy requests continue. Repair by approving
 new commits and composing a fresh batch.
 
 The service serializes batches, coalescing requests waiting during a gate into
-the next batch in admission order. Requests must have the same push intent;
-restores run alone. The existing per-request input
+the next batch in admission order. Push requests coalesce past gate-only ones
+and gate-only requests batch among themselves, so a stray gate-only request
+never splits a run of pushes; it never lands, so no landing order changes.
+Restores run alone and nothing coalesces past one. The existing per-request input
 limits do not cap the combined batch. Requests retain their original UUID and input; a
 `batchId` points to the shared attestation and `attempts` retains previous batch
 IDs. A failed shared gate splits into smaller fresh batches until each failing
@@ -75,18 +77,33 @@ recorded gate; the queue does not install or update the owner's toolchain.
 configured) retains each install/gate exit code, signal, tested HEAD, times and
 log path. Atomic replacement and fsync finish before pass/landing admission.
 Both HEADs and clean worktrees must still match the durable zero-exit gate.
-Origin drift, destination changes or a missing/failed record refuse landing.
+Destination changes or a missing/failed record refuse landing.
 `--push` performs ordinary fast-forward SHA-to-main pushes, always core first,
 then app. It does not deploy or restart the live service, so deploy holds do not
 apply to it.
+
+When origin/main moved after the gate, landing rebases the batch onto it and runs
+`pnpm check:landing --revalidate` in the batch worktree, the same check a direct
+landing uses: it compares the incoming commits with the gate's recorded
+selection. When the gate still covers the rebased HEAD, the batch lands without
+a new gate. Each repository's `revalidations` record the incoming commits it
+checked, the rebased HEAD and the verdict, and `/integrate` names them. When the
+gate no longer covers HEAD, the rebase conflicts or the repository has no
+`check:landing`, the batch is held with the reason and the queue composes and
+gates its requests again on the new main, at most twice; the fresh batch's
+`regateReason` says why. A restore, or core moving under a batch that includes
+the app (whose gate ran against the earlier core), always gates again. A
+deliberate `push UUID` of a held batch revalidates the same way; when that is
+not enough it stays held, and the requests need a new submission.
 
 Two repositories cannot land atomically. If core succeeds and app is rejected,
 the batch says `partial`, records core's confirmed landed SHA, and explains
 “Core landed …; app pending.” A deliberate `push UUID` after repairing a definite
 app rejection skips core and sends only app, provided origins and tested trees
 still match. An uncertain send is reconciled by reading origin, never replayed.
-If origin moved, compose a new batch using the recorded inputs; commits already
-present are recorded as such. Push attempts retain separate logs.
+If origin moved and revalidation does not cover it, compose a new batch using
+the recorded inputs; commits already present are recorded as such. Push
+attempts retain separate logs.
 
 `revert` restores the tree from an explicitly selected passed batch in a **new
 commit on current origin/main**, installs, gates and lands that commit through

@@ -632,6 +632,11 @@ paths:
                           items: { type: object },
                           description: Conflicting or failed members rolled back before gating,
                         }
+                      regateReason:
+                        {
+                          type: string,
+                          description: "Why the queue gates these requests again: main moved somewhere the held attempt's gate checked",
+                        }
                       cancelled:
                         type: object
                         description: Who withdrew this request before its gate started, and why
@@ -645,6 +650,24 @@ paths:
                         items:
                           type: object
                           description: Source/origin/base, directory, HEAD, per-commit conflict results, install/gate exit and tested HEAD, per-repo push outcome and logs
+                          properties:
+                            revalidations:
+                              type: array
+                              description: Each move onto a newer origin/main after the gate, with the incoming commits it checked; covered means the recorded gate selection still covered the rebased HEAD, which landed without a new gate
+                              items:
+                                type: object
+                                required: [from, to, incoming, previousHead, covered, at]
+                                properties:
+                                  from: { type: string }
+                                  to: { type: string }
+                                  incoming: { type: array, items: { type: string } }
+                                  previousHead: { type: string }
+                                  head: { type: string }
+                                  covered: { type: boolean }
+                                  reason: { type: string }
+                                  exitCode: { type: [integer, "null"] }
+                                  log: { type: string }
+                                  at: { type: string, format: date-time }
         "400": { description: Malformed request }
         "403": { description: Actual operator required }
         "409": { description: Unknown record, identity conflict, busy operation or refused landing }

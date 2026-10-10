@@ -129,6 +129,26 @@ const IntegrationRepoSchema = z.object({
   ),
   install: CommandRecordSchema.optional(),
   gate: CommandRecordSchema.optional(),
+  /**
+   * Each move onto a newer origin/main after the gate: the incoming commits it checked and
+   * whether the recorded selection still covered the rebased HEAD (VUH-2068).
+   */
+  revalidations: z
+    .array(
+      z.object({
+        from: Sha,
+        to: Sha,
+        incoming: z.array(Sha),
+        previousHead: Sha,
+        head: Sha.optional(),
+        covered: z.boolean(),
+        reason: z.string().optional(),
+        exitCode: z.number().int().nullable().optional(),
+        log: z.string().optional(),
+        at: z.iso.datetime(),
+      }),
+    )
+    .optional(),
   push: z
     .object({
       state: z.enum(["attempting", "confirmed", "rejected", "unconfirmed"]),
@@ -171,6 +191,8 @@ export const IntegrationBatchSchema = z.object({
   excluded: z
     .array(z.object({ id: Id, state: z.enum(["conflict", "failed"]), error: z.string() }))
     .optional(),
+  /** Why the queue gates these requests again: main moved somewhere the held attempt's gate checked. */
+  regateReason: z.string().optional(),
   /** Who withdrew a request before its gate started, and why. */
   cancelled: z.object({ actor: Text, reason: Text, at: z.iso.datetime() }).optional(),
 });

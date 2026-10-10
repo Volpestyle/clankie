@@ -5,6 +5,7 @@ import type { Server } from "node:http";
 import { chmod, glob, mkdir, mkdtemp, readFile, readlink, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, aroundEach, expect, it } from "vitest";
 import { IntegrationRunSchema } from "@clankie/protocol/integrate";
@@ -716,31 +717,163 @@ it("bisects a failed shared real gate, reports the bad request, and lands both h
   );
 }, 90_000);
 
-it("keeps gate-only requests separate from auto-push intent and reports interrupted receipts after process loss", async () => {
+it("coalesces push requests past a gate-only one, which gates by itself, and reports interrupted receipts after process loss", async () => {
   const f = await fixture((root) => barrier(root));
   const initial = await commit(f.core.source, "initial", "one");
+  const before = await commit(f.core.source, "before", "push");
   const candidate = await commit(f.core.source, "candidate", "gate only");
-  const landing = await commit(f.core.source, "landing", "push");
+  const after = await commit(f.core.source, "after", "push");
   const request = (sha: string, push: boolean) =>
     IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [sha], push });
   const first = request(initial, true),
+    a = request(before, true),
     only = request(candidate, false),
-    push = request(landing, true);
+    b = request(after, true);
   await f.queue.start(first, guard);
   await until(async () => (await f.queue.status(first.id)).state === "gating");
-  await f.queue.start(only, guard);
-  await f.queue.start(push, guard);
+  for (const r of [a, only, b]) await f.queue.start(r, guard);
   const reload = await new IntegrationQueue(f.queue.options).snapshot();
-  expect(reload.interrupted.map((r) => r.id)).toEqual(expect.arrayContaining([first.id, only.id, push.id]));
+  expect(reload.interrupted.map((r) => r.id)).toEqual(
+    expect.arrayContaining([first.id, a.id, only.id, b.id]),
+  );
   await writeFile(join(f.root, "release"), "go");
   await f.queue.wait();
-  expect((await f.queue.status(only.id)).state).toBe("passed");
-  expect((await f.queue.status(push.id)).state).toBe("pushed");
-  expect((await f.queue.status(push.id)).members).toHaveLength(1);
+  // The push behind the gate-only request joins the push batch; the gate-only one never lands.
+  const [landedA, landedB] = [await f.queue.status(a.id), await f.queue.status(b.id)];
+  expect([landedA.state, landedB.state]).toEqual(["pushed", "pushed"]);
+  expect(landedA.batchId).toBe(landedB.batchId);
+  expect(landedA.members?.map((m) => m.id)).toEqual([a.id, b.id]);
+  const gated = await f.queue.status(only.id);
+  expect(gated.state).toBe("passed");
+  expect(gated.members?.map((m) => m.id)).toEqual([only.id]);
   expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(3);
-  expect(
-    await git((await f.queue.status(push.id)).repos[0]!.directory, "ls-tree", "--name-only", "HEAD"),
-  ).not.toContain("candidate");
+  const landed = landedB.repos[0]!;
+  expect(await git(landed.directory, "ls-tree", "--name-only", landed.head)).not.toContain("candidate");
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(landed.head);
+});
+
+it("lands a green batch over an unrelated move of main without a second gate, and gates again when main changes what it checked", async () => {
+  const f = await fixture();
+  // The repository's real revalidation judges the move (VUH-2024); the fixture gate records its selection.
+  const validity = fileURLToPath(new URL("../../../scripts/testing/landing-validity.mjs", import.meta.url));
+  await writeFile(
+    join(f.core.source, "landing.mjs"),
+    `
+import { execFileSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { changePatchId, revalidateLanding, sourceFingerprint } from ${JSON.stringify(validity)};
+const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+const base = git('rev-parse', process.env.CLANKIE_LANDING_BASE);
+const report = '.local/landing-gate.json';
+if (process.argv.includes('--revalidate')) {
+  const verdict = await revalidateLanding({ root: process.cwd(), report: JSON.parse(readFileSync(report, 'utf8')), base });
+  console.log(verdict.valid ? '[landing] still covers HEAD' : '[landing] rerun the root gate: ' + verdict.reasons.join('; '));
+  process.exit(verdict.valid ? 0 : 1);
+}
+const root = ${JSON.stringify(f.root)};
+appendFileSync(join(root, 'gate-count'), 'gate\\n');
+while (!existsSync(join(root, 'release'))) await new Promise((r) => setTimeout(r, 20));
+const files = git('diff', '--name-only', base).split('\\n').filter(Boolean);
+mkdirSync('.local', { recursive: true });
+writeFileSync(report, JSON.stringify({
+  head: git('rev-parse', 'HEAD'), base, source: await sourceFingerprint(process.cwd()), exitCode: 0, sourceStable: true,
+  change: { rebased: true, patchId: changePatchId(process.cwd(), base, 'HEAD'), files },
+  // Every selected test imports lib/helper.
+  tests: { dependencies: [...files, 'lib/helper'] },
+  typecheckScope: { reason: 'real compiler import graph', affectedInputs: files },
+}));
+`,
+  );
+  const manifest = JSON.parse(await readFile(join(f.core.source, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
+  manifest.scripts["check:landing"] = "node landing.mjs";
+  await writeFile(join(f.core.source, "package.json"), JSON.stringify(manifest));
+  await writeFile(join(f.core.source, ".gitignore"), "node_modules/\n.local/\n");
+  // Top-level files are repository-wide gate inputs, so the incoming work lives in folders.
+  await mkdir(join(f.core.source, "lib"));
+  await writeFile(join(f.core.source, "lib", "helper"), "one");
+  await git(f.core.source, "add", ".");
+  await git(f.core.source, "commit", "-m", "landing gate");
+  await git(f.core.source, "push", "origin", "HEAD:main");
+  const cli = await queueCli(f);
+  const gates = async () =>
+    (await readFile(join(f.root, "gate-count"), "utf8").catch(() => "")).trim().split("\n").filter(Boolean)
+      .length;
+  // Someone lands directly on main while the batch is gating (0250de6aa on 2026-10-10).
+  const incoming = async (file: string, value: string) => {
+    await git(f.core.source, "fetch", "-q", "origin");
+    await git(f.core.source, "checkout", "-q", "-B", "direct", "origin/main");
+    await mkdir(join(f.core.source, "docs"), { recursive: true });
+    const sha = await commit(f.core.source, file, value);
+    await git(f.core.source, "push", "origin", "HEAD:main");
+    await git(f.core.source, "checkout", "-q", "main");
+    await git(f.core.source, "fetch", "-q", "origin");
+    return sha;
+  };
+
+  const a = randomUUID();
+  await runIntegrationCommand(
+    [await commit(f.core.source, "feature", "a"), "--id", a, "--push", "--no-wait"],
+    cli,
+  );
+  await until(async () => (await gates()) === 1);
+  const unrelated = await incoming("docs/unrelated.md", "unrelated");
+  await writeFile(join(f.root, "release"), "go");
+  await f.queue.wait();
+  const landed = (await runIntegrationCommand(["status", a], cli)).batch!;
+  expect(landed.state).toBe("pushed");
+  expect(await gates()).toBe(1);
+  const repo = landed.repos[0]!;
+  expect(repo.revalidations).toEqual([
+    expect.objectContaining({
+      to: unrelated,
+      incoming: [unrelated],
+      covered: true,
+      head: repo.head,
+      exitCode: 0,
+    }),
+  ]);
+  expect(repo.base).toBe(unrelated);
+  expect(await git(repo.directory, "rev-parse", `${repo.head}^`)).toBe(unrelated);
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(repo.head);
+
+  // A move that touches what the gate checked holds that attempt and gates the request again.
+  await rm(join(f.root, "release"));
+  const b = randomUUID();
+  await git(f.core.source, "reset", "-q", "--hard", "origin/main");
+  await runIntegrationCommand(
+    [await commit(f.core.source, "second", "b"), "--id", b, "--push", "--no-wait"],
+    cli,
+  );
+  await until(async () => (await gates()) === 2);
+  const checked = await incoming("lib/helper", "two");
+  await writeFile(join(f.root, "release"), "go");
+  await f.queue.wait();
+  const again = (await runIntegrationCommand(["status", b], cli)).batch!;
+  expect(again).toMatchObject({ state: "pushed", attempts: [expect.any(String)] });
+  expect(again.regateReason).toContain("incoming commit changes checked input lib/helper");
+  expect(again.repos[0]!.base).toBe(checked);
+  expect(again.repos[0]!.revalidations).toBeUndefined();
+  expect(await gates()).toBe(3);
+  const held = JSON.parse(await readFile(join(f.directory, "batches", b, "record.json"), "utf8")) as {
+    state: string;
+    error: string;
+    repos: { revalidations: unknown[] }[];
+  };
+  expect(held).toMatchObject({
+    state: "held",
+    error: expect.stringContaining("gating again on the new main"),
+  });
+  expect(held.repos[0]!.revalidations).toEqual([
+    expect.objectContaining({
+      incoming: [checked],
+      covered: false,
+      reason: "incoming commit changes checked input lib/helper",
+    }),
+  ]);
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(again.repos[0]!.head);
 });
 
 it("lands through the repository's change-scoped check:landing, told the batch base, instead of the full check", async () => {

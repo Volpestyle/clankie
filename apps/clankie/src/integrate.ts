@@ -27,6 +27,11 @@ interface IntegrationOptions {
   core: string;
   app?: string;
 }
+/** Main moved after the gate and its recorded selection no longer covers the result. */
+class GateNotCovering extends Error {}
+/** A revalidated HEAD inherits its gate; otherwise only the gated HEAD is attested. */
+const attested = (repo: IntegrationRepo) =>
+  repo.revalidations?.findLast((record) => record.covered)?.head ?? repo.gate?.head;
 
 /** The running pin can be a nested linked worktree; app lives beside its source checkout. */
 /**
@@ -74,8 +79,13 @@ export class IntegrationQueue {
   }
   async status(id: string): Promise<IntegrationBatch> {
     const batch = await this.stored(id);
-    // A push request's pass is one step: while its run continues, it is landing.
-    if (batch.state === "passed" && batch.request.push && this.running.has(batch.batchId ?? batch.id))
+    // A push request's pass is one step: while its run continues, it is landing. So is a
+    // hold it is about to gate again past (VUH-2068): the request itself is still running.
+    if (
+      (batch.state === "passed" || batch.state === "held") &&
+      batch.request.push &&
+      (this.running.has(batch.id) || (batch.batchId !== undefined && this.running.has(batch.batchId)))
+    )
       return { ...batch, state: "pushing" };
     return batch;
   }
@@ -194,11 +204,13 @@ export class IntegrationQueue {
                 const first = this.pending.shift()!;
                 const members = [first];
                 const request = first.batch.request;
-                // Preserve FIFO and keep restores and gate-only requests apart.
-                while (!request.restore && this.pending.length) {
-                  const next = this.pending[0]!.batch.request;
-                  if (next.restore || next.push !== request.push) break;
-                  members.push(this.pending.shift()!);
+                // Push requests coalesce past gate-only ones, which never land, and gate-only
+                // requests batch among themselves. Nothing passes a restore: it lands in order.
+                for (let index = 0; !request.restore && index < this.pending.length;) {
+                  const next = this.pending[index]!.batch.request;
+                  if (next.restore) break;
+                  if (next.push === request.push) members.push(...this.pending.splice(index, 1));
+                  else index++;
                 }
                 try {
                   await this.runMembers(members);
@@ -245,7 +257,12 @@ export class IntegrationQueue {
     } while (this.draining);
   }
 
-  private async runMembers(input: PendingIntegration[], fresh = false): Promise<void> {
+  private async runMembers(
+    input: PendingIntegration[],
+    fresh = false,
+    regates = 0,
+    regateReason?: string,
+  ): Promise<void> {
     const members: PendingIntegration[] = [];
     for (const member of input) {
       try {
@@ -274,6 +291,7 @@ export class IntegrationQueue {
             updatedAt: now(),
             evidence: this.path(id),
             repos: [],
+            ...(regateReason === undefined ? {} : { regateReason }),
           };
     batch.members = requests;
     this.running.add(id);
@@ -313,9 +331,26 @@ export class IntegrationQueue {
         batch.error = `${batch.error ?? "Shared gate failed"}; isolated members have separate results (use their request IDs)`;
         await this.save(batch);
       } else if (batch.state === "passed" && batch.request.push) {
-        await this.land(id, async () => {
-          for (const member of remaining) await member.guard();
-        });
+        let uncovered = false;
+        await this.land(
+          id,
+          async () => {
+            for (const member of remaining) await member.guard();
+          },
+          () => (uncovered = true),
+        );
+        // Main moved somewhere the gate checked: compose and gate again, at most twice.
+        if (uncovered && regates < 2) {
+          const held = await this.stored(id);
+          const reason = held.error!;
+          held.error = `${reason}; gating again on the new main`;
+          await this.save(held);
+          // The held attempt is finished; its requests keep running and follow the fresh batch.
+          if (!members.some((member) => member.batch.id === id)) this.running.delete(id);
+          const again: PendingIntegration[] = [];
+          for (const member of remaining) again.push({ ...member, batch: await this.read(member.batch.id) });
+          await this.runMembers(again, true, regates + 1, reason);
+        }
       }
     } finally {
       this.running.delete(id);
@@ -343,14 +378,21 @@ export class IntegrationQueue {
   }
   private async command(
     repo: IntegrationRepo,
-    name: "install" | "gate",
+    name: "install" | "gate" | "revalidate",
     env: NodeJS.ProcessEnv,
     evidence: string,
+    base = repo.base,
   ): Promise<NonNullable<IntegrationRepo["gate"]>> {
-    const log = join(evidence, `${repo.name}-${name}.log`);
+    // Install and gate run once per batch; revalidation runs each time main moves.
+    const log = join(
+      evidence,
+      name === "revalidate"
+        ? `${repo.name}-revalidate-${now().replaceAll(":", "-")}.log`
+        : `${repo.name}-${name}.log`,
+    );
     const startedAt = now();
     const head = await this.head(repo);
-    const gateScript = name === "gate" ? await landingGateScript(repo.directory) : "check";
+    const gateScript = name === "install" ? "check" : await landingGateScript(repo.directory);
     const result = await new Promise<{ exitCode: number | null; signal: string | null }>(
       (resolve, reject) => {
         const out = createWriteStream(log, { flags: "wx", mode: 0o600 });
@@ -364,10 +406,12 @@ export class IntegrationQueue {
                 env.npm_config_store_dir!,
                 "--package-import-method=copy",
               ]
-            : [gateScript];
+            : name === "gate"
+              ? [gateScript]
+              : [gateScript, "--revalidate"];
         const child = spawn("pnpm", args, {
           cwd: repo.directory,
-          env: name === "gate" ? { ...env, CLANKIE_LANDING_BASE: repo.base } : env,
+          env: name === "install" ? env : { ...env, CLANKIE_LANDING_BASE: base },
           stdio: ["ignore", "pipe", "pipe"],
         });
         child.stdout.pipe(out, { end: false });
@@ -546,8 +590,75 @@ export class IntegrationQueue {
     await this.save(batch);
   }
 
+  /**
+   * Rebases a green repo onto the newer origin/main and asks its gate whether the recorded
+   * selection still covers the result (`check:landing --revalidate`, VUH-2024). Returns why
+   * not, with the worktree back on the HEAD it had.
+   */
+  private async revalidate(batch: IntegrationBatch, repo: IntegrationRepo): Promise<string | undefined> {
+    const root = dirname(batch.evidence);
+    await this.git(repo.directory, ["fetch", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
+    const to = await this.git(repo.directory, ["rev-parse", "refs/remotes/origin/main"]);
+    const record: NonNullable<IntegrationRepo["revalidations"]>[number] = {
+      from: repo.base,
+      to,
+      incoming: (await this.git(repo.directory, ["rev-list", "--reverse", `${repo.base}..${to}`]))
+        .split("\n")
+        .filter(Boolean),
+      previousHead: repo.head,
+      covered: false,
+      at: now(),
+    };
+    (repo.revalidations ??= []).push(record);
+    await this.save(batch);
+    let reason: string | undefined;
+    if ((await landingGateScript(repo.directory)) !== "check:landing")
+      reason = "its gate records no selection to revalidate";
+    else if ((await this.git(repo.directory, ["merge-base", repo.base, to])) !== repo.base)
+      reason = `origin/main no longer contains the gated base ${repo.base}`;
+    else
+      try {
+        await this.git(repo.directory, ["rebase", "--onto", to, repo.base]);
+        record.head = await this.head(repo);
+      } catch (error) {
+        const conflicts = (await this.git(repo.directory, ["diff", "--name-only", "--diff-filter=U"]))
+          .split("\n")
+          .filter(Boolean);
+        await this.git(repo.directory, ["rebase", "--abort"]).catch(() => undefined);
+        reason = conflicts.length
+          ? `rebasing onto it conflicts in ${conflicts.join(", ")}`
+          : `rebasing onto it failed: ${String(error)}`;
+      }
+    if (record.head)
+      try {
+        const env = await integrationEnvironment(join(root, "isolation", repo.name));
+        const result = await this.command(repo, "revalidate", env, root, to);
+        record.exitCode = result.exitCode;
+        record.log = result.log;
+        if (result.exitCode !== 0)
+          reason =
+            (await readFile(result.log, "utf8")).match(/^\[landing\] rerun the root gate: (.+)$/mu)?.[1] ??
+            `check:landing --revalidate exited ${result.exitCode ?? result.signal}`;
+        else if ((await this.head(repo)) !== record.head) reason = "HEAD changed during revalidation";
+        else if (await this.git(repo.directory, ["status", "--porcelain"]))
+          reason = "revalidation left the worktree changed";
+      } catch (error) {
+        reason = `revalidation could not run: ${String(error)}`;
+      }
+    if (reason) {
+      record.reason = reason;
+      await this.git(repo.directory, ["reset", "--hard", record.previousHead]);
+    } else {
+      record.covered = true;
+      repo.base = to;
+      repo.head = record.head!;
+    }
+    await this.save(batch);
+    return reason;
+  }
+
   /** Deploy holds protect the running service, not main, so landing never waits for one (ADR 0240). */
-  async land(id: string, guard: () => Promise<void>): Promise<IntegrationBatch> {
+  async land(id: string, guard: () => Promise<void>, onUncovered?: () => void): Promise<IntegrationBatch> {
     const batch = await this.stored(id);
     if (batch.batchId) {
       if (["conflict", "failed", "interrupted"].includes(batch.state))
@@ -571,7 +682,7 @@ export class IntegrationQueue {
           for (const repo of recorded.repos) {
             if (
               repo.gate?.exitCode !== 0 ||
-              repo.gate.head !== repo.head ||
+              attested(repo) !== repo.head ||
               repo.head !== (await this.head(repo))
             )
               throw Error(`${repo.name}: recorded gate is not a pass for exact HEAD`);
@@ -580,9 +691,9 @@ export class IntegrationQueue {
               throw Error(`${repo.name}: origin changed since composition`);
             if ((await this.git(repo.directory, ["remote", "get-url", "--push", "origin"])) !== repo.origin)
               throw Error(`${repo.name}: push destination changed since composition`);
-            const current = (
-              await this.git(repo.directory, ["ls-remote", "origin", "refs/heads/main"])
-            ).split(/\s/u)[0];
+            const remote = async () =>
+              (await this.git(repo.directory, ["ls-remote", "origin", "refs/heads/main"])).split(/\s/u)[0];
+            let current = await remote();
             if (repo.push && repo.push.state !== "confirmed" && repo.push.state !== "rejected") {
               // Reconcile an uncertain send, never replay it.
               if (current !== repo.head)
@@ -596,10 +707,24 @@ export class IntegrationQueue {
             if (repo.push?.state === "confirmed") {
               if (current !== repo.head)
                 throw Error(`${repo.name}: origin advanced after landing; start a fresh batch`);
-            } else if (current !== repo.base)
-              throw Error(
-                `${repo.name}: origin/main moved from ${repo.base} to ${current}; compose a fresh batch`,
-              );
+            } else
+              // A green gate survives a moved main while its recorded selection still covers HEAD.
+              for (let round = 0; current !== repo.base; round++) {
+                const from = repo.base;
+                const why =
+                  round === 3
+                    ? "origin/main kept moving"
+                    : recorded.request.restore
+                      ? "a restore is composed again on the current main"
+                      : repo.name === "core" && recorded.repos.some((r) => r.name === "app")
+                        ? "the app gate ran against the earlier core"
+                        : await this.revalidate(recorded, repo);
+                if (why)
+                  throw new GateNotCovering(
+                    `${repo.name}: origin/main moved from ${from} to ${current} and the gate no longer covers HEAD: ${why}`,
+                  );
+                current = await remote();
+              }
           }
           recorded.state = "pushing";
           delete recorded.error;
@@ -650,6 +775,7 @@ export class IntegrationQueue {
           await this.save(recorded);
           return recorded;
         } catch (error) {
+          if (error instanceof GateNotCovering) onUncovered?.();
           // Keep successful/uncertain individual repo landings; two origins have no atomic transaction.
           const latest = await this.stored(id);
           latest.state = latest.repos.some((r) => r.push) ? "partial" : "held";
