@@ -255,6 +255,10 @@ export interface CaptainPort {
   bodyRoomConversation(lane: "discord_presence" | "discord_voice", targetId: string): string;
   evaluatorStatus(): EvaluatorStatus;
   evaluatorCommand(command: EvaluatorCommand): Promise<EvaluatorStatus>;
+  /** The owner's routines (ADR 0265): list, change and read run history. */
+  routineCommand(
+    command: import("@clankie/protocol").RoutineCommand,
+  ): Promise<import("@clankie/protocol").RoutinesStatus>;
   /**
    * One Discord text/voice message becomes one captain turn, unless a text
    * follow-up steers the same sender's running handoff under the same grant.
@@ -499,6 +503,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       queued: 0,
       jobs: [],
     }),
+    routineCommand: async () => ({ schemaVersion: 1, routines: [] }),
     submitDiscordTurn: async () => ({
       state: "settled",
       captainSessionId: "stub-session",

@@ -131,6 +131,15 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["routines", "routine"],
+    lines: [
+      "  routines [list] | history [ID] [--limit N] | pause|resume|run-now|remove ID",
+      "  routines add NAME --when WHEN (--turn PROMPT | --hire JSON --brief TEXT | --check --cwd DIR -- CMD...)",
+      "  routines edit ID [--name N] [--when WHEN] [--tz ZONE] [--missed catch_up|skip]",
+      "                           Recurring scheduled jobs: lead turns, hires, checks (text; --json)",
+    ],
+  },
+  {
     nouns: ["conversations", "conversation"],
     lines: [
       "  conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",

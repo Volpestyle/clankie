@@ -125,4 +125,22 @@ Auto. On a local Mac,
 [`clankie autostart enable`](/cli/#autostart-enable-autostart-disable-autostart-status)
 keeps the service running after login.
 
+<a id="routines"></a>
+
+For work on a cadence, ask for it in plain words ("every weekday morning,
+triage new issues") or set up a routine yourself:
+
+```text
+clankie routines add "Morning triage" --when "every weekday at 9:00" --turn "Triage new issues"
+```
+
+A routine runs a turn in a conversation, hires a helper with a brief, or runs a
+check command, on its schedule in your time zone. Each run is logged with its
+result; `clankie routines history` and `/routines` show them, and the app lists
+them too. If your Mac slept through a run, the routine catches up once when it
+wakes (or skips, if you chose that), and it never runs the same slot twice.
+A routine can do only what its conversation could already do. Pause, resume,
+run now or remove one from any of those places; the full syntax is under
+[`clankie routines`](/cli/#routines).
+
 Next: [how he works](/how-it-works/) explains what sits underneath.

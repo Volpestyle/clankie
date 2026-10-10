@@ -580,6 +580,17 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
+    if (command === "routines" || command === "routine") {
+      const routines = await import("../src/command/routines.ts");
+      const result = await routines.runRoutinesCommand(rest, options);
+      if (!result.ok) {
+        stderr.write(`${result.error}\n`);
+        return 1;
+      }
+      if (result.json) outputJson(stdout, result.status);
+      else stdout.write(`${routines.formatRoutinesStatus(result.status)}\n`);
+      return 0;
+    }
     if (command === "evaluator") {
       const result = await (await import("../src/command/evaluator.ts")).runEvaluatorCommand(rest, options);
       outputJson(stdout, result);

@@ -286,6 +286,11 @@ export interface HerdrWatchPort {
   /** Huddles (VUH-2025). */
   huddles?: import("./port.ts").HuddleService;
   readoptSeat?(seatId: string, authority: ConversationAuthority): Promise<void>;
+  /** This conversation's routines, managed as its lead (ADR 0265). */
+  routines?: (
+    command: import("@clankie/protocol").RoutineCommand,
+    conversationId: string,
+  ) => Promise<import("@clankie/protocol").RoutinesStatus>;
   watch(
     conversationId: string,
     target: string,
@@ -796,6 +801,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public efficiency?: import("./fleet-efficiency-tools.ts").FleetEfficiencyActions;
   public workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
   public huddles?: import("./port.ts").HuddleService;
+  public routines?: NonNullable<HerdrWatchPort["routines"]>;
   private readonly projectHires: ProjectHires;
   private readonly fleetHireTools: (() => Promise<readonly string[]>) | undefined;
   private readonly projectPolicy: ProjectHirePolicy | undefined;

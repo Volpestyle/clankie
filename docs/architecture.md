@@ -484,6 +484,22 @@ working a goal, written through `note_goal_decision` and returned by
 `get_goal` so a continuation resumes from what was already decided
 ([ADR 0132](adr/0132-a-goal-keeps-a-decision-journal.md)).
 
+### Routines
+
+`captain/routines.ts` keeps owner-defined recurring jobs under
+`~/.clankie/captain/routines/`: `routines.json` (schedule, target, missed-run
+policy and the cursor of the last slot claimed), `runs.jsonl` (the run log) and
+`claims/<routine>/<slot>`, one exclusive file per slot created before it runs,
+which fences restarts and overlapping deploys against a second run. A 30-second
+tick resolves due slots with `croner` in the routine's time zone and applies
+`catch_up` or `skip` to slots missed while the Mac slept.
+`captain/routine-runner.ts` runs a target as its conversation: a `turn` takes
+the self-wake path, a `hire` goes through `HireSeat`, and a `check` runs through
+`clankie heavy`. Routines are explicit owner or lead schedules, so `/autonomy
+off` does not pause them; each has its own pause. `POST /v1/captain/routines`,
+`clankie routines`, `/routines` and the lead `routine` tool share one store
+([ADR 0265](adr/0265-routines-are-recurring-jobs-with-a-run-fence.md)).
+
 ### Independent evaluation
 
 The optional independent evaluator captures settled Pi turns and native Herdr

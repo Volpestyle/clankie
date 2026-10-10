@@ -211,9 +211,22 @@ seat cannot hold one. Carry it across turns on wakes:
 | Owned seats need review           | the periodic fleet round, every 30 minutes | only while this conversation owns live seats; skipped when nothing changed              |
 | Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you     |
 | A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while autonomy is on |
+| A recurring time                  | `routine` (`clankie routines`)             | runs on its schedule until paused or removed; never overlaps or repeats a slot          |
 
 A wake whose turn fails three times, or once with a rejected model credential,
 is held, not retried, until your seat binds or the service restarts.
+
+A **routine** is a recurring job: a schedule (plain language such as "every
+weekday at 9:00" or five cron fields, in the owner's time zone) and a target —
+a turn in a conversation with a prompt, a hire with `hire_agent`'s fields and a
+brief, or a command run through `clankie heavy`. It runs with its target
+conversation's authority and no more; a lead's `routine` tool sees and changes
+only routines that target its own conversation. After the Mac slept through
+runs, `catch_up` (default) runs once and says how many it stands in for; `skip`
+logs them and waits. A run a restart cut short is logged `interrupted` and not
+replayed. The owner manages all of them with `clankie routines` (list, add,
+edit, pause, resume, run-now, remove, history), `/routines` in the TUI, and the
+app. Design: ADR 0265.
 
 Keep the objective, done criteria and boundaries on the work item (the handoff
 protocol is in `work-items`). Before ending a turn, check that one of these sources will fire,
