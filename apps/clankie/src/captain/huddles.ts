@@ -33,6 +33,12 @@ export interface HuddleSeatTarget {
   readonly harness: string;
   readonly fleet?: string;
   readonly workingDirectory?: string;
+  /** The repository it works in; worktrees of one repo share it. */
+  readonly workRepo?: string;
+  /** The conversation that leads it; a huddle asks only its own lead's seats. */
+  readonly leadConversationId?: string;
+  /** It leads other seats itself (a head): it leads huddles rather than answers them. */
+  readonly leads?: boolean;
 }
 
 const newHuddleId = () =>
@@ -85,7 +91,8 @@ function parseHuddleAnswer(text: string): HuddleAnswer | undefined {
 /**
  * Landing order: every seat that will land something, earliest ETA first
  * (unknown last, then by answer). A seat touching a file an earlier seat also
- * touches lands after it; seats on disjoint files are independent.
+ * touches in the same repository lands after it; seats on disjoint files, or
+ * on the same path in different repositories, are independent.
  */
 function compileLanding(seats: readonly HuddleSeat[]): {
   landingOrder: HuddleLandingStep[];
@@ -102,7 +109,9 @@ function compileLanding(seats: readonly HuddleSeat[]): {
     );
   const landingOrder = landing.map(({ seat }, position) => {
     const files = new Set(seat.files);
+    const repo = seat.repo ?? seat.workRepo;
     const after = landing.slice(0, position).flatMap(({ seat: earlier }) => {
+      if ((earlier.repo ?? earlier.workRepo) !== repo) return [];
       const shared = (earlier.files ?? []).filter((file) => files.has(file));
       return shared.length ? [{ seatId: earlier.seatId, title: earlier.title, files: shared }] : [];
     });
@@ -216,6 +225,7 @@ export class HuddleStore {
         ...(seat.paneId === undefined ? {} : { paneId: seat.paneId }),
         ...(seat.fleet === undefined ? {} : { fleet: seat.fleet }),
         ...(seat.workingDirectory === undefined ? {} : { workingDirectory: seat.workingDirectory }),
+        ...(seat.workRepo === undefined ? {} : { workRepo: seat.workRepo }),
       })),
       landingOrder: [],
       blockers: [],
@@ -289,6 +299,7 @@ export class HuddleStore {
  */
 export function createHuddleService(deps: {
   readonly store: HuddleStore;
+  /** The fleet's seats (optionally one project's), with who leads each. */
   readonly seats: (project: string | undefined) => Promise<readonly HuddleSeatTarget[]>;
   readonly projectExists: (project: string) => Promise<boolean>;
   readonly deliver: (
@@ -347,7 +358,11 @@ export function createHuddleService(deps: {
         dueAt,
         ...(input.project === undefined ? {} : { project: input.project }),
       });
-      const seats = await deps.seats(input.project);
+      // Only seats this conversation leads: another lead's hires are steered through
+      // that lead, and heads lead huddles rather than answer them.
+      const seats = (await deps.seats(input.project)).filter(
+        (seat) => seat.leadConversationId === conversationId && seat.leads !== true,
+      );
       const delivered = await Promise.all(
         seats.map(async (seat) => ({
           ...seat,
@@ -358,7 +373,7 @@ export function createHuddleService(deps: {
         id,
         conversationId,
         windowMinutes,
-        seats: delivered,
+        seats: delivered.map(({ leadConversationId: _lead, leads: _leads, ...seat }) => seat),
         ...(input.project === undefined ? {} : { project: input.project }),
       });
       arm(huddle);

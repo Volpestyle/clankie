@@ -1618,8 +1618,8 @@ queue delivery use the account's home; seat-sync uses the hook's transcript path
 
 ### `huddle [list | ID] [--json]` / `huddle start [--project ID] [--window MINUTES]` / `huddle close ID`
 
-A huddle (VUH-2025) asks every seat in a project, or the whole fleet, one
-question: what it is on, what blocks it, and which files it will land when.
+A huddle (VUH-2025) asks every seat the asking conversation leads, in a project or
+across the fleet, one question: what it is on, what blocks it, and which files it will land when.
 Each seat gets the request once through its normal channel and answers at its
 next pause between steps, without stopping work, by sending `message_clankie`
 a single JSON block:
@@ -1638,8 +1638,10 @@ That answer is recorded on the huddle rather than reaching the lead one by one.
 Once every asked seat has answered, or the window (default 15 minutes) passes,
 the lead conversation hears one compiled board. The **landing order** lists
 seats that will land something, earliest ETA first (unknown last). A seat that
-touches a file an earlier seat also touches lands after it, and the board names
-the shared files. **Blockers** come urgent first; the lead files those that
+touches a file an earlier seat also touches in the same repository (worktrees of
+one repo count as one) lands after it, and the board names the shared files.
+Another lead's hires are never asked (steer them through that lead), and heads,
+the seats that lead others, lead huddles rather than answer them. **Blockers** come urgent first; the lead files those that
 cost the fleet time as Urgent issues. Answers arriving later still update the
 board. `close` stops collecting and compiles now. Nothing stops, moves or
 steers a seat.

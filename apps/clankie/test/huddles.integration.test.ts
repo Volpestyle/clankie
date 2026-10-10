@@ -23,11 +23,51 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
+const LED = { leadConversationId: "global-default" };
 const SEATS: HuddleSeatTarget[] = [
-  { seatId: "term_a", title: "Odette", harness: "claude", workingDirectory: "/src/clankie" },
-  { seatId: "term_b", title: "Tansy", harness: "claude", workingDirectory: "/src/clankie" },
-  { seatId: "term_c", title: "Moss", harness: "codex", workingDirectory: "/src/clankie" },
-  { seatId: "term_d", title: "Linnea", harness: "claude", workingDirectory: "/src/app" },
+  {
+    seatId: "term_a",
+    title: "Odette",
+    harness: "claude",
+    workingDirectory: "/src/clankie",
+    workRepo: "clankie",
+    ...LED,
+  },
+  {
+    seatId: "term_b",
+    title: "Tansy",
+    harness: "claude",
+    workingDirectory: "/src/clankie",
+    workRepo: "clankie",
+    ...LED,
+  },
+  // Same project, another repository: the same path there is a different file.
+  {
+    seatId: "term_c",
+    title: "Moss",
+    harness: "codex",
+    workingDirectory: "/src/clankie",
+    workRepo: "clankie-app",
+    ...LED,
+  },
+  { seatId: "term_d", title: "Linnea", harness: "claude", workingDirectory: "/src/app", ...LED },
+  // Never asked: another lead's hire, a head that leads its own seats, and an unowned seat.
+  {
+    seatId: "kh2/term_e",
+    title: "kh2-review2",
+    harness: "codex",
+    workingDirectory: "/src/clankie",
+    leadConversationId: "conv-kh2",
+  },
+  {
+    seatId: "term_f",
+    title: "KH2 lead",
+    harness: "claude",
+    workingDirectory: "/src/clankie",
+    leads: true,
+    ...LED,
+  },
+  { seatId: "term_g", title: "Claude Code", harness: "claude", workingDirectory: "/src/clankie" },
 ];
 
 async function fixture() {
@@ -110,7 +150,10 @@ it("asks each seat once through the API and CLI, and compiles a landing order an
   const last = f.answer("term_c", huddle, {
     on: "VUH-1866 landing gate timeout",
     blocked: "waiting for the owner to approve a release",
-    landing: { files: ["scripts/check-landing.mjs"], eta: new Date(Date.now() + 20 * 60_000).toISOString() },
+    landing: {
+      files: ["scripts/check-landing.mjs", "apps/clankie/src/captain/captain.ts"],
+      eta: new Date(Date.now() + 20 * 60_000).toISOString(),
+    },
   })!;
   // The last answer compiles the board and wakes the lead once.
   await expect.poll(() => f.wakes.length).toBe(1);
@@ -119,7 +162,10 @@ it("asks each seat once through the API and CLI, and compiles a landing order an
     ["Moss", []],
     ["Tansy", ["Odette"]],
   ]);
-  expect(last.landingOrder[2]!.after[0]!.files).toEqual(["apps/clankie/src/captain/captain.ts"]);
+  // Tansy shares captain.ts with Odette in clankie; Moss's captain.ts is in clankie-app.
+  expect(last.landingOrder[2]!.after).toEqual([
+    { seatId: "term_a", title: "Odette", files: ["apps/clankie/src/captain/captain.ts"] },
+  ]);
   expect(last.blockers.map((blocker) => [blocker.title, blocker.urgent])).toEqual([
     ["Tansy", true],
     ["Moss", false],
@@ -153,6 +199,8 @@ it("closing a huddle tells the lead what arrived and who has not answered", asyn
     ["term_c", "delivered"],
     ["term_d", "offline"],
   ]);
+  // Only this conversation's own seats: no other lead's hires, no heads, no unowned seats.
+  expect(f.requests.map((request) => request.seatId)).toEqual(["term_a", "term_b", "term_c", "term_d"]);
   f.answer("term_a", huddle, { on: "VUH-1961", blocked: null, landing: { files: ["a.ts"] } });
   const closed = HuddleSchema.parse(await runHuddleCommand(["close", huddle.id], f.client));
   expect(closed.status).toBe("closed");

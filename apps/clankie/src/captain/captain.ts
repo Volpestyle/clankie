@@ -90,6 +90,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
+import { execFile } from "node:child_process";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
@@ -4364,6 +4365,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   // Huddles (VUH-2025): one structured question to every seat, answered
   // between steps through message_clankie, compiled into one lead wake.
+  // A seat's repository by its git common directory, so worktrees of one repo share it.
+  const huddleWorkRepo = (cwd: string): Promise<{ workRepo?: string }> =>
+    new Promise((resolve) =>
+      execFile(
+        "git",
+        ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        { timeout: 2_000 },
+        (error, stdout) => {
+          const common = error ? "" : String(stdout).trim();
+          resolve(common ? { workRepo: basename(dirname(common)) } : {});
+        },
+      ),
+    );
   const huddleService = createHuddleService({
     store: new HuddleStore(join(options.stateDir, "huddles.json")),
     defaultConversation: () => conversations.defaultGlobalConversationId(),
@@ -4371,8 +4385,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (await settings()).projects.projects.some((entry) => entry.id === project),
     async seats(project) {
       const current = await settings();
+      const fleet = await refreshFleet({ force: true });
+      // A head is any seat whose conversation owns another seat (the main,
+      // native and remote-lead heads alike).
+      const leading = new Set(fleet.flatMap((seat) => (seat.owner ? [seat.owner.conversationId] : [])));
       const targets: HuddleSeatTarget[] = [];
-      for (const seat of await refreshFleet({ force: true })) {
+      for (const seat of fleet) {
+        const leads =
+          seat.seatId === headSeat?.seatId ||
+          [seat.conversationId, conversations.conversationIdForSeat(seat.seatId)].some(
+            (id) => id !== undefined && leading.has(id),
+          );
         if (project !== undefined) {
           const seatProject =
             seat.workingDirectory === undefined || seat.fleet !== undefined
@@ -4386,6 +4409,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           harness: seat.harness,
           ...(seat.fleet === undefined ? {} : { fleet: seat.fleet }),
           ...(seat.workingDirectory === undefined ? {} : { workingDirectory: seat.workingDirectory }),
+          ...(seat.fleet !== undefined || seat.workingDirectory === undefined
+            ? {}
+            : await huddleWorkRepo(seat.workingDirectory)),
+          ...(seat.owner === undefined ? {} : { leadConversationId: seat.owner.conversationId }),
+          ...(leads ? { leads } : {}),
         });
       }
       return targets;

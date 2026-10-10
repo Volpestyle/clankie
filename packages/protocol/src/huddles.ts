@@ -54,6 +54,8 @@ export const HuddleSeatSchema = z.object({
   harness: z.string(),
   fleet: z.string().optional(),
   workingDirectory: z.string().optional(),
+  /** The repository it works in (its git checkout's name, shared by that repo's worktrees), when known. */
+  workRepo: z.string().optional(),
   /** How the request reached it. */
   delivery: z.enum(["delivered", "unconfirmed", "undelivered", "offline"]),
   answeredAt: z.iso.datetime().optional(),
