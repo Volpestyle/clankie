@@ -472,7 +472,8 @@ release obsolete update worktrees. The current pin and that cutover's immediate
 protect their worktrees and referenced commits; live processes, dirty or locked
 trees, missing completion evidence and unverified native Git identity also hold
 removal. An unreadable journal, uncertain current/previous identity or incomplete
-process inventory refuses cleanup. Update admission and retention share a lock.
+process inventory refuses cleanup; a process read that fails while processes
+change is retried twice first, and a timed-out one is not. Update admission and retention share a lock.
 No forced removals, worker-worktree tidy or operation/receipt deletion occurs.
 `clankie update status --json` includes the last `retention` inspection, bounded
 removed/retained lists and counts. `retentionMaintenance` and `retentionPending`
@@ -481,9 +482,17 @@ is unreadable. Complete effect evidence stays in private
 `~/.clankie/updates/retention.log`; operation journals remain beside it.
 Retention runs once per passed operation per service boot, rather than on every
 canary poll. Recovery in a new service process inspects retention again; failed
-maintenance callbacks remain retryable. A held
-`maintenance.lock` or `retention-pending.json` requires owner reconciliation;
-neither age nor a timeout authorizes deletion or replay of a removal.
+maintenance callbacks remain retryable. A removal first moves the worktree into
+private `~/.clankie/updates/retention-trash` with one rename, drops its Git
+registration, then deletes the moved tree with no timeout, so an interrupted
+removal leaves trash, never a half-deleted registered runtime.
+`retention-pending.json` records that removal until it is confirmed. The next
+retention run or update admission finishes it, including a marker an older
+version left when a timeout killed `git worktree remove` partway, provided it
+names a retention worktree of a recorded operation at its recorded commit,
+unlocked and unused. Otherwise it refuses with the reason and needs owner
+reconciliation, as a held `maintenance.lock` always does. A failed removal
+records its timeout or signal, exit code and stderr.
 
 An unavailable sample stays pending and is retried at the configured interval.
 No verified health for three sample intervals (30 seconds by default), or

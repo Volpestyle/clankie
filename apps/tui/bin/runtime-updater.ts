@@ -1,6 +1,7 @@
 import { syncOwnerCheckout } from "@clankie/settings";
 import type { DeployHold } from "@clankie/protocol/integrate";
 import {
+  finishPendingRetention,
   retainRuntimeWorktrees,
   withRuntimeMaintenance,
   RuntimeMaintenanceBusyError,
@@ -37,6 +38,7 @@ import {
 import { listProcessCommands } from "./service-supervisor.ts";
 import { operationId, object, privateDirectory, readPrivateJson, writePrivateJson } from "./update-files.ts";
 import {
+  errorText,
   readRuntimeUpdate,
   writeRuntimeUpdate,
   type RuntimeBootIdentity,
@@ -430,7 +432,12 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
       initialize();
       return withRuntimeMaintenance(updates, async () => {
         if (existsSync(join(updates, RUNTIME_RETENTION_PENDING)))
-          throw Error("Runtime retention removal requires owner reconciliation");
+          await finishPendingRetention(
+            updates,
+            dirname(realpathSync(resolve(checkout, run("git", ["rev-parse", "--git-common-dir"], checkout)))),
+          ).catch((error: unknown) => {
+            throw Error(`Runtime retention removal requires owner reconciliation: ${errorText(error)}`);
+          });
         if (!journal.admit())
           return { ...status(), accepted: false, blockedReason: "update-in-progress" as const };
         const oldCommit = assertPinnedRuntime(checkout, runtimePath, run);
