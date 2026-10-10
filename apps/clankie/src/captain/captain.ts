@@ -4360,7 +4360,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const huddleService = createHuddleService({
     store: new HuddleStore(join(options.stateDir, "huddles.json")),
     defaultConversation: () => conversations.defaultGlobalConversationId(),
-    projectExists: async (project) => (await settings()).projects.projects.some((entry) => entry.id === project),
+    projectExists: async (project) =>
+      (await settings()).projects.projects.some((entry) => entry.id === project),
     async seats(project) {
       const current = await settings();
       const targets: HuddleSeatTarget[] = [];
