@@ -822,6 +822,9 @@ export async function startCodexAppServerSeat(options: {
     const viewArgs = [
       ...configArgs,
       ...(server.viewConfigArgs ?? []),
+      // An "Update available" prompt holds a fresh install's view before its first brief (VUH-2074).
+      "-c",
+      "check_for_update_on_startup=false",
       "--remote",
       endpoint,
       ...(options.model ? ["--model", options.model] : []),

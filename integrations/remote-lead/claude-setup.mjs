@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 export const leadPlugin = "clankie-remote-lead@clankie-remote-leads";
+const leadServer = "plugin:clankie-remote-lead:lead";
 const parse = (text, detail) => {
   try {
     return JSON.parse(text);
@@ -165,5 +166,38 @@ export async function prepareClaude(executable, plugin, options = {}) {
     throw new Error(
       "Native Claude lead plugin is not disabled at user scope; inspect that profile on the PC",
     );
+  // Herdr learns a pane's session only from its own SessionStart hook in this
+  // profile; without it the lead's proof stays pending and every call is refused (VUH-2074).
+  const herdr = async (args) => {
+    try {
+      return (
+        await execute(options.herdr ?? "herdr", args, {
+          env: { ...env, CLAUDE_CONFIG_DIR: profile },
+          timeout: 30000,
+        })
+      ).stdout;
+    } catch {
+      return "";
+    }
+  };
+  const herdrCurrent = async () => /^claude: current\b/mu.test(await herdr(["integration", "status"]));
+  if (!(await herdrCurrent())) {
+    await herdr(["integration", "install", "claude"]);
+    if (!(await herdrCurrent()))
+      throw new Error(
+        `Herdr's Claude integration is not installed in ${profile}; on the PC run $env:CLAUDE_CONFIG_DIR = '${profile}'; herdr integration install claude, then retry`,
+      );
+  }
+  // An earlier lead whose bridge timed out leaves its server marked as needing
+  // auth, and every later session in this profile skips it (VUH-2074).
+  const authCachePath = join(profile, "mcp-needs-auth-cache.json");
+  const authCacheText = await readFile(authCachePath, "utf8").catch(() => undefined);
+  if (authCacheText !== undefined) {
+    const authCache = parse(authCacheText, "Invalid native MCP auth cache; inspect that profile on the PC");
+    if (authCache && typeof authCache === "object" && Object.hasOwn(authCache, leadServer)) {
+      delete authCache[leadServer];
+      await writeFile(authCachePath, JSON.stringify(authCache));
+    }
+  }
   return profile;
 }
