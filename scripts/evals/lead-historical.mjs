@@ -71,8 +71,8 @@ function file(root, path, max = 128 * 1024 * 1024) {
 function persist(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx", mode: 0o600 });
 }
-function task(id) {
-  const selected = loadTasks().historical.find((entry) => entry.id === id);
+function task(id, source) {
+  const selected = loadTasks(source).historical.find((entry) => entry.id === id);
   if (!selected) throw Error("Pinned historical task required");
   return verifyTask(selected);
 }
@@ -86,9 +86,10 @@ function profileRecord(profile) {
   return record;
 }
 
-/** Source-only staging; no dependencies, current checkout, future history or graders reach agents. */
-export function stageHistorical({ taskId, output }) {
-  const selected = task(taskId);
+/** Source-only staging; no dependencies, current checkout, future history or graders reach agents.
+ * `source` replaces this checkout's pinned repository, tasks and coverage together (see `loadTasks`). */
+export function stageHistorical({ taskId, output, source }) {
+  const selected = task(taskId, source);
   fresh(output);
   fresh(join(output, "inputs"));
   const inputs = historicalDependencyInputs(selected).map(({ path, bytes }) => {
@@ -611,6 +612,7 @@ export async function gradeHistorical({ profile, build, calibration, command, pa
   const authority = materializations.get(materialized);
   if (!authority || authority.build !== build) throw Error("Owned materialized dependencies required");
   const result = await gradeCandidate(output, {
+    task: selected,
     runtime: {
       nodeVersion: record.evidence.nodeVersion,
       nodeSha256: record.evidence.nodeSha256,

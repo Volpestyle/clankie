@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { LeadContainer, dockerTransportIdentity } from "./lead-containment.mjs";
 import { requireNativeBuild } from "./lead-native-image.mjs";
+import { writeNativeClaudeCollectorHooks } from "./lead-native-claude-hooks.mjs";
 const proofs = new WeakMap();
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const ENV = [
@@ -290,7 +291,6 @@ async function probeClaudeControl({ built, command, root }) {
     "tasks/other",
   ])
     mkdirSync(join(root, directory), { mode: 0o700 });
-  const { writeNativeClaudeCollectorHooks } = await import("./lead-native-claude-collector.mjs");
   writeNativeClaudeCollectorHooks(root);
   const nonce = randomUUID();
   writeFileSync(join(root, "control/canary"), nonce, { mode: 0o600, flag: "wx" });

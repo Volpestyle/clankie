@@ -17,41 +17,24 @@ import {
   writeSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { LeadContainer } from "./lead-containment.mjs";
 import { NativeOwnerAttachment } from "./lead-native-attachment.mjs";
 import { nativeRuntimeEvidence } from "./lead-native-capability.mjs";
 import { NativeClaudeObservation } from "./lead-native-claude-observation.mjs";
+import { CONTROL, EVENTS, privateDirectory } from "./lead-native-claude-hooks.mjs";
 import { stopNativeClaudeArm } from "./lead-native-claude-plan.mjs";
 
+export { writeNativeClaudeCollectorHooks } from "./lead-native-claude-hooks.mjs";
+
 const SOURCE = readFileSync(new URL("./lead-native-claude-capture.py", import.meta.url), "utf8");
-const SOCKET = "/eval/control/claude/collector/hooks.sock";
-const CONTROL = "/eval/control/claude/collector";
-const EVENTS = [
-  "SessionStart",
-  "UserPromptSubmit",
-  "SubagentStart",
-  "SubagentStop",
-  "Stop",
-  "StopFailure",
-  "SessionEnd",
-];
 const MAX_FRAME = 24 * 1024 * 1024,
   MAX_RETAINED = 64 * 1024 * 1024;
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const ID = /^[A-Za-z0-9_-]{1,128}$/u,
   HEX = /^[a-f0-9]{64}$/u;
-const HOOK = `import socket,sys\nraw=sys.stdin.buffer.read(65537)\nif len(raw)>65536:sys.exit(2)\ns=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)\ns.settimeout(15)\ns.connect(${JSON.stringify(SOCKET)})\ns.sendall(raw)\ns.shutdown(socket.SHUT_WR)\nif s.recv(3)!=b"ok\\n":sys.exit(2)\ns.close()\n`;
 
-function privateDirectory(path) {
-  if (resolve(path) !== path || realpathSync(path) !== path)
-    throw Error("Canonical collector directory required");
-  const stat = lstatSync(path);
-  if (!stat.isDirectory() || stat.uid !== process.getuid() || stat.mode & 0o077)
-    throw Error("Private controller directory required");
-  return { device: stat.dev, inode: stat.ino };
-}
 function overlap(a, b) {
   const inside = (parent, child) => {
     const path = relative(parent, child);
@@ -82,32 +65,6 @@ function decoded(frame, limit) {
   if (bytes.length !== frame.bytes || bytes.toString("base64") !== frame.data || hash(bytes) !== frame.sha256)
     throw Error("Capture bytes/hash mismatch");
   return bytes;
-}
-
-/** Writes only collector hook configuration. A future verified runtime must select it explicitly. */
-export function writeNativeClaudeCollectorHooks(root) {
-  privateDirectory(root);
-  privateDirectory(join(root, "control"));
-  privateDirectory(join(root, "control/claude"));
-  const directory = join(root, "control/claude/collector");
-  mkdirSync(directory, { mode: 0o700 });
-  writeFileSync(join(directory, "hook.py"), HOOK, { flag: "wx", mode: 0o500 });
-  const settings = {
-    disableAllHooks: false,
-    enabledPlugins: {},
-    permissions: { defaultMode: "default", deny: ["mcp__*", "WebFetch", "WebSearch"] },
-    hooks: Object.fromEntries(
-      EVENTS.map((event) => [
-        event,
-        [{ hooks: [{ type: "command", command: `/usr/bin/python3 -I ${CONTROL}/hook.py`, timeout: 20 }] }],
-      ]),
-    ),
-  };
-  writeFileSync(join(directory, "settings.json"), JSON.stringify(settings, null, 2) + "\n", {
-    flag: "wx",
-    mode: 0o400,
-  });
-  return { settingsPath: `${CONTROL}/settings.json`, settings, hookSha256: hash(HOOK), launchAllowed: false };
 }
 
 /** Real runtime calls require the existing private capability through native container.pipe/inspect. */

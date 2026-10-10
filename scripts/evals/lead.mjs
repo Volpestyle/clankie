@@ -69,16 +69,23 @@ function command(binary, args, cwd = repo, input) {
     throw Error(`${binary} ${args[0]} failed: ${result.stderr?.toString().slice(-1000)}`);
   return result.stdout;
 }
-const git = (...args) => command("/usr/bin/git", args);
-const gitText = (...args) =>
-  git(...args)
+/** Tasks loaded from an explicit source read its repository and coverage instead of this checkout's. */
+const sources = new WeakMap();
+const git = (task, ...args) => command("/usr/bin/git", args, sources.get(task)?.repository ?? repo);
+const gitText = (task, ...args) =>
+  git(task, ...args)
     .toString()
     .trim();
 
 /** Read pinned objects together, without caching or skipping any provenance check. */
-function gitObjects(specs) {
+function gitObjects(task, specs) {
   if (specs.some((spec) => /[\r\n]/u.test(spec))) throw Error("Invalid Git object request");
-  const output = command("/usr/bin/git", ["cat-file", "--batch"], repo, `${specs.join("\n")}\n`);
+  const output = command(
+    "/usr/bin/git",
+    ["cat-file", "--batch"],
+    sources.get(task)?.repository ?? repo,
+    `${specs.join("\n")}\n`,
+  );
   let offset = 0;
   const objects = specs.map((spec) => {
     const newline = output.indexOf(10, offset);
@@ -97,8 +104,17 @@ function gitObjects(specs) {
   return objects;
 }
 
-export function loadTasks() {
-  return JSON.parse(readFileSync(manifestPath, "utf8"));
+/**
+ * This checkout's pinned manifest. A `source` ({ repository, tasks, coverage }) replaces all three
+ * together, so a small fixture repository can stand in for the real history; every pin is still verified.
+ */
+export function loadTasks(source) {
+  if (source === undefined) return JSON.parse(readFileSync(manifestPath, "utf8"));
+  const repository = realpathSync(source.repository);
+  const tasks = structuredClone(source.tasks);
+  for (const task of tasks.historical)
+    sources.set(task, { repository, coverage: structuredClone(source.coverage) });
+  return tasks;
 }
 
 /** Verify local objects and test blobs before any preparation. Never fetch implicitly. */
@@ -112,7 +128,7 @@ export function verifyTask(task) {
   for (const grader of task.graders)
     if (!/^(apps|packages)\/[^/]+\/test\/[a-zA-Z0-9/-]+\.test\.ts$/.test(grader.path))
       throw Error("Invalid held-out test path");
-  const [parent, before, after, ...graders] = gitObjects([
+  const [parent, before, after, ...graders] = gitObjects(task, [
     `${task.sourceCommit}^`,
     `${task.baseCommit}^{tree}`,
     `${task.sourceCommit}^{tree}`,
@@ -126,7 +142,7 @@ export function verifyTask(task) {
     after.oid !== task.sourceTree
   )
     throw Error("Source tree mismatch");
-  const changed = gitText("diff", "--name-only", task.baseCommit, task.sourceCommit).split("\n");
+  const changed = gitText(task, "diff", "--name-only", task.baseCommit, task.sourceCommit).split("\n");
   task.graders.forEach((grader, index) => {
     if (!changed.includes(grader.path)) throw Error("Invalid held-out test path");
     const object = graders[index];
@@ -210,7 +226,7 @@ function freshDirectory(path) {
 /** Exact historical inputs; callers never read an ambient checkout or fetch missing objects. */
 export function historicalDependencyInputs(task) {
   verifyTask(task);
-  const paths = gitText("ls-tree", "-r", "--name-only", task.baseCommit)
+  const paths = gitText(task, "ls-tree", "-r", "--name-only", task.baseCommit)
     .split("\n")
     .filter(
       (path) =>
@@ -220,7 +236,10 @@ export function historicalDependencyInputs(task) {
         path.startsWith("patches/") ||
         path.startsWith("vendor/"),
     );
-  const objects = gitObjects(paths.map((path) => `${task.baseCommit}:${path}`));
+  const objects = gitObjects(
+    task,
+    paths.map((path) => `${task.baseCommit}:${path}`),
+  );
   return paths.map((path, index) => {
     if (objects[index].type !== "blob") throw Error("Historical dependency input is not a blob");
     return { path, bytes: objects[index].bytes };
@@ -232,7 +251,7 @@ export function prepareHistoricalWorkspace(task, output) {
   verifyTask(task);
   const workspace = freshDirectory(output);
   const tar = join(workspace, ".historical-source.tar");
-  writeFileSync(tar, git("archive", "--format=tar", task.baseCommit));
+  writeFileSync(tar, git(task, "archive", "--format=tar", task.baseCommit));
   command("/usr/bin/tar", ["-xf", tar, "-C", workspace]);
   rmSync(tar);
   for (const grader of task.graders) rmSync(join(workspace, grader.path), { force: true });
@@ -311,12 +330,12 @@ export function prepareReference(task, output, revision) {
   const tar = join(root, "source.tar");
   writeFileSync(
     tar,
-    git("archive", "--format=tar", revision === "before" ? task.baseCommit : task.sourceCommit),
+    git(task, "archive", "--format=tar", revision === "before" ? task.baseCommit : task.sourceCommit),
   );
   command("/usr/bin/tar", ["-xf", tar, "-C", root]);
   rmSync(tar);
   for (const grader of task.graders)
-    writeFileSync(join(root, grader.path), git("show", `${task.sourceCommit}:${grader.path}`));
+    writeFileSync(join(root, grader.path), git(task, "show", `${task.sourceCommit}:${grader.path}`));
   const result = {
     task: task.id,
     revision,
@@ -489,11 +508,18 @@ const referenceFileCounts = {
 };
 const referenceSha256 = "c642e894b03b5a0de6f34537b3e59f1375452438c700d38e0796a1885eeac6bc";
 
-/** A process exit alone is never a green result: require every pinned file and test. */
-export function validateGraderReport(task, workspace, report, { expectedFailure = false } = {}) {
+function coverage(task) {
+  const supplied = sources.get(task)?.coverage;
+  if (supplied) return { ...supplied, referenceSha256: sha(JSON.stringify(supplied)) };
   const bytes = readFileSync(referencePath);
   if (sha(bytes) !== referenceSha256) throw Error("Reference coverage pin changed");
-  const reference = JSON.parse(bytes).results.find((r) => r.task === task.id);
+  return { results: JSON.parse(bytes).results, fileCounts: referenceFileCounts, referenceSha256 };
+}
+
+/** A process exit alone is never a green result: require every pinned file and test. */
+export function validateGraderReport(task, workspace, report, { expectedFailure = false } = {}) {
+  const pinned = coverage(task);
+  const reference = pinned.results.find((r) => r.task === task.id);
   const after = reference?.checks.find((r) => r.reference === "after" && r.outcome === "pass");
   const expectedTests = Number(after?.summary.join("\n").match(/Tests\s+(\d+) passed/)?.[1]);
   if (
@@ -503,7 +529,12 @@ export function validateGraderReport(task, workspace, report, { expectedFailure 
     JSON.stringify(reference.graders) !== JSON.stringify(task.graders)
   )
     throw Error("Reference coverage does not match task");
-  const failure = (detail) => ({ complete: false, detail, expectedTests, referenceSha256 });
+  const failure = (detail) => ({
+    complete: false,
+    detail,
+    expectedTests,
+    referenceSha256: pinned.referenceSha256,
+  });
   if (
     !report ||
     report.success !== !expectedFailure ||
@@ -524,7 +555,7 @@ export function validateGraderReport(task, workspace, report, { expectedFailure 
   )
     return failure("Missing, skipped, failed or incomplete held-out test coverage");
   const expectedFiles = new Map(
-    task.graders.map((g, i) => [join(workspace, g.path), referenceFileCounts[task.id][i]]),
+    task.graders.map((g, i) => [join(workspace, g.path), pinned.fileCounts[task.id][i]]),
   );
   let count = 0,
     failed = 0;
@@ -573,22 +604,23 @@ export function validateGraderReport(task, workspace, report, { expectedFailure 
         failedTests: failed,
         identities: identities.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
         files: report.testResults.length,
-        referenceSha256,
+        referenceSha256: pinned.referenceSha256,
       }
     : failure("Assertion count does not match pinned reference");
 }
 
 /** Grade only an explicitly prepared candidate with separately staged dependencies.
  * This command never starts agents. It uses the existing network-off OS sandbox.
+ * `task` passes a task already loaded from an explicit source; it must still match the receipt.
  */
-export async function gradeCandidate(directory, { execute = executeSandbox, runtime } = {}) {
+export async function gradeCandidate(directory, { execute = executeSandbox, runtime, task: loaded } = {}) {
   const root = realpathSync(resolve(directory));
   const workspace = join(root, "worktree");
   if (realpathSync(workspace) !== workspace || readdirSync(join(root, "home")).length)
     throw Error("Grading requires an owned worktree and fresh empty credential-free home");
   const receipt = JSON.parse(readFileSync(join(root, "lead-grader.json"), "utf8"));
-  const task = loadTasks().historical.find((t) => t.id === receipt.task);
-  if (!task || receipt.status !== "prepared-requires-sandboxed-grader")
+  const task = loaded ?? loadTasks().historical.find((t) => t.id === receipt.task);
+  if (!task || task.id !== receipt.task || receipt.status !== "prepared-requires-sandboxed-grader")
     throw Error("Not a prepared candidate");
   verifyTask(task);
   const local = (...args) =>
