@@ -21,12 +21,14 @@ const DIRECTORY_COUNT = 1024;
 const UNRELATED_PER_DIRECTORY = 1;
 const roots: string[] = [];
 const captains: ReturnType<typeof createCaptain>[] = [];
-afterEach(async () => {
+afterEach(async ({ signal }) => {
   await Promise.all(captains.splice(0).map((captain) => captain.close()));
   vi.restoreAllMocks();
   syncBuiltinESMExports();
   vi.unstubAllEnvs();
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  // A cancelled or timed-out body may still be writing (scripts/testing/vitest-setup.ts).
+  const removed = roots.splice(0);
+  if (!signal.aborted) await Promise.all(removed.map((root) => rm(root, { recursive: true, force: true })));
 });
 const line = (value: unknown) => `${JSON.stringify(value)}\n`;
 async function temporaryRoot() {
