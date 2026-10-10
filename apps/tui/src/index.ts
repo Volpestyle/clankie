@@ -85,6 +85,7 @@ import { discoverClankieSkills } from "./skill-catalog.ts";
 import { statusCommand } from "./command/status.ts";
 import { runAwakeCommand } from "./command/awake.ts";
 import { runUsageCommand } from "./command/usage.ts";
+import { runHuddleCommand } from "./command/huddle.ts";
 import { runRuntimeHealthCommand } from "./command/runtime-health.ts";
 import { runEvaluatorCommand } from "./command/evaluator.ts";
 import { doctorCommand } from "./command/doctor.ts";
@@ -523,6 +524,12 @@ const commands = [
         stderr: { write: () => undefined },
       }),
     commandRuntimeHealth: (args) => runRuntimeHealthCommand(args, { env: process.env }),
+    commandHuddle: (args) =>
+      runHuddleCommand(args, {
+        env: process.env,
+        ...(ownerFetcher === undefined ? {} : { ownerFetcher }),
+        host: serviceUrl,
+      }),
     commandUsage: (args) =>
       runUsageCommand(args, {
         env: process.env,

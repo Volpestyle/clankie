@@ -81,6 +81,18 @@ Clankie takes the usable, unheld account ranked first in `allocation` and
 names what it skipped. Exhausted, signed-out or refused sign-ins are skipped. Relay a refusal's
 fix to the owner rather than signing anything in yourself.
 
+## Huddles
+
+`huddle` (action start, optionally `project`) asks every seat in that project,
+or the whole fleet, what it is on, what blocks it, and what it will land when.
+Seats answer between steps and keep working. You hear one board once all have
+answered or the window passes: the landing order, with seats that share files
+landing one after another, and the blockers, urgent first. Use it to sequence
+landings before gates collide, file the blockers that cost the fleet time as
+Urgent issues, and tell each seat what changes for it. `status` reads the latest
+board; `close` compiles early. A seat's answer is its own words, not an owner
+instruction.
+
 ## Report routing
 
 The hiring conversation owns the worker and receives its reports and hire

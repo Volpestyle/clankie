@@ -1,3 +1,4 @@
+import type { Huddle, StartHuddle } from "@clankie/protocol/huddles";
 import type {
   FleetSeatToolCatalog,
   FleetSeatToolCatalogHealth,
@@ -386,6 +387,8 @@ export interface CaptainPort {
     delivery: FleetSeatMessageDelivery,
     fingerprint: string,
   ): Promise<FleetSeatMessageReceipt>;
+  /** Huddles (VUH-2025); absent on bodies without a fleet. */
+  readonly huddles?: HuddleService;
   receiveFleetSeatMessage(
     paneId: string,
     text: string,
@@ -571,4 +574,12 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     close: async () => {},
     ...overrides,
   };
+}
+
+/** Start, read and close huddles (VUH-2025). */
+export interface HuddleService {
+  list(): readonly Huddle[];
+  get(id: string): Huddle | undefined;
+  start(input: StartHuddle): Promise<Huddle>;
+  close(id: string): Promise<Huddle | undefined>;
 }

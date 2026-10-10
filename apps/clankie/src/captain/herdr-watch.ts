@@ -283,6 +283,8 @@ export interface HerdrWatchPort {
   efficiency?: import("./fleet-efficiency-tools.ts").FleetEfficiencyActions;
   /** A machine's Claude profiles and Codex accounts with sign-in and usage (VUH-1527). */
   workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
+  /** Huddles (VUH-2025). */
+  huddles?: import("./port.ts").HuddleService;
   readoptSeat?(seatId: string, authority: ConversationAuthority): Promise<void>;
   watch(
     conversationId: string,
@@ -793,6 +795,7 @@ export interface ProjectHirePolicy {
 export class HerdrWatchStore implements HerdrWatchPort {
   public efficiency?: import("./fleet-efficiency-tools.ts").FleetEfficiencyActions;
   public workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
+  public huddles?: import("./port.ts").HuddleService;
   private readonly projectHires: ProjectHires;
   private readonly fleetHireTools: (() => Promise<readonly string[]>) | undefined;
   private readonly projectPolicy: ProjectHirePolicy | undefined;

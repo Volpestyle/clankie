@@ -6,6 +6,7 @@ import { roomForkIdOf } from "../captain/captain-discord-turns.ts";
 import { hostedActivityViewer } from "../hosted-activity-viewer.ts";
 import { createWorkerAccountHoldsRoutes } from "../worker-account-holds-routes.ts";
 import { createUsageRoutes } from "../usage-routes.ts";
+import { createHuddleRoutes } from "../huddle-routes.ts";
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
 import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
 import { createViewRoutes } from "../view-routes.ts";
@@ -1326,6 +1327,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       workerAccounts && (async () => workerAccounts(undefined, ["claude", "codex", "prime"])),
     ),
   );
+
+  app.route("/", createHuddleRoutes(authorizeOwnerSecrets, dependencies.captain.huddles));
 
   app.get("/v1/runtime-connections", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);

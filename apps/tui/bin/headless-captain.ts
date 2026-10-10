@@ -203,6 +203,17 @@ export async function runHeadlessCaptainCommand(
       else stdout.write(`${(await import("../src/command/usage.ts")).formatUsageTable(result)}\n`);
       return 0;
     }
+    if (command === "huddle") {
+      const json = rest.includes("--json");
+      const { runHuddleCommand, formatHuddleBoard } = await import("../src/command/huddle.ts");
+      const result = await runHuddleCommand(
+        rest.filter((arg) => arg !== "--json"),
+        options,
+      );
+      if (json || !("seats" in result)) outputJson(stdout, result);
+      else stdout.write(`${formatHuddleBoard(result)}\n`);
+      return 0;
+    }
     if (command === "runtime-health") {
       outputJson(
         stdout,

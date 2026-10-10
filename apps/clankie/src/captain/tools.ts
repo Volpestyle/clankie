@@ -1,3 +1,5 @@
+import { huddleSummary } from "./huddles.ts";
+import type { HuddleService } from "./port.ts";
 import type { ProjectProposalDraft } from "@clankie/protocol/projects";
 import { splitFleetQualified } from "../herdr-fleet.ts";
 import type { QuestionDraft } from "./conversation-questions.ts";
@@ -292,6 +294,7 @@ export function captainTools(
           ...(herdrWatches.workerAccountsReport === undefined
             ? []
             : [workerAccountsTool(herdrWatches.workerAccountsReport)]),
+          ...(herdrWatches.huddles === undefined ? [] : [huddleTool(herdrWatches.huddles, turn)]),
         ]
       : []),
     // Hiring starts a process on the operator's machine, so it rides the same
@@ -1046,6 +1049,48 @@ function hireAgentTool(
           status: result.seat.status,
         },
       });
+    },
+  });
+}
+
+function huddleTool(huddles: HuddleService, turn: TurnContext): ToolDefinition {
+  return defineTool({
+    name: "huddle",
+    label: "Huddle the fleet",
+    description:
+      "Ask every seat in a project, or the whole fleet when project is omitted, what it is on, what blocks it, and which " +
+      "files it will land when. Seats answer between steps without stopping work; you hear one compiled board once all " +
+      "have answered or windowMinutes (default 15) passes: a landing order that sequences seats touching the same " +
+      "files, and the blockers, urgent first. action start begins one led by this conversation; status reads one (or " +
+      "the latest); close stops collecting and compiles now. File blockers that cost the fleet time as Urgent issues.",
+    parameters: Type.Object({
+      action: Type.Union([Type.Literal("start"), Type.Literal("status"), Type.Literal("close")]),
+      project: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+      id: Type.Optional(Type.String({ pattern: "^hud_[a-z0-9]{12}$" })),
+      windowMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 240 })),
+    }),
+    executionMode: "sequential",
+    execute: async (_id, input) => {
+      const authority = captureConversationAuthority(turn.conversationAuthority);
+      await assertConversationAuthority(authority);
+      if (input.action === "start")
+        return json(
+          await huddles.start({
+            conversationId: authority.owner.conversationId,
+            ...(input.project === undefined ? {} : { project: input.project }),
+            ...(input.windowMinutes === undefined ? {} : { windowMinutes: input.windowMinutes }),
+          }),
+        );
+      const huddle =
+        input.action === "close"
+          ? input.id === undefined
+            ? undefined
+            : await huddles.close(input.id)
+          : input.id === undefined
+            ? huddles.list()[0]
+            : huddles.get(input.id);
+      if (!huddle) throw new Error(input.id ? `No huddle ${input.id}` : "No huddle yet; start one");
+      return json({ summary: huddleSummary(huddle), huddle });
     },
   });
 }

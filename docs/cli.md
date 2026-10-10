@@ -1616,6 +1616,47 @@ The owner-authorized API offers `GET /v1/accounts/codex` and
 Local transcript discovery, `clankie agents`, resumed sessions and follow-up
 queue delivery use the account's home; seat-sync uses the hook's transcript path.
 
+### `huddle [list | ID] [--json]` / `huddle start [--project ID] [--window MINUTES]` / `huddle close ID`
+
+A huddle (VUH-2025) asks every seat in a project, or the whole fleet, one
+question: what it is on, what blocks it, and which files it will land when.
+Each seat gets the request once through its normal channel and answers at its
+next pause between steps, without stopping work, by sending `message_clankie`
+a single JSON block:
+
+```json
+{
+  "huddle": "hud_…",
+  "on": "…",
+  "blocked": null,
+  "blockerUrgent": false,
+  "landing": { "files": ["apps/…"], "etaMinutes": 40, "repo": "optional" }
+}
+```
+
+That answer is recorded on the huddle rather than reaching the lead one by one.
+Once every asked seat has answered, or the window (default 15 minutes) passes,
+the lead conversation hears one compiled board. The **landing order** lists
+seats that will land something, earliest ETA first (unknown last). A seat that
+touches a file an earlier seat also touches lands after it, and the board names
+the shared files. **Blockers** come urgent first; the lead files those that
+cost the fleet time as Urgent issues. Answers arriving later still update the
+board. `close` stops collecting and compiles now. Nothing stops, moves or
+steers a seat.
+
+`huddle` prints the latest board (`--json` for the record); `huddle ID` prints
+one. The console's `/huddle [start [project] | close ID | ID]` shows the same
+board, and the lead calls it with the `huddle` tool. The API is
+`GET`/`POST /v1/huddles` and `POST /v1/huddles/close` with `{ id }` (owner or
+Take Control authority, relayed for the app). Records live in
+`~/.clankie/captain/huddles.json` (the latest 32).
+
+```sh
+clankie huddle start --project clankie
+clankie huddle
+clankie huddle close hud_abc123def456
+```
+
 ### `usage [--refresh] [--json]` / `usage overlay [on|off]` / `usage warning [on|off|HOURS]`
 
 `usage` prints one row per registered Claude profile and Codex account: harness,

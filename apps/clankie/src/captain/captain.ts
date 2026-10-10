@@ -216,6 +216,7 @@ import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { PaneTidy } from "./pane-tidy.ts";
 import { SeatIssueKeeper } from "./seat-issue-status.ts";
 import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
+import { createHuddleService, HuddleStore, type HuddleSeatTarget } from "./huddles.ts";
 import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
 import type { CaptainPort, FleetHealthAlertDelivery, HireSeat, MessageSeat } from "./port.ts";
 import {
@@ -4354,6 +4355,41 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return { nativeRecipientAuthority: native, conversationAuthority };
   }
 
+  // Huddles (VUH-2025): one structured question to every seat, answered
+  // between steps through message_clankie, compiled into one lead wake.
+  const huddleService = createHuddleService({
+    store: new HuddleStore(join(options.stateDir, "huddles.json")),
+    defaultConversation: () => conversations.defaultGlobalConversationId(),
+    projectExists: async (project) => (await settings()).projects.projects.some((entry) => entry.id === project),
+    async seats(project) {
+      const current = await settings();
+      const targets: HuddleSeatTarget[] = [];
+      for (const seat of await refreshFleet({ force: true })) {
+        if (project !== undefined) {
+          const seatProject =
+            seat.workingDirectory === undefined || seat.fleet !== undefined
+              ? undefined
+              : await localWorkspaceProject(current.projects, seat.workingDirectory).catch(() => undefined);
+          if (seatProject !== project) continue;
+        }
+        targets.push({
+          seatId: seat.seatId,
+          title: seat.title || seat.seatId,
+          harness: seat.harness,
+          ...(seat.fleet === undefined ? {} : { fleet: seat.fleet }),
+          ...(seat.workingDirectory === undefined ? {} : { workingDirectory: seat.workingDirectory }),
+        });
+      }
+      return targets;
+    },
+    deliver: async (seat, text, conversationId) =>
+      (await deliverToSeat(seat.seatId, text, { conversationId, source: "huddle" })).outcome,
+    wake: (conversationId, text) =>
+      wakeConversation({ conversationId }, text, undefined, "machine", true, false),
+    changed: () => fleetChanges.touch(),
+  });
+  herdrWatches.huddles = huddleService;
+
   const peerMessages = new PeerSeatMessages({
     path: join(options.stateDir, "delivery-receipts", "peer-messages.json"),
     enabled: async () => (await settings()).fleet.peerMessages === "on",
@@ -4390,6 +4426,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
 
   return {
+    huddles: huddleService,
     listFleetPeerSeats: (authority) => peerMessages.list(authority),
     sendFleetPeerMessage: (authority, input) => peerMessages.send(authority, input),
     reconcileFleetPeerMessage: (authority, delivery, fingerprint) =>
@@ -5640,6 +5677,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               binding: delivery.binding,
               fingerprint: deliveryFingerprint(text),
             };
+          // A huddle answer is recorded for the compiled board, not relayed one by one.
+          {
+            const recorded = huddleService.receive(
+              [agent.terminalId, ...(fleet === undefined ? [] : [`${fleet}/${agent.terminalId}`])],
+              text,
+            );
+            if (recorded) {
+              return {
+                schemaVersion: 1,
+                received: true,
+                deliveryStage: "stored",
+                deliveryId: delivery.id,
+                binding: delivery.binding,
+                fingerprint: deliveryFingerprint(text),
+                detail: `Recorded for huddle ${recorded.id}; carry on with your work.`,
+              };
+            }
+          }
           const message = [
             `An agent wrote to you from a fleet pane${fleet === undefined ? "" : ` on ${fleet}`}: ` +
               `${agent.agent} in ${agent.paneId}, seat ${agent.terminalId}${agent.title ? ` ("${agent.title}")` : ""}.`,

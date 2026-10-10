@@ -10,6 +10,7 @@ import {
   USAGE_SETTINGS_PATH,
   WORKER_ACCOUNT_HOLDS_PATH,
 } from "./worker-accounts.ts";
+import { HUDDLE_CLOSE_PATH, HUDDLES_PATH } from "./huddles.ts";
 import { RUNTIME_HEALTH_PATH } from "./runtime-health.ts";
 import { OFFICIAL_DISCORD_BODY_PATH } from "./official-discord.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
@@ -106,6 +107,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       WORKER_ACCOUNT_HOLDS_PATH,
       USAGE_PATH,
       USAGE_SETTINGS_PATH,
+      HUDDLES_PATH,
       LINEAR_FOLLOW_PATH,
       LINEAR_WAKE_PATH,
       "/v1/discord/rooms",
@@ -163,6 +165,8 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       FLEET_HIRE_DEFAULTS_PATH,
       WORKER_ACCOUNT_HOLDS_PATH,
       USAGE_SETTINGS_PATH,
+      HUDDLES_PATH,
+      HUDDLE_CLOSE_PATH,
       PROJECT_UPDATE_SETTINGS_PATH,
       "/v1/support/grants",
     ],

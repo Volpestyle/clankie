@@ -50,7 +50,8 @@
     "./linear-request-budget": "./src/linear-request-budget.ts",
     "./owner-settings": "./src/owner-settings.ts",
     "./linear-settings": "./src/linear-settings.ts",
-    "./evidence": "./src/evidence.ts"
+    "./evidence": "./src/evidence.ts",
+    "./huddles": "./src/huddles.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

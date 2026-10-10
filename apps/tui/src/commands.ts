@@ -94,6 +94,8 @@ import type { AwakeCommandResult } from "./command/awake.ts";
 import { runOutWarningText, type runUsageCommand } from "./command/usage.ts";
 import { ClankieUsageOverlay } from "./face/clankie-usage-panel.ts";
 import { type UsageReport, type UsageSettingsSnapshot } from "@clankie/protocol/worker-accounts";
+import { formatHuddleBoard, type runHuddleCommand } from "./command/huddle.ts";
+import { HUDDLE_WORDING } from "@clankie/protocol/huddles";
 import {
   formatRuntimeHealth,
   parseRuntimeHealthArgs,
@@ -128,6 +130,7 @@ export interface ConsoleCommandContext {
   readonly commandRuntimeHealth?: (args: readonly string[]) => ReturnType<typeof runRuntimeHealthCommand>;
   /** `clankie usage`: account usage meters and the overlay's show/hide choice (VUH-1961). */
   readonly commandUsage?: (args: readonly string[]) => ReturnType<typeof runUsageCommand>;
+  readonly commandHuddle?: (args: readonly string[]) => ReturnType<typeof runHuddleCommand>;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
@@ -1962,6 +1965,43 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         } catch (error) {
           shell.insertCommandResult(
             "/awake",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
+      name: "huddle",
+      aliases: [],
+      description: "Huddle the fleet: what every seat is on, what blocks it, and the landing order",
+      argumentHint: "[start [project] | close ID | ID]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const huddle = context.commandHuddle;
+        if (huddle === undefined) {
+          shell.insertCommandResult("/huddle", "Huddles are unavailable.", "error");
+          return;
+        }
+        const words = argument.trim().split(/\s+/u).filter(Boolean);
+        const args = words[0] === "start" ? ["start", ...(words[1] ? ["--project", words[1]] : [])] : words;
+        try {
+          const result = await huddle(args);
+          if ("seats" in result) {
+            shell.insertCommandResult("/huddle", formatHuddleBoard(result), "success");
+            return;
+          }
+          const latest = result.huddles[0];
+          shell.insertCommandResult(
+            "/huddle",
+            latest
+              ? formatHuddleBoard(latest)
+              : `${HUDDLE_WORDING.summary}\nNo huddle yet. ${HUDDLE_WORDING.start}: /huddle start [project]`,
+            "success",
+          );
+        } catch (error) {
+          shell.insertCommandResult(
+            "/huddle",
             error instanceof Error ? error.message : String(error),
             "error",
           );

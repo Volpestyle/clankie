@@ -218,6 +218,14 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["huddle"],
+    lines: [
+      "  huddle [list | ID] [--json]   Recent huddles, or one huddle's board: seats, blockers, landing order",
+      "  huddle start [--project ID] [--window MINUTES]   Ask every seat what it's on, what blocks it, what it lands when",
+      "  huddle close ID   Stop collecting and tell the lead what arrived",
+    ],
+  },
+  {
     nouns: ["pair"],
     lines: [
       "  pair [--json] [--timeout SEC]",
