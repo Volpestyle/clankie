@@ -1105,6 +1105,9 @@ async function queued(f: Awaited<ReturnType<typeof fixture>>, holder: string) {
   throw new Error(`Ticket for ${holder} was not persisted`);
 }
 
+// FIFO cases make 150-210 exact native observations, each a fresh helper
+// process: 10-13 s on the 18-core Mac, 18-30 s on the 3-core macOS CI runner,
+// where 30 s failed (runs 38064453805, 38093209701; VUH-2059).
 it("grants three holders of one device in persisted FIFO order with one blocking HTTP acquire each", async () => {
   const f = await fixture();
   const a = lease(await f.http("/acquire", f.request));
@@ -1127,7 +1130,7 @@ it("grants three holders of one device in persisted FIFO order with one blocking
   expect(cLease).toMatchObject({ holderId: "fifo-c", deviceId: a.deviceId });
   await f.http("/release", { id: cLease.id, owner: { ...f.owner, holderId: "fifo-c" } });
   expect((await f.governor.snapshot()).queue).toEqual([]);
-}, 30_000);
+}, 60_000);
 
 it("a waiting acquire keeps its ticket through failed seat observations; a replaced occupant ends it", async () => {
   const f = await fixture();
@@ -1204,6 +1207,9 @@ it("a holder moving to another device queues behind the oldest ticket waiting fo
   await f.http("/release", { id: aLease.id, owner: f.owner });
 }, 30_000);
 
+// FIFO cases make 150-210 exact native observations, each a fresh helper
+// process: 10-13 s on the 18-core Mac, 18-30 s on the 3-core macOS CI runner,
+// where 30 s failed (runs 38064453805, 38093209701; VUH-2059).
 it("keeps exact-device FIFO across a restart while another device and heavy work proceed independently", async () => {
   const f = await fixture();
   await f.governor.configure({
@@ -1245,7 +1251,7 @@ it("keeps exact-device FIFO across a restart while another device and heavy work
   const cLease = lease(await f.manager.acquire(lateRequest));
   await f.manager.release(cLease.id, { ...f.owner, holderId: "restart-c" });
   await f.manager.release(other.id, { ...f.owner, holderId: "other-device" });
-}, 30_000);
+}, 60_000);
 
 it("allows only the ticket holder to cancel, refuses changed selections, and expires stale persisted tickets", async () => {
   const f = await fixture();

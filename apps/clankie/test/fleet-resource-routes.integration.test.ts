@@ -512,6 +512,9 @@ it("names a hand-booted simulator, the seat whose process uses it, and tells tha
   expect((await f.commands()).some((command) => command[0] === "create")).toBe(false);
 });
 
+// About 210 exact native observations, each a fresh helper process: 13 s on
+// the 18-core Mac, 22-30 s on the 3-core macOS CI runner, where the default
+// 30 s failed (runs 38064453805, 38093209701; VUH-2059).
 it("keeps FIFO tickets across a real headers timeout and a blocking CLI wait beyond it", async () => {
   const f = await fixture();
   const admitted = FleetSimulatorResultSchema.parse(
@@ -632,7 +635,7 @@ it("keeps FIFO tickets across a real headers timeout and a blocking CLI wait bey
   expect(
     FleetSimulatorResultSchema.parse((await f.send("POST", FLEET_SIMULATORS_PATH, later)).json),
   ).toMatchObject({ outcome: "acquired", lease: { holderId: later.holderId, deviceId: selection.deviceId } });
-});
+}, 60_000);
 
 it("plans through authenticated HTTP and the CLI warns before submitting a new device effect", async () => {
   const f = await fixture();
