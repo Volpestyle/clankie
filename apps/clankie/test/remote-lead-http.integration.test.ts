@@ -87,6 +87,10 @@ describe("remote lead HTTP/MCP trust boundary", () => {
     for (const name of ["volpestyle", "jamescvolpe", "logged-out", "api", "broken", "failed"]) {
       await mkdir(join(root, `.claude-${name}`));
       await writeFile(join(root, `.claude-${name}`, ".credentials.json"), `private fixture ${name}`);
+      await writeFile(
+        join(root, `.claude-${name}`, ".claude.json"),
+        JSON.stringify({ hasCompletedOnboarding: true }),
+      );
     }
     await writeFile(
       policyPath,
@@ -160,6 +164,12 @@ else console.log('{}');
         `Herdr's Claude integration is not installed in ${other}`,
       );
       await rm(join(other, "herdr-install-fails"));
+      // VUH-2075: a profile that never finished its first run refuses before a pane exists.
+      await writeFile(join(other, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: false }));
+      await expect(prepareClaude(executable, plugin, options)).rejects.toThrow(
+        `Claude profile ${other} has not finished its first run`,
+      );
+      await writeFile(join(other, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true }));
       // Omitted account preserves the SSH default and automatic ambiguity refusal.
       expect(await prepareClaude(executable, plugin, options)).toBe(other);
       await expect(
@@ -225,6 +235,7 @@ else console.log('{}');
     await mkdir(join(root, ".claude"));
     await mkdir(plugin, { recursive: true });
     await writeFile(join(profile, ".credentials.json"), "private fixture credential");
+    await writeFile(join(profile, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true }));
     await writeFile(
       policyPath,
       JSON.stringify({
@@ -259,11 +270,17 @@ else console.log('{}');
     const herdr = await fakeHerdr(root);
     const grants = new RemoteLeadDelegations(async () => {});
     const issued = await grants.issue(binding);
+    let promptCalls = 0;
     const bridge = createRemoteLeadBridge({
       delegations: grants,
       identity: () => identity,
       captain: createStubCaptain({
-        lanePrompt: async () => "Project lead context",
+        lanePrompt: async () => {
+          promptCalls += 1;
+          // The first SessionStart read lands mid-restart (VUH-2075).
+          if (promptCalls === 1) throw new Error("Service restarting");
+          return "Project lead context";
+        },
         pollSeatEvents: async () => {
           await new Promise((r) => setTimeout(r, 25));
           return [];
@@ -395,6 +412,8 @@ else console.log('{}');
       expect(head.profile).toBe(profile);
       expect(head.hasToken).toBe(true);
       expect(head.args).toContain(`plugin:${leadPlugin}`);
+      // VUH-2075: the Chrome-extension question never holds a fresh profile's lead.
+      expect(head.args).toContain("--no-chrome");
       expect(head.args).not.toContain("--dangerously-load-development-channels");
       expect(head.args).not.toContain("--plugin-dir");
       expect(
@@ -426,6 +445,7 @@ else console.log('{}');
       expect((await execute(process.execPath, [bundle, "--prompt"], { env: nativeEnv })).stdout).toBe(
         "Project lead context",
       );
+      expect(promptCalls).toBe(2);
       const sync = spawn(process.execPath, [bundle, "--sync"], {
         env: nativeEnv,
         stdio: ["pipe", "pipe", "pipe"],

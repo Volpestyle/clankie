@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { ChildProcess } from "node:child_process";
@@ -25,6 +25,7 @@ interface RemoteProjectLeadOptions {
 // The bridge bundles node:sqlite, experimental on the PC's Node 22. Its warning is
 // the first stderr line a hook shows, hiding the real outcome (VUH-2036).
 const NO_SQLITE_WARNING = "--disable-warning=ExperimentalWarning";
+const EARLIER_PANE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export class RemoteLeadBuildMissing extends Error {
   constructor() {
@@ -205,6 +206,33 @@ process.stdin.on('end', () => {
     return { fleet: id, ...prepared };
   }
 
+  /**
+   * Panes earlier launches for this conversation left on the machine. A head
+   * that never attached keeps its pane, and nothing else names it (VUH-2075).
+   */
+  private async earlierPanes(conversationId: string, requestId: string) {
+    const since = Date.now() - EARLIER_PANE_WINDOW_MS;
+    const panes: Array<{ requestId: string; pane: string; stage: string }> = [];
+    for (const name of await readdir(this.options.directory).catch(() => [])) {
+      if (!name.endsWith(".json") || name === `${requestId}.json`) continue;
+      const path = join(this.options.directory, name);
+      try {
+        if ((await stat(path)).mtimeMs < since) continue;
+        const earlier = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+        if (
+          earlier.conversationId === conversationId &&
+          typeof earlier.pane === "string" &&
+          typeof earlier.requestId === "string" &&
+          (earlier.stage === "dispatched" || earlier.stage === "unconfirmed")
+        )
+          panes.push({ requestId: earlier.requestId, pane: earlier.pane, stage: earlier.stage });
+      } catch {
+        // A partial or foreign file names no pane.
+      }
+    }
+    return panes;
+  }
+
   async launch(input: RemoteLeadLaunch, ownerGuard: () => Promise<void>) {
     await ownerGuard();
     const fleet = await this.fleet(input.fleet);
@@ -290,11 +318,13 @@ process.stdin.on('end', () => {
       const nativeSession = randomUUID();
       // The owner's switch at launch (VUH-2048); a running lead keeps its mode.
       const maximumTrust = settings.maximumTrustMode;
+      const leftBehind = await this.earlierPanes(conversationId, input.requestId);
       Object.assign(record, {
         conversationId,
         nativeSession,
         plugin: prepared.directory,
         maximumTrust,
+        ...(leftBehind.length ? { leftBehind } : {}),
         stage: "allocating",
       });
       await writeFile(path, JSON.stringify(record));
@@ -359,7 +389,11 @@ process.stdin.on('end', () => {
         throw new Error("Remote lead dispatch unconfirmed");
       Object.assign(record, {
         stage: "dispatched",
-        detail: "Native tool admission and channel attachment still require live proof",
+        detail:
+          "Native tool admission and channel attachment still require live proof" +
+          (leftBehind.length
+            ? `. Earlier launches for this conversation left ${leftBehind.map((entry) => entry.pane).join(", ")}; close any that are still open`
+            : ""),
       });
       await writeFile(path, JSON.stringify(record));
       return record;
@@ -382,7 +416,10 @@ process.stdin.on('end', () => {
         failedStage: record.stage,
         error: redactedError,
         stage: "unconfirmed",
-        detail: "Launch did not confirm. Inspect this original receipt and owned pane; do not replay.",
+        detail:
+          typeof record.pane === "string"
+            ? `Launch did not confirm and left pane ${record.pane} open. Inspect this original receipt and that pane, close it if its head never attached, and do not replay.`
+            : "Launch did not confirm before allocating a pane. Inspect this original receipt; do not replay.",
       });
       await writeFile(path, JSON.stringify(record));
       return record;

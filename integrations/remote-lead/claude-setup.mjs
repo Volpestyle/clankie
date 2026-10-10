@@ -89,6 +89,16 @@ export async function prepareClaude(executable, plugin, options = {}) {
           : "No existing signed-in Claude.ai profile; James must sign in to the intended PC profile",
     );
   const [profile] = signed;
+  // A profile that never finished its first run opens on screens nobody in
+  // the lead's pane can answer; refuse before a pane exists (VUH-2075).
+  const state = parse(
+    await readFile(join(profile, ".claude.json"), "utf8").catch(() => "{}"),
+    "Invalid native Claude state; inspect that profile on the PC",
+  );
+  if (state?.hasCompletedOnboarding !== true)
+    throw new Error(
+      `Claude profile ${profile} has not finished its first run; on the PC run $env:CLAUDE_CONFIG_DIR = '${profile}'; claude, complete its first screens, exit, then retry`,
+    );
 
   const policyPath = options.policyPath ?? "C:\\Program Files\\ClaudeCode\\managed-settings.json";
   const text = await readFile(policyPath, "utf8").catch((error) => {
