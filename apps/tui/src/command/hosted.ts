@@ -238,6 +238,7 @@ export const HOSTED_LOCAL_ONLY = new Set([
   "codex",
   "opencode",
   "grok",
+  "prime",
   "seat-sync",
   "seat-hook",
   "mcp",

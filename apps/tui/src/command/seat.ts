@@ -25,7 +25,7 @@ import { operatorHarness } from "./harness-command.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const SEAT_USAGE =
-  "Usage: clankie claude|codex|opencode|grok [--resume] [--conversation ID | --new] [--plugin-dir PATH] [--dry-run]";
+  "Usage: clankie claude|codex|opencode|grok|prime [--resume] [--conversation ID | --new] [--plugin-dir PATH] [--model PROVIDER/MODEL] [--dry-run]";
 /** The plugin's id once installed from the repo's own marketplace. */
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
@@ -116,19 +116,21 @@ export interface SeatCommandOptions {
 }
 
 interface SeatFlags {
-  readonly harness?: "claude" | "codex" | "opencode" | "grok";
+  readonly harness?: "claude" | "codex" | "opencode" | "grok" | "prime";
   readonly conversationId?: string;
   /** A fresh workspace chat even when the global chat is free. */
   readonly newConversation?: boolean;
   readonly resume: boolean;
   readonly dryRun: boolean;
   readonly pluginDir?: string;
+  /** Prime Agent only: the new session's `provider/model`. */
+  readonly model?: string;
 }
 
 export function parseSeatArgs(args: readonly string[], command?: string): SeatFlags {
   const selected = operatorHarness(command);
   const usage =
-    command === undefined ? SEAT_USAGE : SEAT_USAGE.replace("claude|codex|opencode|grok", command);
+    command === undefined ? SEAT_USAGE : SEAT_USAGE.replace("claude|codex|opencode|grok|prime", command);
   if (command !== undefined && selected === undefined) throw new Error(usage);
   let harness: SeatFlags["harness"] = selected;
   let conversationId: string | undefined;
@@ -136,11 +138,18 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
   let resume = false;
   let dryRun = false;
   let pluginDir: string | undefined;
+  let model: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--harness") {
       const value = args[++index];
-      if (value !== "claude" && value !== "codex" && value !== "opencode" && value !== "grok")
+      if (
+        value !== "claude" &&
+        value !== "codex" &&
+        value !== "opencode" &&
+        value !== "grok" &&
+        value !== "prime"
+      )
         throw new Error(usage);
       if (selected !== undefined && value !== selected) throw new Error(usage);
       harness = value;
@@ -156,9 +165,14 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
       if (value === undefined || value.length === 0 || value.startsWith("--")) throw new Error(usage);
       pluginDir = value;
       index += 1;
+    } else if (arg === "--model") {
+      const value = args[++index]?.trim();
+      if (!value || value.startsWith("--")) throw new Error(usage);
+      model = value;
     } else throw new Error(usage);
   }
   if (newConversation && (conversationId !== undefined || resume)) throw new Error(usage);
+  if (model !== undefined && harness !== "prime") throw new Error(usage);
   return {
     ...(harness === undefined ? {} : { harness }),
     ...(newConversation ? { newConversation } : {}),
@@ -166,6 +180,7 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
     dryRun,
     ...(conversationId === undefined ? {} : { conversationId }),
     ...(pluginDir === undefined ? {} : { pluginDir }),
+    ...(model === undefined ? {} : { model }),
   };
 }
 
@@ -265,11 +280,15 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   if (named !== undefined) {
     const harness = operatorHarness(named);
     if (harness === undefined || (flags.harness !== undefined && flags.harness !== harness))
-      throw new Error(SEAT_USAGE.replace("claude|codex|opencode|grok", named));
+      throw new Error(SEAT_USAGE.replace("claude|codex|opencode|grok|prime", named));
     flags = { ...flags, harness };
   }
   if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude")
     throw new Error(SEAT_USAGE);
+  if (flags.harness === "prime") {
+    const { planPrimeSeat } = await import("./prime-seat.ts");
+    return planPrimeSeat(flags, options);
+  }
   if (flags.harness === "grok") {
     const { planGrokSeat } = await import("./grok-seat.ts");
     return planGrokSeat(flags, options);
@@ -421,6 +440,10 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   const flags = parseSeatArgs(args, options.harnessCommand ?? options.claudeCommand);
   if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude")
     throw new Error(SEAT_USAGE);
+  if (flags.harness === "prime") {
+    const { runPrimeSeat } = await import("./prime-seat.ts");
+    return runPrimeSeat(flags, options);
+  }
   if (flags.harness === "grok") {
     const { runGrokSeat } = await import("./grok-seat.ts");
     return runGrokSeat(flags, options);

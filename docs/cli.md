@@ -4667,6 +4667,8 @@ Open Clankie in the selected native harness ([ADR 0152](adr/0152-a-harness-takes
 `claude2` account command. Numbered Claude commands are resolved through your interactive
 `$SHELL`, including shell aliases and functions. The same seat flags work with
 either command. Each numbered command keeps its own resume record. `clankie codex` and `clankie opencode` open the corresponding native harness with the same flags.
+`clankie grok` and `clankie prime` take them without `--plugin-dir`; see
+[Grok Build](#grok-build-worker-and-operator-seats) and [Prime Agent](#prime-agent-operator-seat).
 
 `clankie codex2` selects the registered account labelled exactly `codex2`:
 `clankie accounts codex add /absolute/CODEX_HOME --label codex2` registers it.
@@ -4832,8 +4834,8 @@ native harness (`claude`, `codex`, `opencode`, `grok`, or their Node entry
 points) may open the lane. Started from an agent's shell or script it exits 1,
 because missing worker tools never authorize Clankie's own lane; the worker
 uses its granted `clankie_tools`/`clankie_call` or tells him with
-`message_clankie`. An explicit `CLANKIE_OPERATOR_TOKEN` (the Grok seat and
-verification scripts) skips the check, as does a parent `ps` cannot observe.
+`message_clankie`. An explicit `CLANKIE_OPERATOR_TOKEN` (the Grok and Prime Agent
+seats and verification scripts) skips the check, as does a parent `ps` cannot observe.
 This stops a well-behaved agent from escalating; it is not a security boundary
 against a process that can already read the owner's Keychain.
 
@@ -6106,6 +6108,47 @@ in that Grok profile and start a fresh seat. A missing native catalog, changed
 session or process, unavailable sign-in, or uncertain acknowledgment retains
 the original evidence and names the refusal; no headless or terminal-input
 fallback runs. See [ADR 0224](adr/0224-grok-build-shares-the-visible-native-session.md).
+
+### Prime Agent operator seat
+
+`clankie prime --dry-run` or `clankie seat --harness prime --dry-run` reviews
+the launch: the `prime-agent` install and daemon socket, folder, conversation
+and skills. Remove `--dry-run` to open it. It needs Prime Agent 0.10.x on PATH
+(daemon protocol 7), a model sign-in in Prime Agent, and Clankie's operator
+credential. `--model PROVIDER/MODEL` picks the new session's model; otherwise
+Prime's own default applies. `/prime` reviews the same plan in the console.
+
+The seat is a resident session in the owner's Prime Agent daemon. `create`
+loads the service persona and memory card through `appendSystemPrompt` and
+the shipped skills through `skills`, and passes this pane's `HERDR_*`
+variables so Prime's own Herdr reporter binds the pane. Nothing in
+`~/.prime/agent` is edited. `replace_acp_mcp_servers` adds the operator bank
+as the session's `clankie` MCP server; the model calls it from its REPL with
+`mcp.call_tool("clankie", ...)`. The terminal then runs `prime-agent attach` on
+that exact session. Closing the TUI only detaches: the session stays resident
+and its MCP server stays loaded, but wakes stop until `clankie prime --resume`.
+
+Wakes, watches, worker messages and room escalations arrive through the
+daemon's `prompt` on the recorded session, never terminal input, so an unsent
+draft in the TUI is kept. An idle session starts a turn at once. A busy one
+queues `wake`, `watch` and `message` events behind the running turn and steers
+owner turns and escalations into it. Each event is fenced before it is sent;
+a failed or unanswered send is never resent and blocks the next launch until
+the receipt under `~/.local/state/clankie/prime-seat-receipts/` is inspected.
+Native transcript turns and tool results project into the selected chat.
+Diagnostics go to `seat.log` beside the receipts, not over the TUI.
+
+`--resume` reattaches the recorded session if the daemon still hosts it with
+the same session ID, else reopens the recorded session file; any other session
+refuses. It also refuses after an unconfirmed exit, a changed daemon socket or
+a changed conversation. `--plugin-dir` is unsupported.
+
+Prime Agent asks no tool approvals by default; its own settings govern what
+runs. The operator bridge's parent is Prime's Python kernel, which also runs
+model code, so the seat hands the bridge `CLANKIE_OPERATOR_TOKEN` explicitly.
+Prime keeps that server list in worker memory only, but code in the same
+session can read it back. The server list is lost if the worker restarts;
+`--resume` reapplies it. See [ADR 0262](adr/0262-prime-agent-operator-seat-is-a-resident-daemon-session.md).
 
 ### Delivery receipt stages
 

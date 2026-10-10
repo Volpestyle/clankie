@@ -90,7 +90,7 @@ flowchart TD
 | Pi          | Process-bound native extension follow-up messages    | Opt-in on macOS/Linux; Pi 0.87.1; live acceptance held                |
 | OpenCode    | Injected SDK in the process-bound native worker TUI  | Implemented locally and on linked Mac POSIX fleets; pinned to 1.18.18 |
 | Grok Build  | Leader IPC/ACP on the exact interactive TUI session  | Implemented locally on macOS; pinned to Grok 1.0.46                   |
-| Prime Agent | Daemon session created by Clankie, TUI attached to it | Implemented locally on macOS/Linux; Prime Agent 0.10.x, protocol 7    |
+| Prime Agent | Daemon session created by Clankie, TUI attached to it | Implemented locally on macOS/Linux (0.10.x); operator seat `clankie prime` |
 
 Transcript discovery and an available native CLI
 do not imply a local hire adapter exists. Unsupported automated briefs fail
@@ -151,6 +151,13 @@ Owner permission prompts remain native. Worker saved-history resume and adopting
 a controller after restart are unsupported; unsupported versions/platforms refuse.
 See [the CLI guide](../../docs/cli.md#grok-build-worker-and-operator-seats) and
 [ADR 0224](../../docs/adr/0224-grok-build-shares-the-visible-native-session.md).
+
+The Prime Agent operator seat uses `clankie seat --harness prime` (or
+`clankie prime`). It creates a resident daemon session with the persona, memory
+card and skills, adds the operator MCP server through `replace_acp_mcp_servers`,
+and runs `prime-agent attach` on that session in the terminal. Wakes use the
+daemon's `prompt`; closing the TUI detaches without stopping the session. See
+[the CLI guide](../../docs/cli.md#prime-agent-operator-seat).
 
 The OpenCode **operator** seat is available separately through
 `clankie opencode`. Its plugin uses the native injected SDK client
