@@ -29,7 +29,7 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 const MCP_OWNER = "clankie";
 
 /** Worker rules ride Prime's create-time system prompt; skills ride its create-time skill paths. */
-export const PRIME_WORKER_RULES = [
+const PRIME_WORKER_RULES = [
   "You are a worker hired by Clankie. The owner can watch and type into this session at any time.",
   "Clankie's tools are a per-session MCP server named `clankie`, reached from your Python REPL:",
   "`await mcp.list_tools('clankie')` and `await mcp.call_tool('clankie', name, arguments)`.",
@@ -38,7 +38,7 @@ export const PRIME_WORKER_RULES = [
 ].join(" ");
 
 /** `provider/model` or a bare model id Prime resolves itself. */
-export function primeModelSelection(model: string | undefined) {
+function primeModelSelection(model: string | undefined) {
   if (model === undefined) return {};
   const slash = model.indexOf("/");
   return slash > 0 ? { provider: model.slice(0, slash), model: model.slice(slash + 1) } : { model };

@@ -6111,8 +6111,8 @@ fallback runs. See [ADR 0224](adr/0224-grok-build-shares-the-visible-native-sess
 
 ### Prime Agent operator seat
 
-`clankie prime --dry-run` or `clankie seat --harness prime --dry-run` reviews
-the launch: the `prime-agent` install and daemon socket, folder, conversation
+`clankie prime-agent --dry-run` (alias `clankie prime`) or
+`clankie seat --harness prime --dry-run` reviews the launch: the `prime-agent` install and daemon socket, folder, conversation
 and skills. Remove `--dry-run` to open it. It needs Prime Agent 0.10.x on PATH
 (daemon protocol 7), a model sign-in in Prime Agent, and Clankie's operator
 credential. `--model PROVIDER/MODEL` picks the new session's model; otherwise

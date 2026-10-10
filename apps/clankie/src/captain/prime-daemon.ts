@@ -17,9 +17,9 @@ import { z } from "zod";
  */
 
 /** Daemon wire protocol checked live against Prime Agent 0.10.0. */
-export const PRIME_DAEMON_PROTOCOL = 7;
+const PRIME_DAEMON_PROTOCOL = 7;
 /** Prime Agent releases whose daemon commands and session events were verified. */
-export const PRIME_AGENT_VERSION_PREFIX = "0.10.";
+const PRIME_AGENT_VERSION_PREFIX = "0.10.";
 
 const exec = promisify(execFile);
 
@@ -36,7 +36,7 @@ export interface PrimeAgentInstall {
 }
 
 /** The launcher's socket rule (install-rust.sh): env override, else the per-user Rust socket. */
-export function primeDaemonSocket(env: NodeJS.ProcessEnv): string {
+function primeDaemonSocket(env: NodeJS.ProcessEnv): string {
   if (env.PRIME_AGENT_DAEMON_SOCKET) return env.PRIME_AGENT_DAEMON_SOCKET;
   const uid = process.getuid?.() ?? 0;
   return join(env.TMPDIR || tmpdir(), `prime-agent-rust-${String(uid)}`, "daemon.sock");

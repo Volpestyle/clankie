@@ -43,7 +43,7 @@ import {
 export type WorkerAccountHarness = "claude" | "codex" | "pi" | "prime";
 
 /** Prime Agent API-key spend over one period, from its own transcripts. */
-export interface PrimeSpendPeriod {
+interface PrimeSpendPeriod {
   costUsd: number;
   tokens: number;
 }

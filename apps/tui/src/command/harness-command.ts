@@ -5,5 +5,6 @@ export function operatorHarness(
   if (/^claude\d*$/u.test(command ?? "")) return "claude";
   if (/^codex\d*$/u.test(command ?? "")) return "codex";
   if (command === "opencode" || command === "grok" || command === "prime") return command;
+  if (command === "prime-agent") return "prime";
   return undefined;
 }

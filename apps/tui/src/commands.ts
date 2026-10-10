@@ -494,7 +494,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     },
     {
       name: "prime",
-      aliases: [],
+      aliases: ["prime-agent"],
       description: "Review a Clankie launch in Prime Agent",
       argumentHint: "[--resume] [--conversation ID] [--model PROVIDER/MODEL] [--dry-run]",
       takesArgument: true,
