@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -16,6 +16,10 @@ jobs:
   check:
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'macos-26' || 'ubuntu-latest' }}
     timeout-minutes: 30
+    # The service typechecks need up to ~3.5 GB of heap (apps/clankie); the
+    # runner's default Node heap is about 2 GB.
+    env:
+      NODE_OPTIONS: --max-old-space-size=5120
     steps:
       - uses: actions/checkout@v4
         with:

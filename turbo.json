@@ -1,7 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
-  "globalPassThroughEnv": ["VITEST_MAX_WORKERS", "TURBO_CONCURRENCY", "CARGO_BUILD_JOBS"],
+  "globalPassThroughEnv": ["VITEST_MAX_WORKERS", "TURBO_CONCURRENCY", "CARGO_BUILD_JOBS", "NODE_OPTIONS"],
   "globalEnv": ["CLANKIE_LANDING_TYPE_INPUTS"],
   "tasks": {
     "build": {
