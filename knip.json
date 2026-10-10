@@ -3,7 +3,8 @@
   "ignore": [
     "docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs",
     "docs/testing/2026-09-26-hosted-connections/flows/serve.mts",
-    "docs/testing/2026-09-26-work-items/flows/serve.mts"
+    "docs/testing/2026-09-26-work-items/flows/serve.mts",
+    "docs/testing/2026-10-10-views/flows/serve.mts"
   ],
   "workspaces": {
     ".": {

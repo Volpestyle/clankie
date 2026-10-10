@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 1,
+  "view": {
+    "id": "view_b3b65658e7f0",
+    "spec": {
+      "title": "Heavy queue",
+      "sources": {
+        "fleet": { "kind": "fleet_resources" },
+        "open": {
+          "kind": "tracker_issues",
+          "repo": "/Users/james/dev/clankie",
+          "status": ["in_progress"],
+          "limit": 8
+        }
+      },
+      "panels": [
+        { "source": "fleet", "show": "capacity" },
+        { "title": "Waiting", "source": "fleet", "show": "queue", "resource": "heavy" },
+        { "title": "Running", "source": "fleet", "show": "leases", "resource": "heavy" },
+        { "title": "In progress", "source": "open", "show": "issues" }
+      ],
+      "refreshSeconds": 5
+    },
+    "createdAtMs": 1791611977712,
+    "updatedAtMs": 1791611977712,
+    "pinned": false,
+    "expiresAtMs": 1791698377712
+  },
+  "renderedAtMs": 1791612419729,
+  "sources": {
+    "fleet": {
+      "state": "ok",
+      "kind": "fleet_resources",
+      "snapshot": {
+        "schemaVersion": 1,
+        "policy": {
+          "heavySlots": 8,
+          "simulatorSlots": 1,
+          "simulatorIdleMs": 600000,
+          "maxLoadRatio": 1.5,
+          "minAvailableMemoryMb": 4096
+        },
+        "capacity": { "heavySlots": 8, "simulatorSlots": 1, "used": 8, "simulatorUsed": 0 },
+        "pressure": {
+          "sampledAtMs": 1791612414940,
+          "loadRatio": 1.68212890625,
+          "availableMemoryMb": 33103.8125,
+          "healthy": false,
+          "reason": "load"
+        },
+        "leases": [
+          {
+            "id": "d94b6376-235f-41d4-9c69-f27bc4fdbe2e",
+            "kind": "heavy",
+            "state": "orphaned",
+            "seatId": "vuh-2015",
+            "holderId": "claude:361b1ea6-35ca-42ea-af3c-e06dcf81fd1a",
+            "pid": 27505,
+            "executable": "pnpm",
+            "createdAtMs": 1791599057508,
+            "lastUsedAtMs": 1791599057508
+          },
+          {
+            "id": "21989a94-3e53-41fd-9521-fde51e64eca1",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "vuh-2010",
+            "holderId": "claude:4dd2b146-c9e8-460a-a155-26b3343dfb3e",
+            "pid": 60218,
+            "executable": "pnpm",
+            "createdAtMs": 1791611867977,
+            "lastUsedAtMs": 1791611867977
+          },
+          {
+            "id": "c7ebef2e-53fc-4f73-9067-639852849915",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p22",
+            "holderId": "claude:ee87eee0-3845-41a1-832e-0cefb22f5498",
+            "pid": 10936,
+            "executable": "pnpm",
+            "createdAtMs": 1791612115487,
+            "lastUsedAtMs": 1791612115487
+          },
+          {
+            "id": "7829bfc7-332d-4f5f-8d4e-07de6205b8f2",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p25",
+            "holderId": "claude:ba006eb3-c947-46db-ba8e-e28f859ced8d",
+            "pid": 11544,
+            "executable": "pnpm",
+            "createdAtMs": 1791612116669,
+            "lastUsedAtMs": 1791612116669
+          },
+          {
+            "id": "26580d1c-54f6-4c9b-964c-fc35b58501ab",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p23",
+            "holderId": "claude:2b78d86e-753b-45bc-8210-45c360201a90",
+            "pid": 22542,
+            "executable": "pnpm",
+            "createdAtMs": 1791612151665,
+            "lastUsedAtMs": 1791612151665
+          },
+          {
+            "id": "62086433-be2d-4c3b-942e-1cf803aef3a3",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p2B",
+            "holderId": "claude:b9ebd1fd-1ccc-499b-a0d9-f3030af0fe0d",
+            "pid": 49248,
+            "executable": "pnpm",
+            "createdAtMs": 1791612341009,
+            "lastUsedAtMs": 1791612341009
+          },
+          {
+            "id": "b5eb90ee-6c17-42dd-87df-5867d3768e2e",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p1Z",
+            "holderId": "claude:5a23b653-c250-44ef-9bcc-d9237c7a949b",
+            "pid": 50647,
+            "executable": "pnpm",
+            "createdAtMs": 1791612343287,
+            "lastUsedAtMs": 1791612343287
+          },
+          {
+            "id": "eaab2ffd-173c-4b86-a77b-edb2dfa1c5db",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "w47:p1Y",
+            "holderId": "claude:62a4abf7-616d-42f0-b52e-58e6bea98bcf",
+            "pid": 78781,
+            "executable": "pnpm",
+            "createdAtMs": 1791612407788,
+            "lastUsedAtMs": 1791612407788
+          }
+        ],
+        "queue": [
+          {
+            "id": "3f839c0f-ba82-494b-b8d4-cc03d2a1ada4",
+            "kind": "heavy",
+            "seatId": "w3Z:p3P",
+            "holderId": "claude:af163034-7a51-4345-aec4-f8173adea1b0",
+            "pid": 70089,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611939227
+          },
+          {
+            "id": "3b722a09-0e87-4aff-9d61-9aecd6652928",
+            "kind": "heavy",
+            "seatId": "prime",
+            "pid": 33986,
+            "executable": "pnpm",
+            "queuedAtMs": 1791612246656
+          },
+          {
+            "id": "6290a977-c526-4fca-80c0-a711d6141f74",
+            "kind": "heavy",
+            "seatId": "w47:p1Z",
+            "holderId": "claude:5a23b653-c250-44ef-9bcc-d9237c7a949b",
+            "pid": 44202,
+            "executable": "pnpm",
+            "queuedAtMs": 1791612331112
+          }
+        ]
+      }
+    },
+    "open": {
+      "state": "ok",
+      "kind": "tracker_issues",
+      "repo": { "id": "clankie-3cac94e5", "name": "clankie" },
+      "items": [
+        {
+          "id": "VUH-1988",
+          "title": "iOS 27 simulators churn background daemons and drive the Mac to load 300+",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-1988/ios-27-simulators-churn-background-daemons-and-drive-the-mac-to-load",
+          "updatedAt": "2026-10-10T05:43:59.265Z"
+        },
+        {
+          "id": "VUH-2027",
+          "title": "Orphaned test fixtures hold `clankie heavy` slots for 30+ minutes after their command exits",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-2027/orphaned-test-fixtures-hold-clankie-heavy-slots-for-30-minutes-after",
+          "updatedAt": "2026-10-10T04:39:20.457Z"
+        },
+        {
+          "id": "VUH-2034",
+          "title": "message_seat to live local Claude workers returns unconfirmed or \"channel released\" for most sends under load",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-2034/message-seat-to-live-local-claude-workers-returns-unconfirmed-or",
+          "updatedAt": "2026-10-10T04:32:14.411Z"
+        },
+        {
+          "id": "VUH-2025",
+          "title": "Huddle: every seat syncs status, blockers and landing plans, shown as a physical huddle in the app",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-2025/huddle-every-seat-syncs-status-blockers-and-landing-plans-shown-as-a",
+          "updatedAt": "2026-10-10T04:15:38.106Z"
+        },
+        {
+          "id": "VUH-2029",
+          "title": "Projects on Auto: assign Clankie projects, toggle Auto, and he works them without being told (replaces /goal)",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-2029/projects-on-auto-assign-clankie-projects-toggle-auto-and-he-works-them",
+          "updatedAt": "2026-10-10T03:15:07.021Z"
+        },
+        {
+          "id": "VUH-1990",
+          "title": "Keep Linear status true: In Progress only while a live seat owns the issue",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-1990/keep-linear-status-true-in-progress-only-while-a-live-seat-owns-the",
+          "updatedAt": "2026-10-10T02:42:52.487Z"
+        },
+        {
+          "id": "VUH-1780",
+          "title": "Every PC hire and receipt recovery is refused: the host receipt program outgrew the Windows command-line bound",
+          "status": "in_progress",
+          "priority": 1,
+          "labels": ["Bug"],
+          "location": "https://linear.app/vuhlp/issue/VUH-1780/every-pc-hire-and-receipt-recovery-is-refused-the-host-receipt-program",
+          "updatedAt": "2026-10-10T00:08:42.958Z"
+        },
+        {
+          "id": "VUH-1830",
+          "title": "A resubscribed hosted body rejects every signed exchange: pairing and support access fail",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-1830/a-resubscribed-hosted-body-rejects-every-signed-exchange-pairing-and",
+          "updatedAt": "2026-10-10T00:08:42.798Z"
+        }
+      ]
+    }
+  }
+}

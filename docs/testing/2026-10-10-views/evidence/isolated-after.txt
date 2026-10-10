@@ -1,0 +1,32 @@
+Heavy queue  view_b3b65658e7f0 · expires in 23h52m · read 1:06:56 AM
+
+Capacity
+heavy       ████████  8/8 in use
+simulators  ░  0/1 in use
+queue       3 waiting
+pressure    high (load)  load 1.68 · 32.3 GB free
+
+Waiting
+ 1. heavy     pnpm  seat w3Z:p3P  waiting 7m58s
+ 2. heavy     pnpm  seat prime  waiting 2m50s
+ 3. heavy     pnpm  seat w47:p1Z  waiting 1m26s
+
+Running
+heavy     pnpm  seat vuh-2015  orphaned  3h42m
+heavy     pnpm  seat vuh-2010  running  9m9s
+heavy     pnpm  seat w47:p22  running  5m1s
+heavy     pnpm  seat w47:p25  running  5m
+heavy     pnpm  seat w47:p23  running  4m25s
+heavy     pnpm  seat w47:p2B  running  1m16s
+heavy     pnpm  seat w47:p1Z  running  1m14s
+heavy     pnpm  seat w47:p1Y  running  9s
+
+In progress
+VUH-1988  in_progress Urgent iOS 27 simulators churn background daemons and drive the Mac to load 300+
+VUH-2027  in_progress Urgent Orphaned test fixtures hold `clankie heavy` slots for 30+ minutes after their command exits
+VUH-2034  in_progress Urgent message_seat to live local Claude workers returns unconfirmed or "channel released" for most sends under load
+VUH-2025  in_progress Urgent Huddle: every seat syncs status, blockers and landing plans, shown as a physical huddle in the app
+VUH-2029  in_progress Urgent Projects on Auto: assign Clankie projects, toggle Auto, and he works them without being told (replaces /goal)
+VUH-1990  in_progress Urgent Keep Linear status true: In Progress only while a live seat owns the issue
+VUH-1780  in_progress Urgent Every PC hire and receipt recovery is refused: the host receipt program outgrew the Windows command-line bound
+VUH-1830  in_progress Urgent A resubscribed hosted body rejects every signed exchange: pairing and support access fail

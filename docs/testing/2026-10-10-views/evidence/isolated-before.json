@@ -1,0 +1,299 @@
+{
+  "schemaVersion": 1,
+  "view": {
+    "id": "view_b3b65658e7f0",
+    "spec": {
+      "title": "Heavy queue",
+      "sources": {
+        "fleet": { "kind": "fleet_resources" },
+        "open": {
+          "kind": "tracker_issues",
+          "repo": "/Users/james/dev/clankie",
+          "status": ["in_progress"],
+          "limit": 8
+        }
+      },
+      "panels": [
+        { "source": "fleet", "show": "capacity" },
+        { "title": "Waiting", "source": "fleet", "show": "queue", "resource": "heavy" },
+        { "title": "Running", "source": "fleet", "show": "leases", "resource": "heavy" },
+        { "title": "In progress", "source": "open", "show": "issues" }
+      ],
+      "refreshSeconds": 5
+    },
+    "createdAtMs": 1791611977712,
+    "updatedAtMs": 1791611977712,
+    "pinned": false,
+    "expiresAtMs": 1791698377712
+  },
+  "renderedAtMs": 1791612005897,
+  "sources": {
+    "fleet": {
+      "state": "ok",
+      "kind": "fleet_resources",
+      "snapshot": {
+        "schemaVersion": 1,
+        "policy": {
+          "heavySlots": 8,
+          "simulatorSlots": 1,
+          "simulatorIdleMs": 600000,
+          "maxLoadRatio": 1.5,
+          "minAvailableMemoryMb": 4096
+        },
+        "capacity": { "heavySlots": 8, "simulatorSlots": 1, "used": 4, "simulatorUsed": 0 },
+        "pressure": {
+          "sampledAtMs": 1791612002693,
+          "loadRatio": 3.1898600260416665,
+          "availableMemoryMb": 34045.578125,
+          "healthy": false,
+          "reason": "load"
+        },
+        "leases": [
+          {
+            "id": "d94b6376-235f-41d4-9c69-f27bc4fdbe2e",
+            "kind": "heavy",
+            "state": "orphaned",
+            "seatId": "vuh-2015",
+            "holderId": "claude:361b1ea6-35ca-42ea-af3c-e06dcf81fd1a",
+            "pid": 27505,
+            "executable": "pnpm",
+            "createdAtMs": 1791599057508,
+            "lastUsedAtMs": 1791599057508
+          },
+          {
+            "id": "0ad02af7-41fe-40a3-ba23-96991b0f2e8c",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "prime",
+            "pid": 58277,
+            "executable": "pnpm",
+            "createdAtMs": 1791611857675,
+            "lastUsedAtMs": 1791611857675
+          },
+          {
+            "id": "21989a94-3e53-41fd-9521-fde51e64eca1",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "vuh-2010",
+            "holderId": "claude:4dd2b146-c9e8-460a-a155-26b3343dfb3e",
+            "pid": 60218,
+            "executable": "pnpm",
+            "createdAtMs": 1791611867977,
+            "lastUsedAtMs": 1791611867977
+          },
+          {
+            "id": "cde6ea1f-8263-4d76-ad1b-28633820f711",
+            "kind": "heavy",
+            "state": "running",
+            "seatId": "testflight-20261009",
+            "holderId": "claude:f19087d5-4bb2-44ab-ba6c-e3f08e20df3d:agent:a4d6e8cda7ae7361a",
+            "pid": 64430,
+            "executable": "pnpm",
+            "createdAtMs": 1791611884466,
+            "lastUsedAtMs": 1791611884466
+          }
+        ],
+        "queue": [
+          {
+            "id": "c7ebef2e-53fc-4f73-9067-639852849915",
+            "kind": "heavy",
+            "seatId": "w47:p22",
+            "holderId": "claude:ee87eee0-3845-41a1-832e-0cefb22f5498",
+            "pid": 62809,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611230747
+          },
+          {
+            "id": "8b5b9f67-5aa1-4d7c-9863-934c4d00f4c3",
+            "kind": "heavy",
+            "seatId": "views",
+            "holderId": "claude:af163034-7a51-4345-aec4-f8173adea1b0:agent:affe64f2347b7cf9c",
+            "pid": 65077,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611250626
+          },
+          {
+            "id": "7829bfc7-332d-4f5f-8d4e-07de6205b8f2",
+            "kind": "heavy",
+            "seatId": "w47:p25",
+            "holderId": "claude:ba006eb3-c947-46db-ba8e-e28f859ced8d",
+            "pid": 69371,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611287116
+          },
+          {
+            "id": "e891e3cf-ee79-4f1a-9005-77d6130b8eed",
+            "kind": "heavy",
+            "seatId": "w47:p1Z",
+            "holderId": "claude:5a23b653-c250-44ef-9bcc-d9237c7a949b",
+            "pid": 73629,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611334125
+          },
+          {
+            "id": "5cd2e76b-e9f8-404e-bf07-d1aaa97759fd",
+            "kind": "heavy",
+            "seatId": "w3Z:p5N",
+            "holderId": "claude:0f7540e9-c903-4d75-b6ae-8cfe552fa653",
+            "pid": 74374,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611339838
+          },
+          {
+            "id": "82791aea-816f-43e9-a6e4-ba912d64200b",
+            "kind": "heavy",
+            "seatId": "testflight-20261009",
+            "holderId": "claude:f19087d5-4bb2-44ab-ba6c-e3f08e20df3d:agent:a4d6e8cda7ae7361a",
+            "pid": 74753,
+            "executable": "bash",
+            "queuedAtMs": 1791611343316
+          },
+          {
+            "id": "26580d1c-54f6-4c9b-964c-fc35b58501ab",
+            "kind": "heavy",
+            "seatId": "w47:p23",
+            "holderId": "claude:2b78d86e-753b-45bc-8210-45c360201a90",
+            "pid": 76179,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611357050
+          },
+          {
+            "id": "62086433-be2d-4c3b-942e-1cf803aef3a3",
+            "kind": "heavy",
+            "seatId": "w47:p2B",
+            "holderId": "claude:b9ebd1fd-1ccc-499b-a0d9-f3030af0fe0d",
+            "pid": 98118,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611405377
+          },
+          {
+            "id": "b5eb90ee-6c17-42dd-87df-5867d3768e2e",
+            "kind": "heavy",
+            "seatId": "w47:p1Z",
+            "holderId": "claude:5a23b653-c250-44ef-9bcc-d9237c7a949b",
+            "pid": 94379,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611723080
+          },
+          {
+            "id": "449bf0d5-8cf2-4aa0-8d30-af8da5924dd1",
+            "kind": "heavy",
+            "seatId": "vuh-2014",
+            "holderId": "claude:f19087d5-4bb2-44ab-ba6c-e3f08e20df3d:agent:a31285740a9cafc52",
+            "pid": 59240,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611866637
+          },
+          {
+            "id": "044f41a4-a188-49ed-860a-ddba7c4adf98",
+            "kind": "heavy",
+            "seatId": "vuh-2034",
+            "holderId": "claude:deaaf26c-c6f4-4fe6-b9bd-3adcc6f1e5d5",
+            "pid": 65897,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611897023
+          },
+          {
+            "id": "eaab2ffd-173c-4b86-a77b-edb2dfa1c5db",
+            "kind": "heavy",
+            "seatId": "w47:p1Y",
+            "holderId": "claude:62a4abf7-616d-42f0-b52e-58e6bea98bcf",
+            "pid": 67206,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611909840
+          },
+          {
+            "id": "6fab236e-e551-4abb-a6d3-f23423792e5b",
+            "kind": "heavy",
+            "seatId": "w3Z:p3P",
+            "holderId": "claude:af163034-7a51-4345-aec4-f8173adea1b0:agent:aad888265f5d2acf0",
+            "pid": 68666,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611925725
+          },
+          {
+            "id": "3f839c0f-ba82-494b-b8d4-cc03d2a1ada4",
+            "kind": "heavy",
+            "seatId": "w3Z:p3P",
+            "holderId": "claude:af163034-7a51-4345-aec4-f8173adea1b0",
+            "pid": 70089,
+            "executable": "pnpm",
+            "queuedAtMs": 1791611939227
+          }
+        ]
+      }
+    },
+    "open": {
+      "state": "ok",
+      "kind": "tracker_issues",
+      "repo": { "id": "clankie-3cac94e5", "name": "clankie" },
+      "items": [
+        {
+          "id": "VUH-1988",
+          "title": "iOS 27 simulators churn background daemons and drive the Mac to load 300+",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-1988/ios-27-simulators-churn-background-daemons-and-drive-the-mac-to-load",
+          "updatedAt": "2026-10-10T05:43:59.265Z"
+        },
+        {
+          "id": "VUH-2027",
+          "title": "Orphaned test fixtures hold `clankie heavy` slots for 30+ minutes after their command exits",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-2027/orphaned-test-fixtures-hold-clankie-heavy-slots-for-30-minutes-after",
+          "updatedAt": "2026-10-10T04:39:20.457Z"
+        },
+        {
+          "id": "VUH-2034",
+          "title": "message_seat to live local Claude workers returns unconfirmed or \"channel released\" for most sends under load",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-2034/message-seat-to-live-local-claude-workers-returns-unconfirmed-or",
+          "updatedAt": "2026-10-10T04:32:14.411Z"
+        },
+        {
+          "id": "VUH-2025",
+          "title": "Huddle: every seat syncs status, blockers and landing plans, shown as a physical huddle in the app",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-2025/huddle-every-seat-syncs-status-blockers-and-landing-plans-shown-as-a",
+          "updatedAt": "2026-10-10T04:15:38.106Z"
+        },
+        {
+          "id": "VUH-2029",
+          "title": "Projects on Auto: assign Clankie projects, toggle Auto, and he works them without being told (replaces /goal)",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-2029/projects-on-auto-assign-clankie-projects-toggle-auto-and-he-works-them",
+          "updatedAt": "2026-10-10T03:15:07.021Z"
+        },
+        {
+          "id": "VUH-1990",
+          "title": "Keep Linear status true: In Progress only while a live seat owns the issue",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-1990/keep-linear-status-true-in-progress-only-while-a-live-seat-owns-the",
+          "updatedAt": "2026-10-10T02:42:52.487Z"
+        },
+        {
+          "id": "VUH-1780",
+          "title": "Every PC hire and receipt recovery is refused: the host receipt program outgrew the Windows command-line bound",
+          "status": "in_progress",
+          "priority": 1,
+          "labels": ["Bug"],
+          "location": "https://linear.app/vuhlp/issue/VUH-1780/every-pc-hire-and-receipt-recovery-is-refused-the-host-receipt-program",
+          "updatedAt": "2026-10-10T00:08:42.958Z"
+        },
+        {
+          "id": "VUH-1830",
+          "title": "A resubscribed hosted body rejects every signed exchange: pairing and support access fail",
+          "status": "in_progress",
+          "priority": 1,
+          "location": "https://linear.app/vuhlp/issue/VUH-1830/a-resubscribed-hosted-body-rejects-every-signed-exchange-pairing-and",
+          "updatedAt": "2026-10-10T00:08:42.798Z"
+        }
+      ]
+    }
+  }
+}
