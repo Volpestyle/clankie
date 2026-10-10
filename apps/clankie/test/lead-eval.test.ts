@@ -11,9 +11,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
 // @ts-expect-error -- checkout-only eval tooling is plain ESM.
 import * as lead from "../../../scripts/evals/lead.mjs";
+import { createLeadEvalSource, type LeadEvalSource } from "./helpers/lead-eval-source.ts";
 const sandbox = vi.hoisted(() => vi.fn());
 vi.mock("../../../scripts/evals/isolation.mjs", () => ({ executeSandbox: sandbox }));
 const {
@@ -29,10 +30,14 @@ const {
   verifyTask,
   windowGuard,
 } = lead;
-const completeVerifierReport = (workspace: string, task: { graders: { path: string }[] }) => ({
+const completeVerifierReport = (
+  workspace: string,
+  task: { graders: { path: string }[] },
+  counts: number[],
+) => ({
   success: true,
-  numTotalTests: 35,
-  numPassedTests: 35,
+  numTotalTests: counts.reduce((sum, count) => sum + count, 0),
+  numPassedTests: counts.reduce((sum, count) => sum + count, 0),
   numFailedTests: 0,
   numPendingTests: 0,
   numTodoTests: 0,
@@ -41,7 +46,7 @@ const completeVerifierReport = (workspace: string, task: { graders: { path: stri
   testResults: task.graders.map((grader, index) => ({
     name: join(workspace, grader.path),
     status: "passed",
-    assertionResults: Array.from({ length: [9, 18, 8][index]! }, (_, i) => ({
+    assertionResults: Array.from({ length: counts[index]! }, (_, i) => ({
       fullName: `fixture assertion ${i}`,
       status: "passed",
       duration: 1,
@@ -61,6 +66,19 @@ afterEach(() => {
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
+/** Tree-building cases replay the small fixture repository; the first case still checks the real pins. */
+let replay: { root: string; source: LeadEvalSource } | undefined;
+afterAll(() => {
+  if (replay) rmSync(replay.root, { recursive: true, force: true });
+});
+function fixtureTask() {
+  if (!replay) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "lead-eval-source-")));
+    replay = { root, source: createLeadEvalSource(join(root, "repo")) };
+  }
+  const task = loadTasks(replay.source).historical[0];
+  return { task, repository: replay.source.repository, counts: replay.source.coverage.fileCounts[task.id]! };
+}
 
 it("pins every cross-package pre-fix parent and unchanged landed grader", () => {
   const tasks = loadTasks().historical;
@@ -128,7 +146,7 @@ it("reports implemented verifier source while refusing the unwired native campai
 });
 
 it("exports a history-free replay and distinct worker indexes, with no held-out tests", () => {
-  const task = loadTasks().historical[2];
+  const { task } = fixtureTask();
   const root = join(scratch(), "replay");
   const poisonedIndex = join(root, "inherited-index");
   vi.stubEnv("GIT_INDEX_FILE", poisonedIndex);
@@ -150,7 +168,7 @@ it("exports a history-free replay and distinct worker indexes, with no held-out 
 }, 30_000);
 
 it("overlays identical trusted graders on both reference revisions", () => {
-  const task = loadTasks().historical[2];
+  const { task, repository } = fixtureTask();
   const root = scratch();
   for (const revision of ["before", "after"]) {
     const destination = join(root, revision);
@@ -158,6 +176,7 @@ it("overlays identical trusted graders on both reference revisions", () => {
     expect(result.result).toBe("not-run");
     for (const grader of task.graders) {
       const expected = spawnSync("git", ["show", `${task.sourceCommit}:${grader.path}`], {
+        cwd: repository,
         encoding: "utf8",
       }).stdout;
       expect(readFileSync(join(destination, grader.path), "utf8")).toBe(expected);
@@ -257,7 +276,7 @@ it("deduplicates all-agent call usage, preserves costs as unknown when coverage 
 });
 
 it("applies a retained candidate diff to the trusted base without executing candidate code", () => {
-  const task = loadTasks().historical[2];
+  const { task, repository } = fixtureTask();
   const root = scratch();
   const patchPath = join(root, "candidate.diff");
   writeFileSync(
@@ -281,7 +300,9 @@ it("applies a retained candidate diff to the trusted base without executing cand
   expect(readFileSync(join(output, "worktree/candidate.patch"))).toEqual(readFileSync(patchPath));
   expect(existsSync(join(root, "poison-index"))).toBe(false);
   for (const grader of task.graders) {
-    const expected = spawnSync("git", ["show", `${task.sourceCommit}:${grader.path}`]).stdout;
+    const expected = spawnSync("git", ["show", `${task.sourceCommit}:${grader.path}`], {
+      cwd: repository,
+    }).stdout;
     expect(readFileSync(join(output, "worktree", grader.path))).toEqual(expected);
   }
 }, 30_000);
@@ -289,7 +310,7 @@ it("applies a retained candidate diff to the trusted base without executing cand
 it.each(["candidate.patch", "../escape", "vitest.config.ts", "apps/clankie/test/setup.ts"])(
   "refuses a candidate patch targeting %s",
   (path) => {
-    const task = loadTasks().historical[2];
+    const { task } = fixtureTask();
     const root = scratch();
     const patchPath = join(root, "patch");
     writeFileSync(
@@ -311,7 +332,7 @@ it("refuses an empty candidate patch", () => {
 });
 
 it("grades through the network-off sandbox with fixed argv and retained provenance", async () => {
-  const task = loadTasks().historical[2];
+  const { task, counts } = fixtureTask();
   const root = scratch();
   const patch = join(root, "patch");
   writeFileSync(
@@ -323,20 +344,20 @@ it("grades through the network-off sandbox with fixed argv and retained provenan
   const vitestDir = join(output, "worktree/node_modules/vitest");
   mkdirSync(vitestDir, { recursive: true });
   writeFileSync(join(vitestDir, "vitest.mjs"), "// deterministic fake process fixture\n");
-  const verifierResult = completeVerifierReport(join(output, "worktree"), task);
+  const verifierResult = completeVerifierReport(join(output, "worktree"), task, counts);
   sandbox.mockImplementation(async () => {
     writeFileSync(join(output, "tmp/heldout-results.json"), JSON.stringify(verifierResult));
     return { exitCode: 0, timedOut: false, overflow: false, stdout: "fixture", stderr: "", wallMs: 1 };
   });
   writeFileSync(join(output, "home/owner-secret"), "fixture");
-  await expect(gradeCandidate(output)).rejects.toThrow("credential-free home");
+  await expect(gradeCandidate(output, { task })).rejects.toThrow("credential-free home");
   expect(sandbox).not.toHaveBeenCalled();
   rmSync(join(output, "home/owner-secret"));
   writeFileSync(join(output, "worktree/untracked-source.ts"), "fixture");
-  await expect(gradeCandidate(output)).rejects.toThrow("Untracked source changed");
+  await expect(gradeCandidate(output, { task })).rejects.toThrow("Untracked source changed");
   expect(sandbox).not.toHaveBeenCalled();
   rmSync(join(output, "worktree/untracked-source.ts"));
-  const result = await gradeCandidate(output);
+  const result = await gradeCandidate(output, { task });
   expect(result).toMatchObject({
     status: "passed",
     agentsLaunched: false,
@@ -369,12 +390,12 @@ it("grades through the network-off sandbox with fixed argv and retained provenan
     symlinkSync(outsideReport, join(output, "tmp/heldout-results.json"));
     return { exitCode: 0, timedOut: false, overflow: false };
   });
-  expect(await gradeCandidate(output)).toMatchObject({
+  expect(await gradeCandidate(output, { task })).toMatchObject({
     status: "failed-or-infrastructure",
     verifierReportSha256: null,
   });
   sandbox.mockResolvedValueOnce({ exitCode: 0, timedOut: false, overflow: false });
-  expect(await gradeCandidate(output)).toMatchObject({
+  expect(await gradeCandidate(output, { task })).toMatchObject({
     status: "failed-or-infrastructure",
     coverage: { complete: false },
   });
@@ -382,16 +403,16 @@ it("grades through the network-off sandbox with fixed argv and retained provenan
     writeFileSync(join(output, "tmp/heldout-results.json"), "malformed");
     return { exitCode: 0, timedOut: false, overflow: false };
   });
-  expect(await gradeCandidate(output)).toMatchObject({ status: "failed-or-infrastructure" });
+  expect(await gradeCandidate(output, { task })).toMatchObject({ status: "failed-or-infrastructure" });
   sandbox.mockResolvedValueOnce({
     exitCode: 1,
     timedOut: false,
     overflow: false,
     stderr: "fixture infrastructure failure",
   });
-  expect(await gradeCandidate(output)).toMatchObject({ status: "failed-or-infrastructure" });
+  expect(await gradeCandidate(output, { task })).toMatchObject({ status: "failed-or-infrastructure" });
   sandbox.mockResolvedValueOnce({ exitCode: 0, timedOut: true, overflow: false });
-  expect(await gradeCandidate(output)).toMatchObject({ status: "failed-or-infrastructure" });
+  expect(await gradeCandidate(output, { task })).toMatchObject({ status: "failed-or-infrastructure" });
   const outsideGrader = join(root, "outside-grader.ts");
   const graderPath = join(output, "worktree", task.graders[0].path);
   writeFileSync(outsideGrader, readFileSync(graderPath));
@@ -402,9 +423,9 @@ it("grades through the network-off sandbox with fixed argv and retained provenan
     writeFileSync(join(output, "tmp/heldout-results.json"), JSON.stringify(verifierResult));
     return { exitCode: 0, timedOut: false, overflow: false };
   });
-  expect(await gradeCandidate(output)).toMatchObject({ status: "grader-tampered" });
+  expect(await gradeCandidate(output, { task })).toMatchObject({ status: "grader-tampered" });
   sandbox.mockClear();
-  await expect(gradeCandidate(output)).rejects.toThrow("provenance changed");
+  await expect(gradeCandidate(output, { task })).rejects.toThrow("provenance changed");
   expect(sandbox).not.toHaveBeenCalled();
 }, 30_000);
 
@@ -418,7 +439,7 @@ it("refuses dependency links outside the disposable workspace", () => {
 it("requires every pinned grader file and assertion rather than exit-zero or summary claims", () => {
   const task = loadTasks().historical[2];
   const workspace = "/fixture/worktree";
-  const complete = completeVerifierReport(workspace, task);
+  const complete = completeVerifierReport(workspace, task, [9, 18, 8]);
   expect(lead.validateGraderReport(task, workspace, complete)).toMatchObject({
     complete: true,
     executedTests: 35,
