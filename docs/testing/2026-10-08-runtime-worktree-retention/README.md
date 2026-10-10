@@ -27,7 +27,8 @@ admin directory, registration and exact backlink. Fresh observations must
 agree before deletion. Kernel cwd/executable inventory and recorded live service
 PIDs protect running bodies/helpers; unavailable or incomplete observations
 hold removal. A conservative PID match can retain extra copies; it never grants
-permission to remove one. macOS uses bounded `ps` IDs/UIDs, `lsof` cwd and `libproc` executable paths;
+permission to remove one. macOS reads same-UID PIDs, cwd and executable paths in one `libproc` pass
+(VUH-1983: the earlier machine-wide `lsof -d cwd` sweep cost about 2 CPU-seconds per run on a loaded Mac).
 For unlinked executables, bounded per-PID `lsof` text mappings provide the fallback; an unverified live mapping holds removal. Linux uses same-UID `/proc` cwd/executable observations. Windows refuses cleanup.
 Arguments and credential values are neither returned nor logged.
 

@@ -82,61 +82,82 @@ async function runtimeProcesses(): Promise<{ paths: string[]; pids: Set<number> 
   if (uid === undefined) throw Error("runtime_process_inventory_unsupported");
   if (process.platform === "darwin") {
     const options = { encoding: "utf8" as const, timeout: 10_000, maxBuffer: 4 * 1024 * 1024 };
-    const rows = (await exec("ps", ["-Ao", "pid=,uid=,stat="], options)).stdout.trim().split("\n");
-    const pids = new Set<number>();
-    for (const row of rows) {
-      const match = /^\s*(\d+)\s+(-?\d+)\s+(\S+)\s*$/u.exec(row);
-      if (!match) throw Error("runtime_process_inventory_unverified");
-      if (Number(match[2]) === uid && !match[3]!.startsWith("Z")) pids.add(Number(match[1]));
-    }
-    const fields = (await exec("lsof", ["-nP", "-a", "-u", String(uid), "-d", "cwd", "-Fpn"], options)).stdout
-      .trim()
-      .split("\n");
-    const paths: string[] = [];
-    const observed = new Set<number>();
-    for (const field of fields) {
-      if (/^p\d+$/u.test(field)) observed.add(Number(field.slice(1)));
-      else if (field === "fcwd")
-        continue; // lsof always emits file descriptor fields.
-      else if (field.startsWith("n/")) paths.push(field.slice(1));
-      else throw Error("runtime_process_inventory_unverified");
-    }
-    // Every process present in both observations must have a kernel file observation.
-    // libproc reads actual executable paths without collecting every mapped txt file
-    // (which can produce tens of MiB on a busy desktop). Python is the existing native helper dependency.
-    const executableSource = `import ctypes,json,os,sys
+    // One libproc pass over this user's PIDs reads each cwd and executable directly.
+    // A machine-wide `lsof -d cwd` initializes every open file's metadata and cost
+    // about half a core per run on a busy desktop (VUH-1983). Python is the existing
+    // native helper dependency; the struct layouts match integrations/opencode-plugin.
+    const inventorySource = `import ctypes,errno,json,os,sys
+class Bsd(ctypes.Structure):
+ _fields_=[(n,ctypes.c_uint32) for n in ('flags','status','xstatus','pid','ppid','uid','gid','ruid','rgid','svuid','svgid','reserved')]+[('comm',ctypes.c_char*16),('name',ctypes.c_char*32)]+[(n,ctypes.c_uint32) for n in ('nfiles','pgid','pjobc','tty','tpgid')]+[('nice',ctypes.c_int32),('seconds',ctypes.c_uint64),('microseconds',ctypes.c_uint64)]
+class Path(ctypes.Structure):
+ _fields_=[('vnode',ctypes.c_uint64*19),('path',ctypes.c_char*1024)]
+class Dirs(ctypes.Structure):
+ _fields_=[('cwd',Path),('root',Path)]
+if ctypes.sizeof(Bsd)!=136 or ctypes.sizeof(Dirs)!=2352 or Path.path.offset!=152: raise RuntimeError('Unsupported libproc ABI')
 lib=ctypes.CDLL('/usr/lib/libproc.dylib',use_errno=True)
+lib.proc_listpids.argtypes=[ctypes.c_uint32,ctypes.c_uint32,ctypes.c_void_p,ctypes.c_int]
+lib.proc_listpids.restype=ctypes.c_int
+lib.proc_pidinfo.argtypes=[ctypes.c_int,ctypes.c_int,ctypes.c_uint64,ctypes.c_void_p,ctypes.c_int]
+lib.proc_pidinfo.restype=ctypes.c_int
 lib.proc_pidpath.argtypes=[ctypes.c_int,ctypes.c_void_p,ctypes.c_uint32]
 lib.proc_pidpath.restype=ctypes.c_int
-paths=[]
-missing=[]
-for pid in json.loads(sys.argv[1]):
+uid=os.getuid()
+size=lib.proc_listpids(4,uid,None,0)
+if size<=0: raise RuntimeError('Runtime process list unavailable')
+count=size//4+256
+listed=(ctypes.c_int*count)()
+size=lib.proc_listpids(4,uid,listed,ctypes.sizeof(listed))
+if size<=0 or size>=ctypes.sizeof(listed): raise RuntimeError('Runtime process list unavailable')
+def bsd(pid):
+ info=Bsd()
+ if lib.proc_pidinfo(pid,3,0,ctypes.byref(info),ctypes.sizeof(info))==ctypes.sizeof(info): return info
+ if ctypes.get_errno()==errno.ESRCH: return None
+ raise RuntimeError('Runtime process unavailable')
+pids=[];paths=[];missing=[]
+for pid in sorted(set(listed[:size//4])):
+ if pid<=0: continue
+ info=bsd(pid)
+ # Exited, reaped or re-credentialed processes are not this user's live processes.
+ if info is None or info.status==5 or info.uid!=uid: continue
+ dirs=Dirs()
+ if lib.proc_pidinfo(pid,9,0,ctypes.byref(dirs),ctypes.sizeof(dirs))!=ctypes.sizeof(dirs):
+  info=bsd(pid)
+  if info is None or info.status==5: continue
+  raise RuntimeError('Runtime process cwd unavailable')
+ pids.append(pid)
+ # An empty path is a removed cwd; it cannot be inside an existing worktree.
+ if dirs.cwd.path.startswith(b'/'): paths.append(os.fsdecode(dirs.cwd.path))
  b=ctypes.create_string_buffer(4096)
  n=lib.proc_pidpath(pid,b,4096)
  if n<=0 or n>=4096:
-  try: os.kill(pid,0)
-  except ProcessLookupError: continue
+  info=bsd(pid)
+  if info is None or info.status==5: continue
   missing.append(pid)
   continue
- path=os.fsdecode(b.value)
- if not os.path.isabs(path): raise RuntimeError('Runtime executable path unavailable')
- paths.append(path)
-print(json.dumps({"paths":paths,"missing":missing}))`;
-    const executables = JSON.parse(
-      (await exec("python3", ["-c", executableSource, JSON.stringify([...pids])], options)).stdout,
-    ) as { paths?: unknown; missing?: unknown };
+ if not b.value.startswith(b'/'): raise RuntimeError('Runtime executable path unavailable')
+ paths.append(os.fsdecode(b.value))
+print(json.dumps({"pids":pids,"paths":paths,"missing":missing}))`;
+    const inventory = JSON.parse((await exec("python3", ["-c", inventorySource], options)).stdout) as {
+      pids?: unknown;
+      paths?: unknown;
+      missing?: unknown;
+    };
+    const listed = inventory.pids;
     if (
-      !Array.isArray(executables.paths) ||
-      executables.paths.some((path) => typeof path !== "string" || !path.startsWith("/")) ||
-      !Array.isArray(executables.missing) ||
-      executables.missing.some((pid) => !Number.isSafeInteger(pid) || !pids.has(pid))
+      !Array.isArray(listed) ||
+      listed.some((pid) => !Number.isSafeInteger(pid) || pid <= 0) ||
+      !Array.isArray(inventory.paths) ||
+      inventory.paths.some((path) => typeof path !== "string" || !path.startsWith("/")) ||
+      !Array.isArray(inventory.missing) ||
+      inventory.missing.some((pid) => !listed.includes(pid))
     )
-      throw Error("runtime_executable_inventory_unverified");
-    paths.push(...(executables.paths as string[]));
+      throw Error("runtime_process_inventory_unverified");
+    const pids = new Set(listed as number[]);
+    const paths = [...(inventory.paths as string[])];
     // An unlinked executable can make proc_pidpath return ENOENT while still running.
     // Read kernel txt mappings only for those PIDs, bounded individually, rather than
     // collecting every mapping on the desktop. Missing live mappings fail closed.
-    for (const pid of executables.missing as number[]) {
+    for (const pid of inventory.missing as number[]) {
       let mappings: string[] = [];
       try {
         const output = (await exec("lsof", ["-nP", "-a", "-p", String(pid), "-d", "txt", "-Fpn"], options))
@@ -162,16 +183,7 @@ print(json.dumps({"paths":paths,"missing":missing}))`;
       if (mappings.length === 0) throw Error("runtime_executable_inventory_incomplete");
       paths.push(...mappings);
     }
-    const after = (await exec("ps", ["-Ao", "pid=,uid=,stat="], options)).stdout;
-    for (const row of after.trim().split("\n")) {
-      const match = /^\s*(\d+)\s+(-?\d+)\s+(\S+)\s*$/u.exec(row);
-      if (!match) throw Error("runtime_process_inventory_unverified");
-      const pid = Number(match[1]);
-      if (Number(match[2]) === uid && !match[3]!.startsWith("Z") && pids.has(pid) && !observed.has(pid))
-        throw Error("runtime_process_inventory_incomplete");
-      if (Number(match[2]) === uid && !match[3]!.startsWith("Z")) pids.add(pid);
-    }
-    if (!observed.has(process.pid)) throw Error("runtime_process_inventory_incomplete");
+    if (!pids.has(process.pid)) throw Error("runtime_process_inventory_incomplete");
     return { paths, pids };
   }
   if (process.platform === "linux") {
