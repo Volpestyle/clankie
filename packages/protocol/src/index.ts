@@ -694,3 +694,6 @@ export {
 } from "./operator-conversations.ts";
 
 export { RoomHandoffMetadataSchema, type RoomHandoffMetadata } from "./operator-conversations.ts";
+export * from "./runtime-health.ts";
+export * from "./fleet-health-metrics.ts";
+export * from "./worker-report-health.ts";

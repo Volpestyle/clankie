@@ -36,6 +36,8 @@ interface RuntimeUpdateStatus {
   readonly needsReconciliation?: boolean;
 }
 export interface RuntimeUpdater {
+  /** Immutable boot identity; liveness probes never need transaction-file reads. */
+  readonly runtime: RuntimeBootIdentity;
   status(): RuntimeUpdateStatus;
   request(
     ref: string,
@@ -133,7 +135,10 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
     return result;
   };
   const safeTerminal = (result: RuntimeUpdateResult) =>
-    result.phase === "healthy" ||
+    (result.phase === "healthy" &&
+      (result.canary === undefined ||
+        (result.canary.state === "passed" && result.canary.holdReleased === true) ||
+        (result.canary.state === "failed" && result.canary.holdEstablished === true))) ||
     result.phase === "rolled-back" ||
     result.phase === "refused" ||
     (result.phase === "failed" && result.reason === "pre-cutover-failed");
@@ -153,6 +158,7 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
     };
   };
   return {
+    runtime: boot,
     status,
     async request(ref, authority) {
       await authority.guard();

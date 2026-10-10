@@ -104,11 +104,24 @@ export class DeployHolds {
       return this.list();
     });
   }
-  async release(id: string, actor: string, reason: string): Promise<DeployHold[]> {
+  async release(
+    id: string,
+    actor: string,
+    reason: string,
+    expected?: Pick<DeployHold, "holder" | "reason" | "pane" | "seat">,
+  ): Promise<DeployHold[]> {
     return withDirectoryLock(join(this.directory, "landing.lock"), async () => {
       const registry = await this.read();
       const hold = registry.holds.find((h) => h.id === id);
       if (!hold) throw Error("Unknown hold");
+      if (
+        expected &&
+        (hold.holder !== expected.holder ||
+          hold.reason !== expected.reason ||
+          hold.pane !== expected.pane ||
+          hold.seat !== expected.seat)
+      )
+        throw Error("Hold ownership changed before release");
       registry.events.push({
         action: "release",
         hold,

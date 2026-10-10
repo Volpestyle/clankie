@@ -35,6 +35,7 @@ import {
   MEDIA_IMAGE_GENERATION_PATH,
   MEDIA_VIDEO_GENERATION_PATH,
   RivalsCommandSchema,
+  ProcessHealthSnapshotSchema,
   eventStreamKindForId,
   type CaptainChannelTurnResult,
   type CaptainSessionLaneV2,
@@ -852,6 +853,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     "/",
     createRuntimeUpdateRoutes({
       updater: dependencies.runtimeUpdater,
+      canary: dependencies.runtimeCanary,
       refreshHarnesses: dependencies.refreshHarnesses,
       settings: settingsSource,
       setup: { runtimes: dependencies.runtimes, herdrBinding: dependencies.herdrBinding },
@@ -1441,7 +1443,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           root: z.string().min(1).max(4096),
           instanceId: z.string().uuid(),
         })
-        .safeParse(dependencies.runtimeUpdater?.status().runtime);
+        .safeParse(dependencies.runtimeUpdater?.runtime);
       if (identity.success) runtime = identity.data;
     } catch {
       // Optional boot identity must not turn updater diagnostics into liveness failure.
@@ -1449,6 +1451,18 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({
       ok: true,
       service: "clankie",
+      processHealth: ProcessHealthSnapshotSchema.parse(
+        (() => {
+          const cpu = process.cpuUsage();
+          return {
+            schemaVersion: 1,
+            instanceId,
+            pid: process.pid,
+            uptimeMs: process.uptime() * 1000,
+            cpu: { userMicros: cpu.user, systemMicros: cpu.system },
+          };
+        })(),
+      ),
       ...(herdr === undefined ? {} : { herdr }),
       ...(doorway === undefined ? {} : { doorway }),
       ...(power === undefined ? {} : { power }),
