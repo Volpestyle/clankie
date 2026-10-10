@@ -1717,7 +1717,8 @@ const workerMcp = new WorkerMcp({
   runtimeRevision: workerRuntimeRevision,
   catalogRefreshPending: async (fleet, pane) => {
     const paneId = fleet === "default" ? pane : `${fleet}/${pane}`;
-    const seat = (await captain.workerCatalogSeats!()).find((row) => row.paneId === paneId);
+    // Every tools/list asks this; read only the requesting seat, not every machine's census.
+    const seat = await captain.workerCatalogSeat!(paneId);
     if (!seat || !["idle", "ready"].includes(seat.status ?? "")) return true;
     if (seat.harness === "opencode") {
       const observed = await captain.refreshNativeWorkerCatalog!(paneId, { revision: workerRuntimeRevision });

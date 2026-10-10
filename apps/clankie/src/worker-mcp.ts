@@ -1052,7 +1052,7 @@ export class WorkerMcp {
         }
       }
       const response = await session.transport.handleRequest(request, {
-        authInfo: { token, clientId: authority.principalId, scopes: [] },
+        authInfo: { token, clientId: authority.principalId, scopes: [], extra: { authority } },
       });
       if (request.method === "DELETE" && response.ok) {
         this.sessions.delete(id);
@@ -1090,7 +1090,11 @@ export class WorkerMcp {
         extra.signal,
         "Worker catalog discovery",
         async (signal) => {
-          const current = await authenticate(extra.authInfo?.token ?? "", signal);
+          // Discovery uses the admission this same HTTP request just passed, rather
+          // than proving its socket a second time (VUH-2062). Calls still recheck.
+          const current =
+            (extra.authInfo?.extra?.authority as WorkerAuthorization | undefined) ??
+            (await authenticate(extra.authInfo?.token ?? "", signal));
           signal.throwIfAborted();
           if (current.key !== authority.key) throw new Error("Worker session changed");
           if (current.fleet !== undefined) {
@@ -1454,7 +1458,7 @@ export class WorkerMcp {
     try {
       response = await beforeWorkerDeadline(request.signal, "Worker session initialization", () =>
         transport.handleRequest(request, {
-          authInfo: { token, clientId: authority.principalId, scopes: [] },
+          authInfo: { token, clientId: authority.principalId, scopes: [], extra: { authority } },
           parsedBody,
         }),
       );

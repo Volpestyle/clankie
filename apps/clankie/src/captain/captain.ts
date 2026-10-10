@@ -57,6 +57,7 @@ import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
 import {
   OPERATOR_CONVERSATION_TEXT_MAX,
+  OPERATOR_HEAD_AGENT_NAME,
   CAPTAIN_SILENT_REPLY_SENTINEL,
   type CaptainChannelTurnResult,
   type CaptainSessionLaneV2,
@@ -5600,6 +5601,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             : { ownerConversationId: claim.owner.conversationId, hired: claim.hired }),
         };
       });
+    },
+
+    async workerCatalogSeat(paneId) {
+      // The seats workerCatalogSeats lists, read from this pane's own record (VUH-2062).
+      if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return undefined;
+      const agent = await herdrRunner.get(paneId).catch(() => undefined);
+      if (
+        !agent ||
+        agent.agent === "shell" ||
+        agent.agent === "clankie" ||
+        agent.name === OPERATOR_HEAD_AGENT_NAME ||
+        agent.session === undefined
+      )
+        return undefined;
+      return { harness: agent.agent, status: agent.status };
     },
 
     async refreshNativeWorkerCatalog(paneId, input) {
