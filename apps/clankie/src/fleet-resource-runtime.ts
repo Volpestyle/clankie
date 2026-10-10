@@ -59,7 +59,11 @@ export interface FleetResourceRuntime {
   status(): ResourceSnapshot | undefined;
   configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
   refresh(): Promise<void>;
-  admitHire(input: Pick<SpawnOperatorSeat, "fleet">): Promise<void>;
+  /**
+   * Refuses a local hire only on low memory or an unverifiable probe. Returns a
+   * receipt notice when the seat's heavy work will queue on current load.
+   */
+  admitHire(input: Pick<SpawnOperatorSeat, "fleet">): Promise<string | undefined>;
   hireBrief(input: Pick<SpawnOperatorSeat, "fleet">, brief?: string): Promise<string | undefined>;
   proveSimulatorSeat(input: { seatId: string; fleet?: string; holderId?: string }): Promise<SimulatorOwner>;
   observeSeats(seats: readonly ObservedSeat[]): Promise<void>;
@@ -289,19 +293,21 @@ export async function createFleetResourceRuntime(input: {
     refresh,
     async admitHire(request) {
       try {
-        if (!(await local(request.fleet))) return;
+        if (!(await local(request.fleet))) return undefined;
         await ownerPolicy();
         const admission = await governor.admitBuilder();
-        if (cached) publish({ ...cached, pressure: admission.pressure });
-        if (!admission.allowed) {
-          const pressure = admission.pressure;
+        const pressure = admission.pressure;
+        if (cached) publish({ ...cached, pressure });
+        if (!admission.allowed)
           throw new ResourceAdmissionError(
             admission.reason === "probe-unavailable"
               ? "Local hire refused: machine pressure could not be verified. Recheck clankie doctor."
-              : `Local hire refused: machine pressure is high (${pressure.reason ?? "pressure"}; load/core ${pressure.loadRatio.toFixed(2)}, available memory ${Math.round(pressure.availableMemoryMb)} MiB). Wait for resources or review the owner's fleet resource policy.`,
+              : `Local hire refused: available memory ${Math.round(pressure.availableMemoryMb)} MiB is below the ${String(admission.minAvailableMemoryMb)} MiB floor. Wait for memory to free up or review the owner's fleet resource policy.`,
             admission.reason ?? "probe-unavailable",
           );
-        }
+        return admission.heavyQueued
+          ? `Machine load is high (load/core ${pressure.loadRatio.toFixed(2)}, heavy limit ${admission.heavyQueued.maxLoadRatio.toFixed(2)}): this seat's \`clankie heavy\` builds, tests and simulator leases will queue until load drops.`
+          : undefined;
       } catch (error) {
         if (error instanceof ResourceAdmissionError) throw error;
         throw new ResourceAdmissionError("Local hire refused: machine resource admission is unavailable.");

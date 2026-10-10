@@ -2748,8 +2748,10 @@ pressure samplers; a failed refresh or invalid observation refuses admission. Li
 retains `MemAvailable`, and other platforms retain free memory.
 
 CLI edits update the journal immediately; API edits are reconciled by the body
-within its five-second refresh. High pressure delays queued heavy work and refuses
-new local hires with a reason. Existing accepted agents keep running. Missing
+within its five-second refresh. High load or low memory delays queued heavy work
+and simulator leases. A new local hire is refused, with a reason, only when
+available memory is below its floor; at high load it starts, and its receipt's
+`resourceNotice` says its heavy work will queue. Existing accepted agents keep running. Missing
 Python 3, helper or pressure observations refuse resource admission while the
 body remains available. The canonical registry is the OS user's
 `~/.clankie/fleet-resources`; worker environment and settings-path overrides do

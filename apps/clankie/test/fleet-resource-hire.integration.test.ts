@@ -235,7 +235,7 @@ it.each(["pressure", "probe-unavailable"] as const)(
   "refuses %s before a real native launch",
   async (reason) => {
     const f = await fixture();
-    if (reason === "pressure") f.pressure({ loadRatio: 3, availableMemoryMb: 8192 });
+    if (reason === "pressure") f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
     else f.failProbe();
     expect(await f.hire()).toMatchObject({
       outcome: "failed",
@@ -253,7 +253,7 @@ it.each(["pressure", "probe-unavailable"] as const)(
   async (reason) => {
     const f = await fixture();
     f.onPrepare(async () => {
-      if (reason === "pressure") f.pressure({ loadRatio: 3, availableMemoryMb: 8192 });
+      if (reason === "pressure") f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
       else f.failProbe();
     });
     expect(await f.hire("Work on the fixture")).toMatchObject({
@@ -268,6 +268,26 @@ it.each(["pressure", "probe-unavailable"] as const)(
   },
 );
 
+it("admits a hire at high load above the memory floor and says its heavy work will queue", async () => {
+  const f = await fixture();
+  f.pressure({ loadRatio: 3, availableMemoryMb: 8192 });
+  const result = await f.hire("Work on the fixture");
+  expect(result).toMatchObject({
+    outcome: "spawned",
+    resourceNotice: expect.stringContaining("will queue until load drops"),
+  });
+  expect(f.admissions).toEqual(["request", "launch"]);
+  expect(f.launches()).toBe(1);
+  expect(f.current()).toBeDefined();
+});
+
+it("a hire at normal load carries no queue notice", async () => {
+  const f = await fixture();
+  const result = await f.hire("Work on the fixture");
+  expect(result.outcome).toBe("spawned");
+  expect(result).not.toHaveProperty("resourceNotice");
+});
+
 it("delivers resource instructions once without a user brief and retains the accepted native lifetime", async () => {
   const f = await fixture();
   expect(await f.hire()).toMatchObject({ outcome: "spawned" });
@@ -280,7 +300,7 @@ it("delivers resource instructions once without a user brief and retains the acc
   expect(brief).toContain("fleet-resources skill");
   expect(brief).toContain("clankie simulator");
   expect(brief.match(/Machine resource safety:/gu)).toHaveLength(1);
-  f.pressure({ loadRatio: 3, availableMemoryMb: 8192 });
+  f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
   await expect(f.resources.admitHire({})).rejects.toThrow("Local hire refused");
   expect(f.current()).toBeDefined();
   f.store.close();
@@ -312,7 +332,7 @@ it("a grant revoked during the final real pressure observation cannot launch a n
 
 it("uses actual local-host classification and keeps cached metadata reads off pressure probes", async () => {
   const f = await fixture();
-  f.pressure({ loadRatio: 3, availableMemoryMb: 8192 });
+  f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
   const before = f.probes();
   await expect(f.resources.admitHire({ fleet: "named-local" })).rejects.toThrow("Local hire refused");
   const afterLocal = f.probes();

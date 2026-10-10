@@ -482,17 +482,23 @@ export function createResourceGovernor(
     async admitBuilder() {
       const state = await store.read(),
         sample = await pressure.sample(state.policy);
+      if (sample.reason === "probe-unavailable")
+        return { allowed: false, reason: "probe-unavailable" as const, pressure: sample };
+      // A hire is admitted on memory alone. Its heavy steps queue on load
+      // through their own permits, so load only marks that queue (VUH-2011).
+      if (sample.availableMemoryMb < state.policy.minAvailableMemoryMb)
+        return {
+          allowed: false,
+          reason: "pressure" as const,
+          pressure: sample,
+          minAvailableMemoryMb: state.policy.minAvailableMemoryMb,
+        };
       return {
-        allowed: sample.healthy,
-        ...(!sample.healthy
-          ? {
-              reason:
-                sample.reason === "probe-unavailable"
-                  ? ("probe-unavailable" as const)
-                  : ("pressure" as const),
-            }
-          : {}),
+        allowed: true,
         pressure: sample,
+        ...(sample.loadRatio > state.policy.maxLoadRatio
+          ? { heavyQueued: { maxLoadRatio: state.policy.maxLoadRatio } }
+          : {}),
       };
     },
     runHeavy(command, args, options) {

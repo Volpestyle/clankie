@@ -37,6 +37,9 @@ unavailable native observations. macOS available memory matches
 `memory_pressure -Q` through the kernel's compressor-aware percentage; Linux
 uses `MemAvailable`. macOS pressure reads share a one-second cache, then refresh;
 failed observations refuse new local hires without terminating existing agents.
+A local hire is refused only when available memory is below its floor or the
+observation fails; high load admits it, and its receipt's `resourceNotice` says
+its heavy work and simulator leases will queue until load drops.
 Python 3 and the shipped native helper
 must be available. Repair an unavailable installation through the existing setup
 route; do not select another registry to evade a wait.

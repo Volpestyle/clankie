@@ -227,6 +227,8 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
   names what holds the slots; a notice that one of your seats booted a
   simulator outside a lease means it should lease that device by `deviceId` or
   shut it down.
+  High load never blocks a hire, only its heavy steps: hire, and read the
+  receipt's `resourceNotice` for work that will queue. Low memory refuses one.
 
 Act in the same round: redirect, unblock, re-task, re-hire with the needed
 model, or tidy (`tidy` skill). Tell the owner only what needs their decision.

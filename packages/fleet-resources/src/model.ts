@@ -264,10 +264,15 @@ export type SimulatorAdmission =
 export interface FleetResourceGovernor {
   configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
   snapshot(): Promise<ResourceSnapshot>;
+  /** Hire admission: refuses only on low available memory or an unverifiable probe. */
   admitBuilder(): Promise<{
     allowed: boolean;
     reason?: "pressure" | "probe-unavailable";
     pressure: ResourcePressure;
+    /** The memory floor a `pressure` refusal fell below. */
+    minAvailableMemoryMb?: number;
+    /** Load is above the heavy-permit limit, so the seat's heavy work will queue. */
+    heavyQueued?: { maxLoadRatio: number };
   }>;
   runHeavy(
     command: string,

@@ -1265,6 +1265,12 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
         .strict()
         .optional(),
       /**
+       * Set when machine load is above the heavy-permit limit at hire: the seat
+       * started, and its `clankie heavy` work and simulator leases will queue
+       * until load drops (VUH-2011).
+       */
+      resourceNotice: z.string().max(600).optional(),
+      /**
        * Retired opinionated-skill condition. Bodies no longer send it; kept so
        * clients still parse spawn results from an older body.
        */
