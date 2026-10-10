@@ -1,4 +1,4 @@
-# Clankie v0.4.0
+# Clankie v0.4.1
 
 Clankie now keeps his own record of the work, runs more kinds of agents on more
 machines, and reaches Discord through one official bot without any setup on
@@ -91,3 +91,6 @@ your side.
 This is the macOS Apple silicon service bundle, plus Linux archives for hosted
 bodies. The companion app and hosted service have their own releases. Mailbox,
 official bot and hosted features depend on the hosted service and your account.
+
+The v0.4.0 tag stopped at release checks before publication: the service
+typecheck outgrew the build runner's default Node heap.

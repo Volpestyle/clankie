@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node ../../scripts/build-fleet-proof.mjs && tsx src/index.ts",
     "start": "node ../../scripts/build-fleet-proof.mjs && tsx src/index.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "node --max-old-space-size=6144 node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "free-play-live": "tsx scripts/free-play-live.ts",
     "minecraft:smoke": "tsx scripts/minecraft-smoke.ts",
