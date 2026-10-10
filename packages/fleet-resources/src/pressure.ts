@@ -58,7 +58,7 @@ export function resourceCapacity(policy: FleetResourcePolicy): number {
 /**
  * What one booted iOS 27 simulator costs while an app and its UI-test driver
  * run in it: kernel footprint and CPU, measured on the 18-core, 128 GiB Mac
- * (docs/testing/2026-10-09-lean-simulators). An idle lean one is 27 GiB.
+ * (docs/testing/2026-10-09-lean-simulators). An idle one is 27 GiB.
  */
 const simulatorCost = { memoryGiB: 34, cores: 2 } as const;
 /** A cold boot's CPU burst lasts about two minutes; admit the next simulator after it. */

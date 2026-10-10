@@ -27,47 +27,6 @@ const RuntimesSchema = z.object({
     .max(256),
 });
 
-/**
- * launchd jobs a fleet-leased simulator boots without. Each runs work no
- * capture shows (Apple Intelligence, Siri, News, Mail, indexing, analysis)
- * and together they kept two iOS 27 simulators at load 340 on an 18-core Mac
- * (VUH-1988). The home screen, keyboard, rendering, networking and installed
- * apps are untouched, so captures still match what a user sees.
- */
-export const leanSimulatorJobs: readonly string[] = [
-  // Apple Intelligence and on-device models
-  "com.apple.intelligenceflowd",
-  "com.apple.intelligencecontextd",
-  "com.apple.intelligenceplatformd",
-  "com.apple.intelligencetasksd",
-  "com.apple.generativeexperiencesd",
-  "com.apple.GenerativeFunctions.agentstored",
-  "com.apple.modelmanagerd",
-  "com.apple.knowledgeconstructiond",
-  // Siri and suggestions
-  "com.apple.assistantd",
-  "com.apple.siriactionsd",
-  "com.apple.siriinferenced",
-  "com.apple.siriknowledged",
-  "com.apple.suggestd",
-  "com.apple.peopled",
-  // News, Mail, Weather, Tips
-  "com.apple.newsd",
-  "com.apple.icloudmailagent",
-  "com.apple.weatherd",
-  "com.apple.tipsd",
-  // Indexing and media analysis
-  "com.apple.fileindexerd",
-  "com.apple.spotlightknowledged",
-  "com.apple.spotlightknowledged.updater",
-  "com.apple.mediaanalysisd",
-  "com.apple.photoanalysisd",
-  "com.apple.mlhostd",
-  "com.apple.amsengagementd",
-  // Renders every lock-screen wallpaper in the gallery on each boot
-  "com.apple.PosterBoard",
-];
-
 export interface SimulatorDevice {
   readonly udid: string;
   readonly name: string;
@@ -158,11 +117,9 @@ export function createSimctlAdapter(input: { run?: SimctlRun } = {}): SimulatorA
       return exactDevice((await run(["create", label, deviceType, runtime], 30_000)).trim()).toUpperCase();
     },
     async boot(udid) {
-      const device = exactDevice(udid);
-      await run(["boot", device, ...leanSimulatorJobs.map((job) => `--disabledJob=${job}`)], 120_000);
       // A fresh device's first boot can take minutes; the service owns this
       // wait, never a CLI request (VUH-1816).
-      await run(["bootstatus", device], 600_000);
+      await run(["bootstatus", exactDevice(udid), "-b"], 600_000);
     },
     async shutdown(udid) {
       await run(["shutdown", exactDevice(udid)], 30_000);

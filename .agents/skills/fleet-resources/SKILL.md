@@ -68,7 +68,7 @@ load peaks did not fall, so keep the load and available-memory guards and use
 the governor's observed capacity. Task-specific owner budgets still bind;
 a source/default change does not authorize increasing live capacity.
 Heavy and simulator leases have independent budgets. Automatic simulator
-capacity gives simulators half the machine at the measured lean cost of one
+capacity gives simulators half the machine at the measured cost of one
 simulator under test (34 GiB footprint, two cores): one on the 18-core, 128 GiB
 Mac, where memory, not CPU, binds. Load and available-memory guards gate both. A cold boot burns about ten
 cores for two minutes, ahead of the one-minute load average, so the governor
@@ -188,12 +188,6 @@ process exits between observations can undercount it. Partial or unavailable
 samples do not mean zero. Diagnostic samples never grant device authority.
 Whole-machine admission includes these costs and bounds Darwin's memory estimate
 by free and file-backed pages; do not subtract a device's charge a second time.
-
-Leased devices boot lean: `simctl boot --disabledJob=…` for the Apple
-Intelligence, Siri, suggestions, News, Mail, Weather, Tips, indexing,
-media-analysis and PosterBoard jobs (`leanSimulatorJobs`). The home screen,
-widgets, keyboard and your app render as usual. If a test needs one of those
-features, say so to the lead rather than booting a device by hand.
 
 Touch the lease while actively using it; its default idle timeout is ten
 minutes. Release when finished. Release, idle expiry or a verified seat exit

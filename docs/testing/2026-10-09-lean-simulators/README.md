@@ -4,6 +4,19 @@ On 2026-10-09, two booted iOS 27 simulators held the 18-core, 128 GiB Mac at
 load 340, and the fleet dropped to one simulator slot. This run measures what
 one simulator costs and what the lean boot profile saves.
 
+**Correction (2026-10-10): the lean profile had no effect and is removed.**
+Inside a device booted with `simctl boot --disabledJob=…`, `launchctl
+print-disabled` listed none of the labels in either the `system` or
+`user/501` domain. `intelligenceflowd`, `modelmanagerd`, `peopled`, `newsd`,
+`assistantd`, `suggestd` and `PosterBoard` all ran. A runtime `launchctl
+disable` plus `bootout` was relaunched on demand. The original check that
+"every disabled daemon stayed off" split `ps` output on spaces, and every
+runtime path contains `iOS 27.0.simruntime`, so it could never match. Lean
+A and B below are the same boot as the baseline; their differences are
+run-to-run noise. The rest of this record stands: a cold boot's two-minute
+burst is the cost, overlapping boots caused load 340, and memory binds
+capacity.
+
 ## Method
 
 Every run used one leased device (`clankie simulator acquire`, iPhone 17,
@@ -38,28 +51,26 @@ Mean boot CPU per minute after submission:
 | Lean A   | 858%    | 668 | 155 | 84  | 1   |
 | Lean B   | 1014%   | 568 | 23  | 26  | 12  |
 
-Lean B uses about 20% fewer CPU-seconds over the boot (≈990 against ≈1230
-core-seconds) and finishes its burst a minute sooner. It does not lower the
-first minute's peak. That peak comes from SpringBoard's first render of the
+The runs differ by about 20% in boot CPU-seconds (≈990 against ≈1230
+core-seconds); per the correction above, that is noise between identical boots.
+None lowers the first minute's peak. That peak comes from SpringBoard's first render of the
 wallpaper gallery: about a dozen poster extensions (Mercury, Pride,
-Kaleidoscope, Gradient, Unity and others), plus widgets. They still render
-with `PosterBoard` disabled, and no launchd label covers them. Lean B's idle
-mean comes from one `mlhostd` spike that ran despite its disabled label (an
-XPC-launched instance). Its median idle stays at 0.5%.
+Kaleidoscope, Gradient, Unity and others), plus widgets. Lean B's idle mean
+comes from one `mlhostd` spike. Its median idle stays at 0.5%.
 
 Kernel footprint of the idle device was 31.5 GB at baseline and 29.0 GB lean.
 Other seats' iOS 27 iPhones running their app under an XCUITest driver held
 1.5–2.1 cores steady at 35.7 GB and 36.9 GB footprint (about 34 GiB).
 
-Every disabled daemon stayed off inside the lean device. The home screen
+The home screen
 (wallpaper, Maps and Calendar widgets, icons, dock) was identical before and
 after. `simctl boot` accepts unknown `--disabledJob` labels (exit 0), so one
 list serves both the iOS 26.5 and iOS 27 runtimes.
 
 ## Two simulators
 
-On CPU, two simulators fit within the 1.5 load guard (27 on 18 cores): lean
-ones idle at under a quarter core, and one with an app under test holds about
+On CPU, two simulators fit within the 1.5 load guard (27 on 18 cores): idle
+ones run at under a quarter core, and one with an app under test holds about
 two cores. Two **concurrent boots** do not:
 each boot alone pushed load1 to 170–200 for about two minutes, and two
 overlapping boots reproduce the original load 340. The one-minute load average
