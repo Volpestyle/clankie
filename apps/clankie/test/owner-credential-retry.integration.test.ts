@@ -312,8 +312,6 @@ async function fixture(
     censusFleets: async () => [],
     deps: { herdrAvailable: () => false } as unknown as CaptainDeps,
     turnSettled: new TurnSettledLog(join(root, "settled.jsonl")),
-    goalExecutionReason: () => undefined,
-    refuseNativeGoal: () => false,
     credentialRejected: async (provider, _detail, allowRefresh = true) => {
       recoveryCalls.push(provider);
       const pending = allowRefresh ? refresh(provider) : Promise.resolve("failed");

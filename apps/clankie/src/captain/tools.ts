@@ -101,10 +101,8 @@ export interface TurnContext {
   shell?: boolean | undefined;
   /** Host-stamped Discord message a `herdr_watch` from this turn answers. */
   discordOrigin?: DiscordWatchOrigin | undefined;
-  /** True for a host-authored goal continuation or scheduled wake. */
+  /** True for a host-authored scheduled wake. */
   autonomous?: boolean | undefined;
-  /** Current host-owned refusal reason for service goals; native seats cannot budget that loop. */
-  goalExecutionReason?: (() => string | undefined) | undefined;
   /** Bound by an operator conversation to publish one deliberate finished file into its transcript. */
   publishFile?:
     | ((input: {
@@ -1472,63 +1470,11 @@ function autonomyTools(autonomy: AutonomyStore, turn: TurnContext): ToolDefiniti
   };
   return [
     defineTool({
-      name: "create_goal",
-      label: "Create goal",
-      description:
-        "Propose a durable goal for this Pi-owned conversation. It stays inactive until the owner confirms with /goal accept. Never infer a goal from an ordinary task. State a checkable objective; every goal has a finite token budget (default 1,000,000). Native harness seats refuse service goals because their continuations and usage cannot be enforced by this loop.",
-      parameters: Type.Object({
-        objective: Type.String({ minLength: 1, maxLength: 16_384 }),
-        token_budget: Type.Optional(Type.Integer({ minimum: 1 })),
-      }),
-      executionMode: "sequential",
-      execute: async (_id, params) => {
-        const reason = turn.goalExecutionReason?.();
-        if (reason !== undefined) throw new Error(reason);
-        return json(autonomy.proposeGoal(conversationId(), params.objective, params.token_budget));
-      },
-    }),
-    defineTool({
-      name: "get_goal",
-      label: "Inspect goal",
-      description:
-        "Read this conversation's proposed or active goal, usage, autonomy switch, pending self-wake, and the goal's recent decision journal.",
+      name: "get_wake",
+      label: "Inspect self-wake",
+      description: "Read whether unprompted work (Auto) is on and this conversation's pending self-wake.",
       parameters: Type.Object({}),
-      execute: async () =>
-        json({
-          ...autonomy.status(conversationId()),
-          recentDecisions: autonomy.recentDecisions(conversationId()),
-        }),
-    }),
-    defineTool({
-      name: "note_goal_decision",
-      label: "Note goal decision",
-      description:
-        "Append one line to the current goal's decision journal: what you decided, why, and the evidence behind it. Use when goal work makes a real choice — an approach picked, a hypothesis ruled out, a change discarded — not for routine motion. get_goal returns the recent trail so a later turn resumes from it.",
-      parameters: Type.Object({
-        decision: Type.String({ minLength: 1, maxLength: 512 }),
-        why: Type.String({ minLength: 1, maxLength: 512 }),
-        evidence: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-      }),
-      executionMode: "sequential",
-      execute: async (_id, params) =>
-        json(
-          autonomy.noteDecision(conversationId(), {
-            decision: params.decision,
-            why: params.why,
-            ...(params.evidence === undefined ? {} : { evidence: params.evidence }),
-            ...(turn.autonomous === true ? { autonomous: true } : {}),
-          }),
-        ),
-    }),
-    defineTool({
-      name: "update_goal",
-      label: "Update goal",
-      description:
-        "Mark the current goal complete only after verifying the full objective, or blocked when no meaningful progress is possible without owner input or an external change. You cannot rewrite, pause, or resume the objective.",
-      parameters: Type.Object({ status: StringEnum(["complete", "blocked"]) }),
-      executionMode: "sequential",
-      execute: async (_id, params) =>
-        json(autonomy.updateGoal(conversationId(), params.status as "complete" | "blocked")),
+      execute: async () => json(autonomy.status(conversationId())),
     }),
     defineTool({
       name: "schedule_wake",

@@ -201,29 +201,20 @@ credential holder.
   history is reference-only. Ctrl+X switches between the fork and the main
   thread while both stay alive; Ctrl+C discards the fork and restores the main
   transcript. The footer names the open side conversation from either side.
-- `/goal` shows the selected conversation's durable goal. `/goal <objective>`
-  starts one with a 1,000,000 model-token budget; `--tokens <n>` overrides it.
-  `/goal accept` activates Clankie's inactive proposal, and `pause|resume|clear`
-  remain owner controls. Native harness heads refuse service goals because the
-  service cannot enforce their continuation or usage budget.
 - `/question list` shows Clankie's pending owner asks across source conversations.
   `/question` reads the selected source's immutable target; answer with
   `/question answer NUMBER`, `/question text TEXT` or `/question worker JSON` for
   native question-ID maps. `/question cancel` marks it moot. Cards show what waits,
   recommendation, steps and source; answers resolve everywhere and wake that
   source without granting credentials or changing room trust.
-- Goal activation, acceptance, resume and `/auto on` use the owner
-  credential; the captain bearer receives HTTP 403. The headless equivalents
-  are `clankie conversations goal ID accept|resume` and
-  `clankie conversations goal ID set --tokens N <objective>`.
+- `/auto on` uses the owner credential; the captain bearer receives HTTP 403.
+  The headless equivalent is `clankie auto on`.
 - `/autonomy off|low|high|full` sets the owner's autonomy dial, how much
   Clankie decides without asking (ADR 0263). `/auto on|off` is the master switch
-  for unprompted work: projects on Auto, goal continuations and scheduled
-  self-wakes (ADR 0264). `/project` lists projects under the Auto switch, each
-  with its status line (agents working, landed today, needs you), and sets a
-  project's Auto and focus.
-  `/autonomy clear` removes the selected conversation's pending wake without
-  changing its goal.
+  for unprompted work: projects on Auto and scheduled self-wakes (ADR 0264).
+  `/project` lists projects under the Auto switch, each with its status line
+  (agents working, landed today, needs you), and sets a project's Auto and focus.
+  `/autonomy clear` removes the selected conversation's pending wake.
 - `/cd` opens the conversation for another directory and moves the console's
   shell escape and completion with it.
 - Type `/skill-name` for direct skill invocation or `$` at a token boundary for

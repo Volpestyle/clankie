@@ -11,9 +11,9 @@ import type { FaceShellCommand } from "./shell/shell.ts";
 export interface AutonomyCommandServices {
   /** The owner's one dial over the fleet settings API (ADR 0263). */
   readonly level?: ((args: readonly string[]) => Promise<AutonomyCommandResult>) | undefined;
-  /** The selected conversation's goal and self-wake runner. */
-  readonly goals?: ((command: OperatorAutonomyCommand) => Promise<OperatorAutonomyStatus>) | undefined;
-  readonly formatGoals?: (status: OperatorAutonomyStatus) => string;
+  /** The master Auto switch and the selected conversation's self-wake. */
+  readonly wakes?: ((command: OperatorAutonomyCommand) => Promise<OperatorAutonomyStatus>) | undefined;
+  readonly formatWakes?: (status: OperatorAutonomyStatus) => string;
 }
 
 const USAGE = `Usage: /autonomy [status|${AutonomyLevelSchema.options.join("|")}|clear]`;
@@ -24,8 +24,8 @@ const USAGE = `Usage: /autonomy [status|${AutonomyLevelSchema.options.join("|")}
  * chat's scheduled wake.
  */
 export function autonomyCommand(services: AutonomyCommandServices): FaceShellCommand {
-  const { level, goals } = services;
-  const formatGoals = services.formatGoals ?? ((status) => `Goals and self-wakes: ${onOff(status.enabled)}`);
+  const { level, wakes } = services;
+  const formatWakes = services.formatWakes ?? ((status) => `Auto: ${onOff(status.enabled)}`);
   return {
     name: "autonomy",
     aliases: [],
@@ -33,7 +33,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
     argumentHint: "[off|low|high|full|clear]",
     takesArgument: true,
     async run(argument, shell): Promise<void> {
-      if (level === undefined && goals === undefined) {
+      if (level === undefined && wakes === undefined) {
         shell.insertCommandResult("/autonomy", "Autonomy controls are unavailable.", "error");
         return;
       }
@@ -41,11 +41,11 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
       if (input === "") {
         await runSettingsMenu(shell, "/autonomy", async () => {
           const dial = level === undefined ? undefined : await level([]);
-          const status = goals === undefined ? undefined : await goals({ action: "status" });
+          const status = wakes === undefined ? undefined : await wakes({ action: "status" });
           return {
             title: [
               ...(dial === undefined ? [] : [autonomyLevelDescription(dial.level)]),
-              ...(status === undefined ? [] : [formatGoals(status).split("\n").join(" · ")]),
+              ...(status === undefined ? [] : [formatWakes(status).split("\n").join(" · ")]),
             ].join(" · "),
             actions: [
               ...(level === undefined
@@ -62,11 +62,11 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
                 ? []
                 : [
                     {
-                      value: "goals",
+                      value: "auto",
                       label: status.enabled ? "Turn Auto off" : "Turn Auto on",
                       hint: "Whether he works unprompted (/auto); the level is how much he asks",
                       async run() {
-                        await goals!({ action: "set_enabled", enabled: !status.enabled });
+                        await wakes!({ action: "set_enabled", enabled: !status.enabled });
                         return `Auto ${onOff(!status.enabled)}.`;
                       },
                     },
@@ -79,7 +79,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
                       label: "Clear the scheduled wake",
                       hint: status.wake.at,
                       async run() {
-                        await goals!({ action: "clear_wake" });
+                        await wakes!({ action: "clear_wake" });
                         return "Wake cleared.";
                       },
                     },
@@ -105,7 +105,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
             : input === "clear"
               ? { action: "clear_wake" }
               : undefined;
-        if (input === "status" && goals === undefined && level !== undefined) {
+        if (input === "status" && wakes === undefined && level !== undefined) {
           shell.insertCommandResult(
             "/autonomy",
             autonomyLevelDescription((await level([])).level),
@@ -113,15 +113,15 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
           );
           return;
         }
-        if (command === undefined || goals === undefined) {
+        if (command === undefined || wakes === undefined) {
           shell.insertCommandResult("/autonomy", USAGE, "error");
           return;
         }
-        const status = await goals(command);
+        const status = await wakes(command);
         const dial = input === "status" && level !== undefined ? await level([]) : undefined;
         shell.insertCommandResult(
           "/autonomy",
-          [...(dial === undefined ? [] : [autonomyLevelDescription(dial.level)]), formatGoals(status)].join(
+          [...(dial === undefined ? [] : [autonomyLevelDescription(dial.level)]), formatWakes(status)].join(
             "\n",
           ),
           status.error === undefined ? "success" : "error",
@@ -137,18 +137,18 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
   };
 }
 
-/** `/auto` is the master switch for unprompted work (ADR 0264): projects on Auto, goals and self-wakes. */
+/** `/auto` is the master switch for unprompted work (ADR 0264): projects on Auto and self-wakes. */
 export function autoCommand(
-  goals: ((command: OperatorAutonomyCommand) => Promise<OperatorAutonomyStatus>) | undefined,
+  wakes: ((command: OperatorAutonomyCommand) => Promise<OperatorAutonomyStatus>) | undefined,
 ): FaceShellCommand {
   return {
     name: "auto",
     aliases: [],
-    description: "Turn unprompted work on or off: projects on Auto, goals and self-wakes",
+    description: "Turn unprompted work on or off: projects on Auto and self-wakes",
     argumentHint: "[on|off]",
     takesArgument: true,
     async run(argument, shell): Promise<void> {
-      if (goals === undefined) {
+      if (wakes === undefined) {
         shell.insertCommandResult("/auto", "Auto controls are unavailable.", "error");
         return;
       }
@@ -158,7 +158,7 @@ export function autoCommand(
         return;
       }
       try {
-        const status = await goals(
+        const status = await wakes(
           input === "on" || input === "off"
             ? { action: "set_enabled", enabled: input === "on" }
             : { action: "status" },
@@ -166,7 +166,7 @@ export function autoCommand(
         shell.insertCommandResult(
           "/auto",
           status.enabled
-            ? "Auto is on: Clankie works projects on Auto, goals and self-wakes without being asked. Choose projects with /project."
+            ? "Auto is on: Clankie works projects on Auto and self-wakes without being asked. Choose projects with /project."
             : "Auto is off: nothing starts unprompted.",
           status.error === undefined ? "success" : "error",
         );

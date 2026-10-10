@@ -489,15 +489,15 @@ describe("protocol", () => {
         op: "autonomy",
         schemaVersion: 1,
         conversationId: "conversation-global-default",
-        command: { action: "set_goal", objective: "Ship it", tokenBudget: 10_000 },
+        command: { action: "set_enabled", enabled: true },
       }),
-    ).toMatchObject({ op: "autonomy", command: { action: "set_goal" } });
+    ).toMatchObject({ op: "autonomy", command: { action: "set_enabled" } });
     expect(() =>
       OperatorConversationServiceRequestSchema.parse({
         op: "autonomy",
         schemaVersion: 1,
         conversationId: "conversation-global-default",
-        command: { action: "set_goal", objective: "Ship it", tokenBudget: 0 },
+        command: { action: "set_goal", objective: "Ship it" },
       }),
     ).toThrow();
     expect(OperatorConversationServiceRequestSchema.parse({ op: "roster", schemaVersion: 1 })).toMatchObject({

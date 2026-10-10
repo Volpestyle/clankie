@@ -79,8 +79,6 @@ async function fixture(boundGraceMs = 20) {
     censusFleets: async () => [],
     deps: {} as CaptainDeps,
     turnSettled: new TurnSettledLog(join(root, "metrics.jsonl")),
-    goalExecutionReason: () => undefined,
-    refuseNativeGoal: () => false,
   });
   let store = new ConversationStore(join(root, "conversations"), runner);
   store.rememberNativeHead("global-default", "original-claude-session");

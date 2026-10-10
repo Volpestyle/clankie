@@ -102,16 +102,13 @@ This checklist records no executed passes. Automated links describe coverage at 
 - **Look:** `linear.webhook` decision/delivery IDs and target's `clankie conversations show ID --limit 20` / `tail ID`; HTTP 200 alone proves nothing about turns.
 - **Automation:** [signed HTTP/restart/coalescing](../../apps/clankie/test/linear-webhook.integration.test.ts), [own-write matching](../../apps/clankie/test/linear-revision-receipts-integration.test.ts); real provider attribution is manual-only.
 
-### 9. Goal self-activation or budget escape — [VUH-1676](https://linear.app/vuhlp/issue/VUH-1676), [VUH-1686](https://linear.app/vuhlp/issue/VUH-1686)
+### 9. Agent turns Auto on itself — [VUH-1676](https://linear.app/vuhlp/issue/VUH-1676), [VUH-2029](https://linear.app/vuhlp/issue/VUH-2029)
 
-- [ ] **Setup:** Disposable Pi-owned conversation with instrumented provider usage; separate captain and owner credentials, never printed.
-- **Action:** Let the agent propose a goal; attempt activation via captain authority, then restart. Owner accepts via `clankie conversations goal ID accept`;
-  separately set a small explicit budget with `clankie conversations goal ID set --tokens N "objective"`. Repeat proposal/accept with a native head.
-- **Expected:** Proposal/restart never activates itself; captain activation/accept/resume/autonomy-on returns `goal_owner_required`.
-  Owner acceptance activates only that goal. Accounted exhaustion stops before another provider request and survives restart; in-flight overshoot is recorded.
-  Native-head service goals refuse with `native_goal_unsupported`. This is an API authority test, not same-UID OS isolation.
-- **Look:** `clankie conversations goal ID`, `autonomy.json`, turn journal and provider request/usage counter, including failed/retried calls.
-- **Automation:** [activation authority](../../apps/clankie/test/goal-activation-authority.integration.test.ts), [budget execution](../../apps/clankie/test/goal-execution-integration.test.ts), [native refusal](../../apps/clankie/test/native-goal-refusal.integration.test.ts); paid-provider accounting is manual-only.
+- [ ] **Setup:** Disposable service with Auto off and no project on Auto; separate captain and owner credentials, never printed; one paired device each with Supervise and Take Control.
+- **Action:** Try `set_enabled: true` with the captain bearer, directly through the captain, with the Supervise device, and with a revoked or expired device. Then run `clankie auto on` with the owner credential, and turn Auto off with the captain bearer.
+- **Expected:** Every non-owner attempt returns `goal_owner_required` (HTTP 403) or 401, and `autonomy.json` is unchanged. The owner CLI and an active Take Control device turn Auto on. Anyone with Clankie's credential may turn it off. No turn starts. This is an API authority test, not same-UID OS isolation.
+- **Look:** `clankie auto status`, `autonomy.json`, and the turn journal.
+- **Automation:** [Auto switch authority](../../apps/clankie/test/auto-switch-authority.integration.test.ts).
 
 ### 10. Support grant expires or is revoked — [VUH-1367](https://linear.app/vuhlp/issue/VUH-1367)
 

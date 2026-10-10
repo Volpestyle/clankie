@@ -50,6 +50,11 @@
       "pattern": "shuts the device down and deletes it only if the lease created it",
       "adr": "0249 (VUH-1829 amendment)",
       "now": "Release and expiry stop and retain leased simulator devices for reuse; deletion requires an explicit owner tidy."
+    },
+    {
+      "pattern": "\\b(create_goal|note_goal_decision|update_goal|get_goal)\\b|/goal accept|conversations goal ",
+      "adr": "0264",
+      "now": "Projects on Auto carry standing work; clankie auto / /auto is the switch, get_wake reads the pending wake."
     }
   ]
 }

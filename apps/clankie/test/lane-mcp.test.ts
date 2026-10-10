@@ -315,7 +315,7 @@ describe("a lane's tool bank", () => {
     const operator = new Set((await bank("operator")).tools.map((tool) => tool.name));
     const social = new Set((await bank("discord_presence")).tools.map((tool) => tool.name));
 
-    for (const name of ["create_goal", "herdr_watch", "email_send"]) {
+    for (const name of ["schedule_wake", "herdr_watch", "email_send"]) {
       expect(operator.has(name), `operator should hold ${name}`).toBe(true);
       expect(social.has(name), `a social lane should not hold ${name}`).toBe(false);
     }

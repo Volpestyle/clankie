@@ -17,7 +17,7 @@ customize him, connect a team, or know where your work goes.
   </div>
   <div class="diagram-col diagram-center">
     <h4>His home</h4>
-    <div class="dnode dnode-main"><strong>Clankie's service</strong><span>conversations · memory · goals</span><span>tools · credentials · access</span></div>
+    <div class="dnode dnode-main"><strong>Clankie's service</strong><span>conversations · memory · projects</span><span>tools · credentials · access</span></div>
     <div class="dnode"><strong>On his host</strong><span>your machine or a managed machine</span></div>
   </div>
   <div class="diagram-col">
@@ -47,16 +47,16 @@ wakes for its chat go to it; when it closes, pi takes over again.
 Requests from Discord text or voice run as their own visible threads under
 Clankie, several at once, and the answer returns to the room that asked.
 
-## History, memory, and goals
+## History, memory, and projects
 
-| Store                | What it gives you                                                                              |
-| -------------------- | ---------------------------------------------------------------------------------------------- |
-| Conversation history | The thread you return to: messages, visible tool work, and delivered files.                    |
-| Memory               | Selected experiences and facts for later conversations, kept until forgotten.                  |
-| Goal                 | An objective you approve that he keeps working on, within a token budget, when autonomy is on. |
+| Store                | What it gives you                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| Conversation history | The thread you return to: messages, visible tool work, and delivered files.          |
+| Memory               | Selected experiences and facts for later conversations, kept until forgotten.        |
+| Projects             | Work you assign him; with Auto on he works its backlog unprompted, toward its focus. |
 
 Memory recall is filtered by who is asking: private operator notes never reach
-a social Discord room. Goals and self-wakes use the conversation's existing
+a social Discord room. Auto rounds and self-wakes use the conversation's existing
 permissions. See [memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md).
 
 ## Models, skills, and tools

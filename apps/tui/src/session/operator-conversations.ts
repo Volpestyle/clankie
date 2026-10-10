@@ -96,7 +96,7 @@ export function createCaptainOperatorConversationClient(
         ? "Owner authentication required to acknowledge report history."
         : request.op.startsWith("owner_update_")
           ? "Owner authentication required for mailbox updates."
-          : "Owner authentication required to start, accept, resume, or enable autonomous goals.";
+          : "Owner authentication required to turn Auto on.";
     const ownerRequired =
       request.op.startsWith("owner_update_") ||
       request.op === "acknowledge_worker_report_history" ||

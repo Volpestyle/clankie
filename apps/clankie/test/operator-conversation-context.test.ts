@@ -89,7 +89,7 @@ describe("operator conversation context", () => {
       });
     });
 
-    const internal = store.submitInternal("global-default", "autonomy", "goal");
+    const internal = store.submitInternal("global-default", "autonomy", "wake");
     if (internal.status !== "accepted") throw new Error("internal turn was not accepted");
     await drain();
     expect(started).toEqual(["autonomy"]);

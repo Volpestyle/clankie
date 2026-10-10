@@ -114,7 +114,6 @@ export interface CreateOperatorServiceContext {
     includeRead?: boolean,
     acceptedAfterMs?: number,
   ) => WorkerReportSummary[];
-  readonly goalExecutionReason: (conversationId: string) => string | undefined;
 }
 
 export function createOperatorService(
@@ -180,17 +179,8 @@ export function createOperatorService(
       if (!ctx.conversations.runsCaptainTurns(request.conversationId)) {
         throw new Error("Only Clankie's own conversations have captain autonomy");
       }
-      if (
-        request.command.action === "set_goal" ||
-        request.command.action === "accept_goal" ||
-        (request.command.action === "set_goal_status" && request.command.status === "active")
-      ) {
-        await ctx.refreshFleet({ force: true });
-        const reason = ctx.goalExecutionReason(request.conversationId);
-        if (reason !== undefined) throw new ConversationRefusedError(reason);
-      }
-      // Revalidate the presented owner/device after asynchronous census, at
-      // the activation boundary. A captain credential supplies no authority.
+      // Revalidate the presented owner/device at the activation boundary.
+      // A captain credential supplies no authority.
       if (requiresOwner && (!(await authority!.authorize()) || !authority!.current()))
         throw new Error("goal_owner_required");
       const status = ctx.autonomy.command(request.conversationId, request.command);

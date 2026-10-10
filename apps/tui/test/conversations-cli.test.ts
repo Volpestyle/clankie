@@ -12,8 +12,8 @@ import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
 import { expect, it } from "vitest";
 import { runConversationsCommand } from "../src/command/conversations.ts";
 
-it("runs goal CLI commands through real HTTP with separate owner and captain authority", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clankie-goal-cli-"));
+it("runs the Auto switch through real HTTP with separate owner and captain authority", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-auto-cli-"));
   const ownerToken = mintOperatorToken();
   const ownerCredentials = new FileCredentialStore(join(root, "owner.json"));
   await ownerCredentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: ownerToken });
@@ -46,63 +46,41 @@ it("runs goal CLI commands through real HTTP with separate owner and captain aut
     let output = "";
     const options = {
       host: `http://127.0.0.1:${address.port}`,
-      env: { CLANKIE_CAPTAIN_TOKEN: "goal-cli-captain", CLANKIE_OPERATOR_TOKEN: ownerToken },
+      env: { CLANKIE_CAPTAIN_TOKEN: "auto-cli-captain", CLANKIE_OPERATOR_TOKEN: ownerToken },
       stdout: { write: (text: string) => (output += text) },
       captainCredentialStore: new FileCredentialStore(join(root, "captain.json")),
       operatorCredentialStore: ownerCredentials,
     };
-    for (const action of [[], ["status"], ["pause"], ["clear"]]) {
-      expect(await runConversationsCommand(["goal", "goal-room", ...action], options)).toBe(0);
+    for (const action of [[], ["status"], ["off"]]) {
+      expect(await runConversationsCommand(["auto", ...action], options)).toBe(0);
     }
-    for (const action of [["set", "--tokens", "250", "Finish", "the", "task"], ["accept"], ["resume"]]) {
-      output = "";
-      expect(
-        await runConversationsCommand(["goal", "goal-room", ...action], {
-          ...options,
-          env: {},
-        }),
-      ).toBe(0);
-      expect(JSON.parse(output)).toEqual({ enabled: false });
-    }
+    output = "";
+    expect(await runConversationsCommand(["auto", "on"], { ...options, env: {} })).toBe(0);
+    expect(JSON.parse(output)).toEqual({ auto: "off" });
     expect(requests).toEqual([
-      ...[
-        { action: "status" },
-        { action: "status" },
-        { action: "set_goal_status", status: "paused" },
-        { action: "clear_goal" },
-      ].map((command) => ({
-        conversationId: "goal-room",
-        command,
-        authorization: "Bearer goal-cli-captain",
-      })),
-      ...[
-        { action: "set_goal", objective: "Finish the task", tokenBudget: 250 },
-        { action: "accept_goal" },
-        { action: "set_goal_status", status: "active" },
-      ].map((command) => ({
-        conversationId: "goal-room",
-        command,
+      ...[{ action: "status" }, { action: "status" }, { action: "set_enabled", enabled: false }].map(
+        (command) => ({
+          conversationId: "global-default",
+          command,
+          authorization: "Bearer auto-cli-captain",
+        }),
+      ),
+      {
+        conversationId: "global-default",
+        command: { action: "set_enabled", enabled: true },
         authorization: `Bearer ${ownerToken}`,
-      })),
+      },
     ]);
     const acceptedRequests = requests.length;
     const captainOnly = {
       ...options,
-      env: { CLANKIE_CAPTAIN_TOKEN: "goal-cli-captain" },
+      env: { CLANKIE_CAPTAIN_TOKEN: "auto-cli-captain" },
       operatorCredentialStore: new FileCredentialStore(join(root, "no-owner.json")),
     };
-    for (const action of [["set", "a task"], ["accept"], ["resume"]]) {
-      await expect(runConversationsCommand(["goal", "goal-room", ...action], captainOnly)).rejects.toThrow(
-        "Owner operator credential required",
-      );
-    }
-    for (const action of [
-      ["set", "--tokens", "0", "task"],
-      ["set", "--tokens", "1.5", "task"],
-      ["accept", "--tokens", "100"],
-    ]) {
-      await expect(runConversationsCommand(["goal", "goal-room", ...action], captainOnly)).rejects.toThrow();
-    }
+    await expect(runConversationsCommand(["auto", "on"], captainOnly)).rejects.toThrow(
+      "Owner operator credential required",
+    );
+    await expect(runConversationsCommand(["auto", "maybe"], captainOnly)).rejects.toThrow();
     expect(requests).toHaveLength(acceptedRequests);
   } finally {
     server.closeAllConnections();

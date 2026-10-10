@@ -3997,12 +3997,11 @@ paths:
         These operations require the original owner; captain bearers and
         preference answers cannot save a project. Acceptance uses the durable
         CREATE boundary, saves confirmed roles, and never hires workers.
-        The `autonomy` command `set_goal` activates an owner-authored goal;
-        `accept_goal` confirms an inactive model proposal. Service goals default
-        to a finite 1,000,000-token budget and refuse activation for native heads.
-        Starting, accepting or resuming a goal, and enabling autonomy, require
-        an operator credential or active terminalControl device authority.
-        A captain bearer alone receives 403 goal_owner_required.
+        The `autonomy` command reads or sets the master Auto switch for unprompted
+        work (projects on Auto and self-wakes, ADR 0264) and clears a pending
+        self-wake. Turning Auto on requires an operator credential or active
+        terminalControl device authority; a captain bearer alone receives
+        403 goal_owner_required. Service goals were retired by ADR 0264.
         Seat scopes
         identify Herdr direct-send/projection threads. `cancel` interrupts one
         accepted run: the captain aborts the live model turn and the durable

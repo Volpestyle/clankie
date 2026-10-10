@@ -1,7 +1,7 @@
 /**
  * The seat's outbox ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)).
  *
- * Goals, self-wakes, herdr completion watches, and rooms handing work to the
+ * Self-wakes, Auto rounds, herdr completion watches, and rooms handing work to the
  * head all queue turns into the operator conversation. While a harness sits in
  * the seat, those turns come here instead of the pi lane, and the seat's
  * stdio bridge long-polls them out and pushes each one into the session as a

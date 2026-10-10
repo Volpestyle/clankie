@@ -28,7 +28,6 @@ import {
   type OperatorConversationScope,
   type OperatorConversationStreamEvent,
   type OperatorDeliveredFile,
-  type OperatorGoal,
   type ReplayOperatorConversationRequest,
   type ReplayOperatorConversationResult,
   type SubmitOperatorConversationTurn,
@@ -1785,7 +1784,6 @@ export class ConversationStore {
     conversationId: string,
     message: string,
     origin: NonNullable<ConversationTurnContext["origin"]>,
-    expectedGoal?: OperatorGoal,
     delivery?: ConversationTurnContext["delivery"],
   ): SubmitOperatorConversationTurnResult {
     const meta = this.metas.get(conversationId);
@@ -1795,7 +1793,6 @@ export class ConversationStore {
     }
     return this.enqueue(meta, message, undefined, false, this.runner, {
       origin,
-      ...(expectedGoal === undefined ? {} : { expectedGoal }),
       ...(delivery === undefined ? {} : { delivery }),
     });
   }
@@ -2650,13 +2647,7 @@ export class ConversationStore {
     runner: ConversationRunner = this.runner,
     provenance: Pick<
       ConversationTurnContext,
-      | "origin"
-      | "expectedGoal"
-      | "surfaceClientId"
-      | "attachments"
-      | "ownerAuthority"
-      | "questionBinding"
-      | "inputAnswer"
+      "origin" | "surfaceClientId" | "attachments" | "ownerAuthority" | "questionBinding" | "inputAnswer"
     > & {
       questionAnswer?: {
         readonly record: QuestionRecord;
@@ -2853,7 +2844,6 @@ export class ConversationStore {
           },
           ...(publishOperatorMessage ? {} : { internal: true as const }),
           ...(provenance.origin === undefined ? {} : { origin: provenance.origin }),
-          ...(provenance.expectedGoal === undefined ? {} : { expectedGoal: provenance.expectedGoal }),
           ...(provenance.surfaceClientId === undefined
             ? {}
             : { surfaceClientId: provenance.surfaceClientId }),

@@ -2,7 +2,8 @@
 
 Status: accepted (James, 2026-08-26). Extends
 [ADR 0130](0130-goals-and-self-wakes-share-the-operator-thread.md) and
-[ADR 0107](0107-a-one-shot-turn-still-leaves-a-trail.md).
+[ADR 0107](0107-a-one-shot-turn-still-leaves-a-trail.md). Archived 2026-10-10
+with service goals by [ADR 0264](0264-projects-on-auto-replace-goals.md).
 
 ## Context
 

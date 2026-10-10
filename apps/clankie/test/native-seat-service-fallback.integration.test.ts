@@ -179,8 +179,6 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
     censusFleets: async () => [],
     deps: { herdrAvailable: () => false } as unknown as CaptainDeps,
     turnSettled: new TurnSettledLog(join(root, "turn-settled.jsonl")),
-    goalExecutionReason: () => undefined,
-    refuseNativeGoal: () => false,
     credentialRejected: async (providerId) => {
       credentialRejections.push(providerId);
       // A refreshed credential is accepted by the provider again.
@@ -214,10 +212,10 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
   const receipts = new InboundSeatReceipts(join(root, "inbound.json"), conversations);
   const wakeRuns: number[] = [];
   const wakeSettlements: number[] = [];
-  autonomy.start(async (id, prompt, origin, expectedGoal) => {
+  autonomy.start(async (id, prompt) => {
     wakeRuns.push(Date.now());
     try {
-      await runAutonomyTurn(conversations, id, prompt, origin, expectedGoal);
+      await runAutonomyTurn(conversations, id, prompt);
     } finally {
       wakeSettlements.push(Date.now());
     }

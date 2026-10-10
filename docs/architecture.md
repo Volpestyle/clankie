@@ -2,7 +2,7 @@
 
 Clankie is a persistent agent with a personality, implemented as one service
 plus the clients and connections around it. The service owns his built-in pi runtime,
-conversations, goals, memory, tools, credentials, and authority. The React Native
+conversations, Auto, memory, tools, credentials, and authority. The React Native
 app in the private `clankie-app` repository reaches this service; the public
 gateway, accounts, and managed provisioning live in private `clankie-ops`.
 The service can run on
@@ -24,7 +24,7 @@ flowchart LR
   Gateway["Public gateway<br/>api.clankie.bot"]
   subgraph Host["One host: owner Mac or managed Linux"]
     Relay["Relay<br/>device grants · tails · terminal lease"]
-    Service["Clankie's service<br/>pi · conversations · goals · tools · body leases"]
+    Service["Clankie's service<br/>pi · conversations · Auto · tools · body leases"]
     State["Host-owned state<br/>memory · conversations · settings"]
     Broker["Credential broker"]
     Herdr["Herdr<br/>native worker panes"]
@@ -140,7 +140,7 @@ flowchart LR
   Discord["Discord message<br/>exact delivery id"] -->|"durable receipt"| Lane
   Voice["Voice room floor"] -->|"realtime thread asks him to act"| Lane
   Operator["TUI · app · CLI"] -->|"revision-fenced send"| Lane
-  Auto["Goal · self-wake ·<br/>worker report · watch"] --> Lane
+  Auto["Auto round · self-wake ·<br/>worker report · watch"] --> Lane
   Lane["Authenticate → lane + grant<br/>→ conversation"] --> Busy{"Run already<br/>streaming?"}
   Busy -->|yes| Steer["Steer into it<br/>(absorbed)"]
   Busy -->|no| Driver{"Native seat<br/>attached?"}
@@ -457,32 +457,25 @@ is idempotent and never wakes a conversation. The app mailbox consumes these
 contracts. See [ADR 0245](adr/0245-one-owner-ask-across-surfaces.md) and the
 [CLI contract](cli.md#owner-asks-conversations-questions-id-and-conversations-answer).
 
-### Goals and autonomous continuation
+### Auto and self-wakes
 
-The service also keeps `autonomy.json`: one proposed or owner-approved goal and one
-replaceable self-wake per operator conversation, plus a global enable switch.
-An unreadable file fails closed and surfaces `state_unreadable` to operator
-clients instead of silently re-enabling autonomous work.
-An active goal in a Pi-owned conversation queues host-authored continuation turns through the same
-conversation chain as operator messages, so every tool call and reply stays in
-the existing Pi session and public event log. A human message that arrives
-while that run is streaming steers it by default; in-flight tool calls still
-finish. Explicit `delivery: "steer"` also joins a human-started Pi turn, while
-`delivery: "queue"` waits for a separate turn on the conversation FIFO
-([ADR 0091](adr/0091-a-mid-turn-message-steers-the-turn.md)). A
-finite token budget (default 1,000,000) moves a goal to `budget_limited` before
-another provider request; failed turns retain recorded usage. Model calls persist
-inactive proposals, confirmed only by `/goal accept`. Native harness seats refuse
-service goals, and a queued goal pauses on discovering a native head.
-`/goal` owns activation, pause/resume, and clearing, while `/auto off` stops new continuations and
-wakes. A due wake queues one turn with Clankie's recorded reason and may be
-replaced by another. Neither path changes the conversation's tool set or
-authority ([ADR 0130](adr/0130-goals-and-self-wakes-share-the-operator-thread.md)).
-Each conversation also keeps an append-only goal decision journal under
-`~/.clankie/captain/goal-journal/` — one line per real choice made while
-working a goal, written through `note_goal_decision` and returned by
-`get_goal` so a continuation resumes from what was already decided
-([ADR 0132](adr/0132-a-goal-keeps-a-decision-journal.md)).
+The service keeps `autonomy.json`: the global Auto switch and one replaceable
+self-wake per operator conversation. An unreadable file fails closed and surfaces
+`state_unreadable` to operator clients instead of silently re-enabling unprompted
+work. While Auto is on, a fleet-cadence Auto round wakes the head conversation
+with every project on Auto, its focus and its live workers; unchanged evidence
+rewakes it after two hours. A due self-wake queues one turn with Clankie's
+recorded reason and may be replaced by another. Both are ordinary internal turns
+on the conversation chain, so a live native seat receives them as it receives
+any other wake. A human message that arrives while a Pi run is streaming steers
+it by default; in-flight tool calls still finish. Explicit `delivery: "steer"`
+also joins a human-started Pi turn, while `delivery: "queue"` waits for a
+separate turn on the conversation FIFO
+([ADR 0091](adr/0091-a-mid-turn-message-steers-the-turn.md)). Neither path
+changes the conversation's tool set or authority. `/auto off` stops both.
+Projects on Auto replaced the service goals of ADR 0130
+([ADR 0264](adr/0264-projects-on-auto-replace-goals.md)); a file that still
+carries a goal record loads with its switch and wakes, and the goal is dropped.
 
 ### Routines
 
@@ -506,8 +499,7 @@ The optional independent evaluator captures settled Pi turns and native Herdr
 reply projections under `~/.clankie/captain/evaluator/`. Its durable queue dispatches
 one Codex or Claude Code assessment at a time in a separate Herdr pane; structured
 reports retain outcome, efficiency, tool and harness judgments plus issue/MR
-links. Goal identity groups continuations, while conversation checkpoints leave
-task boundaries to the evaluator. Evaluator descendants are excluded from capture.
+links. Conversation checkpoints leave task boundaries to the evaluator. Evaluator descendants are excluded from capture.
 `clankie evaluator` and `/evaluator` expose the operator API controls. Linear
 following remains independent. See [ADR 0178](adr/0178-the-evaluator-has-its-own-seat.md)
 for scheduling, restart recovery and evidence limits.
@@ -828,13 +820,13 @@ Existing entry paths retain their public exports. These modules organize the
 implementation behind those entry points; callers continue to import the same
 paths.
 
-| Entry point                                                             | Domain modules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Protocol](../packages/protocol/src/index.ts)                           | [Operator conversations](../packages/protocol/src/operator-conversations.ts), [fleet messages](../packages/protocol/src/fleet-messages.ts), [terminal transport](../packages/protocol/src/operator-terminal.ts), [Discord presence](../packages/protocol/src/discord-presence.ts), [voice evidence](../packages/protocol/src/discord-voice-evidence.ts), [embodiment](../packages/protocol/src/embodiment.ts), and the other named wire-contract modules beside the barrel. The package has no other workspace dependencies.                                                                                                                                                                                                                                                                                           |
-| [HTTP app](../apps/clankie/src/app.ts)                                  | [Runtime composition](../apps/clankie/src/app/runtime.ts), [seat delivery](../apps/clankie/src/app/seat-routes.ts), [Discord routing](../apps/clankie/src/app/discord-routes.ts), [voice briefing route and renderers](../apps/clankie/src/app/voice-briefing.ts), [memory](../apps/clankie/src/app/memory-routes.ts), [pairing](../apps/clankie/src/app/pairing-routes.ts), [operator conversations](../apps/clankie/src/app/conversation-routes.ts), and [signed Linear webhooks](../apps/clankie/src/app/linear-routes.ts). Route factories take explicit typed dependencies and preserve registration order.                                                                                                                                                                                                       |
-| [Conversation store](../apps/clankie/src/captain/conversations.ts)      | [Store and lifecycle](../apps/clankie/src/captain/conversations/store.ts), [ordinary-chat Linear wakes](../apps/clankie/src/captain/conversations/linear-wakes.ts), [worker reports](../apps/clankie/src/captain/conversations/worker-reports.ts), [native seats](../apps/clankie/src/captain/conversations/native-seats.ts), [transcripts](../apps/clankie/src/captain/conversations/transcripts.ts), [channel projection](../apps/clankie/src/captain/conversations/channel-projection.ts), and [questions](../apps/clankie/src/captain/conversations/questions.ts). Extracted functions receive the typed store explicitly; class methods retain their public signatures.                                                                                                                                           |
-| [Runtime orchestration](../apps/clankie/src/captain/captain.ts)         | [Discord turns](../apps/clankie/src/captain/captain-discord-turns.ts), [operator service and fleet roster](../apps/clankie/src/captain/captain-operator-service.ts), [conversation runner](../apps/clankie/src/captain/captain-conversation-runner.ts), [worker report recovery and delivery](../apps/clankie/src/captain/captain-worker-reports.ts), [goal budgets](../apps/clankie/src/captain/captain-goals.ts), [session helpers](../apps/clankie/src/captain/captain-session.ts), [prompts](../apps/clankie/src/captain/captain-prompts.ts), [models](../apps/clankie/src/captain/captain-model.ts), [drafts](../apps/clankie/src/captain/captain-draft.ts), and [operator formatting](../apps/clankie/src/captain/captain-operator-format.ts). Factories preserve live bindings through typed context accessors. |
-| [Voice session](../packages/discord-presence-core/src/voice-session.ts) | Consent, attribution, instruction/briefing application, turn-taking, tools, and playback remain together here pending the voice fixes. The [voice floor](../packages/discord-presence-core/src/voice-floor.ts) owns floor arbitration; Vox owns native media transport.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Entry point                                                             | Domain modules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Protocol](../packages/protocol/src/index.ts)                           | [Operator conversations](../packages/protocol/src/operator-conversations.ts), [fleet messages](../packages/protocol/src/fleet-messages.ts), [terminal transport](../packages/protocol/src/operator-terminal.ts), [Discord presence](../packages/protocol/src/discord-presence.ts), [voice evidence](../packages/protocol/src/discord-voice-evidence.ts), [embodiment](../packages/protocol/src/embodiment.ts), and the other named wire-contract modules beside the barrel. The package has no other workspace dependencies.                                                                                                                                                                                                                                                                                               |
+| [HTTP app](../apps/clankie/src/app.ts)                                  | [Runtime composition](../apps/clankie/src/app/runtime.ts), [seat delivery](../apps/clankie/src/app/seat-routes.ts), [Discord routing](../apps/clankie/src/app/discord-routes.ts), [voice briefing route and renderers](../apps/clankie/src/app/voice-briefing.ts), [memory](../apps/clankie/src/app/memory-routes.ts), [pairing](../apps/clankie/src/app/pairing-routes.ts), [operator conversations](../apps/clankie/src/app/conversation-routes.ts), and [signed Linear webhooks](../apps/clankie/src/app/linear-routes.ts). Route factories take explicit typed dependencies and preserve registration order.                                                                                                                                                                                                           |
+| [Conversation store](../apps/clankie/src/captain/conversations.ts)      | [Store and lifecycle](../apps/clankie/src/captain/conversations/store.ts), [ordinary-chat Linear wakes](../apps/clankie/src/captain/conversations/linear-wakes.ts), [worker reports](../apps/clankie/src/captain/conversations/worker-reports.ts), [native seats](../apps/clankie/src/captain/conversations/native-seats.ts), [transcripts](../apps/clankie/src/captain/conversations/transcripts.ts), [channel projection](../apps/clankie/src/captain/conversations/channel-projection.ts), and [questions](../apps/clankie/src/captain/conversations/questions.ts). Extracted functions receive the typed store explicitly; class methods retain their public signatures.                                                                                                                                               |
+| [Runtime orchestration](../apps/clankie/src/captain/captain.ts)         | [Discord turns](../apps/clankie/src/captain/captain-discord-turns.ts), [operator service and fleet roster](../apps/clankie/src/captain/captain-operator-service.ts), [conversation runner](../apps/clankie/src/captain/captain-conversation-runner.ts), [worker report recovery and delivery](../apps/clankie/src/captain/captain-worker-reports.ts), [projects on Auto](../apps/clankie/src/captain/auto-projects.ts), [session helpers](../apps/clankie/src/captain/captain-session.ts), [prompts](../apps/clankie/src/captain/captain-prompts.ts), [models](../apps/clankie/src/captain/captain-model.ts), [drafts](../apps/clankie/src/captain/captain-draft.ts), and [operator formatting](../apps/clankie/src/captain/captain-operator-format.ts). Factories preserve live bindings through typed context accessors. |
+| [Voice session](../packages/discord-presence-core/src/voice-session.ts) | Consent, attribution, instruction/briefing application, turn-taking, tools, and playback remain together here pending the voice fixes. The [voice floor](../packages/discord-presence-core/src/voice-floor.ts) owns floor arbitration; Vox owns native media transport.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 Fleet members reach verified connected accounts through the service's
 `clankie_tools` discovery and `clankie_call` invocation bridge. Fleet membership

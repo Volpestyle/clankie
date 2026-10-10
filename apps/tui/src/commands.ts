@@ -1136,57 +1136,11 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         if (question.length > 0) await shell.submitUserPrompt(question);
       },
     },
-    {
-      name: "goal",
-      aliases: [],
-      description: "Show, accept, start, pause, resume, or clear this conversation's goal",
-      argumentHint: "[accept|pause|resume|clear|--tokens <n> <objective>|<objective>]",
-      takesArgument: true,
-      async run(argument, shell): Promise<void> {
-        if (conversations?.autonomy === undefined) {
-          shell.insertCommandResult("/goal", "Goals are unavailable.", "error");
-          return;
-        }
-        const input = argument.trim();
-        let command: OperatorAutonomyCommand;
-        if (input.length === 0 || input === "status") command = { action: "status" };
-        else if (input === "accept") command = { action: "accept_goal" };
-        else if (input === "pause" || input === "resume") {
-          command = { action: "set_goal_status", status: input === "pause" ? "paused" : "active" };
-        } else if (input === "clear") command = { action: "clear_goal" };
-        else {
-          const budget = /^--tokens\s+(\d+)\s+([\s\S]+)$/u.exec(input);
-          if (input.startsWith("--tokens") && budget === null) {
-            shell.insertCommandResult(
-              "/goal",
-              "Usage: /goal [--tokens <positive integer>] <objective>",
-              "error",
-            );
-            return;
-          }
-          command = {
-            action: "set_goal",
-            objective: budget?.[2]?.trim() ?? input,
-            ...(budget === null ? {} : { tokenBudget: Number.parseInt(budget[1]!, 10) }),
-          };
-        }
-        try {
-          const status = await conversations.autonomy(command);
-          shell.insertCommandResult(
-            "/goal",
-            formatAutonomyStatus(status),
-            status.error === undefined ? "success" : "error",
-          );
-        } catch (error) {
-          shell.insertCommandResult("/goal", error instanceof Error ? error.message : String(error), "error");
-        }
-      },
-    },
     autoCommand(conversations?.autonomy),
     autonomyCommand({
       level: context.commandAutonomy,
-      goals: conversations?.autonomy,
-      formatGoals: formatAutonomyStatus,
+      wakes: conversations?.autonomy,
+      formatWakes: formatAutonomyStatus,
     }),
     maximumTrustModeCommand(context.commandMaximumTrustMode),
     {
@@ -2219,16 +2173,10 @@ function conversationHint(conversation: {
 }
 
 function formatAutonomyStatus(status: OperatorAutonomyStatus): string {
-  const goal = status.goal;
   const wake = status.wake;
   return [
-    `Goals and self-wakes: ${status.enabled ? "on" : "paused"}`,
-    ...(status.error === undefined ? [] : ["State: unreadable · autonomy is fail-closed"]),
-    goal === undefined ? "Goal: none" : `Goal: ${goal.status} · ${goal.objective}`,
-    ...(goal?.status === "proposed" ? ["Confirm: /goal accept"] : []),
-    ...(goal?.tokenBudget === undefined
-      ? []
-      : [`Budget: ${String(goal.tokensUsed)} / ${String(goal.tokenBudget)} tokens`]),
+    `Auto: ${status.enabled ? "on" : "off"}`,
+    ...(status.error === undefined ? [] : ["State: unreadable · Auto is fail-closed"]),
     wake === undefined ? "Wake: none" : `Wake: ${wake.at} · ${wake.reason}`,
   ].join("\n");
 }

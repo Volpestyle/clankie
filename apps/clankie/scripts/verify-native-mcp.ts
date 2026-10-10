@@ -34,7 +34,7 @@ export async function verifyNativeMcp(input: {
   };
   const prompt =
     "This is an owner-authorized read-only MCP compatibility check. Use only Clankie's MCP tools. " +
-    "Call memory with action search and query VUH1583, then get_goal with empty arguments. " +
+    "Call memory with action search and query VUH1583, then get_wake with empty arguments. " +
     "After both return, report their actual returned values and VUH1583_NATIVE_MCP_OK. " +
     "Do not write files, start agents, ask questions, or call any other tools.";
   const claudeId = randomUUID();
@@ -66,7 +66,7 @@ export async function verifyNativeMcp(input: {
       "--setting-sources",
       "user",
       "--settings",
-      JSON.stringify({ permissions: { allow: ["mcp__lead__memory", "mcp__lead__get_goal"] } }),
+      JSON.stringify({ permissions: { allow: ["mcp__lead__memory", "mcp__lead__get_wake"] } }),
       "--tools",
       "",
       "--effort",
@@ -110,7 +110,7 @@ export async function verifyNativeMcp(input: {
         `mcp_servers.lead.env_vars=${JSON.stringify(Object.keys(common.env))}`,
         // Only the two owner-requested reads, in this disposable profile.
         'mcp_servers.lead.tools.memory.approval_mode="approve"',
-        'mcp_servers.lead.tools.get_goal.approval_mode="approve"',
+        'mcp_servers.lead.tools.get_wake.approval_mode="approve"',
       ],
       threadStartTimeoutMs: 30_000,
       startView: async (args) => {
@@ -154,7 +154,7 @@ export async function verifyNativeMcp(input: {
           (row) =>
             row.name === "lead" &&
             row.runtimeStatus === "connected" &&
-            ["memory", "get_goal"].every((name) => Object.hasOwn(row.tools ?? {}, name)),
+            ["memory", "get_wake"].every((name) => Object.hasOwn(row.tools ?? {}, name)),
         )
       )
         break;
@@ -179,13 +179,13 @@ export async function verifyNativeMcp(input: {
             entry.text.includes("VUH1583_NATIVE_MCP_OK") &&
             entry.text.includes("VUH1583_MEMORY_SENTINEL"),
         ) &&
-        ["memory", "get_goal"].every((name) =>
+        ["memory", "get_wake"].every((name) =>
           transcript.entries.some(
             (entry) => entry.type === "tool" && entry.name.endsWith(name) && entry.phase === "completed",
           ),
         );
       const codexCompleted =
-        ["memory", "get_goal"].every((name) =>
+        ["memory", "get_wake"].every((name) =>
           codexEvents.some((event) => {
             const params = event.params as {
               threadId?: string;
@@ -232,7 +232,7 @@ export async function verifyNativeMcp(input: {
           2,
         );
         assert.equal(
-          observations.filter((item) => item.method === "tools/call" && item.name === "get_goal").length,
+          observations.filter((item) => item.method === "tools/call" && item.name === "get_wake").length,
           2,
         );
         return result;

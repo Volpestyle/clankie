@@ -102,8 +102,6 @@ async function fixture() {
     censusFleets: async () => [],
     deps: { herdrAvailable: () => false } as unknown as CaptainDeps,
     turnSettled: new TurnSettledLog(join(root, "turn-settled.jsonl")),
-    goalExecutionReason: () => undefined,
-    refuseNativeGoal: () => false,
   });
   const conversations = new ConversationStore(join(root, "conversations"), runner);
   conversations.rememberNativeHead(ID, BINDING);

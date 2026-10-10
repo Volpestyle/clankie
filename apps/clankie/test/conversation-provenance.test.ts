@@ -367,7 +367,7 @@ it("validates a persisted exact room against current grants and never falls back
       deliveryStage: "stored",
     });
     expect(await captain.wakeConversation(owner, "explicit result")).toBe(true);
-    expect(submit).toHaveBeenCalledWith("global-default", "explicit result", "watch", undefined, undefined);
+    expect(submit).toHaveBeenCalledWith("global-default", "explicit result", "watch", undefined);
     submit.mockClear();
     routePresent = false;
     expect(await captain.wakeConversation(owner, "unavailable source")).toBe(false);

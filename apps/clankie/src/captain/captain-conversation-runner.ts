@@ -3,7 +3,6 @@ import {
   OPERATOR_CONVERSATION_TEXT_MAX,
   type CaptainSessionLaneV2,
   type OperatorConversationActivityPhase,
-  type OperatorGoal,
   type OperatorSeatEventKind,
 } from "@clankie/protocol";
 import { type ClankieSettings } from "@clankie/settings";
@@ -13,7 +12,6 @@ import { join } from "node:path";
 import { materializeOwnerAttachments, modelImagesForOwnerAttachments } from "../owner-attachments.ts";
 import { AutonomyStore, WakeHeldError } from "./autonomy.ts";
 import { createDraftPacer } from "./captain-draft.ts";
-import { enforceGoalBudget } from "./captain-goals.ts";
 import {
   formatOperatorToolDetail,
   formatOperatorToolResult,
@@ -88,8 +86,6 @@ export interface CreateConversationRunnerContext {
   readonly censusFleets: () => Promise<readonly HerdrCensusFleet[]>;
   readonly deps: CaptainDeps;
   readonly turnSettled: TurnSettledLog;
-  readonly goalExecutionReason: (conversationId: string) => string | undefined;
-  readonly refuseNativeGoal: (conversationId: string) => boolean;
   /**
    * A provider rejected its stored credential in a real turn: refresh it once
    * and record the result for doctor. Undefined when nothing could be done.
@@ -104,7 +100,7 @@ export interface CreateConversationRunnerContext {
 }
 
 /**
- * One goal continuation or self-wake as a host-authored conversation turn.
+ * One self-wake as a host-authored conversation turn.
  * Throws when the turn fails; a provider refusing the credentials throws
  * {@link WakeHeldError}, since retrying it only spends another full turn on the
  * same refusal (2026-10-07: 15+ attempts on an expired token). When Clankie
@@ -114,11 +110,9 @@ export async function runAutonomyTurn(
   conversations: Pick<ConversationStore, "submitInternal" | "awaitRunOutcome">,
   conversationId: string,
   prompt: string,
-  origin: "goal" | "wake",
-  expectedGoal?: OperatorGoal,
 ): Promise<void> {
   for (let attempt = 1; ; attempt += 1) {
-    const result = conversations.submitInternal(conversationId, prompt, origin, expectedGoal);
+    const result = conversations.submitInternal(conversationId, prompt, "wake");
     if (result.status !== "accepted") throw new Error("Internal autonomy turn was not accepted");
     const outcome = await conversations.awaitRunOutcome(result.runId);
     if (outcome.ok) return;
@@ -168,15 +162,6 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
     if (message === undefined) return;
     signal.throwIfAborted();
     if (context.origin === "wake" && ctx.autonomy.wakeSuperseded(conversationId, message)) return;
-    if (context.origin === "goal") {
-      if (ctx.refuseNativeGoal(conversationId)) return;
-      if (
-        context.expectedGoal === undefined ||
-        ctx.autonomy.getGoal(conversationId) !== context.expectedGoal ||
-        context.expectedGoal.status !== "active"
-      )
-        return;
-    }
     return ctx.conversations.runWithConversationDriver<void>(
       conversationId,
       () => {
@@ -289,15 +274,6 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
       },
       async (run) => {
         run.signal.throwIfAborted();
-        if (context.origin === "goal") {
-          if (ctx.refuseNativeGoal(conversationId)) return;
-          if (
-            context.expectedGoal === undefined ||
-            ctx.autonomy.getGoal(conversationId) !== context.expectedGoal ||
-            context.expectedGoal.status !== "active"
-          )
-            return;
-        }
         // Signed Linear activity alone still waits for an attached native
         // receiver and is re-offered on its next poll (VUH-1743).
         if (context.origin === "hook" && ctx.conversations.hasNativeSeat(conversationId)) {
@@ -437,7 +413,6 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
         lane.capture.channelId = undefined;
         lane.capture.messageId = undefined;
         lane.capture.discordOrigin = undefined;
-        lane.capture.goalExecutionReason = () => ctx.goalExecutionReason(conversationId);
         lane.capture.publishFile = (input) => ctx.conversations.publishFile({ conversationId, ...input });
         if (releaseStarting === undefined && lane.starting !== undefined)
           try {
@@ -461,28 +436,6 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
         if (metrics !== undefined)
           ctx.captureEvaluationStart(context.runId, conversationId, lane.session, message);
         const skillCalls = new Map<string, string>();
-        const candidateGoal =
-          context.origin === "goal"
-            ? context.expectedGoal
-            : live
-              ? undefined
-              : ctx.autonomy.getGoal(conversationId);
-        const runGoal =
-          context.origin === "goal"
-            ? candidateGoal
-            : candidateGoal?.status === "active"
-              ? candidateGoal
-              : undefined;
-        const releaseGoalBudget =
-          runGoal === undefined
-            ? () => undefined
-            : enforceGoalBudget(
-                lane.session,
-                ctx.autonomy,
-                conversationId,
-                runGoal,
-                context.origin === "goal",
-              );
         let activity: OperatorConversationActivityPhase | undefined;
         const publishActivity = (phase: OperatorConversationActivityPhase): void => {
           if (activity === phase) return;
@@ -590,14 +543,6 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             : undefined;
         try {
           ctx.shutdown.signal.throwIfAborted();
-          if (
-            context.origin === "goal" &&
-            (ctx.refuseNativeGoal(conversationId) ||
-              runGoal === undefined ||
-              ctx.autonomy.getGoal(conversationId) !== runGoal ||
-              runGoal.status !== "active")
-          )
-            return;
           if (!live) await run.wait("model synchronization", ctx.syncModel(lane));
           // After the sync, so a `/model` or `/effort` change made under a live
           // conversation is attributed to this turn — the first one to execute it.
@@ -666,14 +611,6 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           }
           // The resource loader disables discovered extensions and prompt templates;
           // exact, loaded operator skills are the only input allowed to reach Pi expansion.
-          if (
-            context.origin === "goal" &&
-            (ctx.refuseNativeGoal(conversationId) ||
-              runGoal === undefined ||
-              ctx.autonomy.getGoal(conversationId) !== runGoal ||
-              runGoal.status !== "active")
-          )
-            return;
           const role = await run.wait(
             "Pi execution",
             runDurableTurn(
@@ -738,7 +675,6 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
               text,
             }),
           );
-          if (runGoal !== undefined) ctx.autonomy.finishTurn(conversationId, 0, runGoal);
           settled = context.signal.aborted ? "interrupted" : "completed";
         } catch (error) {
           if (metrics !== undefined) settled = context.signal.aborted ? "interrupted" : "failed";
@@ -761,7 +697,6 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
         } finally {
           if (lane.credentialRecovery?.current === ownerRecovery && lane.credentialRecovery !== undefined)
             delete lane.credentialRecovery.current;
-          releaseGoalBudget();
           run.signal.removeEventListener("abort", onInterrupt);
           unsubscribeProgress();
           if (settled !== undefined) {

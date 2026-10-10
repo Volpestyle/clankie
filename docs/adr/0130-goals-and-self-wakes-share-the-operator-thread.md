@@ -2,7 +2,9 @@
 
 Status: accepted (James, 2026-08-25). Extends
 [ADR 0111](0111-a-console-process-starts-one-conversation.md) and
-[ADR 0124](0124-one-self-has-many-local-threads.md).
+[ADR 0124](0124-one-self-has-many-local-threads.md). Goals archived
+2026-10-10 by [ADR 0264](0264-projects-on-auto-replace-goals.md); self-wakes and
+the global switch survive.
 
 ## Input admission
 

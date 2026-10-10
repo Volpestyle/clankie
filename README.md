@@ -103,7 +103,7 @@ Discord, chattiness and what wakes him set how readily he jumps in
 **Your right-hand man.** Think out loud with him and get pushed back on, hand
 him drafts and pictures to make, and ask what's moving, what's stuck, and what
 actually landed. His persona is yours to shape, and his history, memory, and
-goals live in the service, so he picks up where you left off on any screen.
+projects live in the service, so he picks up where you left off on any screen.
 
 **Goes where you are.** Talk to him from his own console, or seat him in Claude
 Code or Codex, the terminal you already use. In the iPhone and iPad app,
