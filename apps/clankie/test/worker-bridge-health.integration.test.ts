@@ -90,6 +90,7 @@ async function fixture(
   pane = "w1:p1",
   mailbox?: { status: number; error: string; ack?: boolean },
   runner?: ConversationRunner,
+  seatEvents = false,
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-bridge-health-"));
   const settings = new HeldSettings(join(root, "settings.json"));
@@ -102,17 +103,6 @@ async function fixture(
   const metrics = new FleetHealthMetrics();
   const conversations = new ConversationStore(join(root, "conversations"), runner ?? (async () => {}));
   const receiver = new InboundSeatReceipts(join(root, "inbound.json"), conversations);
-  let bindingSlow = slowBinding;
-  let binding = "a".repeat(64);
-  const receiptApp = await createClankieApp({
-    captain: createStubCaptain({
-      fleetSeatMessageBinding: async () => binding,
-      receiveFleetSeatMessage: async (sender, text, delivery) =>
-        receiver.accept(sender, delivery!, text, text),
-      fleetSeatMessageStatus: async (sender, id) => receiver.status(sender, binding, id),
-    }),
-    localFleet: { identity: () => identity() },
-  });
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,
@@ -121,6 +111,28 @@ async function fixture(
     fleetTools: async () => (await settings.load()).fleet.tools,
     fleetPeerMessages: async () => (await settings.load()).fleet.peerMessages,
     reportBridgeObserved: (fleet, pane, report) => metrics.observeReport(fleet, pane, report),
+  });
+  let seatPolls = 0;
+  let bindingSlow = slowBinding;
+  let binding = "a".repeat(64);
+  const receiptApp = await createClankieApp({
+    captain: createStubCaptain({
+      fleetSeatMessageBinding: async () => binding,
+      receiveFleetSeatMessage: async (sender, text, delivery) =>
+        receiver.accept(sender, delivery!, text, text),
+      fleetSeatMessageStatus: async (sender, id) => receiver.status(sender, binding, id),
+      // An empty mailbox that parks like the real one until its wait or abort.
+      pollFleetSeatEvents: async (_pane, waitMs, signal) => {
+        seatPolls++;
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, waitMs);
+          signal?.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
+        });
+        return [];
+      },
+    }),
+    localFleet: { identity: () => identity() },
+    ...(seatEvents ? { workerMcp: worker } : {}),
   });
   let valid = true;
   let validations = 0;
@@ -138,6 +150,7 @@ async function fixture(
   let mailboxPolls = 0;
   let mailboxAcks = 0;
   let requests = 0;
+  let catalogLists = 0;
   const requestAttributions: { path: string; bridgeId: string | null }[] = [];
   const server = serve({
     hostname: "127.0.0.1",
@@ -146,6 +159,14 @@ async function fixture(
       requests++;
       const path = new URL(request.url).pathname;
       requestAttributions.push({ path, bridgeId: request.headers.get("x-clankie-bridge-id") });
+      if (seatEvents && path.endsWith("/events")) return receiptApp.app.fetch(request);
+      if (path === "/v1/fleet/mcp" && request.method === "POST") {
+        const rpc = await request
+          .clone()
+          .json()
+          .catch(() => undefined);
+        if (rpc?.method === "tools/list") catalogLists++;
+      }
       if (mailbox && (path.endsWith("/events") || path.endsWith("/ack"))) {
         if (path.endsWith("/ack")) mailboxAcks++;
         else mailboxPolls++;
@@ -261,6 +282,8 @@ async function fixture(
     status: () => worker.bridgeStatus("default", pane),
     reportStatus: () => worker.reportBridgeStatus("default", pane),
     mailboxPolls: () => mailboxPolls,
+    seatPolls: () => seatPolls,
+    catalogLists: () => catalogLists,
     mailboxAcks: () => mailboxAcks,
     requests: () => requests,
     requestAttributions: () => requestAttributions,
@@ -276,7 +299,12 @@ async function fixture(
   };
 }
 
-async function startBridge(f: Awaited<ReturnType<typeof fixture>>, polling = false, harness = "test") {
+async function startBridge(
+  f: Awaited<ReturnType<typeof fixture>>,
+  polling = false,
+  harness = "test",
+  notifications?: string[],
+) {
   const socket = join(f.root, "herdr.sock");
   await mkdir(join(f.root, ".clankie", "links"), { recursive: true });
   await writeFile(
@@ -316,6 +344,7 @@ async function startBridge(f: Awaited<ReturnType<typeof fixture>>, polling = fal
       const message = JSON.parse(buffer.slice(0, at));
       buffer = buffer.slice(at + 1);
       if (message.id !== undefined) replies.set(message.id, message);
+      else notifications?.push(message.method);
     }
   });
   let id = 0;
@@ -338,6 +367,28 @@ async function startBridge(f: Awaited<ReturnType<typeof fixture>>, polling = fal
   await expect.poll(() => f.status().status).toBe("ready");
   return call;
 }
+
+it("lists an idle channel bridge's catalog only when the seat long poll pushes a new revision", async () => {
+  const f = await fixture(false, "w1:p1", undefined, undefined, true);
+  const notifications: string[] = [];
+  const call = await startBridge(f, true, "test", notifications);
+  await expect.poll(() => f.seatPolls()).toBeGreaterThan(0);
+  const listed = f.catalogLists();
+  // Longer than the five-second check an unchanged catalog used to cost (VUH-2062).
+  await new Promise((resolve) => setTimeout(resolve, 6_000));
+  expect(f.catalogLists()).toBe(listed);
+  // A refresh request ends the parked poll at once.
+  f.worker.requestCatalogRefresh("default", f.pane, "refresh-1");
+  await expect.poll(() => f.catalogLists(), { timeout: 2_000 }).toBe(listed + 1);
+  await expect.poll(() => notifications).toContain("notifications/tools/list_changed");
+  notifications.length = 0;
+  // So does an owner settings change, through the service's one settings watch.
+  await f.settings.update((current) => ({ ...current, fleet: { ...current.fleet, tools: "off" } }));
+  await expect.poll(() => notifications, { timeout: 7_000 }).toContain("notifications/tools/list_changed");
+  expect(f.catalogLists()).toBe(listed + 2);
+  const tools = (await call("tools/list", {})) as { result?: { tools?: { name: string }[] } };
+  expect(tools.result?.tools?.map((tool) => tool.name)).not.toContain("clankie_tools");
+}, 20_000);
 
 it("records a real subprocess binding timeout independently of its healthy tool catalog", async () => {
   const f = await fixture(true);

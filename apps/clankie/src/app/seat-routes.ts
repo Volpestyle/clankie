@@ -37,6 +37,7 @@ import { CAPTAIN_PROMPT_SECTIONS, type CaptainPromptSection } from "../captain/p
 import { INBOUND_REQUEST_DEADLINE_MS } from "../captain/inbound-seat-receipts.ts";
 import { createLaneMcpEndpoint } from "../lane-mcp.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
+import { FLEET_CATALOG_REVISION_HEADER } from "../worker-mcp.ts";
 import { readJson } from "./http-auth.ts";
 import { type ClankieAppDependencies } from "./types.ts";
 import { peerSeatAuthority as resolvePeerSeatAuthority } from "./peer-seat-authority.ts";
@@ -353,12 +354,23 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       const waitMs = Number.isFinite(wait)
         ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX)
         : 0;
+      // A catalog change ends the parked poll; the revision below tells the
+      // bridge to list its tools only then, rather than on a timer (VUH-2062).
+      const worker = ctx.dependencies.workerMcp;
+      const catalogChanged = worker?.catalogChanges();
       const events = await ctx.dependencies.captain.pollFleetSeatEvents(
         pane.paneId,
         waitMs,
-        context.req.raw.signal,
+        catalogChanged ? AbortSignal.any([context.req.raw.signal, catalogChanged]) : context.req.raw.signal,
       );
       if (events === undefined) return context.json({ error: "unknown_seat" }, 404);
+      if (worker) {
+        const qualified = splitFleetQualified(pane.paneId);
+        context.header(
+          FLEET_CATALOG_REVISION_HEADER,
+          await worker.catalogRevision(qualified?.fleet ?? "default", qualified?.id ?? pane.paneId),
+        );
+      }
       const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
       return context.json(page);
     }),

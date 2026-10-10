@@ -41,6 +41,14 @@ const ACK_RETRY_MS = 20_000;
 // settle, within Codex's 30-second startup timeout, without weakening proof.
 const FIRST_TOOLS_WAIT_MS = 20_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+// A linked service sends its catalog revision on every seat long poll and ends
+// a parked poll when that revision changes, so the bridge lists its catalog only
+// then (VUH-2062). Without a fresh revision (an older service, no channel, a
+// failing poll) it keeps checking every five seconds; with one, every five minutes.
+const CATALOG_CHECK_MS = 5_000;
+const CATALOG_FALLBACK_MS = 300_000;
+const CATALOG_PUSH_FRESH_MS = WAIT_MS + 15_000;
+const CATALOG_REVISION_HEADER = "x-clankie-catalog-revision";
 const INSTRUCTIONS =
   'Events tagged <channel source="clankie" kind="message" conversation="…" event_id="…"> ' +
   "are a message from the operator or Clankie addressed to this agent. " +
@@ -292,6 +300,7 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId, onMembershipRe
       let toolsState;
       let peerMessages;
       let runtimeRevision;
+      let catalogRevision;
       let pluginVersion;
       let refreshPending = false;
       for (let page = 0; page < 32; page++) {
@@ -311,6 +320,17 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId, onMembershipRe
           peerMessages = peers;
         }
         const revision = result._meta?.clankie?.runtimeRevision;
+        const pushed = result._meta?.clankie?.catalogRevision;
+        if (pushed !== undefined) {
+          if (
+            typeof pushed !== "string" ||
+            !pushed ||
+            pushed.length > 256 ||
+            (catalogRevision !== undefined && catalogRevision !== pushed)
+          )
+            throw new Error("Inconsistent fleet catalog revision");
+          catalogRevision = pushed;
+        }
         const version = result._meta?.clankie?.pluginVersion;
         const hold = result._meta?.clankie?.refreshPending;
         if (hold !== undefined && typeof hold !== "boolean")
@@ -337,7 +357,15 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId, onMembershipRe
         }
         if (tools.length > 4096) throw new Error("Granted catalog exceeds its bound");
         if (result.nextCursor == null)
-          return { tools, toolsState, peerMessages, runtimeRevision, pluginVersion, refreshPending };
+          return {
+            tools,
+            toolsState,
+            peerMessages,
+            runtimeRevision,
+            catalogRevision,
+            pluginVersion,
+            refreshPending,
+          };
         if (typeof result.nextCursor !== "string" || !result.nextCursor || cursors.has(result.nextCursor))
           throw new Error("Invalid granted catalog pagination");
         cursor = result.nextCursor;
@@ -386,6 +414,12 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   let verifiedRevision;
   let runtimeRevision;
   let expectedPluginVersion;
+  // The service's revision for the catalog last listed, and the latest one it pushed.
+  let listedCatalogRevision;
+  let pushedCatalog;
+  let catalogHeld = false;
+  let lastCatalogList = 0;
+  let firstPollAt;
   let activeToolCalls = 0;
   let catalogNotificationPending = false;
   let receiptReconciliationPending;
@@ -555,6 +589,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     if (!link) return { tools: [], reason: "No linked fleet connection" };
     const source = JSON.stringify(link);
     const sequence = ++catalogSequence;
+    lastCatalogList = Date.now();
     const reasons = [];
     let peerMessages;
     const assertSource = () => {
@@ -565,7 +600,8 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       try {
         const result = await granted.list(signal);
         assertSource();
-        if (result.refreshPending && verifiedTools !== undefined) {
+        catalogHeld = result.refreshPending && verifiedTools !== undefined;
+        if (catalogHeld) {
           // A newer busy observation fences older lookups still in flight.
           verifiedToolsSequence = Math.max(sequence, verifiedToolsSequence);
           peerMessages = verifiedPeers ? "on" : "off";
@@ -585,6 +621,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
           verifiedTools = tools;
           verifiedToolsSequence = sequence;
           runtimeRevision = result.runtimeRevision;
+          listedCatalogRevision = result.catalogRevision;
           expectedPluginVersion = result.pluginVersion;
           verifiedRevision = JSON.stringify([runtimeRevision, expectedPluginVersion]);
           if (previousRevision !== undefined && previousRevision !== verifiedRevision)
@@ -592,6 +629,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         }
         return verifiedTools;
       } catch (error) {
+        listedCatalogRevision = undefined;
         assertSource();
         reasons.push(error instanceof Error ? error.message : String(error));
         if (verifiedTools !== undefined) return verifiedTools;
@@ -730,6 +768,27 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     return firstListPending;
   };
   const polling = link && paneId && approvesWorkerChannel(parentArgv);
+  /** True while the service's pushed revision vouches for the catalog last listed. */
+  const catalogCurrent = () => {
+    if (
+      catalogHeld ||
+      listedCatalogRevision === undefined ||
+      Date.now() - lastCatalogList >= CATALOG_FALLBACK_MS
+    )
+      return false;
+    // Until the first poll answers, the listed revision stands for it: a
+    // service that publishes revisions also pushes them on that poll.
+    if (pushedCatalog === undefined)
+      return firstPollAt !== undefined && Date.now() - firstPollAt < CATALOG_PUSH_FRESH_MS;
+    return (
+      Date.now() - pushedCatalog.at < CATALOG_PUSH_FRESH_MS &&
+      pushedCatalog.revision === listedCatalogRevision
+    );
+  };
+  const checkCatalog = () =>
+    void catalog
+      .check()
+      .catch((error) => log(`catalog refresh failed (${String(error)}); keeping the previous catalog`));
   const requiresCatalog = expectedToolNames.length > 0 || expectationError !== undefined;
   let initialized = false;
   let started = false;
@@ -753,6 +812,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     let quiet404 = false;
     while (!closed && !membershipStopped) {
       let receiptUnresolved = false;
+      firstPollAt ??= Date.now();
       try {
         const response = await fetch(`${seatRoute(link, paneId, "events")}?wait=${String(WAIT_MS)}`, {
           headers: linkHeaders(),
@@ -767,6 +827,11 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
           continue;
         }
         if (!response.ok) throw new Error(`mailbox answered ${String(response.status)}`);
+        const revision = response.headers.get(CATALOG_REVISION_HEADER);
+        if (revision && revision.length <= 256) {
+          pushedCatalog = { revision, at: Date.now() };
+          if (!catalogCurrent()) checkCatalog();
+        }
         const page = await response.json();
         for (const event of Array.isArray(page?.events) ? page.events : []) {
           receiptUnresolved = true;
@@ -1011,11 +1076,9 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       if (!startedCatalogWatch) {
         startedCatalogWatch = true;
         setInterval(() => {
-          if (membershipStopped) return;
-          void catalog
-            .check()
-            .catch((error) => log(`catalog refresh failed (${String(error)}); keeping the previous catalog`));
-        }, 5_000).unref();
+          if (membershipStopped || catalogCurrent()) return;
+          checkCatalog();
+        }, CATALOG_CHECK_MS).unref();
       }
       startPolling();
       if (polling && requiresCatalog && !firstCatalogVerified)

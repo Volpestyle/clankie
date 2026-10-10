@@ -179,6 +179,10 @@ const FLEET_TOOLS = [
 const uuid = z.string().uuid();
 const KEY_ID = "clankie_worker_mcp_signing";
 const WORKER_REQUEST_TIMEOUT_MS = 30_000;
+/** Fleet seat long polls carry their catalog revision here; bridges list only when it moves. */
+export const FLEET_CATALOG_REVISION_HEADER = "x-clankie-catalog-revision";
+// Settings are owner-authored files; one service-side read covers every parked seat.
+const CATALOG_INPUTS_WATCH_MS = 5_000;
 // The local listener delegates MCP admission to this boundary. Preserve its
 // public refusal without exposing process, account or credential details.
 class LocalFleetAdmissionError extends Error {}
@@ -261,12 +265,78 @@ export class WorkerMcp {
   requestCatalogRefresh(fleet: string, pane: string, revision: string): void {
     if (!/^[A-Za-z0-9_.:-]{1,256}$/u.test(revision)) throw new Error("Invalid catalog revision");
     this.catalogRevisions.set(JSON.stringify([fleet, pane]), revision);
+    this.catalogChanged();
   }
 
   expectRuntimeRevision(revision: string): void {
     if (!/^[A-Za-z0-9_.:-]{1,256}$/u.test(revision)) throw new Error("Invalid runtime revision");
     this.runtimeRevision = revision;
     this.catalogRevisions.clear();
+    this.catalogChanged();
+  }
+
+  private catalogChange = new AbortController();
+  private catalogInputsWatch: ReturnType<typeof setInterval> | undefined;
+  private catalogInputs: string | undefined;
+
+  /**
+   * Aborts once anything a fleet seat's catalog depends on may have changed, so
+   * parked seat long polls return with a new revision instead of every bridge
+   * listing its catalog on a timer (VUH-2062). A signal, never a grant.
+   */
+  catalogChanges(): AbortSignal {
+    if (this.catalogInputsWatch === undefined && !this.closed) {
+      const observe = () => void this.observeCatalogInputs().catch(() => undefined);
+      this.catalogInputsWatch = setInterval(observe, CATALOG_INPUTS_WATCH_MS);
+      this.catalogInputsWatch.unref?.();
+      observe();
+    }
+    return this.catalogChange.signal;
+  }
+
+  /** The seat's catalog revision, the same value its tools/list metadata carries. */
+  async catalogRevision(fleet: string, pane: string): Promise<string> {
+    return this.catalogRevisionOf(
+      fleet,
+      pane,
+      await this.fleetToolsEnabled(),
+      (await this.options.fleetPeerMessages?.()) ?? "off",
+    );
+  }
+
+  private catalogRevisionOf(
+    fleet: string | undefined,
+    pane: string | undefined,
+    connected: boolean,
+    peerMessages: string,
+  ): string {
+    return createHash("sha256")
+      .update(
+        JSON.stringify([
+          connected,
+          peerMessages,
+          this.catalogRevisions.get(JSON.stringify([fleet, pane])) ?? this.runtimeRevision,
+          this.options.pluginExpectedVersion?.() ?? null,
+        ]),
+      )
+      .digest("hex")
+      .slice(0, 32);
+  }
+
+  private catalogChanged(): void {
+    const previous = this.catalogChange;
+    this.catalogChange = new AbortController();
+    previous.abort();
+  }
+
+  private async observeCatalogInputs(): Promise<void> {
+    const inputs = JSON.stringify([
+      await this.fleetToolsEnabled(),
+      (await this.options.fleetPeerMessages?.()) ?? "off",
+      this.options.pluginExpectedVersion?.() ?? null,
+    ]);
+    if (this.catalogInputs !== undefined && inputs !== this.catalogInputs) this.catalogChanged();
+    this.catalogInputs = inputs;
   }
   private readonly callReceipts: DurableReceiptStore<WorkerCallReceipt>;
   private closed = false;
@@ -1120,6 +1190,12 @@ export class WorkerMcp {
                   tools: connected ? "connected" : "off",
                   peerMessages,
                   refreshPending,
+                  catalogRevision: this.catalogRevisionOf(
+                    authority.fleet,
+                    authority.pane,
+                    connected,
+                    peerMessages,
+                  ),
                   runtimeRevision:
                     this.catalogRevisions.get(JSON.stringify([authority.fleet, authority.pane])) ??
                     this.runtimeRevision,
@@ -1500,6 +1576,7 @@ export class WorkerMcp {
 
   async close() {
     this.closed = true;
+    clearInterval(this.catalogInputsWatch);
     this.bridges.clear();
     this.fleetRequests.clear();
     await Promise.all([...this.sessions.values()].map((session) => session.server.close()));

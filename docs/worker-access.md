@@ -75,8 +75,14 @@ voice, play or other projects.
 
 ## Catalog changes in Codex
 
-The fleet bridge checks its catalog every five seconds and emits MCP
+The fleet bridge lists its catalog when it changes and emits MCP
 `notifications/tools/list_changed` for added, removed or changed definitions.
+A seat's mailbox long poll carries its catalog revision, and the service ends a
+parked poll when a refresh request, a deploy or the fleet tool and peer settings
+change it, so the bridge lists only then (VUH-2062). An unchanged catalog is
+still checked every five minutes. A bridge without a fresh revision (no channel,
+a failing poll, or an older service) checks every five seconds; older bridges
+ignore the revision and keep their five-second check.
 Temporary discovery failures, including admission refusals, keep the previously
 verified schemas. Explicit settings metadata removes disabled tools. Calls still
 pass through Clankie's current admission and account checks, and a refusal reports
