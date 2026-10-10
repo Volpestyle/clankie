@@ -35,6 +35,13 @@ export function receiveLinearActivity(
       ))
   )
     return false;
+  if (!following) {
+    // Nonmatching activity stays in the service log only; the chat shows what woke it.
+    // The retained receipt still keeps a replay from being promoted into a wake.
+    ctx["linearEventReceipts"][eventId] = Date.now();
+    ctx["saveLinearEventReceipts"]();
+    return true;
+  }
   meta.revision += 1;
   ctx["append"](meta, {
     type: "message",

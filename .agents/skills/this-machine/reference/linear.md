@@ -59,7 +59,8 @@ both prerequisites returns `linear_webhook_required` and `missingWebhook`;
 `active`. `clankie linear webhook set --url URL` records an already-registered
 URL; `linear webhook clear` removes it. Secrets stay with the owner at the
 console. Turning following off suppresses new and queued wakes; a running turn
-can finish. Following on does not replay passive history.
+can finish. Following on does not replay skipped events.
+Only events that wake a chat appear in it; the rest are only logged.
 
 ## Wake rules
 

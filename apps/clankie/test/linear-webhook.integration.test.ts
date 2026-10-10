@@ -403,16 +403,16 @@ it("suppresses exact own and worker receipt echoes, regardless of self rules", a
       await (await f.post(f.body({ actor: { id: f.account.userId, type: "app" } }, revision))).json(),
     ).toMatchObject({ ingested: false });
   }
-  // A known own actor also remains passive even when no exact receipt was available.
+  // A known own actor also stays out of the chat even when no exact receipt was available.
   expect(await (await f.post(f.body({ actor: { id: f.account.userId, type: "app" } }))).json()).toMatchObject(
     { ingested: true },
   );
   await f.closeTurns();
   expect(f.wakes).toHaveLength(0);
-  expect(f.events().filter((event) => event.type === "message" && event.role === "external")).toHaveLength(1);
+  expect(f.events().filter((event) => event.type === "message" && event.role === "external")).toHaveLength(0);
 });
 
-it("keeps rule misses and unavailable identity visible without waking", async () => {
+it("keeps rule misses and unavailable identity out of the chat without waking", async () => {
   const f = await fixture();
   for (const envelope of [
     { actor: { id: "other", type: "user", email: "other@example.test" } },
@@ -425,7 +425,7 @@ it("keeps rule misses and unavailable identity visible without waking", async ()
   expect(await (await f.post(f.body())).json()).toMatchObject({ ingested: true });
   await f.closeTurns();
   expect(f.wakes).toHaveLength(0);
-  expect(f.events().filter((event) => event.type === "message" && event.role === "external")).toHaveLength(4);
+  expect(f.events().filter((event) => event.type === "message" && event.role === "external")).toHaveLength(0);
 });
 
 it("rejects bad signatures and stale replay and durably deduplicates valid retry deliveries", async () => {

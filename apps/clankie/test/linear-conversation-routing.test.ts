@@ -154,7 +154,7 @@ it("coalesces new deliveries during an active wake into one queued follow-up", a
   expect(prompts[1]).not.toContain("First active wake");
 });
 
-it("retains passive events as ordinary history without upgrading duplicates into wakes", async () => {
+it("keeps nonmatching events out of the chat without upgrading duplicates into wakes", async () => {
   const f = fixture();
   const passive = notice("Passive history");
   expect(f.store.receiveLinearActivity(passive, false)).toBe(true);
@@ -168,7 +168,7 @@ it("retains passive events as ordinary history without upgrading duplicates into
   expect(reopened.wakes[0]?.prompt).not.toContain("Passive history");
   expect(
     (await events(reopened.store)).filter((event) => event.type === "message" && event.role === "external"),
-  ).toHaveLength(2);
+  ).toHaveLength(1);
 });
 
 it("keeps replay dedupe across restart, chat changes, and removed conversation history", async () => {

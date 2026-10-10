@@ -11,6 +11,9 @@ Amended by James in [VUH-1743](https://linear.app/vuhlp/issue/VUH-1743),
 2026-10-06: project activity goes to its configured lead chat, otherwise
 `global-default` with the project named; provider notifications are marked read
 only after that target chat confirms receipt of the original wake.
+Amended by James, 2026-10-10: only events that wake a chat are written to it.
+Nonmatching signed activity stays in the service log (`linear.webhook` with its
+`decision`) and keeps its replay receipt, but no longer appears in any chat.
 
 ## Amendment — one ordinary chat receives signed Linear activity, 2026-10-04
 
@@ -33,7 +36,7 @@ to one second can supply its display identifier/title. Fetched display context n
 signed actor/resource/change authority. If the title remains unavailable, the
 event says `Title unavailable` and retains its signed UUID/link; it is not dropped.
 Bursts coalesce into one wake. Nonmatching signed
-activity remains visible in the normal chat without starting a turn. The special
+activity is logged with its decision and never enters a chat (2026-10-10). The special
 Linear inbox conversation, inbox handoff protocol, and old notification checkpoint
 are retired. Upgrade drops retained unread inbox items once with a log entry;
 old inbox state never schedules a fresh turn.
@@ -70,15 +73,15 @@ Signed user ID/email evidence identifies the human. Display names and notificati
 subtitles do not. Own-write suppression takes precedence over the selectors;
 Clankie's connected account and attributed workers remain quiet. Production
 wakes require the connected account identity in the signed event's workspace;
-lookup failure or workspace mismatch retains passive chat history with a
-metadata decision of `identity_unavailable` or `account_workspace_mismatch`.
+lookup failure or workspace mismatch is logged without entering a chat, with a
+decision of `identity_unavailable` or `account_workspace_mismatch`.
 Local webhook readiness alone is not proof of account lookup or delivery health.
 
 Raw-body signature verification, signed timestamp tolerance, delivery dedupe and
 restart replay safety remain. The attribution journal and exact write receipts
 retain their provenance and own-write suppression responsibilities; actor-less
 recipient notification polling is no longer the wake path. Rule or target edits
-never promote passive history. Following remains opt-in and requires the stored
+never promote logged, nonmatching events. Following remains opt-in and requires the stored
 webhook URL and broker-held secret. Incoming events remain untrusted context,
 never new authority.
 
@@ -93,13 +96,13 @@ flowchart TD
     Own -->|No| Route{Verified project with configured lead chat?}
     Route -->|Yes| Project[Select project lead chat]
     Route -->|No| Default[Select fallback chat; name project]
-    Project --> History[External activity in selected ordinary chat]
-    Default --> History
-    History --> Identity{Connected account identity matches workspace?}
-    Identity -->|No| Quiet
+    Project --> Identity{Connected account identity matches workspace?}
+    Default --> Identity
+    Identity -->|No| Logged[Log decision and keep replay receipt; no chat entry]
     Identity -->|Yes| Rules{Following, known actor and VUH-1549 rules match?}
-    Rules -->|No| Quiet
-    Rules -->|Yes| Coalesce[Coalesce compact events]
+    Rules -->|No| Logged
+    Rules -->|Yes| History[External activity in selected ordinary chat]
+    History --> Coalesce[Coalesce compact events]
     Coalesce --> Wake[Wake selected chat through its existing receiver]
     Wake --> Lead[Lead decides and delegates]
     Wake --> Receipt{Target confirms original wake?}

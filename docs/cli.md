@@ -1366,7 +1366,7 @@ attribution and routing decision.
 
 `clankie linear follow on|off` applies live. Turning it off suppresses new and
 queued event turns; an already-running turn can finish. Turning it on does not
-replay passive history. `clankie linear status` reports `following`, `active`,
+replay events that were skipped while it was off. `clankie linear status` reports `following`, `active`,
 `webhookConfigured`, `reason`, `missingWebhook`, `detail`, `wakeConversationId`,
 `wakeWarning`, and `settingsFile`. Following requires both the registered webhook
 URL and its broker-held signing secret. Enabling without them leaves the switch
