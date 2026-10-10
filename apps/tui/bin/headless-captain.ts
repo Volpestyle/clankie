@@ -297,6 +297,11 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
+    if (command === "keys") {
+      const result = await (await import("../src/command/keys.ts")).runKeysCommand(rest, options);
+      outputJson(stdout, result);
+      return "ok" in result && result.ok === false ? 1 : 0;
+    }
     if (command === "persona") {
       const result = await (await import("../src/command/persona.ts")).runPersonaCommand(rest, options);
       outputJson(stdout, result);

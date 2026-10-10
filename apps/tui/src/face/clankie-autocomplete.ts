@@ -402,9 +402,18 @@ function imageModelArguments(context: ArgumentContext): StaticArgumentSpec {
 function videoModelArguments(context: ArgumentContext): StaticArgumentSpec {
   if (context.args[0]?.toLowerCase() === "xai")
     return values(["grok-imagine-video-1.5"], ["/video-model xai grok-imagine-video-1.5"]);
+  if (context.args[0]?.toLowerCase() === "google")
+    return values(
+      ["veo-3.1-generate-preview", "veo-3.1-fast-generate-preview", "veo-3.1-lite-generate-preview"],
+      ["/video-model google veo-3.1-generate-preview"],
+    );
   return values(
-    ["status", "xai", "unset"],
-    ["/video-model status", "/video-model xai grok-imagine-video-1.5"],
+    ["status", "xai", "google", "unset"],
+    [
+      "/video-model status",
+      "/video-model xai grok-imagine-video-1.5",
+      "/video-model google veo-3.1-generate-preview",
+    ],
   );
 }
 

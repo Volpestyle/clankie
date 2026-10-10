@@ -448,7 +448,7 @@ const MEDIA_MODELS: Readonly<Record<"image_model" | "video_model", Readonly<Reco
     google: "gemini-3.1-flash-image",
     xai: "grok-imagine-image-quality",
   },
-  video_model: { xai: "grok-imagine-video-1.5" },
+  video_model: { xai: "grok-imagine-video-1.5", google: "veo-3.1-generate-preview" },
 };
 
 function mediaModelCommand(

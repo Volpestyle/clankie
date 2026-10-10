@@ -7,6 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { CredentialStore } from "@clankie/credential-broker";
 import {
   GoogleImageAdapter,
+  GoogleVideoAdapter,
+  GOOGLE_VIDEO_MODELS,
   GrokImageAdapter,
   GrokVideoAdapter,
   MEDIA_GENERATION_SCHEMA_VERSION,
@@ -16,6 +18,7 @@ import {
   type MediaFetch,
   type MediaGenerationAdapter,
   type MediaProvider,
+  type VideoGenerationAdapter,
   type VideoGenerationRequest,
   type VideoJob,
 } from "@clankie/media-connector";
@@ -32,6 +35,7 @@ import {
   GENERATED_MEDIA_DIRECTORY,
   isGeneratedMediaRef,
   GenerateImageResultSchema,
+  GenerateVideoRequestSchema,
   GenerateVideoResultSchema,
   type GenerateImageRequest,
   type GenerateImageResult,
@@ -127,6 +131,11 @@ const DEFAULT_BACKGROUND_RENDER_MS = 1_800_000;
  * the conversation has moved on from.
  */
 const DEFAULT_RENDER_RETENTION_MS = 3_600_000;
+
+/** Veo model for a render with frames when the owner's video model takes none. */
+const VIDEO_FRAMES_DEFAULT_MODEL = GOOGLE_VIDEO_MODELS[0];
+/** Veo's job ids, so a render resumed after a restart still goes back to Google. */
+const GOOGLE_VIDEO_OPERATION = /^models\/veo-[a-z0-9.-]+\/operations\//u;
 
 /** Extension by provider default, so the adapter's format negotiation and the filename agree. */
 const IMAGE_EXTENSION = "png";
@@ -228,9 +237,8 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
     const generation = this.videoJobs.get(record.requestId);
     if (generation === undefined) return;
     try {
-      const model = await this.resolveModel("video_model", "video");
-      if (model.provider !== "grok") return;
-      const adapter = new GrokVideoAdapter(this.adapterConfig(model));
+      const model = await this.resolveVideoModel({ schemaVersion: 1 }, generation);
+      const adapter = this.videoAdapter(model);
       const job = await adapter.poll(record.requestId);
       if (job.status === "pending") return;
       if (job.status !== "done") throw new MediaRefusal("provider_failed", job.error ?? job.status);
@@ -306,6 +314,19 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
     request: GenerateVideoRequest,
     options?: GenerateVideoOptions,
   ): Promise<GenerateVideoResult> {
+    const parsed = GenerateVideoRequestSchema.safeParse(request);
+    if (!parsed.success) {
+      return GenerateVideoResultSchema.parse({
+        outcome: "refused",
+        schemaVersion: 1,
+        reason: "provider_failed",
+        detail: parsed.error.issues
+          .map((issue) => issue.message)
+          .join("; ")
+          .slice(0, 500),
+      });
+    }
+    request = parsed.data;
     // A render the background finished already: hand back the answer it landed
     // on rather than paying the provider to retrieve the same bytes twice.
     const collected = request.requestId === undefined ? undefined : this.renders.get(request.requestId);
@@ -314,11 +335,9 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
       return collected.result;
     }
     try {
-      const model = await this.resolveModel("video_model", "video");
-      if (model.provider !== "grok") {
-        throw new MediaRefusal("provider_unsupported", `${model.providerId} has no video adapter`);
-      }
-      const adapter = new GrokVideoAdapter(this.adapterConfig(model));
+      const remembered = request.requestId ? this.videoJobs.get(request.requestId) : undefined;
+      const model = await this.resolveVideoModel(request, remembered);
+      const adapter = this.videoAdapter(model);
       const generation = await this.videoGenerationRequest(request, model);
       let job: VideoJob = request.requestId
         ? await adapter.poll(request.requestId)
@@ -368,7 +387,7 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
   }
 
   private async retrieveRender(
-    adapter: GrokVideoAdapter,
+    adapter: VideoGenerationAdapter,
     job: VideoJob,
     generation: VideoGenerationRequest,
     model: ResolvedMediaModel,
@@ -426,7 +445,34 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
       outputPath: await this.artifactPath(VIDEO_EXTENSION),
       ...(request.aspectRatio === undefined ? {} : { aspectRatio: request.aspectRatio }),
       ...(request.durationSeconds === undefined ? {} : { durationSeconds: request.durationSeconds }),
+      ...(request.firstFrame === undefined ? {} : { firstFrame: await this.videoImage(request.firstFrame) }),
+      ...(request.lastFrame === undefined ? {} : { lastFrame: await this.videoImage(request.lastFrame) }),
+      ...(request.referenceImages === undefined
+        ? {}
+        : {
+            referenceImages: await Promise.all(
+              request.referenceImages.map((image) => this.videoImage(image)),
+            ),
+          }),
     };
+  }
+
+  /** A frame is media he made, read back from his own directory, or bytes the caller already sent. */
+  private async videoImage(source: string): Promise<string> {
+    return isGeneratedMediaRef(source) ? readSourceImageDataUrl(this.pathForRef(source)) : source;
+  }
+
+  /** Provider by owner config; a provider with frames-to-video (Kling, say) is one more case here. */
+  private videoAdapter(model: ResolvedMediaModel): VideoGenerationAdapter {
+    const config = this.adapterConfig(model);
+    switch (model.provider) {
+      case "grok":
+        return new GrokVideoAdapter(config);
+      case "google":
+        return new GoogleVideoAdapter(config);
+      default:
+        throw new MediaRefusal("provider_unsupported", `${model.providerId} has no video adapter`);
+    }
   }
 
   private imageAdapter(model: ResolvedMediaModel): MediaGenerationAdapter {
@@ -451,12 +497,51 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
     };
   }
 
-  private async resolveModel(role: MediaModelRole, kind: "image" | "video"): Promise<ResolvedMediaModel> {
+  /**
+   * The owner's video model, except that a render with frames goes to Veo: it
+   * is the frames-to-video provider, so sprite work uses it while prompt-only
+   * video keeps the owner's choice. An owner who already chose a Veo model
+   * keeps that model. A render being resumed stays with the provider that
+   * started it.
+   */
+  private async resolveVideoModel(
+    request: GenerateVideoRequest,
+    started?: VideoGenerationRequest,
+  ): Promise<ResolvedMediaModel> {
+    if (started !== undefined) return this.resolveModel("video_model", "video", started);
+    const resumingVeo = request.requestId !== undefined && GOOGLE_VIDEO_OPERATION.test(request.requestId);
+    const framed = (request.firstFrame ?? request.lastFrame ?? request.referenceImages) !== undefined;
+    if (!framed && !resumingVeo) return this.resolveModel("video_model", "video");
+    const configured = await this.configuredRole("video_model");
+    return this.resolveModel(
+      "video_model",
+      "video",
+      configured?.providerId === "google"
+        ? undefined
+        : { provider: "google", model: VIDEO_FRAMES_DEFAULT_MODEL },
+    );
+  }
+
+  private async configuredRole(role: MediaModelRole) {
     const { config } = await loadConfig({
       cwd: this.options.configCwd,
       ...(this.options.environment === undefined ? {} : { env: this.options.environment }),
     });
-    const resolved = resolveRole(role, { config, catalog: loadBundledCatalog() });
+    return resolveRole(role, { config, catalog: loadBundledCatalog() });
+  }
+
+  private async resolveModel(
+    role: MediaModelRole,
+    kind: "image" | "video",
+    fixed?: { readonly provider: MediaProvider; readonly model: string },
+  ): Promise<ResolvedMediaModel> {
+    const resolved =
+      fixed === undefined
+        ? await this.configuredRole(role)
+        : {
+            providerId: Object.keys(PROVIDERS).find((id) => PROVIDERS[id] === fixed.provider)!,
+            modelId: fixed.model,
+          };
     if (resolved === undefined) {
       throw new MediaRefusal("no_model_configured", `set one with /${kind}-model`);
     }
@@ -515,6 +600,11 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
     const directory = join(this.options.attachmentRoot, GENERATED_MEDIA_DIRECTORY);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     return join(directory, `${randomUUID()}.${extension}`);
+  }
+
+  /** The file behind an artifactRef he made, for a caller on this machine such as a fleet worker. */
+  public localPath(artifactRef: string): string {
+    return this.pathForRef(artifactRef);
   }
 
   private pathForRef(artifactRef: string): string {

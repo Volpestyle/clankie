@@ -51,6 +51,12 @@ export const ImageGenerationRequestSchema = z
   })
   .strict();
 
+/** An image a video starts from, ends on or takes after, always as a data URI. */
+const VideoImageSchema = z
+  .string()
+  .max(20_000_000)
+  .regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/u);
+
 export const VideoGenerationRequestSchema = z
   .object({
     ...commonRequestFields,
@@ -58,8 +64,18 @@ export const VideoGenerationRequestSchema = z
     aspectRatio: AspectRatioSchema.optional(),
     durationSeconds: z.number().int().min(1).max(15).optional(),
     resolution: z.enum(["480p", "720p", "1080p"]).optional(),
+    /** The opening frame: the picture the video animates from. */
+    firstFrame: VideoImageSchema.optional(),
+    /** The closing frame. The same image as `firstFrame` makes a loop. */
+    lastFrame: VideoImageSchema.optional(),
+    /** Subject or style guides the video takes after without starting on them. */
+    referenceImages: z.array(VideoImageSchema).min(1).max(3).optional(),
   })
-  .strict();
+  .strict()
+  .refine((request) => request.lastFrame === undefined || request.firstFrame !== undefined, {
+    path: ["lastFrame"],
+    message: "a last frame needs a first frame",
+  });
 
 export const MediaGenerationRequestSchema = z.discriminatedUnion("kind", [
   ImageGenerationRequestSchema,
@@ -312,68 +328,69 @@ export interface VideoJob {
   readonly error?: string;
 }
 
-/** Hosts a rendered video may be downloaded from. A provider response is not a licence to fetch anywhere. */
-const GROK_VIDEO_HOSTS = /^(?:[a-z0-9-]+\.)*x\.ai$/u;
+/**
+ * One provider's video jobs. Kling or another frames-to-video provider joins
+ * by implementing these three steps; the service picks the adapter from the
+ * owner's `video_model` and never from the request.
+ */
+export interface VideoGenerationAdapter {
+  readonly provider: MediaProvider;
+  /** Submits the render and returns immediately with the job's identity. */
+  start(request: VideoGenerationRequest): Promise<VideoJob>;
+  poll(requestId: string): Promise<VideoJob>;
+  /** Downloads a finished render to the caller's path. */
+  retrieve(job: VideoJob, request: VideoGenerationRequest): Promise<MediaGenerationResult>;
+}
 
-export class GrokVideoAdapter {
-  public readonly provider = "grok" as const;
-  private readonly apiKey: string;
-  private readonly transport: MediaFetch;
-  private readonly endpoint: string;
+abstract class FetchVideoAdapter implements VideoGenerationAdapter {
+  public abstract readonly provider: MediaProvider;
+  protected readonly apiKey: string;
+  protected readonly transport: MediaFetch;
+  protected readonly endpoint: string;
+  /** Hosts a rendered video may be downloaded from. A provider response is not a licence to fetch anywhere. */
+  protected abstract readonly videoHosts: RegExp;
 
-  public constructor(config: MediaAdapterConfig) {
+  public constructor(config: MediaAdapterConfig, defaultEndpoint: string) {
     if (!config.apiKey.trim()) throw new Error("media_connector_api_key_required");
     this.apiKey = config.apiKey;
     this.transport = config.fetch ?? globalThis.fetch;
-    this.endpoint = config.endpoint ?? "https://api.x.ai/v1/videos";
+    this.endpoint = config.endpoint ?? defaultEndpoint;
   }
 
-  /** Submits the render and returns immediately with the job's identity. */
   public async start(input: VideoGenerationRequest): Promise<VideoJob> {
     const request = VideoGenerationRequestSchema.parse(input);
     if (request.provider !== this.provider) throw new Error("media_connector_provider_mismatch");
-    requireModel(request.model, "grok-imagine-video-1.5");
     assertAllowedOutputPath(request.outputPath);
-    const response = await this.send(`${this.endpoint}/generations`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model: request.model,
-        prompt: request.prompt,
-        ...(request.aspectRatio ? { aspect_ratio: request.aspectRatio } : {}),
-        ...(request.durationSeconds ? { duration: request.durationSeconds } : {}),
-        ...(request.resolution ? { resolution: request.resolution } : {}),
-      }),
-    });
-    return readJob(await response.json());
+    return this.submit(request);
   }
 
-  public async poll(requestId: string): Promise<VideoJob> {
-    const response = await this.send(`${this.endpoint}/${encodeURIComponent(requestId)}`, {
-      headers: { authorization: `Bearer ${this.apiKey}`, accept: "application/json" },
-    });
-    return readJob(await response.json());
-  }
+  public abstract poll(requestId: string): Promise<VideoJob>;
+  protected abstract submit(request: VideoGenerationRequest): Promise<VideoJob>;
 
   /**
-   * Downloads a finished render to the caller's path.
-   *
    * The URL arrives on an authenticated provider response rather than from a
    * user, but it is still a URL this process is about to fetch: the host is
-   * checked against the provider's own domain, redirects are refused, and the
-   * declared and actual lengths are both bounded. A provider that is
-   * compromised or confused must not become an SSRF primitive.
+   * checked against the provider's own domain, any redirect is followed only
+   * to another of those hosts and without the credential, and the declared and
+   * actual lengths are both bounded. A provider that is compromised or
+   * confused must not become an SSRF primitive.
    */
   public async retrieve(job: VideoJob, request: VideoGenerationRequest): Promise<MediaGenerationResult> {
     if (job.status !== "done" || job.videoUrl === undefined) {
       throw new Error(`media_connector_video_not_ready:${job.status}`);
     }
     assertAllowedOutputPath(request.outputPath);
-    const url = new URL(job.videoUrl);
-    if (url.protocol !== "https:" || !GROK_VIDEO_HOSTS.test(url.hostname)) {
-      throw new Error("media_connector_video_host_refused");
+    let response = await this.transport(this.videoUrl(job.videoUrl), {
+      redirect: "manual",
+      headers: this.downloadHeaders(),
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (location === null) throw new Error("media_connector_video_host_refused");
+      response = await this.transport(this.videoUrl(new URL(location, job.videoUrl).href), {
+        redirect: "error",
+      });
     }
-    const response = await this.transport(url, { redirect: "error" });
     if (!response.ok) throw new Error(`media_connector_provider_error:${String(response.status)}`);
     const declared = Number(response.headers.get("content-length") ?? "0");
     if (declared > MEDIA_ARTIFACT_BYTES_MAX) throw new Error("media_connector_artifact_too_large");
@@ -385,10 +402,58 @@ export class GrokVideoAdapter {
     });
   }
 
-  private async send(url: string, init: RequestInit): Promise<Response> {
+  /** Headers for the first download hop only; a redirect never carries them. */
+  protected downloadHeaders(): Record<string, string> {
+    return {};
+  }
+
+  private videoUrl(value: string): URL {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || !this.videoHosts.test(url.hostname)) {
+      throw new Error("media_connector_video_host_refused");
+    }
+    return url;
+  }
+
+  protected async send(url: string, init: RequestInit): Promise<Response> {
     const response = await this.transport(url, init);
     if (!response.ok) throw new Error(`media_connector_provider_error:${String(response.status)}`);
     return response;
+  }
+}
+
+export class GrokVideoAdapter extends FetchVideoAdapter {
+  public readonly provider = "grok" as const;
+  protected readonly videoHosts = /^(?:[a-z0-9-]+\.)*x\.ai$/u;
+
+  public constructor(config: MediaAdapterConfig) {
+    super(config, "https://api.x.ai/v1/videos");
+  }
+
+  protected async submit(request: VideoGenerationRequest): Promise<VideoJob> {
+    requireModel(request.model, "grok-imagine-video-1.5");
+    if (request.lastFrame !== undefined || request.referenceImages !== undefined)
+      throw new Error("media_connector_video_frames_unsupported:grok");
+    const response = await this.send(`${this.endpoint}/generations`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: request.model,
+        prompt: request.prompt,
+        ...(request.firstFrame ? { image: { url: request.firstFrame } } : {}),
+        ...(request.aspectRatio ? { aspect_ratio: request.aspectRatio } : {}),
+        ...(request.durationSeconds ? { duration: request.durationSeconds } : {}),
+        ...(request.resolution ? { resolution: request.resolution } : {}),
+      }),
+    });
+    return readGrokJob(await response.json());
+  }
+
+  public async poll(requestId: string): Promise<VideoJob> {
+    const response = await this.send(`${this.endpoint}/${encodeURIComponent(requestId)}`, {
+      headers: { authorization: `Bearer ${this.apiKey}`, accept: "application/json" },
+    });
+    return readGrokJob(await response.json());
   }
 }
 
@@ -399,7 +464,7 @@ const GrokVideoResponseSchema = z.object({
   error: z.object({ code: z.string().optional(), message: z.string().optional() }).optional(),
 });
 
-function readJob(body: unknown): VideoJob {
+function readGrokJob(body: unknown): VideoJob {
   const parsed = GrokVideoResponseSchema.parse(body);
   const error = parsed.error?.message ?? parsed.error?.code;
   return {
@@ -408,6 +473,123 @@ function readJob(body: unknown): VideoJob {
     ...(parsed.video?.url ? { videoUrl: parsed.video.url } : {}),
     ...(error ? { error: error.slice(0, 500) } : {}),
   };
+}
+
+export const GOOGLE_VIDEO_MODELS = [
+  "veo-3.1-generate-preview",
+  "veo-3.1-fast-generate-preview",
+  "veo-3.1-lite-generate-preview",
+] as const;
+
+/** A long-running operation name; it is a URL path, so nothing else may pass for one. */
+const GOOGLE_OPERATION = /^models\/[a-z0-9.-]{1,100}\/operations\/[A-Za-z0-9_-]{1,200}$/u;
+
+/**
+ * Google Veo through the Gemini API (`predictLongRunning`).
+ *
+ * Veo is the frames-to-video provider: `image` is the first frame and
+ * `lastFrame` the last, so one image passed as both makes a loop. Reference
+ * images guide the subject without being shown, at most three, and Veo
+ * requires an 8-second render for them.
+ */
+export class GoogleVideoAdapter extends FetchVideoAdapter {
+  public readonly provider = "google" as const;
+  protected readonly videoHosts =
+    /^(?:generativelanguage\.googleapis\.com|[a-z0-9-]+\.googleusercontent\.com)$/u;
+
+  public constructor(config: MediaAdapterConfig) {
+    super(config, "https://generativelanguage.googleapis.com/v1beta");
+  }
+
+  protected async submit(request: VideoGenerationRequest): Promise<VideoJob> {
+    if (!(GOOGLE_VIDEO_MODELS as readonly string[]).includes(request.model))
+      throw new Error(`media_connector_model_unsupported:${request.model}`);
+    if (request.durationSeconds !== undefined && ![4, 6, 8].includes(request.durationSeconds))
+      throw new Error("media_connector_duration_unsupported:google:4|6|8");
+    if (request.resolution === "480p") throw new Error("media_connector_resolution_unsupported:google");
+    const response = await this.send(
+      `${this.endpoint}/models/${encodeURIComponent(request.model)}:predictLongRunning`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-goog-api-key": this.apiKey },
+        body: JSON.stringify({
+          instances: [
+            {
+              prompt: request.prompt,
+              ...(request.firstFrame ? { image: inlineDataPart(request.firstFrame) } : {}),
+              ...(request.lastFrame ? { lastFrame: inlineDataPart(request.lastFrame) } : {}),
+              ...(request.referenceImages
+                ? {
+                    referenceImages: request.referenceImages.map((image) => ({
+                      image: inlineDataPart(image),
+                      referenceType: "asset",
+                    })),
+                  }
+                : {}),
+            },
+          ],
+          parameters: {
+            ...(request.aspectRatio ? { aspectRatio: request.aspectRatio } : {}),
+            ...(request.durationSeconds ? { durationSeconds: request.durationSeconds } : {}),
+            ...(request.resolution ? { resolution: request.resolution } : {}),
+          },
+        }),
+      },
+    );
+    return readGoogleOperation(await response.json());
+  }
+
+  public async poll(requestId: string): Promise<VideoJob> {
+    if (!GOOGLE_OPERATION.test(requestId)) throw new Error("media_connector_request_id_invalid");
+    const response = await this.send(`${this.endpoint}/${requestId}`, {
+      headers: { "x-goog-api-key": this.apiKey, accept: "application/json" },
+    });
+    return readGoogleOperation(await response.json());
+  }
+
+  protected override downloadHeaders(): Record<string, string> {
+    return { "x-goog-api-key": this.apiKey };
+  }
+
+  /** Google answers a bad request with a reason worth saying; keep a bounded one. */
+  protected override async send(url: string, init: RequestInit): Promise<Response> {
+    const response = await this.transport(url, init);
+    if (response.ok) return response;
+    const body = GoogleErrorSchema.safeParse(await response.json().catch(() => undefined));
+    const reason = body.success ? `:${body.data.error.message.slice(0, 300)}` : "";
+    throw new Error(`media_connector_provider_error:${String(response.status)}${reason}`);
+  }
+}
+
+const GoogleErrorSchema = z.object({ error: z.object({ message: z.string() }) });
+
+const GoogleOperationSchema = z.object({
+  name: z.string().regex(GOOGLE_OPERATION),
+  done: z.boolean().optional(),
+  error: z.object({ code: z.number().optional(), message: z.string().optional() }).optional(),
+  response: z
+    .object({
+      generateVideoResponse: z
+        .object({
+          generatedSamples: z.array(z.object({ video: z.object({ uri: z.string().min(1) }) })).optional(),
+          raiMediaFilteredReasons: z.array(z.string()).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+});
+
+function readGoogleOperation(body: unknown): VideoJob {
+  const parsed = GoogleOperationSchema.parse(body);
+  if (parsed.done !== true) return { requestId: parsed.name, status: "pending" };
+  const uri = parsed.response?.generateVideoResponse?.generatedSamples?.[0]?.video.uri;
+  if (uri !== undefined && parsed.error === undefined)
+    return { requestId: parsed.name, status: "done", videoUrl: uri };
+  const reason =
+    parsed.error?.message ??
+    parsed.response?.generateVideoResponse?.raiMediaFilteredReasons?.join("; ") ??
+    "no video in the finished operation";
+  return { requestId: parsed.name, status: "failed", error: reason.slice(0, 500) };
 }
 
 const OpenAiResponseSchema = z.object({ data: z.array(z.object({ b64_json: z.string().min(1) })).min(1) });

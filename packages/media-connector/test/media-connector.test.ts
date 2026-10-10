@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   GoogleImageAdapter,
+  GoogleVideoAdapter,
   GrokImageAdapter,
   GrokVideoAdapter,
   MediaGenerationRequestSchema,
@@ -251,6 +252,84 @@ describe("video jobs", () => {
     expect(result).toMatchObject({ kind: "video", mimeType: "video/mp4", provider: "grok" });
     expect(result.sha256).toBe(createHash("sha256").update(videoBytes).digest("hex"));
     expect(await readFile(outputPath)).toEqual(videoBytes);
+  });
+});
+
+describe("Veo frames-to-video", () => {
+  const frame = "data:image/png;base64,ZnJhbWU=";
+
+  it("sends one picture as first and last frame for a loop, and follows the operation", async () => {
+    const transport = recorder({ name: "models/veo-3.1-generate-preview/operations/op-1" });
+    const adapter = new GoogleVideoAdapter({ apiKey: "google-secret", fetch: transport.fetch });
+    const job = await adapter.start(
+      videoRequest({
+        provider: "google",
+        model: "veo-3.1-generate-preview",
+        durationSeconds: 8,
+        aspectRatio: "9:16",
+        firstFrame: frame,
+        lastFrame: frame,
+      }),
+    );
+    expect(transport.calls[0]).toMatchObject({
+      url: "https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning",
+      headers: { "x-goog-api-key": "google-secret" },
+      body: {
+        instances: [
+          {
+            prompt: "A garden robot waving",
+            image: { inlineData: { mimeType: "image/png", data: "ZnJhbWU=" } },
+            lastFrame: { inlineData: { mimeType: "image/png", data: "ZnJhbWU=" } },
+          },
+        ],
+        parameters: { aspectRatio: "9:16", durationSeconds: 8, resolution: "720p" },
+      },
+    });
+    expect(job).toEqual({ requestId: "models/veo-3.1-generate-preview/operations/op-1", status: "pending" });
+    await expect(adapter.poll("models/veo-3.1/operations/../../files")).rejects.toThrow(
+      /request_id_invalid/u,
+    );
+  });
+
+  it("reads a finished operation's video and a filtered one's reason", async () => {
+    const name = "models/veo-3.1-generate-preview/operations/op-1";
+    const done = new GoogleVideoAdapter({
+      apiKey: "google-secret",
+      fetch: recorder({
+        name,
+        done: true,
+        response: {
+          generateVideoResponse: {
+            generatedSamples: [
+              {
+                video: { uri: "https://generativelanguage.googleapis.com/v1beta/files/v:download?alt=media" },
+              },
+            ],
+          },
+        },
+      }).fetch,
+    });
+    expect(await done.poll(name)).toMatchObject({
+      status: "done",
+      videoUrl: expect.stringContaining("files/v"),
+    });
+    const filtered = new GoogleVideoAdapter({
+      apiKey: "google-secret",
+      fetch: recorder({
+        name,
+        done: true,
+        response: { generateVideoResponse: { raiMediaFilteredReasons: ["blocked"] } },
+      }).fetch,
+    });
+    expect(await filtered.poll(name)).toMatchObject({ status: "failed", error: "blocked" });
+  });
+
+  it("refuses a last frame without a first", () => {
+    expect(() =>
+      MediaGenerationRequestSchema.parse(
+        videoRequest({ provider: "google", model: "veo-3.1-generate-preview", lastFrame: frame }),
+      ),
+    ).toThrow(/last frame needs a first frame/u);
   });
 });
 

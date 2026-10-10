@@ -2559,6 +2559,21 @@ needed. The TUI `/image-model` command calls the same functions.
 The same contract for video generation, with a `videoModel` result field. The
 TUI `/video-model` command calls the same functions.
 
+`google/veo-3.1-generate-preview` (or the `-fast-` and `-lite-` Veo models) is
+the frames-to-video provider; its key is set once with
+`clankie keys set google --key-stdin`. A render with frames goes to Veo even
+when `video_model` names another provider, unless it already names a Veo
+model. Prompt-only video keeps the configured model.
+
+`POST /v1/media/videos` (and his `generate_video` tool) takes `prompt`, plus
+optional `firstFrame`, `lastFrame` (needs `firstFrame`), up to three
+`referenceImages`, `aspectRatio` and `durationSeconds`. Each picture is an
+`artifactRef` he made or a PNG, JPEG or WebP data URI. The same picture as both
+frames makes a seamless loop. A `pending` result is resumed with `requestId`
+alone. Fleet workers call `clankie_generate_video` through `clankie_call`. On
+this machine they may pass absolute image paths, and an `ok` result adds the
+video's local `path`.
+
 ### `persona [status]`
 
 Return the complete owner-authored persona plus `settingsFile` and the restart

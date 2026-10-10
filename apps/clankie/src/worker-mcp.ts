@@ -39,6 +39,13 @@ import {
   type WorkerReportBridgeStatus,
 } from "@clankie/protocol";
 import type { MinecraftService } from "./minecraft.ts";
+import {
+  WORKER_VIDEO_TOOL,
+  WorkerVideoSchema,
+  workerVideoCatalogEntry,
+  workerVideoRequest,
+  type WorkerVideoPort,
+} from "./worker-video.ts";
 import { DurableReceiptStore } from "./durable-receipt-store.ts";
 import { canonicalJson } from "@clankie/play";
 
@@ -106,6 +113,8 @@ type WorkerAuthorization = {
   /** Optional author attribution only; this never changes the connected tool grant. */
   nativeWriteProof?(signal?: AbortSignal): Promise<ProjectProcessProof | undefined>;
   currentFleet?: (() => boolean) | undefined;
+  /** Admitted through local fleet membership, so the worker shares this machine's files. */
+  local?: boolean;
 };
 const FleetSearchSchema = z
   .object({
@@ -224,6 +233,7 @@ export class WorkerMcp {
     /** Canonical settings generation, checked without yielding at provider dispatch. */
     fleetToolsSnapshot?(): Promise<{ tools: FleetSettings["tools"]; assertCurrent(): void }>;
     minecraft?: Pick<MinecraftService, "workerCommand">;
+    video?: WorkerVideoPort;
     pluginExpectedVersion?(): string;
     /** Service-owned generation; informative metadata, never an admission credential. */
     runtimeRevision?: string;
@@ -827,7 +837,7 @@ export class WorkerMcp {
         if (!(await identity.validate(signal)))
           throw new LocalFleetAdmissionError("Local fleet membership unavailable");
         const fleet = identity.fleet ?? "default";
-        return this.fleetAuthorization(
+        const authorization = await this.fleetAuthorization(
           fleet,
           (cancellation) =>
             identity.validate(cancellation ? AbortSignal.any([signal, cancellation]) : signal),
@@ -846,6 +856,7 @@ export class WorkerMcp {
             return observed;
           },
         );
+        return { ...authorization, local: true };
       },
       async (response, signal) => {
         const id = response.headers.get("mcp-session-id") ?? request.headers.get("mcp-session-id") ?? "";
@@ -1173,6 +1184,7 @@ export class WorkerMcp {
                 const catalog = [
                   ...connected,
                   ...(this.options.minecraft === undefined ? [] : minecraftWorkerCatalog),
+                  ...(this.options.video === undefined ? [] : [workerVideoCatalogEntry]),
                 ];
                 const terms = (search.query ?? "").toLowerCase().split(/\s+/u).filter(Boolean);
                 const text = search.names
@@ -1216,6 +1228,25 @@ export class WorkerMcp {
               name = invocation.name;
               args = invocation.arguments;
               background ||= invocation.background === true;
+            }
+            if (name === WORKER_VIDEO_TOOL) {
+              if (authorityNow.fleet === undefined || this.options.video === undefined)
+                throw new Error("Video generation requires an admitted fleet channel");
+              const request = await workerVideoRequest(
+                WorkerVideoSchema.parse(args),
+                authorityNow.local === true,
+              );
+              // Stop waiting before the bridge deadline: an unfinished render comes
+              // back pending with its requestId rather than as a timeout.
+              const result = await this.options.video.generateVideo(request, {
+                signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(1_000, remaining() - 5_000))]),
+              });
+              const text = JSON.stringify(
+                result.outcome === "ok"
+                  ? { ...result, path: this.options.video.localPath(result.artifactRef) }
+                  : result,
+              );
+              return { content: [{ type: "text", text }], isError: result.outcome === "refused" };
             }
             if (Object.hasOwn(minecraftWorkerSchemas, name)) {
               if (authorityNow.fleet === undefined || this.options.minecraft === undefined)

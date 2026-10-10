@@ -1721,6 +1721,7 @@ const workerMcp = new WorkerMcp({
   credentials: operatorCredentialStore,
   host: mcpHost,
   minecraft,
+  video: mediaGenerator,
   reportBridgeObserved: (fleet, pane, report) => fleetHealthMetrics.observeReport(fleet, pane, report),
   pluginVersionObserved: (identity, version) => workerPluginNotices.observe(identity, version),
   pluginExpectedVersion: () => workerPluginNotices.expected(),

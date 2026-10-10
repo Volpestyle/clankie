@@ -97,6 +97,22 @@ export type GenerateImageResult = z.infer<typeof GenerateImageResultSchema>;
 
 export const MEDIA_VIDEO_GENERATION_PATH = "/v1/media/videos";
 
+/**
+ * A picture a video starts from, ends on or takes after: media he already made
+ * (an `artifactRef`), or the caller's own bytes as a PNG, JPEG or WebP data
+ * URI. Never a path, for the reason `sourceRef` is never one: the service
+ * reading a file a request names would turn animation into an arbitrary read.
+ * Callers with a file (the CLI, a local worker) read it themselves.
+ */
+export const VIDEO_IMAGE_DATA_URI_PATTERN = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/u;
+export const VideoImageSourceSchema = z
+  .string()
+  .max(12_000_000)
+  .refine(
+    (value) => isGeneratedMediaRef(value) || VIDEO_IMAGE_DATA_URI_PATTERN.test(value),
+    "expected a generated-media artifact reference or a PNG, JPEG or WebP data URI",
+  );
+
 export const GenerateVideoRequestSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -107,6 +123,12 @@ export const GenerateVideoRequestSchema = z
       .regex(/^\d{1,4}(?:\.\d)?:\d{1,4}(?:\.\d)?$/u)
       .optional(),
     durationSeconds: z.number().int().min(1).max(15).optional(),
+    /** The picture the video opens on and animates from. */
+    firstFrame: VideoImageSourceSchema.optional(),
+    /** The picture it ends on. The same picture as `firstFrame` makes a seamless loop. */
+    lastFrame: VideoImageSourceSchema.optional(),
+    /** Up to three pictures of a subject or style for the video to take after. */
+    referenceImages: z.array(VideoImageSourceSchema).min(1).max(3).optional(),
     /** Resume an in-flight render started by an earlier call. */
     requestId: z.string().trim().min(1).max(200).optional(),
   })
@@ -118,6 +140,19 @@ export const GenerateVideoRequestSchema = z
         path: ["prompt"],
         message: "a video request names either a prompt to start or a requestId to resume, not both",
       });
+    }
+    if (
+      request.requestId !== undefined &&
+      (request.firstFrame ?? request.lastFrame ?? request.referenceImages) !== undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["requestId"],
+        message: "a resumed render keeps the pictures it started with",
+      });
+    }
+    if (request.lastFrame !== undefined && request.firstFrame === undefined) {
+      context.addIssue({ code: "custom", path: ["lastFrame"], message: "a last frame needs a first frame" });
     }
   });
 export type GenerateVideoRequest = z.infer<typeof GenerateVideoRequestSchema>;

@@ -43,8 +43,29 @@ a turn wins, so the model cannot attach a path by describing it.
 
 Video remains a resumable asynchronous job. A bounded wait may return a request
 id; a later call resumes that render rather than purchasing a duplicate. Remote
-downloads are host-checked, redirect-refused, and byte-bounded because any URL
-fetched by the service is an SSRF boundary.
+downloads are host-checked and byte-bounded because any URL fetched by the
+service is an SSRF boundary. A redirect is followed only to another of the
+provider's own hosts, and the credential never travels with it.
+
+### Amendment: frames-to-video (VUH-2037, 2026-10-10)
+
+A video can open on a first frame, end on a last frame and take after up to
+three reference images. One picture as both first and last frame makes a loop,
+which is how a sprite idle gets animated. Each picture is media he made (an
+`artifactRef`) or the caller's own PNG, JPEG or WebP bytes as a data URI, never
+a path the service reads. A render with frames goes to Google Veo, the
+frames-to-video provider, unless the owner's `video_model` is already a Veo
+model. Prompt-only video keeps the owner's choice. The rule lives in code, not
+in the request, so a turn still never picks what to spend. Kling or another
+frames-to-video provider joins as one more adapter.
+
+Fleet workers reach this as `clankie_generate_video` on the tool bridge. Their
+frames are usually files in their checkout, and a model cannot type a PNG as
+base64, so the bridge alone takes absolute paths. It accepts them only from a
+worker proven local by fleet admission, which can already read those files, and
+it sends only bytes that are PNG, JPEG or WebP by their magic numbers. A fleet
+joined over a bearer link may be on another machine and passes references or
+data URIs only.
 
 ## Alternatives considered
 

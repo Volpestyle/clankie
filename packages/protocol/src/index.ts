@@ -664,6 +664,8 @@ export {
   GenerateImageResultSchema,
   type GenerateImageResult,
   MEDIA_VIDEO_GENERATION_PATH,
+  VIDEO_IMAGE_DATA_URI_PATTERN,
+  VideoImageSourceSchema,
   GenerateVideoRequestSchema,
   type GenerateVideoRequest,
   GenerateVideoResultSchema,

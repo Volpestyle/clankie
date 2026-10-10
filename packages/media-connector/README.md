@@ -6,7 +6,12 @@ images, image editing, and video; requests are a discriminated union on `kind`, 
 and resolution never appear on an image request.
 
 Image adapters cover OpenAI `gpt-image-2`, Google `gemini-3.1-flash-image`, and Grok
-`grok-imagine-image-quality`; `GrokVideoAdapter` covers `grok-imagine-video-1.5`. Callers provide the
+`grok-imagine-image-quality`. Video adapters implement `VideoGenerationAdapter`:
+`GrokVideoAdapter` covers `grok-imagine-video-1.5` (prompt, or a first frame), and
+`GoogleVideoAdapter` covers Veo 3.1 (`veo-3.1-generate-preview`, `-fast-`, `-lite-`)
+through the Gemini API's `predictLongRunning`, with a first frame, a last frame and up
+to three reference images. A provider such as Kling joins by implementing the same three
+steps. Callers provide the
 credential and may inject a transport. The package never reads `process.env`, imports a provider SDK,
 publishes an artifact, or grants itself authority.
 
@@ -27,8 +32,8 @@ Provider responses are untrusted. Adapters validate their response shape, decode
 with mode `0600` under a `MEDIA_ARTIFACT_BYTES_MAX` ceiling, and return a validated absolute artifact
 path plus SHA-256 and bounded provider metadata. Credentials are constructor inputs and are used only
 for the provider request. A rendered video is downloaded from a provider-hosted URL: the host is
-checked against the provider's own domain, redirects are refused, and both the declared and actual
-lengths are bounded.
+checked against the provider's own domain, a redirect is followed only to another of its hosts and
+without the credential, and both the declared and actual lengths are bounded.
 
 Product pixel art remains Aseprite-MCP-only in the private `clankie-app` repository. The connector
 refuses `.aseprite` outputs and paths containing pixel-art, sprite, or atlas asset directories.
@@ -55,6 +60,12 @@ let job = await video.start(request); // { requestId, status: "pending" }
 while (job.status === "pending") job = await video.poll(job.requestId);
 const rendered = await video.retrieve(job, request);
 ```
+
+A video request may carry `firstFrame`, `lastFrame` and `referenceImages` as PNG, JPEG
+or WebP data URIs; a last frame needs a first. The same image as both frames makes a
+loop. Veo takes 4, 6 or 8 seconds (8 with reference images or 1080p) at 720p or
+1080p, 16:9 or 9:16. Its download URL may redirect once to a Google content host;
+the redirect is followed without the API key.
 
 Persona self-depiction can supply up to eight bounded `referenceImages` data URIs.
 OpenAI sends them as multipart `image[]`; Google sends inline data parts. The

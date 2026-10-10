@@ -371,10 +371,31 @@ export function captainTools(
         "Make a short video from a prompt. A result of 'pending' is normal — it is still rendering; say so, and " +
         "know that it keeps rendering after you answer. You will be told in this room when it lands, and calling " +
         "again with the same requestId then hands you the finished video. Never start a second render of the " +
-        "same idea. In a Discord channel a finished video attaches itself to your reply, like a picture does.",
+        "same idea. In a Discord channel a finished video attaches itself to your reply, like a picture does. " +
+        "To animate a picture you made, pass its artifactRef as firstFrame; pass the same one as lastFrame too " +
+        "for a seamless loop. Frames and reference images need a model that takes them (Veo); a refusal says so.",
       parameters: Type.Object({
-        prompt: Type.String({ minLength: 1, maxLength: 4000 }),
-        requestId: Type.Optional(Type.String({ description: "Resume a render that came back pending." })),
+        prompt: Type.Optional(Type.String({ minLength: 1, maxLength: 4000 })),
+        requestId: Type.Optional(
+          Type.String({ description: "Resume a render that came back pending, instead of a prompt." }),
+        ),
+        firstFrame: Type.Optional(
+          Type.String({ description: "artifactRef of a picture the video opens on and animates from." }),
+        ),
+        lastFrame: Type.Optional(
+          Type.String({ description: "artifactRef of the picture it ends on. Needs firstFrame." }),
+        ),
+        referenceImages: Type.Optional(
+          Type.Array(Type.String(), {
+            minItems: 1,
+            maxItems: 3,
+            description: "artifactRefs of a subject or style to take after, without opening on them.",
+          }),
+        ),
+        aspectRatio: Type.Optional(
+          Type.String({ description: "16:9 or 9:16. Omit to let the model choose." }),
+        ),
+        durationSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 15 })),
       }),
       executionMode: "sequential",
       execute: async (_id, params) => {
