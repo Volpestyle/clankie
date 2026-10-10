@@ -22,8 +22,8 @@ async function fixture() {
   const agent: {
     pane_id: string;
     terminal_id: string;
-    agent: string;
-    agent_session?: { source: string; kind: string; value: string };
+    agent?: string | null | undefined;
+    agent_session?: { source: string; kind: string; value: string } | null | undefined;
   } = { pane_id: "w1:p1", terminal_id: "term_original", agent: "opencode" };
   const socket = {
     destroyed: false,
@@ -44,7 +44,8 @@ async function fixture() {
     if (method === "layout.apply")
       return { result: { layout: { root: { type: "pane", pane_id: "w1:p1" } } } };
     if (method === "pane.process_info") return { result: { process_info: structuredClone(info) } };
-    if (method === "agent.get") return { result: { agent: structuredClone(agent) } };
+    if (method === "agent.get") throw new Error("agent_not_found: native TUI still loading");
+    if (method === "pane.get") return { result: { pane: structuredClone(agent) } };
     if (method === "pane.report_agent") {
       const value = params as {
         source: string;
@@ -141,6 +142,20 @@ test("only exact foreground/root socket owner qualifies; birth precision survive
   expect(
     f.run.mock.calls.filter(([file]) => file === "/usr/bin/python3").every(([, args]) => args[0] === "-I"),
   ).toBe(true);
+});
+
+test.each([undefined, null])("a fresh unrecognized native pane binds before TUI detection (%s)", async (absent) => {
+  const f = await fixture();
+  f.agent.agent = absent;
+  f.agent.agent_session = absent;
+  const root = await f.capture();
+  expect(await root.check(f.socket as Socket)).toBe(true);
+  await root.report("ses_exact1234", "idle");
+  expect(await root.proof("ses_exact1234")).toMatchObject({ pane: "w1:p1" });
+  expect(f.request.mock.calls.filter(([, method]) => method === "agent.get")).toEqual([]);
+  expect(f.request.mock.calls.filter(([, method]) => method === "layout.apply")).toEqual([]);
+  f.agent.agent_session = absent;
+  expect(await root.check(f.socket as Socket)).toBe(false);
 });
 
 test.each([
