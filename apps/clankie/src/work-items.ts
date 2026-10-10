@@ -40,6 +40,8 @@ import {
   type LinearToolCall,
   type TrackerDeps,
   type TrackerToolCallOptions,
+  type TrackerToolBackend,
+  createLocalTracker,
   TRACKER_OWNER,
 } from "@clankie/work-items";
 import type { McpHost } from "./mcp-host.ts";
@@ -152,6 +154,13 @@ export interface WorkItemsServiceOptions {
   readonly stateDirectory: string;
   /** The shared local tracker, when it lives outside the service's normal state root. */
   readonly globalTrackerDirectory?: string;
+  /**
+   * Opens the service's built-in tracker, optionally scoped to one project's issues,
+   * for repos whose convention is `builtin` (VUH-1987). Defaults to the shared store.
+   */
+  readonly builtInTracker?: (
+    assertIssueWrite?: (issue: Readonly<Record<string, unknown>>) => void,
+  ) => TrackerToolBackend;
   /** The captain's working directory, always readable as `workspace`. */
   readonly workspace?: () => string | undefined;
   readonly mcpHost?: Pick<McpHost, "call"> & Partial<Pick<McpHost, "account" | "binding" | "trackerStatus">>;
@@ -362,8 +371,36 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
+  const openBuiltIn =
+    options.builtInTracker ??
+    ((assertIssueWrite?: (issue: Readonly<Record<string, unknown>>) => void) =>
+      createLocalTracker({
+        directory: options.globalTrackerDirectory ?? join(options.stateDirectory, "tracker"),
+        ...(assertIssueWrite === undefined ? {} : { assertIssueWrite }),
+        ...(options.clock === undefined ? {} : { clock: options.clock }),
+      }));
+  /** The tracker project the owner bound this workspace's settings project to, if any. */
+  const builtInBinding = async (path: string): Promise<TrackerDeps["builtIn"]> => {
+    const machine = options.localMachineId ?? "local";
+    const project = (await options.projects?.())?.projects.find(
+      (entry) =>
+        entry.trackerProjectId !== undefined &&
+        entry.workspaces.some(
+          (workspace) => workspace.machineId === machine && resolve(workspace.path) === resolve(path),
+        ),
+    );
+    if (project?.trackerProjectId === undefined) return undefined;
+    const view = (await openBuiltIn()
+      .call("get_project", { query: project.trackerProjectId })
+      .catch(() => undefined)) as { leadTeam?: { id?: unknown } } | undefined;
+    const teamId = view?.leadTeam?.id;
+    if (typeof teamId !== "string") return undefined;
+    return { projectId: project.trackerProjectId, teamId, open: openBuiltIn };
+  };
+
   const deps = async (path: string, local = true): Promise<TrackerDeps> => {
     const token = await options.githubToken?.();
+    const builtIn = await builtInBinding(path);
     const localTracker = (await options.mcpHost?.trackerStatus?.())?.backend === "local";
     return {
       run,
@@ -383,6 +420,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       ...(linear === undefined || localTracker ? {} : { linear }),
       clock,
       trackerDirectory: join(options.stateDirectory, "repo-trackers", repoId(path)),
+      ...(builtIn === undefined ? {} : { builtIn }),
     };
   };
 
@@ -557,6 +595,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           effectConfirmed,
           ...(target.convention.backend === "default" ||
           target.convention.backend === "markdown" ||
+          target.convention.backend === "builtin" ||
           (target.convention.backend === "linear" && dependencies.linear === undefined)
             ? { onDispatch }
             : {}),
@@ -738,7 +777,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           workspace === undefined
             ? undefined
             : registered.find((candidate) => candidate.path === resolve(workspace));
-        if (entry && (await readConvention(entry.path))?.backend === "linear") return entry.id;
+        const backend = entry === undefined ? undefined : (await readConvention(entry.path))?.backend;
+        if (entry && (backend === "linear" || backend === "builtin")) return entry.id;
         return undefined;
       }
       const candidates = new Map<string, string | undefined>([

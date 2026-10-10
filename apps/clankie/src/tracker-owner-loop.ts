@@ -40,6 +40,8 @@ export interface TrackerOwnerLoopOptions {
 }
 
 interface LoopState {
+  /** The store the cursor belongs to; a cutover or switch-back replaces the store (VUH-1987). */
+  storeId?: string;
   cursor: number;
   /** requestId → issue, only for asks this loop raised. */
   asks: Record<
@@ -61,11 +63,13 @@ const needsCheck = (event: TrackerItemEvent) => {
   const from = DELIVERY_STAGES.indexOf((event.from ?? "reported") as DeliveryStage);
   return from < LANDED && DELIVERY_STAGES.indexOf(event.to as DeliveryStage) >= LANDED;
 };
+/** Linear history imported or mirrored before cutover: it already woke chats in Linear's time. */
+const LINEAR_HISTORY = new Set(["linear_import", "linear_mirror"]);
 const VERIFY_WORKS = "It works";
 const VERIFY_SEND_BACK = "Send it back";
 
 export async function startTrackerOwnerLoop(options: TrackerOwnerLoopOptions): Promise<() => Promise<void>> {
-  const state = load(options.statePath);
+  let state = load(options.statePath);
   let queue = Promise.resolve();
   let closed = false;
   const save = () => {
@@ -117,6 +121,11 @@ export async function startTrackerOwnerLoop(options: TrackerOwnerLoopOptions): P
 
   const handle = async (event: TrackerItemEvent) => {
     if (event.seq <= state.cursor) return;
+    if (event.via !== undefined && LINEAR_HISTORY.has(event.via)) {
+      state.cursor = event.seq;
+      save();
+      return;
+    }
     if (event.type === "ask" && event.purpose !== undefined) {
       const { conversationId, issue } = await route(event.issueId);
       const gate = event.purpose === "gate";
@@ -283,6 +292,19 @@ export async function startTrackerOwnerLoop(options: TrackerOwnerLoopOptions): P
     if (question && question.status !== "pending") serial(() => answered(question));
   }
   const drain = async () => {
+    // A replaced store restarts its own stream; the old cursor and asks belong to the old store.
+    const storeId = await options.tracker.storeId();
+    if (state.storeId !== storeId) {
+      if (state.storeId !== undefined) {
+        options.logger.info(
+          { event: "tracker.owner_loop.store_replaced", from: state.storeId, to: storeId },
+          "tracker store replaced; owner loop restarts its cursor",
+        );
+        state = { cursor: 0, asks: {} };
+      }
+      state.storeId = storeId;
+      save();
+    }
     for (;;) {
       const page = (await options.tracker.call("list_issue_events", {
         after: String(state.cursor),
@@ -309,6 +331,7 @@ function load(path: string): LoopState {
   try {
     const value = JSON.parse(readFileSync(path, "utf8")) as Partial<LoopState>;
     return {
+      ...(typeof value.storeId === "string" ? { storeId: value.storeId } : {}),
       cursor: Number.isInteger(value.cursor) ? value.cursor! : 0,
       asks: value.asks !== null && typeof value.asks === "object" ? value.asks : {},
     };

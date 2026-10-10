@@ -25,7 +25,8 @@ export const WorkItemPrioritySchema = z.union([
 ]);
 export type WorkItemPriority = z.infer<typeof WorkItemPrioritySchema>;
 
-export const WORK_BACKENDS = ["default", "markdown", "github", "linear"] as const;
+/** `builtin` is Clankie's own tracker, bound to a tracker project UUID in host settings (VUH-1987). */
+export const WORK_BACKENDS = ["default", "markdown", "github", "linear", "builtin"] as const;
 export const WorkBackendKindSchema = z.enum(WORK_BACKENDS);
 export type WorkBackendKind = z.infer<typeof WorkBackendKindSchema>;
 
@@ -128,7 +129,12 @@ const WorkConventionFieldsSchema = z
       .object({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/u) })
       .strict()
       .optional(),
-    /** `linear` only: the team key, optional project, and existing repo-board label. */
+    /**
+     * `linear`: the team key, optional project, and existing repo-board label.
+     * `builtin` keeps the Linear scope it was cut over from, so switch-back
+     * restores it unchanged; the built-in scope itself is the host's
+     * `trackerProjectId` binding.
+     */
     linear: z
       .object({
         team: z.string().trim().min(1).max(64),
@@ -154,7 +160,10 @@ const WorkConventionFieldsSchema = z
   })
   .strict();
 export const WorkConventionSchema = WorkConventionFieldsSchema.refine(
-  (convention) => convention.linear?.label === undefined || convention.backend === "linear",
+  (convention) =>
+    convention.linear?.label === undefined ||
+    convention.backend === "linear" ||
+    convention.backend === "builtin",
   { message: "A Linear board label requires the linear backend", path: ["linear", "label"] },
 );
 export type WorkConvention = z.infer<typeof WorkConventionSchema>;

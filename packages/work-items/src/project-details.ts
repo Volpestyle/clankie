@@ -39,12 +39,16 @@ export async function readProjectDetails(
   convention: WorkConvention,
   deps: TrackerDeps,
 ): Promise<WorkProjectDetails> {
-  if (convention.backend !== "linear" || !convention.linear?.project)
-    throw new Error("This tracker has no project details");
+  // A built-in convention reads its bound tracker project by UUID, never by name.
+  const query =
+    convention.backend === "builtin"
+      ? deps.builtIn?.projectId
+      : convention.backend === "linear"
+        ? convention.linear?.project
+        : undefined;
+  if (!query) throw new Error("This tracker has no project details");
   const tools = trackerToolsFor(root, convention, deps);
-  const project = row(
-    await tools.call("get_project", { query: convention.linear.project, includeResources: true }),
-  );
+  const project = row(await tools.call("get_project", { query, includeResources: true }));
   const id = text(project.uuid) ?? text(project.id);
   if (!id) throw new Error("Project has no identity");
   const resources = Array.isArray(project.resources)

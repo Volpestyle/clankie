@@ -306,7 +306,10 @@ default. Linear becomes an optional connection: the built-in
 tracker mirrors it first, then the owner cuts over. Until cutover, Linear stays
 authoritative and the app shows its work rather than a competing copy. GitHub
 and Markdown repository conventions ([ADR 0191](0191-work-is-tracked-where-the-repo-tracks-it.md))
-remain explicit, opt-in adapters.
+remain explicit, opt-in adapters. The cutover is per World project, owner-run
+and reversible: see the
+[ADR 0226 cutover amendment](0226-one-tracker-tool-surface.md#proposed-amendment-cutover-and-switch-back-2026-10-09-vuh-1987)
+(VUH-1987).
 
 [ADR 0226](0226-one-tracker-tool-surface.md)'s `linear_*` tool surface stays the
 agent vocabulary. The built-in tracker grows from its durable local backend, so

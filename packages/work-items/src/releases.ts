@@ -60,7 +60,8 @@ export function repositoryName(remote: string, root: string): string {
  * looks like a key (UTF-8, SHA-256) is not work.
  */
 export function releaseKeyPattern(convention: WorkConvention): RegExp {
-  const team = convention.backend === "linear" ? convention.linear?.team : undefined;
+  const team =
+    convention.backend === "linear" || convention.backend === "builtin" ? convention.linear?.team : undefined;
   const prefixes = [
     "LOCAL(?:-[A-Z0-9]+)*",
     ...(team ? [team.replace(/[^A-Za-z0-9]/gu, "").toUpperCase()] : []),

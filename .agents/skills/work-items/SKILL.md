@@ -329,3 +329,14 @@ the import mapper, once per event id, with the original actor. The copy refuses
 built-in writes (`mirror_read_only`): change mirrored work in Linear until cutover.
 `... status` shows counters and drift reports; drift is repaired by a scoped
 re-read through the connected account. It only ever targets scratch imports.
+
+Cutting a World project over (VUH-1987) is the owner's decision. Run
+`clankie work cutover linear --world-project ID --scratch NAME --project UUID
+--dry-run` first and show the plan: counts against Linear, the mirror, the store,
+binding and convention changes, and the switch-back command. Without `--dry-run`
+it applies the plan, and it refuses on drift or a non-empty live store. Afterwards
+that project's convention is `backend: builtin`. Pass the project's `repo` on
+`linear_*` calls (or use `clankie work --repo`): its work is in the built-in
+tracker, not Linear. A call without `repo` still reaches connected Linear.
+`... --switch-back [--dry-run]` restores Linear as the project's tracker and
+reports the pilot writes Linear never saw.

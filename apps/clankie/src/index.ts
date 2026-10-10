@@ -1,6 +1,7 @@
 import { MachineJoins } from "./machine-joins.ts";
 import { connectedLinearSession, importConnectedLinear, importLinearMedia } from "./linear-import.ts";
 import { LinearMirrors } from "./linear-mirror.ts";
+import { LinearCutover } from "./linear-cutover.ts";
 import { linearGraphqlCredential } from "./linear-graphql.ts";
 import { alertRecoveredCrash } from "./crash-report-alert.ts";
 import { requireMachineAccess } from "./machine-access.ts";
@@ -208,7 +209,12 @@ import { EvidenceStore } from "./evidence-store.ts";
 import { startTrackerOwnerLoop } from "./tracker-owner-loop.ts";
 import { trackerRunner } from "./tracker-runner.ts";
 import { createWorkItemsService } from "./work-items.ts";
-import { createLocalTracker } from "@clankie/work-items";
+import {
+  collectLinearImport,
+  createLocalTracker,
+  type EvidenceReference,
+  type TrackerActor,
+} from "@clankie/work-items";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
@@ -671,18 +677,19 @@ const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json
 // The built-in tracker; its event stream drives the in-process owner loop (VUH-1917).
 // A run's seat, pane and hire are read live from the hire records (VUH-1918).
 const evidenceStore = EvidenceStore.local(join(stateRoot, "evidence"));
-const builtInTracker = createLocalTracker({
+const builtInTrackerOptions = {
   directory: join(stateRoot, "tracker"),
-  validateEvidence: async (_issueKey, references) => {
+  validateEvidence: async (_issueKey: string, references: readonly EvidenceReference[]) => {
     for (const ref of references) {
       const record = await evidenceStore.record(ref.recordId);
       if (!record || record.sha256 !== ref.sha256)
         throw new Error(`Evidence record ${ref.recordId} does not match sha256`);
     }
   },
-  runner: (actor) =>
+  runner: (actor: TrackerActor) =>
     trackerRunner(actor.id, (fleet, pane) => captain.projectHireMembershipCandidate(fleet, pane)),
-});
+};
+const builtInTracker = createLocalTracker(builtInTrackerOptions);
 let bindLinearBudgetWarning!: (notify: (text: string) => Promise<boolean>) => void;
 const linearBudgetWarningReady = new Promise<(text: string) => Promise<boolean>>((resolve) => {
   bindLinearBudgetWarning = resolve;
@@ -908,6 +915,11 @@ const workItems = createWorkItemsService({
   },
   localMachineId: "local",
   workspace: () => startupSettings.captain.workingDirectory ?? process.cwd(),
+  // A `builtin` repo convention reads and writes this same store, scoped to its project (VUH-1987).
+  builtInTracker: (assertIssueWrite) =>
+    assertIssueWrite === undefined
+      ? builtInTracker
+      : createLocalTracker({ ...builtInTrackerOptions, assertIssueWrite }),
   mcpHost,
   githubToken: () => githubConnectionToken(operatorCredentialStore),
   hosted: hostedBody !== undefined,
@@ -1886,6 +1898,21 @@ const clankie = await createClankieApp({
   evidenceStore,
   builtInTracker,
   linearMirrors,
+  linearCutover: new LinearCutover({
+    trackerDirectory: join(stateRoot, "tracker"),
+    importsRoot: join(stateRoot, "tracker-imports"),
+    mirrors: linearMirrors,
+    settings: settingsStore,
+    localMachineId: "local",
+    // The import's own read-only capture: queries only, the shared background budget.
+    linearSnapshot: async (projectId) => {
+      const session = await mirrorSession();
+      const snapshot = await collectLinearImport({ projectId, query: session.query });
+      if (snapshot.workspaceId !== session.binding.workspaceId)
+        throw new Error("Linear workspace did not match connected account");
+      return { snapshot, requests: session.requests() };
+    },
+  }),
   importLinear: async (projectId, scratch, assertCurrent) => {
     const settings = await settingsStore.load();
     return importConnectedLinear(projectId, {

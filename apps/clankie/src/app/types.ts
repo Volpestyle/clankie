@@ -180,6 +180,8 @@ export interface ClankieAppDependencies {
   importLinear?: (projectId: string, scratch: string, assertCurrent: () => Promise<void>) => Promise<unknown>;
   /** Owner command for a scratch store's webhook mirror (VUH-1965). */
   linearMirrors?: Pick<import("../linear-mirror.ts").LinearMirrors, "configure">;
+  /** Mirror 3 (VUH-1987): owner-run cutover from Linear and its switch-back. */
+  linearCutover?: Pick<import("../linear-cutover.ts").LinearCutover, "run">;
   /** Optional host policy; ordinary installations do not supply a provider. */
   runtimeProvider?: RuntimeProvider;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;

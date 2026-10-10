@@ -80,6 +80,7 @@
         "scripts/runtime-canary-live-proof.ts",
         "scripts/tracker-sync-roundtrip.ts",
         "scripts/linear-mirror-roundtrip.ts",
+        "scripts/linear-cutover-rehearsal.ts",
         "test/fixtures/runtime-canary-cpu-preload.mjs",
         "test/fixtures/runtime-canary-service.ts",
         "test/fixtures/mcp-stdio-bridge.ts",

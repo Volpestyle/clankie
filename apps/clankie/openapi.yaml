@@ -1945,6 +1945,41 @@ paths:
         "400": { description: Invalid project UUID, scratch name or action }
         "409": { description: No matching scratch import, or it mirrors another project }
         "503": { description: Mirror capability unavailable }
+  /v1/tracker/cutover/linear:
+    post:
+      tags: [Operator]
+      operationId: cutoverLinear
+      summary: Cut a World project over from Linear to the built-in tracker, or switch it back
+      description: >-
+        Mirror 3 (VUH-1987). A dry run reads only (Linear included) and returns the
+        plan: per-type counts against a fresh read-only Linear capture, the mirror's
+        state, the store, binding and convention changes with backup paths, refusals
+        and the switch-back command. Without dryRun the plan is applied (mirror
+        disabled, scratch import promoted to the live store, trackerProjectId bound,
+        convention switched to builtin) or refused with HTTP 409 and nothing changed.
+        switchBack restores the exact pre-cutover convention, binding and store and
+        keeps the pilot store.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [worldProject]
+              properties:
+                worldProject: { type: string, pattern: "^[a-z][a-z0-9_-]{0,63}$" }
+                scratch: { type: string, pattern: "^[a-zA-Z0-9_-]{1,80}$" }
+                linearProjectId: { type: string, format: uuid }
+                switchBack: { type: boolean, default: false }
+                dryRun: { type: boolean, default: false }
+      responses:
+        "200": { description: The plan (dry run) or the applied plan with its steps }
+        "400": { description: Invalid request; a cutover names its scratch import and Linear project }
+        "401": { description: Operator authentication required }
+        "409": { description: Refused; the body is the plan with its refusals }
+        "422": { description: A step failed; the active record names the steps already applied }
+        "503": { description: Cutover capability unavailable }
   /v1/work:
     post:
       tags: [Operator]

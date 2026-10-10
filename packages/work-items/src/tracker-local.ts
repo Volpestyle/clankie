@@ -266,6 +266,11 @@ interface Store {
     records: Record<string, LinearRecord[]>;
     /** Linear webhook events already applied by the mirror (VUH-1965), newest last. */
     events?: { id: string; deliveryId?: string; at: string; type: string; action: string }[];
+    /**
+     * Set when the owner promoted this copy to the live store (VUH-1987). The
+     * records stay as provenance; the store is now authoritative and writable.
+     */
+    cutover?: { at: string; linearProjectId: string; scratch: string };
   };
   actors?: (User & { actor: TrackerActor })[];
   milestones?: LinearRecord[];
@@ -325,6 +330,8 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
   ): Promise<LinearImportReport>;
   /** Host-only: what a webhook mirror plans against; undefined when this is not a mirror store. */
   linearMirrorView(projectId: string): Promise<LinearMirrorView | undefined>;
+  /** The persisted store identity; it changes when a cutover or switch-back replaces the store. */
+  storeId(): Promise<string>;
   /** Replays events after the cursor (seq), then pushes new ones. Returns an unsubscribe. */
   /** Host-only: link the existing mailbox record to its requesting item event. */
   linkOwnerAsk(eventId: string, requestId: string): Promise<void>;
@@ -375,6 +382,10 @@ const values = (args: Record<string, unknown>, key: string) => (args[key] ?? [])
 const localUrl = (kind: string, id: string) => `clankie-work://local/${kind}/${id}`;
 const priorityRank = (value: number) => (value === 0 ? 5 : value);
 const codeOf = (error: unknown) => (error as NodeJS.ErrnoException).code;
+/** A Linear copy that has not been cut over: read-only, changed only from Linear. */
+function mirroring(store: Store): store is Store & { linearMirror: NonNullable<Store["linearMirror"]> } {
+  return store.linearMirror !== undefined && store.linearMirror.cutover === undefined;
+}
 const localKey = (team: Team) => (team.key === "LOCAL" ? "LOCAL" : `LOCAL-${team.key}`);
 
 function seed(options: LocalTrackerOptions, now: string): Store {
@@ -1024,9 +1035,12 @@ function addCycle(store: Store, project: Project, startsAt: string, now: string)
  * ended cycle (a later cycle may already exist, planned ahead): the next access rolls over.
  */
 function cyclesDue(store: Store, clock: string): boolean {
-  if (store.linearMirror) return false; // provider cycles remain authoritative during mirror
+  if (mirroring(store)) return false; // provider cycles remain authoritative during mirror
+  // Imported Linear team cycles (no project) are history; only project cycles roll over.
   const ended = new Set(
-    (store.cycles ?? []).filter((cycle) => cycle.endsAt <= clock).map((cycle) => cycle.id),
+    (store.cycles ?? [])
+      .filter((cycle) => cycle.projectId !== "" && cycle.endsAt <= clock)
+      .map((cycle) => cycle.id),
   );
   return (
     store.issues.some((issue) => issue.cycleId != null && ended.has(issue.cycleId) && isOpen(store, issue)) ||
@@ -2860,11 +2874,18 @@ function appendSync(
   (store.syncLog ??= []).push({ ...body, hash: auditHash(body) });
 }
 
+/**
+ * Item-event subscribers per store file, shared by every backend instance in the process:
+ * a project-scoped instance (a `builtin` repo's writes) publishes to the owner loop too.
+ */
+const eventListeners = new Map<string, Set<TrackerEventListener>>();
+
 /** Durable local Linear-shaped tracker, also used as ancillary storage for repo backends. */
 export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBackend {
   const directory = resolve(options.directory);
   const path = join(directory, "tracker.json");
-  const listeners = new Set<TrackerEventListener>();
+  const listeners = eventListeners.get(path) ?? new Set<TrackerEventListener>();
+  eventListeners.set(path, listeners);
   const publish = (events: readonly TrackerItemEvent[]) => {
     for (const event of events)
       for (const listener of listeners) {
@@ -2901,7 +2922,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     const firstEvent = (store.events?.length ?? 0) + 1;
     try {
       // Linear stays authoritative until cutover (ADR 0181): a mirror changes only from Linear.
-      if (store.linearMirror)
+      if (mirroring(store))
         throw new TrackerWriteRefused(
           "mirror_read_only",
           "This store mirrors Linear; make the change in Linear until cutover",
@@ -3231,6 +3252,8 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       return withTrackerStoreLock(path, async (assertHeld) => {
         const { store, clock } = await load();
         const before = structuredClone(store);
+        if (store.linearMirror?.cutover)
+          throw new Error("This store was cut over from Linear; import into a scratch store instead");
         if (store.linearMirror && store.linearMirror.workspaceId !== snapshot.workspaceId)
           throw new Error("Scratch store belongs to another Linear workspace");
         if (store.linearMirror && store.team.id !== snapshot.team.id)
@@ -3583,9 +3606,13 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         return report;
       });
     },
+    async storeId() {
+      const { store } = await load();
+      return store.storeId ?? store.team.id;
+    },
     async linearMirrorView(projectId) {
       const { store } = await load();
-      if (!store.linearMirror) return undefined;
+      if (!mirroring(store)) return undefined;
       return {
         workspaceId: store.linearMirror.workspaceId,
         team: store.team as unknown as LinearRecord,
@@ -3786,4 +3813,201 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       });
     },
   };
+}
+
+/** What a cutover plan reads from a store (VUH-1987), without opening it for writes. */
+export interface TrackerStoreSummary {
+  readonly exists: boolean;
+  readonly storeId?: string;
+  readonly team?: { readonly id: string; readonly key: string; readonly name: string };
+  /** Native record counts by collection. */
+  readonly counts: Readonly<Record<string, number>>;
+  /** No record anyone wrote or imported: only the seeded team, user and statuses. */
+  readonly empty: boolean;
+  readonly mirror?: {
+    readonly workspaceId: string;
+    readonly cutover?: { readonly at: string; readonly linearProjectId: string; readonly scratch: string };
+    readonly projects: readonly { readonly id: string; readonly name: string }[];
+    /** Provider records by type, with Linear's own updatedAt, for drift comparison. */
+    readonly records: Readonly<
+      Record<string, readonly { readonly id: string; readonly updatedAt?: string }[]>
+    >;
+  };
+  /** Applied writes that did not come from Linear (import, mirror or the cutover itself). */
+  readonly localWrites: number;
+}
+
+const LINEAR_SOURCED_TOOLS = new Set(["import_linear", "mirror_linear", "cutover_linear"]);
+
+function summarizeStore(store: Store | undefined): TrackerStoreSummary {
+  if (store === undefined) return { exists: false, counts: {}, empty: true, localWrites: 0 };
+  const counts: Record<string, number> = {
+    issues: store.issues.length,
+    projects: store.projects.length,
+    comments: store.comments.length,
+    statusUpdates: store.statusUpdates.length,
+    labels: store.labels.length,
+    milestones: store.milestones?.length ?? 0,
+    documents: store.documents?.length ?? 0,
+    cycles: store.cycles?.length ?? 0,
+    releases: store.releases?.length ?? 0,
+    runs: store.runs?.length ?? 0,
+    bundles: store.bundles?.length ?? 0,
+    events: store.events?.length ?? 0,
+  };
+  return {
+    exists: true,
+    storeId: store.storeId ?? store.team.id,
+    team: { id: store.team.id, key: store.team.key, name: store.team.name },
+    counts,
+    empty: Object.values(counts).every((count) => count === 0),
+    ...(store.linearMirror === undefined
+      ? {}
+      : {
+          mirror: {
+            workspaceId: store.linearMirror.workspaceId,
+            ...(store.linearMirror.cutover === undefined ? {} : { cutover: store.linearMirror.cutover }),
+            projects: store.projects.map((project) => ({ id: project.id, name: project.name })),
+            records: Object.fromEntries(
+              Object.entries(store.linearMirror.records).map(([type, records]) => [
+                type,
+                records.map((record) => ({
+                  id: record.id,
+                  ...(typeof record.updatedAt === "string" ? { updatedAt: record.updatedAt } : {}),
+                })),
+              ]),
+            ),
+          },
+        }),
+    localWrites: (store.audit ?? []).filter(
+      (event) => event.outcome === "applied" && !LINEAR_SOURCED_TOOLS.has(event.tool),
+    ).length,
+  };
+}
+
+async function readStoreText(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (codeOf(error) === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+/** Host-only read of a store directory's `tracker.json`; never seeds or writes one. */
+export async function readTrackerStoreSummary(directory: string): Promise<TrackerStoreSummary> {
+  const text = await readStoreText(join(resolve(directory), "tracker.json"));
+  return summarizeStore(text === undefined ? undefined : parseStore(text));
+}
+
+async function writeExclusive(path: string, content: string): Promise<void> {
+  const handle = await open(path, "wx", 0o600);
+  try {
+    await handle.writeFile(content);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Mirror 3 (VUH-1987): the owner's imported, mirrored copy becomes the live store.
+ * Under both store locks the live store's exact bytes go to `backup`, then the copy
+ * replaces it, marked cut over: writable, authoritative, its Linear records kept as
+ * provenance. The copy keeps its own storeId, so clients rebootstrap (VUH-1971).
+ */
+export async function promoteLinearImport(options: {
+  readonly source: string;
+  readonly target: string;
+  readonly backup: string;
+  readonly linearProjectId: string;
+  readonly scratch: string;
+  readonly actor: TrackerActor;
+  readonly clock?: () => Date;
+  /** Re-checked under both locks, immediately before the swap. */
+  readonly verify: (source: TrackerStoreSummary, target: TrackerStoreSummary) => Promise<void> | void;
+}): Promise<{ storeId: string; previousStoreId: string | undefined; backedUp: boolean }> {
+  const targetPath = join(resolve(options.target), "tracker.json");
+  const sourcePath = join(resolve(options.source), "tracker.json");
+  if (targetPath === sourcePath) throw new Error("A store cannot be promoted onto itself");
+  return withTrackerStoreLock(targetPath, (targetHeld) =>
+    withTrackerStoreLock(sourcePath, async (sourceHeld) => {
+      const [sourceText, targetText] = await Promise.all([
+        readStoreText(sourcePath),
+        readStoreText(targetPath),
+      ]);
+      if (sourceText === undefined) throw new Error("No imported store to promote");
+      const store = parseStore(sourceText);
+      const previous = targetText === undefined ? undefined : parseStore(targetText);
+      await options.verify(summarizeStore(store), summarizeStore(previous));
+      if (!store.linearMirror) throw new Error("Only a Linear import can be promoted");
+      if (store.linearMirror.cutover) throw new Error("That import was already cut over");
+      if (!store.projects.some((project) => project.id === options.linearProjectId))
+        throw new Error("That import does not hold the Linear project");
+      const before = structuredClone(store);
+      const now = nextWriteTime(store, (options.clock ?? (() => new Date()))().toISOString());
+      store.linearMirror.cutover = {
+        at: now,
+        linearProjectId: options.linearProjectId,
+        scratch: options.scratch,
+      };
+      store.lastWriteAt = now;
+      appendAudit(store, {
+        at: now,
+        tool: "cutover_linear",
+        outcome: "applied",
+        actor: options.actor,
+        fields: ["linearMirror"],
+        entities: [{ type: "projects", id: options.linearProjectId }],
+        target: `scratch:${options.scratch}`,
+      });
+      appendSync(before, store, options.actor, "cutover_linear", now);
+      parseStore(JSON.stringify(store));
+      if (targetText !== undefined) await writeExclusive(options.backup, targetText);
+      sourceHeld();
+      await persist(targetPath, store, targetHeld);
+      return {
+        storeId: store.storeId ?? store.team.id,
+        previousStoreId: previous === undefined ? undefined : (previous.storeId ?? previous.team.id),
+        backedUp: targetText !== undefined,
+      };
+    }),
+  );
+}
+
+/**
+ * Switch-back (VUH-1987): the live store's exact bytes go to `keep`, then the
+ * pre-cutover bytes come back unchanged (or the file is removed if there was none).
+ */
+export async function restoreTrackerStore(options: {
+  readonly target: string;
+  readonly backup: string | undefined;
+  readonly keep: string;
+  readonly verify?: (current: TrackerStoreSummary) => Promise<void> | void;
+}): Promise<{ storeId: string | undefined; restoredStoreId: string | undefined }> {
+  const targetPath = join(resolve(options.target), "tracker.json");
+  return withTrackerStoreLock(targetPath, async (assertHeld) => {
+    const currentText = await readStoreText(targetPath);
+    const current = currentText === undefined ? undefined : parseStore(currentText);
+    await options.verify?.(summarizeStore(current));
+    const backupText = options.backup === undefined ? undefined : await readFile(options.backup, "utf8");
+    const restored = backupText === undefined ? undefined : parseStore(backupText);
+    if (currentText !== undefined) await writeExclusive(options.keep, currentText);
+    assertHeld();
+    if (backupText === undefined) await rm(targetPath, { force: true });
+    else {
+      const temp = `${targetPath}.${randomUUID()}.tmp`;
+      try {
+        await writeExclusive(temp, backupText);
+        assertHeld();
+        await rename(temp, targetPath);
+      } finally {
+        await rm(temp, { force: true });
+      }
+    }
+    return {
+      storeId: current === undefined ? undefined : (current.storeId ?? current.team.id),
+      restoredStoreId: restored === undefined ? undefined : (restored.storeId ?? restored.team.id),
+    };
+  });
 }

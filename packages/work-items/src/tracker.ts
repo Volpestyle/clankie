@@ -39,6 +39,18 @@ export interface TrackerDeps extends WorkWriteCallbacks {
   readonly trackerDirectory?: string;
   /** Host-authenticated writer, recorded by the built-in tracker; never from tool arguments. */
   readonly actor?: TrackerActor;
+  /**
+   * Clankie's built-in tracker for a `builtin` convention (VUH-1987): the tracker
+   * project the host bound this repo's project to, its team, and the shared store
+   * opened with an optional issue scope. Absent when the project is not bound.
+   */
+  readonly builtIn?: {
+    readonly projectId: string;
+    readonly teamId: string;
+    readonly open: (
+      assertIssueWrite?: (issue: Readonly<Record<string, unknown>>) => void,
+    ) => TrackerToolBackend;
+  };
 }
 
 /** Raised instead of guessing: the owner has to answer once (ADR 0191). */
@@ -82,6 +94,54 @@ function localTrackerFor(root: string, convention: WorkConvention, deps: Tracker
   });
 }
 
+/** The built-in tracker scoped to the repo's bound tracker project, with the Linear path's rules. */
+function builtInToolsFor(convention: WorkConvention, deps: TrackerDeps): TrackerToolBackend {
+  const builtIn = deps.builtIn;
+  if (builtIn === undefined)
+    throw new BackendUnavailableError(
+      "This repo tracks work in Clankie's built-in tracker, but its project is not bound to a tracker project (clankie project update, trackerProjectId)",
+    );
+  const label = convention.linear?.label;
+  const tracker = builtIn.open(
+    deps.scopedWrites === true
+      ? (issue) => {
+          if (issue.projectId !== builtIn.projectId) throw new WorkItemScopeError();
+        }
+      : undefined,
+  );
+  return {
+    catalog: () => TRACKER_TOOLS,
+    async call(name, args, callbacks) {
+      const scoped =
+        name === "list_issues" ||
+        name === "search_issues" ||
+        (name === "save_issue" && args.id === undefined);
+      if (deps.scopedWrites) {
+        if (args.project === null) throw new WorkItemScopeError();
+        if (
+          args.project !== undefined &&
+          linearResourceId(await tracker.call("get_project", { query: args.project })) !== builtIn.projectId
+        )
+          throw new WorkItemScopeError();
+      }
+      const parameters = {
+        ...(scoped
+          ? {
+              team: builtIn.teamId,
+              project: builtIn.projectId,
+              ...(label === undefined || name === "save_issue" ? {} : { label }),
+            }
+          : {}),
+        ...args,
+        ...(name !== "save_issue" || args.id !== undefined || label === undefined
+          ? {}
+          : { labels: [...new Set([...((args.labels as string[] | undefined) ?? []), label])] }),
+      };
+      return tracker.call(name, parameters, { ...deps, ...callbacks });
+    },
+  };
+}
+
 function nativeBackendFor(root: string, convention: WorkConvention, deps: TrackerDeps): WorkBackend {
   const writes = {
     ...(deps.beforeWrite === undefined ? {} : { beforeWrite: deps.beforeWrite }),
@@ -117,6 +177,16 @@ function nativeBackendFor(root: string, convention: WorkConvention, deps: Tracke
           `This repo tracks work in GitHub issues (${convention.github.repo}); connect GitHub to Clankie to use it`,
         );
       return createGithubBackend({ repo: convention.github.repo, gh: deps.gh, ...writes });
+    case "builtin": {
+      const tools = builtInToolsFor(convention, deps);
+      return createLinearBackend({
+        team: deps.builtIn!.teamId,
+        project: deps.builtIn!.projectId,
+        ...(convention.linear?.label === undefined ? {} : { label: convention.linear.label }),
+        call: (name, args) => tools.call(name, args, writes),
+        ...(deps.scopedWrites === undefined ? {} : { scopedWrites: deps.scopedWrites }),
+      });
+    }
     case "linear":
       if (convention.linear === undefined) throw new Error("A linear convention names its team");
       const local = deps.linear === undefined ? localTrackerFor(root, convention, deps) : undefined;
@@ -140,6 +210,7 @@ export function trackerToolsFor(
   convention: WorkConvention,
   deps: TrackerDeps,
 ): TrackerToolBackend {
+  if (convention.backend === "builtin") return builtInToolsFor(convention, deps);
   if (convention.backend === "linear") {
     const local = deps.linear === undefined ? localTrackerFor(root, convention, deps) : undefined;
     const call =
@@ -215,7 +286,8 @@ export function trackerToolsFor(
 }
 
 export function backendFor(root: string, convention: WorkConvention, deps: TrackerDeps): WorkBackend {
-  if (convention.backend === "linear") return nativeBackendFor(root, convention, deps);
+  if (convention.backend === "linear" || convention.backend === "builtin")
+    return nativeBackendFor(root, convention, deps);
   // Preserve the compatibility callers' eager backend-availability error boundary.
   nativeBackendFor(root, convention, deps);
   const canonical = trackerToolsFor(root, convention, deps);

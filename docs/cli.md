@@ -6658,3 +6658,43 @@ no milestone or relation events, so project events refresh milestones and relati
 changes arrive with the next re-read of an issue. `status` returns counters
 (applied, duplicate, ignored, drift, failed), the applied event count and the
 last 50 drift reports. The service keeps bindings in `tracker-imports/mirrors.json`.
+
+### `work cutover linear --world-project ID --scratch NAME --project UUID [--dry-run]`
+
+Mirror 3 (VUH-1987): the World project `ID` moves off Linear onto the built-in
+tracker. Always run `--dry-run` first. It only reads, including a fresh read-only
+capture of the Linear project through the connected account, and prints this plan:
+
+- `counts` per type: `linear`, `builtIn`, `missing`, `extra` and `stale`;
+- `mirror`: the webhook mirror's state, counters and unrepaired drift;
+- `changes`: the mirror is disabled, the live `tracker/tracker.json` is replaced by
+  the scratch import (with its storeId, counts and backup path), the settings
+  project's `trackerProjectId` is set, and the convention file switches from
+  `linear` to `builtin`;
+- `refusals` and `warnings`;
+- the exact `switchBack` command.
+
+Without `--dry-run`, the cutover applies those steps in that order and records
+them in `tracker/cutover/active.json`. A refused cutover returns the same plan
+with HTTP 409 and changes nothing. It refuses when:
+
+- the copy has drifted from Linear (missing or stale records);
+- the mirror recorded failed events or unrepaired drift;
+- the live store already holds records;
+- the convention is not `linear`;
+- another cutover is active.
+
+After a cutover, the project's `.clankie/tracking.json` reads `backend: builtin`,
+and its `linear` block stays unchanged for switch-back. `clankie work --repo`
+and workers' `linear_*` calls with that project's `repo` then use the built-in
+store, scoped to the bound project UUID. Clients see a new storeId and
+rebootstrap. The scratch store itself is left unchanged.
+
+### `work cutover linear --world-project ID --switch-back [--dry-run]`
+
+Reverses the active cutover. The dry run prints the convention, binding and
+store changes, and `pilotWrites`, the built-in writes made since cutover that
+Linear does not have. The switch-back restores the convention's and the live
+store's exact pre-cutover bytes and the previous binding. It keeps the pilot
+store as `tracker/cutover/<time>/pilot-<time>.json`. The mirror stays disabled.
+To cut over again, re-import into a new scratch name and cut over that import.

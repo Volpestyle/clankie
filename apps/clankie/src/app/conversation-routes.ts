@@ -28,6 +28,7 @@ import { manageConnections } from "../connections.ts";
 import { type DeviceRegistry } from "../devices.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { WorkRequestError } from "../work-items.ts";
+import { CutoverRequestSchema } from "../linear-cutover.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
 import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
 import { z } from "zod";
@@ -904,6 +905,24 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       return context.json(
         { error: "linear_mirror_refused", detail: error instanceof Error ? error.message : String(error) },
         409,
+      );
+    }
+  });
+  // Mirror 3 (VUH-1987): the owner cuts a World project over to the built-in tracker,
+  // or switches it back. A dry run reads only (Linear included) and prints every change.
+  ctx.app.post("/v1/tracker/cutover/linear", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (!identity || identity === "unavailable") return context.json({ error: "operator_required" }, 401);
+    const parsed = CutoverRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!ctx.dependencies.linearCutover) return context.json({ error: "cutover_unavailable" }, 503);
+    try {
+      const result = (await ctx.dependencies.linearCutover.run(parsed.data)) as { ready: boolean };
+      return context.json(result, result.ready || parsed.data.dryRun ? 200 : 409);
+    } catch (error) {
+      return context.json(
+        { error: "linear_cutover_failed", detail: error instanceof Error ? error.message : String(error) },
+        422,
       );
     }
   });

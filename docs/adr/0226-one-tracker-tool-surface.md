@@ -23,7 +23,9 @@ per-project cycles with automatic rollover, and a fifth
 [amendment](#amendment-evidence-bundles-owner-asks-and-run-gates-2026-10-09-vuh-1919)
 (VUH-1919) adds evidence bundles, linked owner asks and run gates. An
 [amendment](#amendment-evidence-keys-are-the-trackers-own-identifiers-2026-10-09-vuh-1991-vuh-1997)
-(VUH-1991, VUH-1997) keys evidence by the tracker's own identifiers.
+(VUH-1991, VUH-1997) keys evidence by the tracker's own identifiers. The
+[cutover amendment](#proposed-amendment-cutover-and-switch-back-2026-10-09-vuh-1987)
+(VUH-1987) moves one World project from Linear onto the built-in tracker and back.
 
 ## Context
 
@@ -656,3 +658,109 @@ in the repo's `.clankie/tracking.json`. Other key-shaped text (`SHA-256`,
 nothing qualifies, the record stays unkeyed. An explicit `--issue` is taken as
 written. Records pushed before this rule under the shortened `VUH-n` keep that
 key; nothing rewrites them.
+
+## Proposed amendment: cutover and switch-back (2026-10-09, VUH-1987)
+
+Status: proposed. This is the ADR 0181 cutover step: the built-in tracker
+mirrors Linear first, then the owner cuts one World project over. Linear is
+read during cutover and never written.
+
+**One command, dry run first.** `clankie work cutover linear --world-project ID
+--scratch NAME --project UUID [--dry-run]` (`POST /v1/tracker/cutover/linear`,
+operator only) cuts the named World project over from the Linear project imported
+into scratch store `NAME`. `--dry-run` reads only, including the Linear capture.
+It prints everything the cutover would change and the exact switch-back command:
+
+- counts per type against Linear;
+- the mirror's state, then disabled;
+- the live store file, its storeId and counts, and the backup path;
+- the settings binding from and to;
+- the convention file from and to.
+
+The real run prints the same plan with the steps it applied, or refuses with the
+same plan and HTTP 409. Cutovers run one at a time per service.
+
+**Refusals.** Cutover refuses:
+
+- when the copy has drifted: a fresh read-only capture of the Linear project
+  (the import's own collector, through the connected account and the shared
+  background budget) has a record the copy lacks, or a newer Linear `updatedAt`
+  than the copy holds (actors are compared by id only);
+- when the mirror recorded failed events or unrepaired drift reports;
+- when the copy holds writes that did not come from Linear;
+- when the import came from another workspace or another Linear project than the
+  convention scopes;
+- when the convention is not `linear`;
+- when a cutover is already active;
+- when the tracker UUID is bound to another World project;
+- when the live built-in store holds any record.
+
+Cutover never merges two stores; a live store with records is a separate
+decision. Records the copy keeps after Linear removed them are reported as
+`extra`, but they do not block. Rerunning `clankie work import linear` repairs
+missing or stale records before a retry.
+
+**Steps.** The service first writes the intent, `tracker/cutover/active.json`,
+and backs up the convention. It then applies these steps, recording each one:
+
+1. **Mirror.** It disables the scratch store's webhook mirror.
+2. **Store.** Under both store locks, the live `tracker/tracker.json`'s exact
+   bytes go to `tracker/cutover/<time>/before.json`. The copy then replaces the
+   live store, marked `linearMirror.cutover`. The marked store is writable and
+   authoritative. Its Linear records stay as provenance, and it refuses further
+   imports. The copy keeps its own storeId, so clients rebootstrap
+   (`store_replaced`, VUH-1971).
+3. **Binding.** It sets the World project's `trackerProjectId` to the imported
+   project UUID (VUH-1969), which is Linear's project UUID.
+4. **Convention.** It switches the project's `.clankie/tracking.json` from
+   `backend: linear` to `backend: builtin`. The `linear` block stays unchanged,
+   so switch-back restores it, and the note records how to switch back.
+
+**The `builtin` convention.** `builtin` joins the repository backends. A
+`builtin` repo reads and writes the service's own built-in store, scoped to the
+project's bound `trackerProjectId`. Lists, searches and new items take that
+project and its team. A delegated write to an issue outside it, or a `project`
+argument naming another project, is refused. The scope uses the UUID, never the
+name. Workers keep the `linear_*` tools: a call with that project's `repo`, or
+`clankie work --repo`, reaches the built-in tracker with the host-stamped worker
+actor. Project details read the bound project by UUID. Release key matching keeps
+the `VUH` prefix. An unbound `builtin` repo is unavailable and names the missing
+binding. It never falls back to Linear.
+
+**Owner loop.** Imported and mirrored history (`via: linear_import` or
+`linear_mirror`) already woke chats in Linear's time. It advances the owner
+loop's cursor without wakes or asks. The cursor belongs to one storeId: when a
+cutover or switch-back replaces the store, the loop restarts its cursor and its
+ask links for the new store. Imported Linear team cycles (no project) are
+history and never roll over; project cycles roll over once the store is cut
+over.
+
+**Switch-back.** `clankie work cutover linear --world-project ID --switch-back
+[--dry-run]` reverses the recorded steps. It prints the convention, binding and
+store changes. It also prints `pilotWrites`: the built-in writes made since
+cutover, which Linear never saw and which must be carried over by hand. The
+switch-back then:
+
+1. restores the convention's exact pre-cutover bytes;
+2. restores the previous `trackerProjectId`, or none;
+3. keeps the pilot store as `tracker/cutover/<time>/pilot-<time>.json`;
+4. restores the live store's exact pre-cutover bytes.
+
+It refuses if the live store is not the one the cutover promoted. The mirror
+stays disabled. To cut over again, run a fresh `import linear` into a new scratch
+name, then cut over again.
+
+**Interfaces and proof.** Before the live run, the device protocol's
+`WorkBackendKind` gains `builtin`, so app builds must include it before they read
+a `builtin` repo. `apps/clankie/test/linear-cutover.integration.test.ts` covers
+these cases over the HTTP route:
+
+- dry run;
+- promote;
+- switch, with a fleet worker's `clankie_call` writes landing in the built-in
+  store;
+- an out-of-project write refused;
+- one "check it works" ask on landing;
+- no wakes from imported history;
+- exact switch-back;
+- refusal on drift, with nothing changed.

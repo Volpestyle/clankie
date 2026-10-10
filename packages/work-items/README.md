@@ -156,3 +156,16 @@ actor and `via: linear_mirror` on item events and enter the sync journal as
 as drift; `collectLinearScoped` re-reads just those records with the import's
 field selections. A store holding a Linear mirror refuses every built-in write
 (`mirror_read_only`) until cutover.
+
+### Cutover
+
+`promoteLinearImport` replaces a live store with an imported copy, under both
+store locks. It backs up the live bytes and marks the copy's `linearMirror.cutover`,
+so the copy is writable, refuses further imports, and keeps its Linear records as
+provenance. `restoreTrackerStore` puts the exact pre-cutover bytes back and keeps
+the pilot store. `readTrackerStoreSummary` reads counts, provider record ids with
+Linear's `updatedAt`, and non-Linear writes, without seeding a store.
+
+A `builtin` convention routes the canonical tools to the host's built-in store
+through `TrackerDeps.builtIn`. That scope is the bound tracker project UUID and
+its team. With scoped writes, an issue outside the project is refused.
