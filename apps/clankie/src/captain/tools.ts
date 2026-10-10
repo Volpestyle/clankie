@@ -1108,10 +1108,18 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
       "Another lead's live hire still receives the message but keeps its lead: the result names ownerConversationId, and its reports and completion go there. " +
       "To reach another lead, name its conversationId or the native head seat that drives it: the message arrives in that lead's conversation over its own seat channel as attributed lead context, never an owner turn, never adopted, never typed into a pane. delivered means its channel acknowledged the event (leadConversationId names the conversation); undelivered means it has no live channel and nothing was queued. " +
       "To answer an observed native Codex or Claude question, supply questionAnswer with its exact requestId and an answers map keyed by question ID ({answers: [text]} per ID), and omit message. Claude permission answers require this worker's exact private authenticated lead and its existing gate authority; owner-only permissions use the authenticated owner inbox. Peers, rooms and Discord cannot answer Claude permissions. Claude hook receipts acknowledge stdout; native channel permission verdicts remain unconfirmed because Claude gives no application receipt. Sync Codex answers use the existing request and native first-answer arbitration. Async requestId is the function call_id; answers use attributed native user input, steering the active turn without interruption or starting its reply when idle. Async receipts prove acceptance, not first-answer arbitration. Resolved IDs are refused, and uncertain acceptance must not be retried or replaced with an ordinary message. " +
+      "Messages to a hire arrive numbered per lead; set replaces when a message overrides earlier guidance, so a late older one is not acted on. " +
+      "If a send is undelivered or unconfirmed, follow its detail and receipt through Clankie; never ask the owner to type into a worker's pane. " +
       "Linked agents can initiate messages with message_clankie.",
     parameters: Type.Object({
       seat: Type.String({ minLength: 1, maxLength: 200 }),
       message: Type.Optional(Type.String({ minLength: 1, maxLength: SEAT_MESSAGE_MAX })),
+      replaces: Type.Optional(
+        Type.Boolean({
+          description:
+            "True when this message replaces your earlier guidance to this hire. Messages to a hire are numbered; the hire is told any earlier numbered message it has not acted on yet is superseded.",
+        }),
+      ),
       questionAnswer: Type.Optional(
         Type.Object({
           requestId: Type.Union([Type.String({ minLength: 1, maxLength: 200 }), Type.Integer()]),
@@ -1138,7 +1146,9 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
         });
       const result =
         params.questionAnswer === undefined
-          ? await message(params.seat, params.message!, authority)
+          ? params.replaces === undefined
+            ? await message(params.seat, params.message!, authority)
+            : await message(params.seat, params.message!, authority, undefined, { replaces: params.replaces })
           : await message(params.seat, "", authority, SeatQuestionAnswerSchema.parse(params.questionAnswer));
       return json({ ...result, deliveryStage: fleetDeliveryStage(result) });
     },

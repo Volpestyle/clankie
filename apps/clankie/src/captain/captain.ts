@@ -250,6 +250,7 @@ import {
   SeatOutbox,
   seatDeliveryAlert,
 } from "./seat-outbox.ts";
+import { WorkerMessageSequence } from "./worker-message-sequence.ts";
 import { LeadMessageReceipts } from "./lead-message-receipts.ts";
 import { createServiceHandoffDelivery } from "./service-handoff-delivery.ts";
 import { withSeatSubagents } from "./seat-subagents.ts";
@@ -2565,7 +2566,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   // The captain briefs a hired seat through the native channel the
   // operator would, by whichever id the hire handed back (VUH-1373).
-  const messageSeat: MessageSeat = async (target, message, source, questionAnswer) => {
+  const messageSeat: MessageSeat = async (target, message, source, questionAnswer, messageOptions) => {
     const authority = captureConversationAuthority(source);
     await assertConversationAuthority(authority);
     const seat = liveSeats.find(
@@ -2599,10 +2600,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     const delivery =
       questionAnswer === undefined
-        ? await deliverToSeat(seatId, message, {
-            conversationId: seat?.conversationId ?? seatId,
-            source: "captain",
-          })
+        ? await deliverToSeat(
+            seatId,
+            // Numbered per lead and hire, so a late older decision reads as older (VUH-2036).
+            workerMessageSequence.number({
+              conversationId: authority.owner.conversationId,
+              seatId,
+              message,
+              ...(conversations.conversation(authority.owner.conversationId)?.title === undefined
+                ? {}
+                : { title: conversations.conversation(authority.owner.conversationId)!.title }),
+              ...(messageOptions?.replaces === undefined ? {} : { replaces: messageOptions.replaces }),
+            }),
+            {
+              conversationId: seat?.conversationId ?? seatId,
+              source: "captain",
+            },
+          )
         : await herdrWatches.answerSeatQuestion(seatId, questionAnswer, authority);
     if (delivery.outcome === "offline")
       return { outcome: "seat_offline", seatId, deliveryStage: "unavailable" };
@@ -2639,6 +2653,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return undefined;
     }
   }
+
+  const workerMessageSequence = new WorkerMessageSequence(
+    join(options.stateDir, "delivery-receipts", "worker-message-sequence.json"),
+  );
 
   /** Unconfirmed lead messages by sender, so their receipts reconcile read-only across restarts. */
   const leadMessages = new LeadMessageReceipts(

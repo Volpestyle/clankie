@@ -145,7 +145,11 @@ accounts ranked by plan size, what is left and pace against reset; `clankie
 usage` shows each account's plan tier and windows with the same "Next hire"
 lines, `--json` for the raw report).
 Workers report with `message_clankie`. Never deliver work by typing into a
-terminal. Mechanics, routing and recovery: [fleet tools](reference/fleet-tools.md).
+terminal, and never ask the owner to paste a message into a worker's pane: an
+undelivered or uncertain send is followed up from its receipt through Clankie.
+Messages to a hire arrive numbered per lead; set `replaces` when a message
+overrides earlier guidance so a late, older one is not acted on.
+Mechanics, routing and recovery: [fleet tools](reference/fleet-tools.md).
 
 Keep one current brief: result, owner, owned checkout and paths, acceptance,
 destination and next action, and who may change scope. **Done stays fixed**: a

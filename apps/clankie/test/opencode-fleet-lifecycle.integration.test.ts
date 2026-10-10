@@ -773,7 +773,10 @@ test("SSH native hire, API history and follow-up reuse the original controller w
     status: "working",
   });
   expect(f.reportedStates).toContain("working");
-  expect(f.receivedBriefs.at(-1)).toBe("Native remote message");
+  // VUH-2036: a lead's messages to a hire arrive numbered.
+  expect(f.receivedBriefs.at(-1)).toMatch(
+    /^\[Lead message #1 from conversation .+\]\n\nNative remote message$/u,
+  );
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 3 });
 });
 

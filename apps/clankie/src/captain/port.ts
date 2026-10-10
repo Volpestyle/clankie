@@ -108,6 +108,8 @@ export type MessageSeat = (
   authority?: ConversationAuthority,
   /** A response to one observed native request, never a new worker turn. */
   questionAnswer?: import("@clankie/agent-hosts").SeatQuestionAnswer,
+  /** This message replaces the lead's earlier guidance the worker may not have acted on yet. */
+  options?: { readonly replaces?: boolean },
 ) => Promise<SeatMessageResult>;
 type SeatMessageResult = { readonly deliveryStage?: DeliveryStage } & (
   | (Extract<FleetSeatDelivery, { outcome: "delivered" }> & {

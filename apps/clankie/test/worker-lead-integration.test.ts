@@ -655,3 +655,35 @@ it("projects persisted original waiting-mail metadata into the owner roster with
       ?.additionalContext,
   ).toContain("private waiting original");
 });
+
+it("a lead's messages to a remote hire arrive numbered; a replacing one supersedes, and a resend keeps its number across restart (VUH-2036)", async () => {
+  const f = await fixture({ remote: true });
+  await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+  const send = async (captain: ReturnType<typeof createCaptain>, message: string, replaces?: boolean) => {
+    const bank = await captain.laneToolBank("operator", f.leads[0]);
+    const sent = await bank.tools
+      .find((tool) => tool.name === "message_seat")!
+      .call({ seat: f.agent.terminalId, message, ...(replaces === undefined ? {} : { replaces }) });
+    const part = sent.content.find((item) => item.type === "text");
+    expect(JSON.parse(part?.type === "text" ? part.text : "null")).toMatchObject({ outcome: "delivered" });
+  };
+  const delivered = () =>
+    vi.mocked(HerdrWatchStore.prototype.deliverToSeat).mock.calls.map(([, text]) => text);
+  await send(f.captain, "Use plan A");
+  await send(f.captain, "Use plan A");
+  await send(f.captain, "Switch to plan B", true);
+  const [first, resend, replacing] = delivered();
+  expect(first).toMatch(/^\[Lead message #1 from conversation .+\]\n\nUse plan A$/u);
+  // An identical resend keeps its number and text, so its receipt stays the original one.
+  expect(resend).toBe(first);
+  expect(replacing).toContain("[Lead message #2 ");
+  expect(replacing).toContain(
+    "replaces this lead's earlier messages #1–#1: any of them you have not acted on yet is superseded",
+  );
+  expect(replacing).toMatch(/\n\nSwitch to plan B$/u);
+  await f.captain.close();
+  const restarted = f.open();
+  await restarted.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+  await send(restarted, "Then run the tests");
+  expect(delivered().at(-1)).toMatch(/^\[Lead message #3 from conversation /u);
+});
