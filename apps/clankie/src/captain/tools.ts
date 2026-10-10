@@ -1,4 +1,5 @@
 import type { ProjectProposalDraft } from "@clankie/protocol/projects";
+import { splitFleetQualified } from "../herdr-fleet.ts";
 import type { QuestionDraft } from "./conversation-questions.ts";
 import type { OwnerUpdate, OwnerUpdateDraft, ConversationQuestionResult } from "@clankie/protocol";
 import {
@@ -1375,7 +1376,8 @@ function herdrWatchTools(
       executionMode: "sequential",
       execute: async (_id, params) =>
         json(
-          available?.() === false
+          // A remote fleet's pane does not depend on this machine's Herdr.
+          available?.() === false && splitFleetQualified(params.agent) === undefined
             ? { outcome: "refused", reason: "herdr_unavailable" }
             : await arm(params.agent, params.reason),
         ),

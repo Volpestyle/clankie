@@ -66,6 +66,10 @@ export function createWorkerToolRefresh(input: {
     detail:
       "This conversation does not lead or hire this seat. An authenticated owner must select its explicit paneId.",
   });
+  // An original remote controller cannot adopt the current plugin in place. Its
+  // reports still reach this lead; the plugin changes only on a resumed session.
+  const resumeOnCurrentPlugin = (seat: Seat) =>
+    `This running worker keeps its current plugin until its session is resumed. Between tasks, close pane ${seat.paneId} and call hire_agent with resume set to its transcript ref${seat.sessionId ? ` (session ${seat.sessionId})` : ""}, the same harness and workingDirectory. The resumed session keeps its context and loads the current plugin.`;
   const run = async (
     seat: Seat,
     target: string,
@@ -113,6 +117,7 @@ export function createWorkerToolRefresh(input: {
               reason: qualified
                 ? "original_remote_codex_registration_unavailable"
                 : "original_local_codex_registration_unavailable",
+              ...(qualified ? { detail: resumeOnCurrentPlugin(seat) } : {}),
             };
       }
       let nativeConnected = false;
@@ -156,6 +161,7 @@ export function createWorkerToolRefresh(input: {
           ...base,
           outcome: "failed",
           reason: "original_remote_claude_imported_bridge_refresh_unsupported",
+          detail: resumeOnCurrentPlugin(seat),
         };
       }
       if (!held || held.revision !== target || !held.signaled) {

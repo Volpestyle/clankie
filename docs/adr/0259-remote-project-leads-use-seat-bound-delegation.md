@@ -138,3 +138,14 @@ They cannot be safely migrated by trusting a new caller's identity claims. The
 owner loads the new artifact with an initial launch after deployment; subsequent
 loss/restart recovery needs no new pane. No live PC operation is part of fixture
 verification or code landing.
+
+## Fleet wakes amendment (VUH-1999, VUH-2004, 2026-10-10)
+
+A remote workspace conversation is a valid owner for its hires' reports, Herdr
+watches and `schedule_wake`, even though it runs no local captain turns. Each
+reaches the native head only over its seat channel; none falls back to a local
+Pi turn. A watch reserves its original receipt before the take, so it waits
+while no head polls and is never delivered twice. A wake retries until the head
+polls again. A watch on a remote fleet's pane does not need this machine's
+Herdr. A remote worker whose plugin cannot refresh in place is told to resume
+its session on the current plugin between tasks; its reports still arrive.

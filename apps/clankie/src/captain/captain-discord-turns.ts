@@ -175,7 +175,12 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     const parsed = ConversationOwnerSchema.safeParse(input);
     if (!parsed.success) return false;
     const owner = parsed.data;
-    if (owner.discord === undefined) return ctx.conversations.runsCaptainTurns(owner.conversationId);
+    // A remote lead's conversation leads its hires through its native head (ADR 0259).
+    if (owner.discord === undefined)
+      return (
+        ctx.conversations.runsCaptainTurns(owner.conversationId) ||
+        ctx.conversations.runsOnRemoteSeat(owner.conversationId)
+      );
     const scope = ctx.conversations.conversation(owner.conversationId)?.scope;
     const origin = owner.discord;
     if (
@@ -304,6 +309,8 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       // Once the exact room accepts the turn, never replay a failed harvest.
       return runDiscordWatchTurn(owner, notification, guard, mode, waitForCompletion, "escalation", original);
     }
+    if (ctx.conversations.runsOnRemoteSeat(owner.conversationId))
+      return wakeRemoteConversation(owner.conversationId, notification, guard, original);
     await guard?.();
     if (!ctx.conversations.runsCaptainTurns(owner.conversationId)) return false;
     const result = ctx.conversations.submitInternal(
@@ -318,6 +325,73 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     if (waitForCompletion && !(await ctx.conversations.awaitRunResult(result.runId)))
       throw new Error("Fleet review turn did not complete");
     return true;
+  }
+
+  /**
+   * A remote lead has no local captain turn to fall back on: its wake goes to
+   * its native head over the bridge channel, or waits (false) for that head to
+   * poll again. A watch's original receipt is reserved before the take, so a
+   * restart reconciles it instead of sending it twice.
+   */
+  async function wakeRemoteConversation(
+    conversationId: string,
+    notification: string,
+    guard?: () => Promise<void>,
+    original?: HerdrWatchWakeContext,
+  ): Promise<boolean> {
+    const owner = { conversationId };
+    return ctx.conversations.runWithConversationDriver<boolean>(
+      conversationId,
+      () => {
+        const outbox = ctx.seatOutbox(conversationId);
+        if (!outbox.routesToSeat(notification, original?.messageId)) return undefined;
+        return {
+          run: async () => {
+            const preparation = new ConversationServiceRun(ctx.shutdown.signal);
+            let recipientBinding: string | undefined;
+            try {
+              await preparation.wait("remote lead authority", guard?.() ?? Promise.resolve());
+              if (original) {
+                recipientBinding = ctx.watchRecipientBinding
+                  ? await preparation.wait("remote lead recipient", ctx.watchRecipientBinding(conversationId))
+                  : outbox.recipientBinding();
+                await preparation.wait("remote lead final authority", guard?.() ?? Promise.resolve());
+                if (original.receipt || outbox.recipientBinding() !== recipientBinding)
+                  return { handled: true as const, result: false };
+              }
+            } finally {
+              preparation.close();
+            }
+            ctx.shutdown.signal.throwIfAborted();
+            const delivery = await outbox.deliver({
+              kind: "watch",
+              conversationId,
+              source: "watch",
+              content: notification,
+              wantsReply: false,
+              signal: ctx.shutdown.signal,
+              ...(original === undefined
+                ? {}
+                : {
+                    original: {
+                      messageId: original.messageId,
+                      prepare: (receipt: {
+                        messageId: string;
+                        fingerprint: string;
+                        recipientBinding?: string;
+                      }) => original.reserve({ ...receipt, owner }),
+                    },
+                    ...(recipientBinding === undefined ? {} : { recipientBinding }),
+                  }),
+            });
+            if (delivery.outcome === "unbound") return { handled: false as const };
+            return { handled: true as const, result: delivery.outcome === "delivered" };
+          },
+        };
+      },
+      async () => false,
+      ctx.shutdown.signal,
+    );
   }
 
   async function runDiscordWatchTurn(

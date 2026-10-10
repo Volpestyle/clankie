@@ -1245,6 +1245,12 @@ export class ConversationStore {
     return scope?.kind === "global" || (scope?.kind === "workspace" && scope.machineId === undefined);
   }
 
+  /** A remote workspace runs only through its native head on the linked machine (ADR 0259). */
+  public runsOnRemoteSeat(conversationId: string): boolean {
+    const scope = this.metas.get(conversationId)?.scope;
+    return scope?.kind === "workspace" && scope.machineId !== undefined;
+  }
+
   /**
    * Subscribe to durable messages this store writes, as they are written.
    * Returns an unsubscribe; a throwing listener cannot fail the write.
@@ -1761,10 +1767,7 @@ export class ConversationStore {
   ): SubmitOperatorConversationTurnResult {
     const meta = this.metas.get(conversationId);
     if (meta === undefined) throw new Error(`Unknown conversation ${conversationId}`);
-    if (
-      !this.runsCaptainTurns(conversationId) &&
-      !(meta.scope.kind === "workspace" && meta.scope.machineId !== undefined)
-    ) {
+    if (!this.runsCaptainTurns(conversationId) && !this.runsOnRemoteSeat(conversationId)) {
       throw new Error(`Conversation ${conversationId} does not run captain turns`);
     }
     return this.enqueue(meta, message, undefined, false, this.runner, {

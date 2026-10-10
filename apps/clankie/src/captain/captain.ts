@@ -3761,7 +3761,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   autonomy.start(async (conversationId, prompt, origin, expectedGoal) => {
-    if (!conversations.runsCaptainTurns(conversationId)) {
+    // A remote lead's wake reaches its native head; its runner never falls back to Pi.
+    if (
+      !conversations.runsCaptainTurns(conversationId) &&
+      !(origin === "wake" && conversations.runsOnRemoteSeat(conversationId))
+    ) {
       autonomy.clearConversation(conversationId);
       return;
     }

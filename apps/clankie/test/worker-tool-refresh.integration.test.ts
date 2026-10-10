@@ -161,6 +161,8 @@ it("remote Claude root health cannot certify replacement of its imported bridge"
       seatId: "original-pc-seat",
       outcome: "failed",
       reason: "original_remote_claude_imported_bridge_refresh_unsupported",
+      // VUH-1999: the lead gets the exact fix path, not a bare refusal.
+      detail: expect.stringContaining("close pane pc/w1:p1 and call hire_agent with resume"),
     });
     expect(signals).toEqual([]);
   } finally {
