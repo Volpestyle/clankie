@@ -296,7 +296,10 @@ export function createSimulatorManager(input: {
     return result;
   };
   const waiters = new Set<() => void>();
+  // Counts every wake, so a change during a waiter's own attempt is not lost.
+  let changes = 0;
   const wake = () => {
+    changes += 1;
     for (const resolve of waiters) resolve();
   };
   const waitForChange = (ms: number, signal?: AbortSignal) =>
@@ -1056,11 +1059,13 @@ export function createSimulatorManager(input: {
       if (pending) return pending.then(() => manager.acquire(request));
       const result = (async (): Promise<SimulatorResult | Unproven> => {
         const deadline = Date.now() + (request.waitMs ?? 0);
+        let attempted = changes;
         let result = await acquire(request);
         let ticketId = result.outcome === "waiting" ? result.ticket?.id : undefined;
         // A failed seat observation keeps waiting on the same ticket for a
         // bounded time instead of discarding the wait (VUH-2055).
         let unprovenSince = result.outcome === "unproven" ? Date.now() : undefined;
+        let retriedMissed = false;
         while (
           (result.outcome === "waiting" ||
             result.outcome === "booting" ||
@@ -1072,13 +1077,19 @@ export function createSimulatorManager(input: {
             if (ticketId) await input.governor.cancelSimulatorTicket(ticketId, request);
             return revoked();
           }
-          await waitForChange(Math.min(RETRY_MS, deadline - Date.now()), request.waitSignal);
+          // A release during the last attempt woke nobody: no waiter was registered.
+          // Retry once at once rather than sleeping out RETRY_MS; never
+          // twice in a row, so an attempt's own ticket change cannot spin it.
+          const missed: boolean = changes !== attempted && !retriedMissed;
+          retriedMissed = missed;
+          if (!missed) await waitForChange(Math.min(RETRY_MS, deadline - Date.now()), request.waitSignal);
           if (request.waitSignal?.aborted) {
             // A socket timeout is not the holder cancelling its queue position.
             // Stop this wait without admitting new effects; the persisted ticket
             // remains resumable until stale expiry or an explicit cancel.
             return result;
           }
+          attempted = changes;
           result = await acquire({ ...request, ...(ticketId ? { ticketId } : {}) });
           if (result.outcome === "waiting") ticketId = result.ticket?.id ?? ticketId;
           unprovenSince = result.outcome === "unproven" ? (unprovenSince ?? Date.now()) : undefined;
