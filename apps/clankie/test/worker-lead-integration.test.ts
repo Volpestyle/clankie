@@ -687,3 +687,64 @@ it("a lead's messages to a remote hire arrive numbered; a replacing one supersed
   await send(restarted, "Then run the tests");
   expect(delivered().at(-1)).toMatch(/^\[Lead message #3 from conversation /u);
 });
+
+it("a head whose bridge is slow to acknowledge under load keeps its conversation; a report in that gap reaches its channel (VUH-2045)", async () => {
+  const f = await fixture();
+  const lead = f.leads[0]!;
+  const capabilities = {
+    schemaVersion: 1 as const,
+    eventKinds: ["wake", "watch", "escalation", "message", "turn"] as const,
+    ownerOrigin: true,
+  };
+  const notifications: string[] = [];
+  const stop = new AbortController();
+  // The real channel pump; each acknowledgment takes 3s, as under load, so no
+  // poll is parked for longer than the outbox's old 2s grace.
+  const pump = pumpSeatEvents(
+    {
+      notification: async (event) =>
+        void notifications.push((event as { params: { content: string } }).params.content),
+    },
+    {
+      pollEvents: (waitMs, signal) =>
+        f.captain.pollSeatEvents(waitMs, signal, lead, {
+          ...capabilities,
+          eventKinds: [...capabilities.eventKinds],
+        }),
+      acknowledge: async (id) => {
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        return f.captain.acknowledgeSeatEvent(id, lead);
+      },
+    },
+    stop.signal,
+    { waitMs: 200, retryMs: 20 },
+  );
+  try {
+    await expect
+      .poll(() => f.captain.serveOperatorConversation({ op: "get", schemaVersion: 1, conversationId: lead }))
+      .toMatchObject({ conversation: { driver: {} } });
+    expect(
+      await f.captain.receiveFleetSeatMessage(
+        f.agent.paneId,
+        "First report",
+        await delivery(f.captain, f.agent.paneId),
+      ),
+    ).toMatchObject({ received: true });
+    await expect.poll(() => notifications.some((text) => text.includes("First report"))).toBe(true);
+    // The pump is now acknowledging; wait past the old grace inside that gap.
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    expect(
+      await f.captain.receiveFleetSeatMessage(
+        f.agent.paneId,
+        "Report in the gap",
+        await delivery(f.captain, f.agent.paneId),
+      ),
+    ).toMatchObject({ received: true });
+    await expect
+      .poll(() => notifications.some((text) => text.includes("Report in the gap")), { timeout: 10_000 })
+      .toBe(true);
+  } finally {
+    stop.abort();
+    await pump;
+  }
+}, 30_000);

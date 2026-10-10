@@ -198,6 +198,9 @@ async function fixture(
       seatAdapters: [],
       discordEnvironment: {},
       fleetRoundIntervalMs: roundMs,
+      // These cases park a seat with one short poll and expect it gone within
+      // the original 2s; the 30s head hold has its own coverage (VUH-2045).
+      headBoundGraceMs: 2_000,
       workerReportBridgeStatus: (_fleet, pane) => reportHealth?.get(pane),
     },
   );

@@ -736,6 +736,9 @@ export class SeatOutbox {
           if (source === "timeout" || source === "wake" || (source === "abort" && this.abortKeepsGrace)) {
             this.lastPollAt = this.now();
             this.lastPollBinding = recipientBinding;
+          } else if (source === "abort") {
+            // A head's aborted poll is its bridge leaving: no grace from an earlier poll.
+            this.lastPollAt = undefined;
           }
           // A superseding poll replaces this one at once; it is not a state change.
           if (source !== "supersede") this.observeBridgeState(`poll_${source}`);

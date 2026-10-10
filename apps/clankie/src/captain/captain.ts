@@ -291,6 +291,11 @@ const WORKER_RESULT_BRIEF =
 /** Pi's answers to a compaction request that leave nothing to do. */
 const BENIGN_COMPACTION_REFUSALS = new Set(["Already compacted", "Nothing to compact (session too small)"]);
 
+/** How long a head seat stays held after a completed poll; see the seat outbox. */
+const HEAD_BOUND_GRACE_MS = 30_000;
+/** Unchanged from the outbox default: a taken event's exact acknowledgment window. */
+const HEAD_ACK_TIMEOUT_MS = 2_000;
+
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const settingsStore = options.settings ?? new SettingsStore();
   const requireAccess =
@@ -1107,6 +1112,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         uncertaintyPath,
         // A seat polling the previous process keeps its turns while it reconnects.
         presencePath: `${uncertaintyPath}.presence`,
+        // Between polls an operator head's bridge acknowledges and may retry
+        // (up to ~25s under load). That gap is not a departure; only an aborted
+        // poll is. Without this the service ran the conversation beside its live
+        // head (VUH-2045). Room seats keep their own handoff timing.
+        ...(conversations.conversation(conversationId)?.scope.kind === "room"
+          ? {}
+          : {
+              boundGraceMs: options.headBoundGraceMs ?? HEAD_BOUND_GRACE_MS,
+              ackTimeoutMs: HEAD_ACK_TIMEOUT_MS,
+            }),
         startedAt: serviceStartedAt,
         // VUH-1779: tell the seat once about an unresolved receipt instead of failing silently.
         onBridgeIssue: (detail) => {
@@ -1133,18 +1148,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       seatOutboxes.set(conversationId, outbox);
     }
     return outbox;
-  }
-  // Open every head outbox whose seat was polling before this restart, so each
-  // routing check sees that seat as reconnecting rather than gone.
-  for (const file of existsSync(headReceiptDirectory) ? readdirSync(headReceiptDirectory) : []) {
-    if (!file.endsWith(".json.presence")) continue;
-    const name = file.slice(0, -".json.presence".length);
-    try {
-      const conversationId = decodeURIComponent(name);
-      if (encodeURIComponent(conversationId) === name) seatOutbox(conversationId);
-    } catch {
-      // Unreadable presence leaves today's behavior: an unpolled seat is unbound.
-    }
   }
   const deliverServiceHandoff = createServiceHandoffDelivery({
     get conversations() {
@@ -1883,6 +1886,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ),
     stop: (seatId, binding, guard) => herdrWatches.stopNativeTask(seatId, binding, guard),
   };
+  // Open every head outbox whose seat was polling before this restart, so each
+  // routing check sees that seat as reconnecting rather than gone. This runs
+  // after the store exists: an outbox reads its conversation's scope.
+  for (const file of existsSync(headReceiptDirectory) ? readdirSync(headReceiptDirectory) : []) {
+    if (!file.endsWith(".json.presence")) continue;
+    const name = file.slice(0, -".json.presence".length);
+    try {
+      const conversationId = decodeURIComponent(name);
+      if (encodeURIComponent(conversationId) === name) seatOutbox(conversationId);
+    } catch {
+      // Unreadable presence leaves today's behavior: an unpolled seat is unbound.
+    }
+  }
   conversations.onRoomHandoffChange = () => fleetChanges.touch();
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
   conversations.projectOnboarding = projectOnboarding(settingsStore, () => options.fleetResources?.status());

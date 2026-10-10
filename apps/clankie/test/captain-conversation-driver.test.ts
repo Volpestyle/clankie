@@ -110,7 +110,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function fixture(pendingOwnerAction = false) {
+async function fixture(pendingOwnerAction = false, headBoundGraceMs?: number) {
   const root = mkdtempSync(join(tmpdir(), "captain-conversation-driver-"));
   if (pendingOwnerAction) {
     const store = new ConversationStore(join(root, "conversations"), async () => {});
@@ -148,6 +148,7 @@ async function fixture(pendingOwnerAction = false) {
     workingDirectory: root,
     settings: new SettingsStore(join(root, "settings.json")),
     personaImages: async () => ({ images: [], hash: "fake", files: [] }),
+    ...(headBoundGraceMs === undefined ? {} : { headBoundGraceMs }),
     nativeCensusRunner: async (_command, args) => {
       // Use the same current native identity as agent/get. A stored worker
       // report needs fresh census proof, not an empty display-only fixture.
@@ -529,7 +530,9 @@ it("an attaching project waits for its admitted Pi answer, then receives queued 
 });
 
 it("a definite native refusal resumes the project service runner once", async () => {
-  const { captain, id, journal, send } = await fixture();
+  // A head that completed a poll keeps its hold through acknowledgment gaps
+  // (30s by default, VUH-2045); this case is about what follows its lapse.
+  const { captain, id, journal, send } = await fixture(false, 2_000);
   // Establish then leave a poll within its grace without taking the send.
   expect(await captain.pollSeatEvents(1, undefined, id)).toEqual([]);
   expect(await send("Resume after the seat left")).toMatchObject({
