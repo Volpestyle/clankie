@@ -149,7 +149,11 @@ sibling’s identity. Outcomes:
   leases, devices booted outside leases (and the seats whose processes use
   them). Heavy commands use their own budget. Keep the blocking request open; inspect its persisted ticket, or ask the named holder to release.
 - `rejected`: `reason` is the cause. `service_restarting`: retry shortly.
-  `owner_unavailable`: your seat's live occupant could not be proven.
+  `owner_unavailable`: your seat's live occupant could not be proven; `detail`
+  names why. A failed observation (common under load right after a service
+  restart) is retried, and a waiting acquire keeps its ticket through two
+  minutes of them, so retry the same request; no re-adoption is needed. A
+  changed occupant or exited process refuses at once.
   `device_unavailable`: the type or runtime is not installed; pick one of
   `alternatives`.
 

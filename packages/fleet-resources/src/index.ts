@@ -10,7 +10,7 @@ export {
 export type { SimulatorReferents } from "./process.ts";
 export { automaticHeavySlots, automaticSimulatorSlots } from "./pressure.ts";
 export type { FleetResourcePolicy as ResourcePolicy } from "./model.ts";
-export { createSimulatorManager } from "./simulators.ts";
+export { createSimulatorManager, unprovenSeatDetail } from "./simulators.ts";
 export type {
   SimulatorOwner,
   SimulatorAcquireRequest,

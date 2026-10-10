@@ -2915,6 +2915,15 @@ per-device position, expiry and `estimatedWaitMs`: an idle-budget heuristic that
 heartbeats can extend, or null under pressure/unknown conditions. Other device
 queues and heavy admission remain independent.
 
+The seat is proved live on every request; nothing is stored that a restart could
+drop, so no re-adoption is needed. A failed observation (native observation fails
+in bursts under load, as right after a service restart) is retried briefly before
+the first proof refuses. A waiting acquire keeps its ticket through failed
+observations for up to two minutes, and an admitted lease survives one during
+preparation. Only a proven change of occupant or an exited process ends the wait
+at once. `owner_unavailable` names the observation's cause and the fix: retry the
+same request.
+
 `simulator cancel JSON` accepts the same seat/fleet/holder and ticket `id`.
 Only that holder can cancel; cancel before changing its selection. Active waits
 renew a five-minute stale deadline. Expired tickets and proven dead native owners

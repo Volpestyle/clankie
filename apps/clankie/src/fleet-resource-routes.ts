@@ -53,11 +53,14 @@ export function createFleetResourceRoutes(
     const owned = async () => (await authorize(context.req.raw)) === true;
     const allowed = async () => !context.req.raw.signal.aborted && (await owned());
     try {
-      const owner = await resources!.proveSimulatorSeat({
-        seatId: request.seatId,
-        ...(request.holderId === undefined ? {} : { holderId: request.holderId }),
-        ...(request.fleet === undefined ? {} : { fleet: request.fleet }),
-      });
+      const owner = await resources!.proveSimulatorSeat(
+        {
+          seatId: request.seatId,
+          ...(request.holderId === undefined ? {} : { holderId: request.holderId }),
+          ...(request.fleet === undefined ? {} : { fleet: request.fleet }),
+        },
+        { retryUnproven: true },
+      );
       if (!(await allowed())) return context.json({ error: "forbidden" }, 403);
       const options = { authorize: allowed, signal: context.req.raw.signal };
       const result =

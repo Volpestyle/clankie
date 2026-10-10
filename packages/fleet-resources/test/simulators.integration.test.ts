@@ -88,15 +88,27 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
     },
   });
   let clock = Date.now();
+  // What the host's seat observation reports per task holder: by default proven.
+  const seats = new Map<string, "proven" | "unproven" | "replaced">();
+  const observations: { holderId?: string; state: string }[] = [];
   const options = () => ({
     governor,
     adapter,
     ...settings,
     clock: () => clock,
-    observeSeat: async (identity: Pick<SimulatorOwner, "seatId" | "occupantId" | "fleet">) => ({
-      identity: { ...owner, ...identity },
-      status: "working",
-    }),
+    observeSeat: async (identity: Pick<SimulatorOwner, "seatId" | "occupantId" | "fleet" | "holderId">) => {
+      const state = seats.get(identity.holderId ?? "") ?? "proven";
+      observations.push({ ...(identity.holderId ? { holderId: identity.holderId } : {}), state });
+      if (state === "unproven") return { unproven: "The seat's Herdr process census failed." };
+      return {
+        identity: {
+          ...owner,
+          ...identity,
+          ...(state === "replaced" ? { occupantId: "another-native" } : {}),
+        },
+        status: "working",
+      };
+    },
   });
   let manager = createSimulatorManager(options());
   const read = async () => JSON.parse(await readFile(statePath, "utf8")) as NativeState;
@@ -221,6 +233,10 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
     advance: (ms: number) => {
       clock += ms;
     },
+    observeSeatAs: (holderId: string, state: "proven" | "unproven" | "replaced") => {
+      seats.set(holderId, state);
+    },
+    observations,
     restart: async () => {
       manager.close();
       await governor.close();
@@ -1106,6 +1122,47 @@ it("grants three holders of one device in persisted FIFO order with one blocking
   await f.http("/release", { id: cLease.id, owner: { ...f.owner, holderId: "fifo-c" } });
   expect((await f.governor.snapshot()).queue).toEqual([]);
 }, 30_000);
+
+it("a waiting acquire keeps its ticket through failed seat observations; a replaced occupant ends it", async () => {
+  const f = await fixture();
+  const a = lease(await f.http("/acquire", f.request));
+  const bRequest = { ...f.request, holderId: "steady-b", deviceId: a.deviceId, exact: true, waitMs: 60_000 };
+  const b = f.http("/acquire", bRequest);
+  const ticket = await queued(f, "steady-b");
+  // The waiter's seat observation fails, as observations did under load after
+  // a service restart, while the slot frees (VUH-2055).
+  f.observeSeatAs("steady-b", "unproven");
+  const unproven = () =>
+    f.observations.filter((row) => row.holderId === "steady-b" && row.state === "unproven");
+  expect((await f.http("/release", { id: a.id, owner: f.owner })).outcome).toBe("released");
+  await expect.poll(() => unproven().length, { timeout: 10_000 }).toBeGreaterThan(0);
+  expect((await f.governor.snapshot()).queue.map((entry) => entry.id)).toContain(ticket.id);
+  f.observeSeatAs("steady-b", "proven");
+  const granted = lease(await b);
+  expect(granted).toMatchObject({ holderId: "steady-b", deviceId: a.deviceId });
+
+  // A first observation failure without a wait is refused with the cause and the fix.
+  const single = { ...f.request, holderId: "steady-c", deviceId: a.deviceId, exact: true };
+  f.observeSeatAs("steady-c", "unproven");
+  const refused = await f.http("/acquire", single);
+  expect(refused).toMatchObject({ outcome: "rejected", reason: "owner_unavailable" });
+  expect(JSON.stringify(refused)).toContain("Herdr process census failed");
+  expect(JSON.stringify(refused)).toContain("Retry the same request");
+
+  // A seat proven to hold a different occupant ends its wait at once.
+  f.observeSeatAs("steady-c", "proven");
+  const c = f.http("/acquire", { ...single, waitMs: 60_000 });
+  await queued(f, "steady-c");
+  const started = Date.now();
+  f.observeSeatAs("steady-c", "replaced");
+  expect(await c).toMatchObject({
+    outcome: "rejected",
+    reason: "owner_unavailable",
+    detail: "The seat's native occupant changed or its process exited.",
+  });
+  expect(Date.now() - started).toBeLessThan(15_000);
+  await f.http("/release", { id: granted.id, owner: { ...f.owner, holderId: "steady-b" } });
+}, 60_000);
 
 it("a holder moving to another device queues behind the oldest ticket waiting for the freed slot", async () => {
   const f = await fixture();

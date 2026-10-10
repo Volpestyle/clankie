@@ -169,6 +169,21 @@ const sameFamily = (left: string, right: string) =>
   family(left) === family(right) ||
   (mobileFamily(left) !== undefined && mobileFamily(left) === mobileFamily(right));
 const RETRY_MS = 5_000;
+/**
+ * How long a waiting acquire keeps its ticket through failed seat observations.
+ * Native observation fails in bursts under load, such as right after a service
+ * restart; a definite change of occupant still ends the wait at once (VUH-2055).
+ */
+const UNPROVEN_GRACE_MS = 120_000;
+type SeatProof = { owner: SimulatorOwner } | { unproven: string } | { refuted: true };
+/** Internal only: converted to an actionable `owner_unavailable` before any caller sees it. */
+type Unproven = { outcome: "unproven"; detail: string };
+const REFUTED_DETAIL = "The seat's native occupant changed or its process exited.";
+export const unprovenSeatDetail = (detail: string) =>
+  `The seat's live native occupant could not be proven: ${detail} Native observation can fail ` +
+  "briefly under load, for example right after a service restart. Retry the same request; a " +
+  "waiting ticket keeps its place until it expires. If it keeps failing, check that the seat's " +
+  "harness is still running in its Herdr pane.";
 const view = (lease: SimulatorReservation, requestedDeviceType?: string): SimulatorLeaseView => {
   const {
     id,
@@ -225,10 +240,11 @@ const BOOTING_PHASES = new Set([
 export function createSimulatorManager(input: {
   governor: FleetResourceGovernor;
   adapter?: SimulatorAdapter;
-  observeSeat?: (
-    identity: SeatIdentity,
-  ) => Promise<
-    { identity: SimulatorOwner; processes?: SimulatorOwner["processes"]; status: string } | undefined
+  observeSeat?: (identity: SeatIdentity) => Promise<
+    | { identity: SimulatorOwner; processes?: SimulatorOwner["processes"]; status: string }
+    /** The observation itself failed, so the occupant is neither proven nor disproven. */
+    | { unproven: string }
+    | undefined
   >;
   /** Best-effort: live processes that name each external device, mapped to seats where provable. */
   attribute?: (
@@ -353,13 +369,20 @@ export function createSimulatorManager(input: {
       holders: [...(holders.get(device.udid) ?? [])].slice(0, 32),
     }));
   };
-  const prove = async (identity: SeatIdentity): Promise<SimulatorOwner | undefined> => {
+  const proveSeat = async (identity: SeatIdentity): Promise<SeatProof> => {
     const observed = await input.observeSeat?.(identity);
+    if (observed && "unproven" in observed) return { unproven: observed.unproven };
     if (!observed || !sameSeat(observed.identity, identity) || observed.identity.processes.length === 0)
-      return undefined;
-    if ((await Promise.all(observed.identity.processes.map(probe))).some((state) => state !== "live"))
-      return undefined;
-    return observed.identity;
+      return { refuted: true };
+    const states = await Promise.all(observed.identity.processes.map(probe));
+    if (states.includes("exited")) return { refuted: true };
+    if (states.some((state) => state !== "live"))
+      return { unproven: "The seat's process could not be observed." };
+    return { owner: observed.identity };
+  };
+  const prove = async (identity: SeatIdentity): Promise<SimulatorOwner | undefined> => {
+    const proof = await proveSeat(identity);
+    return "owner" in proof ? proof.owner : undefined;
   };
   const matchesNativeOwner = (lease: SimulatorReservation, owner: SimulatorOwner) =>
     sameNativeSeat(lease, owner) &&
@@ -590,8 +613,10 @@ export function createSimulatorManager(input: {
     const requested = request.deviceId ? undefined : request.deviceType;
     const stage = await serial(async (): Promise<SimulatorResult | SimulatorReservation> => {
       try {
-        const current = await prove(owner);
-        if (!current || !matchesOwner(lease, current)) {
+        const proof = await proveSeat(owner);
+        // A failed observation keeps the admitted lease; the waiting acquire resumes it.
+        if ("unproven" in proof) return booting(lease, requested);
+        if (!("owner" in proof) || !matchesOwner(lease, proof.owner)) {
           await forget(lease);
           return rejected("stale_owner");
         }
@@ -678,12 +703,13 @@ export function createSimulatorManager(input: {
         if (!created || !created.available) return held(lease);
         if (created.state === "Booted") return update(lease, { phase: "booted" });
         if (created.state !== "Shutdown") return held(lease);
-        const live = await prove(owner);
+        const proof = await proveSeat(owner);
+        if ("unproven" in proof) return booting(lease, requested);
         const { policy } = await input.governor.snapshot();
         const leases = await reservations();
         const occupancy = externals(devices, leases).length + leases.length;
         if (!(await authorized(authority))) return revoked();
-        if (!live || !matchesOwner(lease, live) || occupancy > policy.simulatorSlots)
+        if (!("owner" in proof) || !matchesOwner(lease, proof.owner) || occupancy > policy.simulatorSlots)
           return reconcile(lease, true);
         lease = await update(lease, { phase: "boot-submitted", lastUsedAtMs: now() });
         if (!(await authorized(authority))) {
@@ -797,7 +823,7 @@ export function createSimulatorManager(input: {
     return held(lease);
   };
 
-  const acquire = async (request: SimulatorAcquireRequest): Promise<SimulatorResult> => {
+  const acquire = async (request: SimulatorAcquireRequest): Promise<SimulatorResult | Unproven> => {
     if (closed) return rejected("service_restarting", "The simulator manager is stopping.");
     if (!request.holderId)
       return rejected(
@@ -806,9 +832,11 @@ export function createSimulatorManager(input: {
       );
     if (!request.deviceId && (!request.deviceType || !request.runtime))
       return rejected("device_unavailable", "Give deviceType and runtime, or the deviceId to lease.");
-    const owner = await prove(request);
+    const proof = await proveSeat(request);
     if (!(await authorized(request))) return revoked();
-    if (!owner) return rejected("owner_unavailable", "The seat's live native occupant could not be proven.");
+    if ("unproven" in proof) return { outcome: "unproven", detail: proof.unproven };
+    if (!("owner" in proof)) return rejected("owner_unavailable", REFUTED_DETAIL);
+    const owner = proof.owner;
     const existing = (await reservations()).find((lease) => sameSeat(lease, owner));
     if (!(await authorized(request))) return revoked();
     if (existing) {
@@ -972,10 +1000,11 @@ export function createSimulatorManager(input: {
         );
       if (!request.deviceId && (!request.deviceType || !request.runtime))
         return rejected("device_unavailable", "Give deviceType and runtime, or the deviceId to lease.");
-      const owner = await prove(request);
+      const proof = await proveSeat(request);
       if (!(await authorized(request))) return revoked();
-      if (!owner)
-        return rejected("owner_unavailable", "The seat's live native occupant could not be proven.");
+      if ("unproven" in proof) return rejected("owner_unavailable", unprovenSeatDetail(proof.unproven));
+      if (!("owner" in proof)) return rejected("owner_unavailable", REFUTED_DETAIL);
+      const owner = proof.owner;
       try {
         const devices = await inventory();
         const leases = await reservations();
@@ -1025,11 +1054,19 @@ export function createSimulatorManager(input: {
       // Serialize a holder's requests, but never reuse another request's grant:
       // its exact UDID/model/runtime may differ, even while boot is in flight.
       if (pending) return pending.then(() => manager.acquire(request));
-      const result = (async () => {
+      const result = (async (): Promise<SimulatorResult | Unproven> => {
         const deadline = Date.now() + (request.waitMs ?? 0);
         let result = await acquire(request);
         let ticketId = result.outcome === "waiting" ? result.ticket?.id : undefined;
-        while ((result.outcome === "waiting" || result.outcome === "booting") && Date.now() < deadline) {
+        // A failed seat observation keeps waiting on the same ticket for a
+        // bounded time instead of discarding the wait (VUH-2055).
+        let unprovenSince = result.outcome === "unproven" ? Date.now() : undefined;
+        while (
+          (result.outcome === "waiting" ||
+            result.outcome === "booting" ||
+            (unprovenSince !== undefined && Date.now() - unprovenSince < UNPROVEN_GRACE_MS)) &&
+          Date.now() < deadline
+        ) {
           if (closed) return rejected("service_restarting");
           if (!(await authorized(request))) {
             if (ticketId) await input.governor.cancelSimulatorTicket(ticketId, request);
@@ -1044,10 +1081,15 @@ export function createSimulatorManager(input: {
           }
           result = await acquire({ ...request, ...(ticketId ? { ticketId } : {}) });
           if (result.outcome === "waiting") ticketId = result.ticket?.id ?? ticketId;
+          unprovenSince = result.outcome === "unproven" ? (unprovenSince ?? Date.now()) : undefined;
         }
         return result;
       })()
-        .then((result): SimulatorResult => {
+        .then((outcome): SimulatorResult => {
+          const result =
+            outcome.outcome === "unproven"
+              ? rejected("owner_unavailable", unprovenSeatDetail(outcome.detail))
+              : outcome;
           // A reservation can still lack a device when a poll arrives. Check
           // again after preparation rather than treating that absence as mismatch.
           if (
