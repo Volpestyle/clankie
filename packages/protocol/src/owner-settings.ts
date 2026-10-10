@@ -154,6 +154,35 @@ export const UpdateHostSettingsSchema = z
   })
   .strict();
 export type HostSettingsSnapshot = z.infer<typeof HostSettingsSnapshotSchema>;
+
+/**
+ * How Clankie looks to his owner on every surface: the app, web, desktop pet
+ * and overlay. Skins are bundled client data, so the service stores only a
+ * well-formed id. `pack` keeps the selected skin pack's own lead, and a
+ * client that does not bundle a chosen id falls back to it.
+ */
+export const APPEARANCE_SETTINGS_PATH = "/v1/operator/appearance";
+export const LeadSkinIdSchema = z.string().regex(/^[a-z0-9][a-z0-9.-]{0,127}$/u);
+export const AppearanceSettingsSchema = z.object({ leadSkin: LeadSkinIdSchema.default("pack") }).strict();
+export type AppearanceSettings = z.infer<typeof AppearanceSettingsSchema>;
+/** Not strict, so a later layer (agents, scene) reaches older readers as an ignored key. */
+export const AppearanceSettingsSnapshotSchema = z.object({
+  schemaVersion: z.literal(1),
+  revision: RevisionSchema,
+  appearance: z.object({ leadSkin: LeadSkinIdSchema }),
+});
+export const UpdateAppearanceSettingsSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    expectedRevision: RevisionSchema,
+    changes: z
+      .object({ leadSkin: LeadSkinIdSchema.optional() })
+      .strict()
+      .refine((v) => Object.values(v).some((x) => x !== undefined), "No appearance change"),
+  })
+  .strict();
+export type AppearanceSettingsSnapshot = z.infer<typeof AppearanceSettingsSnapshotSchema>;
+export type UpdateAppearanceSettings = z.infer<typeof UpdateAppearanceSettingsSchema>;
 export type UpdateHostSettings = z.infer<typeof UpdateHostSettingsSchema>;
 export const OwnerPersonaImageStatusSchema = z.object({
   directory: z.string().optional(),

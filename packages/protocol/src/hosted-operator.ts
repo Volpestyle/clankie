@@ -1,4 +1,4 @@
-import { HOST_SETTINGS_PATH } from "./owner-settings.ts";
+import { APPEARANCE_SETTINGS_PATH, HOST_SETTINGS_PATH } from "./owner-settings.ts";
 import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
 import { hostedDiscordAllows } from "./hosted-discord.ts";
 export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
@@ -101,6 +101,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
   const routes: Record<string, readonly string[]> = {
     GET: [
       HOST_SETTINGS_PATH,
+      APPEARANCE_SETTINGS_PATH,
       "/v1/operator/voice",
       WORKER_ACCOUNT_HOLDS_PATH,
       USAGE_PATH,
@@ -130,6 +131,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
     ],
     POST: [
       HOST_SETTINGS_PATH,
+      APPEARANCE_SETTINGS_PATH,
       "/v1/operator/voice",
       LINEAR_FOLLOW_PATH,
       LINEAR_WAKE_PATH,

@@ -1,4 +1,7 @@
 import {
+  APPEARANCE_SETTINGS_PATH,
+  AppearanceSettingsSnapshotSchema,
+  UpdateAppearanceSettingsSchema,
   HOST_SETTINGS_PATH,
   HostSettingsSnapshotSchema,
   UpdateHostSettingsSchema,
@@ -161,6 +164,8 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "POST", path: LINEAR_WAKE_PATH },
   { method: "GET", path: HOST_SETTINGS_PATH },
   { method: "POST", path: HOST_SETTINGS_PATH },
+  { method: "GET", path: APPEARANCE_SETTINGS_PATH },
+  { method: "POST", path: APPEARANCE_SETTINGS_PATH },
   { method: "GET", path: "/v1/operator/voice" },
   { method: "POST", path: "/v1/operator/voice" },
   { method: "GET", path: PROJECTS_PATH },
@@ -185,6 +190,11 @@ const OWNER_SETTINGS_ROUTES: Readonly<
     methods: ["GET", "POST"],
     update: UpdateHostSettingsSchema,
     snapshot: HostSettingsSnapshotSchema,
+  },
+  [APPEARANCE_SETTINGS_PATH]: {
+    methods: ["GET", "POST"],
+    update: UpdateAppearanceSettingsSchema,
+    snapshot: AppearanceSettingsSnapshotSchema,
   },
   ["/v1/operator/voice"]: {
     methods: ["GET", "POST"],

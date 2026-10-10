@@ -37,7 +37,11 @@ export {
   type PersonaSettings,
   type VoiceSettings,
 } from "@clankie/protocol/owner-settings";
-import { PersonaSettingsSchema, VoiceSettingsSchema } from "@clankie/protocol/owner-settings";
+import {
+  AppearanceSettingsSchema,
+  PersonaSettingsSchema,
+  VoiceSettingsSchema,
+} from "@clankie/protocol/owner-settings";
 
 /** The relay origin advertised to paired remote devices (ADR 0135/0138). */
 export const RelaySettingsSchema = z
@@ -624,6 +628,8 @@ export const ClankieSettingsSchema = z
     // which a bare `{}` literal does not satisfy.
     discord: DiscordSettingsSchema.default(() => DiscordSettingsSchema.parse({})),
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
+    /** Which bundled skin Clankie wears on the owner's surfaces (clankie-app ADR 0082). */
+    appearance: AppearanceSettingsSchema.default(() => AppearanceSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
     host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),

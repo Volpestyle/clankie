@@ -83,12 +83,13 @@ changes, update this page.
 
 ### 3. His mind: model and voice
 
-| Setting                                | Values (default)          | API                                               | CLI  | TUI                                | App     | Dash                    | Tier     |
-| -------------------------------------- | ------------------------- | ------------------------------------------------- | ---- | ---------------------------------- | ------- | ----------------------- | -------- |
-| Captain model and thinking effort      | catalog; `off` to `max`   | `/v1/model-keys/select`, `/v1/model-keys/effort`  | file | file `/model`, `/effort`; hosted ✓ | ✓ Model | view ("set in the app") | Common   |
-| Model keys and subscriptions           | write-only keys           | `/v1/model-keys/*`                                | file | ✓                                  | ✓       | —                       | Common   |
-| Image/video model, compaction, routing |                           | none (`clankie.json`)                             | file | file                               | —       | —                       | Advanced |
-| Voice brain and TTS (`voice.*`)        | providers, models, voices | `GET`/`POST /v1/operator/voice` (relayed, fenced) | ✓    | ✓ `/voice`                         | —       | —                       | Advanced |
+| Setting                                | Values (default)          | API                                                    | CLI  | TUI                                | App              | Dash                    | Tier     |
+| -------------------------------------- | ------------------------- | ------------------------------------------------------ | ---- | ---------------------------------- | ---------------- | ----------------------- | -------- |
+| Captain model and thinking effort      | catalog; `off` to `max`   | `/v1/model-keys/select`, `/v1/model-keys/effort`       | file | file `/model`, `/effort`; hosted ✓ | ✓ Model          | view ("set in the app") | Common   |
+| Model keys and subscriptions           | write-only keys           | `/v1/model-keys/*`                                     | file | ✓                                  | ✓                | —                       | Common   |
+| Image/video model, compaction, routing |                           | none (`clankie.json`)                                  | file | file                               | —                | —                       | Advanced |
+| Voice brain and TTS (`voice.*`)        | providers, models, voices | `GET`/`POST /v1/operator/voice` (relayed, fenced)      | ✓    | ✓ `/voice`                         | —                | —                       | Advanced |
+| Clankie's look (`appearance.leadSkin`) | bundled skin id (`pack`)  | `GET`/`POST /v1/operator/appearance` (relayed, fenced) | —    | —                                  | ✓ Clankie's look | —                       | Common   |
 
 ### 4. How the fleet works
 

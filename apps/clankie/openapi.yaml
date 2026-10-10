@@ -3297,6 +3297,43 @@ paths:
           {
             description: Settings unavailable or runtime application failed after save; saved=true and settings carries the persisted snapshot,
           }
+  /v1/operator/appearance:
+    get:
+      tags: [Operator]
+      operationId: getAppearanceSettings
+      summary: Read which bundled skin Clankie wears on the owner's surfaces
+      description: leadSkin is a client skin id; "pack" keeps the selected skin pack's own lead. The service validates only its form, and clients fall back to "pack" for an id they do not bundle.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Current snapshot and SHA-256 revision; Cache-Control no-store
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppearanceSettingsSnapshot" }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+    post:
+      tags: [Operator]
+      operationId: updateAppearanceSettings
+      summary: Choose Clankie's look with revision fencing
+      description: The expectedRevision from GET is required. No automatic conflict retry.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppearanceSettingsUpdate" }
+      responses:
+        "200":
+          description: Saved snapshot and revision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppearanceSettingsSnapshot" }
+        "400": { description: Invalid or unfenced update }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision or changed owner authority }
+        "503": { description: Settings unavailable }
   /v1/operator/runtime-health:
     get:
       tags: [Operator]
@@ -6479,6 +6516,30 @@ components:
             state: { enum: [healthy, unhealthy, unreachable] }
             detail: { type: string }
             pid: { type: integer, minimum: 1 }
+    AppearanceSettingsSnapshot:
+      type: object
+      required: [schemaVersion, revision, appearance]
+      properties:
+        schemaVersion: { const: 1 }
+        revision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        appearance:
+          type: object
+          required: [leadSkin]
+          properties:
+            leadSkin: { type: string, pattern: "^[a-z0-9][a-z0-9.-]{0,127}$" }
+    AppearanceSettingsUpdate:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, expectedRevision, changes]
+      properties:
+        schemaVersion: { const: 1 }
+        expectedRevision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        changes:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            leadSkin: { type: string, pattern: "^[a-z0-9][a-z0-9.-]{0,127}$" }
     HostSettingsUpdate:
       type: object
       additionalProperties: false
