@@ -10,7 +10,7 @@ import { createHerdrWatchRunner, HerdrWatchStore } from "../src/captain/herdr-wa
 import { HireOwners } from "../src/captain/hire-owners.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import type { ConversationAuthority } from "../src/captain/conversation-owner.ts";
-import type { SpawnOperatorSeat } from "@clankie/protocol";
+import type { OperatorSeatSpawnResult, SpawnOperatorSeat } from "@clankie/protocol";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -24,18 +24,31 @@ const authority: ConversationAuthority = {
   authorize: async () => true,
 };
 const session = { source: "herdr:codex", kind: "id" as const, value: "10000000-0000-4000-8000-000000000001" };
+const claudeSession = {
+  source: "herdr:claude",
+  kind: "id" as const,
+  value: "20000000-0000-4000-8000-000000000002",
+};
 
 // A native boundary fixture feeds production Herdr parsing/close code, real ownership journals,
 // real report files, and captured live ANSI. It never reaches a person's Herdr server.
 async function fixture(
-  options: { adopted?: boolean; unknown?: boolean; reattached?: boolean; cwd?: string } = {},
+  options: {
+    adopted?: boolean;
+    unknown?: boolean;
+    reattached?: boolean;
+    cwd?: string;
+    harness?: "codex" | "claude";
+  } = {},
 ) {
+  const harness = options.harness ?? "codex";
+  const native = harness === "claude" ? claudeSession : session;
   const root = await mkdtemp(join(tmpdir(), "clankie-tidy-"));
   roots.push(root);
   const watchPath = join(root, "watch.json");
   const owners = new HireOwners(`${watchPath}.owners.json`);
-  const occupant = occupantIdForHerdrSession(session);
-  const key = JSON.stringify(["local", "codex", session.value]);
+  const occupant = occupantIdForHerdrSession(native);
+  const key = JSON.stringify(["local", harness, native.value]);
   if (!options.unknown) {
     if (options.adopted) owners.adopt("w1:p1", "term_111", occupant, authority.owner, key);
     else owners.bind("w1:p1", authority.owner, "term_111", undefined, occupant, key);
@@ -44,24 +57,27 @@ async function fixture(
     closes = 0,
     reads = 0,
     now = 1_800_000_000_000;
-  let ansi = await golden("codex", "empty");
+  let ansi = await golden(harness, "empty");
   let finalAnsi: string | undefined;
   const calls: string[][] = [];
   const pane = {
     pane_id: "w1:p1",
     terminal_id: "term_111",
-    agent: options.reattached ? "unknown" : "codex",
+    agent: options.reattached ? "unknown" : harness,
     agent_status: "working",
     title: "Pip",
     cwd: options.cwd ?? root,
-    ...(options.reattached ? {} : { agent_session: session }),
+    ...(options.reattached ? {} : { agent_session: native }),
   };
+  const others: (typeof pane)[] = [];
   const runner = createHerdrWatchRunner(undefined, async (args) => {
     calls.push([...args]);
     if (args[0] === "pane" && args[1] === "list")
-      return JSON.stringify({ result: { panes: present ? [pane] : [] } });
-    if (args[0] === "agent" && args[1] === "get" && present)
-      return JSON.stringify({ result: { agent: pane } });
+      return JSON.stringify({ result: { panes: [...(present ? [pane] : []), ...others] } });
+    if (args[0] === "agent" && args[1] === "get") {
+      const found = [...(present ? [pane] : []), ...others].find((item) => item.pane_id === args[2]);
+      if (found) return JSON.stringify({ result: { agent: found } });
+    }
     if (args[0] === "pane" && args[1] === "process-info")
       return JSON.stringify({
         result: {
@@ -92,6 +108,17 @@ async function fixture(
   });
   const watch = new HerdrWatchStore(watchPath, { runner });
   const hires: SpawnOperatorSeat[] = [];
+  let hireResult: () => Promise<OperatorSeatSpawnResult> = async () => ({
+    outcome: "spawned",
+    seat: {
+      seatId: "term_222",
+      occupantId: occupant,
+      personaId: "pip",
+      harness,
+      status: "idle",
+      title: "Pip",
+    },
+  });
   const ports: ConstructorParameters<typeof PaneTidy>[1] = {
     runner,
     provenance: (agent) => watch.tidyProvenance(agent),
@@ -103,23 +130,13 @@ async function fixture(
     resolve: async (ref) => ({
       ref,
       host: "local",
-      sessionId: session.value,
+      sessionId: native.value,
       workingDirectory: root,
-      file: { harness: "codex", path: join(root, "session.jsonl"), size: 1, mtimeMs: now },
+      file: { harness, path: join(root, "session.jsonl"), size: 1, mtimeMs: now },
     }),
     hire: async (request) => {
       hires.push(request);
-      return {
-        outcome: "spawned",
-        seat: {
-          seatId: "term_222",
-          occupantId: occupant,
-          personaId: "pip",
-          harness: "codex",
-          status: "idle",
-          title: "Pip",
-        },
-      };
+      return hireResult();
     },
   };
   const path = join(root, "tidy.json");
@@ -146,6 +163,13 @@ async function fixture(
     },
     advance: () => {
       now += 300_001;
+    },
+    setHire: (next: () => Promise<OperatorSeatSpawnResult>) => {
+      hireResult = next;
+    },
+    /** Another Herdr pane already running this native session. */
+    reopenElsewhere: () => {
+      others.push({ ...pane, pane_id: "w1:p9", terminal_id: "term_999" });
     },
     closes: () => closes,
   };
@@ -207,10 +231,116 @@ it.each(["draft", "unstyled", "changed-at-close"])("refuses %s input without clo
   ).toEqual(
     kind === "unstyled"
       ? { outcome: "failed", reason: "draft_state_unknown" }
-      : { outcome: "refused", reason: "unsent_draft" },
+      : { outcome: "refused", reason: "unsent_draft", draft: "Ask Codex to do anything" },
   );
   expect(f.closes()).toBe(0);
   expect(f.tidy.history()).toEqual([]);
+  f.watch.close();
+});
+// VUH-2013: the owner's typed prompt must stop the close in either harness, and come back verbatim.
+it.each([
+  { harness: "claude" as const, state: "busy-draft", text: "go ahead and move Verifying above In Review" },
+  {
+    harness: "claude" as const,
+    state: "draft",
+    text: "Lio disposable unsent draft for ANSI styling evidence",
+  },
+  { harness: "codex" as const, state: "draft", text: "Ask Codex to do anything" },
+])("refuses a typed $harness $state and returns its text verbatim", async ({ harness, state, text }) => {
+  const f = await fixture({ harness });
+  f.setAnsi(await golden(harness, state));
+  expect(
+    await f.tidy.close({ pane: "w1:p1", reason: "Finished", reportPath: f.reportPath }, authority),
+  ).toEqual({ outcome: "refused", reason: "unsent_draft", draft: text });
+  expect(f.closes()).toBe(0);
+  expect(f.tidy.leadHistory()).toEqual([]);
+  f.watch.close();
+});
+it("closes over Claude's faint ghost and keeps it verbatim in the close record", async () => {
+  const f = await fixture({ harness: "claude" });
+  const closed = await f.tidy.close(
+    { pane: "w1:p1", reason: "Finished", reportPath: f.reportPath },
+    authority,
+  );
+  expect(closed).toMatchObject({
+    outcome: "closed",
+    entry: { input: { text: 'Try "write a test for headless-captain.ts"', typed: false } },
+  });
+  expect(f.closes()).toBe(1);
+  // Durable and private: the lead's history keeps it, the public roster record does not carry it.
+  const reopened = new PaneTidy(f.path, f.ports);
+  expect(reopened.leadHistory()[0]!.input).toEqual({
+    text: 'Try "write a test for headless-captain.ts"',
+    typed: false,
+  });
+  expect(reopened.history()[0]).not.toHaveProperty("input");
+  f.watch.close();
+});
+it("reports exactly why Undo could not resume, then lets a later Undo reopen the session", async () => {
+  const f = await fixture({ harness: "claude" });
+  const closed = await f.tidy.close(
+    { pane: "w1:p1", reason: "Finished", reportPath: f.reportPath },
+    authority,
+  );
+  if (closed.outcome !== "closed") throw new Error(`close ${closed.outcome}`);
+  f.setHire(async () => ({
+    outcome: "failed",
+    reason: "not_ready",
+    detail: "Claude did not reach its prompt",
+  }));
+  expect(await f.tidy.undo(closed.entry.id, authority)).toEqual({
+    outcome: "failed",
+    reason: "undo_unconfirmed",
+    detail: "Resume failed: not_ready (Claude did not reach its prompt)",
+  });
+  const restarted = new PaneTidy(f.path, f.ports);
+  expect(restarted.leadHistory()[0]).toMatchObject({
+    state: "closed",
+    undoFailure: {
+      reason: "undo_unconfirmed",
+      detail: "Resume failed: not_ready (Claude did not reach its prompt)",
+    },
+  });
+  f.setHire(async () => {
+    throw new Error("herdr socket closed");
+  });
+  expect(await restarted.undo(closed.entry.id, authority)).toMatchObject({
+    reason: "undo_unconfirmed",
+    detail: "Resume failed: herdr socket closed",
+  });
+  f.setHire(async () => ({
+    outcome: "spawned",
+    seat: {
+      seatId: "term_333",
+      occupantId: "pip",
+      personaId: "pip",
+      harness: "claude",
+      status: "idle",
+      title: "Pip",
+    },
+  }));
+  expect(await restarted.undo(closed.entry.id, authority)).toMatchObject({
+    outcome: "reopened",
+    entry: { resumedSeatId: "term_333", state: "reopened" },
+  });
+  expect(restarted.leadHistory()[0]).not.toHaveProperty("undoFailure");
+  expect(f.hires).toHaveLength(3);
+  expect(f.hires[0]).toMatchObject({ resume: `local:${claudeSession.value}`, harness: "claude" });
+  f.watch.close();
+});
+it("records a session already open again instead of hiring a second copy", async () => {
+  const f = await fixture();
+  const closed = await f.tidy.close(
+    { pane: "w1:p1", reason: "Finished", reportPath: f.reportPath },
+    authority,
+  );
+  if (closed.outcome !== "closed") throw new Error(`close ${closed.outcome}`);
+  f.reopenElsewhere();
+  expect(await f.tidy.undo(closed.entry.id, authority)).toMatchObject({
+    outcome: "reopened",
+    entry: { resumedSeatId: "term_999" },
+  });
+  expect(f.hires).toEqual([]);
   f.watch.close();
 });
 it.each([
@@ -285,6 +415,7 @@ it("keeps uncertain closes durable and prevents an automatic second close or Und
   expect(await restarted.undo(restarted.history()[0]!.id, authority)).toEqual({
     outcome: "failed",
     reason: "undo_unknown",
+    detail: "The close record is close_unconfirmed",
   });
   expect(f.closes()).toBe(0);
   f.watch.close();

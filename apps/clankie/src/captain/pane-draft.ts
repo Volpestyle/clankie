@@ -33,12 +33,22 @@ function styledLines(ansi: string): Cell[][] | undefined {
   return rows;
 }
 
+/**
+ * The native input line as read, so a close can keep it verbatim (VUH-2013). `typed` is false
+ * only for a uniformly faint native ghost (a placeholder or Claude's suggested next prompt).
+ */
+export type PaneInputLine = { state: PaneDraftState; text?: string; typed?: boolean };
+
 export function paneDraftState(harness: string, ansi: string): PaneDraftState {
+  return paneInputLine(harness, ansi).state;
+}
+
+export function paneInputLine(harness: string, ansi: string): PaneInputLine {
   // Do not interpret cursor controls, malformed escapes, or unstyled output as an empty input.
   // oxlint-disable-next-line no-control-regex -- reject non-SGR terminal controls
-  if (/\x1b(?!\[[0-9;]*m)/u.test(ansi)) return "unknown";
+  if (/\x1b(?!\[[0-9;]*m)/u.test(ansi)) return { state: "unknown" };
   const rows = styledLines(ansi);
-  if (!rows || !["codex", "claude"].includes(harness)) return "unknown";
+  if (!rows || !["codex", "claude"].includes(harness)) return { state: "unknown" };
   const marker = harness === "codex" ? "›" : "❯";
   const start = rows.findLastIndex((row) =>
     row
@@ -47,7 +57,7 @@ export function paneDraftState(harness: string, ansi: string): PaneDraftState {
       .trimStart()
       .startsWith(marker),
   );
-  if (start < 0 || start < rows.length - 16) return "unknown";
+  if (start < 0 || start < rows.length - 16) return { state: "unknown" };
   const row = rows[start]!;
   const at = row.findIndex((cell) => cell.text === marker);
   if (
@@ -59,7 +69,7 @@ export function paneDraftState(harness: string, ansi: string): PaneDraftState {
         .trim() ?? "",
     )
   )
-    return "unknown";
+    return { state: "unknown" };
   const input: Cell[] = row.slice(at + 1);
   let bounded = harness === "codex";
   for (const next of rows.slice(start + 1)) {
@@ -75,17 +85,21 @@ export function paneDraftState(harness: string, ansi: string): PaneDraftState {
     if (harness === "codex" && /^\?\s+for shortcuts/u.test(plain)) break;
     input.push(...next);
   }
-  if (!bounded) return "unknown";
+  if (!bounded) return { state: "unknown" };
   const content = input.filter((cell) => cell.text.trim().length > 0);
-  if (content.length === 0) return "empty";
+  if (content.length === 0) return { state: "empty" };
   const text = input
     .map((cell) => cell.text)
     .join("")
     .trim();
-  if (content.some((cell) => !cell.faint && !cell.italic)) return "draft";
+  if (content.some((cell) => !cell.faint && !cell.italic)) return { state: "draft", text, typed: true };
   // Live Claude 2.1.289: variable suggestions are faint; typed input is ordinary.
   // Accept a ghost only inside the native two-rule composer, with uniformly faint cells.
-  if (harness === "claude") return content.every((cell) => cell.faint) ? "empty" : "unknown";
-  if (text === "Ask Codex to do anything" && content.every((cell) => cell.faint)) return "empty";
-  return "unknown";
+  if (harness === "claude")
+    return content.every((cell) => cell.faint)
+      ? { state: "empty", text, typed: false }
+      : { state: "unknown", text };
+  if (text === "Ask Codex to do anything" && content.every((cell) => cell.faint))
+    return { state: "empty", text, typed: false };
+  return { state: "unknown", text };
 }

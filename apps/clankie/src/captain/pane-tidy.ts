@@ -34,7 +34,7 @@ import { splitFleetQualified } from "../herdr-fleet.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { HireSeat } from "./port.ts";
 import type { SavedAgentSession } from "../agent-sessions.ts";
-import { paneDraftState } from "./pane-draft.ts";
+import { paneInputLine } from "./pane-draft.ts";
 import { describeRetainedWorktrees, listTidyWorktrees, type TidyWorktreesResult } from "./tidy-worktrees.ts";
 import { WorktreeDecisions, workerWorktreeHold } from "./worktree-decisions.ts";
 
@@ -44,6 +44,24 @@ const EntrySchema = ClosedWorkerPaneSchema.extend({
   workingDirectory: z.string().min(1),
   owner: ConversationOwnerSchema,
   closedBy: ConversationOwnerSchema,
+  /**
+   * The native input line verbatim at close (VUH-2013). `typed: false` is a uniformly faint
+   * native ghost: a placeholder or Claude's suggested next prompt, never a typed draft.
+   * Service-private, like the session, so older strict clients still parse the public record.
+   */
+  input: z
+    .object({ text: z.string().max(16384), typed: z.boolean() })
+    .strict()
+    .optional(),
+  /** Why the last Undo could not reopen the session, exactly as the resume path reported it. */
+  undoFailure: z
+    .object({
+      reason: z.string().max(64),
+      detail: z.string().max(1024).optional(),
+      at: z.string().datetime(),
+    })
+    .strict()
+    .optional(),
 });
 const ReportSchema = z.object({ sessionKey: z.string(), reportPath: z.string() }).strict();
 export const PaneTidyStateSchema = z
@@ -51,7 +69,9 @@ export const PaneTidyStateSchema = z
   .strict();
 type Entry = z.infer<typeof EntrySchema>;
 export type TidyFailure =
-  | { outcome: "refused"; reason: "unsent_draft" | "owner_interactive" | "results_not_kept" }
+  | { outcome: "refused"; reason: "owner_interactive" | "results_not_kept" }
+  /** The native input line holds typed text; it is returned verbatim so nothing is lost. */
+  | { outcome: "refused"; reason: "unsent_draft"; draft?: string }
   /** Another lead conversation hired this pane; only it may close it (VUH-1763). */
   | { outcome: "refused"; reason: "not_owner"; ownerConversationId: string }
   /** The worker's worktree holds commits not on main by content, or uncommitted files (VUH-1814). */
@@ -74,6 +94,8 @@ export type TidyFailure =
         | "native_exit_unavailable"
         | "restart_unsupported"
         | "report_receipt_unresolved";
+      /** What the native or resume path reported, when it said more than the reason. */
+      detail?: string;
     };
 class Failure extends Error {
   readonly result: TidyFailure;
@@ -82,14 +104,19 @@ class Failure extends Error {
     this.result = result;
   }
 }
-const fail = (reason: Extract<TidyFailure, { outcome: "failed" }>["reason"]): never => {
-  throw new Failure({ outcome: "failed", reason });
+const fail = (reason: Extract<TidyFailure, { outcome: "failed" }>["reason"], detail?: string): never => {
+  throw new Failure({ outcome: "failed", reason, ...(detail ? { detail: detail.slice(0, 1024) } : {}) });
 };
 const refuse = (
-  reason: Exclude<Extract<TidyFailure, { outcome: "refused" }>["reason"], "not_owner" | "unlanded_work">,
+  reason: Exclude<
+    Extract<TidyFailure, { outcome: "refused" }>["reason"],
+    "not_owner" | "unlanded_work" | "unsent_draft"
+  >,
 ): never => {
   throw new Failure({ outcome: "refused", reason });
 };
+const errorText = (error: unknown) =>
+  (error instanceof Error ? error.message : String(error)).replace(/\s+/gu, " ").slice(0, 512);
 const validReason = (reason: string) =>
   reason.length > 0 && reason.length <= 512 && !/[\r\n]/u.test(reason) && !reason.includes("\0");
 function sessionKey(agent: HerdrAgentSnapshot): string {
@@ -100,8 +127,25 @@ function sessionKey(agent: HerdrAgentSnapshot): string {
   ]);
 }
 function publicEntry(entry: Entry): ClosedWorkerPane {
-  const { sessionId: _session, workingDirectory: _cwd, owner: _owner, closedBy: _by, ...visible } = entry;
+  const {
+    sessionId: _session,
+    workingDirectory: _cwd,
+    owner: _owner,
+    closedBy: _by,
+    input: _input,
+    undoFailure: _undo,
+    ...visible
+  } = entry;
   return ClosedWorkerPaneSchema.parse(visible);
+}
+/** The lead's view: the public record plus what was in the input line and why Undo failed. */
+export type ClosedWorkerPaneHistory = ClosedWorkerPane & Pick<Entry, "input" | "undoFailure">;
+function leadEntry(entry: Entry): ClosedWorkerPaneHistory {
+  return {
+    ...publicEntry(entry),
+    ...(entry.input ? { input: entry.input } : {}),
+    ...(entry.undoFailure ? { undoFailure: entry.undoFailure } : {}),
+  };
 }
 
 /** Judgment is the lead's. This service checks only hard lines and technical admission. */
@@ -141,6 +185,10 @@ export class PaneTidy {
   }
   history(): readonly ClosedWorkerPane[] {
     return this.state.entries.slice(-128).map(publicEntry).reverse();
+  }
+  /** History for the lead's own tools, keeping input lines and Undo failures. */
+  leadHistory(): readonly ClosedWorkerPaneHistory[] {
+    return this.state.entries.slice(-128).map(leadEntry).reverse();
   }
   /** List merged, clean, unused linked worktrees; never remove one. */
   worktrees(repositoryPath: string, mergedInto = "origin/main"): Promise<TidyWorktreesResult> {
@@ -306,9 +354,10 @@ export class PaneTidy {
       nativeOnly?: boolean;
     },
     source: ConversationAuthority,
-  ): Promise<{ outcome: "closed"; entry: ClosedWorkerPane } | TidyFailure> {
+  ): Promise<{ outcome: "closed"; entry: ClosedWorkerPaneHistory } | TidyFailure> {
     let lock: string | undefined;
     let entry: Entry | undefined;
+    let line: { text: string; typed: boolean } | undefined;
     try {
       const authority = captureConversationAuthority(source);
       await this.authority(authority);
@@ -386,9 +435,17 @@ export class PaneTidy {
         const ansi = await this.ports.runner
           .readPane?.(agent.paneId, "visible", "ansi")
           .catch(() => undefined);
-        const draft = ansi === undefined ? "unknown" : paneDraftState(agent.agent, ansi);
-        if (draft === "draft") return refuse("unsent_draft");
-        if (draft === "unknown") return fail("draft_state_unknown");
+        const read = ansi === undefined ? { state: "unknown" as const } : paneInputLine(agent.agent, ansi);
+        if (read.state === "draft")
+          throw new Failure({
+            outcome: "refused",
+            reason: "unsent_draft",
+            ...(read.text ? { draft: read.text.slice(0, 16384) } : {}),
+          });
+        if (read.state === "unknown") return fail("draft_state_unknown");
+        line = read.text ? { text: read.text.slice(0, 16384), typed: read.typed === true } : undefined;
+        // The final read just before the native close wins; an emptied line keeps the earlier text.
+        if (entry && line) entry.input = line;
         // Work committed or written after the first look still holds the close.
         if (checkWorktrees && !unlandedReason) {
           const late = await workerWorktreeHold(latest);
@@ -415,6 +472,7 @@ export class PaneTidy {
         closedAt: new Date(closedAt).toISOString(),
         undoUntil: new Date(closedAt + UNDO_MS).toISOString(),
         state: "closing",
+        ...(line ? { input: line } : {}),
         ...(held.length && unlandedReason
           ? { unlanded: { reason: unlandedReason, worktrees: held.slice(0, 8) } }
           : {}),
@@ -450,7 +508,7 @@ export class PaneTidy {
         }
       if (!closed) return fail("close_unconfirmed");
       this.ports.untrack(agent.terminalId);
-      return { outcome: "closed", entry: publicEntry(entry) };
+      return { outcome: "closed", entry: leadEntry(entry) };
     } catch (error) {
       if (entry?.state === "closing") {
         entry.state = "close_unconfirmed";
@@ -554,7 +612,13 @@ export class PaneTidy {
       if (closed.outcome !== "closed") return closed;
       const resumed = await this.undo(closed.entry.id, source);
       if (resumed.outcome !== "reopened")
-        return { ...resumed, historyId: closed.entry.id, threadId: original.session.value };
+        return {
+          outcome: resumed.outcome,
+          reason:
+            "detail" in resumed && resumed.detail ? `${resumed.reason}: ${resumed.detail}` : resumed.reason,
+          historyId: closed.entry.id,
+          threadId: original.session.value,
+        };
       return {
         outcome: "restarted",
         historyId: resumed.entry.id,
@@ -568,13 +632,17 @@ export class PaneTidy {
   async undo(
     id: string,
     source: ConversationAuthority,
-  ): Promise<{ outcome: "reopened"; entry: ClosedWorkerPane } | TidyFailure> {
+  ): Promise<{ outcome: "reopened"; entry: ClosedWorkerPaneHistory } | TidyFailure> {
     let locked = false;
+    let entry: Entry | undefined;
     try {
       const authority = captureConversationAuthority(source);
       await this.authority(authority);
-      const entry = this.state.entries.find((item) => item.id === id);
-      if (!entry || entry.state !== "closed") return fail("undo_unknown");
+      entry = this.state.entries.find((item) => item.id === id);
+      // An `undoing` record outlived its attempt (the hire failed or the service stopped);
+      // the session scan below decides whether it reopened, so it may be undone again.
+      if (!entry || !["closed", "undoing"].includes(entry.state))
+        return fail("undo_unknown", entry ? `The close record is ${entry.state}` : undefined);
       if (this.now() > Date.parse(entry.undoUntil)) return fail("undo_expired");
       if (this.pending.has(id)) return fail("busy");
       this.pending.add(id);
@@ -585,7 +653,8 @@ export class PaneTidy {
       )
         return fail("authority_unavailable");
       const fleet = splitFleetQualified(entry.paneId)?.fleet;
-      if (!this.ports.resolve || !this.ports.runner.list) return fail("undo_unconfirmed");
+      if (!this.ports.resolve || !this.ports.runner.list)
+        return fail("undo_unconfirmed", "This body cannot list panes or resolve saved sessions");
       // Do not create a second TUI when the session was already reopened by someone else.
       for (const pane of await this.ports.runner.list(fleet)) {
         if (pane.agent !== "unknown" && pane.agent !== entry.harness) continue;
@@ -596,43 +665,94 @@ export class PaneTidy {
           // A known unsupported shell shape is irrelevant; an unidentifiable native worker
           // may already be this session, so it cannot be counted as absent.
           if (!(error instanceof Failure) || error.result.reason !== "draft_state_unknown")
-            return fail("undo_unconfirmed");
+            return fail(
+              "undo_unconfirmed",
+              `Pane ${pane.paneId} could not be identified (${error instanceof Failure ? error.result.reason : String(error)}); it may already hold this session`,
+            );
         }
-        if (fresh?.agent === entry.harness && fresh.session?.value === entry.sessionId)
-          return fail("undo_unconfirmed");
+        if (fresh?.agent === entry.harness && fresh.session?.value === entry.sessionId) {
+          // The session is open again; record where instead of hiring a duplicate.
+          entry.state = "reopened";
+          entry.resumedSeatId = fresh.terminalId;
+          delete entry.undoFailure;
+          this.save();
+          return { outcome: "reopened", entry: leadEntry(entry) };
+        }
       }
       const ref = `${fleet ?? "local"}:${entry.sessionId}`;
-      const saved = await this.ports.resolve(ref);
+      const saved = await this.ports
+        .resolve(ref)
+        .catch((error: unknown) =>
+          fail("undo_unconfirmed", `Saved session ${ref} is unavailable: ${errorText(error)}`),
+        );
       if (saved.sessionId !== entry.sessionId || saved.workingDirectory !== entry.workingDirectory)
-        return fail("undo_unconfirmed");
+        return fail(
+          "undo_unconfirmed",
+          `Saved session ${saved.sessionId} in ${saved.workingDirectory} is not the closed ${entry.sessionId} in ${entry.workingDirectory}`,
+        );
       await this.authority(authority);
       if (this.now() > Date.parse(entry.undoUntil)) return fail("undo_expired");
       entry.state = "undoing";
       this.save();
-      const result = await this.ports.hire(
-        {
-          schemaVersion: 1,
-          title: entry.title || "Worker",
-          workingDirectory: entry.workingDirectory,
-          harness: entry.harness,
-          resume: ref,
-          placement: "new-tab",
-          ...(fleet ? { fleet } : {}),
-        },
-        undefined,
-        {
-          owner: entry.owner,
-          current: authority.current,
-          authorize: async () => (await authority.authorize()) && (await this.ports.ownerValid(entry.owner)),
-        },
-      );
-      if (result.outcome !== "spawned") return fail("undo_unconfirmed");
-      entry.state = "reopened";
-      entry.resumedSeatId = result.seat.seatId;
+      const closed = entry;
+      const result = await this.ports
+        .hire(
+          {
+            schemaVersion: 1,
+            title: closed.title || "Worker",
+            workingDirectory: closed.workingDirectory,
+            harness: closed.harness,
+            resume: ref,
+            placement: "new-tab",
+            ...(fleet ? { fleet } : {}),
+          },
+          undefined,
+          {
+            owner: closed.owner,
+            current: authority.current,
+            authorize: async () =>
+              (await authority.authorize()) && (await this.ports.ownerValid(closed.owner)),
+          },
+        )
+        .catch((error: unknown) => ({ outcome: "threw" as const, error }));
+      if (result.outcome !== "spawned") {
+        // Back to closed: the next Undo rescans for this session before any second hire.
+        closed.state = "closed";
+        this.save();
+        return fail(
+          "undo_unconfirmed",
+          result.outcome === "threw"
+            ? `Resume failed: ${errorText(result.error)}`
+            : `Resume ${result.outcome}: ${result.reason}${result.detail ? ` (${result.detail})` : ""}`,
+        );
+      }
+      closed.state = "reopened";
+      closed.resumedSeatId = result.seat.seatId;
+      delete closed.undoFailure;
       this.save();
-      return { outcome: "reopened", entry: publicEntry(entry) };
+      return { outcome: "reopened", entry: leadEntry(closed) };
     } catch (error) {
-      return error instanceof Failure ? error.result : { outcome: "failed", reason: "undo_unconfirmed" };
+      const result: TidyFailure =
+        error instanceof Failure
+          ? error.result
+          : { outcome: "failed", reason: "undo_unconfirmed", detail: `Undo failed: ${errorText(error)}` };
+      if (
+        entry &&
+        result.outcome === "failed" &&
+        result.reason !== "undo_unknown" &&
+        result.reason !== "busy"
+      )
+        try {
+          entry.undoFailure = {
+            reason: result.reason,
+            ...(result.detail ? { detail: result.detail } : {}),
+            at: new Date(this.now()).toISOString(),
+          };
+          this.save();
+        } catch {
+          /* The returned failure still carries the reason. */
+        }
+      return result;
     } finally {
       if (locked) this.pending.delete(id);
     }
