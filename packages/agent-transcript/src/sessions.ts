@@ -17,7 +17,7 @@ export interface AgentTranscriptHost {
 }
 
 export interface AgentSessionFile {
-  readonly harness: "claude" | "codex" | "grok" | "pi";
+  readonly harness: "claude" | "codex" | "grok" | "pi" | "prime";
   /** Host-native path; it stays inside the host layer's transcript roots. */
   readonly path: string;
   readonly size: number;
@@ -108,7 +108,7 @@ export function sessionIdFromPath(file: AgentSessionFile): string {
   if (file.harness === "grok") return parts.at(-2) ?? "";
   const name = parts.at(-1)!.replace(/\.jsonl$/, "");
   // Codex names rollouts `rollout-<timestamp>-<uuid>`, Pi `<timestamp>_<uuid>`; Claude
-  // names the file the session id.
+  // and Prime Agent name the file the session id.
   const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.exec(name);
   return uuid?.[0] ?? name;
 }

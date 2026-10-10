@@ -46,7 +46,7 @@ export function remoteHerdrTranscriptReader(host: AgentTranscriptHost, now: () =
   };
   return async (agent: HerdrAgentSnapshot): Promise<HerdrSeatTranscript | undefined> => {
     const session = agent.session;
-    if (!session || !["claude", "codex", "grok", "pi"].includes(agent.agent)) return undefined;
+    if (!session || !["claude", "codex", "grok", "pi", "prime"].includes(agent.agent)) return undefined;
     const key = JSON.stringify([agent.agent, session.kind, session.value]);
     let file = resolved.get(key);
     if (!file) {

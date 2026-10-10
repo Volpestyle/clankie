@@ -50,7 +50,7 @@ function nativeSummary(value: OpenCodeHistorySnapshot): AgentSessionSummary {
 }
 
 /**
- * Any Claude, Codex, Grok or Pi session on this machine or an owner-configured SSH host,
+ * Any Claude, Codex, Grok, Pi or Prime Agent session on this machine or an owner-configured SSH host,
  * read from the agent's own transcript. No terminal host is involved: a session
  * is readable whether it runs in Herdr, tmux, or a bare PowerShell tab.
  */

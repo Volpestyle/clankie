@@ -141,7 +141,7 @@ interface TailedTranscript {
  */
 const tails = new Map<string, TailedTranscript>();
 
-/** Codex and Grok map each record independently; Claude and Pi re-walk a parent chain. */
+/** Codex and Grok map each record independently; Claude, Pi and Prime re-walk a parent chain. */
 function tailableAgent(agent: string): boolean {
   return agent === "codex" || agent === "grok";
 }
@@ -272,7 +272,8 @@ export function parseHerdrSeatTranscript(
             .map((entry) => ({ ...entry, isSidechain: false })),
       includeChannelPrompts,
     );
-  if (agent === "pi") return piEntries(records);
+  // Prime Agent writes Pi's v3 session tree unchanged.
+  if (agent === "pi" || agent === "prime") return piEntries(records);
   return [];
 }
 

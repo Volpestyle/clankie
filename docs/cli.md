@@ -3356,7 +3356,7 @@ hire needs an exact remote directory grant. See
 
 ### `agents [list]` / `agents read` / `agents resume` / `agents hosts`
 
-Clankie reads any Claude Code, Codex, Grok or Pi session from the
+Clankie reads any Claude Code, Codex, Grok, Pi or Prime Agent session from the
 agent's own transcript, on this machine or an owner-configured SSH host. No
 terminal host is involved: a session in Herdr, tmux, or a bare PowerShell tab
 reads the same way
@@ -3375,8 +3375,9 @@ clankie agents hosts remove pc
 
 A remote host needs only sshd and its default shell; nothing is installed there.
 Authentication is the owner's SSH configuration (keys, `~/.ssh/config` aliases).
-Reads are confined to `~/.claude/projects`, `~/.codex/sessions`, `~/.grok/sessions`
-and `~/.pi/agent/sessions` on that host and capped at 4 MiB per call. `local` is always present. Hosts are stored under
+Reads are confined to `~/.claude/projects`, `~/.codex/sessions`, `~/.grok/sessions`,
+`~/.pi/agent/sessions` and `~/.prime/agent/sessions` (or
+`$PRIME_AGENT_CODING_AGENT_DIR/sessions`) on that host and capped at 4 MiB per call. `local` is always present. Hosts are stored under
 `agentHosts.connections` (up to 15).
 
 `list` reports `ref` (`host:sessionId`), harness, size and `modifiedAt`; a recent

@@ -111,5 +111,7 @@ export function nativeResumeArgs(session: SavedAgentSession): readonly string[] 
       return ["resume", session.sessionId];
     case "pi":
       return ["--session", session.file.path];
+    case "prime":
+      return ["--resume", session.sessionId];
   }
 }

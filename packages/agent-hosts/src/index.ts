@@ -7,7 +7,7 @@ import { join, relative, isAbsolute } from "node:path";
 import { promisify } from "node:util";
 
 export interface AgentSessionFile {
-  harness: "claude" | "codex" | "grok" | "pi";
+  harness: "claude" | "codex" | "grok" | "pi" | "prime";
   path: string;
   size: number;
   mtimeMs: number;
@@ -42,7 +42,12 @@ function within(root: string, path: string) {
   );
 }
 export function createLocalAgentHost(
-  options: { home?: string; codexHomes?: readonly string[]; piSessionRoots?: readonly string[] } = {},
+  options: {
+    home?: string;
+    codexHomes?: readonly string[];
+    piSessionRoots?: readonly string[];
+    primeSessionRoot?: string;
+  } = {},
 ): AgentHost {
   const home = options.home ?? homedir();
   const roots = [
@@ -56,6 +61,11 @@ export function createLocalAgentHost(
       if (!isAbsolute(path)) throw new Error("Pi transcript roots must be absolute");
       return { harness: "pi" as const, path };
     }),
+    {
+      harness: "prime" as const,
+      path:
+        options.primeSessionRoot ?? join(primeAgentDir(options.home ? {} : process.env, home), "sessions"),
+    },
   ];
   return {
     id: "local",
@@ -128,10 +138,27 @@ export function piSessionRoots(
   if (!isAbsolute(root)) throw new Error("Native Pi session root must be absolute");
   return [root];
 }
+/**
+ * Prime Agent's state directory as its own CLI and daemon resolve it; root
+ * sessions live flat in its `sessions`.
+ */
+export function primeAgentDir(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  home = homedir(),
+): string {
+  const dir = env.PRIME_AGENT_CODING_AGENT_DIR || join(home, ".prime", "agent");
+  const root = dir === "~" || dir.startsWith("~/") ? join(home, dir.slice(1)) : dir;
+  if (!isAbsolute(root)) throw new Error("Prime Agent directory must be absolute");
+  return root;
+}
 const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 const psQuote = (text: string) => `'${text.replaceAll("'", "''")}'`;
 const psRoots =
-  "$roots = @(@{h='claude';p=(Join-Path $env:USERPROFILE '.claude\\projects')}, @{h='codex';p=(Join-Path $env:USERPROFILE '.codex\\sessions')}, @{h='grok';p=(Join-Path $env:USERPROFILE '.grok\\sessions')}, @{h='pi';p=(Join-Path $env:USERPROFILE '.pi\\agent\\sessions')})";
+  "$roots = @(@{h='claude';p=(Join-Path $env:USERPROFILE '.claude\\projects')}, @{h='codex';p=(Join-Path $env:USERPROFILE '.codex\\sessions')}, @{h='grok';p=(Join-Path $env:USERPROFILE '.grok\\sessions')}, @{h='pi';p=(Join-Path $env:USERPROFILE '.pi\\agent\\sessions')}, @{h='prime';p=(Join-Path $(if ($env:PRIME_AGENT_CODING_AGENT_DIR) { $env:PRIME_AGENT_CODING_AGENT_DIR -replace '^~(?=$|[\\\\/])', $env:USERPROFILE } else { Join-Path $env:USERPROFILE '.prime\\agent' }) 'sessions')})";
+const PRIME_POSIX_ROOT = `prime_root="\${PRIME_AGENT_CODING_AGENT_DIR:-$HOME/.prime/agent}"
+case "$prime_root" in "~"|"~/"*) prime_root="$HOME\${prime_root#"~"}";; esac
+prime_root="$prime_root/sessions"
+`;
 function powershell(script: string) {
   return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from("$ErrorActionPreference='Stop'; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; " + script, "utf16le").toString("base64")}`;
 }
@@ -144,12 +171,13 @@ function listCommand(shell: AgentHostConfig["shell"], count: number) {
       `${psRoots}; $rows = @(foreach ($r in $roots) { if (Test-Path -LiteralPath $r.p) { Get-ChildItem -LiteralPath $r.p -Recurse -File -Filter '*.jsonl' | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and ($r.h -ne 'grok' -or $_.Name -eq 'chat_history.jsonl') } | ForEach-Object { [PSCustomObject]@{harness=$r.h; path=$_.FullName; size=$_.Length; mtimeMs=([DateTimeOffset]$_.LastWriteTimeUtc).ToUnixTimeMilliseconds()} } } }); ConvertTo-Json -Compress -InputObject @($rows | Sort-Object mtimeMs -Descending | Select-Object -First ${count})`,
     );
   return posix(`set -eu
-for h in claude codex grok pi; do
+${PRIME_POSIX_ROOT}for h in claude codex grok pi prime; do
   case "$h" in
     claude) root="$HOME/.claude/projects";;
     codex) root="$HOME/.codex/sessions";;
     grok) root="$HOME/.grok/sessions";;
     pi) root="$HOME/.pi/agent/sessions";;
+    prime) root="$prime_root";;
   esac
   pattern='*.jsonl'
   [ "$h" != grok ] || pattern=chat_history.jsonl
@@ -176,7 +204,7 @@ case "$p" in /*.jsonl) ;; *) exit 2;; esac
 dir=$(CDPATH= cd -P -- "$(dirname "$p")" && pwd)
 p="$dir/$(basename "$p")"
 ok=false
-for root in "$HOME/.claude/projects" "$HOME/.codex/sessions" "$HOME/.grok/sessions" "$HOME/.pi/agent/sessions"; do
+${PRIME_POSIX_ROOT}for root in "$HOME/.claude/projects" "$HOME/.codex/sessions" "$HOME/.grok/sessions" "$HOME/.pi/agent/sessions" "$prime_root"; do
   [ -d "$root" ] || continue
   root=$(CDPATH= cd -P -- "$root" && pwd)
   case "$p" in "$root"/*) ok=true;; esac
@@ -235,7 +263,7 @@ export function createSshAgentHost(
         const r = row as AgentSessionFile;
         if (
           !r ||
-          !["claude", "codex", "grok", "pi"].includes(r.harness) ||
+          !["claude", "codex", "grok", "pi", "prime"].includes(r.harness) ||
           typeof r.path !== "string" ||
           !r.path.endsWith(".jsonl") ||
           !Number.isSafeInteger(r.size) ||
