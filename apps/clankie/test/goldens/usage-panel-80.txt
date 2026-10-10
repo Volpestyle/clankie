@@ -1,0 +1,24 @@
+┌────────────────────────────────────────────────────────────────────┐
+│ Usage · local                                          r o w · esc │
+│ live · updated 0s ago                                              │
+│                                                                    │
+│ Claude work · Max 20x                                          10s │
+│   5h    █░░░░░░░░░░░░░░░░░░░░░░░   3%                 4h18m        │
+│   wk    █████████████████████░░▶  87% out ~Sat 6:02am 4d9h         │
+│   Fable ░░░░░░░░░░░░░░░░░░░░░░░░   0% →0%             4d9h         │
+│ Claude volpestyle · Max 20x                           ● next · 10s │
+│   5h    █████████░░░│░░░░░░░░░░░  37% →50%            1h18m        │
+│   wk    ██████░░░░░░░│░░░░░░░░░░  25% →58%            3d23h        │
+│   Fable ░░░░░░░░░░░░░░░░░░░░░░░░   0% →0%             3d23h        │
+│ Codex owner · Pro                                     ● next · 10s │
+│   wk    ██████░░░░░░░░░░░░░░░░░▶  26% out ~Sun 11:22am 6d10h       │
+│ Codex spare · Free                                      held · 10s │
+│   30d   ░░░░░░░░░░░░░░░░░░░░░░░░   0% →0%             27d16h       │
+│                                                                    │
+│ Next hire Claude → volpestyle (Max 20x): 75% of its week left,     │
+│   4.0 days to reset                                                │
+│ Next hire Codex → owner (Pro): 74% of its week left, 6.4 days to   │
+│   reset; at 46%/day it runs out in 1.6 days, 4.8 days before it    │
+│   resets                                                           │
+│ Overlay shown · run-out warning 12h                                │
+└────────────────────────────────────────────────────────────────────┘

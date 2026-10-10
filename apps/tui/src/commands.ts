@@ -91,12 +91,9 @@ import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
 import type { AwakeCommandResult } from "./command/awake.ts";
-import { formatUsageTable, runOutWarningText, type runUsageCommand } from "./command/usage.ts";
-import {
-  USAGE_WORDING,
-  type UsageReport,
-  type UsageSettingsSnapshot,
-} from "@clankie/protocol/worker-accounts";
+import { runOutWarningText, type runUsageCommand } from "./command/usage.ts";
+import { ClankieUsageOverlay } from "./face/clankie-usage-panel.ts";
+import { type UsageReport, type UsageSettingsSnapshot } from "@clankie/protocol/worker-accounts";
 import {
   formatRuntimeHealth,
   parseRuntimeHealthArgs,
@@ -2022,49 +2019,27 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           );
           return;
         }
-        await runSettingsMenu(shell, "/usage", async () => {
-          const report = (await usage(words[0] === "refresh" ? ["--refresh"] : [])) as UsageReport;
-          const overlay = report.settings.display.overlay;
-          return {
-            title: formatUsageTable(report),
-            actions: [
-              {
-                value: "overlay",
-                label: overlay ? "Hide usage beside Clankie" : USAGE_WORDING.overlay.label,
-                hint: USAGE_WORDING.overlay.description,
-                async run() {
-                  const next = (await usage([
-                    "overlay",
-                    overlay ? "off" : "on",
-                    "--expected-revision",
-                    report.settings.revision,
-                  ])) as { display: { overlay: boolean } };
-                  return `Overlay meters ${next.display.overlay ? "shown" : "hidden"}.`;
-                },
-              },
-              ...(report.settings.allocation === undefined
-                ? []
-                : [
-                    {
-                      value: "warning",
-                      label: report.settings.allocation.runOutWarning
-                        ? "Stop run-out warnings"
-                        : USAGE_WORDING.runOutWarning.label,
-                      hint: USAGE_WORDING.runOutWarning.description,
-                      async run() {
-                        const next = (await usage([
-                          "warning",
-                          report.settings.allocation!.runOutWarning ? "off" : "on",
-                          "--expected-revision",
-                          report.settings.revision,
-                        ])) as UsageSettingsSnapshot;
-                        return runOutWarningText(next);
-                      },
-                    },
-                  ]),
-            ],
-          };
-        });
+        // The live panel (VUH-2021): it re-reads while open; r, o and w act inside it.
+        const set = async (args: readonly string[]) => void (await usage(args));
+        const overlay = new ClankieUsageOverlay(
+          {
+            read: async (refresh) => (await usage(refresh ? ["--refresh"] : [])) as UsageReport,
+            setOverlay: (on, revision) =>
+              set(["overlay", on ? "on" : "off", "--expected-revision", revision]),
+            setRunOutWarning: (on, revision) =>
+              set(["warning", on ? "on" : "off", "--expected-revision", revision]),
+          },
+          {
+            onClose: () => {
+              overlay.stop();
+              close();
+            },
+            onRender: () => shell.requestRender(),
+          },
+          { theme: shell.theme.commandUiTheme, unicode: shell.theme.capabilities.unicode },
+        );
+        const close = shell.openPanel(overlay);
+        overlay.start(words[0] === "refresh");
       },
     },
     {

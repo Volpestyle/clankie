@@ -1,8 +1,10 @@
-import type {
-  AccountAllocation,
-  AllocationRecommendation,
-  MachineAllocation,
-  UsageWindow,
+import {
+  usageWindowPace,
+  type AccountAllocation,
+  type AllocationRecommendation,
+  type MachineAllocation,
+  type UsageWindow,
+  type UsageWindowPace,
 } from "@clankie/protocol/worker-accounts";
 import type { MachineWorkerAccounts, WorkerAccountStatus } from "./harness-accounts.ts";
 
@@ -24,11 +26,6 @@ import type { MachineWorkerAccounts, WorkerAccountStatus } from "./harness-accou
  * but never rank. Unknown usage ranks after every known reading and an
  * unreported plan tier counts as the base plan; neither is guessed.
  */
-
-const DAY_MS = 86_400_000;
-/** Pace is unknown until this share of a window has passed. */
-const PACE_MIN_ELAPSED = 0.05;
-const PACE_MIN_ELAPSED_MS = 3_600_000;
 
 /** Plan size against each harness's base paid plan. */
 const PLAN_WEIGHTS: Record<"claude" | "codex", Record<string, number>> = {
@@ -60,42 +57,7 @@ function planWeight(account: WorkerAccountStatus): number | null {
   return tier === undefined ? null : (PLAN_WEIGHTS[account.harness][tier] ?? null);
 }
 
-interface WindowPace {
-  readonly window: UsageWindow;
-  readonly left: number;
-  readonly daysToReset: number;
-  readonly burnPerDay?: number;
-  readonly runsOutAt?: number;
-  readonly resetsAt?: number;
-}
-
-function pace(window: UsageWindow, now: number): WindowPace {
-  const reset = window.resetsAt === undefined ? undefined : Date.parse(window.resetsAt);
-  const lengthMs = (window.windowMinutes ?? 10_080) * 60_000;
-  if (reset !== undefined && reset <= now) return { window, left: 1, daysToReset: lengthMs / DAY_MS };
-  const left = 1 - window.usedPercent / 100;
-  const remainingMs = reset === undefined ? lengthMs : reset - now;
-  const elapsedMs = reset === undefined || window.windowMinutes === undefined ? 0 : lengthMs - remainingMs;
-  if (elapsedMs < Math.max(PACE_MIN_ELAPSED_MS, lengthMs * PACE_MIN_ELAPSED))
-    return {
-      window,
-      left,
-      daysToReset: remainingMs / DAY_MS,
-      ...(reset === undefined ? {} : { resetsAt: reset }),
-    };
-  const perMs = window.usedPercent / elapsedMs;
-  const outMs = perMs > 0 ? (100 - window.usedPercent) / perMs : Infinity;
-  return {
-    window,
-    left,
-    daysToReset: remainingMs / DAY_MS,
-    burnPerDay: perMs * DAY_MS,
-    resetsAt: reset!,
-    ...(outMs < remainingMs ? { runsOutAt: now + outMs } : {}),
-  };
-}
-
-function spare(entry: WindowPace): number {
+function spare(entry: UsageWindowPace): number {
   return entry.left / Math.max(entry.daysToReset, 1 / 24) - (entry.burnPerDay ?? 0) / 100;
 }
 
@@ -125,7 +87,7 @@ export function allocateAccounts(report: MachineWorkerAccounts, now = Date.now()
       .map((account, index) => {
         const tier = accountTier(account);
         const weight = planWeight(account);
-        const windows = (account.usage?.windows ?? []).map((window) => pace(window, now));
+        const windows = (account.usage?.windows ?? []).map((window) => usageWindowPace(window, now));
         const general = windows.filter((entry) => !entry.window.id.includes(":"));
         const binding = general.length ? general.reduce((a, b) => (spare(b) < spare(a) ? b : a)) : undefined;
         const sparePerDay = binding === undefined ? null : (weight ?? 1) * spare(binding);

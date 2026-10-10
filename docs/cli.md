@@ -1677,8 +1677,14 @@ Nothing is moved or stopped.
 
 `usage overlay on|off` shows or hides the meters beside Clankie in the desktop
 overlay (`usage.overlay` in settings, default on; `GET`/`POST /v1/usage/settings`,
-revision-fenced). The console's `/usage` shows the same report and toggles the
-overlay; the app's Usage screen does both.
+revision-fenced). The console's `/usage` opens a live panel over the same
+report: a bar per window colored by how much is used, a marker where the
+current pace lands it at reset (red `▶` and "runs out ~…" when that is before
+the reset), a countdown to each reset, each reading's age, and the next-hire
+pick. It re-reads every 15 seconds while open; `r` reads every account again,
+`o` toggles the overlay, `w` the run-out warning, and `esc` closes it. On a narrow
+terminal each window takes a compact row; without color the text says
+everything. The app's Usage screen shows the same report and toggles both.
 
 ```sh
 clankie usage

@@ -2,8 +2,8 @@ import { execFile, execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { promisify, stripVTControlCharacters } from "node:util";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mintOperatorToken } from "@clankie/credential-broker";
 import {
   USAGE_PATH,
@@ -17,6 +17,8 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { readMachineWorkerAccounts } from "../src/captain/harness-accounts.ts";
 import { claudeUsageLines, claudeUsageWindows, usageHeadroom } from "../src/captain/harness-usage.ts";
 import { runUsageCommand } from "../../tui/src/command/usage.ts";
+import { ClankieUsageOverlay } from "../../tui/src/face/clankie-usage-panel.ts";
+import { createClankieFaceAnsiTheme } from "../../tui/src/face/clankie-face-theme.ts";
 
 /**
  * Usage meters (VUH-1961, ADR 0221). The API answers through the real account
@@ -87,6 +89,134 @@ describe("Claude's own /usage lines", () => {
     expect(
       claudeUsageWindows([{ label: "Current session", usedPercent: 1, resets: "soon" }], now)[0],
     ).not.toHaveProperty("resetsAt");
+  });
+});
+
+describe("the /usage panel", () => {
+  // This Mac's own reading at 2026-10-10T01:40:30Z (example identities): two
+  // Max 20x Claude profiles, Codex Pro on pace to run out, a held free Codex.
+  const observedAt = "2026-10-10T01:40:30.092Z";
+  const week = (usedPercent: number, resetsAt: string, label = "Current week (all models)") => ({
+    id: "week",
+    label,
+    usedPercent,
+    windowMinutes: 10_080,
+    resetsAt,
+  });
+  const claude = (
+    label: string,
+    [session, sessionReset]: [number, string],
+    [used, reset]: [number, string],
+    fableReset: string,
+  ) => ({
+    harness: "claude" as const,
+    label,
+    home: `/Users/owner/.claude-${label}`,
+    signedIn: true,
+    identity: `${label === "default" ? "work" : label}@example.com`,
+    plan: "max",
+    tier: "default_claude_max_20x",
+    headroom: 1 - Math.max(session, used) / 100,
+    usable: true,
+    usage: {
+      source: "claude-usage" as const,
+      observedAt,
+      windows: [
+        {
+          id: "session",
+          label: "Current session",
+          usedPercent: session,
+          windowMinutes: 300,
+          resetsAt: sessionReset,
+        },
+        week(used, reset),
+        { ...week(0, fableReset, "Current week (Fable)"), id: "week:fable" },
+      ],
+    },
+  });
+  const accounts = [
+    claude(
+      "default",
+      [3, "2026-10-10T05:59:00.000Z"],
+      [87, "2026-10-14T10:59:00.000Z"],
+      "2026-10-14T11:00:00.000Z",
+    ),
+    claude(
+      "volpestyle",
+      [37, "2026-10-10T02:59:00.000Z"],
+      [25, "2026-10-14T00:59:00.000Z"],
+      "2026-10-14T01:00:00.000Z",
+    ),
+    {
+      harness: "codex" as const,
+      label: "default",
+      home: "/Users/owner/.codex",
+      signedIn: true,
+      identity: "owner@example.com",
+      plan: "pro",
+      headroom: 0.74,
+      usable: true,
+      usage: {
+        source: "codex-rate-limits" as const,
+        observedAt,
+        windows: [week(26, "2026-10-16T12:04:44.000Z", "Weekly limit")],
+      },
+    },
+    {
+      harness: "codex" as const,
+      label: "spare",
+      home: "/Users/owner/.codex-spare",
+      signedIn: true,
+      plan: "free",
+      headroom: 1,
+      usable: true,
+      held: { reason: "free plan, done" },
+      usage: {
+        source: "codex-rate-limits" as const,
+        observedAt,
+        windows: [{ ...week(0, "2026-11-06T18:01:00.000Z", "Weekly limit"), windowMinutes: 43_200 }],
+      },
+    },
+  ];
+  const plain = createClankieFaceAnsiTheme({ color: false, trueColor: false });
+  const color = createClankieFaceAnsiTheme({ color: true, trueColor: true });
+  // pi gives the overlay 88% of the terminal.
+  const draw = (overlay: ClankieUsageOverlay, columns: number) =>
+    overlay.render(Math.floor(columns * 0.88)).map((line) => line.trimEnd());
+
+  it("draws the API's report at 80 and 160 columns, with color only reinforcing the text", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-10T01:40:40.092Z"), toFake: ["Date"] });
+    try {
+      const { client } = await service(async () => ({
+        machine: "local",
+        shell: "posix",
+        observedAt,
+        accounts,
+      }));
+      const report = UsageReportSchema.parse(await runUsageCommand([], client));
+      const now = Date.now();
+      const overlay = (theme: typeof plain) => {
+        const panel = new ClankieUsageOverlay(
+          { read: async () => report, setOverlay: async () => {}, setRunOutWarning: async () => {} },
+          { onClose: () => {}, onRender: () => {} },
+          { theme, unicode: true, clock: () => now, timeZone: "America/Chicago" },
+        );
+        panel.setReport(report, now);
+        return panel;
+      };
+      const narrow = draw(overlay(plain), 80);
+      const wide = draw(overlay(plain), 160);
+      // Without color the panel is plain text that still says everything.
+      expect([...narrow, ...wide].join("")).not.toContain("\u001b");
+      await expect(`${narrow.join("\n")}\n`).toMatchFileSnapshot("goldens/usage-panel-80.txt");
+      await expect(`${wide.join("\n")}\n`).toMatchFileSnapshot("goldens/usage-panel-160.txt");
+      for (const columns of [80, 160])
+        expect(draw(overlay(color), columns).map((line) => stripVTControlCharacters(line))).toEqual(
+          columns === 80 ? narrow : wide,
+        );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

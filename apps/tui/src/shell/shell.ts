@@ -30,6 +30,7 @@ import {
   TuiAltScreen,
   VStack,
   type Component,
+  type Focusable,
   type OverlayHandle,
   type OverlayOptions,
   type Terminal,
@@ -1565,6 +1566,25 @@ export class ClankieFaceShell {
     if (handle !== undefined) handle.hide();
     this.tui.setFocus(this.editor);
     this.tui.requestRender();
+  }
+
+  /** Shows a focused panel over the conversation; the returned close hands focus back to the composer. */
+  openPanel(component: Component & Focusable): () => void {
+    this.closeCommandPalette();
+    const handle = this.showModalOverlay(component, {
+      anchor: "center",
+      maxHeight: "80%",
+      margin: { bottom: 2, left: 2, right: 2, top: 2 },
+      minWidth: 48,
+      width: "88%",
+    });
+    handle.focus();
+    this.tui.requestRender();
+    return () => {
+      handle.hide();
+      this.tui.setFocus(this.editor);
+      this.tui.requestRender();
+    };
   }
 
   private toggleVoiceTranscripts(): void {

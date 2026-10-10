@@ -86,7 +86,7 @@ function bar(usedPercent: number): string {
 }
 
 /** `3pm` today, `Sat 2am` later, `Oct 14 6am` past a week; in the reader's local time. */
-function usageResetLocal(iso: string | undefined, now: number, timeZone?: string): string {
+export function usageResetLocal(iso: string | undefined, now: number, timeZone?: string): string {
   if (iso === undefined) return "reset unknown";
   const at = new Date(iso);
   const zone = timeZone === undefined ? {} : { timeZone };

@@ -341,3 +341,53 @@ export function usagePlanLabel(account: {
   const plan = account.plan?.trim();
   return plan ? `${plan[0]!.toUpperCase()}${plan.slice(1)}` : undefined;
 }
+
+const DAY_MS = 86_400_000;
+/** Pace is unknown until this share of a window has passed, and at least an hour. */
+const PACE_MIN_ELAPSED = 0.05;
+const PACE_MIN_ELAPSED_MS = 3_600_000;
+
+/** One window's pace (VUH-1974): what is left, how fast it is going, and when it runs out. */
+export interface UsageWindowPace {
+  readonly window: UsageWindow;
+  /** Fraction left, 0..1. */
+  readonly left: number;
+  readonly daysToReset: number;
+  /** Percent of the window used per day so far; absent until enough of it has passed. */
+  readonly burnPerDay?: number;
+  /** Epoch ms when it runs out at that pace, if before its reset. */
+  readonly runsOutAt?: number;
+  readonly resetsAt?: number;
+}
+
+/**
+ * The window's own average pace: percent used over the time it has run. The
+ * allocator ranks hires on it and every usage surface draws it, so one
+ * formula serves both. A window with no reported reset counts as a whole
+ * window away; one whose reset has passed is whole again.
+ */
+export function usageWindowPace(window: UsageWindow, now: number): UsageWindowPace {
+  const reset = window.resetsAt === undefined ? undefined : Date.parse(window.resetsAt);
+  const lengthMs = (window.windowMinutes ?? 10_080) * 60_000;
+  if (reset !== undefined && reset <= now) return { window, left: 1, daysToReset: lengthMs / DAY_MS };
+  const left = 1 - window.usedPercent / 100;
+  const remainingMs = reset === undefined ? lengthMs : reset - now;
+  const elapsedMs = reset === undefined || window.windowMinutes === undefined ? 0 : lengthMs - remainingMs;
+  if (elapsedMs < Math.max(PACE_MIN_ELAPSED_MS, lengthMs * PACE_MIN_ELAPSED))
+    return {
+      window,
+      left,
+      daysToReset: remainingMs / DAY_MS,
+      ...(reset === undefined ? {} : { resetsAt: reset }),
+    };
+  const perMs = window.usedPercent / elapsedMs;
+  const outMs = perMs > 0 ? (100 - window.usedPercent) / perMs : Infinity;
+  return {
+    window,
+    left,
+    daysToReset: remainingMs / DAY_MS,
+    burnPerDay: perMs * DAY_MS,
+    resetsAt: reset!,
+    ...(outMs < remainingMs ? { runsOutAt: now + outMs } : {}),
+  };
+}
