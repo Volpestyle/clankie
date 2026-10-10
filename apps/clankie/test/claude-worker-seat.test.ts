@@ -273,6 +273,31 @@ it("a hire starts the interactive TUI, briefs it over the channel, and waits for
   ).toBeUndefined();
 });
 
+it("a resume hire briefs the session it last messaged in another terminal (VUH-2060)", async () => {
+  const f = await fixture();
+  // The live shape: the session's last dispatch was in its old terminal and pane.
+  f.hooks.beginDispatch({ harness: "claude", sessionId: SESSION, paneId: "w1:p0" }, "term_old");
+  const started = await f.adapter.start(
+    { harness: "claude", cwd: "/w", brief: "BRIEF-2 carry on", resumeSessionId: SESSION },
+    f.view,
+  );
+  expect(started.outcome).toBe("started");
+  expect(f.deliver).toHaveBeenCalledWith("term_0a1b2c", "BRIEF-2 carry on");
+  expect(f.hooks.snapshot(SESSION)).toMatchObject({
+    paneId: "w1:p1",
+    dispatch: { terminalId: "term_0a1b2c" },
+  });
+  // Only the adapter's own verified launch rebinds; a reopened log still refuses another terminal.
+  const replacement = createClaudeWorkerSeatAdapter({
+    ...f.deps,
+    hooks: new SeatHookLog(join(f.root, "hooks.json")),
+    agent: async () => ({ ...f.agent, terminalId: "another-native-terminal" }),
+  });
+  expect(
+    await replacement.attach({ harness: "claude", sessionId: SESSION, paneId: "w1:p1" }),
+  ).toBeUndefined();
+});
+
 it("preserves a taken but unacknowledged channel event as uncertain without replaying it", async () => {
   const f = await fixture();
   const started = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "" }, f.view);

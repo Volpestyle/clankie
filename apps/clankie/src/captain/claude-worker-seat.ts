@@ -252,6 +252,22 @@ export class SeatHookLog {
     });
   }
 
+  /**
+   * A session resumed in a new terminal: the old terminal's dispatch boundary
+   * cannot correlate a turn here, and would refuse every send (VUH-2060).
+   */
+  public rebind(ref: SeatRef, terminalId: string): void {
+    const prior = this.snapshot(ref.sessionId);
+    if (
+      prior === undefined ||
+      (prior.paneId === ref.paneId &&
+        (prior.dispatch === undefined || prior.dispatch.terminalId === terminalId))
+    )
+      return;
+    const { dispatch: _stale, ...rest } = prior;
+    this.commit(ref.sessionId, { ...rest, paneId: ref.paneId, revision: prior.revision + 1 });
+  }
+
   public snapshot(sessionId: string): HookSession | undefined {
     return Object.hasOwn(this.sessions, sessionId) ? this.sessions[sessionId] : undefined;
   }
@@ -861,11 +877,18 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           reason: "not_ready",
           detail: `channel_unready: the ${CLAUDE_WORKER_PLUGIN_ID} channel never started polling the seat's mailbox`,
         };
-      const control = new ClaudeWorkerSeatControl(
-        { harness: "claude", sessionId, paneId: view.paneId },
-        deps,
-        agent.terminalId,
-      );
+      const ref: SeatRef = { harness: "claude", sessionId, paneId: view.paneId };
+      try {
+        deps.hooks.rebind(ref, agent.terminalId);
+      } catch {
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail:
+            "brief_delivery_unverified: the resumed session's hook boundary could not be saved; no brief was sent",
+        };
+      }
+      const control = new ClaudeWorkerSeatControl(ref, deps, agent.terminalId);
       if (launch.brief.length > 0) {
         await view.guard?.();
         const delivery = await control.send(launch.brief, { timeoutMs: receiptMs });
