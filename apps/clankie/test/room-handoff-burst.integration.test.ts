@@ -172,7 +172,7 @@ it("a sender's burst steers their running handoff while other speakers and grant
     );
 
     // A verified-owner proof is a different grant: it never joins the plain run.
-    const plain = captain.submitDiscordTurn(message("c-1", "20003", "first"));
+    const plain = captain.submitDiscordTurn(message("c-1", "20003", "plain-run-only"));
     work.push(plain);
     await vi.waitFor(() => expect(calls).toHaveLength(4), { timeout: 10_000 });
     const elevated = captain.submitDiscordTurn(message("c-2", "20003", "second"), {
@@ -182,7 +182,7 @@ it("a sender's burst steers their running handoff while other speakers and grant
     work.push(elevated);
     await vi.waitFor(() => expect(calls).toHaveLength(5), { timeout: 10_000 });
     expect(calls[4]!.text).toContain("second");
-    expect(calls[4]!.text).not.toContain('"first');
+    expect(calls[4]!.text).not.toContain("plain-run-only");
     calls[3]!.finish("one");
     calls[4]!.finish("two");
     expect(await plain).toMatchObject({ state: "settled", response: "one" });
