@@ -1922,7 +1922,11 @@ transaction whose `expectedStoreId` no longer names the store is `refused` with
 reason `store_replaced`, with no model write; its receipt records the refusal. Output is the typed result; bootstrap contains JSON lines
 in `ndjson`, ending with snapshot cursor and model count metadata. Subscribe
 waits on committed changes, for at most 20 seconds. A keyed transaction is
-atomic across 1–50 operations; receipt lookup uses `work owner get_write_receipt`.
+atomic across 1–50 operations; receipt lookup uses `work call get_write_receipt`
+(or `work owner get_write_receipt` for the owner's own writes), since receipts
+belong to the actor that wrote them.
+On the operator credential a transaction writes as Clankie for the owner, like
+every other `clankie work` tracker verb (see [who a write is from](#who-a-clankie-work-write-is-from)).
 
 Full bootstrap `projects: ["*"]` returns every tracker project UUID, `unprojected`
 and `workspace` in metadata `syncGroups`. Every subscription includes `workspace`
@@ -1952,6 +1956,19 @@ projects and project status updates use the same input shapes with connected
 Linear or durable local storage. `clankie doctor` reports the active backend and
 selection reason. An explicit `repo` tool argument selects the repo's recorded
 GitHub or Markdown adapter.
+
+#### Who a `clankie work` write is from
+
+The operator credential proves a caller on this machine, not the person at the
+keyboard: the lead seat, a hired worker's shell and the owner's own terminal all
+hold it. So on the built-in tracker every `clankie work` write (create, update,
+close, write, bundles, asks, cycles, leases, run controls and `work sync`) is
+recorded as Clankie, the `agent-worker` `clankie`, on behalf of the owner. It is
+self-echo: it never wakes Clankie as owner activity, and it cannot verify,
+complete, reopen or self-check work Clankie did. Two surfaces speak as the owner:
+the app on an enrolled device, and `clankie work owner TOOL`, the owner's
+explicit own call. Agents never use `work owner`. The owner's "It works" answer
+to a verify ask counts as the bundle check and verifies the item (LOCAL-VUH-1).
 
 - `clankie work` (or `work status`, `work discover`) reports the repo's signals,
   its recorded convention if any, and a `question` when discovery found more
@@ -1988,13 +2005,13 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   for items that are already delivered. `clankie work releases [--lane L]
 [--item KEY] [--limit N]` lists releases newest first. `clankie work release
 ID|VERSION` shows one release, with each item's commits and, for built-in
-  items, their stage. These run as the owner through
-  `POST /v1/tracker/releases/sync` and `POST /v1/tracker/owner/call`.
+  items, their stage. These run as Clankie for the owner through
+  `POST /v1/tracker/releases/sync` and `POST /v1/tracker/call`.
 - `clankie work cycle [--project P] [--type current|previous|next|all]` reads
   built-in tracker cycles with their event-stream summary: planned, added,
   rolled in, removed, finished, rolled over, in flight. `work cycle show ID
 [--project P]` reads one cycle. `work cycle add ITEM [--to current|next|N]`
-  and `work cycle remove ITEM` set membership as the owner. `work cycle length
+  and `work cycle remove ITEM` set membership as Clankie for the owner. `work cycle length
 PROJECT DAYS` sets the project's cycle length (default 7), starting with its
   next cycle. Unfinished items roll into the next cycle on the first access after
   one ends
@@ -2015,7 +2032,8 @@ PROJECT DAYS` sets the project's cycle length (default 7), starting with its
   lowercase 64-character hashes and links; supported types are `log`,
   `screenshot`, `video`, `diff`, `eval`, `other`. No bytes go into the tracker.
   `work bundle show ITEM [--run ID]` reads it; `work bundle check BUNDLE_ID
-[--body TEXT]` checks it as the owner. Its worker cannot self-check. Replacement
+[--body TEXT]` checks it as Clankie for the owner, so it is refused when
+  Clankie published the bundle or did the work; a worker cannot self-check either. Replacement
   bundles need a fresh check; the owner must reopen an item past landed before
   replacing its completion bundle. Completion past landed needs the item's bundle
   and a check; the owner's existing "It works" answer counts as a check.
@@ -2025,18 +2043,22 @@ plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
   immediately and raises an ADR 0245 ask with purpose `gate`. The linked
   `requestId` appears after the host publishes it. Use the existing `clankie conversations questions|answer` commands to choose Approve. Decline, free text and
   cancellation do not unblock the gate; every pending gate needs approval.
-- `clankie work run steer|pause|resume|stop ID [--body TEXT]` records an owner
-  control event. The additive `linear_post_run_control` tool also permits the
+- `clankie work run steer|pause|resume|stop ID [--body TEXT]` records a lead
+  control event, never an owner approval. The additive `linear_post_run_control` tool also permits the
   lead; workers are refused. Paused or gated runs refuse updates except
   cancellation. Resume clears only the pause; stop cancels the attempt. These
   commands change tracked run state and do not deliver native terminal input
   or kill a process. The tool/API contract is the
   [VUH-1919 amendment](adr/0226-one-tracker-tool-surface.md#amendment-evidence-bundles-owner-asks-and-run-gates-2026-10-09-vuh-1919).
+- `clankie work call TOOL [--json ARGS]` makes Clankie's call to the built-in
+  tracker for the owner (`POST /v1/tracker/call`) with a `linear_*` tool name
+  (prefix optional), recorded like every other `clankie work` write.
 - `clankie work owner TOOL [--json ARGS]` makes the owner's own call to the
   built-in tracker (`POST /v1/tracker/owner/call`) with a `linear_*` tool name
   (prefix optional), for example `work owner get_issue --json
 '{"id":"LOCAL-1","includeReleases":true}'`. Owner writes there are owner
-  activity: they can verify, reopen and wake the routed chat.
+  activity: they can verify, reopen and wake the routed chat. The owner is never
+  refused a bundle check, even on work he did himself.
 - Work statuses are `backlog`, `todo`, `in_progress`, `in_review`, `done`, and
   `canceled`. Linear backlog/triage, GitHub `status: backlog`, and Markdown
   `status: backlog` stay distinct from todo. Items may carry a native milestone

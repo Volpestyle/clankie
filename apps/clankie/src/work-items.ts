@@ -42,7 +42,9 @@ import {
   type TrackerToolCallOptions,
   type TrackerToolBackend,
   createLocalTracker,
+  TRACKER_LEAD,
   TRACKER_OWNER,
+  type TrackerActor,
 } from "@clankie/work-items";
 import type { McpHost } from "./mcp-host.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
@@ -70,6 +72,8 @@ import { deliveryFingerprint } from "./captain/delivery-fence.ts";
 
 const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 30_000;
+/** Clankie (the lead) acting for the owner: how operator-bearer tracker writes are attributed. */
+const CLANKIE_FOR_OWNER: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
 
 export const WorkRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("repos") }).strict(),
@@ -421,6 +425,10 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       clock,
       trackerDirectory: join(options.stateDirectory, "repo-trackers", repoId(path)),
       ...(builtIn === undefined ? {} : { builtIn }),
+      // The operator bearer is a local caller (the CLI, the lead seat, a hire), not proof
+      // of the human: its writes are Clankie's, for the owner. Callers that know better
+      // (a worker's grant, the owner's own route, an app device) replace it (LOCAL-VUH-1).
+      actor: CLANKIE_FOR_OWNER,
     };
   };
 
@@ -583,11 +591,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         const writeDeps: { -readonly [K in keyof TrackerDeps]: TrackerDeps[K] } = {
           ...dependencies,
           scopedWrites: true,
-          // The authenticated principal: the owner at the operator console, or an enrolled app device.
+          // The authenticated principal: an enrolled app device is the owner's app. The
+          // operator bearer is any local caller (CLI, lead seat, hire), so Clankie writes for the owner.
           actor:
             authority.principal.kind === "device"
               ? { type: "app", id: `device:${authority.principal.id}`, onBehalfOf: [TRACKER_OWNER] }
-              : { ...TRACKER_OWNER, onBehalfOf: [] },
+              : CLANKIE_FOR_OWNER,
           beforeWrite: async () => {
             await free?.guard();
             beforeWrite();

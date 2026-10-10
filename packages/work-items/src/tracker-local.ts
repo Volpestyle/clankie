@@ -1269,7 +1269,9 @@ function checkBundle(
       )
       .map((event) => event.actor),
   ];
-  if (workers.some((actor) => actorKey(actor) === actorKey(context.actor)))
+  // Independence keeps agents from attesting their own work. The owner is the
+  // authority it protects and the only one who verifies, so he is never refused.
+  if (!isOwner(context.actor) && workers.some((actor) => actorKey(actor) === actorKey(context.actor)))
     throw new TrackerWriteRefused("bundle_self_check", "an actor who did the work cannot check its bundle");
   if (bundle.checked !== undefined) return;
   appendEvent(store, context, now, issue, {

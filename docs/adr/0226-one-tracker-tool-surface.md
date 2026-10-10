@@ -118,14 +118,23 @@ arguments. There are three types: `human` (the owner), `agent-worker` (Clankie
 himself or a hired worker) and `app` (an enrolled device). Each actor carries
 its on-behalf-of chain, outermost first, and the model when the host knows it.
 
-| Caller                                   | Actor                                | Chain           |
-| ---------------------------------------- | ------------------------------------ | --------------- |
-| Fleet or granted worker (`clankie_call`) | `agent-worker`, its grant principal  | owner → Clankie |
-| Clankie's operator tools                 | `agent-worker` `clankie`, turn model | owner           |
-| Clankie in a social room                 | `agent-worker` `clankie`, turn model | none            |
-| Owner write from the operator console    | `human` `owner`                      | none            |
-| Owner write from an app device           | `app` `device:<id>`                  | owner           |
-| Standalone use with no host              | the store's visibly local user       | none            |
+| Caller                                    | Actor                                | Chain           |
+| ----------------------------------------- | ------------------------------------ | --------------- |
+| Fleet or granted worker (`clankie_call`)  | `agent-worker`, its grant principal  | owner → Clankie |
+| Clankie's operator tools                  | `agent-worker` `clankie`, turn model | owner           |
+| Clankie in a social room                  | `agent-worker` `clankie`, turn model | none            |
+| `clankie work` on the operator credential | `agent-worker` `clankie`             | owner           |
+| Owner's explicit `clankie work owner`     | `human` `owner`                      | none            |
+| Owner's verify/gate answer (ADR 0245)     | `human` `owner`, `via: owner_ask`    | none            |
+| Owner write from an app device            | `app` `device:<id>`                  | owner           |
+| Standalone use with no host               | the store's visibly local user       | none            |
+
+The operator credential proves a caller on this machine (the lead seat, a hire's
+shell or the owner's terminal), not the person at the keyboard, so its
+`clankie work` writes are Clankie's for the owner (LOCAL-VUH-1, 2026-10-10).
+Before that, the operator credential wrote as `human` `owner` and the CLI's
+`/v1/work` verbs as the store's local user. The lead's own bundles then counted
+as the owner's work, so the owner's verify answer was refused as a self-check.
 
 A fleet worker is named by the seat its hire recorded. The records it creates
 or changes carry `createdByActor` and `updatedByActor`; existing Linear-shaped
@@ -375,6 +384,8 @@ independent check, recorded as `bundle_checked` with its bundle ID and actor.
 `post_bundle_check` refuses a checker who published the bundle, ran the work,
 or reported action/result/landing on the item, and refuses a superseded bundle.
 The owner's verification through the existing `verify` ask counts as a check.
+The owner (a `human` actor) is never refused: independence keeps agents from
+attesting their own work, and he alone verifies (LOCAL-VUH-1).
 The same gate applies to typed stage moves, hand-set completion and automatic
 release delivery; a release sync refuses atomically if an item it would advance
 lacks a checked bundle. Creating an item already completed is refused: create,

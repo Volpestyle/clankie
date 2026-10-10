@@ -308,9 +308,15 @@ not become owner approvals. The owner and lead can use
 a worker is refused. Resume clears the pause only; stop cancels the attempt.
 These are tracker events, not proof of native delivery or process termination.
 
-Owner CLI equivalents are `clankie work bundle set|show|check`, `work ask`,
-`work gate ask` and `work run steer|pause|resume|stop`; answer through the
-existing `clankie conversations questions|answer` mailbox. Other tracker backends refuse these additions.
+CLI equivalents are `clankie work bundle set|show|check`, `work ask`,
+`work gate ask` and `work run steer|pause|resume|stop`; the owner answers through
+the existing `clankie conversations questions|answer` mailbox. Every
+`clankie work` write, from any seat or terminal, is recorded as Clankie for the
+owner, never as the owner: so the lead cannot check a bundle he published, and
+the owner's "It works" is the check. Only the owner's app and his explicit
+`clankie work owner` call speak as the owner; agents never use `work owner`
+and reach any other tool with `clankie work call TOOL --json ARGS`. Other
+tracker backends refuse these additions.
 
 ## Built-in tracker sync
 

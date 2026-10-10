@@ -20,7 +20,9 @@ import { startTrackerOwnerLoop } from "../src/tracker-owner-loop.ts";
 import { trackerRepoForPrincipal } from "../src/tracker-runner.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
+import { runWorkCommand } from "../../tui/src/command/work.ts";
 import { captured, OWNER_ID } from "./helpers/linear-mirror.ts";
+import { trackerEvidence } from "./helpers/tracker-evidence.ts";
 
 /**
  * VUH-1987 through the real service surfaces: the owner's cutover route over HTTP, a
@@ -129,7 +131,11 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     },
   });
   const trackerDirectory = join(root, "tracker");
-  const live = createLocalTracker({ directory: trackerDirectory });
+  const evidence = trackerEvidence(root);
+  const live = createLocalTracker({
+    directory: trackerDirectory,
+    validateEvidence: evidence.validateEvidence,
+  });
   // The live store as a fresh service leaves it: seeded, persisted, holding no records.
   await live.sync({ action: "bootstrap", type: "full", projects: ["*"], lazy: false });
   const linearReads: string[] = [];
@@ -182,7 +188,11 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     builtInTracker: (assertIssueWrite) =>
       assertIssueWrite === undefined
         ? live
-        : createLocalTracker({ directory: trackerDirectory, assertIssueWrite }),
+        : createLocalTracker({
+            directory: trackerDirectory,
+            assertIssueWrite,
+            validateEvidence: evidence.validateEvidence,
+          }),
   });
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
@@ -246,6 +256,7 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
   cleanups.push(async () => {
     await stopLoop();
     app.close();
+    evidence.store.close();
     await rm(root, { recursive: true, force: true });
   });
   const post = async (path: string, body: unknown, authorization = "Bearer owner") => {
@@ -305,9 +316,18 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     mirrors: await readFile(join(imports, "mirrors.json"), "utf8").catch(() => null),
     projects: JSON.stringify((await settings.load()).projects),
   });
+  /** `clankie work` as the lead seat runs it: the CLI over HTTP with the operator credential. */
+  const work = (...args: string[]) =>
+    runWorkCommand([...args, "--repo", workspace], {
+      env: { CLANKIE_OPERATOR_TOKEN: "owner", CLANKIE_CONTROL_PLANE_URL: "http://clankie.test" },
+      fetchImpl: (input, init) => Promise.resolve(app.app.request(String(input), init)),
+    }) as Promise<{ ok: boolean; body: Record<string, any> }>;
   return {
     root,
     workspace,
+    host,
+    evidence,
+    work,
     source,
     projectId,
     trackerDirectory,
@@ -679,4 +699,140 @@ it("routes a hired worker's tracker calls without repo by its project's saved co
   expect((await store()).issues.some((entry: { title: string }) => entry.title === "Explicit repo")).toBe(
     false,
   );
+});
+
+it("records the lead's tracker writes as Clankie for the owner, and the owner's verify answer closes them (LOCAL-VUH-1)", async () => {
+  const f = await cutoverFixture();
+  const cut = await f.post("/v1/tracker/cutover/linear", {
+    worldProject: "clankie-work",
+    scratch: "work",
+    linearProjectId: f.projectId,
+  });
+  expect(cut.status, JSON.stringify(cut.body)).toBe(200);
+  const clankieForOwner = {
+    type: "agent-worker",
+    id: "clankie",
+    name: "Clankie",
+    onBehalfOf: [{ type: "human", id: "owner", name: "Owner" }],
+  };
+  const store = async () => JSON.parse(await readFile(join(f.trackerDirectory, "tracker.json"), "utf8"));
+  // The owner loop has read the promoted store before the lead writes, so any wake is his.
+  await expect
+    .poll(
+      async () =>
+        JSON.parse(await readFile(join(f.trackerDirectory, "owner-loop.json"), "utf8").catch(() => "{}"))
+          .cursor,
+      { timeout: 10_000, interval: 100 },
+    )
+    .toBe((await store()).events.length);
+
+  // The lead seat files, proves and lands work with `clankie work` on the operator credential.
+  const created = await f.work("create", "Lead-published pilot");
+  expect(created.ok, JSON.stringify(created.body)).toBe(true);
+  const key = created.body.item.id as string;
+  const reference = await f.evidence.record(key);
+  const bundle = await f.work(
+    "bundle",
+    "set",
+    key,
+    "--json",
+    JSON.stringify({ references: [reference], gaps: [] }),
+  );
+  expect(bundle.ok, JSON.stringify(bundle.body)).toBe(true);
+  const landed = await f.work("update", key, "--status", "in_review");
+  expect(landed.ok, JSON.stringify(landed.body)).toBe(true);
+  // A keyed sync transaction, and the lead's own MCP tool (operator lane, with repo).
+  const synced = await f.work(
+    "sync",
+    "--json",
+    JSON.stringify({
+      action: "transaction",
+      idempotencyKey: "lead-sync-comment",
+      operations: [{ name: "save_comment", arguments: { issueId: key, body: "Synced by the lead." } }],
+    }),
+  );
+  expect(synced.ok, JSON.stringify(synced.body)).toBe(true);
+  const commented = await f.host.call({
+    lane: "operator",
+    server: "linear",
+    tool: "save_comment",
+    arguments: { repo: f.repo, issueId: key, body: "Landed; please check it works." },
+  });
+  expect(commented, JSON.stringify(commented)).toMatchObject({ outcome: "ok" });
+
+  // Every one of those writes is Clankie's for the owner; none is owner activity.
+  const issue = (await store()).issues.find((entry: { identifier: string }) => entry.identifier === key);
+  expect(issue).toMatchObject({ stage: "landed", projectId: f.projectId });
+  const leadEvents = (await store()).events.filter(
+    (event: { issueId: string; via?: string }) => event.issueId === issue.id && event.via !== "owner_ask",
+  );
+  expect(leadEvents.map((event: { type: string }) => event.type)).toEqual(
+    expect.arrayContaining(["created", "bundle", "stage", "comment"]),
+  );
+  for (const event of leadEvents) {
+    expect(event.actor, JSON.stringify(event)).toEqual(expect.objectContaining(clankieForOwner));
+    expect(event.selfEcho).toBe(true);
+  }
+  expect((await store()).bundles.at(-1).actor).toEqual(expect.objectContaining(clankieForOwner));
+  const comments = (await store()).comments.filter(
+    (entry: { issueId: string }) => entry.issueId === issue.id,
+  );
+  expect(comments).toHaveLength(2);
+  for (const comment of comments)
+    expect(comment.createdByActor).toEqual(expect.objectContaining(clankieForOwner));
+
+  // Clankie cannot check his own bundle or close what he landed, whatever credential he holds.
+  const selfCheck = await f.work("bundle", "check", bundle.body.result.id);
+  expect(selfCheck.ok).toBe(false);
+  expect(JSON.stringify(selfCheck.body)).toContain("bundle_self_check");
+  expect((await f.work("close", key)).ok).toBe(false);
+  expect((await store()).issues.find((entry: { id: string }) => entry.id === issue.id).stage).toBe("landed");
+  await f.settle();
+  expect(f.wakes).toEqual([]);
+
+  // The owner answers the verify ask from his own surface: that is the check, and it verifies.
+  const pendingVerify = async () =>
+    (
+      await f.post("/operator/v1/dispatch", { schemaVersion: 1, op: "input_list" })
+    ).body.result.questions.find(
+      (entry: { question: { purpose: string; status: string; issue?: { key: string } } }) =>
+        entry.question.purpose === "verify" &&
+        entry.question.status === "pending" &&
+        entry.question.issue?.key === key,
+    );
+  await expect.poll(pendingVerify, { timeout: 10_000, interval: 100 }).toBeDefined();
+  const verify = await pendingVerify();
+  const answered = await f.post("/operator/v1/dispatch", {
+    schemaVersion: 1,
+    op: "input_answer",
+    conversationId: verify.conversationId,
+    incarnationId: verify.incarnationId,
+    requestId: verify.question.requestId,
+    expectedRevision: verify.revision,
+    answer: {
+      kind: "choice",
+      optionId: verify.question.options.find((option: { label: string }) => option.label === "It works")
+        .optionId,
+    },
+  });
+  expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+  await expect
+    .poll(async () => (await store()).issues.find((entry: { id: string }) => entry.id === issue.id).stage, {
+      timeout: 10_000,
+      interval: 100,
+    })
+    .toBe("owner-verified");
+  const after = await store();
+  expect(after.bundles.at(-1).checked.actor).toEqual({
+    type: "human",
+    id: "owner",
+    name: "Owner",
+    onBehalfOf: [],
+  });
+  expect(
+    after.events.find(
+      (event: { issueId: string; type: string }) =>
+        event.issueId === issue.id && event.type === "bundle_checked",
+    ),
+  ).toMatchObject({ via: "owner_ask", actor: { type: "human", id: "owner" } });
 });

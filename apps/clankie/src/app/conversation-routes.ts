@@ -420,10 +420,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       if (!(await allowed()))
         return context.json({ error: writing ? "owner_required" : "authentication_required" }, 401);
       try {
+        // The owner's app, or Clankie for the owner on the operator bearer (LOCAL-VUH-1).
         const actor: TrackerActor | undefined = authority
           ? authority.principal.kind === "device"
-            ? { type: "app", id: `device:${authority.principal.id}`, onBehalfOf: [TRACKER_OWNER] }
-            : { ...TRACKER_OWNER, onBehalfOf: [] }
+            ? appActor(authority.principal.id)
+            : CLANKIE_FOR_OWNER
           : undefined;
         const result = await tracker.sync(
           command,
@@ -824,38 +825,43 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     });
     return context.json({ schemaVersion: 1 as const, items });
   });
-  // The owner's own writes to the built-in tracker (VUH-1917). The actor comes from
-  // authentication: the operator is the human owner, a terminalControl device is the
-  // owner's app. These are owner activity, so they can wake the item's routed chat.
-  ctx.app.post(TRACKER_OWNER_CALL_PATH, async (context) => {
-    const tracker = ctx.dependencies.builtInTracker;
-    if (tracker === undefined) return context.json({ error: "tracker_unavailable" }, 503);
-    const authority = await questionOwnerAuthority(context.req.raw);
-    if (authority === undefined) return context.json({ error: "owner_required" }, 401);
-    const parsed = TrackerOwnerCallSchema.safeParse(await readJson(context.req.raw));
-    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
-    if (!(await authority.authorize()) || !authority.current())
-      return context.json({ error: "owner_required" }, 401);
-    const actor: TrackerActor =
-      authority.principal.kind === "device"
-        ? { type: "app", id: `device:${authority.principal.id}`, onBehalfOf: [TRACKER_OWNER] }
-        : { ...TRACKER_OWNER, onBehalfOf: [] };
-    try {
-      const result = await tracker.call(parsed.data.name, parsed.data.arguments, {
-        actor,
-        beforeWrite: async () => {
-          if (!(await authority.authorize()) || !authority.current())
-            throw new Error("Owner authority expired");
-        },
-      });
-      return context.json({ result });
-    } catch (error) {
-      return context.json(
-        { error: "tracker_refused", detail: error instanceof Error ? error.message : String(error) },
-        422,
-      );
-    }
-  });
+  /**
+   * Built-in tracker calls from an authenticated owner principal. A terminalControl
+   * device is always the owner's app. The operator bearer proves a local caller (the
+   * lead seat, a hire, or the owner's own terminal), not the human at the keyboard, so
+   * `/v1/tracker/call` (every `clankie work` tracker verb) is Clankie writing for the
+   * owner (LOCAL-VUH-1). `/v1/tracker/owner/call` (`clankie work owner`) is the owner
+   * speaking as himself (VUH-1917): owner activity that verifies, reopens and wakes.
+   */
+  const trackerCall = (path: string, operatorActor: TrackerActor) =>
+    ctx.app.post(path, async (context) => {
+      const tracker = ctx.dependencies.builtInTracker;
+      if (tracker === undefined) return context.json({ error: "tracker_unavailable" }, 503);
+      const authority = await questionOwnerAuthority(context.req.raw);
+      if (authority === undefined) return context.json({ error: "owner_required" }, 401);
+      const parsed = TrackerOwnerCallSchema.safeParse(await readJson(context.req.raw));
+      if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+      if (!(await authority.authorize()) || !authority.current())
+        return context.json({ error: "owner_required" }, 401);
+      const actor = authority.principal.kind === "device" ? appActor(authority.principal.id) : operatorActor;
+      try {
+        const result = await tracker.call(parsed.data.name, parsed.data.arguments, {
+          actor,
+          beforeWrite: async () => {
+            if (!(await authority.authorize()) || !authority.current())
+              throw new Error("Owner authority expired");
+          },
+        });
+        return context.json({ result });
+      } catch (error) {
+        return context.json(
+          { error: "tracker_refused", detail: error instanceof Error ? error.message : String(error) },
+          422,
+        );
+      }
+    });
+  trackerCall(TRACKER_CALL_PATH, CLANKIE_FOR_OWNER);
+  trackerCall(TRACKER_OWNER_CALL_PATH, { ...TRACKER_OWNER, onBehalfOf: [] });
   ctx.app.post("/v1/tracker/import/linear", async (context) => {
     const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
     if (!identity || identity === "unavailable") return context.json({ error: "operator_required" }, 401);
@@ -972,6 +978,14 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
 const TRACKER_RELEASE_SYNC_PATH = "/v1/tracker/releases/sync";
 const TrackerReleaseSyncSchema = z.object({ repo: z.string().min(1).max(4096) }).strict();
 const TRACKER_OWNER_CALL_PATH = "/v1/tracker/owner/call";
+const TRACKER_CALL_PATH = "/v1/tracker/call";
+/** Clankie (the lead) acting for the owner. */
+const CLANKIE_FOR_OWNER: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
+const appActor = (deviceId: string): TrackerActor => ({
+  type: "app",
+  id: `device:${deviceId}`,
+  onBehalfOf: [TRACKER_OWNER],
+});
 const TrackerOwnerCallSchema = z
   .object({
     name: z.string().min(1).max(128),

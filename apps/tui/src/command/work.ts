@@ -28,7 +28,8 @@ const WORK_USAGE = [
   "  | run steer|pause|resume|stop ID [--body TEXT] | ask ITEM --body TEXT",
   "  | lease ITEM [--minutes N] [--release]",
   "  | sync --json COMMAND   (built-in bootstrap, batch, subscribe or keyed transaction)",
-  "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker)",
+  "  | call TOOL [--json ARGS]   (Clankie's call to the built-in tracker, for the owner)",
+  "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker; agents never use it)",
   "  | import linear --project UUID --scratch NAME   (read-only Linear mirror into a scratch store)",
   "  | mirror linear --scratch NAME --project UUID enable|disable|status   (Linear webhooks keep that scratch store current)",
   "  | cutover linear --world-project ID --scratch NAME --project UUID [--dry-run]   (that import becomes the live built-in tracker)",
@@ -255,8 +256,10 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
 }
 
 /**
- * Built-in tracker calls (VUH-1917, VUH-1930): the owner's own tool calls and the
- * release sync. Undefined for every other verb, which goes to /v1/work.
+ * Built-in tracker calls (VUH-1917, VUH-1930). Undefined for every other verb, which
+ * goes to /v1/work. The operator credential proves a caller on this machine, not the
+ * human, so these verbs are Clankie's calls for the owner (`/v1/tracker/call`); only
+ * `work owner` speaks as the owner himself (LOCAL-VUH-1).
  */
 function trackerRequest(
   args: readonly string[],
@@ -264,8 +267,8 @@ function trackerRequest(
 ): { readonly path: string; readonly body: Record<string, unknown> } | undefined {
   const parsed = parseWorkArgs(args);
   const [verb, ...rest] = parsed.positional;
-  const owner = (name: string, toolArgs: Record<string, unknown>) => ({
-    path: "/v1/tracker/owner/call",
+  const call = (name: string, toolArgs: Record<string, unknown>, path = "/v1/tracker/call") => ({
+    path,
     body: { name, arguments: toolArgs },
   });
   switch (verb) {
@@ -326,7 +329,7 @@ function trackerRequest(
         return { path: "/v1/tracker/releases/sync", body: { repo } };
       if (rest.length > 0) throw new Error(WORK_USAGE);
       const limit = one(parsed, "--limit");
-      return owner("list_releases", {
+      return call("list_releases", {
         ...(one(parsed, "--lane") === undefined ? {} : { pipeline: one(parsed, "--lane") }),
         ...(one(parsed, "--item") === undefined ? {} : { query: one(parsed, "--item") }),
         ...(limit === undefined ? {} : { limit: Number(limit) }),
@@ -334,53 +337,53 @@ function trackerRequest(
     }
     case "release":
       if (rest.length !== 1) throw new Error(WORK_USAGE);
-      return owner("get_release", { id: rest[0] });
+      return call("get_release", { id: rest[0] });
     case "cycle": {
       const [action, ...targets] = rest;
       const project = one(parsed, "--project");
       if (action === undefined) {
         const type = one(parsed, "--type") ?? "current";
-        return owner("list_cycles", {
+        return call("list_cycles", {
           ...(project === undefined ? {} : { project }),
           ...(type === "all" ? {} : { type }),
         });
       }
       if (action === "show" && targets.length === 1)
-        return owner("get_cycle", { id: targets[0], ...(project === undefined ? {} : { project }) });
+        return call("get_cycle", { id: targets[0], ...(project === undefined ? {} : { project }) });
       if (action === "add" && targets.length === 1) {
         const to = one(parsed, "--to") ?? "current";
-        return owner("save_issue", { id: targets[0], cycle: /^\d+$/u.test(to) ? Number(to) : to });
+        return call("save_issue", { id: targets[0], cycle: /^\d+$/u.test(to) ? Number(to) : to });
       }
       if (action === "remove" && targets.length === 1)
-        return owner("save_issue", { id: targets[0], cycle: null });
+        return call("save_issue", { id: targets[0], cycle: null });
       if (action === "length" && targets.length === 2 && /^\d+$/u.test(targets[1]!))
-        return owner("save_project", { id: targets[0], cycleDays: Number(targets[1]) });
+        return call("save_project", { id: targets[0], cycleDays: Number(targets[1]) });
       throw new Error(WORK_USAGE);
     }
     case "ready": {
       const limit = one(parsed, "--limit");
-      return owner("list_ready_issues", {
+      return call("list_ready_issues", {
         ...(one(parsed, "--project") === undefined ? {} : { project: one(parsed, "--project") }),
         ...(limit === undefined ? {} : { limit: Number(limit) }),
       });
     }
     case "drift": {
       const days = one(parsed, "--idle-days");
-      return owner("list_drift", {
+      return call("list_drift", {
         ...(one(parsed, "--project") === undefined ? {} : { project: one(parsed, "--project") }),
         ...(days === undefined ? {} : { idleDays: Number(days) }),
       });
     }
     case "runs":
       if (rest.length > 1) throw new Error(WORK_USAGE);
-      return owner("list_runs", {
+      return call("list_runs", {
         ...(rest[0] === undefined ? {} : { issueId: rest[0] }),
         ...(one(parsed, "--status") === undefined ? {} : { status: one(parsed, "--status") }),
       });
     case "lease": {
       if (rest.length !== 1) throw new Error(WORK_USAGE);
       const minutes = one(parsed, "--minutes");
-      return owner("save_lease", {
+      return call("save_lease", {
         issueId: rest[0],
         ...(one(parsed, "--release") === "true" ? { release: true } : {}),
         ...(minutes === undefined ? {} : { ttlMinutes: Number(minutes) }),
@@ -390,12 +393,12 @@ function trackerRequest(
       if (rest.length !== 2) throw new Error(WORK_USAGE);
       const [action, target] = rest;
       if (action === "show")
-        return owner("get_evidence_bundle", {
+        return call("get_evidence_bundle", {
           issueId: target,
           ...(one(parsed, "--run") === undefined ? {} : { runId: one(parsed, "--run") }),
         });
       if (action === "check")
-        return owner("post_bundle_check", {
+        return call("post_bundle_check", {
           bundleId: target,
           ...(one(parsed, "--body") === undefined ? {} : { body: one(parsed, "--body") }),
         });
@@ -403,13 +406,13 @@ function trackerRequest(
         const bundle = JSON.parse(one(parsed, "--json")!);
         if (!bundle || typeof bundle !== "object" || Array.isArray(bundle))
           throw new Error("--json takes a bundle object");
-        return owner("save_evidence_bundle", { ...bundle, issueId: target });
+        return call("save_evidence_bundle", { ...bundle, issueId: target });
       }
       throw new Error(WORK_USAGE);
     }
     case "gate":
       if (rest[0] !== "ask" || rest.length !== 2) throw new Error(WORK_USAGE);
-      return owner("post_issue_ask", {
+      return call("post_issue_ask", {
         issueId: rest[1],
         runId: one(parsed, "--run"),
         purpose: "gate",
@@ -418,21 +421,26 @@ function trackerRequest(
       });
     case "ask":
       if (rest.length !== 1) throw new Error(WORK_USAGE);
-      return owner("post_issue_ask", { issueId: rest[0], purpose: "decision", body: one(parsed, "--body") });
+      return call("post_issue_ask", { issueId: rest[0], purpose: "decision", body: one(parsed, "--body") });
     case "run":
       if (rest.length !== 2) throw new Error(WORK_USAGE);
-      return owner("post_run_control", {
+      return call("post_run_control", {
         runId: rest[1],
         action: rest[0],
         ...(one(parsed, "--body") === undefined ? {} : { body: one(parsed, "--body") }),
       });
+    case "call":
     case "owner": {
       if (rest.length !== 1) throw new Error(WORK_USAGE);
       const json = one(parsed, "--json");
       const toolArgs = json === undefined ? {} : (JSON.parse(json) as unknown);
       if (toolArgs === null || typeof toolArgs !== "object" || Array.isArray(toolArgs))
         throw new Error("--json takes a JSON object of tool arguments");
-      return owner(rest[0]!.replace(/^linear_/u, ""), toolArgs as Record<string, unknown>);
+      return call(
+        rest[0]!.replace(/^linear_/u, ""),
+        toolArgs as Record<string, unknown>,
+        verb === "owner" ? "/v1/tracker/owner/call" : "/v1/tracker/call",
+      );
     }
     default:
       return undefined;
