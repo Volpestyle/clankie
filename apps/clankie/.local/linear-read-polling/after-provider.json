@@ -1,0 +1,9 @@
+{
+  "transport": "real MCP SDK HTTP provider and stdio consumer; fixture only",
+  "polls": 46,
+  "cadence": "immediate; simulated cache clock unchanged",
+  "logicalPagesPerPoll": 5,
+  "logicalCalls": 230,
+  "providerPagesPerScan": 4,
+  "providerCalls": 4
+}
