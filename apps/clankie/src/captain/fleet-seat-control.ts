@@ -461,35 +461,29 @@ export function createFleetSeatControl(
         fence.pending(key) ??
         fence.pending(seatId) ??
         fence.entries().find(([, receipt]) => receipt.seatId === seatId)?.[1];
-      if (pending !== undefined) {
+      // The receiver's own record (its exact channel ack or its exact transcript
+      // entry) can settle an uncertain original. Once settled, a different
+      // message goes through; the original is never sent again (VUH-2034).
+      const resolvePending = async (pending: UncertainReceipt): Promise<FleetSeatDelivery | "settled"> => {
+        const same = pending.fingerprint === deliveryFingerprint(text);
         const nativeId = pending.nativeDeliveryId;
         if (nativeId) {
           const reconciled = await reconcileDelivery(nativeId);
           if (reconciled?.outcome === "delivered") {
-            return pending.fingerprint === deliveryFingerprint(text)
-              ? { ...reconciled, detail: "Original delivery reconciled; nothing was sent." }
-              : {
-                  outcome: "undelivered",
-                  deliveryStage: "unavailable",
-                  detail: "Original delivery reconciled; this different message was not sent.",
-                };
+            if (!same) return "settled";
+            return { ...reconciled, detail: "Original delivery reconciled; nothing was sent." };
           }
         }
         const pendingKey = fence.entries().find(([, receipt]) => receipt === pending)?.[0] ?? key;
-        if (stableReceiptKey !== undefined && pendingKey !== key)
-          return {
-            outcome: options?.reconcileOnly ? "unconfirmed" : "undelivered",
-            deliveryStage: options?.reconcileOnly ? "uncertain" : "unavailable",
-            detail: "A different original delivery owns this recipient; nothing was sent or reconciled.",
-          };
-        if (!options?.reconcileOnly && pending.fingerprint !== deliveryFingerprint(text))
-          return {
-            outcome: "undelivered",
-            deliveryStage: "unavailable",
-            detail:
-              "A different original delivery is unresolved for this recipient; this message was not sent.",
-          };
-        if (options?.reconcileOnly && pending.fingerprint !== deliveryFingerprint(text))
+        // Another stable ID's original: its transcript may still settle it below.
+        const foreign = stableReceiptKey !== undefined && pendingKey !== key;
+        const owned = {
+          outcome: options?.reconcileOnly ? "unconfirmed" : "undelivered",
+          deliveryStage: options?.reconcileOnly ? "uncertain" : "unavailable",
+          detail: "A different original delivery owns this recipient; nothing was sent or reconciled.",
+        } as FleetSeatDelivery;
+        if (foreign && options?.reconcileOnly) return owned;
+        if (options?.reconcileOnly && !same)
           return {
             outcome: "unconfirmed",
             deliveryStage: "uncertain",
@@ -528,33 +522,28 @@ export function createFleetSeatControl(
             state: "started",
             deliveryStage: "consumed",
           });
-          if (pending.fingerprint !== deliveryFingerprint(text))
+          if (same && foreign) return owned;
+          if (same)
+            return {
+              outcome: "delivered",
+              deliveryStage: "consumed",
+              messageId: matched.id,
+              state: "started",
+              detail:
+                "Original uncertain native delivery was found in its exact session; no message was sent again.",
+            };
+          // A stable ID names one content; a different message needs its own ID.
+          if (pendingKey === key)
             return {
               outcome: "undelivered",
               deliveryStage: "unavailable",
               detail: "Stable delivery ID already belongs to different content; nothing was sent.",
             };
-          return {
-            outcome: "delivered",
-            deliveryStage: "consumed",
-            messageId: matched.id,
-            state: "started",
-            detail:
-              "Original uncertain native delivery was found in its exact session; no message was sent again.",
-          };
+          return "settled";
         }
-        if (
-          matched !== undefined &&
-          stableReceiptKey === undefined &&
-          fence.reconcile(pendingKey, pending.messageId)
-        ) {
-          if (pending.fingerprint !== deliveryFingerprint(text))
-            return {
-              outcome: "undelivered",
-              deliveryStage: "unavailable",
-              detail:
-                "The original uncertain receipt was reconciled. This different message was not sent; submit it again if still needed.",
-            };
+        if (matched !== undefined && fence.reconcile(pendingKey, pending.messageId)) {
+          if (!same) return "settled";
+          if (foreign) return owned;
           return {
             outcome: "delivered",
             deliveryStage: "consumed",
@@ -564,6 +553,13 @@ export function createFleetSeatControl(
               "The original uncertain message was found in its native session; no new message was sent.",
           };
         }
+        if (foreign) return owned;
+        if (!same)
+          return {
+            outcome: "undelivered",
+            deliveryStage: "unavailable",
+            detail: `A different original delivery (${nativeId ?? pending.messageId}) is unresolved for this recipient: neither its channel ack nor its session transcript shows it arrived. This message was not sent; reconcile or settle that original by its ID.`,
+          };
         return {
           outcome: "unconfirmed",
           deliveryStage: "uncertain",
@@ -571,6 +567,10 @@ export function createFleetSeatControl(
           detail:
             "An earlier delivery remains uncertain; reconcile its original native receipt before any retry. No new message was sent.",
         };
+      };
+      if (pending !== undefined) {
+        const resolved = await resolvePending(pending);
+        if (resolved !== "settled") return resolved;
       }
       if (options?.reconcileOnly) {
         // A completed native receipt may have been cleared before the peer journal

@@ -105,13 +105,21 @@ it("blocks explicit native retry across restart until a new full receipt appears
   });
   expect(send).toHaveBeenCalledTimes(2);
 });
-it("does not claim a different follow-up was sent when reconciling the original", async () => {
+it("sends a different follow-up on its own receipt once the transcript settles the original (VUH-2034)", async () => {
   const { create, entries, send } = fixture();
   const native = create();
   await native.deliverToSeat("seat1", "original");
-  entries.push({ type: "message", role: "operator", id: "new", text: "original" });
+  // Unproven, the original blocks a different message.
   await expect(native.deliverToSeat("seat1", "different")).resolves.toMatchObject({ outcome: "undelivered" });
   expect(send).toHaveBeenCalledTimes(1);
+  entries.push({ type: "message", role: "operator", id: "new", text: "original" });
+  // The follow-up's result is its own receipt, never the original's.
+  await expect(native.deliverToSeat("seat1", "different")).resolves.toMatchObject({
+    outcome: "unconfirmed",
+    messageId: "native-id",
+  });
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send.mock.calls.map(([text]) => text)).toEqual(["original", "different"]);
 });
 
 it("retains explicit stable native completions across restart and refuses changed content for the same ID", async () => {

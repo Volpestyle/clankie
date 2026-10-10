@@ -141,6 +141,48 @@ it("retains the exact blocking event across restart and reconciles a late acknow
   expect(f.sends()).toBe(1);
   expect(f.create().unresolvedDeliveries()).toEqual([]);
 });
+it("sends a different message once the receiver's late acknowledgment settles the original (VUH-2034)", async () => {
+  const f = fixture(),
+    native = f.create();
+  const poll = f.mailbox.poll(1000, undefined, "binding1");
+  const delivery = native.deliverToSeat("seat1", "original", undefined, options);
+  const [event] = await poll;
+  expect(await delivery).toMatchObject({ outcome: "unconfirmed", messageId: event!.id });
+  // Unproven, the original still blocks a different message, and names itself.
+  const refused = await native.deliverToSeat("seat1", "next", undefined, options);
+  expect(refused).toMatchObject({ outcome: "undelivered" });
+  expect(refused.outcome === "undelivered" && refused.detail).toContain(event!.id);
+  expect(f.mailbox.acknowledge(event!.id, "binding1")).toBe(true);
+  const nextPoll = f.mailbox.poll(1000, undefined, "binding1");
+  const next = native.deliverToSeat("seat1", "next", undefined, options);
+  const [nextEvent] = await nextPoll;
+  expect(nextEvent!.content).toContain("next");
+  f.mailbox.acknowledge(nextEvent!.id, "binding1");
+  expect(await next).toMatchObject({ outcome: "delivered", messageId: nextEvent!.id });
+  expect(f.sends()).toBe(2);
+  expect(native.unresolvedDeliveries()).toEqual([]);
+});
+it("sends a different message once the original appears in the receiver's own transcript (VUH-2034)", async () => {
+  const f = fixture(),
+    native = f.create();
+  let entries: { id: string; type: "message"; role: "operator"; text: string }[] = [];
+  f.runner.transcript = async () => ({ entries }) as never;
+  const poll = f.mailbox.poll(1000, undefined, "binding1");
+  const delivery = native.deliverToSeat("seat1", "original", undefined, options);
+  const [event] = await poll;
+  expect(await delivery).toMatchObject({ outcome: "unconfirmed", messageId: event!.id });
+  // The bridge wrote the event but its ack never landed; the session shows it.
+  entries = [{ id: "entry-1", type: "message", role: "operator", text: "original" }];
+  const nextPoll = f.mailbox.poll(1000, undefined, "binding1");
+  const next = native.deliverToSeat("seat1", "next", undefined, options);
+  const [nextEvent] = await nextPoll;
+  expect(nextEvent!.id).not.toBe(event!.id);
+  expect(nextEvent!.content).toContain("next");
+  f.mailbox.acknowledge(nextEvent!.id, "binding1");
+  expect(await next).toMatchObject({ outcome: "delivered" });
+  expect(f.sends()).toBe(2);
+  expect(native.unresolvedDeliveries()).toEqual([]);
+});
 it("does not accept a late acknowledgment from a replaced native occupant", async () => {
   const f = fixture(),
     native = f.create();
