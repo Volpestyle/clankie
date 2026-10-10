@@ -855,6 +855,7 @@ the service returned `spawned`; completion still needs the matching native event
 clankie integrate CORE_SHA... [--app APP_SHA]... [--push] [--id UUID] [--no-wait]
 clankie integrate status [UUID]
 clankie integrate push UUID
+clankie integrate cancel UUID --actor NAME --reason TEXT
 clankie integrate revert PASSED_BATCH_UUID [--push]
 clankie integrate holds
 clankie integrate hold --holder NAME --reason TEXT --minutes 1-60 [--pane ID|--seat ID] [--id UUID]
@@ -866,8 +867,11 @@ Changes land directly on `main` after their narrow checks
 To use it, push a branch, run `clankie integrate <sha> --push --no-wait`, then
 follow with `clankie integrate status`. With no UUID, status shows running batches, waiting
 requests, the last result and interrupted work. `status UUID` reads a request
-receipt, including its shared batch and attempts. `/integrate` shows this queue
-in the TUI.
+receipt, including its shared batch and attempts. `cancel UUID --actor NAME
+--reason TEXT` withdraws a request still waiting for its gate: it reads
+`cancelled` with who and why, and never joins a batch. A request already
+composing, gating or finished is refused. `/integrate` shows this queue in the
+TUI.
 
 Requests arriving during a gate coalesce into the next compatible batch.
 Conflicting members roll back; failed shared gates split to isolate failing

@@ -632,6 +632,39 @@ it("CLI/API coalesces arrivals during a real gate, isolating a cross-repo confli
   );
 });
 
+it("cancels a request still waiting for its gate with a receipt, and the requests behind it keep their order", async () => {
+  const f = await fixture((root) => barrier(root));
+  const cli = await queueCli(f);
+  const ids = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  const submit = async (name: string, id: string) =>
+    runIntegrationCommand([await commit(f.core.source, name, name), "--id", id, "--push", "--no-wait"], cli);
+  const status = async (id: string) => (await runIntegrationCommand(["status", id], cli)).batch!;
+  const cancel = (id: string, actor: string, reason: string) =>
+    runIntegrationCommand(["cancel", id, "--actor", actor, "--reason", reason], cli);
+  await submit("first", ids[0]!);
+  await until(async () => (await status(ids[0]!)).state === "gating");
+  await submit("a", ids[1]!);
+  await submit("typo", ids[2]!);
+  await submit("b", ids[3]!);
+
+  // A request whose gate has started runs on; one still waiting is withdrawn with a receipt.
+  await expect(cancel(ids[0]!, "Ivy", "wrong commit")).rejects.toThrow(`Request ${ids[0]} is gating`);
+  expect((await cancel(ids[2]!, "Clankie", "Ivy's typo request")).batch).toMatchObject({
+    state: "cancelled",
+    cancelled: { actor: "Clankie", reason: "Ivy's typo request" },
+  });
+  await writeFile(join(f.root, "release"), "go");
+  await f.queue.wait();
+
+  expect(await status(ids[2]!)).toMatchObject({ state: "cancelled", cancelled: { actor: "Clankie" } });
+  const [a, b] = [await status(ids[1]!), await status(ids[3]!)];
+  expect([a.state, b.state]).toEqual(["pushed", "pushed"]);
+  expect(a.members?.map((m) => m.id)).toEqual([ids[1], ids[3]]);
+  expect(await git(a.repos[0]!.directory, "ls-tree", "--name-only", a.repos[0]!.head)).not.toContain("typo");
+  expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(2);
+  await expect(cancel(ids[1]!, "Ivy", "too late")).rejects.toThrow(`Request ${ids[1]} is pushed`);
+});
+
 it("bisects a failed shared real gate, reports the bad request, and lands both healthy requests", async () => {
   const f = await fixture((root) => barrier(root, "if (existsSync('broken')) process.exit(9);"));
   const initial = await commit(f.core.source, "initial", "one");

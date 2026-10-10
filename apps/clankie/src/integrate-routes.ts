@@ -23,7 +23,7 @@ export function createIntegrationRoutes(options: {
     const parsed = IntegrationRequestSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!parsed.success) return context.json({ ok: false, error: "invalid_integration_request" }, 400);
     const request = parsed.data;
-    if (!options.holds || (!options.queue && ["run", "status", "push"].includes(request.action)))
+    if (!options.holds || (!options.queue && ["run", "status", "push", "cancel"].includes(request.action)))
       return context.json({ ok: false, error: "integration_unavailable" }, 503);
     try {
       await guard();
@@ -42,7 +42,9 @@ export function createIntegrationRoutes(options: {
             ? await options.queue!.start(request, guard)
             : request.action === "push"
               ? await options.queue!.land(request.id, guard)
-              : await options.queue!.status(request.id!);
+              : request.action === "cancel"
+                ? await options.queue!.cancel(request.id, request.actor, request.reason)
+                : await options.queue!.status(request.id!);
         return { ok: !["conflict", "failed", "held", "partial", "interrupted"].includes(batch.state), batch };
       })();
       return context.json(IntegrationResponseSchema.parse(result));

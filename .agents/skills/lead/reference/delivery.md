@@ -56,7 +56,10 @@ waiting during a gate join the next batch, with one root landing gate for the co
 core/app pair. Conflicting requests roll back as a whole; failed shared gates
 split into smaller batches until the failing request is reported. Each receipt
 keeps its original input, shared batch ID and attempted evidence. Restores and
-gate-only requests keep their separate intent.
+gate-only requests keep their separate intent. A mistaken request that is still
+waiting, yours or a worker's, is withdrawn with `integrate cancel UUID --actor
+NAME --reason TEXT`. The receipt keeps who and why; a request already gating
+runs on.
 
 Read the receipt before claiming delivery: a passing gate is not a confirmed
 push, and a partial batch can land core while the app is still pending. Retry
