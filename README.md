@@ -4,12 +4,12 @@
 
 # Clankie
 
-**Your own assistant. Your machine, models, and tools.**
+**An agent lead with a personality. Your machine, models, and tools.**
 
-A persistent AI teammate who remembers, makes things, codes, leads other agents,
-and hangs out in Discord. Run him on your Mac, shape his character, and connect
-the tools you want. The iPhone and iPad app gives you a window into the same
-Clankie wherever you are.
+Clankie plans your work, hires coding agents to do it, owns it until it lands,
+and makes as many of the calls as you let him. Between jobs he has ideas of his
+own and hangs out in your Discord. Run him on your Mac, shape his character,
+and reach the same Clankie from the iPhone and iPad app wherever you are.
 
 [Get started](https://docs.clankie.bot/get-started/#diy-start-on-your-mac) ·
 [Customize Clankie](https://docs.clankie.bot/diy/) ·
@@ -53,35 +53,75 @@ machine.
 
 ## What he does
 
-**Keeps you company and remembers.** Talk through ideas, make drafts and
-pictures, and keep memories across conversations. His persona is yours to
-shape, and his history, memory, and goals live in the service, not the window.
+You drive him. He drives the rest.
 
-**Browses on his own.** He has a private browser profile with his own logins,
-headless by default, with a visible window when you need to take over a
-sign-in ([browser contract](docs/adr/0082-clankie-holds-the-browser.md)).
+**Plans the work.** Hand him an outcome, not a task list. He breaks it into
+issues where your repo already tracks work, in Linear, GitHub issues or its own
+files, or in his built-in tracker, and keeps the plan true as it moves
+([work items](https://docs.clankie.bot/cli/#work-status-work-init-work-list-show-create-update-close-attach-write-receipt)).
 
-**Codes and leads a team.** He works directly or hires Claude Code, Codex, Pi,
-OpenCode, or Grok Build agents into real terminals in Herdr, and messages them
-through each harness's own channel. Work stays in your repo's tracker or files,
-and you set how agents commit, push, release, and report
-([agent control](packages/agent-hosts/README.md#seat-adapters),
-[working preferences](docs/cli.md#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear)).
+**Delegates it.** When a job needs more hands he hires Claude Code, Codex, Pi,
+OpenCode, or Grok Build agents into real terminals in Herdr, panes you can
+watch and type into, and briefs them through each harness's own channel. Each
+project can get its own lead, on your Mac or a linked PC, and leads message
+each other directly. New hires go to the account with capacity to spare, and
+builds and simulators take turns so a busy fleet doesn't grind your Mac to a
+halt ([agent control](packages/agent-hosts/README.md#seat-adapters),
+[remote project leads](docs/adr/0259-remote-project-leads-use-seat-bound-delegation.md),
+[shared resources](https://docs.clankie.bot/cli/#heavy-seat-label-holder-id-command-args-fleet-resources-simulator)).
 
-**Lives on your phone.** In the iPhone and iPad app, Messages is home, Commons
-shows the team as little figures, and Terminal opens the real worker panes.
+**Owns it.** He reads every report, checks it against the evidence, lands the
+work, and moves the issue to Done with that evidence attached. Evidence lives
+in its own store, not your git history
+([evidence store](docs/adr/0258-evidence-lives-in-the-evidence-store.md)).
+
+**Improves how it gets done.** He reviews every worker he leads on a schedule,
+flags the stalled and the drifting, and steps in. Per-issue metrics show where
+the time and tokens went
+([efficiency](https://docs.clankie.bot/cli/#agents-efficiency-agents-tidy-worktrees),
+[metrics](https://docs.clankie.bot/cli/#metrics-issues-issue-id-worker-id-since-iso-until-iso)).
+
+**Decides as much as you let him.** Pick a preset, hands-off, balanced or
+careful, or set each gate yourself: everyday work, anything that leaves your
+Mac, and changes that are hard to undo each go to the worker, to Clankie, or
+to you. Money and accounts always come to you. Committing, pushing, releasing
+(even on a rule like "when the last release is a week old") and closing work
+are settings too, for every project or just one. When he needs you, he leaves
+one ask with his recommendation
+([working preferences](https://docs.clankie.bot/cli/#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear),
+[asks](https://docs.clankie.bot/cli/#owner-asks-conversations-questions-id-and-conversations-answer)).
+
+**Has ideas of his own.** Give a conversation a goal and he keeps at it, waking
+himself up later, within a token budget you set. He proposes goals too, and
+`/goal accept` starts one. From his own conversations he can post into your
+Discord rooms: a find worth sharing, or an announcement in the server he runs.
+`/autonomy off` stops goal runs and self-wakes; in Discord, chattiness and what
+wakes him set how readily he jumps in
+([goals](https://docs.clankie.bot/using-clankie/#give-him-ongoing-work)).
+
+**Your right-hand man.** Think out loud with him and get pushed back on, hand
+him drafts and pictures to make, and ask what's moving, what's stuck, and what
+actually landed. His persona is yours to shape, and his history, memory, and
+goals live in the service, so he picks up where you left off on any screen.
+
+**Goes where you are.** Talk to him from his own console, or seat him in Claude
+Code or Codex, the terminal you already use. In the iPhone and iPad app,
+Messages is home, Commons shows the team as little figures, and Terminal opens
+the real worker panes.
 [Pair the app](https://docs.clankie.bot/get-started/#bring-your-mac-s-clankie-into-the-app)
 with your Mac and keep the Mac awake to reach him away from your desk.
 
-**Hangs out in Discord.** The official bot chats, joins voice, plays requested
+**Hangs out after hours.** In Discord he chats, joins voice, plays requested
 music, and streams his Pokémon play (from his own PokeAgents seat) through an
 Activity. Screen-share watching and Go Live need the separate personal-lab body
 ([Discord media](docs/discord-media.md)).
 
 **Is built to extend.** Models, skills, and connected services are independent
-choices. A headless CLI, an HTTP API, and an MCP bridge expose the same
-authorized tools to scripts and other agents
-([customize](https://docs.clankie.bot/diy/)).
+choices: Linear, GitHub, Gmail, Google Calendar and Drive, Discord, image and
+video generation, and his own browser with his own logins
+([browser contract](docs/adr/0082-clankie-holds-the-browser.md)). A headless
+CLI, an HTTP API, and an MCP bridge expose the same authorized tools to scripts
+and other agents ([customize](https://docs.clankie.bot/diy/)).
 
 ## The system underneath
 

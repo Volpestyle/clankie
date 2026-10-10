@@ -1,7 +1,8 @@
 # Get started
 
-Clankie is a personal assistant with a memory, a personality, and tools to get
-things done. Have his machine looked after for you, or run him yourself.
+Clankie is an agent lead with a memory and a personality: he plans the work,
+leads a team to do it, and owns it until it lands. Have his machine looked after
+for you, or run him yourself.
 
 |                  | Hosted Clankie                          | Run him yourself                                    |
 | ---------------- | --------------------------------------- | --------------------------------------------------- |

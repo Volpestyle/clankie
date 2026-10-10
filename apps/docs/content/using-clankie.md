@@ -43,12 +43,17 @@ running rather than starting a duplicate.
 
 ## Bigger jobs and helper agents
 
-Clankie can do the work himself or assemble a team. Tell him the outcome, your
-constraints, and the decisions you want to keep. Ask who is doing what, open a
-helper's conversation, and steer as it develops.
+Clankie can do the work himself or lead a team. Tell him the outcome, your
+constraints, and the decisions you want to keep. He plans it into tracked
+issues, hires helpers, checks their reports against the evidence, and closes
+each issue once it lands. Ask who is doing what, open a helper's conversation,
+and steer as it develops.
 
 Tell him how agents should work: “Commit and push without asking, ask me before
-releases, and keep reports short.” Owner defaults apply everywhere, a project
+releases, and keep reports short.” A preset (hands-off, balanced or careful)
+sets who answers for everyday work, anything that leaves the machine, and
+changes that are hard to undo: the helper, Clankie, or you. Money and accounts
+always come to you. Owner defaults apply everywhere, a project
 can override them, and every helper receives the result. Change them by asking
 Clankie, in the app's project settings, or with `clankie fleet` on a DIY
 installation. Preferences never widen access.

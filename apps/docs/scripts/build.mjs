@@ -1267,7 +1267,7 @@ function llmsIndex() {
   return [
     "# Clankie",
     "",
-    "> Clankie is a persistent personal assistant with a personality, memory, and tools for everyday help, creative projects, and work with helper agents. He can run on a managed private machine or a machine you maintain. The iPhone and iPad app reaches that service. The open-source DIY setup adds configurable models, skills, coding harnesses, Discord, voice, and play; capabilities depend on the host and connected services.",
+    "> Clankie is a persistent agent lead with a personality and memory: he plans work, delegates it to coding agents, owns it until it lands, and decides as much as his owner allows. He also helps with everyday and creative work. He can run on a managed private machine or a machine you maintain. The iPhone and iPad app reaches that service. The open-source DIY setup adds configurable models, skills, coding harnesses, Discord, voice, and play; capabilities depend on the host and connected services.",
     "",
     "The service (`apps/clankie`, HTTP on `127.0.0.1:4310` on its host) owns conversations, goals, memory, tools, and access. Clankie's built-in runtime is pi. Native harness channels carry agent messages; Herdr supplies the worker terminals. The CLI, API, and MCP projection serve technical users. The CLI reference documents JSON output and its exceptions. Hosted plans and availability live on clankie.bot; this library does not infer shipping support from a source-code capability.",
     "",
