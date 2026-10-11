@@ -1,4 +1,4 @@
-# Clankie v0.4.3
+# Clankie v0.4.4
 
 Clankie now keeps his own record of the work, runs more kinds of agents on more
 machines, and reaches Discord through one official bot without any setup on
@@ -53,12 +53,17 @@ your side.
   worktree, and finished hires are retired once their process is gone.
 - **Shared machine resources.** `clankie heavy` takes turns on builds and test
   suites, and `clankie simulator` leases iOS simulators first come, first
-  served, so a busy fleet stops overloading the Mac.
+  served, so a busy fleet stops overloading the Mac. Dev servers and watchers
+  run in their own small CPU-budgeted lane beside full checks
+  (`clankie heavy --server`), and a waiting request names who is ahead of it.
+  Resource limits can be set per machine
+  (`clankie fleet set --machine ID --heavy-slots auto|N`).
 - **One autonomy dial.** `clankie autonomy off|low|high|full` (or `/autonomy`)
   sets who may commit, push, release, close work and set up machines in one
   step. The default is High: Clankie decides hard-to-undo steps himself. Finer
   preferences stay in `clankie fleet set` and every settings surface, and
-  leads and workers read the same resolved rules.
+  leads and workers read the same resolved rules. First-run setup asks you to
+  choose a level, and a custom mix shows how it differs from the nearest one.
 
 ## Easier to run
 
@@ -68,8 +73,10 @@ your side.
 - **Services recover on their own.** The launcher restarts crashed services.
   `clankie update` moves to a new release, checks its health, and rolls back if
   it fails.
-- **Hosted bodies update themselves.** Releases now include Linux archives, and
-  hosted bodies install the approved official release while idle.
+- **Runs on Linux.** The same installer
+  (`curl -fsSL https://clankie.bot/install | sh`) now installs and starts
+  Clankie on Ubuntu 24.04 or newer, arm64 or x64, without root. Hosted bodies
+  install the approved official release while idle.
 - **Guided setup.** The console walks through phone pairing and a first hire.
   `clankie doctor` leads with the first fix to make.
 - **Settings everywhere.** Talkativeness, hire defaults, worker account holds
@@ -106,22 +113,20 @@ your side.
 - `clankie claude --resume SESSION_ID --conversation ID` reattaches one exact
   Claude Code seat to its conversation.
 - More reliable native delivery, completion wakes, report receipts, Linear wake
-  cursors and remote hire proof.
+  cursors and remote hire proof. Only Linear events that wake Clankie appear
+  in his chat.
+- `clankie integrate` alerts you when a landing stalls, and no longer hangs
+  staging a change on a Windows PC.
 - Faster fleet liveness checks and deferred optional MCP discovery reduce idle
   CPU.
 
-This is the macOS Apple silicon service bundle, plus Linux archives for hosted
-bodies. The companion app and hosted service have their own releases. Mailbox,
+This release has service bundles for Apple silicon macOS and for arm64 and
+x64 Linux. The companion app and hosted service have their own releases. Mailbox,
 official bot and hosted features depend on the hosted service and your account.
 
-The v0.4.0, v0.4.1 and v0.4.2 tags stopped at release checks before
-publication. The service typechecks outgrew the build runner's default Node
-heap; the release and CI checks now set one heap ceiling for every typecheck.
-The new huddle routes were also missing from the public API reference. The full
-release check now passes on the clean macOS build runner.
-
-Known issue: when two requests race for one iOS simulator, the one left
-waiting can occasionally say it is held "by an unknown holder" instead of
-naming the request ahead of it. It still gets the simulator in turn
-([VUH-2083](https://linear.app/vuhlp/issue/VUH-2083)). The matching test is a
-rare flake on the slow CI runner.
+The v0.4.3 tag was never published: its release check failed on a slow test
+on the macOS build runner, so v0.4.4 ships the same changes with
+the fixes made since. The v0.4.0, v0.4.1 and v0.4.2 tags also stopped at release
+checks before publication. The service typechecks outgrew the build runner's
+default Node heap; the release and CI checks now set one heap ceiling for every
+typecheck. The full release check now passes on the clean macOS build runner.
