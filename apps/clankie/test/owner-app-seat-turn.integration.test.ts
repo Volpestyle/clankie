@@ -9,6 +9,7 @@ import {
   type OperatorConversationServiceRequest,
 } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
+import { createLocalTracker } from "@clankie/work-items";
 import { afterEach, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
@@ -18,7 +19,7 @@ import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { LaneLog } from "../src/captain/lane-log.ts";
-import { createStubCaptain } from "../src/captain/port.ts";
+import { createStubCaptain, type LaneTool } from "../src/captain/port.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 import { TurnSettledLog } from "../src/captain/turn-metrics.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
@@ -32,7 +33,7 @@ afterEach(async () => {
 const ID = "global-default";
 const DEVICE = "owner-phone";
 const BINDING = "native-seat-fixture";
-async function fixture() {
+async function fixture(tools: readonly LaneTool[] = []) {
   const root = mkdtempSync(join(tmpdir(), "owner-app-seat-turn-"));
   const now = Date.now();
   const key = randomBytes(32);
@@ -105,10 +106,15 @@ async function fixture() {
   });
   const conversations = new ConversationStore(join(root, "conversations"), runner);
   conversations.rememberNativeHead(ID, BINDING);
-  const hooks: { beforeServe?: () => Promise<void>; beforeAuthorize?: (check: number) => Promise<void> } = {};
+  const hooks: {
+    beforeServe?: () => Promise<void>;
+    beforeAuthorize?: (check: number) => Promise<void>;
+    beforePoll?: () => Promise<void>;
+  } = {};
   const service = await createClankieApp({
     settings,
     captain: createStubCaptain({
+      laneToolBank: async (lane) => ({ lane, tools }),
       serveOperatorConversation: async (request, authority, signal) => {
         await hooks.beforeServe?.();
         let checks = 0;
@@ -174,12 +180,16 @@ async function fixture() {
       bearer,
     );
   const poll = () =>
-    conversations.pollConversationDriver(ID, () =>
-      outbox.poll(60000, undefined, BINDING, {
-        schemaVersion: 1,
-        eventKinds: OperatorSeatEventKindSchema.options,
-        ownerOrigin: true,
-      }),
+    conversations.pollConversationDriver(
+      ID,
+      () =>
+        outbox.poll(60000, undefined, BINDING, {
+          schemaVersion: 1,
+          eventKinds: OperatorSeatEventKindSchema.options,
+          ownerOrigin: true,
+        }),
+      undefined,
+      hooks.beforePoll,
     );
   const journal = () => new ConversationJournal(join(root, "conversations")).read(ID);
   const revoke = async () => {
@@ -191,6 +201,110 @@ async function fixture() {
   };
   return { service, conversations, outbox, hooks, dispatch, send, poll, journal, revoke };
 }
+
+it("one owner turn dispatches one tracker write while native admission overlaps service routing", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "owner-turn-tracker-"));
+  cleanups.push(async () => rmSync(directory, { recursive: true, force: true }));
+  const tracker = createLocalTracker({ directory, team: "Clankie" });
+  const save = tracker.catalog().find((tool) => tool.name === "save_issue")!;
+  let dispatches = 0;
+  const f = await fixture([
+    {
+      ...save,
+      name: "linear_save_issue",
+      call: async (args) => ({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              await tracker.call("save_issue", args, {
+                onDispatch: () => {
+                  dispatches += 1;
+                },
+              }),
+            ),
+          },
+        ],
+      }),
+    },
+  ]);
+  let prepared!: () => void;
+  let release!: () => void;
+  const preparing = new Promise<void>((resolve) => (prepared = resolve));
+  const ready = new Promise<void>((resolve) => (release = resolve));
+  f.hooks.beforePoll = async () => {
+    prepared();
+    await ready;
+  };
+  const poll = f.poll();
+  await preparing;
+  const response = await f.send();
+  expect(response.status).toBe(200);
+  const accepted = (await response.json()) as { result: { status: string; runId: string } };
+  expect(accepted.result.status).toBe("accepted");
+  // Give the service runner its routing opportunity while the native proof is
+  // pending. It must wait for admission, never execute a second owner turn.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  release();
+  const delivered = await Promise.race([
+    poll,
+    f.conversations.awaitRunResult(accepted.result.runId).then(() => {
+      throw new Error("Owner turn settled without native delivery");
+    }),
+  ]);
+  const event = OperatorSeatEventSchema.parse(delivered[0]);
+  expect(event).toMatchObject({ kind: "turn", conversationId: ID });
+  const rpc = (body: unknown, sessionId?: string) =>
+    f.service.app.request(`/v1/mcp?conversationId=${ID}`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer fixture-owner",
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        ...(sessionId === undefined ? {} : { "mcp-session-id": sessionId }),
+      },
+      body: JSON.stringify(body),
+    });
+  const initialized = await rpc({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "native-seat", version: "1" },
+    },
+  });
+  expect(initialized.status).toBe(200);
+  await initialized.body?.cancel();
+  const sessionId = initialized.headers.get("mcp-session-id")!;
+  expect((await rpc({ jsonrpc: "2.0", method: "notifications/initialized" }, sessionId)).status).toBe(202);
+  // The native receiver executes the delivered owner turn through the real
+  // operator MCP endpoint and persists a real issue, with no provider/model.
+  const written = await rpc(
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "linear_save_issue", arguments: { title: event.content, team: "Clankie" } },
+    },
+    sessionId,
+  );
+  expect(written.status).toBe(200);
+  expect(await written.json()).toMatchObject({ result: { content: [{ type: "text" }] } });
+  expect(f.outbox.acknowledge(event.id, BINDING)).toBe(true);
+  expect(await f.conversations.awaitRunResult(accepted.result.runId)).toBe(true);
+  expect(await f.outbox.poll(0, undefined, BINDING)).toEqual([]);
+  expect(dispatches).toBe(1);
+  // Reopen the durable backend: a dispatch counter alone is not effect proof.
+  expect(await createLocalTracker({ directory }).call("list_issues", {})).toMatchObject({
+    issues: [{ title: event.content }],
+  });
+  expect(((await tracker.call("list_issues", {})) as { issues: unknown[] }).issues).toHaveLength(1);
+  expect(f.journal().filter((item) => item.type === "message" && item.role === "operator")).toHaveLength(1);
+  expect(f.journal().filter((item) => item.type === "turn" && item.phase === "completed")).toHaveLength(1);
+  expect(f.journal().filter((item) => item.type === "turn" && item.phase === "failed")).toHaveLength(0);
+});
 
 it.each([
   { bearer: "device", principal: { kind: "device", id: DEVICE } },

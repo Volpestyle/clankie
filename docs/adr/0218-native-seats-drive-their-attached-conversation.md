@@ -372,6 +372,10 @@ flowchart LR
 ```
 
 Regression coverage is `apps/clankie/test/native-seat-service-fallback.integration.test.ts`.
+The owner-turn regression in
+`apps/clankie/test/owner-app-seat-turn.integration.test.ts` also overlaps native
+admission with service routing and checks one operator MCP tracker dispatch and
+one durable issue. Removing the admission wait makes that regression fail.
 It uses real admission, driver fence, journals, inbound receipts, seat outbox
 and handoff state, with a scripted model. It covers the following:
 
