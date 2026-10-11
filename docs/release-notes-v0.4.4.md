@@ -39,6 +39,10 @@ your side.
 - **More harnesses.** Hire Pi, OpenCode and Grok Build workers alongside
   Claude Code and Codex, each in its own visible Herdr pane. `clankie opencode`
   and `clankie grok` open those tools as Clankie's seat.
+- **Prime Agent as Clankie's seat.** `clankie prime` opens Clankie in a
+  resident Prime Agent session (Prime Agent 0.10.x). Closing the terminal only
+  detaches it, and wakes and worker messages reach it without typing into the
+  pane.
 - **Your subscriptions, used well.** Workers sign in with your Claude and Codex
   subscriptions. `clankie usage` shows every account's usage windows and plan.
   Hires go to the account with the most headroom, and the lead is warned
