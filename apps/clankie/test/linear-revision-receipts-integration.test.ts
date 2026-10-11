@@ -209,7 +209,7 @@ async function fixture() {
   };
 }
 
-it("correlates a native display-ID issue write after durable reload, while human activity stays in the ordinary chat and worker echoes stay quiet", async () => {
+it("correlates a native display-ID issue write after durable reload, while nonmatching activity is recorded but stays out of chat history and worker echoes stay quiet", async () => {
   const f = await fixture();
   try {
     const revision = f.revision();
@@ -222,15 +222,23 @@ it("correlates a native display-ID issue write after durable reload, while human
     expect(await f.receipts()).toEqual([expect.objectContaining({ id: revision.id })]);
     expect(f.providerWrites).toEqual([{ id: "VUH-FIXTURE", state: "Done" }]);
 
-    const visible = [
+    const nonmatching = [
       [revision, { actor: { id: randomUUID(), name: f.account.name, email: f.account.email } }],
       [revision, { organizationId: randomUUID() }],
       [{ ...revision, updatedAt: new Date(NOW.getTime() + 1).toISOString() }, {}],
       [{ ...revision, description: "A human correction in the same millisecond" }, {}],
     ] as const;
-    for (const [data, envelope] of visible)
+    for (const [data, envelope] of nonmatching)
       expect(await post(data, envelope)).toMatchObject({ ingested: true });
-    expect(f.external()).toHaveLength(visible.length);
+    // These signed events are not exact own-write echoes, so attribution retains
+    // them. None qualifies for a wake; recording is not admission to chat history.
+    expect(f.admitted).toEqual(
+      nonmatching.map(([data]) => expect.objectContaining({ issueId: data.id })),
+    );
+    expect(f.recorded.slice(1)).toEqual(
+      f.admitted.map(({ eventId }) => expect.objectContaining({ eventId })),
+    );
+    expect(f.external()).toEqual([]);
 
     const workerRevision = f.revision();
     const worker = await f.write({ ...workerRevision, id: "VUH-FIXTURE", uuid: workerRevision.id }, true);
@@ -240,7 +248,7 @@ it("correlates a native display-ID issue write after durable reload, while human
       principalId: worker!.principalId,
       workId: worker!.workId,
     });
-    expect(f.external()).toHaveLength(visible.length);
+    expect(f.external()).toEqual([]);
   } finally {
     await f.close();
   }
@@ -271,7 +279,10 @@ it("retains UUID-id compatibility without hiding activity from ambiguous native 
       for (const activity of activities) expect(await post(activity)).toMatchObject({ ingested: true });
     }
     expect(f.admitted).toHaveLength(4);
-    expect(f.external()).toHaveLength(4);
+    expect(f.recorded.slice(1)).toEqual(
+      f.admitted.map(({ eventId }) => expect.objectContaining({ eventId })),
+    );
+    expect(f.external()).toEqual([]);
   } finally {
     await f.close();
   }
