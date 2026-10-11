@@ -43,13 +43,19 @@ Scroll up to load older retained history; loading a page preserves the visible t
 
 On a joined install, Clankie's service, memory and accounts stay at the home.
 Use `clankie join status` to read its registration, `join resume` for the outbound
-machine channel, and `clankie claude [--new | --conversation ID]` in an approved
+machine channel, and `clankie claude [--new | --conversation ID | --resume … | --reset]` in an approved
 folder for a local seat in the home's workspace chat. Plain `clankie claude`
 reuses that machine/folder's chat; `--new` makes another. Exact conversation IDs
 must belong to that machine and folder. The home supplies delegated lead tools
 and maximum trust through encrypted join traffic; no SSH or second local service
-is needed. Joined resume, other harness seats, worker adapters and Windows
-installer/live gateway proof remain follow-ups. Run service start/restart/recover
+is needed. Resume keeps the native session and chat in its original approved
+folder. Reset keeps the folder chat, retires old sessions and reports earlier
+launches without closing their panes. The joined lead hires native Claude workers
+through the running join channel; they report with `message_clankie` using one
+UUID deliveryId per report, then reconcile with `message_clankie_status` after
+uncertainty. The lead uses `worker_reports`, `acknowledge_worker_reports` and
+`message_seat` to the returned seat. No SSH link is needed. Other harness seats,
+legacy SSH chat migration and Windows installer/live gateway proof remain follow-ups. Run service start/restart/recover
 at the home; a joined install refuses them locally.
 
 ## Configure through the CLI

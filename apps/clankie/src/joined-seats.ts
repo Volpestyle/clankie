@@ -1,3 +1,4 @@
+import { createJoinedWorkers } from "./joined-workers.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 import { z } from "zod";
@@ -14,10 +15,12 @@ const Launch = z.strictObject({
   conversationId: z.string().min(1).max(256).optional(),
   fresh: z.boolean(),
   dryRun: z.boolean(),
+  reset: z.boolean().default(false),
 });
 interface Seat extends RemoteSeatAuthority {
   readonly machineId: string;
   readonly directory: string;
+  readonly sessionId: string;
   readonly abort: AbortController;
   touchedAt: number;
 }
@@ -30,6 +33,8 @@ export function createJoinedSeats(input: {
   receiptPath?: string;
 }) {
   const seats = new Map<string, Seat>();
+  const launches = new Map<string, string[]>();
+  const workers = createJoinedWorkers(input);
   const bridge = createRemoteLeadBridge({
     captain: input.captain,
     ...(input.receiptPath === undefined ? {} : { receiptPath: input.receiptPath }),
@@ -39,17 +44,19 @@ export function createJoinedSeats(input: {
       close: () => {
         for (const seat of seats.values()) seat.abort.abort();
         seats.clear();
+        workers.close();
       },
       authorize: async (request) => {
         const token = request.headers.get("authorization")?.replace(/^Bearer /u, "");
-        const seat = token === undefined ? undefined : seats.get(token);
+        const seat = token === undefined ? undefined : (seats.get(token) ?? (await workers.authority(token)));
         if (!seat || !seat.current() || !(await seat.authorize())) return undefined;
-        seat.touchedAt = Date.now();
+        if ("touchedAt" in seat) seat.touchedAt = Date.now();
         return seat;
       },
     },
   });
   const closeSeat = (token: string, seat: Seat) => {
+    input.captain.releaseJoinedSeat?.(seat.binding.conversationId);
     seats.delete(token);
     seat.abort.abort();
   };
@@ -78,6 +85,7 @@ export function createJoinedSeats(input: {
         })
       )
         return json({ error: "directory_refused" }, 403);
+      if (launch.reset && launch.fresh) return json({ error: "joined_reset_new_refused" }, 400);
       let conversationId = launch.conversationId;
       if (conversationId === undefined && !launch.fresh) {
         const list = await input.captain.serveOperatorConversation({ op: "list", schemaVersion: 1 });
@@ -89,6 +97,8 @@ export function createJoinedSeats(input: {
               canonical(chat.scope.workspaceId) === cwd,
           )?.conversationId;
       }
+      if (conversationId === undefined && launch.reset)
+        return json({ error: "joined_reset_chat_missing" }, 404);
       if (conversationId === undefined && !launch.dryRun) {
         await machine.authorize();
         conversationId = input.captain.createRemoteWorkspaceConversation({
@@ -102,7 +112,32 @@ export function createJoinedSeats(input: {
       const context = input.captain.seatContext(conversationId);
       if (!context || context.machineId !== machine.machineId || canonical(context.cwd) !== cwd)
         return json({ error: "joined_seat_conversation_mismatch" }, 403);
-      if (input.captain.operatorSeatReady?.(conversationId)) return json({ error: "seat_occupied" }, 409);
+      const earlierSessions = launches.get(conversationId) ?? [];
+      if (launch.reset && !launch.dryRun) {
+        await machine.authorize();
+        const list = await input.captain.serveOperatorConversation({ op: "list", schemaVersion: 1 });
+        const chat =
+          list.op === "list"
+            ? list.conversations.find((chat) => chat.conversationId === conversationId)
+            : undefined;
+        if (!chat) return json({ error: "joined_seat_conversation_mismatch" }, 403);
+        await machine.authorize();
+        for (const [token, seat] of seats)
+          if (seat.binding.conversationId === conversationId) closeSeat(token, seat);
+        try {
+          await input.captain.serveOperatorConversation({
+            op: "reset",
+            schemaVersion: 1,
+            conversationId,
+            expectedRevision: chat.revision,
+          });
+        } catch (error) {
+          return json({ error: error instanceof Error ? error.message : "joined_reset_refused" }, 409);
+        }
+        workers.revokeConversation(conversationId);
+      }
+      if (!launch.reset && input.captain.operatorSeatReady?.(conversationId))
+        return json({ error: "seat_occupied" }, 409);
       const standing = input.captain.seatSessionState?.(conversationId, launch.sessionId);
       if (standing === "retired" || standing === "elsewhere")
         return json({ error: "joined_seat_session_refused" }, 403);
@@ -119,6 +154,7 @@ export function createJoinedSeats(input: {
         id: randomUUID(),
         machineId: machine.machineId,
         directory: launch.directory,
+        sessionId: launch.sessionId,
         abort,
         binding: {
           conversationId,
@@ -149,15 +185,37 @@ export function createJoinedSeats(input: {
           }
         },
       };
+      seat.toolBank = workers.tools(seat, machine, launch.directory, maximumTrustMode);
+      if (!launches.has(conversationId) && launches.size >= 256)
+        launches.delete(launches.keys().next().value!);
+      launches.set(conversationId, [...new Set([...earlierSessions, launch.sessionId])].slice(-32));
+      if (!input.captain.syncSeatTranscript(conversationId, { sessionId: launch.sessionId, entries: [] }))
+        return json({ error: "joined_seat_session_refused" }, 403);
       seats.set(token, seat);
-      return json({ conversationId, directory: launch.directory, maximumTrustMode, token });
+      return json({ conversationId, directory: launch.directory, maximumTrustMode, token, earlierSessions });
     }
     const token = frame.headers.authorization?.replace(/^Bearer /u, "");
-    const seat = token === undefined ? undefined : seats.get(token);
+    const worker = token === undefined ? undefined : await workers.authority(token, machine);
+    const seat = token === undefined ? undefined : (seats.get(token) ?? worker);
     if (!seat || seat.machineId !== machine.machineId || !(await seat.authorize()))
       return json({ error: "joined_seat_revoked" }, 403);
+    if (worker && url.pathname === "/workers/check" && frame.method === "GET")
+      return json({
+        sessionId: worker.sessionId,
+        directory: worker.directory,
+        conversationId: worker.binding.conversationId,
+      });
+    if (worker && url.pathname === "/workers/admit" && frame.method === "POST") {
+      try {
+        return json(await workers.admit(worker, JSON.parse(frame.body ?? "")));
+      } catch {
+        return json({ error: "joined_worker_session_mismatch" }, 403);
+      }
+    }
+    if (worker && !/^\/v1\/fleet\/lead\/(mcp|events(?:\/[^/]+\/ack)?)$/u.test(url.pathname))
+      return json({ error: "joined_worker_route_refused" }, 403);
     if (url.pathname === "/close" && frame.method === "POST") {
-      closeSeat(token!, seat);
+      closeSeat(token!, seat as Seat);
       return json({ closed: true });
     }
     // Only the delegated bridge's published routes are reachable. It pins chat and transcript session.

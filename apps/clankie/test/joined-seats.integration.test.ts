@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, realpath, rm, readFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, readFile, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -14,6 +14,7 @@ import {
   MachineJoinLeaseSchema,
   MachineJoinStatusSchema,
   machineJoinLeaseAad,
+  JoinedWorkerLaunchSchema,
 } from "@clankie/protocol/machine-join";
 import { MachineJoins } from "../src/machine-joins.ts";
 import { createMachineJoinRoutes } from "../src/machine-join-routes.ts";
@@ -24,7 +25,7 @@ import { createMcpHost } from "../src/mcp-host.ts";
 import { logger } from "../src/app/log.ts";
 import { machineJoinHash, machineJoinKey } from "../src/machine-join-crypto.ts";
 import { openGatewayValue } from "../src/gateway-encryption.ts";
-import { saveJoinedMachineCredential } from "../../tui/bin/joined-machine-client.ts";
+import { saveJoinedMachineCredential, runJoinedMachineChannel } from "../../tui/bin/joined-machine-client.ts";
 import { joinedSeatTransport, runJoinedSeatHook } from "../../tui/src/command/joined-seat.ts";
 import { runSeatCommand } from "../../tui/src/command/seat.ts";
 import { runHeadlessCaptainCommand } from "../../tui/bin/headless-captain.ts";
@@ -96,7 +97,31 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
     CLANKIE_OPERATOR_TOKEN: undefined,
     CLANKIE_CAPTAIN_TOKEN: undefined,
   };
+  const channelAbort = new AbortController();
+  let workerToken = "";
+  let workerSession = "";
+  const channel = runJoinedMachineChannel(credential, {
+    store: local,
+    signal: channelAbort.signal,
+    intervalMs: 10,
+    ports: {
+      workers: async (request) => {
+        const launch = JoinedWorkerLaunchSchema.parse(JSON.parse(request));
+        workerToken = launch.token;
+        workerSession = launch.sessionId;
+        const admitted = await wire.rpc({
+          method: "POST",
+          path: "/workers/admit",
+          headers: { authorization: `Bearer ${workerToken}` },
+          body: JSON.stringify({ paneId: "worker-proof", sessionId: workerSession }),
+        });
+        expect(admitted.status).toBe(200);
+        return "Native adapter admission fixture";
+      },
+    },
+  });
   let chat = "";
+  const sessions: string[] = [];
   let launches = 0;
   const cli = {
     repoRoot,
@@ -110,6 +135,9 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
       childEnv?: NodeJS.ProcessEnv,
     ) => {
       launches += 1;
+      sessions.push(childEnv!.CLANKIE_SEAT_SESSION_ID!);
+      if (launches === 3 || launches === 4) expect(args).toContain("--resume");
+      if (launches === 5) expect(args).toContain("--session-id");
       expect(cwd).toBe(directory);
       expect(args).toContain("--dangerously-skip-permissions");
       expect(args).toContain("plugin:clankie@inline");
@@ -196,11 +224,23 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
           },
         );
         expect(synced.status).toBe(200);
-        const conversation = await captain.serveOperatorConversation({
+        let conversation = await captain.serveOperatorConversation({
           op: "replay",
           schemaVersion: 1,
           replay: { schemaVersion: 1, conversationId: chat, surfaceClientId: "joined-proof", limit: 100 },
         });
+        if (conversation.op === "replay" && conversation.result.status === "recover")
+          conversation = await captain.serveOperatorConversation({
+            op: "replay",
+            schemaVersion: 1,
+            replay: {
+              schemaVersion: 1,
+              conversationId: chat,
+              surfaceClientId: "joined-proof",
+              limit: 100,
+              cursor: conversation.result.resetCursor,
+            },
+          });
         expect(JSON.stringify(conversation)).toContain("Joined seat transcript arrived at home.");
         const secondMachine = joinedSeatTransport(await approve(), fetch);
         expect(
@@ -225,6 +265,99 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
           }),
         });
         expect(race.status).toBe(409);
+        if (launches === 1) {
+          const capabilities = {
+            "x-clankie-seat-capabilities": JSON.stringify({
+              schemaVersion: 1,
+              eventKinds: ["wake", "watch", "message", "escalation", "turn"],
+              ownerOrigin: true,
+            }),
+          };
+          const leadPoll = (wait: number) =>
+            wire.fetchFor(token)(
+              `http://joined-seat.invalid/v1/seat/events?conversationId=${chat}&wait=${wait}`,
+              { headers: capabilities },
+            );
+          expect((await leadPoll(1)).status).toBe(200);
+          const hired = await upstream.callTool("hire_agent", {
+            title: "Joined proof worker",
+            brief: "Report proof",
+            harness: "claude",
+          });
+          expect(JSON.stringify(hired)).toContain("started");
+          const worker = await connectLaneUpstream({
+            host: "http://joined-seat.invalid",
+            bearer: "adapter",
+            conversationId: chat,
+            fetchImpl: wire.fetchFor(workerToken),
+          });
+          try {
+            const names = (await worker.listTools()).map((tool) => tool.name);
+            expect(names).toContain("message_clankie");
+            expect(names).not.toContain("hire_agent");
+            expect(
+              (
+                await wire.fetchFor(workerToken)(
+                  `http://joined-seat.invalid/v1/captain/prompt?conversationId=${chat}`,
+                )
+              ).status,
+            ).toBe(403);
+            const wrongNative = await wire.rpc({
+              method: "POST",
+              path: "/workers/admit",
+              headers: { authorization: `Bearer ${workerToken}` },
+              body: JSON.stringify({ paneId: "worker-proof", sessionId: randomUUID() }),
+            });
+            expect(wrongNative.status).toBeGreaterThanOrEqual(400);
+            const deliveryId = randomUUID();
+            const pagePromise = leadPoll(2000);
+            const report = await worker.callTool("message_clankie", {
+              text: "Joined worker result reached its lead",
+              deliveryId,
+            });
+            expect(JSON.stringify(report)).toContain("stored");
+            const page = await (await pagePromise).json();
+            const event = page.events.find((event: { content: string }) =>
+              event.content.includes("Joined worker result reached its lead"),
+            );
+            expect(event).toBeDefined();
+            expect(
+              (
+                await wire.fetchFor(token)(
+                  `http://joined-seat.invalid/v1/seat/events/${event.id}/ack?conversationId=${chat}`,
+                  { method: "POST" },
+                )
+              ).status,
+            ).toBe(200);
+            const inbox = await upstream.callTool("worker_reports", {});
+            expect(JSON.stringify(inbox)).toContain(deliveryId);
+            expect(JSON.stringify(inbox)).toContain("Joined worker result reached its lead");
+            const duplicate = await worker.callTool("message_clankie", {
+              text: "Joined worker result reached its lead",
+              deliveryId,
+            });
+            expect(JSON.stringify(duplicate)).toContain("stored");
+            expect(JSON.stringify(await worker.callTool("message_clankie_status", { deliveryId }))).toContain(
+              deliveryId,
+            );
+            await worker.pollEvents(1);
+            const workerPoll = worker.pollEvents(2000);
+            const answer = upstream.callTool("message_seat", {
+              seat: `${credential.lease.machineId}/worker-proof`,
+              message: "Keep the proof",
+            });
+            const workerEvents = await workerPoll;
+            expect(workerEvents[0]?.content).toBe("Keep the proof");
+            expect(await worker.acknowledge!(workerEvents[0]!.id)).toBe(true);
+            expect(JSON.stringify(await answer)).toContain("delivered");
+            const acknowledged = await upstream.callTool("acknowledge_worker_reports", {
+              deliveryIds: [deliveryId],
+            });
+            expect(acknowledged.structuredContent).toMatchObject({ acknowledged: true, unanswered: [] });
+          } finally {
+            await worker.close();
+          }
+        }
         if (launches === 2) {
           // A remote native seat needs its own workers consent, not shell on the home.
           await settings.update((current) => ({
@@ -302,7 +435,43 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
       }),
     });
     expect(denied.status).toBe(403);
-    await expect(runSeatCommand(["--resume"], cli)).rejects.toThrow("resume and other seats");
+    expect(await runSeatCommand(["--resume"], cli)).toBe(0);
+    expect(sessions[2]).toBe(sessions[1]);
+    const project = directory.replace(/[^A-Za-z0-9]/gu, "-");
+    await mkdir(join(env.CLAUDE_CONFIG_DIR, "projects", project), { recursive: true });
+    await writeFile(
+      join(env.CLAUDE_CONFIG_DIR, "projects", project, `${sessions[2]}.jsonl`),
+      JSON.stringify({ cwd: directory, type: "user", message: { role: "user", content: "Resume proof" } }) +
+        "\n",
+    );
+    expect(await runSeatCommand(["--resume", sessions[2]!, "--conversation", chat], cli)).toBe(0);
+    let earlier = "";
+    expect(
+      await runSeatCommand(["--reset", "--conversation", chat], {
+        ...cli,
+        stderr: {
+          write: (value) => {
+            earlier += value;
+          },
+        },
+      }),
+    ).toBe(0);
+    expect(earlier).toContain(sessions[1]);
+    expect(sessions[4]).not.toBe(sessions[1]);
+    expect(captain.seatSessionState?.(chat, sessions[1]!)).toBe("retired");
+    await expect(runSeatCommand(["--resume", sessions[1]!, "--conversation", chat], cli)).rejects.toThrow(
+      "session_refused",
+    );
+    expect(
+      (
+        await wire.rpc({
+          method: "POST",
+          path: "/v1/fleet/lead/mcp",
+          headers: { authorization: `Bearer ${workerToken}` },
+          body: "{}",
+        })
+      ).status,
+    ).toBe(403);
     let error = "";
     expect(
       await runHeadlessCaptainCommand(["start"], {
@@ -324,6 +493,8 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
     await joins.remove(credential.lease.machineId);
     await expect(runSeatCommand(["--new"], cli)).rejects.toThrow("revoked");
   } finally {
+    channelAbort.abort();
+    await channel;
     await seats.close();
     await captain.close();
     await mcp.close();

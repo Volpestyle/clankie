@@ -214,7 +214,7 @@ test("public CLI waits for owner consent, joins through the relay, and removal r
         directory: f.directory,
         request: "hire",
       }),
-    ).toMatchObject({ ok: false, error: "operation_unavailable" });
+    ).toMatchObject({ ok: false, error: "operation_failed" });
     expect(await f.machines.setAccess(credential.lease.machineId, { accessLevel: "shell" })).toMatchObject({
       accessEnforcement: "joined-host",
     });

@@ -208,6 +208,10 @@ export async function runJoinCommand(
     }
     const hostPorts: JoinedMachinePorts = options.ports ?? {
       shell: joinedMachineShell,
+      workers: (await import("./joined-worker.ts")).joinedWorkerPorts(credential, {
+        env,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      }),
       ...(credential.lease.accessLevel === "screen"
         ? defaultJoinedScreenPorts(credential.lease.machineId, env)
         : {}),

@@ -3649,7 +3649,7 @@ the old capability cannot reconnect, including after service restart. A new
 join needs a new code, owner approval and machine identity. Interrupting the
 foreground command disconnects it without revoking approval.
 
-From an approved folder on a joined install, `clankie claude [--new | --conversation ID]`
+From an approved folder on a joined install, `clankie claude [--new | --conversation ID | --resume … | --reset]`
 opens the local Claude Code seat in a workspace chat stored at Clankie's home.
 Plain `clankie claude` reuses an existing chat for that machine and folder, or
 creates one; `--new` creates a separate chat. An exact `--conversation` must
@@ -3662,8 +3662,33 @@ encrypted join channel, with no SSH or local Clankie service. A second launch
 in an occupied chat is refused. Closing the launcher revokes its seat grant;
 an unconfirmed close expires after one hour without traffic. A home restart
 invalidates these grants; reopen the seat rather than replaying a tool call.
-Joined `--resume`, other harness seats, native worker adapters, Windows release
-packaging and real PC/production-gateway proof remain follow-ups. Plain `clankie`
+`--resume` keeps the recorded Claude session and home chat; an explicit session
+uses the same local transcript checks as a home launch and must run from its
+original approved folder. Retired or cross-chat sessions are refused. `--reset`
+archives the current context and retires native sessions while retaining the
+folder chat. It revokes earlier lead and worker grants, reports earlier launch
+session IDs, and leaves their panes for the owner to inspect. It cannot combine
+with `--new` or `--resume`. Reset uses the chat's revision guard and refuses an
+active turn or side conversation. Earlier-launch reports are bounded to the last
+32 IDs held by this home process; a home restart loses that list.
+
+The joined lead's `hire_agent` starts Claude workers in new Herdr panes on the
+same approved folder, using the bounded workers adapter in the running `join`
+channel. Supply `title`, `brief`, optional `model`/`effort`; `harness` can only be
+`claude`, and an optional `workingDirectory` must equal the lead's folder. The
+adapter observes the exact native session before admission. The worker gets
+only `message_clankie` (text plus a caller-chosen UUID `deliveryId`) and
+`message_clankie_status` (`deliveryId`). Reports are durable in its lead chat;
+the lead reads and acknowledges them through `worker_reports` and
+`acknowledge_worker_reports`. `message_seat` with the returned `seat` and
+`message` reaches that worker's native channel. There is no SSH fleet link,
+owner bearer, connected-account grant or general shell in this transport.
+Uncertain launches and reports must be reconciled, never repeated. Grant expiry,
+reset, access downgrade, leave and home restart refuse later traffic; existing
+native panes remain open. Keep `join` / `join resume` running for worker launches.
+
+Other harness seats, Windows release packaging, legacy SSH chat migration and
+real native PC/production-gateway proof remain follow-ups. Plain `clankie`
 on a joined install explains how to open a seat; `start`, `restart` and `recover`
 point to the home instead of starting another Clankie.
 
@@ -3671,7 +3696,7 @@ Inventory reports `transport: join` and `accessEnforcement: joined-host` for
 these approved identities. The receiver checks the current access level and
 intersects the service-approved directories with its own canonical directories
 before execution; a symlink escape is refused. The channel supports a guarded
-shell at shell/screen level. Native worker adapters remain a follow-up;
+shell at shell/screen level and a bounded native Claude worker adapter at workers level;
 screen level can host a consent-bound computer through the same encrypted channel.
 workers-level shell and screen requests are refused. Directory checks bind the
 requested working directory; an authorized shell command still runs as the

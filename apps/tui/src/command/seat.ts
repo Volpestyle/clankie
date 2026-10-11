@@ -119,6 +119,7 @@ export interface SeatCommandOptions {
   /** Internal joined-install transport; never grants an operator credential. */
   readonly joinedSeat?: {
     readonly sessionId: string;
+    validateResume?(input: { sessionId: string; conversationId: string; cwd: string }): Promise<void>;
     resolveContext(input: Parameters<typeof resolveSeatContext>[0]): ReturnType<typeof resolveSeatContext>;
     maximumTrust(): Promise<{ readonly enabled: boolean }>;
   };
@@ -416,6 +417,10 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
         : undefined;
   if (flags.resume && previous === undefined) {
     throw new Error(`No Claude chat to resume; run \`clankie ${command}\` first.`);
+  }
+  if (previous && options.joinedSeat?.validateResume) {
+    if (!previous.conversationId) throw Error("Joined resume requires a home conversation");
+    await options.joinedSeat.validateResume({ ...previous, conversationId: previous.conversationId });
   }
   const sessionId = previous?.sessionId ?? options.joinedSeat?.sessionId ?? randomUUID();
   if (

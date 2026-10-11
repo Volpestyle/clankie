@@ -4,7 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
 import { OperatorSeatCapabilitiesSchema, OperatorSeatReplySchema } from "@clankie/protocol";
-import type { CaptainPort } from "./captain/port.ts";
+import type { CaptainPort, LaneToolBank } from "./captain/port.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import type { RemoteLeadDelegations } from "./remote-lead-delegations.ts";
@@ -32,6 +32,13 @@ export interface RemoteSeatAuthority {
   readonly id: string;
   readonly binding: { readonly conversationId: string; readonly nativeOccupantId: string };
   readonly signal: AbortSignal;
+  readonly worker?: boolean;
+  toolBank?(bank: LaneToolBank): Promise<LaneToolBank>;
+  pollEvents?(
+    wait: number,
+    signal: AbortSignal,
+  ): Promise<readonly import("@clankie/protocol").OperatorSeatEvent[]>;
+  acknowledge?(eventId: string): Promise<boolean>;
   current(): boolean;
   authorize(): Promise<boolean>;
 }
@@ -71,6 +78,7 @@ export function createRemoteLeadBridge(input: {
       await requireCurrent(admitted);
       const path = new URL(context.req.url).pathname;
       if (path === "/v1/fleet/lead/transcript" && context.req.method === "POST") {
+        if (admitted.worker) return context.json({ error: "worker_transcript_refused" }, 403);
         const parsed = SeatTranscriptUploadSchema.safeParse(await context.req.json());
         if (
           !parsed.success ||
@@ -97,13 +105,19 @@ export function createRemoteLeadBridge(input: {
             ...(input.receiptPath === undefined ? {} : { receiptPath: input.receiptPath }),
             captain: {
               laneToolBank: async () => {
-                const bank = await input.captain.laneToolBank("operator", conversationId, delegation);
+                const original = admitted.worker
+                  ? { lane: "operator" as const, tools: [] }
+                  : await input.captain.laneToolBank("operator", conversationId, delegation);
+                const bank = admitted.toolBank ? await admitted.toolBank(original) : original;
                 return {
                   ...bank,
                   tools: bank.tools
                     // The delegated captain bank narrows both direct and deferred
                     // connected tools to the tracker; never expose its general directory.
-                    .filter((tool) => PROJECT_TOOLS.has(tool.name) || tool.name.startsWith("linear_"))
+                    .filter(
+                      (tool) =>
+                        admitted.worker || PROJECT_TOOLS.has(tool.name) || tool.name.startsWith("linear_"),
+                    )
                     .map((tool) => ({
                       ...tool,
                       ...(tool.name === "linear_wake"
@@ -173,13 +187,18 @@ export function createRemoteLeadBridge(input: {
         const capabilities = OperatorSeatCapabilitiesSchema.safeParse(raw ? JSON.parse(raw) : undefined);
         if (!capabilities.success) return context.json({ error: "invalid_seat_capabilities" }, 400);
         const wait = Number(context.req.query("wait") ?? 25_000);
-        const events = await input.captain.pollSeatEvents(
-          Number.isFinite(wait) ? Math.min(25_000, Math.max(0, Math.trunc(wait))) : 25_000,
-          AbortSignal.any([context.req.raw.signal, admitted.signal]),
-          conversationId,
-          capabilities.data,
-          { owner: { conversationId }, current: admitted.current, authorize: admitted.authorize },
-        );
+        const events = admitted.pollEvents
+          ? await admitted.pollEvents(
+              Number.isFinite(wait) ? Math.min(25_000, Math.max(0, Math.trunc(wait))) : 25_000,
+              AbortSignal.any([context.req.raw.signal, admitted.signal]),
+            )
+          : await input.captain.pollSeatEvents(
+              Number.isFinite(wait) ? Math.min(25_000, Math.max(0, Math.trunc(wait))) : 25_000,
+              AbortSignal.any([context.req.raw.signal, admitted.signal]),
+              conversationId,
+              capabilities.data,
+              { owner: { conversationId }, current: admitted.current, authorize: admitted.authorize },
+            );
         await requireCurrent(admitted);
         return context.json({ schemaVersion: 1, events });
       }
@@ -189,9 +208,12 @@ export function createRemoteLeadBridge(input: {
           event[2] === "reply" ? OperatorSeatReplySchema.safeParse(await context.req.json()) : undefined;
         if (reply && !reply.success) return context.json({ error: "invalid_request" }, 400);
         await requireCurrent(admitted);
-        const ok = reply?.success
-          ? await input.captain.replySeatEvent(event[1]!, reply.data.text, conversationId)
-          : await input.captain.acknowledgeSeatEvent(event[1]!, conversationId);
+        if (admitted.worker && reply?.success) return context.json({ error: "worker_reply_refused" }, 403);
+        const ok = admitted.acknowledge
+          ? await admitted.acknowledge(event[1]!)
+          : reply?.success
+            ? await input.captain.replySeatEvent(event[1]!, reply.data.text, conversationId)
+            : await input.captain.acknowledgeSeatEvent(event[1]!, conversationId);
         return context.json({ ok }, ok ? 200 : 404);
       }
       return context.json({ error: "not_found" }, 404);

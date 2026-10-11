@@ -89,11 +89,13 @@ export async function runJoinedClaudeSeat(
   const store = options.joinCredentialStore ?? createDefaultCredentialStore({ env });
   const credential = await readJoinedMachineCredential(store);
   if (!credential) return undefined;
-  const flags = parseSeatArgs(args, options.harnessCommand ?? options.claudeCommand);
-  if ((flags.harness !== undefined && flags.harness !== "claude") || flags.resume)
-    throw Error(
-      "Joined installs currently support clankie claude [--new | --conversation ID]; resume and other seats are a follow-up.",
-    );
+  const reset = args.includes("--reset");
+  const seatArgs = args.filter((arg) => arg !== "--reset");
+  const flags = parseSeatArgs(seatArgs, options.harnessCommand ?? options.claudeCommand);
+  if (flags.harness !== undefined && flags.harness !== "claude")
+    throw Error("Joined installs currently support clankie claude; other harness seats are a follow-up.");
+  if (reset && (flags.resume || flags.newConversation))
+    throw Error("--reset keeps the folder chat; use it without --resume or --new");
   const directory = await realpath(process.cwd());
   let allowed = false;
   for (const root of credential.localDirectories) {
@@ -101,7 +103,7 @@ export async function runJoinedClaudeSeat(
     if (!isAbsolute(remainder) && remainder !== ".." && !remainder.startsWith(`..${sep}`)) allowed = true;
   }
   if (!allowed) throw Error("directory_refused: launch from a directory approved when this machine joined");
-  const sessionId = randomUUID();
+  let sessionId = flags.resumeSessionId ?? randomUUID();
   const wire = joinedSeatTransport(credential, options.fetchImpl ?? fetch);
   let resolved: z.infer<typeof LaunchResult> | undefined;
   let token: string | undefined;
@@ -111,6 +113,7 @@ export async function runJoinedClaudeSeat(
       path: "/launch",
       headers: {},
       body: JSON.stringify({
+        reset,
         sessionId,
         directory,
         fresh,
@@ -120,7 +123,12 @@ export async function runJoinedClaudeSeat(
     });
     const body = await response.json();
     if (!response.ok) throw Error(body.error ?? "joined_seat_unavailable");
-    resolved = LaunchResult.parse(body);
+    const { earlierSessions, ...result } = body;
+    if (!dryRun && Array.isArray(earlierSessions) && earlierSessions.length)
+      (options.stderr ?? process.stderr).write(
+        `Earlier joined launches: ${earlierSessions.join(", ")}. Their panes were not closed.\n`,
+      );
+    resolved = LaunchResult.parse(result);
     token = resolved.token ?? token;
     return resolved;
   };
@@ -130,14 +138,21 @@ export async function runJoinedClaudeSeat(
     "CLANKIE_CAPTAIN_TOKEN",
     "CLANKIE_REMOTE_LEAD_TOKEN",
     "CLANKIE_JOINED_SEAT_TOKEN",
+    "CLANKIE_JOINED_WORKER_SESSION",
   ])
     delete seatEnv[key];
   try {
-    return await runSeatCommand(args, {
+    return await runSeatCommand(seatArgs, {
       ...options,
       env: seatEnv,
       joinedSeat: {
         sessionId,
+        validateResume: async (request) => {
+          if ((await realpath(request.cwd)) !== directory)
+            throw Error("Joined resume must run in its original approved folder");
+          sessionId = request.sessionId;
+          await launch(true, false, request.conversationId);
+        },
         resolveContext: async (request) => {
           const result = await launch(request.dryRun, request.fresh === true, request.conversationId);
           return result.conversationId === undefined
@@ -188,11 +203,14 @@ export async function runJoinedSeatHook(
   const credential = await readJoinedMachineCredential(createDefaultCredentialStore({ env }));
   if (!credential) throw Error("Joined machine registration missing; use clankie join resume");
   const wire = joinedSeatTransport(credential, options.fetchImpl ?? fetch);
-  const routed = {
+  const routed: HeadlessCaptainCommandOptions = {
     ...options,
     env: { ...env, CLANKIE_OPERATOR_TOKEN: SENTINEL },
     host: HOST,
-    fetchImpl: wire.fetchFor(token),
+    fetchImpl: async (resource, init) => {
+      await (await import("./joined-worker.ts")).verifyJoinedWorker(env);
+      return wire.fetchFor(token)(resource, init);
+    },
   };
   if (command === "mcp") return (await import("./mcp.ts")).runMcpCommand(args, routed);
   if (command === "prompt") return (await import("./prompt.ts")).runPromptCommand(args, routed);

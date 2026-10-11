@@ -13,7 +13,7 @@
  * the conversation on pi beside a live seat (2026-10-07).
  */
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   type OperatorOwnerTurnOrigin,
@@ -832,6 +832,12 @@ export class SeatOutbox {
         return false;
     }
     return this.acknowledge(original.messageId, original.recipientBinding);
+  }
+
+  /** Explicit launcher departure; unlike service shutdown it cannot reconnect. */
+  public release(): void {
+    this.close();
+    if (this.presencePath !== undefined) rmSync(this.presencePath, { force: true });
   }
 
   public close(): void {

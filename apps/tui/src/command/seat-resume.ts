@@ -9,7 +9,7 @@ import {
   readdirSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import type { SeatCommandOptions } from "./seat.ts";
@@ -49,7 +49,7 @@ function transcriptCwd(path: string): string | undefined {
     for (const line of buffer.subarray(0, length).toString("utf8").split("\n")) {
       try {
         const cwd = (JSON.parse(line) as { cwd?: unknown }).cwd;
-        if (typeof cwd === "string" && cwd.startsWith("/")) return cwd;
+        if (typeof cwd === "string" && isAbsolute(cwd)) return cwd;
       } catch {
         // A partial final line or a non-record line.
       }
@@ -107,38 +107,49 @@ export async function planExplicitResume(
       `Claude session ${input.sessionId} has no working directory matching its project; it cannot be resumed here.`,
     );
 
-  const credential = await resolveOperatorCredential({
-    env,
-    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
-  });
-  if (credential === undefined) throw new Error("No operator credential is available; start Clankie first.");
-  const url = new URL("/v1/captain/seat-context", commandHost({ ...options, env }));
-  url.searchParams.set("conversationId", input.conversationId);
-  url.searchParams.set("sessionId", input.sessionId);
-  const response = await (options.fetchImpl ?? fetch)(url, {
-    headers: { authorization: `Bearer ${credential.token}` },
-    redirect: "error",
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!response.ok) throw new Error(`Seat conversation unavailable (${response.status})`);
-  const context = (await response.json()) as {
-    conversationId?: unknown;
-    occupied?: unknown;
-    session?: unknown;
-  };
-  if (context.conversationId !== input.conversationId) throw new Error("Invalid service seat context");
-  if (context.session === "elsewhere")
-    throw new Error(`Claude session ${input.sessionId} belongs to another conversation; resume it there.`);
-  if (context.session === "retired")
-    throw new Error(`Claude session ${input.sessionId} was retired from ${input.conversationId} by a reset.`);
-  if (context.session !== "current" && context.session !== "unknown")
-    throw new Error(
-      "This service cannot check seat session ownership; update Clankie before resuming by ID.",
-    );
-  if (context.occupied === true)
-    throw new Error(
-      `${input.conversationId} already has a live seat. Close that seat's pane first, so one session drives it.`,
-    );
+  if (options.joinedSeat?.validateResume) {
+    await options.joinedSeat.validateResume({
+      sessionId: input.sessionId,
+      conversationId: input.conversationId,
+      cwd,
+    });
+  } else {
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+    if (credential === undefined)
+      throw new Error("No operator credential is available; start Clankie first.");
+    const url = new URL("/v1/captain/seat-context", commandHost({ ...options, env }));
+    url.searchParams.set("conversationId", input.conversationId);
+    url.searchParams.set("sessionId", input.sessionId);
+    const response = await (options.fetchImpl ?? fetch)(url, {
+      headers: { authorization: `Bearer ${credential.token}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error(`Seat conversation unavailable (${response.status})`);
+    const context = (await response.json()) as {
+      conversationId?: unknown;
+      occupied?: unknown;
+      session?: unknown;
+    };
+    if (context.conversationId !== input.conversationId) throw new Error("Invalid service seat context");
+    if (context.session === "elsewhere")
+      throw new Error(`Claude session ${input.sessionId} belongs to another conversation; resume it there.`);
+    if (context.session === "retired")
+      throw new Error(
+        `Claude session ${input.sessionId} was retired from ${input.conversationId} by a reset.`,
+      );
+    if (context.session !== "current" && context.session !== "unknown")
+      throw new Error(
+        "This service cannot check seat session ownership; update Clankie before resuming by ID.",
+      );
+    if (context.occupied === true)
+      throw new Error(
+        `${input.conversationId} already has a live seat. Close that seat's pane first, so one session drives it.`,
+      );
+  }
   if (copy !== undefined && !input.dryRun) {
     mkdirSync(join(home, "projects", transcript.directory), { recursive: true, mode: 0o700 });
     // Never replace a transcript the target home already has.

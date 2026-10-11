@@ -115,7 +115,7 @@ export const JoinedMachineOperationSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("workers"),
       directory,
-      request: z.string().min(1).max(MACHINE_JOIN_OUTPUT_CHAR_MAX),
+      request: z.string().min(1).max(65_536),
     })
     .strict(),
   z
@@ -207,3 +207,15 @@ export const machineJoinExchangeAad = (
   requestId: string,
   challenge: string,
 ): string => `clankie-machine-${direction}-v1:${machineId}:${requestId}:${challenge}`;
+
+/** Bounded native launch, carried only inside an approved workers operation. */
+export const JoinedWorkerLaunchSchema = z.strictObject({
+  token: MachineJoinSecretSchema,
+  sessionId: z.uuid(),
+  conversationId: z.string().min(1).max(256),
+  title: z.string().min(1).max(128),
+  brief: z.string().min(1).max(32_768),
+  maximumTrust: z.boolean(),
+  model: z.string().min(1).max(128).optional(),
+  effort: z.enum(["low", "medium", "high", "max"]).optional(),
+});

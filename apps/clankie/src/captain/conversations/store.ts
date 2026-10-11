@@ -3539,7 +3539,10 @@ export class ConversationStore {
   ): ConversationServiceResult {
     const meta = this.metas.get(conversationId);
     if (meta === undefined) throw new ConversationResetError("Unknown conversation");
-    if (!this.runsCaptainTurns(conversationId) || meta.parentConversationId !== undefined) {
+    if (
+      (!this.runsCaptainTurns(conversationId) && !this.runsOnRemoteSeat(conversationId)) ||
+      meta.parentConversationId !== undefined
+    ) {
       throw new ConversationResetError(
         "Only Clankie's own global and workspace conversations can reset context",
       );

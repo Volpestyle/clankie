@@ -589,8 +589,16 @@ call-time revocation checks still apply.
   consumers through `joined-seat.ts`. The delegated lead bridge rechecks current
   machine access for every request and tool effect. It never issues an owner bearer
   or lets the joined seat choose an unrelated chat. Chat and transcript state stay
-  at the home; no service starts on the joined machine. Worker admission and
-  Windows installer/production-gateway proof remain follow-ups.
+  at the home; no service starts on the joined machine. Resume reuses local native
+  transcripts and the home's session ownership checks. Reset uses the existing
+  revision-guarded conversation archive while retaining its machine/folder scope.
+  `joined-workers.ts` gives each lead hire a separate machine/chat/session grant;
+  the bounded local adapter starts Claude in a new Herdr pane and admits only its
+  observed session. Its MCP bank exposes report/status tools; reports enter the
+  existing durable inbound receipt and lead inbox path. Replies use a worker
+  outbox over join, not terminal typing. Every request rechecks current consent;
+  reset and home restart revoke grants without terminating panes. Legacy SSH
+  chat migration and Windows installer/production-gateway proof remain follow-ups.
   A joined screen is selected explicitly through `/v1/computer`'s `machineId`;
   hosted Clankie can borrow it without a local desktop. Encrypted join traffic
   carries strict commands and bounded frame chunks. The host intersects its

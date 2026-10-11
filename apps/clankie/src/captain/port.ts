@@ -221,6 +221,8 @@ export interface CaptainPort {
   harnessProcesses?(retire?: boolean): Promise<unknown>;
   /** A live native operator bridge can answer independently of the fallback model (default: the global chat). */
   operatorSeatReady?(conversationId?: string): boolean;
+  /** An explicitly closed joined launcher releases channel presence; uncertainty remains journaled. */
+  releaseJoinedSeat?(conversationId: string): void;
   /** This machine's live seats and whether each launched under maximum trust mode (VUH-2048). */
   maximumTrustSeats?(): Promise<readonly import("@clankie/protocol").MaximumTrustSeat[]>;
   /** A native session's standing for a conversation, for an explicit seat resume (VUH-2045). */
@@ -419,6 +421,17 @@ export interface CaptainPort {
   ): Promise<FleetSeatMessageReceipt>;
   /** Huddles (VUH-2025); absent on bodies without a fleet. */
   readonly huddles?: HuddleService;
+  /** Home-admitted joined native worker; target and binding come only from its lead grant. */
+  receiveJoinedWorkerReport?(
+    input: { paneId: string; binding: string; conversationId: string; text: string; deliveryId: string },
+    authority: import("./conversation-owner.ts").ConversationAuthority,
+  ): Promise<FleetSeatMessageReceipt>;
+  recordJoinedWorkerReply?(conversationId: string, paneId: string, binding: string): void;
+  joinedWorkerReportStatus?(
+    paneId: string,
+    binding: string,
+    deliveryId: string,
+  ): Promise<FleetSeatMessageStatus | undefined>;
   receiveFleetSeatMessage(
     paneId: string,
     text: string,
