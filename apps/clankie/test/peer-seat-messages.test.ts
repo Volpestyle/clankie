@@ -88,9 +88,10 @@ function fixture(fleet = "default") {
       return result;
     },
   );
-  const create = () =>
+  const create = (window?: number) =>
     new PeerSeatMessages({
       path,
+      ...(window === undefined ? {} : { unresolvedWindowMs: window }),
       enabled: async () => enabled,
       sender: async (paneId) => seats.get(paneId),
       recipient: async (seatId) => [...seats.values()].find((seat) => seat.terminalId === seatId),
@@ -372,18 +373,61 @@ it("reconciles an uncertain original by native observation while off and never r
   expect(f.observedNative.mock.calls[0]).toEqual(f.dispatched.mock.calls[0]);
 });
 
-it("blocks a new ID until the sender's uncertain original has a native receipt", async () => {
+it("an uncertain original holds only its own recipient until it has a native receipt", async () => {
   const f = fixture();
   f.setResult({ outcome: "unconfirmed", detail: "Lost receipt." });
   const input = await f.input();
-  const next = await f.input(f.authority, f.third.terminalId);
+  const again = await f.input(f.authority, f.recipient.terminalId, randomUUID(), "A second note.");
+  const elsewhere = await f.input(f.authority, f.third.terminalId);
   const original = await f.peer.send(f.authority, input);
-  await expect(f.create().send(f.authority, next)).resolves.toMatchObject({ deliveryStage: "rejected" });
+  await expect(f.create().send(f.authority, again)).resolves.toMatchObject({ deliveryStage: "rejected" });
+  // VUH-2100: one unresolved delivery no longer silences the sender toward every other seat.
+  f.setResult({ outcome: "delivered", messageId: "elsewhere", state: "queued" });
+  await expect(f.create().send(f.authority, elsewhere)).resolves.toMatchObject({ outcome: "delivered" });
   f.setObserved({ outcome: "delivered", messageId: "confirmed", state: "queued" });
   await f.peer.reconcile(f.authority, input.delivery, original.fingerprint);
   f.setResult({ outcome: "delivered", messageId: "next", state: "queued" });
-  await expect(f.peer.send(f.authority, next)).resolves.toMatchObject({ outcome: "delivered" });
+  await expect(f.peer.send(f.authority, again)).resolves.toMatchObject({ outcome: "delivered" });
+  expect(f.dispatched).toHaveBeenCalledTimes(3);
+});
+
+it("an original nothing proves in time is superseded, never resent, and the next message says it follows it", async () => {
+  const f = fixture();
+  f.setResult({ outcome: "unconfirmed", detail: "Lost receipt." });
+  const input = await f.input();
+  const original = await f.peer.send(f.authority, input);
+  // Within the window the original stays uncertain and holds its recipient.
+  await expect(
+    f.create().reconcile(f.authority, input.delivery, original.fingerprint),
+  ).resolves.toMatchObject({
+    deliveryStage: "uncertain",
+  });
+  const later = f.create(0);
+  await expect(later.reconcile(f.authority, input.delivery, original.fingerprint)).resolves.toMatchObject({
+    deliveryId: input.delivery.id,
+    deliveryStage: "superseded",
+    outcome: "unconfirmed",
+  });
+  // Terminal: a later native observation cannot rewrite it, and a restart keeps it.
+  f.setObserved({ outcome: "delivered", messageId: "late", state: "queued" });
+  await expect(
+    f.create().reconcile(f.authority, input.delivery, original.fingerprint),
+  ).resolves.toMatchObject({
+    deliveryStage: "superseded",
+  });
+  f.setResult({ outcome: "delivered", messageId: "next", state: "queued" });
+  const next = await f.input(f.authority, f.recipient.terminalId, randomUUID(), "A new note.");
+  await expect(later.send(f.authority, next)).resolves.toMatchObject({ outcome: "delivered" });
   expect(f.dispatched).toHaveBeenCalledTimes(2);
+  const [, sent] = f.dispatched.mock.calls[1]!;
+  expect(sent).toContain(
+    `It follows peer message ${input.delivery.id}, whose delivery is unknown; that message was not resent.`,
+  );
+  expect(sent).not.toContain(input.text);
+  // Only the first message after it carries the label.
+  const third = await f.input(f.authority, f.recipient.terminalId, randomUUID(), "Third note.");
+  await later.send(f.authority, third);
+  expect(f.dispatched.mock.calls[2]![1]).not.toContain("It follows peer message");
 });
 
 it("keeps independent senders available and denies another sender's receipt", async () => {
@@ -406,14 +450,15 @@ it("keeps independent senders available and denies another sender's receipt", as
 });
 
 it.each(["closed", "session", "pane"])(
-  "unblocks the sender with a terminal unknown receipt when the recipient's %s is gone",
+  "unblocks the recipient with a terminal unknown receipt when the recipient's %s is gone",
   async (change) => {
     const f = fixture();
     f.setResult({ outcome: "unconfirmed", detail: "Lost receipt." });
     const input = await f.input();
     const original = await f.peer.send(f.authority, input);
     const next = await f.input(f.authority, f.third.terminalId);
-    await expect(f.peer.send(f.authority, next)).resolves.toMatchObject({ deliveryStage: "rejected" });
+    const again = await f.input(f.authority, f.recipient.terminalId, randomUUID(), "Again.");
+    await expect(f.peer.send(f.authority, again)).resolves.toMatchObject({ deliveryStage: "rejected" });
     if (change === "closed") f.seats.delete(f.recipient.paneId);
     else
       f.seats.set(f.recipient.paneId, {

@@ -1,6 +1,14 @@
 import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,7 +90,7 @@ it("a restarted sender only reconciles its original recipient and text after a l
     fingerprint: accepted.fingerprint,
   });
   const restarted = createPeerSender({ directory, scope: "pane", discover, request });
-  const replacement = await restarted("another-peer", "different message");
+  const replacement = await restarted("w1:p2", "different message");
   expect(replacement.deliveryStage).toBe("unavailable");
   expect(replacement.detail).toContain("different follow-up was not sent");
   expect(request.mock.calls.filter(([, init]) => init)).toHaveLength(1);
@@ -128,7 +136,7 @@ it.each(["original", "different follow-up"])(
     liveCatalog = { ...catalog, seats: [replacement] };
     const restarted = createPeerSender({ directory, scope: "pane", discover, request });
     const result = await restarted(
-      followUp === "original" ? "peer-seat" : replacement.seatId,
+      "peer-seat",
       followUp === "original" ? "original message" : "fresh intent",
     );
     if (followUp === "original") expect(result).toEqual(terminalUnknown);
@@ -332,6 +340,105 @@ it("a delayed responder cannot erase a newer original's claim", async () => {
   finish(response(original));
   expect((await pending).deliveryStage).toBe("consumed");
   expect(claim(directory).deliveryId).toBe(newer.deliveryId);
+});
+
+it("an unresolved original, including a pre-VUH-2100 claim, holds only its own recipient", async () => {
+  const directory = root();
+  const other = {
+    seatId: "other-seat",
+    paneId: "w1:p3",
+    binding: "c".repeat(64),
+    harness: "codex",
+    title: "Other",
+  };
+  const posts: PeerBody[] = [];
+  let lost!: ReturnType<typeof receipt>;
+  const request = vi.fn(async (_suffix: string, init?: { method: string; body: string }) => {
+    if (!init) return response({ ...lost, deliveryStage: "uncertain", outcome: "unconfirmed" });
+    const body: PeerBody = JSON.parse(init.body);
+    posts.push(body);
+    if (posts.length === 1) {
+      lost = receipt(body);
+      throw new Error("response lost");
+    }
+    return response(receipt(body));
+  });
+  const send = createPeerSender({
+    directory,
+    scope: "pane",
+    discover: async () => response({ ...catalog, seats: [...catalog.seats, other] }),
+    request,
+  });
+  expect((await send("peer-seat", "first")).deliveryStage).toBe("uncertain");
+  // The claim file name before VUH-2100: one per pane.
+  const [name] = readdirSync(directory);
+  renameSync(
+    join(directory, name!),
+    join(directory, `${createHash("sha256").update("pane").digest("hex")}.json`),
+  );
+  expect(await send("other-seat", "unrelated")).toMatchObject({ outcome: "delivered", seatId: "other-seat" });
+  expect(posts.map((body) => body.seatId)).toEqual(["peer-seat", "other-seat"]);
+  // The original's recipient is still held: a call to it only reconciles.
+  expect(await send("w1:p2", "second")).toMatchObject({
+    deliveryStage: "uncertain",
+    deliveryId: lost.deliveryId,
+  });
+  expect(posts).toHaveLength(2);
+});
+
+it("a superseded original is never resent for the same text", async () => {
+  const directory = root();
+  const posts: PeerBody[] = [];
+  let lost!: ReturnType<typeof receipt>;
+  const request = vi.fn(async (_suffix: string, init?: { method: string; body: string }) => {
+    if (!init) return response(receipt(posts[0]!, "superseded", "unconfirmed"));
+    const body: PeerBody = JSON.parse(init.body);
+    posts.push(body);
+    if (posts.length === 1) {
+      lost = receipt(body);
+      throw new Error("response lost");
+    }
+    return response(receipt(body));
+  });
+  const send = createPeerSender({
+    directory,
+    scope: "pane",
+    discover: async () => response(catalog),
+    request,
+  });
+  expect((await send("peer-seat", "first")).deliveryStage).toBe("uncertain");
+  // The same text is never resent: it only reads the superseded receipt.
+  expect(await send("peer-seat", "first")).toMatchObject({
+    deliveryStage: "superseded",
+    deliveryId: lost.deliveryId,
+  });
+  expect(posts).toHaveLength(1);
+});
+
+it("after a superseded original, a different message to the same seat is sent in that call", async () => {
+  const directory = root();
+  const posts: PeerBody[] = [];
+  const request = vi.fn(async (_suffix: string, init?: { method: string; body: string }) => {
+    if (!init) return response(receipt(posts[0]!, "superseded", "unconfirmed"));
+    const body: PeerBody = JSON.parse(init.body);
+    posts.push(body);
+    if (posts.length === 1) throw new Error("response lost");
+    return response(receipt(body));
+  });
+  const send = createPeerSender({
+    directory,
+    scope: "pane",
+    discover: async () => response(catalog),
+    request,
+  });
+  expect((await send("peer-seat", "first")).deliveryStage).toBe("uncertain");
+  expect(await send("peer-seat", "second")).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "consumed",
+  });
+  expect(posts.map((body) => body.text)).toEqual(["first", "second"]);
+  expect(posts[1]!.delivery.id).not.toBe(posts[0]!.delivery.id);
+  expect(readdirSync(directory)).toEqual([]);
 });
 
 it.each(["corrupt", "locked"])("%s state fails closed before any network request", async (mode) => {

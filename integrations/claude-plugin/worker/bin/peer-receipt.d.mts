@@ -6,6 +6,7 @@ interface PeerReceipt {
     | "consumed"
     | "uncertain"
     | "recipient_gone"
+    | "superseded"
     | "rejected"
     | "unavailable";
   outcome: "delivered" | "unconfirmed" | "undelivered" | "offline";

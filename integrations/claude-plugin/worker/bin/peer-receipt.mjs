@@ -1,7 +1,8 @@
-// A fleet peer send owns one durable unresolved claim per sender pane. The
-// claim is never a replay queue: later calls can only inspect its exact receipt.
+// A fleet peer send owns one durable unresolved claim per sender pane and
+// recipient seat; a claim never holds the sender's other recipients (VUH-2100).
+// The claim is never a replay queue: later calls can only inspect its exact receipt.
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { admissionRefusal, checkFleetMembership } from "./admission.mjs";
 
@@ -36,7 +37,11 @@ export function readPeerCatalog(value) {
 }
 
 export function createPeerSender({ directory, scope, discover, request }) {
-  const path = join(directory, `${hash(scope)}.json`);
+  const prefix = hash(scope);
+  // Claims from before VUH-2100 used one file per pane; it still holds its recipient.
+  const legacy = join(directory, `${prefix}.json`);
+  const lock = `${legacy}.lock`;
+  const pathFor = (seatId) => join(directory, `${prefix}.${hash(seatId)}.json`);
   const identity = (record) =>
     record
       ? {
@@ -73,19 +78,27 @@ export function createPeerSender({ directory, scope, discover, request }) {
   const exact = (value, record) =>
     value?.schemaVersion === 1 &&
     Object.entries(identity(record)).every(([key, expected]) => value[key] === expected) &&
-    ["stored", "delivered", "consumed", "uncertain", "rejected", "unavailable", "recipient_gone"].includes(
-      value.deliveryStage,
-    ) &&
+    [
+      "stored",
+      "delivered",
+      "consumed",
+      "uncertain",
+      "rejected",
+      "unavailable",
+      "recipient_gone",
+      "superseded",
+    ].includes(value.deliveryStage) &&
     ["delivered", "unconfirmed", "undelivered", "offline"].includes(value.outcome);
   const terminal = (value, record) =>
     exact(value, record) &&
     ((["stored", "delivered", "consumed"].includes(value.deliveryStage) && value.outcome === "delivered") ||
       (["rejected", "unavailable"].includes(value.deliveryStage) &&
         ["undelivered", "offline"].includes(value.outcome)) ||
-      // A lost recipient ends reconciliation without claiming whether it read
-      // the original. Clearing permits fresh intent, never replay of this ID.
-      (value.deliveryStage === "recipient_gone" && value.outcome === "unconfirmed"));
-  const inspect = () => {
+      // A lost recipient, or an original nothing proved in time, ends
+      // reconciliation without claiming whether it was read. Clearing permits
+      // fresh intent, never replay of this ID.
+      (["recipient_gone", "superseded"].includes(value.deliveryStage) && value.outcome === "unconfirmed"));
+  const inspect = (path) => {
     try {
       const record = JSON.parse(readFileSync(path, "utf8"));
       if (!valid(record)) throw new Error("Unreadable original peer receipt");
@@ -95,22 +108,45 @@ export function createPeerSender({ directory, scope, discover, request }) {
       throw error;
     }
   };
+  /** Every unresolved claim of this pane, legacy first. */
+  const claims = () => {
+    let names;
+    try {
+      names = readdirSync(directory);
+    } catch (error) {
+      if (error?.code === "ENOENT") return [];
+      throw error;
+    }
+    return names
+      .filter(
+        (name) =>
+          name === `${prefix}.json` ||
+          (name.startsWith(`${prefix}.`) && /^[^.]+\.[a-f0-9]{64}\.json$/u.test(name)),
+      )
+      .sort((left, right) => left.length - right.length)
+      .map((name) => join(directory, name))
+      .map((path) => ({ path, record: inspect(path) }))
+      .filter(({ record }) => record);
+  };
   const mutate = (fn) => {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     // A crash leaves this lock blocked; elapsed time is never proof of ownership.
-    writeFileSync(`${path}.lock`, "exclusive\n", { flag: "wx", mode: 0o600 });
+    writeFileSync(lock, "exclusive\n", { flag: "wx", mode: 0o600 });
     try {
       return fn();
     } finally {
-      unlinkSync(`${path}.lock`);
+      unlinkSync(lock);
     }
   };
-  const settle = (record) =>
+  const settle = ({ path, record }) =>
     mutate(() => {
       // A delayed responder must not remove a newer original's claim.
-      if (inspect()?.deliveryId === record.deliveryId) unlinkSync(path);
+      if (inspect(path)?.deliveryId === record.deliveryId) unlinkSync(path);
     });
-  const reconcile = async (record, target, text) => {
+  /** Superseded settles the claim and lets this call's new message go out. */
+  const followUp = Symbol("follow-up");
+  const reconcile = async (claim, target, text) => {
+    const { record } = claim;
     const query = new URLSearchParams({ binding: record.binding, fingerprint: record.fingerprint });
     const response = await request(`/${record.deliveryId}?${query}`);
     try {
@@ -129,22 +165,28 @@ export function createPeerSender({ directory, scope, discover, request }) {
       };
     const value = response.ok ? await response.json() : undefined;
     if (!terminal(value, record)) return uncertain(record);
-    settle(record);
-    return (target === record.seatId || target === record.paneId) &&
+    settle(claim);
+    const same =
+      (target === record.seatId || target === record.paneId) &&
       typeof text === "string" &&
-      normalize(text) === normalize(record.text)
-      ? value
-      : refused(
-          "unavailable",
-          "The original peer message is settled. This different follow-up was not sent.",
-        );
+      normalize(text) === normalize(record.text);
+    if (same) return value;
+    // The original is never resent; a different message is new intent.
+    if (value.deliveryStage === "superseded") return followUp;
+    return refused(
+      "unavailable",
+      "The original peer message is settled. This different follow-up was not sent.",
+    );
   };
   const send = async (target, text) => {
     let record;
     try {
-      if (existsSync(`${path}.lock`)) return uncertain();
-      record = inspect();
-      if (record) return await reconcile(record, target, text);
+      if (existsSync(lock)) return uncertain();
+      const held = claims().find((claim) => claim.record.seatId === target || claim.record.paneId === target);
+      if (held) {
+        const reconciled = await reconcile(held, target, text);
+        if (reconciled !== followUp) return reconciled;
+      }
       if (typeof target !== "string" || !target.trim() || typeof text !== "string" || !normalize(text))
         return refused("rejected", "Name a peer seat and provide its message.");
       if (target.length > 200 || text.length > 32_768)
@@ -164,6 +206,7 @@ export function createPeerSender({ directory, scope, discover, request }) {
       if (matches.length !== 1)
         return refused("rejected", "The peer seat is unknown or ambiguous in this fleet; nothing was sent.");
       const recipient = matches[0];
+      const path = pathFor(recipient.seatId);
       record = {
         schemaVersion: 1,
         deliveryId: randomUUID(),
@@ -178,8 +221,9 @@ export function createPeerSender({ directory, scope, discover, request }) {
         mutate(() => writeFileSync(path, `${JSON.stringify(record)}\n`, { flag: "wx", mode: 0o600 }));
       } catch (error) {
         if (error?.code !== "EEXIST") throw error;
-        const original = inspect();
-        return original ? await reconcile(original, target, text) : uncertain();
+        const original = inspect(path);
+        const reconciled = original ? await reconcile({ path, record: original }, target, text) : uncertain();
+        return reconciled === followUp ? uncertain() : reconciled;
       }
       const sent = await request("", {
         method: "POST",
@@ -191,33 +235,40 @@ export function createPeerSender({ directory, scope, discover, request }) {
           delivery: { id: record.deliveryId, binding: record.binding },
         }),
       });
+      const claim = { path, record };
       try {
         await checkFleetMembership(sent);
       } catch (error) {
-        settle(record);
+        settle(claim);
         return refused("rejected", `${error.message} Nothing was sent.`);
       }
       const sendRefusal = await admissionRefusal(sent);
       if (sendRefusal) {
-        settle(record);
+        settle(claim);
         return { ...refused("unavailable", sendRefusal.detail), retryable: true };
       }
       const value = await sent.json().catch(() => undefined);
       const exactRefusal = exact(value, record) && ["rejected", "unavailable"].includes(value.deliveryStage);
       if (!terminal(value, record) || (!sent.ok && !exactRefusal)) return uncertain(record);
-      settle(record);
+      settle(claim);
       return value;
     } catch {
       return uncertain(record);
     }
   };
   return Object.assign(send, {
+    /** Reconciles every claim; returns the first still unresolved, else the last result. */
     async reconcilePending() {
       let record;
       try {
-        if (existsSync(`${path}.lock`)) return uncertain();
-        record = inspect();
-        return record === undefined ? undefined : await reconcile(record, record.seatId, record.text);
+        if (existsSync(lock)) return uncertain();
+        let result;
+        for (const claim of claims()) {
+          record = claim.record;
+          result = await reconcile(claim, record.seatId, record.text);
+          if (result?.deliveryStage === "uncertain") return result;
+        }
+        return result;
       } catch {
         return uncertain(record);
       }

@@ -331,8 +331,12 @@ unverified lookups and mismatched evidence retain the uncertain original.
 
 `recipient_gone` with outcome `unconfirmed` is terminal: the original recipient
 lost its binding, so delivery stays unknown and must never be resent. The bridge
-clears that original claim; a later deliberate call may send fresh intent. The
-service prunes older settled bodies after 100 messages, retaining exact receipt
+clears that original claim; a later deliberate call may send fresh intent.
+`superseded` with outcome `unconfirmed` is also terminal: nothing proved or ruled
+out delivery within 15 minutes. The original is never resent; a different message
+to that seat goes out in the same call, labelled as following the unresolved one.
+An unresolved original holds only its own recipient; messages to other seats go
+out (VUH-2100). The service prunes older settled bodies after 100 messages, retaining exact receipt
 identities; unresolved originals keep their full bodies.
 
 The owner can disable this capability with `clankie fleet set --peer-messages off`

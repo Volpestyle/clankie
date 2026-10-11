@@ -31,8 +31,15 @@ function summary(value, name, isError) {
   const data = object(value) && value.outcome === "ok" ? value.content : value;
   const state = value?.outcome === "ok" && object(data) ? (data.outcome ?? data.status) : value?.outcome;
   const label = name ? name.replace(/^.*__/, "").replaceAll("_", " ") : "Tool";
-  if (value?.outcome === "uncertain" || value?.deliveryStage === "uncertain")
-    return "Outcome uncertain; may have applied. Reconcile the receipt; do not retry.";
+  if (value?.outcome === "uncertain" || value?.deliveryStage === "uncertain") {
+    // The ID and detail are the only way to reconcile or report it (VUH-2100).
+    const id = value.receiptId ?? value.deliveryId;
+    return [
+      "Outcome uncertain; may have applied. Reconcile the receipt; do not retry.",
+      ...(typeof id === "string" ? [`ID ${id}.`] : []),
+      ...(typeof value.detail === "string" ? [value.detail.slice(0, 300)] : []),
+    ].join(" ");
+  }
   if (
     isError ||
     value?.isError === true ||

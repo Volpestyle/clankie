@@ -287,9 +287,13 @@ original native delivery receipt. Never POST the same intent again, delete its
 receipt state or switch bridges to compensate for missing acknowledgment. An
 unknown result is a gap to report, not proof of failure. A successful native
 delivery receipt proves the stated handoff, not that the model read or accepted
-the message. While unresolved, another `message_peer` call reads only the
-original receipt. Once that receipt is settled, a different recipient or follow-up
-remains unsent; invoke again deliberately if that new message is still needed.
+the message. While unresolved, another `message_peer` call to the same seat reads
+only the original receipt; messages to other seats are sent normally. Once that
+receipt is settled, a different follow-up remains unsent; invoke again
+deliberately if that new message is still needed. An original that nothing proves
+or rules out within 15 minutes settles as `superseded` with an `unconfirmed`
+outcome: it is never resent, and a different message to that seat goes out as a
+new message labelled as following it.
 If the original recipient closes or loses its native binding, reconciliation
 terminates as `recipient_gone` with an `unconfirmed` outcome. Delivery remains
 unknown; the original is never resent, and the sender can send a fresh message.

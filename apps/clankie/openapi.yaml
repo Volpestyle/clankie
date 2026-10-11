@@ -5090,8 +5090,13 @@ paths:
         acknowledgment; absence of proof remains uncertain while the original
         recipient is bound. A lost recipient binding settles to recipient_gone
         with outcome unconfirmed: delivery remains unknown, never resends, and
-        no longer blocks fresh messages. Older settled bodies are pruned after
-        100 messages; exact compact receipts and unresolved originals are retained.
+        no longer blocks fresh messages. An original still unproven after 15
+        minutes settles to superseded with outcome unconfirmed: delivery remains
+        unknown and is never resent, and the sender's next message to that seat
+        goes out as a new message labelled as following it. An unresolved
+        original blocks only new messages to its own recipient. Older settled
+        bodies are pruned after 100 messages; exact compact receipts and
+        unresolved originals are retained.
       security: []
       parameters:
         - in: path

@@ -5530,7 +5530,10 @@ delete receipt state or switch bridges to replay it. Discovery uses
 from the admitted identity, not caller-supplied pane or fleet fields. Receipt reads
 remain available with peer messages off. A lost recipient binding terminates
 reconciliation as `recipient_gone` with outcome `unconfirmed`: delivery stays
-unknown, the original is never resent, and fresh messages are allowed. The service
+unknown, the original is never resent, and fresh messages are allowed. An original
+still unproven after 15 minutes settles as `superseded` (outcome `unconfirmed`)
+the same way, and the next message to that seat says it follows it. An unresolved
+original holds only its own recipient. The service
 keeps full bodies for the latest 100 settled messages and all unresolved originals;
 older settled bodies become exact compact receipts that still prevent ID replay.
 See [worker access](worker-access.md#messages-between-workers).

@@ -227,6 +227,7 @@ export const FleetPeerReceiptSchema = z
       "consumed",
       "uncertain",
       "recipient_gone",
+      "superseded",
       "rejected",
       "unavailable",
     ]),
@@ -236,10 +237,14 @@ export const FleetPeerReceiptSchema = z
     state: z.enum(["queued", "started", "steered"]).optional(),
   })
   .strict()
-  .refine((receipt) => receipt.deliveryStage !== "recipient_gone" || receipt.outcome === "unconfirmed", {
-    path: ["outcome"],
-    message: "A recipient-gone receipt retains an unknown delivery outcome",
-  });
+  .refine(
+    (receipt) =>
+      !["recipient_gone", "superseded"].includes(receipt.deliveryStage) || receipt.outcome === "unconfirmed",
+    {
+      path: ["outcome"],
+      message: "A recipient-gone or superseded receipt retains an unknown delivery outcome",
+    },
+  );
 export type FleetPeerReceipt = z.infer<typeof FleetPeerReceiptSchema>;
 export const FLEET_PEER_SEATS_PATH = "/v1/fleet/seats/:paneId/peers";
 export const FLEET_PEER_MESSAGES_PATH = "/v1/fleet/seats/:paneId/peer-messages";

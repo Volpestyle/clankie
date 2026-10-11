@@ -1145,7 +1145,11 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       if (params?.name === "message_peer") {
         const args = params?.arguments;
         await reconcileRefresh();
-        const receipt = retainedPeer ?? (await sendPeer(args?.seat, args?.text));
+        // A retained original answers only a call to its own recipient (VUH-2100).
+        const receipt =
+          retainedPeer && retainedPeer.seatId === args?.seat
+            ? retainedPeer
+            : await sendPeer(args?.seat, args?.text);
         retainedPeer = undefined;
         return send({
           id,

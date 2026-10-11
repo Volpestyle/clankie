@@ -47,3 +47,28 @@ it("keeps refusal, uncertainty, receipt metadata and media when decoding", () =>
     expect(formatToolOutput(result)).toContainEqual({ kind: "image", uri: "data:image/png;base64,AA==" });
   }
 });
+
+it("an uncertain result names its receipt and why, so it can be reconciled or reported", () => {
+  const deliveryId = "440ebcfc-180e-4f40-af4a-a55672d26593";
+  const result = readableMcpResult(
+    {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            schemaVersion: 1,
+            deliveryId,
+            outcome: "unconfirmed",
+            deliveryStage: "uncertain",
+            detail: "The original peer receipt is unresolved; no replacement was sent.",
+          }),
+        },
+      ],
+      isError: true,
+    },
+    "mcp__plugin_clankie-worker_worker__message_peer",
+  );
+  expect(result.content[0]?.text).toContain(`ID ${deliveryId}.`);
+  expect(result.content[0]?.text).toContain("no replacement was sent");
+  expect(decodeMcpResult(result)).toMatchObject({ deliveryId, deliveryStage: "uncertain" });
+});
