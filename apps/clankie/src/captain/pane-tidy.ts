@@ -157,6 +157,11 @@ export class PaneTidy {
   readonly decisions: WorktreeDecisions;
   private readonly ports: {
     runner: HerdrWatchRunner;
+    reclaimCaches?(
+      repository: string,
+      path: string | undefined,
+      guard: () => Promise<void>,
+    ): Promise<import("./reclaim-worktree-caches.ts").CacheReclamationResult>;
     prune?(
       repository: string,
       path: string,
@@ -247,6 +252,12 @@ export class PaneTidy {
       ...(work.unlandedCommits === undefined ? {} : { unlandedCommits: work.unlandedCommits }),
       ...(work.dirtyFiles === undefined ? {} : { dirtyFiles: work.dirtyFiles }),
     });
+  }
+  async reclaimCaches(repository: string, path: string | undefined, source: ConversationAuthority) {
+    const authority = captureConversationAuthority(source);
+    await this.authority(authority);
+    if (!this.ports.reclaimCaches) throw Error("Cache reclamation unavailable");
+    return this.ports.reclaimCaches(repository, path, () => this.authority(authority));
   }
   async pruneWorktree(repository: string, path: string, source: ConversationAuthority) {
     const authority = captureConversationAuthority(source);

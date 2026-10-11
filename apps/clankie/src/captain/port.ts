@@ -206,6 +206,10 @@ export interface CaptainPort {
     decision: "worth_landing" | "safe_to_drop";
     reason: string;
   }): Promise<import("@clankie/protocol").WorktreeDecision>;
+  reclaimWorktreeCaches?(
+    repository: string,
+    path?: string,
+  ): Promise<import("./reclaim-worktree-caches.ts").CacheReclamationResult>;
   pruneWorktree?(
     repository: string,
     path: string,

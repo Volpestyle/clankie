@@ -1,3 +1,4 @@
+import { createWorktreeCacheRoutes } from "../worktree-cache-routes.ts";
 import { legacyWorkItem } from "@clankie/protocol/work-items";
 import {
   CAPTAIN_LANE_OBSERVATION_PATH,
@@ -126,6 +127,15 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       return context.json({ error: "checkouts_unavailable" }, 503);
     return context.json(await ctx.dependencies.captain.checkoutReport());
   });
+  ctx.app.route(
+    "/",
+    createWorktreeCacheRoutes({
+      authenticate: (request) => authenticateOperator(request, ctx.dependencies),
+      ...(ctx.dependencies.captain.reclaimWorktreeCaches
+        ? { reclaim: ctx.dependencies.captain.reclaimWorktreeCaches.bind(ctx.dependencies.captain) }
+        : {}),
+    }),
+  );
   for (const action of ["sync", "prune"] as const) {
     ctx.app.post(`/v1/checkouts/${action}`, async (context) => {
       const identity = await authenticateOperator(context.req.raw, ctx.dependencies);

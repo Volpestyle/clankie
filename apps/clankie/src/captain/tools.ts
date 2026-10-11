@@ -1339,6 +1339,21 @@ function herdrWatchTools(
             },
           }),
           defineTool({
+            name: "reclaim_tidy_worktree_caches",
+            label: "Reclaim idle worktree caches",
+            description:
+              "Reclaim ignored package-manager node_modules and Rust target with CACHEDIR.TAG in clean enrolled linked agent worktrees idle for six hours. Complete native process cwd and pane inventories must prove inactivity; unknown observations refuse. Keeps commits, source edits and logs. Manual only; never removes worktrees.",
+            parameters: Type.Object({
+              repository: Type.String({ minLength: 1, maxLength: 4096 }),
+              path: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+            }),
+            execute: async (_id, input) => {
+              const authority = captureConversationAuthority(turn.conversationAuthority);
+              await assertConversationAuthority(authority);
+              return json(await watches.tidy!.reclaimCaches(input.repository, input.path, authority));
+            },
+          }),
+          defineTool({
             name: "prune_tidy_worktree",
             label: "Remove a landed worktree",
             description:

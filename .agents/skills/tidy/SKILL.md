@@ -107,3 +107,11 @@ are never overwritten, stashed or deleted. Fresh topic branches are accepted.
 A dirty-start refusal names up to 20 blocking paths, including
 untracked directories. Preserve those files; create a fresh owned deliverable
 worktree from fetched `origin/main`. Resuming a saved session keeps its exact directory.
+
+For disk pressure, use `reclaim_tidy_worktree_caches({ repository, path? })`
+(or `clankie checkouts reclaim-caches --repository OWNER_CHECKOUT [--path WORKTREE]`).
+It removes only ignored package-manager installs and tagged Rust build caches
+in enrolled linked worktrees clean and idle for six hours, with a complete native
+process cwd and pane census. Commits, edits, logs and `.local` evidence stay.
+Unknown, recent, dirty, live or managed trees stay. Report the returned paths and
+refusals. Cache deletion is manual; reinstall or rebuild before resuming that tree.

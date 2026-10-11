@@ -29,6 +29,7 @@ import {
   projectPathContains,
   checkoutGit,
 } from "@clankie/settings";
+import { reclaimWorktreeCaches } from "./reclaim-worktree-caches.ts";
 import { pruneTidyWorktree, type PruneWorktreeResult } from "./prune-worktree.ts";
 import { managedWorktreePaths } from "./tidy-worktrees.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
@@ -2193,6 +2194,28 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       throw Error("Select a registered owner checkout");
     return Promise.all((repository === undefined ? repositories : [repository]).map(syncOwnerCheckout));
   };
+  const reclaimCaches = async (
+    repository: string,
+    path?: string,
+    guard: () => Promise<void> = async () => {},
+  ) => {
+    const current = await settings();
+    const roots = current.projects.projects
+      .flatMap((project) => project.worktreeRoots)
+      .filter((root) => root.machineId === "local" && root.repoPath === repository)
+      .map((root) => root.path);
+    if (!roots.length) throw Error("Select a registered local owner checkout");
+    return reclaimWorktreeCaches(repository, herdrRunner, {
+      roots,
+      ...(path === undefined ? {} : { path }),
+      protection: { runtimeRoot: options.repoRoot },
+      guard: async () => {
+        await guard();
+        if (JSON.stringify((await settings()).projects) !== JSON.stringify(current.projects))
+          throw Error("Project enrollment changed");
+      },
+    });
+  };
   const pruneWorktree = async (
     repository: string,
     path: string,
@@ -2428,6 +2451,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const paneTidy: PaneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
     runner: herdrRunner,
     runtimeRoot: options.repoRoot,
+    reclaimCaches,
     prune: (repository, path, guard) => pruneWorktree(repository, path, guard),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     ownerValid: validateConversationOwner,
@@ -5724,6 +5748,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     checkoutReport,
     syncCheckouts,
     pruneWorktree,
+    reclaimWorktreeCaches: reclaimCaches,
     tidyWorktrees: (repository, mergedInto) => paneTidy.worktreeReport(repository, mergedInto),
     ...(deps.harnessProcesses
       ? {

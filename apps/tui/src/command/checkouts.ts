@@ -9,14 +9,18 @@ export async function runCheckoutsCommand(
   const action = args[0] ?? "status";
   if (action === "decide") return decide(args, options);
   if (
-    !["status", "sync", "prune"].includes(action) ||
-    (action === "prune"
-      ? args.length !== 5 || args[1] !== "--repository" || args[3] !== "--path"
-      : (action === "status" ? ![0, 1].includes(args.length) : ![1, 3].includes(args.length)) ||
-        (args.length === 3 && args[1] !== "--repository"))
+    !["status", "sync", "prune", "reclaim-caches"].includes(action) ||
+    (action === "reclaim-caches"
+      ? ![3, 5].includes(args.length) ||
+        args[1] !== "--repository" ||
+        (args.length === 5 && args[3] !== "--path")
+      : action === "prune"
+        ? args.length !== 5 || args[1] !== "--repository" || args[3] !== "--path"
+        : (action === "status" ? ![0, 1].includes(args.length) : ![1, 3].includes(args.length)) ||
+          (args.length === 3 && args[1] !== "--repository"))
   )
     throw Error(
-      `Usage: clankie checkouts status | sync [--repository OWNER_CHECKOUT] | prune --repository OWNER_CHECKOUT --path WORKTREE | ${DECIDE_USAGE}`,
+      `Usage: clankie checkouts status | sync [--repository OWNER_CHECKOUT] | prune --repository OWNER_CHECKOUT --path WORKTREE | reclaim-caches --repository OWNER_CHECKOUT [--path WORKTREE] | ${DECIDE_USAGE}`,
     );
   return request(
     action === "status" ? "" : `/${action}`,
@@ -24,7 +28,7 @@ export async function runCheckoutsCommand(
       ? undefined
       : {
           ...(args[2] ? { repository: args[2] } : {}),
-          ...(action === "prune" ? { path: args[4] } : {}),
+          ...(["prune", "reclaim-caches"].includes(action) && args[4] ? { path: args[4] } : {}),
         },
     options,
   );

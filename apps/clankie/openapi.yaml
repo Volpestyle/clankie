@@ -295,6 +295,35 @@ paths:
           description: Operator authentication required
         "409":
           description: Repository enrollment refused
+  /v1/checkouts/reclaim-caches:
+    post:
+      tags: [Operator]
+      operationId: reclaimWorktreeCaches
+      summary: Reclaim verified caches in clean inactive enrolled linked worktrees
+      description: Manual only. Six-hour retention; complete native process cwd and pane inventories. Removes ignored package-manager node_modules and CACHEDIR.TAG Rust target, at most 32 per sweep. Keeps commits, source edits and logs; unknown observations refuse.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [repository]
+              properties:
+                repository: { type: string }
+                path: { type: string }
+      responses:
+        "200":
+          description: Reclaimed cache paths and kept reasons, or unavailable census
+        "400":
+          description: Invalid request
+        "401":
+          description: Operator authentication required
+        "409":
+          description: Unregistered repository refused
+        "503":
+          description: Cache reclamation unavailable
   /v1/checkouts/prune:
     post:
       tags: [Operator]

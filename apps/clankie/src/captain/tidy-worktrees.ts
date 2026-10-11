@@ -71,7 +71,7 @@ async function git(path: string, args: readonly string[]): Promise<string> {
   });
   return stdout;
 }
-async function repository(path: string) {
+export async function inspectTidyRepository(path: string) {
   await canonical(path);
   const paths = (
     await git(path, [
@@ -89,7 +89,7 @@ async function repository(path: string) {
   if (top !== path) throw new Error("Repository path must be its exact canonical root");
   return { top: top!, directory: directory!, common: common! };
 }
-function worktrees(raw: string): GitWorktree[] {
+export function tidyWorktreeInventory(raw: string): GitWorktree[] {
   const records = raw
     .split("\0\0")
     .filter(Boolean)
@@ -123,7 +123,7 @@ function worktrees(raw: string): GitWorktree[] {
     throw new Error("Incomplete worktree inventory");
   return records;
 }
-async function paneDirectories(runner: Pick<HerdrWatchRunner, "list">): Promise<string[]> {
+export async function tidyPaneDirectories(runner: Pick<HerdrWatchRunner, "list">): Promise<string[]> {
   if (!runner.list) throw new Error("Complete pane inventory unavailable");
   const panes = await runner.list();
   const paths: string[] = [];
@@ -156,9 +156,9 @@ export async function listTidyWorktrees(
     candidates: [],
     excluded: [{ path: repositoryPath, reason }],
   });
-  let repo: Awaited<ReturnType<typeof repository>>;
+  let repo: Awaited<ReturnType<typeof inspectTidyRepository>>;
   try {
-    repo = await repository(repositoryPath);
+    repo = await inspectTidyRepository(repositoryPath);
   } catch {
     return unavailable("repository_unverified");
   }
@@ -175,13 +175,13 @@ export async function listTidyWorktrees(
   }
   let panePaths: string[];
   try {
-    panePaths = await paneDirectories(runner);
+    panePaths = await tidyPaneDirectories(runner);
   } catch {
     return unavailable("pane_inventory_unavailable");
   }
   try {
     const raw = await git(repo.top, ["worktree", "list", "--porcelain", "-z"]);
-    const inventory = worktrees(raw);
+    const inventory = tidyWorktreeInventory(raw);
     const managedPaths = await managedWorktreePaths(protection);
     const result: TidyWorktreesResult = { outcome: "listed", mergedInto, candidates: [], excluded: [] };
     for (const entry of inventory) {
@@ -200,7 +200,7 @@ export async function listTidyWorktrees(
       else if (entry.prunable) reason = "prunable";
       else {
         try {
-          const candidate = await repository(entry.path);
+          const candidate = await inspectTidyRepository(entry.path);
           if (
             candidate.common !== repo.common ||
             dirname(candidate.directory) !== join(repo.common, "worktrees")
@@ -248,7 +248,7 @@ export async function listTidyWorktrees(
           ...(landedBy ? { landedBy } : {}),
         });
     }
-    const refreshedRepo = await repository(repositoryPath);
+    const refreshedRepo = await inspectTidyRepository(repositoryPath);
     const refreshedSha = (
       await git(repo.top, ["rev-parse", "--verify", "--end-of-options", `${mergedInto}^{commit}`])
     ).trim();
@@ -256,7 +256,7 @@ export async function listTidyWorktrees(
       JSON.stringify(refreshedRepo) !== JSON.stringify(repo) ||
       refreshedSha !== mergeSha ||
       (await git(repo.top, ["worktree", "list", "--porcelain", "-z"])) !== raw ||
-      JSON.stringify(await paneDirectories(runner)) !== JSON.stringify(panePaths)
+      JSON.stringify(await tidyPaneDirectories(runner)) !== JSON.stringify(panePaths)
     )
       return unavailable("inventory_changed");
     return result;

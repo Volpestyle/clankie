@@ -7319,6 +7319,18 @@ checkout does not undo a successful push or prevent the fetched runtime from upd
 linked worktree's unlanded work at its current HEAD. Doctor and tidy show it; a
 new commit invalidates it.
 
+`clankie checkouts reclaim-caches --repository OWNER_CHECKOUT [--path WORKTREE]`
+reclaims ignored package-manager `node_modules` and Rust `target` directories
+bearing a valid `CACHEDIR.TAG` in registered local agent worktrees. Trees must
+be clean and inactive for six hours; complete native process cwd and pane
+inventories must show no live use. Main, managed runtime, locked and alias trees
+are protected. Missing or changing observations refuse cleanup. A sweep removes
+at most 32 caches; commits, source files, `.local` evidence and logs stay.
+The owner-authenticated `POST /v1/checkouts/reclaim-caches` accepts `repository`
+and optional `path`; tidy uses `reclaim_tidy_worktree_caches`. This is manual;
+there is no automatic cache-deletion timer. Reinstall dependencies or rebuild
+before using a reclaimed tree again.
+
 `clankie checkouts prune --repository OWNER_CHECKOUT --path WORKTREE` removes
 one landed, clean, inactive linked worktree in an enrolled worktree root:
 merged, on main by content, or decided `safe_to_drop` for that exact HEAD. A
