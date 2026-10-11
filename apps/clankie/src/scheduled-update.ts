@@ -42,7 +42,12 @@ export function startScheduledUpdates(options: ScheduledUpdateOptions): {
       if (!(await options.idle())) return "body-busy";
       let current = true;
       const result = await options.updater.request("latest", {
-        guard: async () => {},
+        guard: async () => {
+          // Release/approval lookups may outlast the initial idle observation.
+          // The updater repeats this guard immediately before helper acceptance.
+          if (!(await options.enabled())) throw new Error("Automatic installs are disabled");
+          if (!(await options.idle())) throw new Error("Body became busy before scheduled install");
+        },
         current: () => current,
         initiator: { kind: "schedule" },
       });

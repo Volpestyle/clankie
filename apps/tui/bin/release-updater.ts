@@ -112,7 +112,13 @@ export function createReleaseUpdater(options: ReleaseUpdaterOptions): RuntimeUpd
       if (currentRelease(installRoot) !== releaseRoot)
         throw Error("Running service is not the current release");
       const version = await resolveRelease(ref);
-      if (version === manifest.version) return { ...status(), accepted: false, upToDate: true };
+      // A newer image seed must not be undone by the next hourly check against
+      // an older fleet approval. Explicit operator pins retain rollback support.
+      if (
+        version === manifest.version ||
+        (authority.initiator?.kind === "schedule" && olderThan(version, manifest.version))
+      )
+        return { ...status(), accepted: false, upToDate: true };
       const target = { version, commit: commitString((await api(`/commits/${version}`)).sha) };
       if (!existsSync(helperPath)) throw Error("This release has no update helper");
       const initiator = parseUpdateInitiator(authority.initiator ?? { kind: "operator" });

@@ -112,7 +112,10 @@ newer of the seed and any release the body already installed, keeping one
 previous release for rollback. The service then checks hourly and installs the
 latest official `clankie-linux-<arch>` release while idle, with the same health
 rollback as a Mac install; `clankie update auto off` leaves installs to
-`clankie update`. Rebuilding the image (`up -d --build --wait`) still updates the
+`clankie update`. Scheduling rechecks enabled/idle state after release lookup
+before accepting the helper. Hourly checks keep a newer image seed even when a
+managed fleet's approved release is older; an explicit `--ref vX.Y.Z` can still
+roll back within that cap. Rebuilding the image (`up -d --build --wait`) still updates the
 base system, Node tooling and global harnesses, and a newer seed takes over. Back up both volumes
 with the deployment stopped. Replacing a container ends its live processes;
 persisted tasks and dispatch intents require reconciliation, not blind reassignment.
