@@ -78,6 +78,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "tracker_sync",
         "evidence_records",
         "evidence_fetch",
+        "lead_chats",
         "evidence_preview",
         "work_item_write",
         "work_item_write_receipt",

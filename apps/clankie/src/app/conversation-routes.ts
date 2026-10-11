@@ -366,6 +366,37 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         receipt: await serveWorkWrite(request, authority, parsed.data.op === "work_item_write"),
       });
     }
+    if (parsed.success && parsed.data.op === "lead_chats") {
+      const ownerDevice = () => {
+        if (owner?.principal.kind !== "device") return false;
+        const record = ctx.devices.get(owner.principal.id);
+        // Local pairing records the configured operator ID, not a fixed name.
+        // Hosted visitor pairing uses the distinct "hosted-account" principal.
+        return (
+          record !== undefined &&
+          record.supportGrantId === undefined &&
+          record.mintedBy !== "hosted-account" &&
+          !record.mintedBy.startsWith("support:")
+        );
+      };
+      if (!ownerDevice() || !owner || !(await owner.authorize()))
+        return context.json({ error: "owner_device_required" }, 403);
+      try {
+        if (!ctx.dependencies.captain.leadChats) throw new Error("Lead roster unavailable");
+        const chats = await ctx.dependencies.captain.leadChats();
+        if (!ownerDevice() || !(await owner.authorize()))
+          return context.json({ error: "owner_device_required" }, 403);
+        return context.json({ op: "lead_chats", schemaVersion: 1, result: { outcome: "ready", chats } });
+      } catch {
+        if (!ownerDevice() || !(await owner.authorize()))
+          return context.json({ error: "owner_device_required" }, 403);
+        return context.json({
+          op: "lead_chats",
+          schemaVersion: 1,
+          result: { outcome: "unavailable", message: "The lead roster can’t be read here." },
+        });
+      }
+    }
     if (parsed.success && parsed.data.op === "evidence_fetch") {
       // Media stays in the device's authenticated relay. Operator/captain tokens are not device authority.
       const ownerDevice = () =>

@@ -802,3 +802,5 @@ export * from "./machine-access.ts";
 export { OperatorLeadVisitSchema, type OperatorLeadVisit } from "./operator-conversations.ts";
 
 export * from "./tracker-sync.ts";
+
+export * from "./lead-chats.ts";

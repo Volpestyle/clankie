@@ -1,3 +1,5 @@
+import { leadChatFixture } from "./fixtures/lead-chats.ts";
+import { OperatorConversationServiceResultSchema } from "@clankie/protocol";
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -23,10 +25,12 @@ import { GatewayEncryptionHost, openGatewayValue, sealGatewayValue } from "../sr
 import { hostedFixture } from "./fixtures/hosted-body.ts";
 
 // The browser side here uses only globalThis.crypto.subtle, as app.clankie.bot does.
+const leadCleanup: Array<() => Promise<void>> = [];
 const apps: ClankieApp[] = [],
   roots: string[] = [];
 afterEach(async () => {
   apps.splice(0).forEach((app) => app.close());
+  for (const close of leadCleanup.splice(0).reverse()) await close();
   vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -45,7 +49,7 @@ it("WebCrypto gateway records open with the body's node:crypto implementation, a
   expect(() => openGatewayValue(raw, sealed, `${aad}x`)).toThrow();
 });
 
-async function fixture(tamper = false) {
+async function fixture(tamper = false, captain = createStubCaptain(), owner = false) {
   const f = hostedFixture();
   vi.spyOn(Date, "now").mockReturnValue(f.now);
   const root = await mkdtemp(join(tmpdir(), "hosted-web-"));
@@ -58,7 +62,7 @@ async function fixture(tamper = false) {
   );
   const encryption = new GatewayEncryptionHost(f.hostId, randomBytes(32));
   const app = await createClankieApp({
-    captain: createStubCaptain(),
+    captain,
     hostedPairing,
     settings: new SettingsStore(join(root, "body-settings.json")),
     deviceSessionKey: randomBytes(32),
@@ -87,6 +91,7 @@ async function fixture(tamper = false) {
     if (url.pathname === "/fleet/v1/pairing/offer") {
       const binding = JSON.parse(body) as { browserPublicKey: string; nonce: string };
       const pairTicket = f.pair({
+        ...(owner ? { purpose: "operator" } : {}),
         bkh: createHash("sha256")
           .update(Buffer.from(binding.browserPublicKey, "base64url"))
           .digest("base64url"),
@@ -116,55 +121,83 @@ async function fixture(tamper = false) {
   return { f, fetchImpl, wire };
 }
 
-it("a browser pairs with a hosted body through WebCrypto alone and uses the encrypted gateway", async () => {
-  const { f, fetchImpl, wire } = await fixture();
-  const account = createHostedAccountClient({
-    origin: "https://api.example.test",
-    accessToken: "account-only-secret",
-    fetchImpl,
-  });
-  const [machine] = await account.machines();
-  const paired = await account.pair(machine!);
-  expect(paired.encryption.hostId).toBe(f.hostId);
-  let encryption = paired.encryption;
-  const rotate = (response: Response) =>
-    GatewayEncryptionCredentialSchema.parse({
-      hostId: encryption.hostId,
-      key: response.headers.get("x-clankie-encryption-key"),
-      ticket: response.headers.get("x-clankie-encryption-ticket"),
+it.each([true, false])(
+  "a browser pairs through WebCrypto and lead roster privacy holds (owner=%s)",
+  async (owner) => {
+    const lead = await leadChatFixture(false, leadCleanup);
+    const { f, fetchImpl, wire } = await fixture(false, lead.captain, owner);
+    const account = createHostedAccountClient({
+      origin: "https://api.example.test",
+      accessToken: "account-only-secret",
+      fetchImpl,
     });
-  const secureFetch = createGatewayEncryptedFetch({
-    crypto: createWebGatewayCrypto(),
-    fetchImpl,
-    credential: () => encryption,
-  });
-  const base = `https://api.example.test/h/${f.hostId}`;
-  const redeemResponse = await secureFetch(`${base}/v1/pairing/redeem`, {
-    method: "POST",
-    body: JSON.stringify({
-      offerSecret: new URL(paired.link).searchParams.get("offer"),
-      device: { name: "Browser", platform: "unknown" },
-    }),
-  });
-  expect(redeemResponse.status).toBe(200);
-  const redeem = PairingRedeemResponseSchema.parse(await redeemResponse.json());
-  encryption = rotate(redeemResponse);
-  const completeResponse = await secureFetch(`${base}/v1/pairing/complete`, {
-    method: "POST",
-    body: JSON.stringify({ completionToken: redeem.completionToken, acceptedGrants: TAKE_CONTROL_GRANTS }),
-  });
-  expect(completeResponse.status).toBe(200);
-  const complete = PairingCompleteResponseSchema.parse(await completeResponse.json());
-  encryption = rotate(completeResponse);
-  const self = await secureFetch(`${base}/v1/devices/self`, {
-    headers: { authorization: `Bearer ${complete.deviceToken}` },
-  });
-  expect(self.status).toBe(200);
-  expect(await self.json()).toMatchObject({ deviceId: complete.deviceId });
-  const seen = wire.join("\n");
-  for (const secret of [paired.link, complete.deviceToken, paired.encryption.key, encryption.key])
-    expect(seen).not.toContain(secret);
-});
+    const [machine] = await account.machines();
+    const paired = await account.pair(machine!);
+    expect(paired.encryption.hostId).toBe(f.hostId);
+    let encryption = paired.encryption;
+    const rotate = (response: Response) =>
+      GatewayEncryptionCredentialSchema.parse({
+        hostId: encryption.hostId,
+        key: response.headers.get("x-clankie-encryption-key"),
+        ticket: response.headers.get("x-clankie-encryption-ticket"),
+      });
+    const secureFetch = createGatewayEncryptedFetch({
+      crypto: createWebGatewayCrypto(),
+      fetchImpl,
+      credential: () => encryption,
+    });
+    const base = `https://api.example.test/h/${f.hostId}`;
+    const redeemResponse = await secureFetch(`${base}/v1/pairing/redeem`, {
+      method: "POST",
+      body: JSON.stringify({
+        offerSecret: new URL(paired.link).searchParams.get("offer"),
+        device: { name: "Browser", platform: "unknown" },
+      }),
+    });
+    expect(redeemResponse.status).toBe(200);
+    const redeem = PairingRedeemResponseSchema.parse(await redeemResponse.json());
+    encryption = rotate(redeemResponse);
+    const completeResponse = await secureFetch(`${base}/v1/pairing/complete`, {
+      method: "POST",
+      body: JSON.stringify({ completionToken: redeem.completionToken, acceptedGrants: TAKE_CONTROL_GRANTS }),
+    });
+    expect(completeResponse.status).toBe(200);
+    const complete = PairingCompleteResponseSchema.parse(await completeResponse.json());
+    encryption = rotate(completeResponse);
+    const self = await secureFetch(`${base}/v1/devices/self`, {
+      headers: { authorization: `Bearer ${complete.deviceToken}` },
+    });
+    expect(self.status).toBe(200);
+    expect(await self.json()).toMatchObject({ deviceId: complete.deviceId });
+    const roster = await secureFetch(`${base}/v1/hosted/operator`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${complete.deviceToken}` },
+      body: JSON.stringify({
+        method: "POST",
+        path: "/operator/v1/dispatch",
+        body: JSON.stringify({ op: "lead_chats", schemaVersion: 1 }),
+      }),
+    });
+    expect(roster.status).toBe(owner ? 200 : 403);
+    if (owner) {
+      const result = OperatorConversationServiceResultSchema.parse(await roster.json());
+      expect(result).toEqual({
+        op: "lead_chats",
+        schemaVersion: 1,
+        result: { outcome: "ready", chats: await lead.captain.leadChats!() },
+      });
+      expect(
+        result.op === "lead_chats" && result.result.outcome === "ready" ? result.result.chats.length : 0,
+      ).toBeGreaterThan(0);
+    } else {
+      expect(await roster.json()).toEqual({ error: "operator_device_required" });
+    }
+    const seen = wire.join("\n");
+    expect(seen).not.toContain("lead_chats");
+    for (const secret of [paired.link, complete.deviceToken, paired.encryption.key, encryption.key])
+      expect(seen).not.toContain(secret);
+  },
+);
 
 it("the WebCrypto exchange refuses an answer the body did not sign", async () => {
   const { fetchImpl } = await fixture(true);

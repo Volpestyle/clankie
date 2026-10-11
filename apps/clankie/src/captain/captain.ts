@@ -5252,6 +5252,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     prepareWorkHandoffIntent,
     prepareFreeAgentIntent,
+    leadChats,
     serveOperatorConversation: createOperatorService({
       prepareFreeAgentIntent,
       get personas() {

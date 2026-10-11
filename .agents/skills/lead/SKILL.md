@@ -64,6 +64,10 @@ lead channel; a saved activity timestamp alone never means it is connected.
 Disconnected, reconnecting and stale native heads remain labelled honestly.
 Worker and Discord room chats stay out of this private roster; Discord cannot
 read it. The card refreshes each service turn, and `get_self_state` rereads it.
+The owner's paired app devices can read this same projection through encrypted
+operator dispatch `lead_chats` (schema version 1). Only active owner devices with
+`terminalControl` qualify; visitor, guest, support and Discord access is refused.
+The result distinguishes `ready` with `chats` from `unavailable` with a message.
 
 Leads talk to each other with `message_seat`, naming the other lead's
 conversation ID or its head's seat ID. The message arrives in that chat over the
