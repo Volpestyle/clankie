@@ -194,6 +194,23 @@ For matched local health measurements, use the runtime sampler's fresh native
 HTTP transport on both versions. Idle pooled fetch sockets can delay sending;
 a profiler or frequent event-loop histogram can hide that delay.
 
+## Integration queue recovery
+
+`clankie integrate status [UUID]` shows the scheduled position, isolation chain
+and conditional completion ETA from recent completed gates (unknown before
+measurements). Compatible batches have at most three requests; a failed shared
+gate retries members separately and interleaves them with new work. Restores
+remain order barriers. The queue keeps exact-tree gate and push checks.
+
+When your input is obsolete, `clankie integrate cancel UUID --actor NAME
+--reason TEXT` withdraws a waiting request or an active isolated retry before
+landing. An in-flight isolated gate finishes, but its pass cannot land withdrawn
+input. Remaining members need a fresh gated tree. The first non-isolated gate
+and a landing already under way cannot be cancelled. Check the original receipt
+before submitting a replacement after an uncertain cancellation; never infer
+withdrawal from a timeout. [Integration](../../../../docs/integration.md) owns the
+full contract.
+
 ## Changing yourself
 
 Your code, skills and instructions are yours to fix, improve and reshape. An

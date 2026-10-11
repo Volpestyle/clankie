@@ -442,8 +442,12 @@ paths:
       summary: Compose, gate and land an ordered approved commit batch
       description: |
         Source-checkout service only. Run returns a durable request receipt immediately; poll status.
-        Compatible requests waiting during a gate share the next batch. Conflicting members
-        roll back; failed shared gates split until failing members are reported. Status without
+        Compatible requests waiting during a gate share batches of at most three. Conflicting members
+        roll back; failed shared gates retry members individually, alternating with waiting work.
+        Waiting and active isolating requests can be cancelled before landing; a gate containing a
+        withdrawn input cannot land, even if green. Status exposes progress.queuePosition,
+        progress.isolationChain and a conditional progress.estimatedCompletionAt based on recent
+        completed gates (null without measurements). Status without
         an id returns running batches, waiting requests, the last result and interrupted work.
         Independent clones and detached core/app sibling worktrees install real packages
         and run pnpm check with private home, state, credentials and caches. Only the
@@ -571,7 +575,7 @@ paths:
                         {
                           type: array,
                           items: { type: object },
-                          description: Queued request receipts in admission order,
+                          description: "Queued request receipts in scheduled batch order, including isolated retries",
                         }
                       lastResult:
                         { type: object, description: Most recently completed batch and its evidence }
@@ -637,9 +641,54 @@ paths:
                           type: string,
                           description: "Why the queue gates these requests again: main moved somewhere the held attempt's gate checked",
                         }
+                      isolation:
+                        type: object
+                        required: [rootBatchId]
+                        properties:
+                          rootBatchId:
+                            {
+                              type: string,
+                              format: uuid,
+                              description: Failed shared attempt that scheduled the individual retry,
+                            }
+                      progress:
+                        type: object
+                        required:
+                          [
+                            queuePosition,
+                            estimatedRemainingMs,
+                            estimatedCompletionAt,
+                            estimateBasis,
+                            isolationChain,
+                          ]
+                        properties:
+                          queuePosition:
+                            {
+                              type: [integer, "null"],
+                              minimum: 0,
+                              description: "Scheduled batches ahead, zero for running, null if finished or unknown",
+                            }
+                          estimatedRemainingMs: { type: [number, "null"], minimum: 0 }
+                          estimatedCompletionAt:
+                            {
+                              type: [string, "null"],
+                              format: date-time,
+                              description: "Conditional completion estimate from recently completed gates, null without measurements",
+                            }
+                          estimateBasis: { type: string, enum: [recent-completions, unknown, finished] }
+                          isolationChain:
+                            type: array
+                            items:
+                              type: object
+                              required: [batchId, memberCount, state]
+                              properties:
+                                batchId: { type: string, format: uuid }
+                                memberCount: { type: integer, minimum: 1 }
+                                state: { type: string }
+                                gateExitCode: { type: [integer, "null"] }
                       cancelled:
                         type: object
-                        description: Who withdrew this request before its gate started, and why
+                        description: Who withdrew this waiting or isolating request before landing, and why
                         required: [actor, reason, at]
                         properties:
                           actor: { type: string }

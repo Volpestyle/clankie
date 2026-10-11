@@ -572,6 +572,16 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         const result = await runIntegrationCommand(args.length ? args : ["status"]);
         const queue = result.queue;
         const describe = (batch: import("@clankie/protocol/integrate").IntegrationBatch) => {
+          const progress = batch.progress;
+          const isolation = progress?.isolationChain.length
+            ? ` · isolation ${progress.isolationChain.map((attempt) => `${attempt.memberCount} (${attempt.batchId.slice(0, 8)} ${attempt.state})`).join(" → ")}`
+            : "";
+          const eta =
+            progress && progress.estimateBasis !== "finished"
+              ? progress.estimatedRemainingMs === null
+                ? " · ETA unknown"
+                : ` · ETA ~${Math.max(1, Math.ceil(progress.estimatedRemainingMs / 60_000))}m (recent gates)`
+              : "";
           const revalidated = batch.repos.flatMap((repo) =>
             (repo.revalidations ?? [])
               .filter((r) => r.covered)
@@ -579,7 +589,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                 (r) => ` · ${repo.name} revalidated over ${r.incoming.map((c) => c.slice(0, 9)).join(", ")}`,
               ),
           );
-          return `${batch.id} · ${batch.state} · ${(batch.members ?? [batch.request]).map((m) => `${m.id}: ${[...m.core, ...(m.app ?? [])].join(", ")}`).join("; ")}${batch.error ? ` · ${batch.error}` : ""}${batch.cancelled ? ` · cancelled by ${batch.cancelled.actor}: ${batch.cancelled.reason}` : ""}${batch.regateReason ? ` · gating again: ${batch.regateReason}` : ""}${revalidated.join("")}`;
+          return `${batch.id} · ${batch.state} · ${(batch.members ?? [batch.request]).map((m) => `${m.id}: ${[...m.core, ...(m.app ?? [])].join(", ")}`).join("; ")}${batch.error ? ` · ${batch.error}` : ""}${batch.cancelled ? ` · cancelled by ${batch.cancelled.actor}: ${batch.cancelled.reason}` : ""}${batch.regateReason ? ` · gating again: ${batch.regateReason}` : ""}${revalidated.join("")}${isolation}${eta}`;
         };
         shell.insertCommandResult(
           "/integrate",

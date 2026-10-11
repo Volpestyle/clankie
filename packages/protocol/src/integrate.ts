@@ -2,6 +2,8 @@ import { CheckoutSyncResultSchema } from "./checkouts.ts";
 import { z } from "zod";
 
 export const INTEGRATE_PATH = "/v1/integrate";
+/** Failed shared gates retry members separately rather than growing an isolation tree. */
+export const INTEGRATE_MAX_BATCH_MEMBERS = 3;
 const Id = z.uuid();
 const Sha = z.string().regex(/^[a-f0-9]{40,64}$/u);
 const Commit = z.string().regex(/^[a-f0-9]{7,64}$/u);
@@ -161,26 +163,27 @@ const IntegrationRepoSchema = z.object({
     .optional(),
 });
 export type IntegrationRepo = z.infer<typeof IntegrationRepoSchema>;
+const IntegrationStateSchema = z.enum([
+  "queued",
+  "composing",
+  "conflict",
+  "installing",
+  "gating",
+  "isolating",
+  "failed",
+  "passed",
+  "held",
+  "pushing",
+  "pushed",
+  "partial",
+  "interrupted",
+  "cancelled",
+]);
 export const IntegrationBatchSchema = z.object({
   schemaVersion: z.literal(1),
   id: Id,
   request: RecordedRunSchema,
-  state: z.enum([
-    "queued",
-    "composing",
-    "conflict",
-    "installing",
-    "gating",
-    "isolating",
-    "failed",
-    "passed",
-    "held",
-    "pushing",
-    "pushed",
-    "partial",
-    "interrupted",
-    "cancelled",
-  ]),
+  state: IntegrationStateSchema,
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   evidence: z.string(),
@@ -200,7 +203,26 @@ export const IntegrationBatchSchema = z.object({
    * `local` with the reason it could not go there.
    */
   placement: z.object({ machine: z.string(), reason: z.string().optional() }).optional(),
-  /** Who withdrew a request before its gate started, and why. */
+  /** The failed shared attempt that caused this request's individual retry. */
+  isolation: z.object({ rootBatchId: Id }).optional(),
+  /** Live queue position and conditional estimate; absent in older durable records. */
+  progress: z
+    .object({
+      queuePosition: z.number().int().nonnegative().nullable(),
+      estimatedRemainingMs: z.number().nonnegative().nullable(),
+      estimatedCompletionAt: z.iso.datetime().nullable(),
+      estimateBasis: z.enum(["recent-completions", "unknown", "finished"]),
+      isolationChain: z.array(
+        z.object({
+          batchId: Id,
+          memberCount: z.number().int().positive(),
+          state: IntegrationStateSchema,
+          gateExitCode: z.number().int().nullable().optional(),
+        }),
+      ),
+    })
+    .optional(),
+  /** Who withdrew a waiting or isolating request, and why. */
   cancelled: z.object({ actor: Text, reason: Text, at: z.iso.datetime() }).optional(),
 });
 export type IntegrationBatch = z.infer<typeof IntegrationBatchSchema>;

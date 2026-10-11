@@ -35,21 +35,44 @@ request is applied. Its later inputs are blocked and its error and conflicting
 paths remain in the batch record. Healthy requests continue. Repair by approving
 new commits and composing a fresh batch.
 
-The service serializes batches, coalescing requests waiting during a gate into
-the next batch in admission order. Push requests coalesce past gate-only ones
-and gate-only requests batch among themselves, so a stray gate-only request
-never splits a run of pushes; it never lands, so no landing order changes.
-Restores run alone and nothing coalesces past one. The existing per-request input
-limits do not cap the combined batch. Requests retain their original UUID and input; a
-`batchId` points to the shared attestation and `attempts` retains previous batch
-IDs. A failed shared gate splits into smaller fresh batches until each failing
-request is reported; good subsets gate and land independently on fresh origin.
-A failed single request is terminal and cannot block later arrivals. A request
-still waiting can be withdrawn with `cancel UUID --actor NAME --reason TEXT`: it
-reads `cancelled` with a receipt naming who and why, never joins a batch, and the
-requests behind it keep their order. Once its batch starts it can't be cancelled. Shared gate
-failures caused by the base or infrastructure may affect every member; diagnosis
-is bounded by smaller subsets, and every failure retains its logs.
+The service serializes gates and coalesces compatible waiting requests in batches
+of **at most three requests**. Push requests coalesce past gate-only ones;
+gate-only requests never land. Restores run alone and remain admission-order
+barriers, including retries admitted before the restore.
+
+A failed shared gate queues each surviving member for an individual fresh gate.
+The scheduler alternates those retries with new waiting batches, so diagnosis
+does not drain a recursive isolation tree before other work can progress.
+Each member needs at most its shared attempt and one individual attempt to
+attribute that failure. Main moving into checked inputs still requires the
+existing bounded re-gating described below. Failure of a single request is
+terminal; base or infrastructure faults may independently fail every member.
+Every attempt retains its logs and exact tree.
+
+Requests retain their UUID and input. `batchId` follows the current attestation,
+`attempts` retains attempt IDs, and `isolation.rootBatchId` identifies the failed
+shared gate. While a retry waits it is `queued`, can be withdrawn, and its failed
+attempt remains in the chain. `status` exposes `progress.isolationChain` with each
+attempt's member count, state and recorded gate exit; `/integrate` displays it.
+`progress.queuePosition` counts scheduled batches (zero is running). Status's
+waiting list follows that schedule, including coalescing and restore barriers.
+
+`progress.estimatedRemainingMs` and `estimatedCompletionAt` estimate completion
+from the median of up to eight measured gate jobs completed by this queue process
+and the jobs currently ahead. They are conditional estimates, not deadlines:
+new arrivals, machine pressure, remote fallback and main moving can change them.
+Without a completed measurement or a known position, the estimate is `null`
+(`estimateBasis: unknown`); the TUI shows `ETA unknown`. Restarting resets timing
+samples and interrupts owned work rather than inventing a resumable gate.
+
+An owner can withdraw a waiting request or an active isolated retry with
+`cancel UUID --actor NAME --reason TEXT`. The durable `cancelled` receipt names
+who and why. A running isolated gate finishes without killing its process, but
+**a tree containing a withdrawn input cannot land even if its gate passes**.
+Surviving requests are composed and gated again on a fresh tree before landing;
+other queued members continue. The first, non-isolated gate and a landing already
+under way cannot be cancelled. Repeating cancellation returns the original
+receipt. Cancelling does not undo code already landed by another request.
 
 Each batch runs real `pnpm install --frozen-lockfile`
 with a private store and copied packages, then each included repository's

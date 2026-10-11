@@ -7,6 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
   IntegrationBatchSchema,
+  INTEGRATE_MAX_BATCH_MEMBERS,
   type IntegrationBatch,
   type IntegrationRepo,
   type IntegrationRun,
@@ -24,6 +25,34 @@ const active = new Set(["queued", "composing", "installing", "gating", "isolatin
 interface PendingIntegration {
   batch: IntegrationBatch;
   guard: () => Promise<void>;
+}
+interface IntegrationJob {
+  members: PendingIntegration[];
+  fresh: boolean;
+  regates: number;
+  regateReason?: string;
+}
+/** The scheduler and its status estimate use the same ordering, including restore barriers. */
+function nextJob(pending: PendingIntegration[], retries: IntegrationJob[], preferRetry: boolean) {
+  const restore = pending[0]?.batch.request.restore;
+  const retryBeforeRestore =
+    restore && retries[0] && retries[0].members[0]!.batch.createdAt <= pending[0]!.batch.createdAt;
+  if (retries.length && (!pending.length || (restore ? retryBeforeRestore : preferRetry)))
+    return { job: retries.shift()!, preferRetry: false };
+  const first = pending.shift()!;
+  const members = [first];
+  const request = first.batch.request;
+  // Gate-only requests cannot land. Restores remain admission-order barriers.
+  for (
+    let index = 0;
+    !request.restore && members.length < INTEGRATE_MAX_BATCH_MEMBERS && index < pending.length;
+  ) {
+    const next = pending[index]!.batch.request;
+    if (next.restore) break;
+    if (next.push === request.push) members.push(...pending.splice(index, 1));
+    else index++;
+  }
+  return { job: { members, fresh: false, regates: 0 }, preferRetry: true };
 }
 interface IntegrationOptions {
   directory: string;
@@ -75,6 +104,12 @@ export class IntegrationQueue {
   private tail: Promise<void> = Promise.resolve();
   private running = new Set<string>();
   private pending: PendingIntegration[] = [];
+  private retries: IntegrationJob[] = [];
+  private preferRetry = false;
+  private current: { job: IntegrationJob; batch?: IntegrationBatch; startedAt: number } | undefined;
+  private withdrawn = new Set<string>();
+  private durations: number[] = [];
+  private writes = new Map<string, Promise<void>>();
   private draining = false;
   private readonly commands = new Map<string, { pid?: number; proof: ReturnType<typeof processIdentity> }>();
   readonly options: IntegrationOptions;
@@ -86,8 +121,20 @@ export class IntegrationQueue {
     return join(this.options.directory, "batches", id, "record.json");
   }
   private async save(batch: IntegrationBatch): Promise<void> {
-    batch.updatedAt = now();
-    await durableJson(this.path(batch.id), IntegrationBatchSchema.parse(batch));
+    // A cancel receipt and a queue transition for the same request cannot overwrite out of order.
+    const previous = this.writes.get(batch.id) ?? Promise.resolve();
+    const write = previous
+      .catch(() => undefined)
+      .then(async () => {
+        batch.updatedAt = now();
+        await durableJson(this.path(batch.id), IntegrationBatchSchema.parse(batch));
+      });
+    this.writes.set(batch.id, write);
+    try {
+      await write;
+    } finally {
+      if (this.writes.get(batch.id) === write) this.writes.delete(batch.id);
+    }
   }
   private async read(id: string): Promise<IntegrationBatch> {
     return IntegrationBatchSchema.parse(JSON.parse(await readFile(this.path(id), "utf8")));
@@ -101,8 +148,64 @@ export class IntegrationQueue {
       batch.request.push &&
       (this.running.has(batch.id) || (batch.batchId !== undefined && this.running.has(batch.batchId)))
     )
-      return { ...batch, state: "pushing" };
-    return batch;
+      batch.state = "pushing";
+    return this.requestProgress(batch);
+  }
+  private waitingJobs(): IntegrationJob[] {
+    const pending = this.pending.slice();
+    const retries = this.retries.filter((job) => job.members.length).slice();
+    const jobs: IntegrationJob[] = [];
+    let preferRetry = this.preferRetry;
+    while (pending.length || retries.length) {
+      const selected = nextJob(pending, retries, preferRetry);
+      preferRetry = selected.preferRetry;
+      jobs.push(selected.job);
+    }
+    return jobs;
+  }
+  private async requestProgress(batch: IntegrationBatch): Promise<IntegrationBatch> {
+    const matches = (job: IntegrationJob) => job.members.some((m) => m.batch.id === batch.id);
+    const waiting = this.waitingJobs().findIndex(matches);
+    const current = this.current && (matches(this.current.job) || this.current.batch?.id === batch.id);
+    const finished = !active.has(batch.state);
+    const position = finished ? null : current ? 0 : waiting < 0 ? null : waiting + 1;
+    const samples = this.durations.slice().sort((a, b) => a - b);
+    const duration = samples.length ? samples[Math.floor(samples.length / 2)]! : undefined;
+    const remaining = finished
+      ? 0
+      : position === null || duration === undefined
+        ? null
+        : (this.current ? Math.max(duration / 10, duration - (Date.now() - this.current.startedAt)) : 0) +
+          (current ? 0 : (waiting + 1) * duration);
+    const chain = batch.isolation
+      ? await Promise.all(
+          (batch.attempts ?? []).map(async (id) => {
+            const attempt = await this.read(id);
+            const gate = attempt.repos.find((repo) => repo.gate)?.gate;
+            return {
+              batchId: id,
+              memberCount: attempt.members?.length ?? 1,
+              state: attempt.state,
+              ...(gate ? { gateExitCode: gate.exitCode } : {}),
+            };
+          }),
+        )
+      : [];
+    return {
+      ...batch,
+      progress: {
+        queuePosition: position,
+        estimatedRemainingMs: remaining,
+        estimatedCompletionAt:
+          remaining === null
+            ? null
+            : finished
+              ? batch.updatedAt
+              : new Date(Date.now() + remaining).toISOString(),
+        estimateBasis: finished ? "finished" : remaining === null ? "unknown" : "recent-completions",
+        isolationChain: chain,
+      },
+    };
   }
   private async stored(id: string): Promise<IntegrationBatch> {
     const receipt = await this.read(id);
@@ -114,10 +217,14 @@ export class IntegrationQueue {
           request: receipt.request,
           batchId: shared.id,
           attempts: receipt.attempts,
+          isolation: receipt.isolation,
         }
       : shared;
-    if (receipt.batchId && ["conflict", "failed"].includes(receipt.state))
-      return { ...batch, state: receipt.state, error: receipt.error };
+    if (receipt.batchId && ["conflict", "failed", "cancelled"].includes(receipt.state))
+      return { ...batch, state: receipt.state, error: receipt.error, cancelled: receipt.cancelled };
+    // A held attempt remains durable evidence while its request waits for a fresh gate.
+    if (this.retries.some((job) => job.members.some((member) => member.batch.id === id)))
+      return { ...batch, state: "queued" };
     // Polling a member must not mistake the failed shared attempt for its final result.
     if (shared.state === "failed" && this.running.has(shared.id) && (shared.members?.length ?? 0) > 1)
       return { ...batch, state: "isolating" };
@@ -145,14 +252,24 @@ export class IntegrationQueue {
         if (error.code === "ENOENT") return undefined;
         throw error;
       });
-      if (receipt && !receipt.batchId) batches.push(await this.status(id));
+      if (
+        receipt &&
+        (!receipt.batchId || this.retries.some((job) => job.members.some((member) => member.batch.id === id)))
+      )
+        batches.push(await this.status(id));
     }
     batches.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
     const completed = batches.filter((b) => !active.has(b.state) && b.state !== "interrupted");
     completed.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return {
       running: batches.filter((b) => active.has(b.state) && b.state !== "queued"),
-      waiting: batches.filter((b) => b.state === "queued"),
+      waiting: batches
+        .filter((b) => b.state === "queued")
+        .sort(
+          (a, b) =>
+            (a.progress?.queuePosition ?? Number.MAX_SAFE_INTEGER) -
+            (b.progress?.queuePosition ?? Number.MAX_SAFE_INTEGER),
+        ),
       ...(completed[0] ? { lastResult: completed[0] } : {}),
       interrupted: batches.filter((b) => b.state === "interrupted"),
     };
@@ -220,15 +337,29 @@ export class IntegrationQueue {
     this.schedule();
     return batch;
   }
-  /** Withdraws a request still waiting for its gate; one already running keeps going. */
+  /** Withdraw waiting requests and isolated retries before their landing begins. */
   async cancel(id: string, actor: string, reason: string): Promise<IntegrationBatch> {
     const index = this.pending.findIndex((member) => member.batch.id === id);
-    if (index === -1) {
-      const { state } = await this.status(id);
-      throw Error(`Request ${id} is ${state}; only a request still waiting for its gate can be cancelled`);
+    const retry = this.retries.flatMap((job) => job.members).find((member) => member.batch.id === id);
+    const inFlight = this.current?.job.members.find((member) => member.batch.id === id);
+    const attempt = this.current?.batch;
+    const isolated =
+      inFlight?.batch.isolation &&
+      (!attempt || ["queued", "composing", "installing", "gating", "failed"].includes(attempt.state));
+    const member =
+      index >= 0 ? this.pending.splice(index, 1)[0]! : (retry ?? (isolated ? inFlight : undefined));
+    if (!member) {
+      const previous = await this.status(id);
+      if (previous.state === "cancelled") return previous;
+      throw Error(
+        `Request ${id} is ${previous.state}; only waiting or isolating requests before landing can be cancelled`,
+      );
     }
-    // Leaving the pending list first means no batch can take it while the receipt is written.
-    const { batch } = this.pending.splice(index, 1)[0]!;
+    // Fence first, before durable I/O: a completed gate containing this member cannot land.
+    this.withdrawn.add(id);
+    for (const job of this.retries) job.members = job.members.filter((m) => m.batch.id !== id);
+    this.retries = this.retries.filter((job) => job.members.length);
+    const { batch } = member;
     batch.state = "cancelled";
     batch.cancelled = { actor, reason, at: now() };
     await this.save(batch);
@@ -245,22 +376,20 @@ export class IntegrationQueue {
           await withDirectoryLock(
             join(this.options.directory, "queue.lock"),
             async () => {
-              while (this.pending.length) {
-                const first = this.pending.shift()!;
-                const members = [first];
-                const request = first.batch.request;
-                // Push requests coalesce past gate-only ones, which never land, and gate-only
-                // requests batch among themselves. Nothing passes a restore: it lands in order.
-                for (let index = 0; !request.restore && index < this.pending.length;) {
-                  const next = this.pending[index]!.batch.request;
-                  if (next.restore) break;
-                  if (next.push === request.push) members.push(...this.pending.splice(index, 1));
-                  else index++;
-                }
+              while (this.pending.length || this.retries.length) {
+                const selected = nextJob(this.pending, this.retries, this.preferRetry);
+                this.preferRetry = selected.preferRetry;
+                const { job } = selected;
+                this.current = { job, startedAt: Date.now() };
                 try {
-                  await this.runMembers(members);
+                  await this.runMembers(job);
                 } finally {
-                  for (const member of members) this.running.delete(member.batch.id);
+                  for (const member of job.members)
+                    if (
+                      !this.retries.some((retry) => retry.members.some((m) => m.batch.id === member.batch.id))
+                    )
+                      this.running.delete(member.batch.id);
+                  this.current = undefined;
                 }
               }
             },
@@ -268,7 +397,10 @@ export class IntegrationQueue {
           );
         } catch (error) {
           // A retained cross-process lock is a refusal, never permission to run a second gate.
-          for (const member of this.pending.splice(0)) {
+          for (const member of [
+            ...this.pending.splice(0),
+            ...this.retries.splice(0).flatMap((job) => job.members),
+          ]) {
             member.batch.state = "failed";
             member.batch.error = String(error);
             await this.save(member.batch);
@@ -276,7 +408,7 @@ export class IntegrationQueue {
           }
         } finally {
           this.draining = false;
-          if (this.pending.length) this.schedule();
+          if (this.pending.length || this.retries.length) this.schedule();
         }
       });
   }
@@ -302,18 +434,46 @@ export class IntegrationQueue {
     } while (this.draining);
   }
 
-  private async runMembers(
-    input: PendingIntegration[],
-    fresh = false,
-    regates = 0,
+  private async retry(
+    members: PendingIntegration[],
+    regates: number,
     regateReason?: string,
+    isolationRoot?: string,
   ): Promise<void> {
+    const job: IntegrationJob = {
+      members: members.filter((m) => !this.withdrawn.has(m.batch.id)),
+      fresh: true,
+      regates,
+      ...(regateReason === undefined ? {} : { regateReason }),
+    };
+    if (!job.members.length) return;
+    this.retries.push(job);
+    for (const member of job.members) {
+      const receipt = await this.read(member.batch.id);
+      if (this.withdrawn.has(member.batch.id)) continue;
+      member.batch = receipt;
+      // A single-request held attempt shares its original receipt directory. Preserve
+      // that attestation/revalidation history; status projects its queued retry separately.
+      if (receipt.state !== "held") {
+        receipt.state = "queued";
+        delete receipt.batchId;
+        delete receipt.error;
+      }
+      if (isolationRoot) receipt.isolation = { rootBatchId: isolationRoot };
+      this.running.add(receipt.id);
+      await this.save(receipt);
+    }
+  }
+  private async runMembers(job: IntegrationJob): Promise<void> {
+    const { members: input, fresh, regates, regateReason } = job;
     const members: PendingIntegration[] = [];
     for (const member of input) {
+      if (this.withdrawn.has(member.batch.id)) continue;
       try {
         await member.guard();
-        members.push(member);
+        if (!this.withdrawn.has(member.batch.id)) members.push(member);
       } catch (error) {
+        if (this.withdrawn.has(member.batch.id)) continue;
         member.batch.state = "failed";
         member.batch.error = String(error);
         await this.save(member.batch);
@@ -339,6 +499,12 @@ export class IntegrationQueue {
             ...(regateReason === undefined ? {} : { regateReason }),
           };
     batch.members = requests;
+    const isolationRoot = members.find((m) => m.batch.isolation)?.batch.isolation?.rootBatchId;
+    if (isolationRoot) {
+      batch.isolation = { rootBatchId: isolationRoot };
+      batch.attempts = [...(first.attempts ?? []), id];
+    }
+    this.current!.batch = batch;
     this.running.add(id);
     await this.save(batch);
     for (const member of members) {
@@ -357,24 +523,33 @@ export class IntegrationQueue {
         await this.save(batch);
       }
       remaining = members.filter((m) => !batch.excluded?.some((e) => e.id === m.batch.id));
+      const withdrawn = members.filter((m) => this.withdrawn.has(m.batch.id));
+      remaining = remaining.filter((m) => !this.withdrawn.has(m.batch.id));
+      if (batch.repos.some((repo) => repo.gate)) {
+        this.durations.push(Date.now() - this.current!.startedAt);
+        this.durations = this.durations.slice(-8);
+      }
       for (const excluded of batch.excluded ?? []) {
         const member = members.find((m) => m.batch.id === excluded.id)!;
-        if (member.batch.id !== id) {
+        if (member.batch.id !== id && !this.withdrawn.has(member.batch.id)) {
           member.batch.state = excluded.state;
           member.batch.error = excluded.error;
           await this.save(member.batch);
         }
       }
-      if (batch.state === "failed" && remaining.length > 1) {
-        batch.state = "isolating";
-        await this.save(batch);
-        // Bounded diagnosis: every failed subset gets smaller; good subsets get fresh attestations.
-        const middle = Math.ceil(remaining.length / 2);
-        await this.runMembers(remaining.slice(0, middle), true);
-        await this.runMembers(remaining.slice(middle), true);
+      if (withdrawn.length) {
+        // Even a green gate attests the withdrawn member's tree. Never subtract it from a pass.
         batch.state = "failed";
-        batch.error = `${batch.error ?? "Shared gate failed"}; isolated members have separate results (use their request IDs)`;
+        batch.error = `Withdrawn requests ${withdrawn.map((m) => m.batch.id).join(", ")}; surviving requests need a fresh tree and gate`;
         await this.save(batch);
+        await this.retry(remaining, regates, batch.error, isolationRoot);
+      } else if (batch.state === "failed" && remaining.length > 1) {
+        batch.error = `${batch.error ?? "Shared gate failed"}; individual retries queued (use request IDs)`;
+        await this.save(batch);
+        // Cap the diagnosis at a shared attempt plus one individual gate per member.
+        // The scheduler gives waiting work a turn between these retries.
+        for (const member of remaining) await this.retry([member], regates, undefined, isolationRoot ?? id);
+        this.preferRetry = false;
       } else if (batch.state === "passed" && batch.request.push) {
         let uncovered = false;
         await this.land(
@@ -394,11 +569,12 @@ export class IntegrationQueue {
           if (!members.some((member) => member.batch.id === id)) this.running.delete(id);
           const again: PendingIntegration[] = [];
           for (const member of remaining) again.push({ ...member, batch: await this.read(member.batch.id) });
-          await this.runMembers(again, true, regates + 1, reason);
+          await this.retry(again, regates + 1, reason, isolationRoot);
         }
       }
     } finally {
-      this.running.delete(id);
+      if (!this.retries.some((retry) => retry.members.some((m) => m.batch.id === id)))
+        this.running.delete(id);
     }
   }
 
@@ -840,7 +1016,7 @@ export class IntegrationQueue {
   async land(id: string, guard: () => Promise<void>, onUncovered?: () => void): Promise<IntegrationBatch> {
     const batch = await this.stored(id);
     if (batch.batchId) {
-      if (["conflict", "failed", "interrupted"].includes(batch.state))
+      if (["conflict", "failed", "interrupted", "cancelled"].includes(batch.state))
         throw Error(`Request ${id} has no landable pass (${batch.state})`);
       await this.land(batch.batchId, guard);
       return this.status(id);
@@ -856,6 +1032,10 @@ export class IntegrationQueue {
           await guard();
           // Read the persisted attestation rather than trusting an in-memory check result.
           const recorded = await this.stored(id);
+          for (const member of recorded.members ?? [recorded.request]) {
+            if (this.withdrawn.has(member.id) || (await this.read(member.id)).state === "cancelled")
+              throw Error(`Request ${member.id} was withdrawn; compose and gate surviving requests again`);
+          }
           recorded.repos.sort((a, b) => (a.name === b.name ? 0 : a.name === "core" ? -1 : 1));
           if (!recorded.repos.length) throw Error("No repositories were gated");
           for (const repo of recorded.repos) {

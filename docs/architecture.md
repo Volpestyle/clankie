@@ -77,8 +77,12 @@ production enforcement.
 The source-checkout service owns an approved-commit integration queue through
 `POST /v1/integrate` and `clankie integrate`. Landings go directly to `main`
 (ADR 0240); the queue is an optional gated path. Requests waiting during a gate share the next compatible batch;
-conflicting requests roll back and failed shared gates split to isolate failures.
-`integrate status` and `/integrate` expose running/waiting work and the last result.
+each compatible batch has at most three requests. Conflicting requests roll back;
+failed shared gates retry members individually, alternating with fresh work.
+`integrate status` and `/integrate` expose running/waiting work, the isolation chain,
+a conditional measured ETA and the last result. An owner can withdraw a waiting
+or active isolated request before landing; a gate containing withdrawn input
+cannot authorize a push.
 Each batch has independent Git clones and detached sibling worktrees, private gate environments and durable tested-HEAD
 records. Exact passed trees land core before app; partial landings preserve each
 confirmed SHA. Timed deploy holds guard runtime-update admission only, never

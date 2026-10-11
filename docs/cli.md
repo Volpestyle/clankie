@@ -872,11 +872,10 @@ Changes land directly on `main` after their narrow checks
 To use it, push a branch, run `clankie integrate <sha> --push --no-wait`, then
 follow with `clankie integrate status`. With no UUID, status shows running batches, waiting
 requests, the last result and interrupted work. `status UUID` reads a request
-receipt, including its shared batch and attempts. `cancel UUID --actor NAME
---reason TEXT` withdraws a request still waiting for its gate: it reads
-`cancelled` with who and why, and never joins a batch. A request already
-composing, gating or finished is refused. `/integrate` shows this queue in the
-TUI.
+receipt, including its shared batch and attempts. `progress` shows the isolation
+chain, scheduled batch position and a conditional completion ETA from recent
+completed gates (`null` until measurements exist). `/integrate` displays the chain
+and ETA in the TUI.
 
 The service checks integration progress every 30 seconds. A running head without
 a checkpoint for three minutes alerts the owner through the existing runtime
@@ -886,9 +885,16 @@ Opening and recovery notices are durably deduplicated across service restarts;
 unavailable observations retain the incident. The observer never cancels,
 restarts or resubmits a batch. Inspect the named receipt with `integrate status`.
 
-Requests arriving during a gate coalesce into the next compatible batch.
-Conflicting members roll back; failed shared gates split to isolate failing
-requests. Gate-only runs and restores stay separate.
+`cancel UUID --actor NAME --reason TEXT` withdraws a waiting request or active
+isolated retry before landing. It reads `cancelled` with who and why. An in-flight
+isolated gate finishes, but its tree cannot land with a withdrawn input even if
+green; surviving requests need a fresh composition and gate. The first
+non-isolated gate and a landing already under way refuse cancellation.
+
+Requests arriving during a gate coalesce into compatible batches of at most
+three requests. Conflicting members roll back; failed shared gates retry members
+individually, alternating with fresh waiting batches. Gate-only runs stay
+separate and never land; restores remain admission-order barriers.
 An ordered approved batch composes on fresh origin in independent throwaway
 core/app worktrees, performs real installs and full checks with private home,
 state, credentials and package stores, and records tested HEAD and exit codes

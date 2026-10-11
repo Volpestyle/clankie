@@ -814,9 +814,9 @@ it("cancels a request still waiting for its gate with a receipt, and the request
   await expect(cancel(ids[1]!, "Ivy", "too late")).rejects.toThrow(`Request ${ids[1]} is pushed`);
 });
 
-// Six real install-and-gate batches: 32–38s on a loaded Mac and over 30s on a
+// Real install-and-gate batches take over 30s on a
 // cold CI runner, on base and head alike (VUH-2059). Sized to that work, with margin.
-it("bisects a failed shared real gate, reports the bad request, and lands both healthy requests", async () => {
+it("retries a failed shared real gate individually, reports the bad request, and lands both healthy requests", async () => {
   const f = await fixture((root) => barrier(root, "if (existsSync('broken')) process.exit(9);"));
   const initial = await commit(f.core.source, "initial", "one");
   const good = await commit(f.core.source, "good", "healthy");
@@ -838,12 +838,12 @@ it("bisects a failed shared real gate, reports the bad request, and lands both h
   const rejected = await f.queue.status(failing.id);
   expect(rejected.state).toBe("failed");
   expect(rejected.repos[0]!.gate?.exitCode).toBe(9);
-  expect(rejected.attempts).toHaveLength(3);
+  expect(rejected.attempts).toHaveLength(2);
   const landed = (await f.queue.status(b.id)).repos[0]!;
   expect(await git(landed.directory, "ls-tree", "--name-only", landed.head)).toContain("good");
   expect(await git(landed.directory, "ls-tree", "--name-only", landed.head)).toContain("later");
   expect(await git(landed.directory, "ls-tree", "--name-only", landed.head)).not.toContain("broken");
-  expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(6);
+  expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(5);
   expect((await new IntegrationQueue(f.queue.options).status(failing.id)).state).toBe("failed");
   process.stdout.write(
     "isolation-evidence " +
@@ -852,11 +852,182 @@ it("bisects a failed shared real gate, reports the bad request, and lands both h
         failing: rejected.state,
         exitCode: rejected.repos[0]!.gate?.exitCode,
         attempts: rejected.attempts?.length,
-        coreGates: 6,
+        coreGates: 5,
       }) +
       "\n",
   );
 }, 90_000);
+
+it("CLI/API caps batches, advances waiting work during isolation and fences active and waiting withdrawals from landing", async () => {
+  const names = ["initial", "withdraw", "broken", "survivor", "green1", "green2", "green3", "green4", "late"];
+  const f = await fixture(
+    (root) => `
+const fs = await import('node:fs');
+const root = ${JSON.stringify(root)};
+const files = ${JSON.stringify(names)}.filter(name => existsSync(name));
+fs.appendFileSync(join(root, 'gate-heads'), JSON.stringify({ files, head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() }) + '\\n');
+let stage;
+if (files.length === 1) stage = 'initial';
+else if (existsSync('broken')) stage = 'shared';
+else if (existsSync('withdraw')) stage = 'withdraw';
+if (stage) {
+  fs.writeFileSync(join(root, stage + '-started'), 'gating');
+  while (!existsSync(join(root, stage + '-release')) && !existsSync(join(root, 'release')))
+    await new Promise(resolve => setTimeout(resolve, 20));
+}
+if (existsSync('broken')) process.exit(9);
+`,
+  );
+  const cli = await queueCli(f);
+  const inputs = names.map((name) => ({ name, id: randomUUID() }));
+  // Serialize edits to the real source index; each request carries just its own approved commit.
+  const commits = new Map<string, string>();
+  for (const { name } of inputs) commits.set(name, await commit(f.core.source, name, name));
+  const byName = (name: string) => inputs.find((input) => input.name === name)!;
+  const submit = (name: string) =>
+    runIntegrationCommand([commits.get(name)!, "--id", byName(name).id, "--push", "--no-wait"], cli);
+  const status = async (name: string) =>
+    (await runIntegrationCommand(["status", byName(name).id], cli)).batch!;
+  const started = (stage: string) =>
+    until(async () => Boolean(await readFile(join(f.root, stage + "-started")).catch(() => undefined)));
+  const release = (stage: string) => writeFile(join(f.root, stage + "-release"), "go");
+
+  await submit("initial");
+  await started("initial");
+  for (const name of names.slice(1, -1)) await submit(name);
+  await release("initial");
+  await started("shared");
+  const shared = await status("broken");
+  expect(shared.members?.map((member) => member.id)).toEqual(
+    ["withdraw", "broken", "survivor"].map((name) => byName(name).id),
+  );
+  await submit("late");
+  await release("shared");
+  await started("withdraw");
+
+  // New work clears the failed batch before the isolation chain is exhausted.
+  for (const name of ["green1", "green2", "green3"]) expect((await status(name)).state).toBe("pushed");
+  const isolated = await status("withdraw");
+  expect(isolated.state).toBe("gating");
+  expect(isolated.progress).toMatchObject({
+    queuePosition: 0,
+    estimateBasis: "recent-completions",
+    isolationChain: [
+      { memberCount: 3, state: "failed", gateExitCode: 9 },
+      { memberCount: 1, state: "gating" },
+    ],
+  });
+  expect(isolated.progress!.estimatedRemainingMs).toBeGreaterThan(0);
+  expect(isolated.progress!.estimatedCompletionAt).not.toBeNull();
+  const queued = await status("broken");
+  expect(queued.state).toBe("queued");
+  expect(queued.progress!.queuePosition).toBeGreaterThan(0);
+  for (const name of ["withdraw", "broken"]) {
+    const result = await runIntegrationCommand(
+      ["cancel", byName(name).id, "--actor", "Clankie", "--reason", "replace isolated input"],
+      cli,
+    );
+    expect(result.batch).toMatchObject({
+      state: "cancelled",
+      cancelled: { actor: "Clankie", reason: "replace isolated input" },
+    });
+  }
+  // The withdrawn active gate is deliberately green: its pass still cannot authorize a push.
+  await release("withdraw");
+  await f.queue.wait();
+  const withdrawn = await status("withdraw");
+  expect(withdrawn.state).toBe("cancelled");
+  expect(withdrawn.repos[0]!.gate?.exitCode).toBe(0);
+  expect(withdrawn.repos[0]!.push).toBeUndefined();
+  await expect(f.queue.land(withdrawn.batchId!, guard)).rejects.toThrow("no landable pass");
+  expect((await new IntegrationQueue(f.queue.options).status(byName("withdraw").id)).state).toBe("cancelled");
+  expect((await status("broken")).state).toBe("cancelled");
+  for (const name of ["survivor", "green4", "late"]) expect((await status(name)).state).toBe("pushed");
+  const survivor = await status("survivor");
+  const head = survivor.repos[0]!.head;
+  const tree = await git(survivor.repos[0]!.directory, "ls-tree", "--name-only", head);
+  expect(tree).not.toContain("withdraw");
+  expect(tree).not.toContain("broken");
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(head);
+  for (const input of inputs) expect((await status(input.name)).members?.length ?? 1).toBeLessThanOrEqual(3);
+  const gates = (await readFile(join(f.root, "gate-heads"), "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { files: string[]; head: string });
+  // No individual retry of the known-bad, withdrawn member ran.
+  expect(gates.filter((gate) => gate.files.includes("broken"))).toHaveLength(1);
+  process.stdout.write(
+    "vuh-2090-progress-evidence " +
+      JSON.stringify({
+        isolated: isolated.progress,
+        activeWithdrawal: withdrawn.cancelled,
+        waitingWithdrawal: (await status("broken")).cancelled,
+        gates,
+        landedHead: head,
+      }) +
+      "\n",
+  );
+}, 120_000);
+
+it("keeps older isolated retries before a restore and gates the later forward change on its restored tree", async () => {
+  const f = await fixture(
+    (root) => `
+const fs = await import('node:fs');
+const root = ${JSON.stringify(root)};
+if (existsSync('broken')) {
+  fs.writeFileSync(join(root, 'shared-started'), 'gating');
+  while (!existsSync(join(root, 'shared-release')) && !existsSync(join(root, 'release')))
+    await new Promise(resolve => setTimeout(resolve, 20));
+  process.exit(9);
+}
+if (!existsSync(join(root, 'initial-release')) && !existsSync(join(root, 'release')))
+  while (!existsSync(join(root, 'initial-release')) && !existsSync(join(root, 'release')))
+    await new Promise(resolve => setTimeout(resolve, 20));
+`,
+  );
+  const initial = await commit(f.core.source, "initial", "one");
+  const a = await commit(f.core.source, "a", "healthy");
+  const bad = await commit(f.core.source, "broken", "fails");
+  const b = await commit(f.core.source, "b", "healthy");
+  const later = await commit(f.core.source, "later", "forward");
+  const request = (sha: string) =>
+    IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [sha], push: true });
+  const first = request(initial),
+    goodA = request(a),
+    failing = request(bad),
+    goodB = request(b),
+    after = request(later);
+  await f.queue.start(first, guard);
+  await until(async () => (await f.queue.status(first.id)).state === "gating");
+  for (const member of [goodA, failing, goodB]) await f.queue.start(member, guard);
+  await writeFile(join(f.root, "initial-release"), "go");
+  await until(async () => Boolean(await readFile(join(f.root, "shared-started")).catch(() => undefined)));
+  const restore = IntegrationRunSchema.parse({
+    action: "run",
+    id: randomUUID(),
+    restore: first.id,
+    push: true,
+  });
+  await f.queue.start(restore, guard);
+  await f.queue.start(after, guard);
+  await writeFile(join(f.root, "shared-release"), "go");
+  await f.queue.wait();
+  for (const member of [goodA, goodB, restore, after])
+    expect((await f.queue.status(member.id)).state).toBe("pushed");
+  expect((await f.queue.status(failing.id)).state).toBe("failed");
+  const restored = (await f.queue.status(restore.id)).repos[0]!;
+  const landedB = (await f.queue.status(goodB.id)).repos[0]!;
+  expect(await git(restored.directory, "rev-parse", `${restored.head}^`)).toBe(landedB.head);
+  const final = (await f.queue.status(after.id)).repos[0]!;
+  const tree = await git(final.directory, "ls-tree", "--name-only", final.head);
+  expect(tree).toContain("initial");
+  expect(tree).toContain("later");
+  expect(tree.split("\n")).not.toContain("a");
+  expect(tree.split("\n")).not.toContain("b");
+  expect(tree).not.toContain("broken");
+  expect(final.gate).toMatchObject({ exitCode: 0, head: final.head });
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(final.head);
+}, 120_000);
 
 it("coalesces push requests past a gate-only one, which gates by itself, and reports interrupted receipts after process loss", async () => {
   const f = await fixture((root) => barrier(root));
