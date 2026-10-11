@@ -10,8 +10,9 @@ The paired scratch preset chooses distinct free loopback ports, private state,
 settings and file credentials. Its launcher drops inherited configuration.
 Both production entrypoints refuse installed ports for scratch listeners and
 peers before initializing credentials or upstream clients. The service checks
-again after saved relay settings are projected. A verified owner sandbox keeps
-its normal state location. Relay port `0` is refused on the service because
+again after saved relay settings are projected. Scratch mode is explicitly
+`CLANKIE_SCRATCH=1`; custom production state directories and `NODE_ENV` alone
+retain the installed ports. Relay port `0` is refused on the service because
 pairing otherwise falls back to `4321`.
 
 The focused integration test runs the real entrypoints with unsafe defaults
@@ -28,7 +29,17 @@ Verification:
 - `clankie heavy -- pnpm --filter @clankie/relay typecheck`: exit `0`.
 - The first paired-proof assertion incorrectly inspected redemption before activation; corrected to complete pairing. A later refusal run hit one aggregate `60s` deadline across ten launches under fleet load; the final cases are separate tests retaining the same `20s` child deadline. Assertions and product defaults were not relaxed.
 
-The candidate is verified locally. Landing is pending the root landing gate and
-`clankie integrate --push`; the issue's completion comment will record the
-landed revision and integration receipt. The [verification capture](clankie://evidence/sha256/fbb2bfae9e68fbd7b76d5bff9a4b154f6b384b11642d9fb6d6234163bfdd7fc4)
-retains the final output, source diff and new source files.
+The [initial candidate capture](clankie://evidence/sha256/fbb2bfae9e68fbd7b76d5bff9a4b154f6b384b11642d9fb6d6234163bfdd7fc4)
+retains that output and candidate source. Lead review found its state-path
+inference would refuse hosted `/state/runtime` on port `4310`. The current
+guard requires the explicit scratch flag; neither state paths nor `NODE_ENV`
+infer it. Final focused checks and landing are pending.
+
+The manual Docker regression bundles the current service and relay with the
+release's JavaScript bundle options, mounts those bundles into an existing
+hosted runtime image, and boots both entrypoints on canonical container-only
+ports. Docker uses `--network none`, no published host ports, private container
+state, no scratch flag, and `NODE_ENV=development`. The production defaults
+must remain healthy. Run it with `VUH_1996_DOCKER_PROOF=1` and optionally
+`VUH_1996_DOCKER_IMAGE` under `clankie heavy`; ordinary gates skip this Docker
+test. It is a runtime regression proof, not a full image/release build.

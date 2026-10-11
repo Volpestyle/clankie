@@ -82,6 +82,9 @@ An unavailable remote host never reports the local machine's snapshot.
 saves owner limits for that machine; auto resolves against its host's CPU/RAM.
 All surfaces use the same resource status and revision-guarded fleet settings API.
 
+Before stopping a queued job, verify its exact command, working directory and
+your own launch record. A matching seat or holder alone does not identify the job.
+
 `clankie fleet resources` and `clankie doctor --json` show capacity, actual holders,
 queue and pressure. Status includes executable names and labels, never arguments
 or credentials. A wait can mean a full pool, high load, low available memory or

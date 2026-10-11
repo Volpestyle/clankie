@@ -239,6 +239,7 @@ it("serves the real VUH-1608 golden through the production service, client and C
       CLANKIE_STATE: state,
       NODE_ENV: "test",
       CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(dir, "fleet-resources"),
+      CLANKIE_SCRATCH: "1",
       CLANKIE_SETTINGS_FILE: settings,
       CLANKIE_CREDENTIALS_FILE: join(dir, "credentials.json"),
       CLANKIE_OPERATOR_TOKEN: "metrics-journey-private-operator",
