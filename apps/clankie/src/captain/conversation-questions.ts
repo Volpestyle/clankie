@@ -190,6 +190,21 @@ export function answerMessage(question: ConversationQuestion, answer: Conversati
     })
   );
 }
+/** Owner-facing transcript; the runner keeps answerMessage's authority boundary. */
+export function answerTranscript(question: ConversationQuestion, answer: ConversationQuestionAnswer): string {
+  const value =
+    answer.kind === "choice"
+      ? question.options.find((option) => option.optionId === answer.optionId)!.label
+      : answer.kind === "text"
+        ? answer.text
+        : question
+            .workerQuestion!.questions.map(
+              (item) =>
+                `${item.header ?? item.question}: ${item.isSecret ? "Private answer" : answer.answers[item.id]!.answers.join(", ")}`,
+            )
+            .join("\n");
+  return `Ask: ${question.prompt}\nYou answered: ${value}`;
+}
 /** Read-only facts for an actual owner workspace turn; ambiguity/errors stay unknown. */
 export async function questionWorkspaceContext(
   path: string,

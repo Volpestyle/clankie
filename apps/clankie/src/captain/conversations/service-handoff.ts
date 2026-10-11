@@ -39,6 +39,7 @@ function clip(text: string, max: number): string {
 
 function projectedLine(event: OperatorConversationStreamEvent): string | undefined {
   if (event.type === "message") {
+    if (event.answerReceipt !== undefined) return undefined;
     if (event.streaming) return undefined;
     const text = event.text.trim();
     return text.length === 0

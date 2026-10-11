@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -103,6 +103,19 @@ it("escalates a real pending Claude permission through the owner ask store and r
       await registry.answer(ref, { requestId: native.requestId, answers: { q0: { answers: ["Deny"] } } }),
     ).toMatchObject({ outcome: "refused" });
     expect(await store.serve(request, owner)).toEqual(answered);
+    const events = (await readFile(join(root, "conversations", q.conversationId, "events.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const answerMessages = events.filter(
+      (event) => event.type === "message" && event.answerReceipt !== undefined,
+    );
+    expect(answerMessages).toHaveLength(1);
+    expect(answerMessages[0].text).toContain(`Ask: ${q.prompt}`);
+    expect(answerMessages[0].text).toContain("You answered:");
+    expect(answerMessages[0].text).toContain("Allow");
+    expect(answerMessages[0].text).not.toContain('"answers"');
+    expect(answerMessages[0].answerReceipt.principal).toEqual(owner.principal);
   } finally {
     registry.cancel(ref);
     await store.close();

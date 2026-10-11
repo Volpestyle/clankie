@@ -76,7 +76,20 @@ it.each(["global", "room", "native"])(
     expect(calls[0]!.id).toBe(id);
     expect(calls[0]!.context.inputAnswer?.requestId).toBe(q.requestId);
     expect(calls[0]!.context.ownerAuthority).toBe(owner);
-    expect(readFileSync(join(root, id, "events.jsonl"), "utf8")).toContain('"role":"operator"');
+    const events = readFileSync(join(root, id, "events.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const messages = events.filter((event) => event.type === "message");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: "external",
+      text: "Ask: Which route?\nYou answered: A",
+      streaming: false,
+      answerReceipt: { requestId: q.requestId, principal: owner.principal },
+    });
+    expect(messages[0]).not.toHaveProperty("ownerOrigin");
+    expect(events.filter((event) => event.type === "input_resolved")).toHaveLength(1);
     await store.close();
   },
 );

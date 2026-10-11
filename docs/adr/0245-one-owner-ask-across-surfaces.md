@@ -190,3 +190,14 @@ Approve. Decline, cancellation and free text leave it blocked. Tracker-raised
 asks carry a host publication identity so replay reconciles the retained record;
 the loop reads settled receipts on restart. Lead run controls retain the lead's
 attribution and never stand in for owner approval.
+
+## Answer transcript (2026-10-11, VUH-2000)
+
+The owner message published for an accepted answer contains the ask prompt and
+`You answered:` followed by the chosen label or authored words. Native multi-question
+answers include their question labels; secret answers show `Private answer`.
+The display-only external message keeps its durable cursor and an `answerReceipt`
+with the request ID and responder principal, distinct from the resolved ask event.
+It carries no `ownerOrigin` and is omitted from every model/harness context projection. The runner and private answer receipt retain the full
+security-framed `answerMessage`; display copy grants no additional authority.
+No portal parses the runner's JSON to reconstruct an answer.

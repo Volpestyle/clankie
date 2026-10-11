@@ -3,6 +3,7 @@ import {
   operatorConversationWindow,
   ReplayOperatorConversationRequestSchema,
   OperatorConversationReplayPageSchema,
+  OperatorConversationStreamEventSchema,
   type OperatorConversationStreamEvent,
   type OperatorConversationEventBody,
 } from "../src/index.ts";
@@ -25,6 +26,24 @@ const message = (text: string): OperatorConversationEventBody => ({
 });
 
 describe("recent conversation window", () => {
+  it("answer receipts cannot claim owner-message authority", () => {
+    const receipt = events([
+      {
+        type: "message",
+        role: "external",
+        text: "You answered: It works",
+        streaming: false,
+        answerReceipt: { requestId: "ask-1", principal: { kind: "device", id: "phone" } },
+      },
+    ])[0]!;
+    expect(OperatorConversationStreamEventSchema.safeParse(receipt).success).toBe(true);
+    for (const patch of [
+      { role: "operator" },
+      { streaming: true },
+      { ownerOrigin: { surfaceClientId: "phone", principal: { kind: "device", id: "phone" } } },
+    ])
+      expect(OperatorConversationStreamEventSchema.safeParse({ ...receipt, ...patch }).success).toBe(false);
+  });
   it("selects newest turns and pages backwards without overlap or gaps", () => {
     const source = events(Array.from({ length: 53 }, (_, index) => message(String(index))));
     const newest = operatorConversationWindow(source);

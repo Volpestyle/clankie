@@ -1732,6 +1732,14 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     role: z.enum(["operator", "captain", "agent", "external"]),
     /** Host-authenticated attribution for an ordinary owner message. */
     ownerOrigin: OperatorOwnerTurnOriginSchema.optional(),
+    /** Display-only answer receipt, never owner message authority or model context. */
+    answerReceipt: z
+      .object({
+        requestId: OperatorConversationEventRefSchema,
+        principal: QuestionResolutionActorSchema,
+      })
+      .strict()
+      .optional(),
     text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
     streaming: z.boolean(),
     /** Coordinator message identity, retained for duplicate delivery recovery. */
@@ -1768,7 +1776,18 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
       .min(1)
       .max(OPERATOR_CONVERSATION_ATTACHMENTS_MAX)
       .optional(),
-  }).strict(),
+  })
+    .strict()
+    .superRefine((event, ctx) => {
+      if (
+        event.answerReceipt &&
+        (event.role !== "external" ||
+          event.ownerOrigin !== undefined ||
+          event.streaming ||
+          event.attachments !== undefined)
+      )
+        ctx.addIssue({ code: "custom", message: "Answer receipts are display-only external messages" });
+    }),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("reasoning"),
     text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),

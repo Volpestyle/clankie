@@ -68,6 +68,7 @@ import {
 } from "./service-handoff.ts";
 import {
   authorizeQuestion,
+  answerTranscript,
   newQuestionState,
   QuestionStateSchema,
   questionWorkspace,
@@ -2720,17 +2721,29 @@ export class ConversationStore {
     if (publishOperatorMessage) {
       this.append(meta, {
         type: "message",
-        role: "operator",
-        text: message,
+        role: provenance.questionAnswer ? "external" : "operator",
+        text: provenance.questionAnswer
+          ? answerTranscript(
+              provenance.questionAnswer.record.question,
+              provenance.questionAnswer.answer,
+            ).slice(0, OPERATOR_CONVERSATION_TEXT_MAX)
+          : message,
         streaming: false,
-        ...(provenance.ownerAuthority === undefined
-          ? {}
-          : {
-              ownerOrigin: {
-                surfaceClientId: provenance.surfaceClientId ?? "operator",
-                principal: { ...provenance.ownerAuthority.principal },
+        ...(provenance.questionAnswer
+          ? {
+              answerReceipt: {
+                requestId: provenance.questionAnswer.record.question.requestId,
+                principal: { ...provenance.questionAnswer.authority.principal },
               },
-            }),
+            }
+          : provenance.ownerAuthority === undefined
+            ? {}
+            : {
+                ownerOrigin: {
+                  surfaceClientId: provenance.surfaceClientId ?? "operator",
+                  principal: { ...provenance.ownerAuthority.principal },
+                },
+              }),
         ...(provenance.attachments === undefined
           ? {}
           : { attachments: provenance.attachments.map((attachment) => attachment.file) }),
