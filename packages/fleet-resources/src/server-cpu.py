@@ -76,8 +76,10 @@ def wait(child, runner, cores, identity, born_since, signal_bound, reader):
     previous = {}
     stopped = {}
     balance = 0.0
+    maximum_cores = max(cores, os.cpu_count() or 1)
     at = time.monotonic()
     interrupted = False
+    uncertain = False
     handlers = {}
     def resume():
         for key, proof in list(stopped.items()):
@@ -100,10 +102,12 @@ def wait(child, runner, cores, identity, born_since, signal_bound, reader):
                 time.sleep(0.1)
                 continue
             now = time.monotonic()
-            balance = min(cores * 0.1, balance + (now - at) * cores)
+            elapsed = now - at
+            balance = min(cores * 0.1, balance + elapsed * cores)
             at = now
             live = {}
             proofs = {}
+            charge = 0.0
             try:
                 for pid in members(runner["pgid"]):
                     if pid == runner["pid"]:
@@ -125,24 +129,55 @@ def wait(child, runner, cores, identity, born_since, signal_bound, reader):
                     if after != before:
                         raise RuntimeError("Server member lifetime changed")
                     key = (pid, before["startTime"])
-                    balance -= max(0, used - previous.get(key, 0))
+                    charge += max(0, used - previous.get(key, 0))
                     live[key] = used
                     proofs[key] = before
-                previous = live
+                # Census/identity reads race process exit. Commit one complete
+                # sample, so a failed later read cannot charge an earlier
+                # member again against its old baseline on the next retry.
+                # A census omission is not proof of exit either: retain that
+                # lifetime's baseline until the exact identity proves it gone.
+                retired = []
+                for key in previous:
+                    if key not in live:
+                        try:
+                            current = identity(key[0])
+                        except RuntimeError:
+                            # Historical uncertainty retains its baseline;
+                            # only current census members affect this sample.
+                            continue
+                        if current is None or current["startTime"] != key[1]:
+                            retired.append(key)
+                balance -= charge
+                previous.update(live)
+                for key in retired:
+                    previous.pop(key, None)
+                    stopped.pop(key, None)
                 if balance >= 0:
                     resume()
                 else:
                     for key, proof in proofs.items():
                         if signal_bound(proof, runner["pgid"], signal.SIGSTOP):
                             stopped[key] = proof
-            except Exception:
-                # Unknown CPU is not zero: pause only previously proven members,
-                # retry observations, and always resume on interruption/exit.
-                for key in previous:
-                    proof = {"pid": key[0], "startTime": key[1]}
-                    if signal_bound(proof, runner["pgid"], signal.SIGSTOP):
-                        stopped[key] = proof
-                balance = min(balance, -cores * 0.1)
+                uncertain = False
+            except Exception as error:
+                if not uncertain:
+                    print("Server CPU observation unavailable: " + str(error), file=sys.stderr, flush=True)
+                    balance -= maximum_cores * elapsed
+                uncertain = True
+                # An unreaped Darwin zombie can be unobservable. Keeping its
+                # parent stopped forever prevents the very reap that restores
+                # observation. Budget a short resume window at the maximum
+                # possible machine CPU rate, then pause proved members while
+                # repaying that debt. Unknown CPU is never treated as zero.
+                if balance >= 0:
+                    balance -= maximum_cores * 0.1
+                    resume()
+                else:
+                    for key in previous.keys() | proofs.keys():
+                        proof = {"pid": key[0], "startTime": key[1]}
+                        if signal_bound(proof, runner["pgid"], signal.SIGSTOP):
+                            stopped[key] = proof
             time.sleep(0.1)
         return child.returncode
     finally:

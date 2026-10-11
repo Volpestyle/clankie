@@ -27,7 +27,9 @@ Do not launch dev servers ungoverned. The lane has up to two slots and shares
 20% of machine cores (at most 64 cores), divided equally between its slots.
 Tool-native parallelism is capped at two; a native supervisor also samples the
 owned process group's CPU every 100 ms and pauses/resumes exact process births
-to pay back excess CPU. Brief bursts can exceed this sampled budget. Keep
+to pay back excess CPU. Failed CPU observations pause proven members, with short
+resume windows charged at the machine's maximum CPU rate so a launcher can reap
+an exited child. Brief bursts can exceed this sampled budget. Keep
 children in the owned group; detached/privileged processes are outside its
 contract. Stop your server when finished. Neither server age nor a long build
 causes an automatic kill. Normal interruption and leftover cleanup still apply.
@@ -53,7 +55,8 @@ in `sh -c`; either makes it a full job. An optional `--seat LABEL`
 before `--` labels the seat in status; `--holder ID` identifies its native child. Neither grants seat authority. Arguments
 after `--`, including flags such as `--chat`, belong to the child. The wrapper
 preserves its exit status and forwards interruption. Nested commands with the same holder in the same
-verified process group reuse its permit. Once your command exits, anything it
+verified process group reuse its permit. A nested server reuses a server permit;
+under a bounded parent it takes its own governed server permit. Once your command exits, anything it
 left in its process group (a test's server, watcher or fixture) is a leftover:
 status shows the lease as `leftovers`, or `orphaned` if its runner died. After a
 ten-second grace the runner, or the governor for a dead runner, sends the group

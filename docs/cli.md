@@ -2856,10 +2856,13 @@ two slots, sharing 20% of machine CPU cores (at most 64 cores), divided equally
 among the slots. Its native supervisor samples aggregate owned-group CPU every
 100 ms and pauses/resumes proven process lifetimes to pay back excess usage;
 brief bursts can exceed this sampled budget. Tool-native fan-out is capped at
-two. Detached or privileged children are outside this process-group contract.
+two. Unknown CPU observations pause proven members, with short resume windows
+charged at the machine's maximum CPU rate so a launcher can reap an exited child.
+Detached or privileged children are outside this process-group contract.
 Servers still wait on machine load, memory and FIFO in their own journal under
 `server/`; they hold no build/check slots. Stop them when finished. A server
 inside a bounded job gets its own permit rather than borrowing the parent's.
+Verified nested servers under a server parent reuse its governed permit.
 An older installed arbiter does not govern this lane; new server waiters judge
 its admission themselves until the service advertises server-lane support.
 Brief registry-lock contention waits internally without discarding the queue

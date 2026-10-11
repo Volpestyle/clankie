@@ -153,6 +153,104 @@ it("servers hold only server slots; bounded builds start, waiters see holders, a
   }
 }, 120_000);
 
+it.each([true, false])(
+  "nested servers reuse server permits and separately govern bounded parents (server parent: %s)",
+  async (serverParent) => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-nested-servers-"));
+    const directory = join(root, "registry");
+    const governor = createResourceGovernor({
+      directory,
+      probe: async () => ({ loadRatio: 0, availableMemoryMb: 64_000 }),
+    });
+    const stop = new AbortController();
+    const jobs: Promise<number>[] = [];
+    try {
+      await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1 });
+      const barrier = join(root, "launch-inner-servers");
+      const receipts = Array.from({ length: serverParent ? serverLaneCapacity().slots : 1 }, (_, index) =>
+        join(root, `nested-${index}.json`),
+      );
+      for (const [index, path] of receipts.entries()) {
+        jobs.push(
+          governor.runHeavy(
+            process.execPath,
+            [
+              join(import.meta.dirname, "fixtures/nested-server.mjs"),
+              directory,
+              `nested-${index}`,
+              barrier,
+              path,
+              serverCommand,
+            ],
+            { server: serverParent, holderId: `nested-${index}`, signal: stop.signal },
+          ),
+        );
+        await until(
+          async () =>
+            readFile(`${path}.ready`)
+              .then(() => true)
+              .catch(() => false),
+          Boolean,
+        );
+      }
+      expect((await governor.snapshot()).capacity).toMatchObject({
+        used: serverParent ? 0 : 1,
+        serverUsed: serverParent ? receipts.length : 0,
+      });
+      await writeFile(barrier, "go");
+      const ports: number[] = [];
+      for (const path of receipts) {
+        const started = (await until(
+          async () => (await receipt(path)) ?? (await receipt(`${path}.done`)),
+          Boolean,
+        ))!;
+        expect(started.port).toBeTypeOf("number");
+        expect(Number(started.turbo)).toBeLessThanOrEqual(2);
+        expect((await governor.snapshot()).capacity).toMatchObject({
+          used: serverParent ? 0 : 1,
+          serverUsed: serverParent ? receipts.length : 1,
+        });
+        ports.push(started.port);
+      }
+      for (const port of ports) await get(port, "/stop");
+      expect(await Promise.all(jobs)).toEqual(receipts.map(() => 7));
+      expect((await governor.snapshot()).capacity).toMatchObject({ used: 0, serverUsed: 0 });
+    } finally {
+      stop.abort();
+      await Promise.allSettled(jobs);
+      await governor.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  30_000,
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "a stopped Darwin server launcher can reap an exited child when CPU observation is unavailable",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-zombie-server-"));
+    const path = join(root, "zombie.json");
+    const governor = createResourceGovernor({
+      directory: join(root, "registry"),
+      probe: async () => ({ loadRatio: 0, availableMemoryMb: 64_000 }),
+    });
+    try {
+      const code = await governor.runHeavy(
+        resourcePython,
+        [join(import.meta.dirname, "fixtures/zombie-server.py"), path],
+        { server: true, signal: AbortSignal.timeout(12_000) },
+      );
+      expect(code).toBe(17);
+      expect(JSON.parse(await readFile(`${path}.reaped`, "utf8"))).toEqual({ code: 17 });
+      expect((await governor.snapshot()).capacity.serverUsed).toBe(0);
+    } finally {
+      await governor.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  20_000,
+);
+
 it("the registered native supervisor bounds aggregate CPU across real server children and preserves exit status", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-server-cpu-"));
   const store = new ResourceStore(root);

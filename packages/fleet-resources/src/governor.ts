@@ -850,7 +850,7 @@ export function createResourceGovernor(
         });
     }
   }
-  async function inherited(holderId?: string): Promise<HeavyLease | undefined> {
+  async function inherited(holderId?: string): Promise<(HeavyLease & { lane: HeavyJobLane }) | undefined> {
     let ref: { id?: string; token?: string };
     try {
       ref = JSON.parse(process.env.CLANKIE_RESOURCE_LEASE ?? "null") ?? {};
@@ -859,10 +859,16 @@ export function createResourceGovernor(
     }
     const found = (entry: ResourceState["leases"][number]): entry is HeavyLease =>
       entry.kind === "heavy" && entry.id === ref.id && entry.token === ref.token;
-    const lease =
-      (await store.read()).leases.find(found) ??
-      (await lightStore.read()).leases.find(found) ??
-      (await serverStore.read()).leases.find(found);
+    let lane: HeavyJobLane = "full";
+    let lease = (await store.read()).leases.find(found);
+    if (!lease) {
+      lane = "light";
+      lease = (await lightStore.read()).leases.find(found);
+    }
+    if (!lease) {
+      lane = "server";
+      lease = (await serverStore.read()).leases.find(found);
+    }
     if (!lease?.runner || lease.state !== "running") return undefined;
     // A native child in the same group is a distinct holder, not nested work
     // belonging to the parent that acquired this permit.
@@ -871,7 +877,7 @@ export function createResourceGovernor(
     if (!mine || mine.pgid !== lease.runner.pgid || mine.uid !== lease.runner.uid) return undefined;
     const root = await processIdentity(lease.runner.pid);
     if (root && !matches(root, lease.runner)) return undefined;
-    return lease;
+    return { ...lease, lane };
   }
   async function runHeavy(
     command: string,
@@ -900,7 +906,7 @@ export function createResourceGovernor(
       if (signal.aborted) throw abort();
       // A server must not borrow a bounded parent permit; it needs the CPU
       // supervisor and its own lifetime in the independent lane.
-      if (parentLease && lane !== "server") {
+      if (parentLease && (lane !== "server" || parentLease.lane === "server")) {
         child = spawn(command, heavyJobArgs(command, args), {
           stdio: "inherit",
           env: heavyJobEnvironment(process.env),
