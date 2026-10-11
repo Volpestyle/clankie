@@ -143,6 +143,8 @@ export const FleetPrepareRequestSchema = z
       .optional(),
     /** A newly supplied source script always requires claimed owner consent. */
     codexSourceSetup: AbsolutePathSchema.optional(),
+    /** Prepare only the selected local Herdr's pane launcher, or restore its prior shell. */
+    claudePathShim: z.enum(["install", "remove"]).optional(),
   })
   .strict();
 export type FleetPrepareRequest = z.infer<typeof FleetPrepareRequestSchema>;
@@ -150,6 +152,7 @@ export type FleetPrepareRequest = z.infer<typeof FleetPrepareRequestSchema>;
 /** Refresh only existing links; source-manager approvals remain their own recorded proof. */
 export const FleetHarnessRefreshRequestSchema = FleetPrepareRequestSchema.omit({
   codexSourceSetup: true,
+  claudePathShim: true,
   expectedMachineRevision: true,
 });
 export type FleetHarnessRefreshRequest = z.infer<typeof FleetHarnessRefreshRequestSchema>;

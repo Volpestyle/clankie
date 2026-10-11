@@ -84,6 +84,18 @@ stays unavailable until restart; no replacement fleet is silently created.
 service liveness. `/v1/herdr` returns 503 without an active binding.
 Doctor's `commands.herdr` probes the selected CLI. `commands.herdr-lead` and
 `herdrPlugin` describe the optional dashboard integration.
+Mac zsh panes can also select Clankie's automatic Claude PATH shim: bundled
+panes get it at service start; prepare the active local external session with
+`clankie herdr prepare local --claude-path-shim install`, then open a new pane.
+Plain `claude` and `claude --resume ID` add the worker channel when enabled;
+explicit channels/settings, bare/print launches and disabled plugins pass through.
+Preparation changes only Herdr's stable `default_shell` reference, preserving
+its config symlink and owner zsh startup files. Undo with the same command and
+`--claude-path-shim remove`. It affects future panes, never running sessions.
+Doctor's `herdrPlugin.claudePathShim` distinguishes active PATH from a shell
+configured for new panes. It does not prove native channel delivery. Windows
+PowerShell/Git Bash automatic activation remains a follow-up; use the explicit
+channel-enabled launch there. See the [shim setup](../../../../integrations/herdr-plugin/README.md#hand-started-claude-on-mac).
 Load `lead` for native hiring, messaging and harvest; Herdr is the inspection/runtime surface. The optional dashboard CLI is installed separately. Never run `herdr-lead`
 bare or with `--version` — that starts a TUI and hangs the shell. `herdr-lead
 state` and `herdr-lead split` are the headless verbs. If the plugin is

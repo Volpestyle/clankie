@@ -4109,6 +4109,22 @@ Policy is machine-wide, so the SSH account must be that machine's administrator.
 Rerun preparation after an update to ship the matching plugin. Its API is the
 operator-only `POST /v1/runtime-connections/NAME/prepare`.
 
+For the active local external Herdr session on Mac, prepare only the automatic
+Claude launcher with `clankie herdr prepare local --claude-path-shim install`.
+It uses the same machine setup policy and operator API, with
+`claudePathShim: "install"` and connection ID `local`. It sets the stable
+Clankie-owned zsh shell under `~/.clankie/herdr-pane/SESSION`, preserves the
+config symlink and all other settings, and reloads config for new panes.
+Plain `claude` and `claude --resume ID` then opt into the enabled worker channel.
+Explicit channels/settings, bare/print/administrative launches and disabled
+plugins pass through. Existing panes and sessions keep their launch settings.
+`--claude-path-shim remove` (API `claudePathShim: "remove"`) restores the prior
+shell selection; owner edits made since installation are preserved. Existing
+custom shell launchers are refused. Bundled zsh panes are prepared at service
+start. `doctor` reports `herdrPlugin.claudePathShim`; PATH activation is setup
+evidence, separate from the live receiver observation. See the
+[shim setup and limitations](../integrations/herdr-plugin/README.md#hand-started-claude-on-mac).
+
 What crosses the link, and what cannot:
 
 - Every call runs `herdr --session SESSION <verb> …` on the remote host with an

@@ -89,7 +89,7 @@ export async function runRuntimeCommand(
     path = `/v1/runtime-connections/${encodeURIComponent(args[1]!)}/${args[0]}`;
   } else if (args[0] === "prepare") {
     const usage =
-      "Usage: clankie runtime prepare ID [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT] [--project PROJECT] [--approve]";
+      "Usage: clankie runtime prepare ID [--claude-path-shim install|remove (local)] [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT] [--project PROJECT] [--approve]";
     if (!args[1]) throw new Error(usage);
     const flags = new Map<string, string>();
     let approvalRequested = false;
@@ -100,7 +100,7 @@ export async function runRuntimeCommand(
         continue;
       }
       if (
-        !["--codex-source-setup", "--project"].includes(flag) ||
+        !["--codex-source-setup", "--project", "--claude-path-shim"].includes(flag) ||
         flags.has(flag) ||
         args[index + 1] === undefined
       )
@@ -108,6 +108,14 @@ export async function runRuntimeCommand(
       flags.set(flag, args[++index]!);
     }
     const codexSourceSetup = flags.get("--codex-source-setup");
+    const claudePathShim = flags.get("--claude-path-shim");
+    if (
+      claudePathShim !== undefined &&
+      (args[1] !== "local" ||
+        !["install", "remove"].includes(claudePathShim) ||
+        codexSourceSetup !== undefined)
+    )
+      throw new Error("Use prepare local --claude-path-shim install|remove");
     if (
       codexSourceSetup !== undefined &&
       (/\p{Cc}/u.test(codexSourceSetup) ||
@@ -155,6 +163,7 @@ export async function runRuntimeCommand(
       ...(context.projectId === undefined ? {} : { projectId: context.projectId }),
       ownerApproved,
       ...(codexSourceSetup === undefined ? {} : { codexSourceSetup }),
+      ...(claudePathShim === undefined ? {} : { claudePathShim }),
     });
   } else if (args[0] === "disconnect" && args.length === 2) {
     method = "DELETE";

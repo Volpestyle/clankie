@@ -93,6 +93,11 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
           : "linked"
         : "not linked"
     }`,
+    ...(report.herdrPlugin.claudePathShim
+      ? [
+          `  ${mark(report.herdrPlugin.claudePathShim.active === true || report.herdrPlugin.claudePathShim.configured === true)} Claude PATH shim · ${report.herdrPlugin.claudePathShim.state} · ${clean(report.herdrPlugin.claudePathShim.detail)}`,
+        ]
+      : []),
     `  ${mark(missing.length === 0)} Tools · ${
       missing.length ? `missing ${missing.join(", ")}` : `${commands.length} present`
     }`,

@@ -230,6 +230,7 @@ export interface ClankieAppDependencies {
   projectWorktreeRoot?: import("@clankie/settings").ObserveProjectWorktreeRoot;
   /** `clankie herdr prepare NAME`: prepare native workers through that fleet's registered transport. */
   prepareFleet?: (id: string, options: { codexSourceSetup?: string }, fleet: HerdrFleet) => Promise<unknown>;
+  prepareLocalClaudeShim?: (action: "install" | "remove", binding: HerdrBinding) => Promise<unknown>;
   inspectFleetHarnesses?: (id: string) => Promise<unknown>;
   /** A machine's worker accounts (VUH-1527); absent fleet is this machine. */
   workerAccounts?: (

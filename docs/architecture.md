@@ -651,6 +651,12 @@ call-time revocation checks still apply.
   Herdr supplies the native terminals and process control. The service's
   selected runtime supplies every console's fleet view. Current binding and
   fallback behavior live in [the CLI reference](cli.md#herdr-statusopencreate--herdr-use-name).
+  Prepared Mac zsh panes use a stable Clankie-owned login-shell overlay to put
+  the Claude PATH shim after owner startup configuration. A plain or resumed
+  Claude then selects the enabled worker channel. External sessions use the
+  operator preparation API; bundled panes are prepared at service start. This
+  changes future launches, not live session authority or existing agents
+  ([setup and undo](../integrations/herdr-plugin/README.md#hand-started-claude-on-mac)).
   Native Herdr events wake fleet readers across workspaces
   ([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)); the optional herdr-lead
   board is a view, not a second coordination authority.

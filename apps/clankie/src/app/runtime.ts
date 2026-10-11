@@ -1409,7 +1409,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.prepareFleet) return context.json({ error: "runtimes_unavailable" }, 503);
     const input = FleetPrepareRequestSchema.safeParse(
       await context.req
         .text()
@@ -1417,13 +1416,23 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         .catch(() => undefined),
     );
     if (!input.success) return context.json({ error: "invalid_fleet_prepare" }, 400);
+    const shimAction = input.data.claudePathShim;
+    if (
+      shimAction !== undefined &&
+      (context.req.param("id") !== "local" || input.data.codexSourceSetup !== undefined)
+    )
+      return context.json({ error: "invalid_fleet_prepare" }, 400);
+    if (shimAction ? !dependencies.prepareLocalClaudeShim : !dependencies.prepareFleet)
+      return context.json({ error: "runtimes_unavailable" }, 503);
     const options =
       input.data.codexSourceSetup === undefined ? {} : { codexSourceSetup: input.data.codexSourceSetup };
     try {
       const current = await settingsSource.load();
       const configured = current.execution.connections.find((entry) => entry.id === context.req.param("id"));
-      if (!configured?.enabled || !configured.ssh) throw new Error("Configured ssh fleet unavailable");
-      const fleet = structuredClone({ id: configured.id, session: configured.session, ssh: configured.ssh });
+      const liveBinding = shimAction ? dependencies.herdrBinding?.() : undefined;
+      const binding = liveBinding ? structuredClone(liveBinding) : undefined;
+      if (shimAction ? !binding : !configured?.enabled || !configured.ssh)
+        throw new Error(shimAction ? "Active local Herdr unavailable" : "Configured ssh fleet unavailable");
       const policy = await resolveFleetSettingsContext(
         current,
         {
@@ -1456,9 +1465,20 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         return context.json({ error: "operator_authentication_required" }, 401);
       if (JSON.stringify(await settingsSource.load()) !== JSON.stringify(current))
         throw new Error("Machine setup settings changed");
+      if (shimAction && binding) {
+        if (JSON.stringify(dependencies.herdrBinding?.()) !== JSON.stringify(binding))
+          throw new Error("Machine setup target changed");
+        return context.json({
+          ok: true,
+          prepared: await dependencies.prepareLocalClaudeShim!(shimAction, structuredClone(binding)),
+          ownerApproval: input.data.ownerApproved ? "claimed" : "not_claimed",
+        });
+      }
+      if (!configured?.ssh) throw new Error("Configured ssh fleet unavailable");
+      const fleet = structuredClone({ id: configured.id, session: configured.session, ssh: configured.ssh });
       return context.json({
         ok: true,
-        prepared: await dependencies.prepareFleet(context.req.param("id"), options, fleet),
+        prepared: await dependencies.prepareFleet!(context.req.param("id"), options, fleet),
         ownerApproval: input.data.ownerApproved ? "claimed" : "not_claimed",
       });
     } catch (error) {

@@ -31,6 +31,9 @@ import {
   type ClankieSettings,
 } from "@clankie/settings";
 import { inspectHarnessBridges } from "./harness-doctor.ts";
+import { readHerdrBinding } from "./session/herdr-connection.ts";
+import { localClaudeShimPaths } from "../../clankie/src/herdr-claude-shim.ts";
+import { inspectPaneShim } from "../../../integrations/herdr-plugin/claude-path-shim.mjs";
 import {
   modelCredentialHealthPath,
   readModelCredentialHealth,
@@ -80,6 +83,14 @@ interface HerdrPluginReport {
   readonly linked?: boolean;
   readonly enabled?: boolean;
   readonly manifestPath?: string;
+  readonly claudePathShim?: {
+    readonly state: string;
+    readonly detail: string;
+    readonly installed?: boolean;
+    readonly configured?: boolean;
+    readonly active?: boolean;
+    readonly paneShell?: string;
+  };
 }
 
 export interface InstallDoctorReport {
@@ -334,6 +345,28 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     bundled,
     pluginBundle,
   );
+  const claudePathShim = await (async () => {
+    if (process.platform !== "darwin")
+      return {
+        state: "unsupported",
+        detail: "Automatic Claude PATH shim currently supports Mac zsh panes; linked Windows is a follow-up.",
+      };
+    try {
+      const binding = await readHerdrBinding({
+        repoRoot: options.repoRoot,
+        env,
+        operatorCredentialStore: credentialStore,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      });
+      return await inspectPaneShim({ ...localClaudeShimPaths(binding, env), env });
+    } catch {
+      return {
+        state: "unverified",
+        detail: "Active local Herdr binding unavailable; no PATH activation was proven.",
+      };
+    }
+  })();
+  Object.assign(herdrPlugin, { claudePathShim });
   const laneTools = await inspectLaneTools(commandHost({ env }), options.fetchImpl ?? fetch);
   const { doorway, lastSleep, runtimeHealth } = await probeHealth({
     env,

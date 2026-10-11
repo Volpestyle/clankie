@@ -207,8 +207,10 @@ Installing a new plugin cannot enable channels in an already-running process.
 
 Clankie’s Claude hire enables the plugin for that session (`enabledPlugins`) and
 starts Claude Code with `--channels plugin:clankie-worker@clankie` for immediate
-delivery. An owner-enabled worker plugin also serves a hand-started session in
-a linked Herdr pane without that flag; its observed synchronous prompt hook
+delivery. In prepared Mac zsh panes, Clankie's [PATH shim](../herdr-plugin/README.md#hand-started-claude-on-mac)
+adds the channel to plain `claude` and `claude --resume ID` when the worker
+plugin is enabled. Explicit channels and settings always win. Other unprepared
+hand-started sessions without that flag use their observed synchronous prompt hook, which
 receives held replies on the next turn. A session without an observed compatible
 hook or live channel has no reply receiver. Its hooks (`SessionStart`, `UserPromptSubmit`,
 `Stop`, `StopFailure`) report through the matching local or remote fleet link, so

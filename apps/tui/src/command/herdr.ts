@@ -3,7 +3,7 @@ import type { HerdrBinding } from "@clankie/protocol";
 import { SettingsStore, defaultSettingsPath, type HerdrSettings } from "@clankie/settings";
 
 const HERDR_USAGE =
-  "Usage: clankie herdr [status|open|create|disable]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external|disabled\n       clankie herdr fleets\n       clankie herdr add NAME --ssh HOST --session SESSION [--shell posix|powershell]\n       clankie herdr remove NAME\n       clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT] [--project PROJECT] [--approve]";
+  "Usage: clankie herdr [status|open|create|disable]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external|disabled\n       clankie herdr fleets\n       clankie herdr add NAME --ssh HOST --session SESSION [--shell posix|powershell]\n       clankie herdr remove NAME\n       clankie herdr prepare NAME [--claude-path-shim install|remove (local)] [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT] [--project PROJECT] [--approve]";
 
 /**
  * Remote fleets are runtime connections with an ssh transport (ADR 0184,
@@ -20,7 +20,10 @@ export function herdrFleetRuntimeArgs(args: readonly string[]): string[] | undef
     const seen = new Set<string>();
     for (let index = 0; index < rest.length; index++) {
       const flag = rest[index]!;
-      if (seen.has(flag) || !["--approve", "--project", "--codex-source-setup"].includes(flag))
+      if (
+        seen.has(flag) ||
+        !["--approve", "--project", "--codex-source-setup", "--claude-path-shim"].includes(flag)
+      )
         throw new Error(HERDR_USAGE);
       seen.add(flag);
       if (flag !== "--approve" && !rest[++index]) throw new Error(HERDR_USAGE);

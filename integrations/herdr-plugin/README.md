@@ -9,6 +9,56 @@ hooks ([ADR 0139](../../docs/adr/0139-clankie-rides-vanilla-herdr.md)).
 The plugin is optional: Clankie runs the same without it. Linking it puts his
 board, console, and status report one keystroke from any herdr workspace.
 
+## Hand-started Claude on Mac
+
+In prepared Mac zsh panes, typing `claude` or `claude --resume ID` selects
+Clankie's PATH shim, which adds `--channels plugin:clankie-worker@clankie` when
+the worker plugin is enabled. The shim is independent of the optional UI plugin.
+Bundled zsh panes are prepared at service start. For the active linked local
+Herdr session:
+
+```sh
+clankie herdr prepare local --claude-path-shim install
+```
+
+Open a new pane afterward. The command writes a stable Clankie-owned launcher
+under `~/.clankie/herdr-pane/SESSION`, sets only `[terminal].default_shell`,
+and reloads Herdr's config for future panes. A config symlink stays linked;
+the edit goes to its canonical source. Preparation is idempotent. The launcher
+sources the owner's zsh startup files, preserving their `ZDOTDIR`, and puts
+the shim first on PATH after startup. It does not edit shell dotfiles.
+Existing custom shell launchers are refused rather than replaced.
+
+Undo the shell selection with:
+
+```sh
+clankie herdr prepare local --claude-path-shim remove
+```
+
+Removal restores the saved config exactly when unchanged, or restores only the
+prior shell setting while preserving later owner edits. It refuses if another
+launcher has taken over. It leaves the generated files and existing panes alone.
+
+Explicit `--channels` (including `--channels=...`) always wins. Print,
+administrative and bare launches, nested Claude processes, and launches with
+explicit `--settings` or `--setting-sources` pass through. The shim checks
+the selected `CLAUDE_CONFIG_DIR` at every launch and respects project/local
+plugin disabling. Outside the selected managed Herdr session it passes through.
+It skips every installed copy/symlink of itself when resolving real Claude,
+and replaces its process so Claude keeps normal TTY, signals and exit status.
+
+`clankie doctor` reports `herdrPlugin.claudePathShim`: `active` describes this
+pane's PATH, `configured-for-new-panes` describes the saved shell selection,
+and `unverified` means the service's selected local session could not be read.
+Those are setup observations; only an exact-session live channel poll proves a
+receiver. Aliases/functions and absolute Claude paths can bypass PATH. Channel
+policy, plugin trust and worker membership still apply. No running Claude gains
+channels from installing the shim.
+
+Automatic activation currently supports Mac zsh. Linked Windows PowerShell and
+Git Bash activation and idle-wake proof are tracked in
+[VUH-2084](https://linear.app/vuhlp/issue/VUH-2084).
+
 ## What you get
 
 | Entry point           | Kind         | What it does                                             |

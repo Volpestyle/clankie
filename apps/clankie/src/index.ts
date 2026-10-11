@@ -167,6 +167,7 @@ import { localProofDiagnostics } from "./local-fleet-proof-log.ts";
 import { closeNativeProcessObservers } from "./native-process-transport.ts";
 import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
+import { prepareLocalClaudeShim } from "./herdr-claude-shim.ts";
 import { createWorkerAccountsReader } from "./captain/harness-accounts.ts";
 import { createPiWorkerStatusReader } from "./captain/pi-worker-account.ts";
 import { refreshLinkedHarnesses } from "../../tui/src/harness-refresh.ts";
@@ -2078,6 +2079,7 @@ const clankie = await createClankieApp({
       workerPluginDir: workerPluginDir(repoRoot),
     });
   },
+  prepareLocalClaudeShim: (action, binding) => prepareLocalClaudeShim(action, binding),
   deliveredFiles,
   herdrRuntime: herdr.status,
   activitySharing,

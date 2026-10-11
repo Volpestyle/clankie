@@ -90,7 +90,7 @@ const HEADLESS_COMMAND_HELP = [
       "  runtime [list|status] | connect ID (--session NAME | --socket PATH) | disconnect ID",
       "          workspaces ID (--repo /checkout | --dir /directory)... | workspaces ID --clear",
       "          capacity ID N|--clear (default 16; clear = unlimited)",
-      "          prepare ID [--codex-source-setup SCRIPT] [--project PROJECT] [--approve]",
+      "          prepare ID [--claude-path-shim install|remove (local)] [--codex-source-setup SCRIPT] [--project PROJECT] [--approve]",
       "                           Manage named execution connections (JSON)",
     ],
   },
@@ -453,7 +453,7 @@ const HEADLESS_COMMAND_HELP = [
       "  herdr [status|open|create|disable] | use NAME",
       "                           Open his workspace or choose your Herdr session",
       "  herdr [--connection ID] <herdr command>    Run against a selected runtime",
-      "  herdr prepare NAME [--codex-source-setup SCRIPT] [--project PROJECT] [--approve]",
+      "  herdr prepare NAME [--claude-path-shim install|remove (local)] [--codex-source-setup SCRIPT] [--project PROJECT] [--approve]",
     ],
   },
   {

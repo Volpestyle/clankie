@@ -2528,6 +2528,10 @@ paths:
                     type: string,
                     description: Absolute source-owned script path on the target machine; supplying a script requires ownerApproved even under lead policy. Existing source and configuration fences remain,
                   }
+                claudePathShim:
+                  type: string
+                  enum: [install, remove]
+                  description: Prepare only the active local external Herdr session's stable Clankie-owned zsh launcher, or restore its prior default_shell. Requires id local and cannot be combined with codexSourceSetup. Reloads configuration for future panes without restarting existing occupants.
       responses:
         "200":
           description: Harness preparation result and the caller's consent claim

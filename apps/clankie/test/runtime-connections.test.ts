@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { mkdtemp, rm, mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, symlink, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
@@ -9,6 +9,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { runRuntimeCommand } from "../../tui/src/command/runtime.ts";
 import { readHerdrBinding, herdrConnection } from "../../tui/src/session/herdr-connection.ts";
+import { preparePaneShell } from "../../../integrations/herdr-plugin/claude-path-shim.mjs";
 
 async function prepareFixture() {
   const root = await mkdtemp("/tmp/clankie-runtime-prepare-");
@@ -383,6 +384,88 @@ it("prepares registered fleets only for the owner and passes remote source setup
     await rm(f.root, { recursive: true, force: true });
   }
 });
+
+it.skipIf(process.platform !== "darwin")(
+  "prepares and reverses the exact linked local shell through the authenticated CLI/API",
+  async () => {
+    const f = await prepareFixture();
+    const configPath = join(f.root, "herdr.toml");
+    const original = 'onboarding = false\n[ui]\nagent_panel_sort = "spaces"\n';
+    await writeFile(configPath, original);
+    const binding = {
+      runtime: "external" as const,
+      session: "default",
+      socketPath: join(f.root, "herdr.sock"),
+    };
+    const app = await createClankieApp({
+      settings: f.settings,
+      runtimes: f.runtimes,
+      herdrBinding: () => binding,
+      captain: createStubCaptain(),
+      authenticateOperator: async (request) =>
+        request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+      prepareLocalClaudeShim: async (action, exact) => {
+        expect(exact).toEqual(binding);
+        return preparePaneShell({
+          root: join(f.root, ".clankie/herdr-pane/default"),
+          socketPath: exact.socketPath,
+          configPath,
+          owner: { HOME: f.root, SHELL: "/bin/zsh" },
+          action,
+        });
+      },
+    });
+    const cli = {
+      cwd: f.root,
+      host: "http://localhost",
+      env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+      fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
+    };
+    try {
+      for (const authorization of [undefined, "Bearer worker"]) {
+        const denied = await app.app.request("/v1/runtime-connections/local/prepare", {
+          method: "POST",
+          headers: { "content-type": "application/json", ...(authorization ? { authorization } : {}) },
+          body: JSON.stringify({ workingDirectory: f.root, claudePathShim: "install" }),
+        });
+        expect(denied.status).toBe(401);
+      }
+      const wrongTarget = await app.app.request("/v1/runtime-connections/pc/prepare", {
+        method: "POST",
+        headers: { authorization: "Bearer owner", "content-type": "application/json" },
+        body: JSON.stringify({ workingDirectory: f.root, claudePathShim: "install" }),
+      });
+      expect(wrongTarget.status).toBe(400);
+      expect(await readFile(configPath, "utf8")).toBe(original);
+      await f.settings.update((current) => ({
+        ...current,
+        autonomy: { ...current.autonomy, fleet: { ...current.autonomy.fleet, machineSetup: "owner" } },
+      }));
+      await expect(
+        runRuntimeCommand(["prepare", "local", "--claude-path-shim", "install"], cli),
+      ).rejects.toThrow("owner approval");
+      expect(await readFile(configPath, "utf8")).toBe(original);
+      await f.settings.update((current) => ({
+        ...current,
+        autonomy: { ...current.autonomy, fleet: { ...current.autonomy.fleet, machineSetup: "lead" } },
+      }));
+      expect(
+        await runRuntimeCommand(["prepare", "local", "--claude-path-shim", "install"], cli),
+      ).toMatchObject({ ok: true, prepared: { changed: true } });
+      expect(await readFile(configPath, "utf8")).toContain("default_shell");
+      expect(
+        await runRuntimeCommand(["prepare", "local", "--claude-path-shim", "install"], cli),
+      ).toMatchObject({ ok: true, prepared: { changed: false } });
+      expect(
+        await runRuntimeCommand(["prepare", "local", "--claude-path-shim", "remove"], cli),
+      ).toMatchObject({ ok: true });
+      expect(await readFile(configPath, "utf8")).toBe(original);
+    } finally {
+      await app.close();
+      await rm(f.root, { recursive: true, force: true });
+    }
+  },
+);
 
 it("refuses malformed prepare bodies and unknown fields before fleet preparation", async () => {
   const seen: string[] = [];

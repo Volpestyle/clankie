@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 
 import { refreshOfficialHerdr } from "./herdr-release.ts";
 import { prepareHerdrBinary } from "./herdr-binary.ts";
+import { installPaneShell } from "../../../integrations/herdr-plugin/claude-path-shim.mjs";
 
 const exec = promisify(execFile);
 type RuntimeState = "starting" | "healthy" | "recovering" | "stopped";
@@ -124,7 +125,16 @@ export async function startHerdrRuntime(input: {
   // environment; the config is created once and only patched to name it, so
   // viewer preferences the owner adds to that file survive.
   const paneShell = join(root, "pane-shell");
-  await writeFile(paneShell, paneShellScript(input.env), { mode: 0o700 });
+  if (process.platform === "darwin" && (input.env.SHELL?.trim() || "/bin/zsh").endsWith("/zsh")) {
+    await installPaneShell({
+      root,
+      socketPath,
+      owner: input.env,
+      restore: Object.fromEntries(RESTORED_IN_PANES.map((name) => [name, input.env[name]])),
+    });
+  } else {
+    await writeFile(paneShell, paneShellScript(input.env), { mode: 0o700 });
+  }
   await chmod(paneShell, 0o700);
   const configPath = join(root, "herdr/config.toml");
   const shellLine = `default_shell = ${JSON.stringify(paneShell)}`;
