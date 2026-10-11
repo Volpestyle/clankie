@@ -136,6 +136,7 @@ it("reads chunked JSON stdin and carries every review field intact to the select
       offScope: false,
       assignmentStatus,
       deliverable: "VUH-1662",
+      ownedIssues: assignmentStatus === "paused" ? ["VUH-2026", "VUH-2108"] : [],
       progressAt: checkedAt,
       evidence: "Inspected native report:\ncommit abc123, finding café; literal $(command) and `text`",
     };

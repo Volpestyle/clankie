@@ -35,6 +35,7 @@ import type { AutonomyStore } from "../src/captain/autonomy.ts";
 import type { HerdrWatchPort } from "../src/captain/herdr-watch.ts";
 import type { LaneLog } from "../src/captain/lane-log.ts";
 import { createStubCaptain, type LaneTool, type LaneToolBank } from "../src/captain/port.ts";
+import { fleetEfficiencyTools, type FleetEfficiencyReview } from "../src/captain/fleet-efficiency-tools.ts";
 
 /**
  * His tools over MCP (VUH-1085). What this guards is the lane boundary: the
@@ -141,6 +142,84 @@ async function toolNames(
 }
 
 describe("lane MCP endpoint", () => {
+  it("exposes lead ownership reviews and carries claims and clearing through MCP", async () => {
+    const reviews: (FleetEfficiencyReview | undefined)[] = [];
+    const authority = {
+      owner: { conversationId: "global-default" },
+      current: () => true,
+      authorize: async () => true,
+    };
+    const [definition] = fleetEfficiencyTools(
+      {
+        run: async (admitted, review) => {
+          expect(admitted.owner).toEqual(authority.owner);
+          reviews.push(review);
+          return { conversationId: "global-default", seats: [] };
+        },
+      },
+      { conversationAuthority: authority },
+    );
+    if (!definition) throw new Error("Missing fleet efficiency tool");
+    const app = await createClankieApp({
+      captain: createStubCaptain({
+        laneToolBank: async (lane) => ({
+          lane,
+          tools: [
+            {
+              name: definition!.name,
+              description: definition!.description,
+              inputSchema: { ...definition!.parameters },
+              call: async (args) =>
+                definition!.execute(
+                  "review-test",
+                  args,
+                  undefined,
+                  undefined,
+                  {} as Parameters<typeof definition.execute>[4],
+                ),
+            },
+          ],
+        }),
+      }),
+      authenticateOperator: async () => ({ operatorId: "operator-james" }),
+    });
+    try {
+      const session = await connect(app, "operator");
+      const listed = await call(app, "operator", { jsonrpc: "2.0", id: 2, method: "tools/list" }, session);
+      const result = (await listed.json()).result;
+      assertMcpToolsList(result, "operator");
+      const tool = result.tools.find((entry: { name: string }) => entry.name === "fleet_efficiency");
+      const reviewSchema = tool.inputSchema.anyOf.find(
+        (entry: { properties: { action: { const: string } } }) => entry.properties.action.const === "review",
+      );
+      expect(reviewSchema.required).toEqual(expect.arrayContaining(["action", "seatId", "evidence"]));
+      expect(reviewSchema.properties.ownedIssues).toMatchObject({
+        type: "array",
+        maxItems: 100,
+        items: { type: "string", pattern: "^[A-Z][A-Z0-9]*-[0-9]+$" },
+      });
+      for (const ownedIssues of [["VUH-2026", "VUH-2108"], []]) {
+        const review = { seatId: "worker-seat", ownedIssues, evidence: "Exact live follow-up assignment" };
+        const response = await call(
+          app,
+          "operator",
+          {
+            jsonrpc: "2.0",
+            id: 3,
+            method: "tools/call",
+            params: { name: "fleet_efficiency", arguments: { action: "review", ...review } },
+          },
+          session,
+        );
+        expect((await response.json()).result.isError).not.toBe(true);
+        expect(reviews.at(-1)).toEqual(review);
+      }
+      expect(reviews).toHaveLength(2);
+    } finally {
+      app.close();
+    }
+  });
+
   it("serves the bearer's own lane, and never another lane's session", async () => {
     const app = await mcpApp();
 

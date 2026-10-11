@@ -166,7 +166,15 @@ export async function runAgentsCommand(
       finding = input as Record<string, unknown>;
       if (
         Object.keys(finding).some(
-          (key) => !["offScope", "assignmentStatus", "deliverable", "progressAt", "evidence"].includes(key),
+          (key) =>
+            ![
+              "offScope",
+              "assignmentStatus",
+              "deliverable",
+              "ownedIssues",
+              "progressAt",
+              "evidence",
+            ].includes(key),
         )
       )
         throw new Error(AGENTS_USAGE);

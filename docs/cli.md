@@ -4150,7 +4150,8 @@ clankie agents efficiency review SEAT --conversation ID --json-stdin < review.js
 
 The JSON object requires `evidence` (1–2048 trimmed characters). Optional fields
 are `offScope` (boolean), `assignmentStatus` (`active`, `paused`, `canceled` or
-`done`), `deliverable` (1–512 trimmed characters), and `progressAt` (a UTC ISO
+`done`), `deliverable` (1–512 trimmed characters), `ownedIssues` (up to 100 exact
+issue keys, such as `["VUH-2026", "VUH-2108"]`; `[]` clears the claim), and `progressAt` (a UTC ISO
 8601 timestamp for the substantive finding or commit). The CLI supplies the
 action, seat ID and conversation; extra JSON keys are refused. A review applies
 to that exact owned native session and records inspected evidence. It does not
