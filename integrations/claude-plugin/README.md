@@ -187,6 +187,12 @@ bridge retries that same ack for up to 20 seconds and keeps polling once it
 lands (VUH-2034). It stops polling only when the ack names another event or
 never lands. A roster that shows the seat as not `live` is then accurate.
 
+An expired poll binding does not mean the owner took over. Claude's native
+work status and Stop hooks remain watchable while live channel delivery is
+unavailable. Subagent UI changes and `UserPromptSubmit` are not owner-input
+evidence: [Claude also fires that hook for background subagent reports and
+scheduled turns](https://code.claude.com/docs/en/hooks#userpromptsubmit).
+
 The fleet roster's `messageReceiver` separates inbound delivery from installed
 tools and outbound reports. `next-turn-only` means a prompt hook is observed for
 this exact session but no live channel poll is bound; `live` means a native poll

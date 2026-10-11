@@ -4728,7 +4728,7 @@ function seatEventObservation(event: SeatEvent): string {
     case "blocked":
       return `The seat is waiting on the owner in its pane: ${event.reason}.`;
     case "released":
-      return "The owner took the seat over in its pane; it is an interactive session now.";
+      return "The seat's programmatic control ended; its native session may still be active.";
     case "exited":
       return `The seat's harness exited (${String(event.code)}).`;
     case "turn_started":

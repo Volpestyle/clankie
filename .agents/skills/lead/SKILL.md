@@ -180,6 +180,11 @@ for the completion event; do not poll output on a timer or add a second watcher.
 Start from the report and its evidence, and read a pane or transcript only to
 resolve a gap or contradiction.
 
+A Claude channel losing its poll binding says only that live delivery is
+unavailable. Keep watching the native session's work; neither Claude's subagent
+switcher nor `UserPromptSubmit` proves owner takeover (background agents also
+trigger that hook). A released channel alone never proves owner input.
+
 On completion, inspect, decide and act. A branch is not landed, and landing is
 not delivery: check the integrated consumer as soon as the parts can join.
 Respect the repo's review gate with one bounded pass over the actual diff and

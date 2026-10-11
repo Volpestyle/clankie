@@ -602,12 +602,12 @@ it("messages have transcript receipts, while Stop text remains separate from mes
   expect(quiet).toBeUndefined();
 
   unbind();
-  expect(await control.status()).toBe("released");
+  expect(await control.status()).toBe("blocked");
   expect(await control.send("after the channel went away")).toEqual({
     outcome: "released",
     deliveryStage: "unavailable",
   });
-  expect(await control.settled()).toMatchObject({ type: "released" });
+  expect(await control.settled()).toMatchObject({ type: "blocked" });
 });
 
 it("rechecks the hiring source after readiness before delivering its initial brief", async () => {

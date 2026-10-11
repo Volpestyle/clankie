@@ -629,7 +629,9 @@ class ClaudeWorkerSeatControl implements SeatControl {
     }
     if (agent === undefined || !this.matches(agent)) return { status: "offline" };
     this.terminalId ??= agent.terminalId;
-    if (!this.deps.mailbox.bound(agent.terminalId)) return { status: "released" };
+    // A poll gap makes delivery unavailable, not the native work or its Stop
+    // observation. In particular it is no evidence of owner input (VUH-1989).
+    // send() checks the channel separately before dispatch.
     if (agent.status === "unknown") return undefined;
     return {
       status: agent.status === "working" ? "working" : agent.status === "blocked" ? "blocked" : "idle",
@@ -761,7 +763,6 @@ class ClaudeWorkerSeatControl implements SeatControl {
           return { type: "settlement_unconfirmed", at: at(), reason: "status_unavailable" };
         const status = observation.status;
         if (status === "offline") return { type: "exited", at: at(), code: null };
-        if (status === "released") return { type: "released", at: at() };
         if (status === "blocked")
           return { type: "blocked", at: at(), reason: "Claude is waiting on the owner in its pane" };
         const stop = held?.last?.type === "turn_completed" ? held.lastStop : undefined;
