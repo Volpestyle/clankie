@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { z } from "zod";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { ProjectsSettingsSchema } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
@@ -558,19 +559,27 @@ it("retains imported release membership without inventing a delivery stage and c
   expect(imported.every((issue: { stage?: string }) => issue.stage === undefined)).toBe(true);
   const native = [];
   for (const title of ["No bundle", "Unchecked bundle", "Checked bundle"])
-    native.push(await f.live.call("save_issue", { team: "VUH", title }));
+    native.push(
+      z.object({ identifier: z.string() }).parse(await f.live.call("save_issue", { team: "VUH", title })),
+    );
   for (const issue of native.slice(1)) {
-    const bundle = await f.live.call(
-      "save_evidence_bundle",
-      {
-        issueId: issue.identifier,
-        references: [await f.evidence.record(issue.identifier as string)],
-        gaps: [],
-      },
-      { actor: TRACKER_LEAD },
+    const bundle = z.object({ id: z.string() }).parse(
+      await f.live.call(
+        "save_evidence_bundle",
+        {
+          issueId: issue.identifier,
+          references: [await f.evidence.record(issue.identifier as string)],
+          gaps: [],
+        },
+        { actor: { ...TRACKER_LEAD, onBehalfOf: [] } },
+      ),
     );
     if (issue === native[2])
-      await f.live.call("post_bundle_check", { bundleId: bundle.id }, { actor: TRACKER_OWNER });
+      await f.live.call(
+        "post_bundle_check",
+        { bundleId: bundle.id },
+        { actor: { ...TRACKER_OWNER, onBehalfOf: [] } },
+      );
   }
   const keys = [...imported, ...native].map((issue) => issue.identifier as string);
   const history = {
@@ -607,7 +616,10 @@ it("retains imported release membership without inventing a delivery stage and c
   expect(after.releases[0].items.map((item: { key: string }) => item.key)).toEqual(keys);
   expect(after.events.filter((event: { to?: string }) => event.to === "delivered")).toHaveLength(1);
   const reopened = createLocalTracker({ directory: f.trackerDirectory });
-  expect((await reopened.call("get_release", { id: "v0.4.3" })).items).toHaveLength(5);
+  const release = z
+    .object({ items: z.array(z.unknown()) })
+    .parse(await reopened.call("get_release", { id: "v0.4.3" }));
+  expect(release.items).toHaveLength(5);
   expect((await f.live.syncReleases(history)).delivered).toEqual([]);
   const repeated = JSON.parse((await f.files()).live);
   expect(repeated.events.filter((event: { to?: string }) => event.to === "delivered")).toHaveLength(1);
