@@ -1481,6 +1481,24 @@ function autonomyTools(autonomy: AutonomyStore, turn: TurnContext): ToolDefiniti
       execute: async () => json(autonomy.status(conversationId())),
     }),
     defineTool({
+      name: "report_continuation",
+      label: "Report lead continuation",
+      description:
+        "At the reporting boundary, declare whether this lead's work remains active, is intentionally paused, is complete, or is blocked on an owner decision. For blocked_on_owner, include the exact question. This durable record grants no approval and schedules nothing; declare complete or paused to clear the blocker, or active when it is resolved and work continues.",
+      parameters: Type.Object({
+        mode: Type.Union([
+          Type.Literal("active"),
+          Type.Literal("paused"),
+          Type.Literal("complete"),
+          Type.Literal("blocked_on_owner"),
+        ]),
+        question: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+      }),
+      executionMode: "sequential",
+      execute: async (_id, params) =>
+        json(autonomy.command(conversationId(), { action: "report_continuation", continuation: params })),
+    }),
+    defineTool({
       name: "schedule_wake",
       label: "Schedule self-wake",
       description:

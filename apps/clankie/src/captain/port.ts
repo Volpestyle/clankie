@@ -1,4 +1,5 @@
 import type { Huddle, StartHuddle } from "@clankie/protocol/huddles";
+import type { FleetProgressObservation } from "../fleet-progress.ts";
 import type {
   FleetSeatToolCatalog,
   FleetSeatToolCatalogHealth,
@@ -252,6 +253,7 @@ export interface CaptainPort {
     observe?: (delivery: FleetHealthAlertDelivery) => void,
   ): Promise<boolean>;
   notifyRuntimeHealthAlert(text: string): Promise<boolean>;
+  leadProgress(): Promise<readonly FleetProgressObservation[]>;
   /** Record a service notice in the owner's default conversation; never a model turn (VUH-1702). */
   recordRuntimeHealthNotice(text: string): boolean;
   wakeConversation(
@@ -550,6 +552,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     wakeConversation: async () => false,
     notifyFleetHealthAlert: async () => false,
     notifyRuntimeHealthAlert: async () => false,
+    leadProgress: async () => [],
     recordRuntimeHealthNotice: () => false,
     laneMemoryCard: async () => "",
     acknowledgeSeatEvent: async () => false,

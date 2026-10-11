@@ -244,6 +244,8 @@ export function roomHandoffConversationId(roomConversationId: string, deliveryId
 export class ConversationStore {
   /** Live outbox binding, never inferred from a remembered transcript. */
   public nativeTurnDelivery?: (conversationId: string) => boolean;
+  /** A bounded explicit continuation declaration in a lead's settled report. */
+  public reportBoundary?: (conversationId: string, text: string, at: string) => void;
   /** Roster/inbox observers see progress independently of a worker's pane lifetime. */
   public onInboundReportChange?: () => void;
   private readonly metas = new Map<string, ConversationMeta>();
@@ -3012,6 +3014,14 @@ export class ConversationStore {
       ...body,
     } as OperatorConversationStreamEvent;
     this.journal.append(meta.conversationId, event);
+    if (
+      (meta.scope.kind === "global" || meta.scope.kind === "workspace") &&
+      meta.parentConversationId === undefined &&
+      body.type === "message" &&
+      (body.role === "captain" || body.role === "agent") &&
+      !body.streaming
+    )
+      this.reportBoundary?.(meta.conversationId, body.text, event.occurredAt);
     // Captain owner threads are private to the authenticated operator. Room,
     // channel, worker and side-fork activity must not become a desktop notice.
     if (

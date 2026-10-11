@@ -18,6 +18,7 @@ const PROJECT_TOOLS = new Set([
   "acknowledge_worker_reports",
   "herdr_watch",
   "schedule_wake",
+  "report_continuation",
   "cancel_wake",
   "routine",
   "request_user_input",

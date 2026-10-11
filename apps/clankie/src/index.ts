@@ -1784,6 +1784,7 @@ const fleetProgress = new FleetProgressObserver({
   sources: [
     ...(integration ? [{ prefix: "integration", read: () => integration.progress() }] : []),
     { prefix: "heavy", read: async () => fleetResources.progress() },
+    { prefix: "lead", read: () => captain.leadProgress() },
   ],
   notify: (text) => captain.notifyRuntimeHealthAlert(text),
   onError: (error) =>

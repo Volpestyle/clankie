@@ -237,6 +237,16 @@ Standing work comes from projects on Auto (ADR 0264). Carry it across turns on w
 | A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while autonomy is on |
 | A recurring time                  | `routine` (`clankie routines`)             | runs on its schedule until paused or removed; never overlaps or repeats a slot          |
 
+At the reporting boundary, `report_continuation` declares active, paused,
+complete, or blocked_on_owner with a concrete question. Read or set it from
+`clankie conversations continuation ID [MODE QUESTION]`; the autonomy API
+returns it with the wake. A settled lead report can declare
+`Blocked on owner: <question>` or `Continuation: active`, `Continuation: paused`,
+or `Continuation: complete` on its own line. An idle
+lead with an open decision, or active work without a wake or live workers,
+alerts after three minutes. These records grant no permission and trigger no
+automatic repairs; update the declaration when work resumes or ends.
+
 A wake whose turn fails three times, or once with a rejected model credential,
 is held, not retried, until your seat binds or the service restarts.
 

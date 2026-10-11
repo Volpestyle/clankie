@@ -1950,6 +1950,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
   conversations.onRoomHandoffChange = () => fleetChanges.touch();
+  conversations.reportBoundary = (id, text, at) => {
+    try {
+      autonomy.reportBoundary(id, text, at);
+    } catch (error) {
+      console.warn("Lead continuation report could not be retained", id, String(error));
+    }
+  };
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
   conversations.projectOnboarding = projectOnboarding(settingsStore, () => options.fleetResources?.status());
   // Legacy workspace preferences/project proposals retain their native-seat fence.
@@ -5561,6 +5568,54 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     wakeConversation,
     notifyFleetHealthAlert,
     notifyRuntimeHealthAlert,
+    async leadProgress() {
+      const fleet = await refreshFleet();
+      const listed = await conversations.serve({ op: "list", schemaVersion: 1 });
+      if (listed.op !== "list") throw Error("Lead conversation inventory unavailable");
+      const leading = new Set(fleet.flatMap((seat) => (seat.owner ? [seat.owner.conversationId] : [])));
+      leading.add(conversations.defaultGlobalConversationId());
+      const leads = listed.conversations.filter(
+        (conversation) =>
+          (conversation.scope.kind === "global" || conversation.scope.kind === "workspace") &&
+          conversation.parentConversationId === undefined &&
+          (leading.has(conversation.conversationId) ||
+            autonomy.status(conversation.conversationId).continuation !== undefined ||
+            conversation.scope.kind === "workspace"),
+      );
+      return autonomy.progress(
+        leads.map((conversation) => {
+          const id = conversation.conversationId;
+          const source = conversations.nativeSource(id);
+          const seat =
+            id === conversations.defaultGlobalConversationId()
+              ? fleet.find((entry) => entry.seatId === headSeat?.seatId)
+              : fleet.find(
+                  (entry) =>
+                    entry.conversationId === id ||
+                    (source !== undefined && entry.seatId === source.terminalId),
+                );
+          const goal = seat?.goal ?? conversationGoal(id);
+          const assignment = seat?.assignment ?? conversationAssignment(id);
+          const native = conversations.hasNativeSeat(id) || conversationDriver(id) !== undefined;
+          if (native && !seat) throw Error(`Lead ${id} native idle state unavailable`);
+          return {
+            conversationId: id,
+            ...(seat ? { seatId: seat.seatId } : {}),
+            idle:
+              conversations.activeInvocationCount(id) === 0 &&
+              (native ? seat?.status === "idle" || seat?.status === "blocked" : conversations.turnIdle(id)),
+            liveWorkers: fleet.some(
+              (worker) => worker.owner?.conversationId === id && worker.status === "working",
+            ),
+            activeWork: assignment !== undefined || goal?.status === "active" || goal?.status === "blocked",
+            paused:
+              goal !== undefined &&
+              ["paused", "complete", "budget_limited", "usage_limited"].includes(goal.status),
+            workEpoch: assignment?.updatedAt ?? goal?.updatedAt,
+          };
+        }),
+      );
+    },
     recordRuntimeHealthNotice: (text: string) =>
       conversations.recordServiceNotice(conversations.defaultGlobalConversationId(), text),
 

@@ -33,6 +33,7 @@ const USAGE = [
   "Usage: clankie conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
   "       clankie conversations pending ID [list|remove|send-now|edit] [MESSAGE_ID --version N] [--text TEXT]",
   "       clankie conversations stop-task ID",
+  "       clankie conversations continuation ID [active|paused|complete|blocked_on_owner QUESTION]",
   "       clankie conversations project-proposal ID --request UUID --incarnation UUID",
   "       clankie conversations confirm-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
   "       clankie conversations accept-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
@@ -70,6 +71,20 @@ export async function runConversationsCommand(
   if (["updates", "read-update", "dismiss-update"].includes(args[0] ?? ""))
     return runOwnerUpdateAction(args, options);
   if (args[0] === "auto") return runAutoAction(args.slice(1), options);
+  if (args[0] === "continuation") {
+    const [, id, mode, ...question] = args;
+    if (!id || (!mode && question.length)) throw Error(USAGE);
+    const command = OperatorAutonomyCommandSchema.parse(
+      mode
+        ? {
+            action: "report_continuation",
+            continuation: { mode, ...(question.length ? { question: question.join(" ") } : {}) },
+          }
+        : { action: "status" },
+    );
+    outputJson(options.stdout ?? process.stdout, await (await serviceClient(options)).autonomy(id, command));
+    return 0;
+  }
   if (
     [
       "questions",

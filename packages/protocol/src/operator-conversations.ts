@@ -1511,11 +1511,28 @@ export const OperatorWakeSchema = z
   .strict();
 export type OperatorWake = z.infer<typeof OperatorWakeSchema>;
 
+/** A lead's declared next step, not a work item's lifecycle or permission grant. */
+const ContinuationFields = {
+  mode: z.enum(["active", "paused", "complete", "blocked_on_owner"]),
+  question: z.string().trim().min(1).max(512).optional(),
+};
+const validContinuation = (value: { mode: string; question?: string | undefined }) =>
+  value.mode === "blocked_on_owner" ? value.question !== undefined : value.question === undefined;
+export const OperatorContinuationSchema = z
+  .object({
+    ...ContinuationFields,
+    updatedAt: z.string().datetime(),
+  })
+  .strict()
+  .refine(validContinuation, "Only a blocking owner decision carries a question");
+export type OperatorContinuation = z.infer<typeof OperatorContinuationSchema>;
+
 export const OperatorAutonomyStatusSchema = z
   .object({
     enabled: z.boolean(),
     error: z.literal("state_unreadable").optional(),
     wake: OperatorWakeSchema.optional(),
+    continuation: OperatorContinuationSchema.optional(),
   })
   .strict();
 export type OperatorAutonomyStatus = z.infer<typeof OperatorAutonomyStatusSchema>;
@@ -1524,6 +1541,15 @@ export const OperatorAutonomyCommandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("status") }).strict(),
   z.object({ action: z.literal("set_enabled"), enabled: z.boolean() }).strict(),
   z.object({ action: z.literal("clear_wake") }).strict(),
+  z
+    .object({
+      action: z.literal("report_continuation"),
+      continuation: z
+        .object(ContinuationFields)
+        .strict()
+        .refine(validContinuation, "Only a blocking owner decision carries a question"),
+    })
+    .strict(),
 ]);
 export type OperatorAutonomyCommand = z.infer<typeof OperatorAutonomyCommandSchema>;
 

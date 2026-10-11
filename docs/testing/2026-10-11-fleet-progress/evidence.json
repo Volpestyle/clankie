@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "focused-evidence.tar",
+      "size": 40960,
+      "sha256": "dd284aa2169fcd8971155ecb84a1eeab033718b9e6d3900f59fc2aff38045a65",
+      "url": "clankie://evidence/sha256/dd284aa2169fcd8971155ecb84a1eeab033718b9e6d3900f59fc2aff38045a65"
+    },
+    {
+      "path": "fresh-main-checks.tar",
+      "size": 20480,
+      "sha256": "9989da0a37bb2fc9547f62c2f96679318d5f2760c0259090deecc818c59a7095",
+      "url": "clankie://evidence/sha256/9989da0a37bb2fc9547f62c2f96679318d5f2760c0259090deecc818c59a7095"
+    }
+  ]
+}

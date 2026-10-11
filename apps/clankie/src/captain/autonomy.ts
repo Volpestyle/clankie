@@ -2,11 +2,28 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname } from "node:path";
 import {
   OperatorWakeSchema,
+  OperatorContinuationSchema,
+  type OperatorContinuation,
   type OperatorAutonomyCommand,
   type OperatorAutonomyStatus,
   type OperatorWake,
 } from "@clankie/protocol";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
+import type { FleetProgressObservation } from "../fleet-progress.ts";
+
+const ContinuationIdleSchema = z
+  .object({ key: z.string().max(1024), id: z.string().uuid(), sinceMs: z.number().int().nonnegative() })
+  .strict();
+export interface LeadProgressState {
+  conversationId: string;
+  seatId?: string;
+  idle: boolean;
+  liveWorkers: boolean;
+  activeWork: boolean;
+  paused: boolean;
+  workEpoch?: string | undefined;
+}
 
 const MAX_TIMER_MS = 2_147_483_647;
 const WAKE_RETRY_START_MS = 5_000;
@@ -38,7 +55,14 @@ const PersistedAutonomySchema = z
       z.string(),
       // `goal` is a retired ADR 0130 record (ADR 0264). It is read and dropped so
       // an older file keeps its switch and wakes instead of reading as unreadable.
-      z.object({ goal: z.unknown().optional(), wake: OperatorWakeSchema.optional() }).strict(),
+      z
+        .object({
+          goal: z.unknown().optional(),
+          wake: OperatorWakeSchema.optional(),
+          continuation: OperatorContinuationSchema.optional(),
+          continuationIdle: ContinuationIdleSchema.optional(),
+        })
+        .strict(),
     ),
   })
   .strict();
@@ -46,7 +70,14 @@ const PersistedAutonomySchema = z
 interface PersistedAutonomy {
   schemaVersion: 1;
   enabled: boolean;
-  conversations: Record<string, { wake?: OperatorWake }>;
+  conversations: Record<
+    string,
+    {
+      wake?: OperatorWake;
+      continuation?: OperatorContinuation;
+      continuationIdle?: z.infer<typeof ContinuationIdleSchema>;
+    }
+  >;
 }
 /** One turn Clankie asked for. */
 type InternalRun = (conversationId: string, prompt: string) => Promise<void>;
@@ -85,6 +116,7 @@ export class AutonomyStore {
       enabled: this.state.enabled,
       ...(this.stateUnreadable ? { error: "state_unreadable" as const } : {}),
       ...(record?.wake === undefined ? {} : { wake: record.wake }),
+      ...(record?.continuation === undefined ? {} : { continuation: record.continuation }),
     };
   }
 
@@ -98,8 +130,104 @@ export class AutonomyStore {
       case "clear_wake":
         this.clearWake(conversationId);
         break;
+      case "report_continuation":
+        this.reportContinuation(conversationId, command.continuation);
+        break;
     }
     return this.status(conversationId);
+  }
+
+  public reportContinuation(
+    conversationId: string,
+    input: Omit<OperatorContinuation, "updatedAt">,
+    at = new Date().toISOString(),
+  ): void {
+    if (this.stateUnreadable)
+      throw Error("Continuation store is unreadable; repair before publishing a report");
+    const continuation = OperatorContinuationSchema.parse({ ...input, updatedAt: at });
+    const previous = this.state.conversations[conversationId]?.continuation;
+    if (previous && Date.parse(previous.updatedAt) >= Date.parse(at)) return;
+    if (!this.state.conversations[conversationId] && Object.keys(this.state.conversations).length >= 1_000)
+      throw Error("Continuation inventory exceeds its bound");
+    this.record(conversationId).continuation = continuation;
+    this.save();
+  }
+
+  /** Only explicit report markers count; ordinary prose and quoted context grant nothing. */
+  public reportBoundary(conversationId: string, text: string, at: string): void {
+    let fenced = false;
+    const lines = text.split("\n").filter((line) => {
+      if (/^\s*(```|~~~)/u.test(line)) {
+        fenced = !fenced;
+        return false;
+      }
+      return !fenced;
+    });
+    const blocking = lines.find((line) => /^blocked on owner: \S/iu.test(line));
+    if (blocking) {
+      this.reportContinuation(
+        conversationId,
+        {
+          mode: "blocked_on_owner",
+          question: blocking.slice("blocked on owner: ".length).trim().slice(0, 512),
+        },
+        at,
+      );
+      return;
+    }
+    const marker = lines.find((line) => /^continuation: (active|paused|complete)\s*$/iu.test(line));
+    if (marker)
+      this.reportContinuation(
+        conversationId,
+        { mode: marker.split(":")[1]!.trim().toLowerCase() as "active" | "paused" | "complete" },
+        at,
+      );
+  }
+
+  /** Passive, durable idle epochs. Reports and observations never approve or repair work. */
+  public progress(leads: readonly LeadProgressState[]): readonly FleetProgressObservation[] {
+    if (this.stateUnreadable) throw Error("Lead continuation observations unavailable: unreadable store");
+    if (leads.length > 256) throw Error("Lead continuation inventory exceeds its bound");
+    const result: FleetProgressObservation[] = [];
+    const known = new Set(leads.map((lead) => lead.conversationId));
+    let changed = false;
+    for (const [id, record] of Object.entries(this.state.conversations)) {
+      if (record.continuationIdle && !known.has(id)) {
+        delete record.continuationIdle;
+        this.pruneRecord(id);
+        changed = true;
+      }
+    }
+    for (const lead of leads) {
+      const record = this.state.conversations[lead.conversationId];
+      const continuation = record?.continuation;
+      const blocking = continuation?.mode === "blocked_on_owner";
+      const active = blocking || continuation?.mode === "active" || lead.activeWork;
+      const paused = lead.paused || continuation?.mode === "paused" || continuation?.mode === "complete";
+      const noContinuation = this.enabled && record?.wake === undefined && !lead.liveWorkers;
+      if (!lead.idle || !active || paused || (!blocking && !noContinuation)) {
+        if (record?.continuationIdle) {
+          delete record.continuationIdle;
+          this.pruneRecord(lead.conversationId);
+          changed = true;
+        }
+        continue;
+      }
+      const key = `${continuation?.updatedAt ?? lead.workEpoch ?? "assigned"}:${blocking ? "owner-decision" : "no-continuation"}`;
+      const current = this.record(lead.conversationId);
+      if (current.continuationIdle?.key !== key) {
+        current.continuationIdle = { key, id: randomUUID(), sinceMs: Date.now() };
+        changed = true;
+      }
+      const idle = current.continuationIdle!;
+      result.push({
+        id: `lead:${lead.conversationId}:${idle.id}`,
+        stalled: Date.now() - idle.sinceMs >= 180_000,
+        message: `Lead continuation stalled: conversation ${lead.conversationId}, seat ${lead.seatId ?? "service"}, idle since ${new Date(idle.sinceMs).toISOString()}. ${blocking ? `Blocked on owner: ${continuation.question}` : "Active work has no scheduled self-wake or live workers."} Inspect the report and declared continuation; no automatic approval, wake or repair.`,
+      });
+    }
+    if (changed) this.save();
+    return result;
   }
 
   /**
@@ -265,7 +393,12 @@ export class AutonomyStore {
 
   private pruneRecord(conversationId: string): void {
     const record = this.state.conversations[conversationId];
-    if (record !== undefined && record.wake === undefined) {
+    if (
+      record !== undefined &&
+      record.wake === undefined &&
+      record.continuation === undefined &&
+      record.continuationIdle === undefined
+    ) {
       delete this.state.conversations[conversationId];
     }
   }
@@ -276,7 +409,16 @@ export class AutonomyStore {
       const parsed = PersistedAutonomySchema.parse(JSON.parse(readFileSync(this.path, "utf8")));
       const conversations: PersistedAutonomy["conversations"] = {};
       for (const [id, record] of Object.entries(parsed.conversations))
-        if (record.wake !== undefined) conversations[id] = { wake: record.wake };
+        if (
+          record.wake !== undefined ||
+          record.continuation !== undefined ||
+          record.continuationIdle !== undefined
+        )
+          conversations[id] = {
+            ...(record.wake ? { wake: record.wake } : {}),
+            ...(record.continuation ? { continuation: record.continuation } : {}),
+            ...(record.continuationIdle ? { continuationIdle: record.continuationIdle } : {}),
+          };
       return { schemaVersion: 1, enabled: parsed.enabled, conversations };
     } catch {
       this.stateUnreadable = true;

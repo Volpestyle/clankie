@@ -348,6 +348,23 @@ under Clankie's state directory first. Runtime pins, runtime/update namespaces
 and the running service checkout stay protected regardless of enrollment.
 Keep live workers' owned trees even when their pane startup cwd is main.
 
+## Reporting continuation
+
+At a lead's reporting boundary, declare the next step with `report_continuation`:
+`active`, `paused`, `complete`, or `blocked_on_owner` with the exact question.
+The same declaration is available through `clankie conversations continuation
+ID MODE [QUESTION]` and the conversation autonomy API. A settled report may
+instead contain a line `Blocked on owner: <question>` or `Continuation: active`,
+`Continuation: paused`, or `Continuation: complete`; quoted text and code blocks do not count. This is a
+continuation record, not a work-item status or permission grant. Update it when
+the decision resolves; owner prose alone never implies approval.
+
+The service alerts after three minutes of confirmed lead idleness with an open
+blocking decision, or active work with neither a scheduled self-wake nor live
+workers. Declare paused or complete when that is the actual outcome. Unknown
+native state does not prove idleness or recovery. Idle epochs and alert dedupe
+survive restart; the observer never wakes, approves or repairs work for you.
+
 ## Custom autonomy
 
 `clankie autonomy status` and doctor name the nearest preset and differing

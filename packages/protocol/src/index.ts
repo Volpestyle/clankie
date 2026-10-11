@@ -269,6 +269,8 @@ export {
   OperatorWakeSchema,
   type OperatorWake,
   OperatorAutonomyStatusSchema,
+  OperatorContinuationSchema,
+  type OperatorContinuation,
   type OperatorAutonomyStatus,
   OperatorAutonomyCommandSchema,
   operatorAutonomyCommandRequiresOwner,

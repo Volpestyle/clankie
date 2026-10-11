@@ -4434,6 +4434,20 @@ head runs on Pi with the original room authority and grant. Only the verified
 owner's work uses native Codex children. Completed delivery retries return the
 saved result. See [ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md).
 
+### `conversations continuation ID [MODE QUESTION]`
+
+Lead continuation is declared through the conversation autonomy API or
+`clankie conversations continuation ID [active|paused|complete|blocked_on_owner QUESTION]`.
+With no mode, it reads the current declaration and wake. A blocked declaration
+requires a question; other modes carry none. Leads can use `report_continuation`
+or a settled report line `Blocked on owner: <question>` or `Continuation: active`,
+`Continuation: paused`, or `Continuation: complete`. Quoted text does not count.
+The service alerts after three minutes of confirmed idleness with an open
+blocking decision, or active work with no self-wake or live workers. Completed
+and intentionally paused work is excluded. Idle epochs and opening/recovery
+dedupe persist across restart; unavailable state remains unknown. No approval,
+wake or repair is performed automatically.
+
 ### `conversations lead prepare FLEET | launch --json-stdin | revoke ID`
 
 Start a fresh native Claude project lead on a linked Windows machine. The machine
