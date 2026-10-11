@@ -918,8 +918,8 @@ From a source checkout, generate one private preset for both processes:
 ```bash
 node scripts/scratch-stack.mjs .local/my-proof
 # Start the two owned processes in separate panes:
-clankie heavy -- node scripts/scratch-stack.mjs run .local/my-proof clankie
-clankie heavy -- node scripts/scratch-stack.mjs run .local/my-proof relay
+clankie heavy --server -- node scripts/scratch-stack.mjs run .local/my-proof clankie
+clankie heavy --server -- node scripts/scratch-stack.mjs run .local/my-proof relay
 ```
 
 The preset chooses distinct free loopback service, relay and device-doorway ports,
