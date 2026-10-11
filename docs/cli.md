@@ -2897,6 +2897,13 @@ ticket. Actual native failures identify their cause; see the
 [resource governor reference](../packages/fleet-resources/README.md).
 
 `fleet resources` returns current capacity, pressure, holders and queue as JSON.
+The service alerts when a lane head remains queued over 60 seconds despite
+consecutive sampled verdicts permitting admission. The alert names the ticket,
+owner seat, holder and PID, including an absent grant marker. Pressure and
+capacity waits do not alert; unavailable observations do not prove recovery.
+Opening and recovery notices are durably deduplicated. No automatic repair,
+requeue or registry edit is performed. Granted-but-not-started leases are outside
+this queue-head detector.
 `capacity.used` counts heavy leases against `heavySlots`; `simulatorUsed` counts
 simulator reservations against `simulatorSlots`; `lightUsed` counts light-lane
 jobs against `lightSlots`, whose holders and waiters are `lightLeases` and

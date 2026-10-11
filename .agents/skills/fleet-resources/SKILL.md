@@ -112,6 +112,15 @@ The service judges admission for every waiter from one view of the machine, so
 don't run `clankie heavy` itself under a shim that changes what Node reports
 about the machine (cores, memory); put such shims on the child command. Task-specific owner budgets still bind;
 a source/default change does not authorize increasing live capacity.
+An eligible heavy lane head still queued after 60 seconds on consecutive arbiter
+passes alerts the lead. The alert names its ticket, owner seat, holder and PID,
+and identifies an absent grant marker (older client or missing marker). These
+are sampled admission verdicts, not an inference from free slots. Pressure or
+capacity waits stay quiet; unavailable observations do not resolve an alert.
+Read `clankie fleet resources` and coordinate with the named owner. The observer
+never requeues work or edits the registry. Opening and recovery notices are
+durably deduplicated across service restarts.
+
 Heavy and simulator leases have independent budgets. Automatic simulator
 capacity gives simulators half the machine at the measured cost of one
 simulator under test (34 GiB footprint, two cores): one on the 18-core, 128 GiB

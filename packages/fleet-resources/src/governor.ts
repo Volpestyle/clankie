@@ -21,6 +21,7 @@ import {
   type FleetResourceGovernor,
   type FleetResourcePolicy,
   type HeavyLease,
+  type HeavyArbitration,
   type ProcessIdentity,
   type ResourcePressure,
   type ResourcePressureInput,
@@ -639,7 +640,9 @@ export function createResourceGovernor(
    * read without the lock; the sample and process census come before it.
    */
   let arbiterPassAt = 0;
+  let lastArbitration: HeavyArbitration | undefined;
   async function arbitrate(): Promise<number> {
+    lastArbitration = undefined;
     const policy = (await mainStore.read()).policy;
     const lanes = [
       { lane: "full" as HeavyJobLane, from: mainStore },
@@ -649,6 +652,7 @@ export function createResourceGovernor(
     const peeks = await Promise.all(lanes.map(({ from }) => from.read()));
     if (peeks.every((state) => !state.queue.some((entry) => entry.kind === "heavy"))) {
       await heartbeat();
+      lastArbitration = { atMs: Date.now(), heads: [] };
       return 0;
     }
     const sampled = await pressure.sample(policy);
@@ -657,10 +661,28 @@ export function createResourceGovernor(
     await heartbeat();
     const due = Date.now() - arbiterPassAt >= FULL_PASS_MS;
     let granted = 0;
+    const heads: HeavyArbitration["heads"] = [];
+    const recordHead = (lane: HeavyJobLane, state: ResourceState) => {
+      const head = state.queue.find((entry) => entry.kind === "heavy");
+      if (!head) return;
+      heads.push({
+        lane,
+        ticketId: head.id,
+        ...(head.seatId ? { seatId: head.seatId } : {}),
+        ...(head.holderId ? { holderId: head.holderId } : {}),
+        pid: head.owner.pid,
+        queuedAtMs: head.queuedAtMs,
+        marked: grantable(head.id),
+        admits: headAdmits(lane, state, policy, sampled),
+      });
+    };
     for (const [index, { lane, from }] of lanes.entries()) {
       const peek = peeks[index]!;
       if (!peek.queue.some((entry) => entry.kind === "heavy")) continue;
-      if (!due && !headAdmits(lane, peek, policy, sampled)) continue;
+      if (!due && !headAdmits(lane, peek, policy, sampled)) {
+        recordHead(lane, peek);
+        continue;
+      }
       const seen = await look(from);
       granted += await from.transaction(async (state) => {
         await reconcile(state, seen, from.directory);
@@ -668,7 +690,10 @@ export function createResourceGovernor(
         for (;;) {
           const head = state.queue.find((entry) => entry.kind === "heavy");
           // An older waiter at the head judges for itself; FIFO waits on it.
-          if (!head || !grantable(head.id) || !headAdmits(lane, state, policy, sampled)) return count;
+          if (!head || !grantable(head.id) || !headAdmits(lane, state, policy, sampled)) {
+            recordHead(lane, state);
+            return count;
+          }
           grant(state, head);
           count++;
         }
@@ -693,6 +718,7 @@ export function createResourceGovernor(
         }
       }
     }
+    lastArbitration = { atMs: Date.now(), heads };
     return granted;
   }
   async function acquire(
@@ -1031,6 +1057,7 @@ export function createResourceGovernor(
   }
   return {
     arbitrate,
+    arbitration: () => (lastArbitration === undefined ? undefined : structuredClone(lastArbitration)),
     async configure(policy: FleetResourcePolicy) {
       const parsed = FleetResourcePolicySchema.parse(policy);
       const state = await store.transaction((current) => {

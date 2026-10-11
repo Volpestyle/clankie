@@ -1779,7 +1779,10 @@ const workerToolRefresh = createWorkerToolRefresh({
 bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
 const fleetProgress = new FleetProgressObserver({
   path: join(stateRoot, "fleet-progress-incidents.json"),
-  sources: integration ? [{ prefix: "integration", read: () => integration.progress() }] : [],
+  sources: [
+    ...(integration ? [{ prefix: "integration", read: () => integration.progress() }] : []),
+    { prefix: "heavy", read: async () => fleetResources.progress() },
+  ],
   notify: (text) => captain.notifyRuntimeHealthAlert(text),
   onError: (error) =>
     logger.warn({ event: "fleet.progress.unavailable", error }, "Fleet progress observation unavailable"),

@@ -17,6 +17,7 @@ import type { HerdrAgentSnapshot } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
 import type { ProjectHireProcessProof } from "./captain/project-hires.ts";
 import { fleetQualified, splitFleetQualified } from "./herdr-fleet.ts";
+import type { FleetProgressObservation } from "./fleet-progress.ts";
 
 /** A simulator request's first proof: three observations about two seconds apart (VUH-2055). */
 const PROOF_ATTEMPTS = 3;
@@ -63,6 +64,8 @@ export interface FleetResourceRuntime {
   bindSeats(resolver: SeatResolver): void;
   /** Cached metadata only. Neither health nor a roster read probes the host. */
   status(): ResourceSnapshot | undefined;
+  /** Cached real arbiter verdicts; unavailable observations never mean recovery. */
+  progress(): readonly FleetProgressObservation[];
   configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
   refresh(): Promise<void>;
   /**
@@ -113,6 +116,9 @@ export async function createFleetResourceRuntime(input: {
   let arbiter: ReturnType<typeof setInterval> | undefined;
   let arbitrating: Promise<unknown> | undefined;
   let closed = false;
+  let progressAt = 0;
+  let progress: FleetProgressObservation[] | undefined;
+  let priorHeads = new Set<string>();
   /** `${udid}:${seatId}` pairs already told; forgotten once the device is no longer external. */
   const noticed = new Set<string>();
   const noticedHolders = new Set<string>();
@@ -363,6 +369,11 @@ export async function createFleetResourceRuntime(input: {
       resolver = value;
     },
     status: () => cached,
+    progress() {
+      if (!progress || Date.now() - progressAt > 5_000)
+        throw Error("Heavy arbiter admission observation unavailable");
+      return progress;
+    },
     configure,
     refresh,
     async admitHire(request) {
@@ -460,7 +471,35 @@ export async function createFleetResourceRuntime(input: {
         if (arbitrating) return;
         arbitrating = governor
           .arbitrate()
-          .catch(input.onError ?? (() => {}))
+          .then(() => {
+            const verdict = governor.arbitration();
+            if (!verdict) {
+              progress = undefined;
+              priorHeads.clear();
+              return;
+            }
+            progressAt = verdict.atMs;
+            progress = verdict.heads.map((head) => {
+              const id = `heavy:${head.lane}:${head.ticketId}`;
+              return {
+                id,
+                stalled: head.admits && priorHeads.has(id) && verdict.atMs - head.queuedAtMs > 60_000,
+                // A marked admitted head is granted in the same transaction. The
+                // remaining eligible head has no marker (older client or wedge).
+                message: `Heavy ${head.lane} lane head stalled: ticket ${head.ticketId}, owner seat ${head.seatId ?? "unknown"}, holder ${head.holderId ?? "unknown"}, PID ${head.pid}, queued since ${new Date(head.queuedAtMs).toISOString()}. Consecutive sampled verdicts permit admission, but the grant marker is absent (older client or missing marker). Inspect clankie fleet resources; no automatic repair.`,
+              };
+            });
+            priorHeads = new Set(
+              verdict.heads
+                .filter((head) => head.admits)
+                .map((head) => `heavy:${head.lane}:${head.ticketId}`),
+            );
+          })
+          .catch((error) => {
+            progress = undefined;
+            priorHeads.clear();
+            input.onError?.(error);
+          })
           .finally(() => {
             arbitrating = undefined;
           });

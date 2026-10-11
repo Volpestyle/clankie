@@ -278,6 +278,20 @@ export interface ResourceSnapshot {
     pid?: number;
   }[];
 }
+/** Admission facts captured by the service's existing arbiter pass, never inferred from free slots. */
+export interface HeavyArbitration {
+  atMs: number;
+  heads: {
+    lane: "full" | "light" | "server";
+    ticketId: string;
+    seatId?: string;
+    holderId?: string;
+    pid: number;
+    queuedAtMs: number;
+    marked: boolean;
+    admits: boolean;
+  }[];
+}
 export interface ResourceWaitOptions {
   signal?: AbortSignal;
   /** `arbiter`: the service is judging admission for this waiter (VUH-2080). */
@@ -312,6 +326,8 @@ export interface FleetResourceGovernor {
    * Returns how many requests it admitted.
    */
   arbitrate(): Promise<number>;
+  /** Last completed sampled verdict; undefined when observation is unavailable. */
+  arbitration(): HeavyArbitration | undefined;
   configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
   snapshot(): Promise<ResourceSnapshot>;
   /** Hire admission: refuses only on low available memory or an unverifiable probe. */

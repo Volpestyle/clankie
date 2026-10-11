@@ -34,10 +34,13 @@ async function fixture() {
     for (const governor of governors) await governor.close();
     await rm(directory, { recursive: true, force: true });
   });
-  const governor = (view: ResourcePressureInput) => {
+  const governor = (view: ResourcePressureInput | Error) => {
     const created = createResourceGovernor({
       directory,
-      probe: async () => ({ ...view }),
+      probe: async () => {
+        if (view instanceof Error) throw view;
+        return { ...view };
+      },
       heavyJobSettleMs: 0,
     });
     governors.push(created);
@@ -128,9 +131,36 @@ it("an arbiter never grants a waiter that cannot take a grant up; that waiter ke
   });
   const judge = f.governor(calm);
   for (let pass = 0; pass < 3; pass++) expect(await judge.arbitrate()).toBe(0);
+  expect(judge.arbitration()?.heads).toEqual([
+    expect.objectContaining({ ticketId: id, lane: "full", pid: process.pid, marked: false, admits: true }),
+  ]);
   const snapshot = await judge.snapshot();
   expect(snapshot.leases).toEqual([]);
   expect(snapshot.queue.map((entry) => entry.id)).toEqual([id]);
+});
+
+it("unavailable pressure is unknown admission, while an empty queue is known idle", async () => {
+  const f = await fixture();
+  const healthy = f.governor(calm);
+  await healthy.arbitrate();
+  expect(healthy.arbitration()?.heads).toEqual([]);
+  const id = randomUUID();
+  const owner = (await processIdentity())!;
+  await new ResourceStore(f.directory).transaction((state) =>
+    state.queue.push({
+      id,
+      token: randomUUID(),
+      kind: "heavy",
+      owner,
+      queuedAtMs: Date.now(),
+    }),
+  );
+  await healthy.arbitrate();
+  expect(healthy.arbitration()?.heads[0]?.admits).toBe(true);
+  const blind = f.governor(new Error("fixture pressure observation unavailable"));
+  expect(await blind.arbitrate()).toBe(0);
+  expect(blind.arbitration()).toBeUndefined();
+  expect((await new ResourceStore(f.directory).read()).queue[0]?.id).toBe(id);
 });
 
 it("a waiter whose grant marker was pruned before it enqueued is still granted, in order", async () => {
