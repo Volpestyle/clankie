@@ -54,3 +54,15 @@ does not add a new detector for physical owner input.
 This folder records the baseline reproduction and focused candidate checks.
 The issue links the retained `clankie integrate --push` gate record and final
 landed revision once integration completes.
+
+## Released-event producer audit
+
+Before submission, searched production seat-event producers and inspected all
+seven remaining `type: "released"` returns (`released-producers.txt`): Pi (two),
+OpenCode, Grok and Prime emit it for unavailable native control or a native settlement
+failure; the fleet boundary (two) emits it when its connection authority ends.
+None establishes owner input or relies on takeover wording. The existing
+`packages/agent-hosts/src/seat.ts` contract defines `released` as programmatic
+control ending, not proof of owner action. The generic notification now matches
+that contract for every remaining producer. Claude no longer produces this event
+from a mailbox poll gap.
