@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createServer, type Socket } from "node:net";
+import { nativeRequest } from "../src/herdr-native-request.ts";
+import { nativeHerdrRead } from "../src/herdr-native-read.ts";
+import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import { afterEach, expect, it } from "vitest";
 import { PaneTidy } from "../src/captain/pane-tidy.ts";
 import { paneDraftState } from "../src/captain/pane-draft.ts";
@@ -13,7 +17,9 @@ import type { ConversationAuthority } from "../src/captain/conversation-owner.ts
 import type { OperatorSeatSpawnResult, SpawnOperatorSeat } from "@clankie/protocol";
 
 const roots: string[] = [];
+const socketCleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
+  await Promise.all(socketCleanups.splice(0).map((close) => close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 const golden = (harness: string, state: string) =>
@@ -36,7 +42,11 @@ async function fixture(
   options: {
     adopted?: boolean;
     unknown?: boolean;
+    legacy?: boolean;
     reattached?: boolean;
+    readopt?: boolean;
+    remote?: boolean;
+    socket?: boolean;
     cwd?: string;
     harness?: "codex" | "claude";
   } = {},
@@ -47,12 +57,22 @@ async function fixture(
   roots.push(root);
   const watchPath = join(root, "watch.json");
   const owners = new HireOwners(`${watchPath}.owners.json`);
-  const occupant = occupantIdForHerdrSession(native);
-  const key = JSON.stringify(["local", harness, native.value]);
+  const paneId = options.remote ? "pc/w1:p1" : "w1:p1";
+  const seatId = options.remote ? "pc/term_111" : "term_111";
+  const original = options.readopt
+    ? { ...native, kind: "path" as const, value: join(root, `rollout-${native.value}.jsonl`) }
+    : native;
+  const occupant = occupantIdForHerdrSession(original);
+  const key = JSON.stringify([options.remote ? "pc" : "local", harness, native.value]);
   if (!options.unknown) {
-    if (options.adopted) owners.adopt("w1:p1", "term_111", occupant, authority.owner, key);
-    else owners.bind("w1:p1", authority.owner, "term_111", undefined, occupant, key);
-  } else owners.bind("w1:p1", authority.owner, "term_111", undefined, "different-session", key);
+    if (options.adopted) owners.adopt(paneId, seatId, occupant, authority.owner, key);
+    else owners.bind(paneId, authority.owner, seatId, undefined, occupant, key);
+  } else owners.bind(paneId, authority.owner, seatId, undefined, "different-session", key);
+  if (options.legacy) {
+    const state = JSON.parse(await readFile(`${watchPath}.owners.json`, "utf8"));
+    delete state.hires[0].hired;
+    await writeFile(`${watchPath}.owners.json`, JSON.stringify(state));
+  }
   let present = true,
     closes = 0,
     reads = 0,
@@ -70,7 +90,7 @@ async function fixture(
     ...(options.reattached ? {} : { agent_session: native }),
   };
   const others: (typeof pane)[] = [];
-  const runner = createHerdrWatchRunner(undefined, async (args) => {
+  const execute = async (args: readonly string[]) => {
     calls.push([...args]);
     if (args[0] === "pane" && args[1] === "list")
       return JSON.stringify({ result: { panes: [...(present ? [pane] : []), ...others] } });
@@ -105,8 +125,78 @@ async function fixture(
       return "{}";
     }
     throw new Error(`Unexpected fixture native call ${args.join(" ")}`);
-  });
-  const watch = new HerdrWatchStore(watchPath, { runner });
+  };
+  let transport = execute;
+  if (options.socket) {
+    const socketPath = join(root, "herdr.sock");
+    const binding = { runtime: "external" as const, socketPath, session: "fixture" };
+    const sockets = new Set<Socket>();
+    const server = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+      socket.on("error", () => {});
+      let buffer = "";
+      socket.on("data", (chunk) => {
+        buffer += chunk;
+        if (!buffer.includes("\n")) return;
+        const request = JSON.parse(buffer.split("\n")[0]!);
+        const params = request.params;
+        const args: string[] =
+          request.method === "pane.list"
+            ? ["pane", "list"]
+            : request.method === "agent.get"
+              ? ["agent", "get", params.target]
+              : request.method === "pane.read"
+                ? ["pane", "read", params.pane_id, "--source", params.source, "--format", params.format]
+                : request.method === "pane.close"
+                  ? ["pane", "close", params.pane_id]
+                  : [];
+        void execute(args)
+          .then((result) => {
+            socket.end(
+              JSON.stringify({
+                id: request.id,
+                ...(request.method === "pane.read" ? { result: { text: result } } : JSON.parse(result)),
+              }) + "\n",
+            );
+          })
+          .catch(() =>
+            socket.end(JSON.stringify({ id: request.id, error: { code: "pane_not_found" } }) + "\n"),
+          );
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(socketPath, resolve);
+    });
+    socketCleanups.push(async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+    transport = async (args) => {
+      const read = nativeHerdrRead(binding, args);
+      if (read) return read;
+      const method = args[1] === "read" ? "pane.read" : "pane.close";
+      const reply = (await nativeRequest(binding, method, {
+        pane_id: args[2],
+        source: args[4],
+        format: args[6],
+      })) as { result: { text?: string } };
+      return method === "pane.read" ? reply.result.text! : JSON.stringify(reply);
+    };
+  }
+  const baseRunner = createHerdrWatchRunner(undefined, transport);
+  const runner = options.remote ? routeHerdrFleets(baseRunner, new Map([["pc", baseRunner]])) : baseRunner;
+  let watch = new HerdrWatchStore(watchPath, { runner });
+  if (options.readopt) {
+    // Replacement service loads the original journal, then admits path→id reattachment.
+    watch.close();
+    watch = new HerdrWatchStore(watchPath, { runner });
+    await watch.readoptSeat(seatId, authority);
+    watch.close();
+    watch = new HerdrWatchStore(watchPath, { runner });
+  }
+
   const hires: SpawnOperatorSeat[] = [];
   let hireResult: () => Promise<OperatorSeatSpawnResult> = async () => ({
     outcome: "spawned",
@@ -174,6 +264,65 @@ async function fixture(
     closes: () => closes,
   };
 }
+
+// VUH-2130: actual Unix socket requests, production fleet qualification, and journals
+// reloaded on both sides of re-adoption. No live owner panes or terminal typing.
+it.each([false, true])("closes a proven hire after deploy/re-adoption (remote=%s)", async (remote) => {
+  const f = await fixture({ socket: true, readopt: true, remote });
+  const pane = remote ? "pc/w1:p1" : "w1:p1";
+  const seat = remote ? "pc/term_111" : "term_111";
+  await f.watch.adoptSeat(seat, authority);
+  if (remote) {
+    expect(
+      await f.tidy.close({ pane, reason: "Harvested", reportPath: f.reportPath }, authority),
+    ).toMatchObject({ outcome: "refused", reason: "unlanded_work" });
+    expect(f.closes()).toBe(0);
+  }
+  const closed = await f.tidy.close(
+    {
+      pane,
+      reason: "Landed and harvested",
+      reportPath: f.reportPath,
+      ...(remote ? { unlandedReason: "Remote work handed back to its project lead" } : {}),
+    },
+    authority,
+  );
+  expect(closed).toMatchObject({ outcome: "closed" });
+  expect(f.closes()).toBe(1);
+  expect(await f.ports.runner.resolveTerminal(seat)).toBeUndefined();
+  expect(f.tidy.leadHistory()[0]).toMatchObject({ paneId: pane });
+  f.watch.close();
+});
+it.each([false, true])(
+  "re-adoption cannot turn a hand-started pane into a hire (remote=%s)",
+  async (remote) => {
+    const f = await fixture({ socket: true, readopt: true, adopted: true, remote });
+    const pane = remote ? "pc/w1:p1" : "w1:p1";
+    expect(await f.tidy.close({ pane, reason: "Finished", reportPath: f.reportPath }, authority)).toEqual({
+      outcome: "refused",
+      reason: "owner_interactive",
+    });
+    expect(f.closes()).toBe(0);
+    f.watch.close();
+  },
+);
+it("re-adoption cannot manufacture missing legacy hire provenance", async () => {
+  const f = await fixture({ socket: true, readopt: true, legacy: true });
+  expect(
+    await f.tidy.close({ pane: "w1:p1", reason: "Finished", reportPath: f.reportPath }, authority),
+  ).toEqual({ outcome: "failed", reason: "provenance_unknown" });
+  expect(f.closes()).toBe(0);
+  f.watch.close();
+});
+it("still refuses a re-adopted hire's unsent draft over the Herdr socket", async () => {
+  const f = await fixture({ socket: true, readopt: true });
+  f.setAnsi(await golden("codex", "draft"));
+  expect(
+    await f.tidy.close({ pane: "w1:p1", reason: "Finished", reportPath: f.reportPath }, authority),
+  ).toMatchObject({ outcome: "refused", reason: "unsent_draft" });
+  expect(f.closes()).toBe(0);
+  f.watch.close();
+});
 
 it.each(["claude", "codex"])(
   "live %s ANSI distinguishes ghost and actual unsubmitted draft",
@@ -504,7 +653,7 @@ it("refuses to close a worker whose worktree holds unlanded commits or uncommitt
   await git(w.tree, "add", "feature.txt");
   await git(w.tree, "commit", "--quiet", "-m", "unlanded feature");
   await writeFile(join(w.tree, "notes.txt"), "uncommitted\n");
-  const f = await fixture({ cwd: w.tree });
+  const f = await fixture({ cwd: w.tree, socket: true, readopt: true });
   const refused = await f.tidy.close({ pane: "w1:p1", reason: "Done", reportPath: f.reportPath }, authority);
   expect(refused).toMatchObject({
     outcome: "refused",

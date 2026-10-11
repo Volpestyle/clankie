@@ -139,7 +139,17 @@ export class HireOwners {
       schemaVersion: 1,
       hires: [
         ...this.state.hires.filter((entry) => entry.id !== intentId && !replaced.includes(entry)),
-        { id: intentId ?? prior.id, paneId, seatId, occupantId, owner: held, sessionKey },
+        {
+          id: intentId ?? prior.id,
+          paneId,
+          seatId,
+          occupantId,
+          owner: held,
+          sessionKey,
+          // Reattachment changes native admission, not how the thread was started.
+          // Keep false and unknown too: re-adoption must never manufacture a hire.
+          ...(prior.hired === undefined ? {} : { hired: prior.hired }),
+        },
       ],
     });
     return { owner: held, replaced: replaced.map((entry) => RecordSchema.parse(entry)) };

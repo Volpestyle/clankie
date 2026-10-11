@@ -107,10 +107,12 @@ it("keeps a rebound worker closed until its owner re-adopts the same thread, the
   );
   await store.readoptSeat(f.current().terminalId, authority());
   expect(store.nativeOwner(f.current())).toEqual(owner);
+  expect(store.tidyProvenance(f.current())).toEqual(owner);
   expect(JSON.parse(f.journal()).hires).toHaveLength(1);
   store.close();
   const restarted = f.open();
   restarted.start(async () => {});
+  expect(restarted.tidyProvenance(f.current())).toEqual(owner);
   await restarted.adoptSeat(f.current().terminalId, authority());
   expect(await restarted.watch(owner.conversationId, f.current().paneId, "completion")).toMatchObject({
     outcome: "already_settled",
@@ -174,6 +176,7 @@ it("an owner-admitted same-thread re-hire replaces the old native owner before r
   expect(persisted.hasClaim(f.original.paneId, f.original.terminalId)).toBe(false);
   const restarted = f.open();
   expect(restarted.nativeOwner(f.current())).toEqual(owner);
+  expect(restarted.tidyProvenance(f.current())).toEqual(owner);
   await restarted.adoptSeat("term_resumed", authority());
 });
 

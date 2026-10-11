@@ -5618,6 +5618,12 @@ The API uses authenticated operator dispatch operations `readopt_seat`,
 `conversationId`. Credential and conversation authority are checked again at
 admission.
 
+Same-thread `readopt_seat` preserves whether Clankie hired the pane, across
+service replacement and on remote fleets. A proven hire remains eligible for
+`close_worker_pane` by its lead, subject to the saved-report, draft and worktree
+guards. Re-adoption or messaging alone cannot make a hand-started pane eligible;
+legacy records with unknown hire provenance remain refused.
+
 Without persisted adoption, the host reads the actual census parent/launcher
 edge and routes to that exact native lead or its attached conversation. Explicit
 adoption wins; tabs, titles and report text establish no ownership. The parent

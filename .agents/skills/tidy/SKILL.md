@@ -20,6 +20,11 @@ reason and its saved report path when available. The service preserves its last
 output and report in `worker_pane_history`, and returns an undo ID with a short
 deadline. `undo_worker_pane` reopens and resumes that session.
 
+Hire provenance survives service replacement and same-thread `readopt_seat`,
+including remote fleets. Messaging or re-adopting a hand-started pane does not
+make it a hire. A legacy record with lost provenance still fails closed; do not
+infer a hire from its name, report route or re-adoption.
+
 The service protects unsent drafts, owner-interactive or hand-started panes you
 did not hire, results not kept, and unlanded work: `unlanded_work` names the
 worker's worktree with commits not on `origin/main` by content or uncommitted
