@@ -4,6 +4,10 @@ import type { BrowserCommandOptions } from "./browser.ts";
 import { HoldOverrideSchema } from "@clankie/protocol/integrate";
 import { HOST_SETTINGS_PATH, HostSettingsSnapshotSchema } from "@clankie/protocol/owner-settings";
 import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
+import {
+  SCHEDULED_RELEASE_CUTOVER_PATH,
+  ScheduledReleaseCutoverRequestSchema,
+} from "@clankie/protocol/body-release";
 
 const AUTO_USAGE = "Usage: clankie update auto [status|on|off]";
 
@@ -103,7 +107,15 @@ export async function runUpdateCommand(
       effective: updated.autoUpdateEffective,
     };
   }
-  const { canary, status, policy, ref, overrides, overrideHolds, reason } = parseUpdateArgs(args);
+  let cutover: { operationId: string; instanceId: string } | undefined;
+  if (args[0] === "cutover") {
+    if (args.length !== 5 || args[1] !== "--operation" || args[3] !== "--instance")
+      throw Error("Usage: clankie update cutover --operation UUID --instance UUID");
+    cutover = ScheduledReleaseCutoverRequestSchema.parse({ operationId: args[2], instanceId: args[4] });
+  }
+  const { canary, status, policy, ref, overrides, overrideHolds, reason } = parseUpdateArgs(
+    cutover ? [] : args,
+  );
   const env = options.env ?? process.env;
   const credential = await resolveOperatorCredential({
     env,
@@ -123,9 +135,11 @@ export async function runUpdateCommand(
   try {
     response = await (options.fetchImpl ?? fetch)(
       new URL(
-        canary
-          ? "/v1/runtime-update/canary"
-          : `/v1/runtime-update${read && options.previewRef ? `?ref=${encodeURIComponent(options.previewRef)}` : ""}`,
+        cutover
+          ? SCHEDULED_RELEASE_CUTOVER_PATH
+          : canary
+            ? "/v1/runtime-update/canary"
+            : `/v1/runtime-update${read && options.previewRef ? `?ref=${encodeURIComponent(options.previewRef)}` : ""}`,
         commandHost(options),
       ),
       {
@@ -135,13 +149,14 @@ export async function runUpdateCommand(
           ? {}
           : {
               body: JSON.stringify(
-                canary
-                  ? policy
-                  : {
-                      ref,
-                      ...(overrides.length ? { overrides } : {}),
-                      ...(overrideHolds ? { overrideHolds, reason } : {}),
-                    },
+                cutover ??
+                  (canary
+                    ? policy
+                    : {
+                        ref,
+                        ...(overrides.length ? { overrides } : {}),
+                        ...(overrideHolds ? { overrideHolds, reason } : {}),
+                      }),
               ),
             }),
         signal: AbortSignal.timeout(30_000),

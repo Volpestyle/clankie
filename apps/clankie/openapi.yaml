@@ -843,6 +843,46 @@ paths:
         "403": { description: Operator required or revoked }
         "400": { description: Invalid update request }
         "503": { description: Runtime updater unavailable }
+  /v1/runtime-update/cutover:
+    post:
+      tags: [Operator]
+      operationId: scheduledReleaseCutover
+      summary: Confirm an idle scheduled release cutover after staging
+      description: >-
+        Only the exact installing scheduled operation and running boot may act.
+        Rechecks enabled and idle state. Waiting retains staging without stopping
+        services. Ready closes turn admission and begins idle shutdown before the
+        helper stops services and switches current. Uncertainty authorizes no stop.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [operationId, instanceId]
+              properties:
+                operationId: { type: string, format: uuid }
+                instanceId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Exact operation and boot with ready or waiting result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [operationId, instanceId, outcome]
+                properties:
+                  operationId: { type: string, format: uuid }
+                  instanceId: { type: string, format: uuid }
+                  outcome: { type: string, enum: [ready, waiting] }
+                  reason:
+                    { type: string, enum: [disabled, body-busy], description: Present only when waiting }
+        "400": { description: Invalid cutover request }
+        "403": { description: Operator required or revoked }
+        "409": { description: Scheduled operation or running boot changed }
+        "503": { description: Scheduled cutover unavailable }
   /v1/discord/settings:
     get:
       tags: [Discord]

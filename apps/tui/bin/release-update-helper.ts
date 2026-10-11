@@ -7,6 +7,7 @@ import { launchMacApp } from "./mac-app.ts";
 import { executeReleaseUpdate, parseReleasePlan } from "./release-update.ts";
 import { readRuntimeUpdate, runtimeUpdateServices } from "./runtime-update.ts";
 import { object, operationId, readPrivateJson } from "./update-files.ts";
+import { ScheduledReleaseCutoverResultSchema } from "@clankie/protocol/body-release";
 
 const directory = realpathSync(process.argv[2] ?? "");
 const plan = parseReleasePlan(readPrivateJson(join(directory, "plan.json")));
@@ -39,6 +40,26 @@ const cli = async (release: string, args: readonly string[]): Promise<unknown> =
   return JSON.parse(stdout);
 };
 const result = await executeReleaseUpdate(plan, {
+  scheduledCutover: async () => {
+    try {
+      const result = ScheduledReleaseCutoverResultSchema.parse(
+        await cli(plan.oldRelease, [
+          "update",
+          "cutover",
+          "--operation",
+          plan.id,
+          "--instance",
+          plan.oldInstanceId,
+        ]),
+      );
+      if (result.operationId !== plan.id || result.instanceId !== plan.oldInstanceId)
+        return { outcome: "waiting", reason: "cutover-changed" };
+      return result;
+    } catch (error) {
+      console.error("Scheduled release cutover could not be confirmed:", error);
+      return { outcome: "waiting", reason: "cutover-unavailable" };
+    }
+  },
   applicationsDirectory: process.env.CLANKIE_APPLICATIONS_DIR,
   launchApp: async (release, path) => {
     const paired = await launchMacApp(release, path, { ...process.env, CLANKIE_UPDATE_OPERATION: plan.id });

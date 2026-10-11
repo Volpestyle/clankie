@@ -5,6 +5,10 @@ import { realpath } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import type { RuntimeUpdater, UpdateAuthority } from "../../tui/bin/runtime-updater.ts";
 import { HoldOverrideSchema } from "@clankie/protocol/integrate";
+import {
+  SCHEDULED_RELEASE_CUTOVER_PATH,
+  ScheduledReleaseCutoverRequestSchema,
+} from "@clankie/protocol/body-release";
 import { DeployHeldError, type DeployHolds } from "./deploy-holds.ts";
 import { FleetHarnessRefreshRequestSchema } from "@clankie/protocol/fleet-settings";
 import {
@@ -39,6 +43,12 @@ class CanaryPolicyAuthorityError extends Error {}
 
 export function createRuntimeUpdateRoutes(options: {
   readonly updater?: RuntimeUpdater | undefined;
+  /** Rechecks owner policy/idle, then closes work admission and begins idle shutdown. */
+  readonly scheduledCutover?:
+    | ((
+        guard: () => Promise<void>,
+      ) => Promise<{ outcome: "ready" } | { outcome: "waiting"; reason: "disabled" | "body-busy" }>)
+    | undefined;
   readonly canary?: RuntimeCanary | undefined;
   readonly holds?: DeployHolds | undefined;
   readonly refreshHarnesses?: ((authority: HarnessRefreshAuthority) => Promise<unknown>) | undefined;
@@ -51,6 +61,40 @@ export function createRuntimeUpdateRoutes(options: {
   readonly authorize: (request: Request) => Promise<UpdateAuthority | undefined>;
 }): Hono {
   const app = new Hono();
+  app.post(SCHEDULED_RELEASE_CUTOVER_PATH, bodyLimit({ maxSize: 1024 }), async (context) => {
+    const authority = await options.authorize(context.req.raw);
+    if (!authority) return context.json({ error: "operator_required" }, 403);
+    const input = ScheduledReleaseCutoverRequestSchema.safeParse(
+      await context.req.json().catch(() => undefined),
+    );
+    if (!input.success) return context.json({ error: "invalid_scheduled_cutover" }, 400);
+    if (!options.updater || !options.scheduledCutover)
+      return context.json({ error: "scheduled_cutover_unavailable" }, 503);
+    const guard = async () => {
+      await authority.guard();
+      if (!authority.current()) throw new Error("operator_revoked");
+      const status = options.updater!.status();
+      if (
+        status.runtime.instanceId !== input.data.instanceId ||
+        status.pending !== input.data.operationId ||
+        status.latest?.id !== input.data.operationId ||
+        status.latest.phase !== "installing" ||
+        status.latest.initiator?.kind !== "schedule" ||
+        status.latest.oldCommit !== status.runtime.commit
+      )
+        throw new Error("Scheduled cutover operation changed");
+    };
+    try {
+      await guard();
+      const result = await options.scheduledCutover(guard);
+      return context.json({ ...input.data, ...result }, 200, { "Cache-Control": "no-store" });
+    } catch {
+      return context.json(
+        { error: authority.current() ? "scheduled_cutover_refused" : "operator_revoked" },
+        authority.current() ? 409 : 403,
+      );
+    }
+  });
   app.use("/v1/runtime-update/canary", bodyLimit({ maxSize: 1024 }));
   app.get("/v1/runtime-update/canary", async (context) => {
     const authority = await options.authorize(context.req.raw);
