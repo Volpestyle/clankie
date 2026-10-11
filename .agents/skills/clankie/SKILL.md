@@ -12,6 +12,12 @@ where you are. A pane ID, environment variable or installed plugin is a clue,
 not proof of membership or permission.
 
 For local heavy commands and simulators, load [fleet-resources](../fleet-resources/SKILL.md).
+For scratch service/relay proofs in a source checkout, generate one preset with
+`node scripts/scratch-stack.mjs .local/PROOF` and launch both entrypoints using
+its printed `stack.env` through `clankie heavy`. The commands are in
+`docs/cli.md` under "Scratch service and relay proofs". Include that preset in
+proof briefs: changing only `PORT` leaves peer addresses unsafe. Never use the
+installed ports `4310`/`4321` for scratch listeners or targets.
 Boot simulators only through `clankie simulator acquire`, never `simctl boot` directly.
 Native hire briefs include its command contract. `clankie heavy -- COMMAND` shares
 machine capacity across worktrees; `clankie fleet resources` names current holders

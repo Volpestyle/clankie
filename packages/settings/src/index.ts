@@ -154,3 +154,4 @@ export { DesktopSettingsSchema, desktopIsQuiet, type DesktopSettings } from "./d
 
 export * from "./checkouts.ts";
 export * from "./local-sandbox.ts";
+export { assertScratchNetwork } from "./scratch-network.ts";

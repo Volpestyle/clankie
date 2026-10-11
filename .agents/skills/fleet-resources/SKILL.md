@@ -14,6 +14,11 @@ clankie heavy -- node path/to/owned-runtime.js
 ```
 
 Keep the complete owned runtime and its children inside the wrapper's lifetime.
+For source-checkout scratch service/relay proofs, use
+`node scripts/scratch-stack.mjs .local/PROOF` and the same generated `stack.env`
+for both heavy-wrapped entrypoints (commands in `docs/cli.md`, "Scratch service
+and relay proofs"). Include this in worker proof briefs; never leave either
+peer URL or advertised relay at the installed `4310`/`4321` defaults.
 Each permit passes `VITEST_MAX_WORKERS=4` and `TURBO_CONCURRENCY=4` to its
 children, including package scripts and nested commands, preserving lower
 positive integer environment limits.
