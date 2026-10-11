@@ -55,6 +55,16 @@ report routing before treating a project as converted. Existing workers need a
 written context handoff and separately coordinated adoption; never restart their
 active work as part of a new lead launch. Remote Codex heads are not yet supported.
 
+The private operator session card and `get_self_state.leadChats` show the global
+lead and configured Linear project leads: project, conversation, workspace,
+machine, native holder or service lane, receiver state and recent activity.
+Use the row's `messageSeat` conversation ID to reach a sibling without searching
+all conversations. `messageAvailable` means its current receiver supports the
+lead channel; a saved activity timestamp alone never means it is connected.
+Disconnected, reconnecting and stale native heads remain labelled honestly.
+Worker and Discord room chats stay out of this private roster; Discord cannot
+read it. The card refreshes each service turn, and `get_self_state` rereads it.
+
 Leads talk to each other with `message_seat`, naming the other lead's
 conversation ID or its head's seat ID. The message arrives in that chat over the
 head's own channel as an attributed `source="lead"` event: context, never an owner

@@ -1,3 +1,12 @@
+import { FileCredentialStore } from "@clankie/credential-broker";
+import { EmbodimentManager } from "../src/embodiment.ts";
+import { ConfiguredMediaGenerator } from "../src/media-generation.ts";
+import {
+  DiscordPresenceSessionProjection,
+  DiscordVoiceHistoryProjection,
+} from "../src/discord-presence-session.ts";
+import { readVoiceSpeechSnapshot } from "../src/voice-receipt-activity.ts";
+import type { LeadChat } from "../src/captain/lead-roster.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,6 +50,15 @@ async function fixture(remote: boolean) {
     if (created.op !== "create") throw new Error("create failed");
     leads.push(created.conversation.conversationId);
   }
+  const hidden = [seeded.roomConversation("discord_presence", "guild:channel")];
+  const worker = await seeded.serve({
+    schemaVersion: 1,
+    op: "create",
+    scope: { kind: "seat", seatId: "worker-seat" },
+    title: "Hidden worker",
+  });
+  if (worker.op !== "create") throw new Error("Missing worker chat");
+  hidden.push(worker.conversation.conversationId);
   await seeded.close();
   const sessionId = randomUUID();
   const prefix = remote ? "pc/" : "";
@@ -95,9 +113,32 @@ async function fixture(remote: boolean) {
         ],
       },
     }));
+  const embodiment = new EmbodimentManager({
+    clock: () => new Date(),
+    decide: () => "deny",
+    idFactory: randomUUID,
+    emit: async () => {
+      throw new Error("Read-only self-state proof cannot emit embodiment events");
+    },
+  });
+  const presence = new DiscordPresenceSessionProjection();
+  const voice = new DiscordVoiceHistoryProjection();
+  const media = new ConfiguredMediaGenerator({
+    credentials: new FileCredentialStore(join(root, "credentials.json")),
+    attachmentRoot: root,
+    configCwd: root,
+    environment: {},
+  });
   const deps = {
     herdrAvailable: () => !remote,
-    embodiment: {},
+    embodiment: { getLiveSession: async () => embodiment.observe() },
+    presence: {
+      listSessions: async () => presence.list(),
+      listVoiceHistory: async (limit = 5) => voice.list(limit),
+      listRecentVoiceSpeech: (limit = 12) => readVoiceSpeechSnapshot(join(root, "voice.jsonl"), limit),
+    },
+    media,
+
     memory: {},
     browser: { catalog: async () => ({ available: false, tools: [] }) },
     mcp: { catalog: async () => [], call: async () => ({ outcome: "ok", content: "", isError: false }) },
@@ -164,7 +205,19 @@ async function fixture(remote: boolean) {
     const part = sent.content.find((item) => item.type === "text");
     return JSON.parse(part?.type === "text" ? part.text : "null");
   };
-  return { captain, open, leads, head, bridge, messageSeat, workerDelivery, adoption };
+  return {
+    captain,
+    open,
+    leads,
+    head,
+    bridge,
+    messageSeat,
+    workerDelivery,
+    adoption,
+    settings,
+    root,
+    hidden,
+  };
 }
 
 it.each([false, true])(
@@ -258,4 +311,130 @@ it("only the sender reconciles an unconfirmed lead message after a restart, once
   // Another conversation cannot read the sender's receipt.
   expect(await restarted.reconcileSeatDelivery!(event!.id, work)).toBeUndefined();
   expect(await restarted.pollSeatEvents(0, undefined, work, capabilities)).toEqual([]);
+});
+
+it.each([false, true])(
+  "private self-state and session card expose configured lead chats and current receiver state (remote=%s)",
+  async (remote) => {
+    const f = await fixture(remote);
+    const [global, work] = f.leads as [string, string];
+    const service = await f.captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "create",
+      scope: { kind: "workspace", workspaceId: f.root },
+      title: "Service lead",
+    });
+    if (service.op !== "create") throw new Error("Missing service lead");
+    const hidden = f.hidden;
+    const routes = [global, work, service.conversation.conversationId].map((conversationId, i) => ({
+      projectId: randomUUID(),
+      name: ["Global project", "Work project", "Service project"][i]!,
+      conversationId,
+    }));
+    await f.settings.update((current) => ({
+      ...current,
+      linearWebhook: {
+        ...current.linearWebhook,
+        projectChats: [
+          ...routes,
+          ...hidden.map((conversationId) => ({
+            projectId: randomUUID(),
+            name: "Must stay hidden",
+            conversationId,
+          })),
+        ],
+      },
+    }));
+    const bank = await f.captain.laneToolBank("operator", global);
+    const self = async () => {
+      const result = await bank.tools.find((tool) => tool.name === "get_self_state")!.call({});
+      if (result.isError) throw new Error(JSON.stringify(result));
+      return JSON.parse(result.content.find((item) => item.type === "text")!.text).leadChats as LeadChat[];
+    };
+    const before = await self();
+    expect(before.map((chat) => chat.conversationId)).not.toEqual(expect.arrayContaining(hidden));
+    for (const id of hidden) expect(before.some((chat) => chat.conversationId === id)).toBe(false);
+    expect(before.find((chat) => chat.conversationId === work)).toMatchObject({
+      projects: [{ id: routes[1]!.projectId, name: "Work project" }],
+      holder: { kind: "native", seatId: f.head.terminalId, harness: "claude" },
+      machine: remote ? "pc" : "local",
+      state: "disconnected",
+      messageAvailable: false,
+      messageSeat: work,
+    });
+    expect(before.find((chat) => chat.conversationId === service.conversation.conversationId)).toMatchObject({
+      holder: { kind: "service", lane: "operator" },
+      workspace: f.root,
+      state: "service",
+      messageAvailable: false,
+    });
+    const receiver = await f.bridge(work);
+    const current = await self();
+    const row = current.find((chat) => chat.conversationId === work)!;
+    expect(row).toMatchObject({
+      state: "current",
+      messageAvailable: true,
+      lastActiveAt: expect.any(String),
+      lastBridgeSeenAt: expect.any(String),
+    });
+    const prompt = await f.captain.lanePrompt({
+      lane: "operator",
+      conversationId: global,
+      sections: ["fleet"],
+    });
+    const rosterJson = prompt
+      .split("# Your lead chats\n")[1]!
+      .split("\n")
+      .slice(1)
+      .join("\n")
+      .split("\n\n# Selected conversation")[0]!;
+    expect(JSON.parse(rosterJson)).toEqual(await self());
+    expect(await f.messageSeat(global, row.messageSeat, "Roster-discovered sibling message")).toMatchObject({
+      outcome: "delivered",
+      leadConversationId: work,
+    });
+    expect(receiver).toHaveBeenCalledOnce();
+    expect(f.adoption).not.toHaveBeenCalled();
+    expect(f.workerDelivery).not.toHaveBeenCalled();
+    const voiceBank = await f.captain.laneToolBank("discord_voice");
+    const voiceSelf = await voiceBank.tools.find((tool) => tool.name === "get_self_state")!.call({});
+    expect(JSON.parse(voiceSelf.content.find((item) => item.type === "text")!.text)).not.toHaveProperty(
+      "leadChats",
+    );
+    expect(await f.captain.lanePrompt({ lane: "discord_voice", sections: ["fleet"] })).not.toContain(
+      "Work project",
+    );
+  },
+);
+
+it("a polled legacy lead channel is stale, not a live messaging target", async () => {
+  const f = await fixture(false);
+  const [global, work] = f.leads as [string, string];
+  await f.settings.update((current) => ({
+    ...current,
+    linearWebhook: {
+      ...current.linearWebhook,
+      projectChats: [{ projectId: randomUUID(), name: "Legacy lead", conversationId: work }],
+    },
+  }));
+  const stop = new AbortController();
+  const parked = f.captain.pollSeatEvents(5000, stop.signal, work, {
+    schemaVersion: 1,
+    eventKinds: ["message"],
+    ownerOrigin: false,
+  });
+  try {
+    const bank = await f.captain.laneToolBank("operator", global);
+    await expect
+      .poll(async () => {
+        const result = await bank.tools.find((tool) => tool.name === "get_self_state")!.call({});
+        return JSON.parse(result.content.find((item) => item.type === "text")!.text).leadChats.find(
+          (chat: LeadChat) => chat.conversationId === work,
+        );
+      })
+      .toMatchObject({ state: "stale", messageAvailable: false });
+  } finally {
+    stop.abort();
+    await parked;
+  }
 });
