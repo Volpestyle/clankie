@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "local-resubmit-proof.json",
+      "size": 204639,
+      "sha256": "d4f6e6735a5c74a772847ed94c97203abf103bec9254700b889772047588e6ae",
+      "url": "clankie://evidence/sha256/d4f6e6735a5c74a772847ed94c97203abf103bec9254700b889772047588e6ae"
+    },
+    {
       "path": "proof.json",
       "size": 207884,
       "sha256": "579ce82ba1219a3936a47636bc7a00574055b92b3b020e5d746b283cde31c609",

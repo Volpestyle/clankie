@@ -55,6 +55,13 @@ consumer coverage. Service and TUI typechecks, formatter and focused lint passed
 Every heavy command ran through `clankie heavy --`. The lead assigned the root
 landing gate to integrate; it was not duplicated locally.
 
+The PC gate was interrupted by the lead's service deployment after a WSL kernel
+wedge; no remote gate pass or landing is claimed. The branch was refreshed onto
+`84e6f9dee`, preserving its public stall observer and renaming this change's
+private status projector to `requestProgress`. All **63 tests** in the same five
+affected files and both typechecks passed on that tree. The refreshed source,
+logs and interrupted receipt are in `local-resubmit-proof.json` in the manifest.
+
 Final focused checks and landing evidence are attached to the issue. Raw logs,
 observations and the checked source snapshot are keys in the `proof.json`
 object listed in [evidence.json](evidence.json).
