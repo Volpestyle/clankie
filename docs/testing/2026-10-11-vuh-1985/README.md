@@ -46,3 +46,20 @@ Correction and rebased verification:
 - Corrected code tip: `6f79608c7c2228bddab511216da72cc48e97482c`. The original
   request `357cd184-5425-481e-8688-6e2c147d7599` remains in isolation. Per the lead,
   preserve it until terminal, then submit the corrected tree.
+
+Migration correction on `8ae28f675`:
+
+- The second full gate exited 1 at the legacy migration's owner wake assertion.
+  Reproduced exactly (one failure, 11 passes): its owner fixture omitted the
+  published user actor type. Preserved the configured wake assertions, added
+  the user actor type, and verified unknown origins remain rejected.
+- Signed HTTP proof now covers both current and legacy persisted owner settings
+  with the published Comment envelope. Eight focused files passed 60 tests
+  (53 in the combined run and seven Linear-follow checks), including the private
+  native plugin installation proof. Direct formatting passed.
+- [Linear's current SDK actor contract](https://github.com/linear/linear/blob/master/packages/sdk/src/_generated_documents.ts)
+  requires a type string on every non-null actor variant. Both Comment and Issue
+  webhooks use this common envelope. Nullable/deleted actors cannot prove an owner.
+  This is provider-contract evidence, not a retained real James delivery.
+- Old request `74fc8ebf-3cd3-430c-99c5-39b27099b8e3` was cancelled while queued in
+  isolation, at the lead's direction. The corrected tree awaits a fresh request.

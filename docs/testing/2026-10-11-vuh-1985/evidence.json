@@ -8,6 +8,12 @@
       "url": "clankie://evidence/sha256/ec7e0a533f41429b43295cd0bc32972319dc07fa553a995102c6a0aeea19fbc8"
     },
     {
+      "path": "migration-correction.json",
+      "size": 822132,
+      "sha256": "b309e0954ce6444fc2feed39d826a79511f6c874408be970afebe4448b4e5117",
+      "url": "clankie://evidence/sha256/b309e0954ce6444fc2feed39d826a79511f6c874408be970afebe4448b4e5117"
+    },
+    {
       "path": "verification.json",
       "size": 81637,
       "sha256": "0a4f996da19e90f4ff7cdae2c4ccce3a6946c8457210d4d145faf56c79bd71c0",

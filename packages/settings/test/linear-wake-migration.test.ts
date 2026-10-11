@@ -42,10 +42,12 @@ it.each([{ ownerUserIds: [] }, { ownerUserIds: ["configured-owner"] }])(
     expect(() => fenced.assertCurrent()).not.toThrow();
     expect(await readFile(store.path, "utf8")).toBe(original);
     // No owner email is assumed: only a saved owner ID identifies the owner.
-    const owner = { id: "configured-owner", email: "owner@example.test" };
+    // Linear app/web comments carry a user actor; identity alone is not provenance.
+    const owner = { id: "configured-owner", email: "owner@example.test", type: "user" };
     const configured = ownerUserIds.length > 0;
     expect(expected.ownerUserEmails).toEqual([]);
     expect(linearWakeMatches(expected, "issueNewComment", owner, "app")).toBe(configured);
+    expect(linearWakeMatches(expected, "issueNewComment", { ...owner, type: undefined }, "app")).toBe(false);
     expect(linearWakeMatches(expected, "issueStatusChanged", owner, "app")).toBe(false);
 
     // A normal settings write persists the new shape, so an intentional later
