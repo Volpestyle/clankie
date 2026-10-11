@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import { availableParallelism } from "node:os";
+import { readFileSync, statSync } from "node:fs";
 
 /**
  * Cores one heavy slot is sized for. Automatic slots are cores / this, so
@@ -57,6 +58,89 @@ const PNPM_VALUE_OPTIONS = new Set(["--filter", "-F", "-C", "--dir"]);
 /** A pnpm filter that can select more than one package. */
 const MULTI_PACKAGE_FILTER = /[*{}[\]!^]|\.\.\./u;
 
+/** Explicit files only: directories, globs and implicit repository scans stay full. */
+const MAX_CODE_CHECK_FILES = 64;
+const CODE_CHECK_FLAGS = new Set([
+  "--write",
+  "--check",
+  "--list-different",
+  "--disable-nested-config",
+  "--deny-warnings",
+  "--fix",
+  "--fix-suggestions",
+  "--fix-dangerously",
+  "--no-ignore",
+  "--disable-inline-config",
+]);
+const CODE_CHECK_VALUES = new Set([
+  "--threads",
+  "-c",
+  "--config",
+  "--ignore-path",
+  "--tsconfig",
+  "--max-warnings",
+  "-A",
+  "--allow",
+  "-W",
+  "--warn",
+  "-D",
+  "--deny",
+  "--format",
+]);
+type CodeCheck = { offset: number; args: readonly string[] };
+function codeCheck(command: string, args: readonly string[]): CodeCheck | undefined {
+  let tool = basename(command);
+  let offset = 0;
+  if (tool === "pnpm") {
+    // Scoped scripts may have their own whole-package work; only our root
+    // file-aware aliases are known. Explicit binaries can still use pnpm exec.
+    while (args[offset]?.startsWith("-")) {
+      const flag = args[offset++]!;
+      if (PNPM_VALUE_OPTIONS.has(flag)) offset++;
+      else if (!flag.includes("=")) return undefined;
+    }
+    if (["exec", "run"].includes(args[offset] ?? "")) offset++;
+    tool = basename(args[offset++] ?? "");
+    if (["fmt", "fmt:check", "lint"].includes(tool)) {
+      if (offset > (args[0] === "run" ? 2 : 1)) return undefined;
+      try {
+        const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
+        if (scripts?.[tool] !== `node scripts/scoped-code-check.mjs ${tool}`) return undefined;
+      } catch {
+        return undefined;
+      }
+    } else if (!["oxfmt", "oxlint"].includes(tool)) return undefined;
+  } else if (!["oxfmt", "oxlint"].includes(tool)) return undefined;
+  return { offset, args: args.slice(offset) };
+}
+function codeCheckLane(args: readonly string[]): HeavyJobLane {
+  let files = 0;
+  let positional = false;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!;
+    if (!positional && arg === "--") {
+      positional = true;
+      continue;
+    }
+    if (!positional && arg.startsWith("-")) {
+      const equal = arg.indexOf("=");
+      const flag = equal < 0 ? arg : arg.slice(0, equal);
+      if (CODE_CHECK_VALUES.has(flag)) {
+        const value = equal < 0 ? args[++index] : arg.slice(equal + 1);
+        if (!value || value.startsWith("-")) return "full";
+      } else if (!CODE_CHECK_FLAGS.has(arg)) return "full";
+      continue;
+    }
+    if (++files > MAX_CODE_CHECK_FILES || /[*?{}[\]]/u.test(arg)) return "full";
+    try {
+      if (!statSync(arg).isFile()) return "full";
+    } catch {
+      return "full";
+    }
+  }
+  return files ? "light" : "full";
+}
+
 function vitestLane(args: readonly string[]): HeavyJobLane {
   const files: string[] = [];
   for (let index = 0; index < args.length; index++) {
@@ -105,6 +189,8 @@ function pnpmTypecheckLane(args: readonly string[]): HeavyJobLane {
 }
 
 export function heavyJobLane(command: string, args: readonly string[]): HeavyJobLane {
+  const check = codeCheck(command, args);
+  if (check) return codeCheckLane(check.args);
   const words = [command, ...args];
   const executable = basename(command);
   // Recognize launchers and explicit watch modes, without reading scripts or
@@ -188,10 +274,35 @@ export function heavyJobEnvironment(
 }
 
 /**
- * xcodebuild has no environment knob for its compile fan-out, so a heavy
- * xcodebuild gets `-jobs` unless the caller already chose one.
+ * Known formatter/linter tools receive a native thread cap matching the permit.
+ * xcodebuild gets `-jobs` because it has no environment knob for compile fan-out.
  */
-export function heavyJobArgs(command: string, args: readonly string[]): string[] {
+export function heavyJobArgs(
+  command: string,
+  args: readonly string[],
+  limit = heavyJobParallelism,
+): string[] {
+  const check = codeCheck(command, args);
+  if (check) {
+    const result = args.slice(0, check.offset);
+    let threads = Number(capTo(process.env.RAYON_NUM_THREADS, limit));
+    let positional = false;
+    for (let index = check.offset; index < args.length; index++) {
+      const arg = args[index]!;
+      if (arg === "--") positional = true;
+      if (!positional && (arg === "--threads" || arg.startsWith("--threads="))) {
+        const value = arg === "--threads" ? args[++index] : arg.slice("--threads=".length);
+        // Let the tool report malformed flags rather than turning a bad
+        // command into a successful one. Lower valid caps remain lower.
+        if (!value || !/^\d+$/u.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1)
+          return [...args];
+        threads = Math.min(threads, Number(value));
+      } else result.push(arg);
+    }
+    const separator = result.indexOf("--", check.offset);
+    result.splice(separator < 0 ? result.length : separator, 0, `--threads=${threads}`);
+    return result;
+  }
   if (basename(command) !== "xcodebuild" || args.includes("-jobs")) return [...args];
   return [...args, "-jobs", String(heavyJobParallelism)];
 }

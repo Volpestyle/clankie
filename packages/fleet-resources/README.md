@@ -90,12 +90,18 @@ observations fail closed.
 
 `runHeavy` sizes each command with `heavyJobLane`. Focused checks (Vitest
 naming up to eight test files, `tsc` without `--build`, one package's
-`pnpm --filter … typecheck`) take the light lane: a second journal in
+`pnpm --filter … typecheck`, or Oxfmt/Oxlint naming up to 64 existing files) take the light lane: a second journal in
 `light/` with the same schema and native runner, so installs that predate it
 never read it. Its capacity is the base heavy slots (one per four cores), its jobs are capped at two
 cores, and only the memory floor (not load) holds it, because the full gates
 it runs beside already answer to load. Status adds `capacity.lightSlots`,
-`capacity.lightUsed`, `lightLeases` and `lightQueue`. A zero simulator limit refuses
+`capacity.lightUsed`, `lightLeases` and `lightQueue`.
+Explicit formatter/linter files work directly, through `pnpm exec`, and through
+the repository's file-aware `fmt`, `fmt:check` and `lint` scripts. Their native
+`--threads` budget matches the permit (two in light), keeping a lower explicit
+cap. Directories, globs, missing files, unknown flags, type-aware linting and
+whole-repository scripts remain full jobs. The root scripts retain their native
+Vox checks only for whole-repository invocations. A zero simulator limit refuses
 simulator admission without disturbing the heavy queue.
 Python 3 and the shipped native helper are required for OS locking and
 process observations on macOS or Linux. Availability probes the helper

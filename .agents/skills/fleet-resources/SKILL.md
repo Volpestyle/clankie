@@ -69,7 +69,12 @@ the compiler budget.
 `clankie heavy` sizes the command for you. Vitest naming up to eight test files,
 `tsc` without `--build`, or `pnpm --filter ONE typecheck` runs in the light lane:
 two cores, its own slots, held only by the memory floor, so it starts beside full
-gates. Name the files rather than a directory, and don't wrap a focused check
+gates. Oxfmt/Oxlint naming up to 64 existing files also run there, including
+`pnpm exec oxfmt --check FILE...`, `pnpm exec oxlint --deny-warnings FILE...`
+and this repo's file-aware `pnpm fmt`, `pnpm fmt:check` and `pnpm lint` scripts.
+The tools' threads are capped at two, preserving a lower explicit cap. Whole
+repository scripts, directories, globs, missing files, unknown flags and
+type-aware linting remain full jobs. Name the files rather than a directory, and don't wrap a focused check
 in `sh -c`; either makes it a full job. An optional `--seat LABEL`
 before `--` labels the seat in status; `--holder ID` identifies its native child. Neither grants seat authority. Arguments
 after `--`, including flags such as `--chat`, belong to the child. The wrapper

@@ -954,10 +954,14 @@ export function createResourceGovernor(
       // A server must not borrow a bounded parent permit; it needs the CPU
       // supervisor and its own lifetime in the independent lane.
       if (parentLease && (lane !== "server" || parentLease.lane === "server")) {
-        child = spawn(command, heavyJobArgs(command, args), {
-          stdio: "inherit",
-          env: heavyJobEnvironment(process.env),
-        });
+        child = spawn(
+          command,
+          heavyJobArgs(command, args, lane === "full" ? heavyJobParallelism : lightJobParallelism),
+          {
+            stdio: "inherit",
+            env: heavyJobEnvironment(process.env),
+          },
+        );
         const done = new Promise<number>((resolve, reject) => {
           child!.once("error", () => reject(new Error("Heavy command could not start")));
           child!.once("exit", (code, sig) => resolve(code ?? (sig ? 128 + constants.signals[sig] : 1)));
@@ -1014,7 +1018,7 @@ export function createResourceGovernor(
       input.write(
         `${JSON.stringify({
           command,
-          args: heavyJobArgs(command, args),
+          args: heavyJobArgs(command, args, lane === "full" ? heavyJobParallelism : lightJobParallelism),
           ...(lane === "server" ? { serverCpuCores: serverLaneCapacity().jobCpuCores } : {}),
         })}\n`,
       );

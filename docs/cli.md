@@ -2932,6 +2932,14 @@ test files, `tsc` without `--build`, or `pnpm --filter ONE typecheck` — runs i
 the light lane: its own journal under `light/`, as many slots as the base heavy slots,
 two cores per job (the same variables capped at two), held only by the memory
 floor, so it starts beside full gates even at high load.
+File-scoped Oxfmt and Oxlint runs also use the light lane (up to 64 existing
+files). Use `clankie heavy -- pnpm exec oxfmt --check FILE...`,
+`clankie heavy -- pnpm exec oxlint --deny-warnings FILE...`, or the root
+`pnpm fmt`, `pnpm fmt:check` and `pnpm lint` scripts with explicit files.
+Those scripts honor the file selection; their argument-free forms retain whole
+repository and native checks. Direct tool threads are capped at two in a light
+permit, preserving a lower explicit limit. Directories, globs, missing files,
+unknown flags and type-aware linting keep the full lane.
 
 Expo start, `pnpm dev`, Vite/Next dev and recognized watch commands select the
 separate server lane. Custom long-lived services use `heavy --server -- COMMAND`;
