@@ -161,6 +161,7 @@ it.skipIf(process.platform !== "darwin" || process.env.CLANKIE_KEYCHAIN_TESTS !=
       expect((await read(replacement)).status).toBe(200);
       phases.unrelatedChange = counts();
       expect(counts().securityReads).toBe(0);
+      await store.list(); // warm index so the failed mutation reaches the write boundary
       await execute("/usr/bin/security", ["lock-keychain", keychain], { env, timeout: 3000 });
       commands.length = 0;
       expect((await read(replacement)).status).toBe(200); // warm cached credentials still work
@@ -170,6 +171,12 @@ it.skipIf(process.platform !== "darwin" || process.env.CLANKIE_KEYCHAIN_TESTS !=
         if (health.state !== "ready") notices.push(health.state);
       });
       const started = performance.now();
+      await expect(store.set("clankie_operator", { type: "api", key: mintOperatorToken() })).rejects.toThrow(
+        /keychain locked/i,
+      );
+      expect((await read(replacement)).status).toBe(200); // failed rotation preserves the unchanged bearer
+      phases.failedLockedRotation = counts();
+      expect(counts().securityWrites).toBe(0);
       const failures = await Promise.allSettled(
         Array.from({ length: 20 }, (_, n) => store.get(`cold-${n % 4}`)),
       );

@@ -60,8 +60,8 @@ broker writes, rotations and deletes invalidate only that account across process
 Read-modify-write operations validate the publication witness under their mutation
 lock, re-reading only changed entries (including after waiting for another writer). Direct edits
 outside the broker require a process restart; use the broker's rotation commands.
-A pending or failed publication refuses cached authorization rather than retaining
-an old bearer.
+A pending or ambiguous failed publication refuses cached authorization. A write
+refused by the locked-keychain preflight preserves the unchanged cached credential.
 
 A native, noninteractive `SecKeychainGetStatus` check precedes every cold read/write.
 A locked keychain spawns no `security` process or unlock dialog. A separate OS-account

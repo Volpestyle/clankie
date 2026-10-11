@@ -29,6 +29,8 @@ categories were recorded without arguments, credential values, or passwords.
 - A separate Node process rotated the operator bearer: old HTTP bearer refused,
   replacement accepted after one new read. An unrelated provider write caused no
   operator re-read. Cross-process deletion then refused the cached bearer.
+- A failed rotation while locked preserved the cached, unchanged bearer and cleared
+  its pending publication; no security write ran.
 - Twenty simultaneous cold reads across four accounts while locked: one native
   status check, zero security reads, one owner-state transition. The CLI handler
   also failed with “Keychain locked” and spawned zero security reads.
@@ -61,7 +63,7 @@ live-keychain flag):
 CLANKIE_KEYCHAIN_TESTS=1 clankie heavy -- pnpm exec vitest run apps/clankie/test/keychain-cache-native.integration.test.ts
 ```
 
-The native proof is skipped in normal push/release checks. No evals, production
-service restarts, credentials, accounts, or OS default/search-list configuration
-were changed. Integration's exact-tree gate and confirmed push are the landing
+The native proof is skipped in normal push/release checks. No evals, production service restarts, or account changes occurred. No OS default
+or search-list selection command was issued; create/delete managed only the scratch
+keychain. Integration's exact-tree gate and confirmed push are the landing
 requirements; local focused checks alone do not claim a landed result.

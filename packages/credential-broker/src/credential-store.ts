@@ -603,6 +603,7 @@ export class KeychainCredentialStore implements CredentialStore {
       assertHeld();
       await this.write(id, JSON.stringify(parsed));
     } catch (error) {
+      if (error instanceof KeychainLockedError) throw error;
       assertHeld();
       if (indexChanged) await this.writeIndex(index).catch(() => undefined);
       assertHeld();
@@ -745,18 +746,7 @@ export class KeychainCredentialStore implements CredentialStore {
         this.reportHealth({ state: "ready" });
         return value;
       } catch (error) {
-        const failure =
-          error instanceof KeychainLockedError
-            ? error
-            : new Error("Keychain read unavailable; retrying in 30 seconds");
-        const until = Date.now() + 30_000;
-        this.state.failure = { error: failure, until };
-        this.reportHealth({
-          state: error instanceof KeychainLockedError ? "locked" : "unavailable",
-          message: failure.message,
-          retryAt: new Date(until).toISOString(),
-        });
-        throw failure;
+        throw this.rememberFailure(error);
       }
     });
     this.state.reads.set(readKey, read);
@@ -775,10 +765,52 @@ export class KeychainCredentialStore implements CredentialStore {
     this.state.values.delete(account);
   }
 
-  private async write(account: string, secret: string): Promise<void> {
+  private rememberFailure(error: unknown): Error {
+    const failure =
+      error instanceof KeychainLockedError
+        ? error
+        : new Error("Keychain unavailable; retrying in 30 seconds");
+    const until = Date.now() + 30_000;
+    this.state.failure = { error: failure, until };
+    this.reportHealth({
+      state: error instanceof KeychainLockedError ? "locked" : "unavailable",
+      message: failure.message,
+      retryAt: new Date(until).toISOString(),
+    });
+    return failure;
+  }
+
+  private async command(account: string, args: string[]): Promise<void> {
+    if (this.state.failure && Date.now() < this.state.failure.until) throw this.state.failure.error;
+    const revision = this.state.revisions.get(account) ?? "absent";
+    const cached = this.state.values.has(account);
+    const previous = this.state.values.get(account);
     await this.changing(account);
+    try {
+      await this.execFile(SECURITY_CLI, args);
+    } catch (error) {
+      if (error instanceof KeychainLockedError) {
+        // The native preflight refused before spawning security: no item changed.
+        // Restore that exact witness and cache instead of leaving a permanent hold.
+        const path = this.accountRevisionPath(account);
+        const temporary = `${path}.${process.pid}.tmp`;
+        await writeFile(temporary, revision, { mode: 0o600 });
+        await rename(temporary, path);
+        this.state.revisions.set(account, revision);
+        if (cached) this.state.values.set(account, previous);
+        throw this.rememberFailure(error);
+      }
+      // A timed-out command may have published. Invalidate cached authorization
+      // and let the next read observe the durable truth, never a stuck pending marker.
+      await this.published(account);
+      throw error;
+    }
+    await this.published(account);
+  }
+
+  private async write(account: string, secret: string): Promise<void> {
     // -U updates an existing item in place instead of failing with "already exists".
-    await this.execFile(SECURITY_CLI, [
+    await this.command(account, [
       "add-generic-password",
       "-U",
       "-s",
@@ -788,20 +820,14 @@ export class KeychainCredentialStore implements CredentialStore {
       "-w",
       secret,
     ]);
-    await this.published(account);
   }
 
   private async deleteDirect(account: string): Promise<boolean> {
-    await this.changing(account);
     try {
-      await this.execFile(SECURITY_CLI, ["delete-generic-password", "-s", this.service, "-a", account]);
-      await this.published(account);
+      await this.command(account, ["delete-generic-password", "-s", this.service, "-a", account]);
       return true;
     } catch (error) {
-      if (isKeychainNotFound(error)) {
-        await this.published(account);
-        return false;
-      }
+      if (isKeychainNotFound(error)) return false;
       throw error;
     }
   }
