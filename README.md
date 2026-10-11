@@ -68,7 +68,7 @@ each other directly. New hires go to the account with capacity to spare, and
 builds and simulators take turns so a busy fleet doesn't grind your Mac to a
 halt ([agent control](packages/agent-hosts/README.md#seat-adapters),
 [remote project leads](docs/adr/0259-remote-project-leads-use-seat-bound-delegation.md),
-[shared resources](https://docs.clankie.bot/cli/#heavy-seat-label-holder-id-command-args-fleet-resources-simulator)).
+[shared resources](https://docs.clankie.bot/cli/#heavy-server-seat-label-holder-id-command-args-fleet-resources-simulator)).
 
 **Owns it.** He reads every report, checks it against the evidence, lands the
 work, and moves the issue to Done with that evidence attached. Evidence lives

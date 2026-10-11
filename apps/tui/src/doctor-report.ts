@@ -220,5 +220,21 @@ function formatResourceLines(resources: InstallDoctorReport["resources"]): strin
       (entry) =>
         `    Queued ${holder(entry)} · light${entry.executable ? ` ${clean(entry.executable)}` : ""}`,
     ),
+    ...(resources.capacity.serverSlots === undefined
+      ? []
+      : [
+          `    Servers · ${resources.capacity.serverUsed ?? 0}/${resources.capacity.serverSlots} held · ${resources.serverQueue?.length ?? 0} queued · ${resources.capacity.serverCpuCores} CPU cores shared`,
+        ]),
+    ...(resources.serverLeases ?? []).map(
+      (lease) =>
+        `    ${holder(lease)} · server ${clean(lease.executable)} · ${clean(lease.state)} · ${lease.cpuCores} CPU cores`,
+    ),
+    ...(resources.serverQueue ?? []).map(
+      (entry) => `    Queued ${holder(entry)} · server ${clean(entry.executable ?? "process")}`,
+    ),
+    ...(resources.holderAlerts ?? []).map(
+      (alert) =>
+        `    ${alert.reason} · ${holder(alert)} · ${alert.lane} ${clean(alert.executable)} · held ${Math.floor((Date.now() - alert.createdAtMs) / 60_000)}m`,
+    ),
   ];
 }

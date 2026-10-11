@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { availableParallelism } from "node:os";
 
 /**
  * Cores one heavy slot is sized for. Automatic slots are cores / this, so
@@ -13,9 +14,20 @@ export const lightJobParallelism = 2;
 /**
  * Which pool a heavy command waits in. A focused check (named test files, one
  * package's typecheck) is `light`: it starts beside full gates in its own
- * smaller-capped lane. Everything else, and anything unrecognized, is `full`.
+ * smaller-capped lane. Dev servers and watch commands use `server`; everything
+ * else, and anything unrecognized, is `full` (custom servers opt in explicitly).
  */
-export type HeavyJobLane = "full" | "light";
+export type HeavyJobLane = "full" | "light" | "server";
+/** Tool-native fan-out inside a server permit; its OS CPU budget is separate. */
+export const serverJobParallelism = 2;
+/** A bounded job held this long is reported, never killed for its age. */
+export const longHeldJobMs = 15 * 60_000;
+export function serverLaneCapacity(): { slots: number; cpuCores: number; jobCpuCores: number } {
+  const cores = Math.max(1, availableParallelism());
+  const slots = Math.min(2, Math.max(1, Math.floor(cores / 4)));
+  const cpuCores = Math.min(64, cores / 5);
+  return { slots, cpuCores, jobCpuCores: cpuCores / slots };
+}
 
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/u;
 const MAX_LIGHT_TEST_FILES = 8;
@@ -94,6 +106,46 @@ function pnpmTypecheckLane(args: readonly string[]): HeavyJobLane {
 
 export function heavyJobLane(command: string, args: readonly string[]): HeavyJobLane {
   const words = [command, ...args];
+  const executable = basename(command);
+  // Recognize launchers and explicit watch modes, without reading scripts or
+  // treating arbitrary shell text / test-name patterns as command words.
+  if (["sh", "bash", "zsh", "fish"].includes(executable)) return "full";
+  let tool = executable;
+  let rest = [...args];
+  if (["pnpm", "npm", "yarn", "npx", "bun"].includes(tool)) {
+    while (rest[0]?.startsWith("-")) {
+      const flag = rest.shift()!;
+      if (PNPM_VALUE_OPTIONS.has(flag)) rest.shift();
+    }
+    if (["exec", "run", "dlx"].includes(rest[0] ?? "")) rest.shift();
+    tool = basename(rest.shift() ?? "");
+  } else if (["node", "nodejs"].includes(tool)) {
+    if (rest.some((arg) => arg === "--watch" || arg.startsWith("--watch="))) return "server";
+    tool = basename(rest.shift() ?? "");
+  }
+  if (/^(?:dev|watch)(?::[\w-]+)*$/u.test(tool) || /:watch(?:$|:)/u.test(tool) || tool === "start")
+    return "server";
+  if (["vite", "next", "expo", "tsx", "tsc", "vitest", "webpack"].includes(tool)) {
+    for (let index = 0; index < rest.length; index++) {
+      const arg = rest[index]!;
+      if (tool === "vitest" && VITEST_VALUE_OPTIONS.has(arg)) {
+        index++;
+        continue;
+      }
+      if (
+        arg === "--watch" ||
+        arg === "-w" ||
+        arg === "watch" ||
+        (arg.startsWith("--watch=") && arg !== "--watch=false")
+      )
+        return "server";
+    }
+    if (tool === "expo" && (rest.length === 0 || rest[0] === "start")) return "server";
+    if (tool === "next" && ["dev", "start"].includes(rest[0] ?? "")) return "server";
+    if (tool === "vite" && !rest.includes("build")) return "server";
+    if (tool === "webpack" && rest[0] === "serve") return "server";
+    if (tool === "vitest" && !rest.includes("run") && !rest.includes("--run")) return "server";
+  }
   const vitest = words.findIndex((word) => /^vitest(?:\.m?js)?$/u.test(basename(word)));
   if (vitest >= 0) return vitestLane(words.slice(vitest + 1));
   const tsc = words.findIndex((word) => basename(word) === "tsc");

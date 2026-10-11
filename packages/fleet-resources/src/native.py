@@ -756,8 +756,18 @@ def heavy_runner(directory, lease_id, token):
         signal.signal(signal.SIGTERM, lambda *_: None)
         environment = os.environ.copy()
         environment["CLANKIE_RESOURCE_LEASE"] = json.dumps({"id": lease_id, "token": token})
+        budget = None
+        if "serverCpuCores" in request:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("server_cpu", os.path.join(os.path.dirname(__file__), "server-cpu.py"))
+            budget = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(budget)
+            reader = budget.cpu_reader()
         child = subprocess.Popen([request["command"], *request["args"]], env=environment)
-        code = child.wait()
+        if budget is not None:
+            code = budget.wait(child, mine, request["serverCpuCores"], identity, born_since, signal_bound, reader)
+        else:
+            code = child.wait()
         if group_occupied(mine["pgid"]):
             # The command exited; whatever remains in its group is a leftover. Show it,
             # give it a short grace to exit, then stop it so the slot frees (VUH-2027).

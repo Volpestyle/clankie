@@ -48,6 +48,9 @@ import {
   heavyJobLane,
   heavyJobParallelism,
   lightJobParallelism,
+  serverJobParallelism,
+  serverLaneCapacity,
+  longHeldJobMs,
   type HeavyJobLane,
 } from "./parallelism.ts";
 
@@ -215,8 +218,10 @@ export function createResourceGovernor(
   // The light lane is its own journal, so installs that predate it never read
   // a lease shape they do not know. Its policy comes from the main journal.
   const lightStore = new ResourceStore(join(directory, "light"), retrying);
+  const serverStore = new ResourceStore(join(directory, "server"), retrying);
   const mainStore = store;
-  const laneStore = (lane: HeavyJobLane) => (lane === "light" ? lightStore : store);
+  const laneStore = (lane: HeavyJobLane) =>
+    lane === "server" ? serverStore : lane === "light" ? lightStore : store;
   const pressure = new ResourcePressureSampler(options.probe);
   const shutdown = new AbortController();
   const active = new Set<Promise<unknown>>();
@@ -267,8 +272,9 @@ export function createResourceGovernor(
     }
     return seen;
   }
-  async function reconcile(state: ResourceState, seen: Seen): Promise<void> {
+  async function reconcile(state: ResourceState, seen: Seen, leaseDirectory = directory): Promise<void> {
     if (!state.leases.some((lease) => lease.kind === "heavy") && state.queue.length === 0) return;
+    const previousIds = new Set(state.leases.map((lease) => lease.id));
     // This state and its exact recorded PIDs belong to the held OS lock; the
     // facts about them were observed just before it, never under it.
     const observe = (proof: ProcessIdentity) => {
@@ -322,10 +328,10 @@ export function createResourceGovernor(
           orphaned.add(lease.id);
           // Nobody else will ever stop these leftovers: after the grace, the reaper
           // does, and a later pass releases the lease once the census is empty (VUH-2027).
-          let since = leftoversSince(directory, lease.id);
-          if (since === undefined) markLeftovers(directory, lease.id, (since = Date.now()));
+          let since = leftoversSince(leaseDirectory, lease.id);
+          if (since === undefined) markLeftovers(leaseDirectory, lease.id, (since = Date.now()));
           if (Date.now() - since >= LEFTOVER_GRACE_MS)
-            stopLeftovers(directory, lease, lease.runner.pgid, since);
+            stopLeftovers(leaseDirectory, lease, lease.runner.pgid, since);
           retained.push(lease);
           continue;
         }
@@ -335,9 +341,10 @@ export function createResourceGovernor(
       }
     }
     state.leases = retained;
-    pruneLeftoverMarkers(directory, retained);
-    for (const id of orphaned) if (!retained.some((lease) => lease.id === id)) orphaned.delete(id);
-    if (reaped.length) await recordReaped(reaped);
+    pruneLeftoverMarkers(leaseDirectory, retained);
+    for (const id of orphaned)
+      if (previousIds.has(id) && !retained.some((lease) => lease.id === id)) orphaned.delete(id);
+    if (reaped.length) await recordReaped(reaped, leaseDirectory);
   }
   /** Kernel group existence, confirmed by a census that excludes zombies; failures retain. */
   async function groupOccupied(pgid: number): Promise<boolean> {
@@ -366,8 +373,8 @@ export function createResourceGovernor(
     };
   }
   /** Append-only beside the journal, so older readers of the strict journal are unaffected. */
-  async function recordReaped(receipts: ReapReceipt[]): Promise<void> {
-    const path = join(directory, "reaped.jsonl");
+  async function recordReaped(receipts: ReapReceipt[], leaseDirectory = directory): Promise<void> {
+    const path = join(leaseDirectory, "reaped.jsonl");
     try {
       if ((await stat(path)).size > 262_144) await rename(path, `${path}.1`);
     } catch (error) {
@@ -377,8 +384,14 @@ export function createResourceGovernor(
       mode: 0o600,
     });
   }
-  async function project(state: ResourceState, light?: ResourceState): Promise<ResourceSnapshot> {
+  async function project(
+    state: ResourceState,
+    light?: ResourceState,
+    server?: ResourceState,
+  ): Promise<ResourceSnapshot> {
     light ??= await lightStore.read();
+    server ??= await serverStore.read();
+    const serverCapacity = serverLaneCapacity();
     const usage = state.leases.some((lease) => lease.kind === "simulator" && lease.deviceId)
       ? await observeSimulatorUsage()
       : new Map();
@@ -393,8 +406,63 @@ export function createResourceGovernor(
         simulatorUsed: state.leases.filter((lease) => lease.kind === "simulator").length,
         lightSlots: baseHeavySlots(state.policy),
         lightUsed: light.leases.length,
+        serverSlots: serverCapacity.slots,
+        serverUsed: server.leases.length,
+        serverCpuCores: serverCapacity.cpuCores,
       },
       pressure: sampledPressure,
+      serverLeases: server.leases.flatMap((lease) =>
+        lease.kind === "heavy"
+          ? [
+              {
+                id: lease.id,
+                state: orphaned.has(lease.id)
+                  ? "orphaned"
+                  : leftoversSince(serverStore.directory, lease.id) !== undefined
+                    ? "leftovers"
+                    : lease.state,
+                ...(lease.seatId ? { seatId: lease.seatId } : {}),
+                ...(lease.holderId ? { holderId: lease.holderId } : {}),
+                executable: lease.executable,
+                createdAtMs: lease.createdAtMs,
+                cpuCores: serverCapacity.jobCpuCores,
+                ...(lease.runner ? { pid: lease.runner.pid } : {}),
+              },
+            ]
+          : [],
+      ),
+      serverQueue: server.queue.map(({ id, seatId, holderId, executable, queuedAtMs, owner }) => ({
+        id,
+        ...(seatId ? { seatId } : {}),
+        ...(holderId ? { holderId } : {}),
+        ...(executable ? { executable } : {}),
+        queuedAtMs,
+        pid: owner.pid,
+      })),
+      holderAlerts: (
+        [
+          { lane: "full", state },
+          { lane: "light", state: light },
+          { lane: "server", state: server },
+        ] as const
+      ).flatMap(({ lane, state: from }) =>
+        from.leases.flatMap((lease) =>
+          lease.kind === "heavy" && (lane === "server" || Date.now() - lease.createdAtMs >= longHeldJobMs)
+            ? [
+                {
+                  id: lease.id,
+                  lane,
+                  reason: lane === "server" ? ("server" as const) : ("long-held" as const),
+                  ...(lease.seatId ? { seatId: lease.seatId } : {}),
+                  ...(lease.holderId ? { holderId: lease.holderId } : {}),
+                  executable: lease.executable,
+                  createdAtMs: lease.createdAtMs,
+                  ...(lease.runner ? { pid: lease.runner.pid } : {}),
+                },
+              ]
+            : [],
+        ),
+      ),
       leases: state.leases.map((lease) => ({
         id: lease.id,
         kind: lease.kind,
@@ -492,12 +560,12 @@ export function createResourceGovernor(
     if (!state.leases.some((lease) => lease.kind === "heavy") && !state.queue.length) return state;
     const seen = await look(from);
     return from.transaction(async (current) => {
-      await reconcile(current, seen);
+      await reconcile(current, seen, from.directory);
       return structuredClone(current);
     });
   }
   async function snapshot() {
-    return project(await reconciled(store), await reconciled(lightStore));
+    return project(await reconciled(store), await reconciled(lightStore), await reconciled(serverStore));
   }
   const arbiterPath = join(directory, "arbiter.json");
   /**
@@ -508,9 +576,16 @@ export function createResourceGovernor(
   const grantsDirectory = join(directory, "grants");
   const grantable = (id: string) => existsSync(join(grantsDirectory, id));
   /** Whether a live arbiter is judging admission; waiters then never judge it themselves. */
-  async function arbiterFresh(): Promise<boolean> {
+  async function arbiterFresh(lane: HeavyJobLane): Promise<boolean> {
     try {
-      const { at } = JSON.parse(await readFile(arbiterPath, "utf8")) as { at?: unknown };
+      const { at, lanes } = JSON.parse(await readFile(arbiterPath, "utf8")) as {
+        at?: unknown;
+        lanes?: unknown;
+      };
+      // An installed service predating this lane cannot grant its tickets.
+      // Keep full/light compatibility, and let server waiters judge for
+      // themselves until a lane-aware arbiter advertises support.
+      if (lane === "server" && (!Array.isArray(lanes) || !lanes.includes("server"))) return false;
       return typeof at === "number" && Math.abs(Date.now() - at) < ARBITER_FRESH_MS;
     } catch {
       return false;
@@ -518,7 +593,11 @@ export function createResourceGovernor(
   }
   async function heartbeat(): Promise<void> {
     const next = `${arbiterPath}.${randomUUID()}`;
-    await writeFile(next, JSON.stringify({ pid: process.pid, at: Date.now() }), { mode: 0o600 });
+    await writeFile(
+      next,
+      JSON.stringify({ pid: process.pid, at: Date.now(), lanes: ["full", "light", "server"] }),
+      { mode: 0o600 },
+    );
     await rename(next, arbiterPath);
   }
   /** Whether the head of this lane's queue may start, under one sample. */
@@ -529,6 +608,7 @@ export function createResourceGovernor(
     sampled: ResourcePressure,
   ): boolean {
     const held = state.leases.filter((lease) => lease.kind === "heavy");
+    if (lane === "server") return held.length < serverLaneCapacity().slots && sampled.healthy;
     if (held.length >= (lane === "light" ? baseHeavySlots(policy) : resourceCapacity(policy))) return false;
     // A light job is small and capped, so only the memory floor holds it;
     // load already holds the full gates it runs beside (VUH-2023). A full
@@ -567,6 +647,7 @@ export function createResourceGovernor(
     const lanes = [
       { lane: "full" as HeavyJobLane, from: mainStore },
       { lane: "light" as HeavyJobLane, from: lightStore },
+      { lane: "server" as HeavyJobLane, from: serverStore },
     ];
     const peeks = await Promise.all(lanes.map(({ from }) => from.read()));
     if (peeks.every((state) => !state.queue.some((entry) => entry.kind === "heavy"))) {
@@ -585,7 +666,7 @@ export function createResourceGovernor(
       if (!due && !headAdmits(lane, peek, policy, sampled)) continue;
       const seen = await look(from);
       granted += await from.transaction(async (state) => {
-        await reconcile(state, seen);
+        await reconcile(state, seen, from.directory);
         let count = 0;
         for (;;) {
           const head = state.queue.find((entry) => entry.kind === "heavy");
@@ -642,7 +723,7 @@ export function createResourceGovernor(
     const seen = await look(store);
     await store.transaction(
       async (state) => {
-        await reconcile(state, seen);
+        await reconcile(state, seen, store.directory);
         if (state.queue.length >= 512) throw new Error("Fleet resource queue is full");
         state.queue.push({
           id,
@@ -660,7 +741,7 @@ export function createResourceGovernor(
     let admitted = false;
     // The owner's policy lives in the main journal for both lanes.
     const policyFor = async (state: ResourceState) =>
-      options.lane === "light" ? (await mainStore.read()).policy : state.policy;
+      options.lane !== "full" ? (await mainStore.read()).policy : state.policy;
     const admits = (state: ResourceState, policy: FleetResourcePolicy, sampled: ResourcePressure) =>
       state.queue.find((entry) => entry.kind === "heavy")?.id === id &&
       headAdmits(options.lane, state, policy, sampled);
@@ -676,7 +757,11 @@ export function createResourceGovernor(
       if (!options.onWait || Date.now() - reportedAt < FULL_PASS_MS) return;
       reportedAt = Date.now();
       options.onWait(
-        options.lane === "light" ? await project(await mainStore.read(), state) : await project(state),
+        options.lane === "server"
+          ? await project(await mainStore.read(), undefined, state)
+          : options.lane === "light"
+            ? await project(await mainStore.read(), state)
+            : await project(state),
       );
     };
     try {
@@ -690,7 +775,7 @@ export function createResourceGovernor(
         }
         // A live arbiter judges admission from one view; this waiter only
         // waits for its grant, so its own view cannot hold the FIFO (VUH-2080).
-        if (peek && (await arbiterFresh())) {
+        if (peek && (await arbiterFresh(options.lane))) {
           // Re-assert this ticket's marker: without it the arbiter treats this
           // waiter as an older client and the FIFO stalls behind it.
           if (!grantable(id)) writeFileSync(join(grantsDirectory, id), "", { mode: 0o600 });
@@ -722,7 +807,7 @@ export function createResourceGovernor(
         let advisory: ResourceState | undefined;
         const lease = await store.transaction(
           async (state) => {
-            await reconcile(state, seen);
+            await reconcile(state, seen, store.directory);
             const blocked = () => {
               advisory = structuredClone(state);
               return undefined;
@@ -774,7 +859,10 @@ export function createResourceGovernor(
     }
     const found = (entry: ResourceState["leases"][number]): entry is HeavyLease =>
       entry.kind === "heavy" && entry.id === ref.id && entry.token === ref.token;
-    const lease = (await store.read()).leases.find(found) ?? (await lightStore.read()).leases.find(found);
+    const lease =
+      (await store.read()).leases.find(found) ??
+      (await lightStore.read()).leases.find(found) ??
+      (await serverStore.read()).leases.find(found);
     if (!lease?.runner || lease.state !== "running") return undefined;
     // A native child in the same group is a distinct holder, not nested work
     // belonging to the parent that acquired this permit.
@@ -788,7 +876,7 @@ export function createResourceGovernor(
   async function runHeavy(
     command: string,
     args: readonly string[],
-    options: ResourceWaitOptions & { seatId?: string; holderId?: string } = {},
+    options: ResourceWaitOptions & { seatId?: string; holderId?: string; server?: boolean } = {},
   ): Promise<number> {
     if (!command || command.includes("\0") || args.some((arg) => arg.includes("\0")))
       throw new Error("Invalid heavy command");
@@ -805,12 +893,14 @@ export function createResourceGovernor(
     let lease: HeavyLease | undefined;
     let child: ReturnType<typeof spawn> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
-    const lane = heavyJobLane(command, args);
+    const lane = options.server ? "server" : heavyJobLane(command, args);
     const store = laneStore(lane);
     try {
       const parentLease = await inherited(options.holderId);
       if (signal.aborted) throw abort();
-      if (parentLease) {
+      // A server must not borrow a bounded parent permit; it needs the CPU
+      // supervisor and its own lifetime in the independent lane.
+      if (parentLease && lane !== "server") {
         child = spawn(command, heavyJobArgs(command, args), {
           stdio: "inherit",
           env: heavyJobEnvironment(process.env),
@@ -850,7 +940,14 @@ export function createResourceGovernor(
         {
           detached: true,
           stdio: ["inherit", "inherit", "inherit", "pipe", "pipe"],
-          env: heavyJobEnvironment(process.env, lane === "light" ? lightJobParallelism : heavyJobParallelism),
+          env: heavyJobEnvironment(
+            process.env,
+            lane === "server"
+              ? serverJobParallelism
+              : lane === "light"
+                ? lightJobParallelism
+                : heavyJobParallelism,
+          ),
         },
       );
       const done = new Promise<number>((resolve, reject) => {
@@ -861,7 +958,13 @@ export function createResourceGovernor(
       const input = child.stdio[3] as Writable;
       const replies = createInterface({ input: child.stdio[4] as Readable });
       const first = replies[Symbol.asyncIterator]().next();
-      input.write(`${JSON.stringify({ command, args: heavyJobArgs(command, args) })}\n`);
+      input.write(
+        `${JSON.stringify({
+          command,
+          args: heavyJobArgs(command, args),
+          ...(lane === "server" ? { serverCpuCores: serverLaneCapacity().jobCpuCores } : {}),
+        })}\n`,
+      );
       const cancelRegistration = () => {
         input.end();
       };
@@ -884,7 +987,10 @@ export function createResourceGovernor(
       if (runner.pid !== child.pid || !matches(await processIdentity(runner.pid), runner))
         throw new Error("Fleet heavy runner lifetime changed");
       const sendSignal = async (sig: "SIGINT" | "SIGTERM" | "SIGKILL") => {
-        if (matches(await processIdentity(runner.pid), runner)) process.kill(-runner.pgid, sig);
+        if (matches(await processIdentity(runner.pid), runner)) {
+          process.kill(-runner.pgid, sig);
+          if (lane === "server" && sig !== "SIGKILL") process.kill(-runner.pgid, "SIGCONT");
+        }
       };
       const cancel = () => {
         void sendSignal(interrupted.signal.reason === "SIGINT" ? "SIGINT" : "SIGTERM").catch(() => undefined);
@@ -914,7 +1020,7 @@ export function createResourceGovernor(
       if (lease) {
         const seen = await look(store);
         await store.transaction(async (state) => {
-          await reconcile(state, seen);
+          await reconcile(state, seen, store.directory);
         });
       }
     }

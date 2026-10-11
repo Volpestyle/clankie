@@ -1847,6 +1847,31 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                             "normal",
                           ),
                         ),
+                        ...(roster.resources.capacity.serverSlots === undefined
+                          ? []
+                          : [
+                              s.line(
+                                "server slots",
+                                `${roster.resources.capacity.serverUsed ?? 0}/${roster.resources.capacity.serverSlots} · ${roster.resources.serverQueue?.length ?? 0} waiting · ${roster.resources.capacity.serverCpuCores} CPU cores shared`,
+                                "normal",
+                              ),
+                            ]),
+                        ...(roster.resources.serverLeases ?? []).map((lease) =>
+                          s.line(
+                            "resource holder",
+                            `${lease.seatId ?? `pid ${lease.pid ?? "unknown"}`}${lease.holderId ? ` / ${lease.holderId}` : ""} · server · ${lease.executable}`,
+                            "normal",
+                          ),
+                        ),
+                        ...(roster.resources.holderAlerts ?? [])
+                          .filter((alert) => alert.reason === "long-held")
+                          .map((alert) =>
+                            s.line(
+                              "long-held resource",
+                              `${alert.seatId ?? `pid ${alert.pid ?? "unknown"}`} · ${alert.executable} · held ${Math.floor((Date.now() - alert.createdAtMs) / 60_000)}m`,
+                              "normal",
+                            ),
+                          ),
                         ...roster.resources.leases.map((lease) =>
                           s.line(
                             "resource holder",

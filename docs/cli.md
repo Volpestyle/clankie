@@ -2828,7 +2828,7 @@ in the TUI call the same code. A listed harness is hired with `hire_agent`;
 
 <a id="fleet-resource-governor"></a>
 
-### `heavy [--seat LABEL] [--holder ID] -- COMMAND [ARGS...]` / `fleet resources` / `simulator`
+### `heavy [--server] [--seat LABEL] [--holder ID] -- COMMAND [ARGS...]` / `fleet resources` / `simulator`
 
 `heavy` runs a local command inside the shared OS-account resource governor.
 Its child environment caps Vitest workers and Turbo tasks at four through
@@ -2847,8 +2847,21 @@ the same permit; surviving descendants retain it after a wrapper exits.
 test files, `tsc` without `--build`, or `pnpm --filter ONE typecheck` — runs in
 the light lane: its own journal under `light/`, as many slots as the base heavy slots,
 two cores per job (the same variables capped at two), held only by the memory
-floor, so it starts beside full gates even at high load. Everything else, and
-anything wrapped in a shell, is a full job. Workers keep the same command form.
+floor, so it starts beside full gates even at high load.
+
+Expo start, `pnpm dev`, Vite/Next dev and recognized watch commands select the
+separate server lane. Custom long-lived services use `heavy --server -- COMMAND`;
+an opaque shell command otherwise remains a full job. The server lane has up to
+two slots, sharing 20% of machine CPU cores (at most 64 cores), divided equally
+among the slots. Its native supervisor samples aggregate owned-group CPU every
+100 ms and pauses/resumes proven process lifetimes to pay back excess usage;
+brief bursts can exceed this sampled budget. Tool-native fan-out is capped at
+two. Detached or privileged children are outside this process-group contract.
+Servers still wait on machine load, memory and FIFO in their own journal under
+`server/`; they hold no build/check slots. Stop them when finished. A server
+inside a bounded job gets its own permit rather than borrowing the parent's.
+An older installed arbiter does not govern this lane; new server waiters judge
+its admission themselves until the service advertises server-lane support.
 Brief registry-lock contention waits internally without discarding the queue
 ticket. Actual native failures identify their cause; see the
 [resource governor reference](../packages/fleet-resources/README.md).
@@ -2862,6 +2875,14 @@ load guard (each job started in the last minute counts four cores of load), and 
 the cores (a waiting `clankie heavy` says `busy`). Simulator status also reports
 external active devices against the simulator budget. The budgets are independent;
 load and available-memory guards gate both.
+Server status adds `capacity.serverSlots`, `serverUsed`, `serverCpuCores`,
+`serverLeases` (with each holder's `cpuCores`) and `serverQueue`. `holderAlerts`
+identifies governed servers and build/check permits held over 15 minutes by
+lane, seat, holder, executable and creation time. Waiting commands show these
+holders, and the service notifies their owning lead through the existing fleet
+alert channel once per lease/reason, retrying failed delivery. Age never kills a
+bounded job; explicit interruption and command-exit leftover cleanup retain
+their existing behavior. The additive status fields are absent on older servers.
 The operator fleet snapshot also carries recent confirmed native peer exchanges
 in `edges`: `deliveryId` is the original native delivery UUID and `text` is up to
 1,000 verbatim characters. Attempts, uncertain receipts and next-turn storage

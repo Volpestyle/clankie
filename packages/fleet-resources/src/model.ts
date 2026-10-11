@@ -213,6 +213,10 @@ export interface ResourceSnapshot {
     /** Focused checks run in their own capped lane beside full gates (VUH-2023). */
     lightSlots: number;
     lightUsed: number;
+    serverSlots?: number;
+    serverUsed?: number;
+    /** Aggregate sampled CPU budget for all server slots, in cores. */
+    serverCpuCores?: number;
   };
   pressure: ResourcePressure;
   leases: {
@@ -260,6 +264,18 @@ export interface ResourceSnapshot {
     executable?: string;
     queuedAtMs: number;
     pid: number;
+  }[];
+  serverLeases?: (ResourceSnapshot["lightLeases"][number] & { cpuCores: number })[];
+  serverQueue?: ResourceSnapshot["lightQueue"];
+  holderAlerts?: {
+    id: string;
+    lane: "full" | "light" | "server";
+    reason: "server" | "long-held";
+    seatId?: string;
+    holderId?: string;
+    executable: string;
+    createdAtMs: number;
+    pid?: number;
   }[];
 }
 export interface ResourceWaitOptions {
@@ -310,7 +326,7 @@ export interface FleetResourceGovernor {
   runHeavy(
     command: string,
     args: readonly string[],
-    options?: ResourceWaitOptions & { seatId?: string; holderId?: string },
+    options?: ResourceWaitOptions & { seatId?: string; holderId?: string; server?: boolean },
   ): Promise<number>;
   queueSimulator(
     options: Omit<SimulatorAcquireOptions, "externalActive"> & {

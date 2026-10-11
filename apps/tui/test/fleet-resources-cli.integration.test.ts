@@ -27,6 +27,8 @@ import { runFleetCommand } from "../src/command/fleet.ts";
 import { runResourceStatusCommand, runSimulatorCommand } from "../src/command/fleet-resources.ts";
 import { doctorCommand } from "../src/command/doctor.ts";
 import { formatDoctorReport } from "../src/doctor-report.ts";
+import { ResourceStore } from "../../../packages/fleet-resources/src/store.ts";
+import { longHeldJobMs } from "../../../packages/fleet-resources/src/parallelism.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
 const calmPressure = async () => ({ loadRatio: 0, availableMemoryMb: 1_000_000 });
@@ -195,6 +197,105 @@ try {process.exitCode=await runHeadlessCaptainCommand(parseDirectConversation(pr
 }
 
 describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", () => {
+  it("headless custom servers surface through authenticated status and doctor; holder alerts reach the seat's lead once", async () => {
+    const f = await fixture();
+    const alerts: { pane: string; text: string }[] = [];
+    let acceptAlert = false;
+    const lead = createServer(async (incoming, outgoing) => {
+      const bytes: Buffer[] = [];
+      for await (const piece of incoming) bytes.push(Buffer.from(piece));
+      alerts.push(JSON.parse(Buffer.concat(bytes).toString("utf8")));
+      outgoing.statusCode = acceptAlert ? 200 : 503;
+      outgoing.end();
+    });
+    lead.listen(0, "127.0.0.1");
+    await once(lead, "listening");
+    const leadPort = (lead.address() as { port: number }).port;
+    try {
+      f.resources.bindSeats({
+        resolve: async () => undefined,
+        proof: async () => undefined,
+        isLocalFleet: async () => true,
+        notify: async (pane, text) =>
+          (
+            await fetch(`http://127.0.0.1:${leadPort}`, {
+              method: "POST",
+              body: JSON.stringify({ pane, text }),
+            })
+          ).ok,
+      });
+      await f.resources.observeSeats([{ seatId: "server-seat", paneId: "owned-pane", status: "working" }]);
+      const path = join(f.directory, "server.json");
+      const run = await f.headless([
+        "heavy",
+        "--server",
+        "--seat",
+        "server-seat",
+        "--holder",
+        "owned-service",
+        "--",
+        process.execPath,
+        join(repoRoot, "packages/fleet-resources/test/fixtures/server-command.mjs"),
+        path,
+      ]);
+      await eventually(() => exists(path), Boolean, run);
+      const { port } = JSON.parse(await readFile(path, "utf8")) as { port: number };
+      await f.resources.refresh();
+      const status = await runResourceStatusCommand(f.options);
+      expect(status.capacity).toMatchObject({ used: 0, serverUsed: 1 });
+      expect(status.serverLeases?.[0]).toMatchObject({ holderId: "owned-service", seatId: "server-seat" });
+      expect(status.holderAlerts?.[0]).toMatchObject({ lane: "server", reason: "server" });
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toMatchObject({ pane: "owned-pane", text: expect.stringContaining("owned-service") });
+      acceptAlert = true;
+      await f.resources.refresh();
+      await f.resources.refresh();
+      expect(alerts).toHaveLength(2); // Failed delivery retried; successful delivery deduplicated.
+      const report = await doctorCommand({
+        repoRoot: f.directory,
+        settings: f.settings,
+        env: f.env,
+        host: f.host,
+        credentialStore: f.credentials,
+      });
+      expect(formatDoctorReport(report)).toContain("owned-service");
+      expect(formatDoctorReport(report)).toContain("CPU cores");
+
+      // An old full-lane job also reaches the lead and keeps its listener alive.
+      const boundedPath = join(f.directory, "bounded.json");
+      const bounded = await f.headless([
+        "heavy",
+        "--seat",
+        "server-seat",
+        "--holder",
+        "old-build",
+        "--",
+        process.execPath,
+        join(repoRoot, "packages/fleet-resources/test/fixtures/server-command.mjs"),
+        boundedPath,
+      ]);
+      await eventually(() => exists(boundedPath), Boolean, bounded);
+      await new ResourceStore(join(f.directory, "registry")).transaction((state) => {
+        const lease = state.leases.find((lease) => lease.kind === "heavy" && lease.holderId === "old-build")!;
+        lease.createdAtMs = Date.now() - longHeldJobMs - 1000;
+      });
+      await f.resources.refresh();
+      expect(alerts).toHaveLength(3);
+      expect(alerts[2]!.text).toContain("old-build");
+      expect(alerts[2]!.text).toContain("has not been killed");
+      const boundedPort = (JSON.parse(await readFile(boundedPath, "utf8")) as { port: number }).port;
+      expect((await fetch(`http://127.0.0.1:${boundedPort}`)).ok).toBe(true);
+      await fetch(`http://127.0.0.1:${boundedPort}/stop`);
+      expect(await bounded.done).toBe(7);
+      await fetch(`http://127.0.0.1:${port}/stop`);
+      expect(await run.done).toBe(7);
+    } finally {
+      await f.close();
+      lead.closeAllConnections();
+      await new Promise<void>((resolve) => lead.close(() => resolve()));
+    }
+  }, 120_000);
+
   it("runs actual headless heavy locally in hosted mode, preserves child --chat args and nonzero exit", async () => {
     const f = await fixture();
     try {

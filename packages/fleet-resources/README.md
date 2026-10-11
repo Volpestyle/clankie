@@ -84,6 +84,28 @@ process itself, so a hosted captain running as PID 1 can perform pressure
 admission without granting PID 1 lease or signal authority. The hosted Linux
 image installs Python 3; self-hosted hosts must provide it.
 
+Long-lived dev servers have an independent `server/` journal, queue and up to
+two slots. `heavyJobLane` recognizes Expo start, `pnpm dev`, Vite/Next dev and
+watch commands; custom/opaque services opt in with `heavy --server`. Aggregate
+server CPU is 20% of available cores (at most 64), split equally between slots,
+and tool-native fan-out is two. `server-cpu.py`, loaded by the registered native
+runner, samples group CPU without forking every 100 ms, charges reaped child
+time, and pauses/resumes exact PID births to pay back excess usage. Short bursts
+can exceed the sampled budget; reaped children already sampled can conservatively
+be charged twice. It governs same-user children remaining in the owned group,
+not detached or privileged processes. The lane answers to the existing load and
+memory guard but never occupies full/light slots. Native registration, signals,
+exit status and leftover cleanup are shared with the existing runner.
+Arbiter heartbeats advertise lane support: a new server waiter falls back to
+its own admission while an installed older service handles only full/light.
+
+Status adds server capacity, holders, queue and per-holder CPU budgets through
+the API, CLI and TUI. `holderAlerts` names servers and full/light jobs held for
+15 minutes, without arguments. The service routes them through the native seat's
+existing lead alert channel once per lease/reason (failed delivery retries).
+Unknown labels do not select a conversation. Duration is diagnostic: no bounded
+job is killed automatically because it ran too long.
+
 Registry transactions wait for the kernel file lock without a contention timeout.
 The 15-second transaction watchdog begins after acquisition, not while another
 request holds the lock. Queued heavy requests retain their original tickets

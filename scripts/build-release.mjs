@@ -239,6 +239,7 @@ async function copyRuntimeAssets(targetRoot) {
     ["integrations/remote-lead/bootstrap.mjs", "integrations/remote-lead/bootstrap.mjs"],
     ["integrations/remote-lead/claude-setup.mjs", "integrations/remote-lead/claude-setup.mjs"],
     ["packages/fleet-resources/src/native.py", "packages/fleet-resources/src/native.py"],
+    ["packages/fleet-resources/src/server-cpu.py", "packages/fleet-resources/src/server-cpu.py"],
     ["apps/tui/native/LentScreen.cs", "apps/tui/native/LentScreen.cs"],
     ["apps/tui/native/lent-screen.ps1", "apps/tui/native/lent-screen.ps1"],
     ["apps/clankie/src/captain/instructions.md", "apps/clankie/src/instructions.md"],

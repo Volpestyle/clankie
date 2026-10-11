@@ -25,6 +25,7 @@ const PROOF_RETRY_MS = 2_000;
 const RESOURCE_BRIEF = [
   "Machine resource safety:",
   "Load the fleet-resources skill. Run every build, test suite, typecheck and other heavy command through `clankie heavy -- <command> [args...]`.",
+  "Dev servers and watch commands use the separate governed server lane automatically; use `clankie heavy --server -- <command> [args...]` for a custom long-lived service, and stop it when finished.",
   "Boot simulators only through `clankie simulator acquire` (never `xcrun simctl boot` or Simulator.app); use its exact UDID and release it when finished. A device you booted by hand holds a fleet slot: lease it by its deviceId or shut it down.",
   "Never run global simulator shutdown/delete commands or touch another seat's devices.",
 ].join("\n");
@@ -114,6 +115,7 @@ export async function createFleetResourceRuntime(input: {
   let closed = false;
   /** `${udid}:${seatId}` pairs already told; forgotten once the device is no longer external. */
   const noticed = new Set<string>();
+  const noticedHolders = new Set<string>();
   let lastNotice = 0;
 
   const publish = (snapshot: ResourceSnapshot) => {
@@ -126,6 +128,11 @@ export async function createFleetResourceRuntime(input: {
       pressure: { healthy: snapshot.pressure.healthy, reason: snapshot.pressure.reason },
       leases: snapshot.leases.map(({ lastUsedAtMs: _lastUsedAtMs, ...lease }) => lease),
       queue: snapshot.queue,
+      lightLeases: snapshot.lightLeases,
+      lightQueue: snapshot.lightQueue,
+      serverLeases: snapshot.serverLeases,
+      serverQueue: snapshot.serverQueue,
+      holderAlerts: snapshot.holderAlerts,
     });
     if (next === fingerprint) return;
     fingerprint = next;
@@ -234,6 +241,27 @@ export async function createFleetResourceRuntime(input: {
   };
   // Seats seen by the last roster census; attribution maps processes to their panes.
   let seen: readonly ObservedSeat[] = [];
+  const noticeHolders = async () => {
+    if (!resolver?.notify || closed) return;
+    const alerts = cached?.holderAlerts ?? [];
+    const live = new Set(alerts.map((alert) => `${alert.id}:${alert.reason}`));
+    for (const key of noticedHolders) if (!live.has(key)) noticedHolders.delete(key);
+    for (const alert of alerts) {
+      const key = `${alert.id}:${alert.reason}`;
+      if (noticedHolders.has(key) || !alert.seatId) continue;
+      // Caller labels confer no authority: route only through a known native
+      // seat/pane from the fleet census, never a caller-chosen conversation.
+      const seat = seen.find((seat) => seat.seatId === alert.seatId || seat.paneId === alert.seatId);
+      if (!seat?.paneId) continue;
+      const age = Math.floor((Date.now() - alert.createdAtMs) / 60_000);
+      const text = `Resource holder ${seat.seatId}${alert.holderId ? ` / ${alert.holderId}` : ""}: ${alert.executable} in the ${alert.lane} lane, held ${age} minutes. ${
+        alert.reason === "server"
+          ? `This long-lived server uses its own slots and shares a ${cached?.capacity.serverCpuCores} CPU-core budget; stop it when finished.`
+          : "This bounded job has held its permit over 15 minutes; check whether it is a custom service and use `clankie heavy --server -- COMMAND` on its next launch. It has not been killed for its age."
+      }`;
+      if (await resolver.notify(seat.paneId, text).catch(() => false)) noticedHolders.add(key);
+    }
+  };
   let seatProcesses: { at: number; byPid: Map<number, { seatId: string; pane: string }> } | undefined;
   const panesByPid = async () => {
     if (seatProcesses && Date.now() - seatProcesses.at < 15_000) return seatProcesses.byPid;
@@ -316,7 +344,10 @@ export async function createFleetResourceRuntime(input: {
   const refresh = (): Promise<void> => {
     if (closed) return Promise.resolve();
     if (refreshing) return refreshing;
-    const pending = (async () => publish((await ownerPolicy()) ?? (await governor.snapshot())))();
+    const pending = (async () => {
+      publish((await ownerPolicy()) ?? (await governor.snapshot()));
+      await noticeHolders();
+    })();
     refreshing = pending;
     void pending
       .finally(() => {
@@ -363,6 +394,7 @@ export async function createFleetResourceRuntime(input: {
       (await (options?.retryUnproven ? proveFirst(request) : observe(request))).identity,
     async observeSeats(seats) {
       seen = seats.map(({ seatId, status, paneId }) => ({ seatId, status, ...(paneId ? { paneId } : {}) }));
+      await noticeHolders();
       // Only actual lease holders need process probes; an ordinary roster
       // census never performs one process query per worker.
       const holders = new Set(

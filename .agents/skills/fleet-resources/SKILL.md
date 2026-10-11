@@ -14,7 +14,28 @@ clankie heavy -- node path/to/owned-runtime.js
 ```
 
 Keep the complete owned runtime and its children inside the wrapper's lifetime.
-Each permit passes `VITEST_MAX_WORKERS=4` and `TURBO_CONCURRENCY=4` to its
+Dev servers and long-lived services use the separately governed server lane,
+so they never take build/check slots. Expo start, `pnpm dev`, Vite/Next dev and
+recognized watch commands select it automatically. For custom scripts or a
+shell-wrapped service, say so explicitly:
+
+```sh
+clankie heavy --server -- node path/to/owned-service.js
+```
+
+Do not launch dev servers ungoverned. The lane has up to two slots and shares
+20% of machine cores (at most 64 cores), divided equally between its slots.
+Tool-native parallelism is capped at two; a native supervisor also samples the
+owned process group's CPU every 100 ms and pauses/resumes exact process births
+to pay back excess CPU. Brief bursts can exceed this sampled budget. Keep
+children in the owned group; detached/privileged processes are outside its
+contract. Stop your server when finished. Neither server age nor a long build
+causes an automatic kill. Normal interruption and leftover cleanup still apply.
+`fleet resources`, doctor, the TUI and waiting commands show server holders and
+queue separately. The owning lead hears a holder alert for a governed server or
+a build/check permit held over 15 minutes; `holderAlerts` identifies its lane,
+seat, holder, executable and start time without exposing arguments.
+Each full permit passes `VITEST_MAX_WORKERS=4` and `TURBO_CONCURRENCY=4` to its
 children, including package scripts and nested commands, preserving lower
 positive integer environment limits.
 Under `clankie heavy`, inherited `VITEST_MAX_WORKERS` beats `--maxWorkers`; set the environment variable to a lower value to reduce parallelism.

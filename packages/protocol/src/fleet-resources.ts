@@ -48,6 +48,9 @@ export const FleetResourceSnapshotSchema = z
         /** The light lane for focused checks (VUH-2023); absent from older servers. */
         lightSlots: z.number().int().min(1).max(64).optional(),
         lightUsed: z.number().int().nonnegative().optional(),
+        serverSlots: z.number().int().min(1).max(64).optional(),
+        serverUsed: z.number().int().nonnegative().optional(),
+        serverCpuCores: z.number().finite().positive().max(64).optional(),
       })
       .strict(),
     pressure: z
@@ -132,6 +135,50 @@ export const FleetResourceSnapshotSchema = z
           .strict(),
       )
       .max(512)
+      .optional(),
+    /** Governed long-lived commands; omitted by older servers. */
+    serverLeases: z
+      .array(
+        z.strictObject({
+          id: reference,
+          state: z.string().min(1).max(64),
+          seatId: reference.optional(),
+          holderId: reference.optional(),
+          pid: z.number().int().min(2).max(2_147_483_647).optional(),
+          executable: z.string().min(1).max(256),
+          createdAtMs: timestamp,
+          cpuCores: z.number().finite().positive().max(64),
+        }),
+      )
+      .max(128)
+      .optional(),
+    serverQueue: z
+      .array(
+        z.strictObject({
+          id: reference,
+          seatId: reference.optional(),
+          holderId: reference.optional(),
+          pid: z.number().int().min(2).max(2_147_483_647).optional(),
+          executable: z.string().min(1).max(256).optional(),
+          queuedAtMs: timestamp,
+        }),
+      )
+      .max(512)
+      .optional(),
+    holderAlerts: z
+      .array(
+        z.strictObject({
+          id: reference,
+          lane: z.enum(["full", "light", "server"]),
+          reason: z.enum(["server", "long-held"]),
+          seatId: reference.optional(),
+          holderId: reference.optional(),
+          pid: z.number().int().min(2).max(2_147_483_647).optional(),
+          executable: z.string().min(1).max(256),
+          createdAtMs: timestamp,
+        }),
+      )
+      .max(384)
       .optional(),
   })
   .strict();
