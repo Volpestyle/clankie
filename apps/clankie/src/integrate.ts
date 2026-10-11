@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { syncOwnerCheckout } from "@clankie/settings";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, open, readdir, rm } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { mkdir, readFile, open, readdir, rm, realpath, lstat } from "node:fs/promises";
+import { basename, dirname, join, resolve, relative } from "node:path";
 import { promisify } from "node:util";
 import { Writable } from "node:stream";
 import {
@@ -19,6 +19,8 @@ import { integrationEnvironment } from "./integrate-environment.ts";
 import { darwinOnlySkips, remoteGateDeadline, type GateRunner } from "./integrate-remote.ts";
 import { processIdentity, probeProcess } from "@clankie/fleet-resources";
 import type { FleetProgressObservation } from "./fleet-progress.ts";
+
+import { processWorkingDirectories } from "./process-working-directories.ts";
 
 const execute = promisify(execFile);
 const now = () => new Date().toISOString();
@@ -68,6 +70,8 @@ interface IntegrationOptions {
     signal?: AbortSignal,
   ) => Promise<GateRunner | undefined>;
   /** Internal deadlines, overridable by real-process integration fixtures. */
+  /** Terminal scratch worktrees are kept for one hour by default. */
+  worktreeRetentionMs?: number;
   remotePreparationTimeoutMs?: number;
   remoteCleanupTimeoutMs?: number;
   remoteExecutionTimeoutMs?: number;
@@ -460,6 +464,112 @@ export class IntegrationQueue {
     } while (this.draining);
   }
 
+  /** Terminal scratch trees expire; records, logs and cloned commit stores remain. */
+  async reclaimWorktrees(
+    at = Date.now(),
+    guard: () => Promise<void> = async () => {},
+  ): Promise<{ reclaimed: string[]; kept: { id: string; reason: string }[] }> {
+    return withDirectoryLock(
+      join(this.options.directory, "queue.lock"),
+      async () => {
+        await guard();
+        const result: { reclaimed: string[]; kept: { id: string; reason: string }[] } = {
+          reclaimed: [],
+          kept: [],
+        };
+        const ids = await readdir(join(this.options.directory, "batches")).catch(
+          (error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return [];
+            throw error;
+          },
+        );
+        if (ids.length > 4096) throw Error("Integration batch census exceeds its bound");
+        const cwds = await processWorkingDirectories();
+        let attempted = 0;
+        for (const id of ids) {
+          if (attempted >= 32) break;
+          if (!/^[a-f0-9-]{36}$/u.test(id) || this.running.has(id)) continue;
+          const batch = await this.read(id).catch(() => undefined);
+          if (
+            !batch ||
+            batch.batchId ||
+            !["pushed", "failed", "cancelled", "interrupted", "conflict"].includes(batch.state)
+          )
+            continue;
+          if (at - Date.parse(batch.updatedAt) < (this.options.worktreeRetentionMs ?? 60 * 60_000)) continue;
+          const root = resolve(dirname(this.path(id)));
+          if ((await realpath(root)) !== root) {
+            result.kept.push({ id, reason: "batch_alias" });
+            continue;
+          }
+          // An inspector shell is still live even though the queue's own command finished.
+          const contains = (path: string) =>
+            path === root ||
+            (relative(root, path) !== "" &&
+              !relative(root, path).startsWith("..") &&
+              !relative(root, path).startsWith("/"));
+          if (cwds.some(contains)) {
+            result.kept.push({ id, reason: "live_cwd" });
+            continue;
+          }
+          for (const name of ["core", "app"] as const) {
+            if (attempted >= 32) break;
+            const tree = join(root, "worktrees", name === "core" ? "clankie" : "clankie-app");
+            if (!(await lstat(tree).catch(() => undefined))) continue;
+            try {
+              if ((await realpath(tree)) !== tree) throw Error("worktree_alias");
+              const repository = join(root, "repositories", name);
+              if ((await realpath(repository)) !== repository) throw Error("repository_alias");
+              const common = await this.git(tree, [
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+              ]);
+              if (common !== join(repository, ".git")) throw Error("worktree_unverified");
+              if (await this.git(tree, ["status", "--porcelain=v1", "--untracked-files=all"]))
+                throw Error("dirty");
+              if ((await processWorkingDirectories()).some(contains)) throw Error("live_cwd");
+              // Keep detached commits reachable for later inspection and restore.
+              const head = await this.git(tree, ["rev-parse", "HEAD"]);
+              await this.git(repository, ["update-ref", `refs/clankie/retained/${name}`, head]);
+              await guard();
+              attempted++;
+              await this.git(repository, ["worktree", "remove", tree]);
+              result.reclaimed.push(tree);
+              (batch.worktreeReclamation ??= []).push({
+                path: tree,
+                head,
+                keptRef: `refs/clankie/retained/${name}`,
+                at: new Date(at).toISOString(),
+              });
+              await this.save(batch);
+            } catch (error) {
+              result.kept.push({ id, reason: String(error) });
+            }
+          }
+        }
+        return result;
+      },
+      (owner) => this.interruptAbandoned(owner),
+    );
+  }
+  watchReclamation(onError: (error: unknown) => void): () => void {
+    let pending: Promise<unknown> | undefined;
+    const sweep = () => {
+      pending ??= this.reclaimWorktrees()
+        .catch((error: unknown) => {
+          if (!String(error).includes("Integration operation busy; retained lock:")) onError(error);
+        })
+        .finally(() => {
+          pending = undefined;
+        });
+    };
+    const timer = setInterval(sweep, 5 * 60_000);
+    timer.unref();
+    sweep();
+    return () => clearInterval(timer);
+  }
+
   private async retry(
     members: PendingIntegration[],
     regates: number,
@@ -822,7 +932,12 @@ export class IntegrationQueue {
           good.gate.head !== good.head
         )
           throw Error("Restore source does not match a recorded passed tree");
-        await this.git(directory, ["fetch", good.directory, good.head]);
+        const retained = join(dirname(dirname(good.directory)), "repositories", name);
+        await this.git(directory, [
+          "fetch",
+          (await lstat(good.directory).catch(() => undefined)) ? good.directory : retained,
+          good.head,
+        ]);
         await this.git(directory, ["read-tree", "--reset", "-u", `${good.head}^{tree}`]);
         await this.git(directory, [
           "commit",

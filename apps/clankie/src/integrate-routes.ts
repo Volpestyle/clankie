@@ -23,11 +23,16 @@ export function createIntegrationRoutes(options: {
     const parsed = IntegrationRequestSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!parsed.success) return context.json({ ok: false, error: "invalid_integration_request" }, 400);
     const request = parsed.data;
-    if (!options.holds || (!options.queue && ["run", "status", "push", "cancel"].includes(request.action)))
+    if (
+      !options.holds ||
+      (!options.queue && ["run", "status", "push", "cancel", "reclaim"].includes(request.action))
+    )
       return context.json({ ok: false, error: "integration_unavailable" }, 503);
     try {
       await guard();
       const result = await (async () => {
+        if (request.action === "reclaim")
+          return { ok: true, reclamation: await options.queue!.reclaimWorktrees(undefined, guard) };
         if (request.action === "holds")
           return { ok: true, holds: await options.holds!.list(), receipts: await options.holds!.receipts() };
         if (request.action === "hold") return { ok: true, holds: await options.holds!.acquire(request) };

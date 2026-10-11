@@ -945,6 +945,19 @@ evidence paths, isolation limits, uncertain sends and crash recovery.
 
 Integration clones keep client hooks disabled.
 
+`clankie integrate reclaim` runs the same retention-respecting sweep immediately
+through the owner-authorized integration API. It cannot bypass the queue lock,
+retention window, cwd census, or cleanliness checks.
+
+Terminal integration scratch worktrees (`pushed`, `failed`, `cancelled`,
+`interrupted`, or an excluded conflict) expire after one hour. The service
+checks every five minutes, up to 32 trees per sweep, under the queue lock.
+Records, logs and repository clones remain; detached commits are pinned before
+Git removes their scratch checkout. Passed, held and partial batches remain
+available for a later push. Dirty, aliased, locked or live-process directories
+stay retained. An incomplete cwd observation skips reclamation. Restore can
+read a reclaimed pushed batch's retained commit store.
+
 ### Scratch service and relay proofs
 
 From a source checkout, generate one private preset for both processes:

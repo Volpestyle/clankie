@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { execFile, spawn, type ExecFileOptions } from "node:child_process";
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import {
@@ -1572,3 +1573,90 @@ it("reclaims a queue lock its dead earlier owner left, records that owner's batc
   await owner(process.pid, new Date().toISOString());
   await expect(withDirectoryLock(lock, work)).rejects.toThrow(`pid ${process.pid}`);
 });
+
+it.runIf(process.platform === "darwin")(
+  "terminal integration trees expire after retention, keeping logs, records and restorable commits",
+  async () => {
+    const f = await fixture();
+    const change = await commit(f.core.source, "retained-feature", "keep this commit");
+    const id = randomUUID();
+    await f.queue.start(IntegrationRunSchema.parse({ action: "run", id, core: [change], push: true }), guard);
+    await f.queue.wait();
+    const batch = await f.queue.status(id);
+    expect(batch.state).toBe("pushed");
+    const tree = batch.repos[0]!.directory;
+    const cli = await queueCli(f);
+    expect((await runIntegrationCommand(["reclaim"], cli)).reclamation?.reclaimed).toEqual([]);
+    const before = await readFile(batch.evidence, "utf8");
+    const log = await readFile(batch.repos[0]!.gate!.log, "utf8");
+    expect((await f.queue.reclaimWorktrees()).reclaimed).toEqual([]);
+    expect(await readFile(batch.evidence, "utf8")).toBe(before);
+    const result = await f.queue.reclaimWorktrees(Date.now() + 61 * 60_000);
+    expect(result.reclaimed).toContain(tree);
+    expect(existsSync(tree)).toBe(false);
+    expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toBe(log);
+    const retained = await f.queue.status(id);
+    expect(retained.worktreeReclamation?.[0]?.head).toBe(batch.repos[0]!.head);
+    const repository = join(f.directory, "batches", id, "repositories", "core");
+    expect(await git(repository, "show", "refs/clankie/retained/core:retained-feature")).toBe(
+      "keep this commit",
+    );
+    const restore = randomUUID();
+    await f.queue.start(IntegrationRunSchema.parse({ action: "run", id: restore, restore: id }), guard);
+    await f.queue.wait();
+    const restored = await f.queue.status(restore);
+    expect(restored.state).toBe("passed");
+    expect(await readFile(join(restored.repos[0]!.directory, "retained-feature"), "utf8")).toBe(
+      "keep this commit",
+    );
+    expect((await f.queue.reclaimWorktrees(Date.now() + 61 * 60_000)).reclaimed).toEqual([]);
+    expect(existsSync(restored.repos[0]!.directory)).toBe(true);
+    console.log("Batch retention proof", {
+      terminal: batch.state,
+      reclaimed: result.reclaimed,
+      restore: restored.state,
+    });
+  },
+  30_000,
+);
+
+it.runIf(process.platform === "darwin")(
+  "terminal reclamation keeps live process cwd and uncommitted files in real failed scratch trees",
+  async () => {
+    const f = await fixture("process.exit(1);");
+    const change = await commit(f.core.source, "failed-feature", "keep failed commit");
+    const id = randomUUID();
+    await f.queue.start(IntegrationRunSchema.parse({ action: "run", id, core: [change] }), guard);
+    await f.queue.wait();
+    const batch = await f.queue.status(id);
+    expect(batch.state).toBe("failed");
+    const tree = batch.repos[0]!.directory;
+    const child = spawn(process.execPath, ["-e", "setInterval(()=>{}, 1000)"], {
+      cwd: tree,
+      stdio: "ignore",
+    });
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once("spawn", resolve);
+        child.once("error", reject);
+      });
+      expect((await f.queue.reclaimWorktrees(Date.now() + 61 * 60_000)).kept).toContainEqual({
+        id,
+        reason: "live_cwd",
+      });
+      expect(existsSync(tree)).toBe(true);
+    } finally {
+      child.kill("SIGTERM");
+      await exited;
+    }
+    const edit = join(tree, "failed-feature");
+    await writeFile(edit, "uncommitted edit");
+    const result = await f.queue.reclaimWorktrees(Date.now() + 61 * 60_000);
+    expect(result.kept.some((row) => row.id === id && row.reason.includes("dirty"))).toBe(true);
+    expect(await readFile(edit, "utf8")).toBe("uncommitted edit");
+    await writeFile(edit, "keep failed commit");
+    expect((await f.queue.reclaimWorktrees(Date.now() + 61 * 60_000)).reclaimed).toContain(tree);
+  },
+  30_000,
+);

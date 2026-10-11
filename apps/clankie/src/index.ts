@@ -926,6 +926,12 @@ const integration =
           }),
       })
     : undefined;
+const stopIntegrationReclamation = integration?.watchReclamation((error) =>
+  logger.warn(
+    { event: "integration.reclamation_unavailable", error },
+    "Integration worktree reclamation skipped",
+  ),
+);
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();
 const remoteOpenCodeWorkers = new RemoteOpenCodeWorkers({
@@ -2346,6 +2352,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   playAbort.abort(signal);
   hostPower.stop();
   stopDeployHoldExpiry();
+  stopIntegrationReclamation?.();
   void fleetResources
     .close()
     .catch(() =>

@@ -337,3 +337,8 @@ revision-guarded fleet settings API, `/fleet resources`, or
 `clankie fleet set --minimum-free-disk-gb N --warn-free-disk-gb N --warn-free-disk-percent N`.
 Values are in GiB despite the CLI's `-gb` spelling. These guards also apply to
 simulator admission, but do not stop existing leases or deny low-load social turns.
+
+Terminal integration scratch worktrees are reclaimed after one hour by a
+five-minute sweep under the queue lock. Records, logs and cloned commit stores
+remain. Dirty trees and live process cwd stay protected. Passed/held/partial
+batches needed for a later push stay retained; `record.json` records each removal.

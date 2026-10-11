@@ -11,7 +11,7 @@ import {
 import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 
-const usage = `Usage: clankie integrate [run] SHA... [--app SHA]... [--push] [--id UUID] [--no-wait] | status [UUID] | push UUID | cancel UUID --actor NAME --reason TEXT | revert PASSED_UUID [--push] | holds | hold --holder NAME --reason TEXT --minutes 1-${DEPLOY_HOLD_MAX_MINUTES} [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT
+const usage = `Usage: clankie integrate [run] SHA... [--app SHA]... [--push] [--id UUID] [--no-wait] | status [UUID] | push UUID | cancel UUID --actor NAME --reason TEXT | revert PASSED_UUID [--push] | reclaim | holds | hold --holder NAME --reason TEXT --minutes 1-${DEPLOY_HOLD_MAX_MINUTES} [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT
 Cancel withdraws a waiting or isolating request before landing. An in-flight gate finishes, but cannot land a withdrawn input.
 A hold keeps deploys off the running service and lifts on its own when its minutes run out; landing on main never waits for one.`;
 
@@ -49,6 +49,7 @@ function integrationRequest(args: readonly string[]): { request: IntegrationRequ
     push: [],
     cancel: ["--actor", "--reason"],
     holds: [],
+    reclaim: [],
     hold: ["--id", "--holder", "--reason", "--minutes", "--pane", "--seat"],
     release: ["--actor", "--reason"],
   };
@@ -78,8 +79,8 @@ function integrationRequest(args: readonly string[]): { request: IntegrationRequ
         `A hold needs --minutes from 1 to ${DEPLOY_HOLD_MAX_MINUTES}; it lifts on its own when they run out.`,
       );
     input =
-      verb === "holds"
-        ? { action: "holds" }
+      verb === "holds" || verb === "reclaim"
+        ? { action: verb }
         : {
             action: "hold",
             id: one("--id") ?? randomUUID(),

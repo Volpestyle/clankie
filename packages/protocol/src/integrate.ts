@@ -44,6 +44,7 @@ export const IntegrationRequestSchema = z.union([
   z.object({ action: z.literal("push"), id: Id }).strict(),
   z.object({ action: z.literal("cancel"), id: Id, actor: Text, reason: Text }).strict(),
   z.object({ action: z.literal("holds") }).strict(),
+  z.object({ action: z.literal("reclaim") }).strict(),
   z
     .object({
       action: z.literal("hold"),
@@ -190,6 +191,10 @@ export const IntegrationBatchSchema = z.object({
   updatedAt: z.iso.datetime(),
   evidence: z.string(),
   repos: z.array(IntegrationRepoSchema),
+  /** Expired scratch trees; commits stay reachable in the retained repository clone. */
+  worktreeReclamation: z
+    .array(z.object({ path: z.string(), head: Sha, keptRef: z.string(), at: z.iso.datetime() }))
+    .optional(),
   error: z.string().optional(),
   // Request receipts retain their original input and point to the shared attestation.
   batchId: Id.optional(),
@@ -241,6 +246,9 @@ export const IntegrationResponseSchema = z.object({
   holds: z.array(DeployHoldSchema).optional(),
   receipts: z.array(DeployHoldReceiptSchema).optional(),
   queue: IntegrationQueueStatusSchema.optional(),
+  reclamation: z
+    .object({ reclaimed: z.array(z.string()), kept: z.array(z.object({ id: Id, reason: z.string() })) })
+    .optional(),
   error: z.string().optional(),
 });
 export type IntegrationResponse = z.infer<typeof IntegrationResponseSchema>;
