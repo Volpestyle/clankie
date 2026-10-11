@@ -20,6 +20,7 @@ async function hook(input: Record<string, unknown>) {
 it("plugin-local guard denies inherited Linear tools without a pane or live bridge, retaining Clankie and other tools", async () => {
   for (const name of [
     "mcp__linear-server__create_comment",
+    "mcp__linear-server___create_comment",
     "mcp__linear-server__get_issue",
     "mcp__claude_ai_Linear__create_issue",
     "mcp__plugin_external_Linear__save_comment",
