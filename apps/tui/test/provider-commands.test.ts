@@ -188,7 +188,7 @@ async function testServices(
 }> {
   const root = await mkdtemp(join(tmpdir(), "clankie-provider-commands-"));
   tempDirs.push(root);
-  const env = { XDG_CONFIG_HOME: join(root, "config") };
+  const env = { XDG_CONFIG_HOME: join(root, "config"), CLANKIE_OPERATOR_TOKEN: "fixture-owner" };
   const changed: string[] = [];
   const notifications = { count: 0 };
   const refreshes = { count: 0 };
@@ -232,7 +232,47 @@ async function testServices(
       cwd: root,
       env,
       captainModels: options.captainModels ?? captainModels,
-      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      fetchImpl: async (input, init) => {
+        if (new URL(String(input)).pathname !== "/v1/model-settings")
+          return (options.fetchImpl ?? fetch)(input, init);
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture-owner");
+        if (init?.method === "POST") {
+          const { model } = JSON.parse(String(init.body));
+          await updateGlobalConfig(
+            (config) => {
+              config.model = model;
+            },
+            { env },
+          );
+          return Response.json({ ok: true });
+        }
+        const runtime = options.captainModels ?? captainModels;
+        const choices = [];
+        for (const provider of await runtime.providers()) {
+          for (const model of await runtime.models(provider.id))
+            choices.push({
+              ref: `${provider.id}/${model.id}`,
+              actual: {
+                providerId: provider.id,
+                providerName: provider.name,
+                modelId: model.id,
+                modelName: model.name,
+              },
+              funding: "own_provider",
+              available: true,
+              reason: null,
+            });
+        }
+        const selected = (await loadConfig({ env })).config.model ?? null;
+        return Response.json({
+          schemaVersion: 1,
+          selected,
+          effective: choices.find((entry) => entry.ref === selected) ?? null,
+          choices,
+          routing: [],
+          openItems: [],
+        });
+      },
       onConfigChanged(config) {
         notifications.count += 1;
         if (config.model !== undefined) changed.push(config.model);
@@ -676,15 +716,14 @@ describe("provider and model commands", () => {
     expect((await loadConfig({ cwd: services.cwd, env })).config.model).toBe("openai-codex/gpt-5.5");
   });
 
-  it("requires /provider before /model when no configured ref exists", async () => {
+  it("offers the API choices when no configured ref exists", async () => {
     const { services } = await testServices();
     const view = testShell([]);
 
     await command(buildProviderCommands(services), "model").run("", view.shell);
 
-    expect(view.selects).toEqual([]);
-    expect(view.results.at(-1)).toMatchObject({ command: "/model", tone: "error" });
-    expect(view.results.at(-1)?.text).toContain("run /provider first");
+    expect(view.selects).toHaveLength(1);
+    expect(view.selects[0]?.options.map((option) => option.value)).toContain("alpha/alpha-one");
   });
 
   it("refreshes Pi's catalog from the model picker without reopening provider selection", async () => {

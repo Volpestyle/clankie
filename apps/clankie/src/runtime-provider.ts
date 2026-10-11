@@ -35,6 +35,7 @@ export interface RuntimeProvider {
     close(): void;
   };
   model?: {
+    includedMappings?: () => Promise<import("@clankie/protocol/model-keys").IncludedModelMappings>;
     piSeatModel?: () => Promise<PiSeatModel | undefined>;
     onChanged(): Promise<void>;
     close(): Promise<void>;
@@ -104,7 +105,7 @@ export async function loadRuntimeProvider(context: RuntimeProviderContext): Prom
     "start",
     "close",
   ]);
-  methods(provider.model, ["onChanged", "close"], ["piSeatModel"]);
+  methods(provider.model, ["onChanged", "close"], ["piSeatModel", "includedMappings"]);
   if (record(provider.quota)) {
     methods(provider.quota.composer, ["status", "transcribe", "receipt"]);
     validateRuntimeGatewayRoutes(provider.quota.gatewayRoutes);

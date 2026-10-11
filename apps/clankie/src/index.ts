@@ -2035,7 +2035,10 @@ const clankie = await createClankieApp({
     ...(bodyTelemetry === undefined ? {} : { telemetry: bodyTelemetry }),
     ...(runtimeProvider.model === undefined
       ? {}
-      : { onModelChanged: () => runtimeProvider.model!.onChanged() }),
+      : {
+          onModelChanged: () => runtimeProvider.model!.onChanged(),
+          includedMappings: runtimeProvider.model.includedMappings,
+        }),
   }),
   ...(hostedPairing === undefined
     ? {}

@@ -1,9 +1,11 @@
 import { DiscordRoomObservations } from "../../clankie/src/discord-room-observations.ts";
-import { mintOperatorToken } from "@clankie/credential-broker";
+import { FileCredentialStore, mintOperatorToken } from "@clankie/credential-broker";
+import { loadConfig, updateGlobalConfig } from "@clankie/model-provider";
+import { createModelKeys } from "../../clankie/src/model-keys.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +16,6 @@ import { discordStatus } from "../src/command/discord.ts";
 import { effortStatus } from "../src/command/effort.ts";
 import { gamesStatus } from "../src/command/games.ts";
 import { imageModelStatus } from "../src/command/image-model.ts";
-import { modelStatus } from "../src/command/model.ts";
 import { modelRoutingStatus } from "../src/command/model-routing.ts";
 import { personaStatus } from "../src/command/persona.ts";
 import { videoModelStatus } from "../src/command/video-model.ts";
@@ -43,10 +44,38 @@ function outputBuffer(): { readonly stream: { write(chunk: string): void }; read
 async function isolatedEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-owner-commands-"));
   tempDirs.push(root);
-  const env = { XDG_CONFIG_HOME: root, CLANKIE_OPERATOR_TOKEN: mintOperatorToken() };
+  const env = {
+    XDG_CONFIG_HOME: root,
+    CLANKIE_OPERATOR_TOKEN: mintOperatorToken(),
+    CLANKIE_DISABLE_MODELS_FETCH: "1",
+    CLANKIE_MODELS_PATH: join(root, "catalog.json"),
+  };
+  await writeFile(env.CLANKIE_MODELS_PATH, "{}");
+  // Model commands cross the authenticated API, backed by an isolated real
+  // model adapter rather than the captain stub's unrelated configuration.
+  await updateGlobalConfig(
+    (config) => {
+      config.enabled_providers = ["fixture"];
+      config.provider = {
+        fixture: {
+          name: "Fixture Provider",
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "http://127.0.0.1:1/v1" },
+          models: {
+            "work-model": { name: "Work", limit: { context: 32000, output: 512 } },
+            "routine-model": { name: "Routine", limit: { context: 32000, output: 512 } },
+            "other-model": { name: "Other", reasoning: true, limit: { context: 32000, output: 512 } },
+          },
+        },
+      };
+    },
+    { env },
+  );
+  const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const voiceEnv = { ...env };
   const service = await createClankieApp({
     captain: createStubCaptain(),
+    modelKeys: createModelKeys({ env, cwd: root, store: credentials }),
     settings: new SettingsStore(defaultSettingsPath(env)),
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === `Bearer ${env.CLANKIE_OPERATOR_TOKEN}`
@@ -216,47 +245,51 @@ describe("canonical owner command layer", () => {
 
   it("configures task-based model routing through argv", async () => {
     const env = await isolatedEnv();
-    await run(["model", "set", "openai/work-model"], env);
+    await run(["model", "set", "fixture/work-model"], env);
 
     const off = (await run(["model", "routing"], env)) as { enabled: boolean; purposes: unknown };
     expect(off).toMatchObject({
       ok: true,
       enabled: false,
       routineModel: null,
-      workModel: "openai/work-model",
+      workModel: "fixture/work-model",
     });
-    expect(off.purposes).toMatchObject({ discord_social: { tier: "work", model: "openai/work-model" } });
+    expect(off.purposes).toMatchObject({ discord_social: { tier: "work", model: "fixture/work-model" } });
 
-    await run(["model", "routing", "set", "openai/routine-model"], env);
+    await run(["model", "routing", "set", "fixture/routine-model"], env);
     await run(["model", "routing", "escalate", "on"], env);
     await run(["model", "routing", "purpose", "gameplay", "routine"], env);
     const on = await run(["model", "routing", "turn-limit", "5"], env);
     expect(on).toEqual(await modelRoutingStatus({ env }));
     expect(on).toMatchObject({
       enabled: true,
-      routineModel: "openai/routine-model",
+      routineModel: "fixture/routine-model",
       escalate: true,
-      escalationModel: "openai/work-model",
+      escalationModel: "fixture/work-model",
       routineTurnLimit: 5,
       purposes: {
-        operator: { tier: "work", model: "openai/work-model" },
-        discord_social: { tier: "routine", model: "openai/routine-model", escalatesTo: "openai/work-model" },
-        discord_granted: { tier: "work", model: "openai/work-model" },
-        gameplay: { tier: "routine", model: "openai/routine-model", escalatesTo: "openai/work-model" },
+        operator: { tier: "work", model: "fixture/work-model" },
+        discord_social: {
+          tier: "routine",
+          model: "fixture/routine-model",
+          escalatesTo: "fixture/work-model",
+        },
+        discord_granted: { tier: "work", model: "fixture/work-model" },
+        gameplay: { tier: "routine", model: "fixture/routine-model", escalatesTo: "fixture/work-model" },
       },
     });
 
     await run(["model", "routing", "purpose", "gameplay", "default"], env);
     expect(await run(["model", "routing", "off"], env)).toMatchObject({
       enabled: false,
-      purposes: { gameplay: { tier: "work", model: "openai/work-model" } },
+      purposes: { gameplay: { tier: "work", model: "fixture/work-model" } },
     });
   });
 
   it("finishes non-secret setup through argv and returns the command functions' results", async () => {
     const env = await isolatedEnv();
 
-    await run(["model", "set", "xai/grok-4.6"], env);
+    await run(["model", "set", "fixture/other-model"], env);
     await run(["effort", "set", "high"], env);
     await run(["image-model", "set", "openai/gpt-image-2"], env);
     await run(["video-model", "set", "xai/grok-imagine-video-1.5"], env);
@@ -309,7 +342,22 @@ describe("canonical owner command layer", () => {
       env,
     );
 
-    expect(await run(["model", "status"], env)).toEqual(await modelStatus({ env }));
+    expect(await run(["model", "status"], env)).toMatchObject({
+      ok: true,
+      model: "fixture/other-model",
+      settings: {
+        selected: "fixture/other-model",
+        effective: {
+          actual: {
+            providerId: "fixture",
+            providerName: "Fixture Provider",
+            modelId: "other-model",
+            modelName: "Other",
+          },
+        },
+      },
+    });
+    expect((await loadConfig({ env })).config.model).toBe("fixture/other-model");
     expect(await run(["effort", "status"], env)).toEqual(await effortStatus({ env }));
     expect(await run(["image-model", "status"], env)).toEqual(await imageModelStatus({ env }));
     expect(await run(["video-model", "status"], env)).toEqual(await videoModelStatus({ env }));

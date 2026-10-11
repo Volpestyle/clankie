@@ -462,6 +462,22 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/model-settings",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read the persisted model preference, actual provider/model identities, funding, eligible choices, availability and read-only automatic routing targets. Missing hosted identity is unknown; unresolved catalog and credit-rate policy is explicitly labeled.",
+      },
+    ],
+    [
+      "POST /v1/model-settings",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Set or restore an eligible provider/model preference through the shared settings API for CLI, TUI and app. Changes persist and apply to new turns; an active turn keeps its configuration. Routine and escalation targets are read-only, and unavailable choices are rejected.",
+      },
+    ],
+    [
       "GET /v1/model-keys",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

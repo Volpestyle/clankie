@@ -373,3 +373,13 @@ use the private file broker. `clankie update` selects the installed Linux target
 No systemd user session or root service is required; start again after login with
 `clankie start clankie`. Do not claim phone pairing or model authentication from
 service health alone.
+
+## Model identity
+
+`clankie model status` reads the authenticated shared settings
+API; `model set provider/model` writes it for new turns. Read `settings.effective.actual`
+for provider/model identity and `settings.routing` for automatic targets.
+Included aliases are not evidence of the served model: response observations
+name fallback models, and missing hosted metadata is unknown. Do not infer
+historical usage from the current preference. Catalog and credit policy open
+items remain unresolved until the owner decides them.

@@ -40,7 +40,6 @@ import {
   runCodexBrowserLogin,
   runCodexDeviceLogin,
   runXaiDeviceLogin,
-  subscriptionRefFor,
   validateLocalBaseUrl,
   validateLocalProviderId,
   type CaptainReadiness,
@@ -48,7 +47,13 @@ import {
   type PiModelSelection,
   type ProbedLocalModel,
 } from "@clankie/model-provider";
-import { modelDeclareLocal, modelSet, modelStatus } from "./command/model.ts";
+import {
+  modelDeclareLocal,
+  modelSet,
+  modelSetForSetup,
+  modelStatus,
+  readModelSettings,
+} from "./command/model.ts";
 import { effortSet, effortStatus } from "./command/effort.ts";
 import {
   MODEL_ROUTING_USAGE,
@@ -989,42 +994,18 @@ function modelHint(model: ModelEntry): string {
   return parts.join(" · ");
 }
 
-/**
- * The subscription ref that will actually serve a configured ref, or undefined
- * when the configured one stands. Keeps the precedence rule visible in status
- * output instead of only showing up in the ledger after a turn.
- */
-async function servedBySubscription(
-  resolved: { providerId: string; modelId: string },
-  config: ClankieConfig,
-  services: ProviderServices,
-): Promise<string | undefined> {
-  const ref = subscriptionRefFor(resolved, config);
-  if (ref === undefined) return undefined;
-  return (await services.store.get(CODEX_PROVIDER_ID)) === undefined ? undefined : ref;
-}
-
 async function showModelStatus(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
-  const status = await modelStatus({ env: services.env, cwd: services.cwd });
-  const ref = status.model;
-  if (ref === null) {
-    shell.insertCommandResult("/model status", "model: unset", "success");
-    return;
-  }
-  const resolved = parseModelRef(ref);
-  if (resolved === undefined) {
-    shell.insertCommandResult("/model status", "model: unset", "success");
-    return;
-  }
-  const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
-  const served = await servedBySubscription(resolved, config, services);
-  const variantId = status.effort;
-  const variant = variantId === null ? "" : ` (${variantId})`;
+  const settings = await readModelSettings({
+    env: services.env,
+    cwd: services.cwd,
+    fetchImpl: services.fetchImpl,
+  });
+  const actual = settings.effective?.actual;
   shell.insertCommandResult(
     "/model status",
-    `model: ${formatModelRef(resolved)}${variant}${
-      served === undefined ? "" : ` → ${served} (ChatGPT subscription)`
-    }`,
+    actual === undefined || actual === null
+      ? `Model unavailable (${settings.effective?.reason ?? "unset"})`
+      : `${actual.modelName} · ${actual.providerName} · ${settings.effective?.funding === "included" ? "included" : "own provider"}`,
     "success",
   );
 }
@@ -1232,88 +1213,55 @@ async function runModelWizard(
   flow.begin("choose model");
   try {
     for (;;) {
-      const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
-      const credentialIds = Object.keys(await usableModelCredentials(services));
-      const providers = await captainProviders(services, config, credentialIds);
-      const configured = config.model === undefined ? undefined : parseModelRef(config.model);
-      const providerId = selectedProvider ?? configured?.providerId;
-      if (providerId === undefined) {
-        flow.end();
-        shell.insertCommandResult("/model", "No provider selected for model — run /provider first.", "error");
+      const settings = await readModelSettings({
+        env: services.env,
+        cwd: services.cwd,
+        fetchImpl: services.fetchImpl,
+      });
+      const providerId =
+        selectedProvider ??
+        (settings.selected === null ? undefined : parseModelRef(settings.selected)?.providerId);
+      const choices = settings.choices.filter(
+        (entry) =>
+          entry.available &&
+          (providerId === undefined || parseModelRef(entry.ref)?.providerId === providerId),
+      );
+      if (!choices.length) {
+        shell.insertCommandResult("/model", "No models are available from Clankie right now.", "error");
         return selectedProvider;
       }
-      const provider = providers.find((candidate) => candidate.id === providerId);
-      if (provider === undefined) {
-        flow.end();
-        shell.insertCommandResult(
-          "/model",
-          `Provider ${providerId} is not currently enabled — run /provider to choose another.`,
-          "error",
-        );
-        return undefined;
-      }
-      const models = await services.captainModels.models(providerId);
-      if (models.length === 0) {
-        flow.end();
-        shell.insertCommandResult(
-          "/model",
-          `No models listed for ${providerId} — run /provider to choose another.`,
-          "error",
-        );
-        return selectedProvider;
-      }
-      const currentRef = config.model;
-      const currentParsed = currentRef === undefined ? undefined : parseModelRef(currentRef);
-      const currentModelId = currentParsed?.providerId === providerId ? currentParsed.modelId : undefined;
-      const pickedModel = await flow.readSelect({
-        message: `Model from ${provider.name} (${models.length} listed, newest first — type to filter)`,
-        options: models.map((model) => ({
-          value: model.id,
-          label: model.id,
-          hint: modelHint(model),
-          description: model.name,
+      const picked = await flow.readSelect({
+        message: "Clankie's model",
+        options: choices.map((entry) => ({
+          value: providerId === undefined ? entry.ref : parseModelRef(entry.ref)!.modelId,
+          label: entry.actual ? `${entry.actual.modelName} · ${entry.actual.providerName}` : "Unknown model",
+          hint: entry.funding === "included" ? "included" : "own provider",
         })),
         statusActions: [{ value: "__refresh__", label: "refresh model catalogs" }],
-        ...(currentModelId === undefined ? {} : { currentValue: currentModelId }),
+        ...(settings.selected === null
+          ? {}
+          : {
+              currentValue:
+                providerId === undefined ? settings.selected : parseModelRef(settings.selected)!.modelId,
+            }),
         allowBack: true,
       });
-      const modelId = pickedModel;
-      if (modelId === undefined) {
-        flow.end();
-        shell.insertCommandResult("/model", "Model selection cancelled.", "error");
-        return selectedProvider;
-      }
-      if (modelId === "__refresh__") {
-        flow.setStatus("refreshing model catalogs…");
+      if (picked === undefined) return selectedProvider;
+      if (picked === "__refresh__") {
         await services.captainModels.refresh();
-        flow.renderLine("Model catalogs refreshed.", "success");
         continue;
       }
-      const ref = formatModelRef({ providerId, modelId });
-      const served = await servedBySubscription({ providerId, modelId }, config, services);
-      await modelSet(ref, { env: services.env, cwd: services.cwd });
+      const ref = choices.find(
+        (entry) => (providerId === undefined ? entry.ref : parseModelRef(entry.ref)!.modelId) === picked,
+      )?.ref;
+      if (ref === undefined) throw new Error("unsupported_model");
+      await modelSet(ref, { env: services.env, cwd: services.cwd, fetchImpl: services.fetchImpl });
       await notifyModelSelectionChanged(services);
-      flow.end();
-      shell.insertCommandResult(
-        "/model",
-        [
-          `model set to ${ref}.`,
-          ...(served === undefined
-            ? []
-            : [
-                `Served by your ChatGPT subscription as ${served}; log out with /auth for metered API access.`,
-              ]),
-          ...(!provider.connected && served === undefined
-            ? [`Note: ${providerId} has no credential yet — run /auth before real Clankie turns.`]
-            : []),
-        ].join("\n"),
-        "success",
-      );
+      shell.insertCommandResult("/model", "Model saved for new turns.", "success");
       return undefined;
     }
-  } catch (error) {
+  } finally {
     flow.end();
-    throw error;
   }
 }
 
@@ -1498,7 +1446,7 @@ export async function runThinkingSetup(
       });
       if (modelId === undefined) continue;
       const ref = formatModelRef({ providerId, modelId });
-      await modelSet(ref, { env: services.env, cwd: services.cwd });
+      await modelSetForSetup(ref, { env: services.env });
       await notifyModelSelectionChanged(services);
       // The service registers declared endpoints at boot; a new one needs it to look again.
       if (addedEndpoint && options.restartCaptain !== undefined) {

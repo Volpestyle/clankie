@@ -1,6 +1,7 @@
 import { type ModelPurpose, type PiModelSelection } from "@clankie/model-provider";
 import { type CaptainSessionLaneV2 } from "@clankie/protocol";
 import { type InlineExtension } from "@earendil-works/pi-coding-agent";
+import { TurnModelUsageSchema, type TurnModelUsage } from "@clankie/protocol/model-keys";
 
 /**
  * Which kind of model call a session makes, for task-based routing. A Discord
@@ -42,6 +43,52 @@ export function captainModelExtension(resolveSelection: () => Promise<PiModelSel
         const selection = await resolveSelection().catch(() => undefined);
         if (selection === undefined) return undefined;
         return { systemPrompt: `${event.systemPrompt}\n\n${modelCard(selection)}` };
+      });
+    },
+  } satisfies InlineExtension;
+}
+
+/** Response observations are session-local, reset before every provider attempt. */
+export function captainModelUsageExtension(observation: { used?: TurnModelUsage }) {
+  return {
+    name: "captain-model-usage",
+    hidden: true,
+    factory(pi) {
+      pi.on("before_provider_request", (_event, context) => {
+        const model = context.model;
+        if (model === undefined) {
+          delete observation.used;
+          return;
+        }
+        observation.used = {
+          requestedRef: `${model.provider}/${model.id}`,
+          actual:
+            model.provider === "clankie"
+              ? null
+              : {
+                  providerId: model.provider,
+                  providerName: model.provider,
+                  modelId: model.id,
+                  modelName: model.name,
+                },
+          source: model.provider === "clankie" ? "unavailable" : "runtime",
+        };
+      });
+      pi.on("after_provider_response", (event) => {
+        if (
+          observation.used?.requestedRef.startsWith("clankie/") !== true ||
+          event.status < 200 ||
+          event.status >= 300
+        )
+          return;
+        const providerId = event.headers["x-clankie-model-provider"];
+        const modelId = event.headers["x-clankie-model-id"];
+        const parsed = TurnModelUsageSchema.safeParse({
+          requestedRef: observation.used.requestedRef,
+          actual: { providerId, providerName: providerId, modelId, modelName: modelId },
+          source: "hosted_proxy",
+        });
+        if (parsed.success) observation.used = parsed.data;
       });
     },
   } satisfies InlineExtension;

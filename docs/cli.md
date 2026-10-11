@@ -2561,8 +2561,14 @@ LM Studio yourself; `clankie restart captain` only reloads Clankie's config.
 
 ### `model set providerId/modelId`
 
-Select the captain. The ref splits on the **first** slash (model ids may
-contain slashes). JSON: `{ "ok": true, "model": "xai/grok-4.6", "restart": "clankie restart captain" }`.
+Select an eligible preference through the running service's authenticated
+`/v1/model-settings` API. The ref splits on the **first** slash (model IDs may
+contain slashes). Changes apply to new turns; restore the previous ref with the
+same command. JSON: `{ "ok": true, "model": "xai/grok-4.6", "restart": "applies to new turns" }`.
+`model status` includes the shared `settings` response with actual identity,
+funding, availability and automatic routing targets. Missing hosted identity
+remains unknown. See [model settings](model-keys.md) for compatibility and open
+provider/credit policy.
 
 ### `model subscriptions [list|methods|start|status|cancel]`
 

@@ -86,15 +86,13 @@ describe("clankie model add-local / set / status", () => {
     expect((await loadConfig({ env })).config.model).toBe("ds4/deepseek-v4-flash");
 
     const switched = await runModel(["set", "xai/grok-4.6"], { env });
-    expect(switched.exit).toBe(0);
-    expect(JSON.parse(switched.stdout)).toMatchObject({ ok: true, model: "xai/grok-4.6" });
+    expect(switched.exit).toBe(1);
+    expect(switched.stderr).toContain("authentication_required");
+    expect((await loadConfig({ env })).config.model).toBe("ds4/deepseek-v4-flash");
 
     const status = await runModel(["status"], { env });
-    expect(JSON.parse(status.stdout)).toMatchObject({
-      ok: true,
-      model: "xai/grok-4.6",
-      providers: { ds4: { baseURL: "http://127.0.0.1:8000/v1", models: ["deepseek-v4-flash"] } },
-    });
+    expect(status.exit).toBe(1);
+    expect(status.stderr).toContain("authentication_required");
   });
 
   it("falls back to --models when the endpoint is unreachable", async () => {
@@ -140,9 +138,6 @@ describe("clankie model refresh", () => {
         models: { "gpt-6-astra": { id: "gpt-6-astra", name: "GPT-6 Astra", reasoning: true } },
       },
     };
-    const before = await runModel(["status"], { env });
-    expect(before.exit).toBe(0);
-
     const refreshed = await runModel(["refresh"], {
       env,
       fetchImpl: (() => Promise.resolve(Response.json(catalog))) as unknown as typeof fetch,

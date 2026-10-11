@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   MODEL_KEYS_PATH,
+  MODEL_SETTINGS_PATH,
+  ModelSettingsResponseSchema,
   MODEL_KEY_SET_PATH,
   MODEL_KEY_VALIDATE_PATH,
   MODEL_SELECT_PATH,
@@ -45,6 +47,7 @@ export function createModelKeyRoutes(
   // No request, raw error or event-log logging. The model port emits catalog-only outcome telemetry.
   for (const path of [
     MODEL_KEYS_PATH,
+    MODEL_SETTINGS_PATH,
     MODEL_KEY_SET_PATH,
     MODEL_KEY_VALIDATE_PATH,
     MODEL_SELECT_PATH,
@@ -83,6 +86,19 @@ export function createModelKeyRoutes(
     } catch {
       return context.json({ ok: false, error: "unavailable" }, 503);
     }
+  });
+  app.get(MODEL_SETTINGS_PATH, async (context) => {
+    if (!models?.settings) return context.json({ ok: false, error: "unavailable" }, 503);
+    return context.json(ModelSettingsResponseSchema.parse(await models.settings()));
+  });
+  app.post(MODEL_SETTINGS_PATH, async (context) => {
+    const parsed = ModelSelectRequestSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ ok: false, error: "malformed" }, 400);
+    if (!models?.settings) return context.json({ ok: false, error: "unavailable" }, 503);
+    const settings = await models.settings();
+    if (!settings.choices.some((entry) => entry.ref === parsed.data.model && entry.available))
+      return context.json({ ok: false, error: "unsupported_model" }, 400);
+    return context.json(ModelKeyResultSchema.parse(await models!.select(parsed.data.model)));
   });
   app.get(MODEL_SUBSCRIPTIONS_PATH, async (context) => {
     try {

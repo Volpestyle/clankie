@@ -14,6 +14,14 @@ import { runModelRoutingCommand, type ModelRoutingStatus } from "./model-routing
 
 import { runModelSubscriptionsCommand, type ModelSubscriptionsCommandResult } from "./model-subscriptions.ts";
 import type { CredentialStore } from "@clankie/credential-broker";
+import { resolveOperatorCredential } from "@clankie/credential-broker";
+import {
+  MODEL_SETTINGS_PATH,
+  ModelSettingsResponseSchema,
+  ModelKeyResultSchema,
+  type ModelSettingsResponse,
+} from "@clankie/protocol/model-keys";
+import { commandHost } from "./io.ts";
 
 const MODEL_USAGE = [
   "Usage: clankie model [status]",
@@ -28,7 +36,7 @@ const MODEL_USAGE = [
 export interface ModelCommandOptions {
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
-  readonly fetchImpl?: typeof fetch;
+  readonly fetchImpl?: typeof fetch | undefined;
   readonly host?: string;
   readonly operatorCredentialStore?: CredentialStore;
 }
@@ -52,6 +60,7 @@ export type ModelCommandResult =
       readonly providers: Record<string, { baseURL?: string; models: string[] }>;
       readonly issues?: readonly { path: string; message: string }[];
       readonly restart: string;
+      readonly settings?: ModelSettingsResponse;
     }
   | {
       readonly ok: false;
@@ -104,6 +113,45 @@ export async function modelStatus(
     ...(issues.length === 0 ? {} : { issues }),
     restart: "clankie restart",
   };
+}
+
+/** All ordinary model reads/writes use the service's owner authorization. */
+export async function readModelSettings(options: ModelCommandOptions = {}): Promise<ModelSettingsResponse> {
+  const value = await modelSettingsRequest(options);
+  return ModelSettingsResponseSchema.parse(value);
+}
+
+async function modelSettingsRequest(options: ModelCommandOptions, model?: string): Promise<unknown> {
+  const env = options.env ?? process.env;
+  const credential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+  });
+  if (!credential) throw new Error("authentication_required");
+  const response = await (options.fetchImpl ?? fetch)(
+    new URL(MODEL_SETTINGS_PATH, commandHost({ ...options, env })),
+    {
+      method: model === undefined ? "GET" : "POST",
+      headers: {
+        authorization: `Bearer ${credential.token}`,
+        ...(model === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(model === undefined ? {} : { body: JSON.stringify({ model }) }),
+      signal: AbortSignal.timeout(10_000),
+      redirect: "error",
+    },
+  );
+  const value: unknown = await response.json();
+  if (!response.ok)
+    throw new Error(
+      ModelKeyResultSchema.safeParse(value).success &&
+        typeof value === "object" &&
+        value !== null &&
+        "error" in value
+        ? String(value.error)
+        : "unavailable",
+    );
+  return value;
 }
 
 export async function modelDeclareLocal(
@@ -201,14 +249,20 @@ function countModels(catalog: Catalog): number {
   return Object.values(catalog).reduce((total, provider) => total + Object.keys(provider.models).length, 0);
 }
 
+/** First-run setup precedes the service; ordinary selections use modelSet. */
+export async function modelSetForSetup(ref: string, options: ModelCommandOptions = {}): Promise<void> {
+  await setCaptainModel(ref, options.env === undefined ? {} : { env: options.env });
+}
+
 export async function modelSet(
   ref: string,
   options: ModelCommandOptions = {},
 ): Promise<Extract<ModelCommandResult, { readonly ok: true; readonly model: string }>> {
   if (parseModelRef(ref) === undefined)
     throw new Error(`Invalid model ref ${JSON.stringify(ref)}; expected providerId/modelId.`);
-  const config = await setCaptainModel(ref, options.env === undefined ? {} : { env: options.env });
-  return { ok: true, model: config.model ?? ref, restart: "clankie restart" };
+  const result = ModelKeyResultSchema.parse(await modelSettingsRequest(options, ref));
+  if (!result.ok) throw new Error(result.error);
+  return { ok: true, model: ref, restart: "applies to new turns" };
 }
 
 interface AddLocalFlags {
@@ -273,12 +327,26 @@ export async function runModelCommand(
   options: ModelCommandOptions = {},
 ): Promise<ModelCommandResult> {
   const subcommand = args[0];
-  if (subcommand === undefined || subcommand === "status") return await modelStatus(options);
+  if (subcommand === undefined || subcommand === "status") {
+    const settings = await readModelSettings(options);
+    return {
+      ...(await modelStatus(options)),
+      model: settings.selected,
+      settings,
+      restart: "applies to new turns",
+    };
+  }
   if (subcommand === "refresh") {
     if (args.length !== 1) throw new Error(MODEL_USAGE);
     return await modelRefresh(options);
   }
-  if (subcommand === "subscriptions") return runModelSubscriptionsCommand(args.slice(1), options);
+  if (subcommand === "subscriptions") {
+    const { fetchImpl, ...rest } = options;
+    return runModelSubscriptionsCommand(args.slice(1), {
+      ...rest,
+      ...(fetchImpl === undefined ? {} : { fetchImpl }),
+    });
+  }
   if (subcommand === "routing") return await runModelRoutingCommand(args.slice(1), options);
   if (subcommand === "compaction") return await runModelCompactionCommand(args.slice(1), options);
   if (subcommand === "add-local") return await modelAddLocal(parseAddLocalArgs(args.slice(1)), options);

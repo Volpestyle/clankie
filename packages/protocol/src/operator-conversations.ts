@@ -1,4 +1,5 @@
 import { WorkHandoffIntentSchema } from "./work-handoff.ts";
+import { TurnModelUsageSchema } from "./model-keys.ts";
 import { FreeAgentIntentSchema } from "./free-agent.ts";
 import { MailIssueReferenceSchema } from "./mail-reference.ts";
 import { CheckoutStatusSchema, WorktreeReconciliationSchema } from "./checkouts.ts";
@@ -1742,6 +1743,8 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
       .optional(),
     text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
     streaming: z.boolean(),
+    /** Per-call observation, never reconstructed from today's settings. */
+    modelUsage: TurnModelUsageSchema.optional(),
     /** Coordinator message identity, retained for duplicate delivery recovery. */
     swarmMessageId: z.string().min(1).max(128).optional(),
     /** Verified Linear context retained in the selected ordinary chat; never operator authority. */

@@ -16,6 +16,8 @@ export const MODEL_KEYS_PATH = "/v1/model-keys";
 export const MODEL_KEY_SET_PATH = "/v1/model-keys/set";
 export const MODEL_KEY_VALIDATE_PATH = "/v1/model-keys/validate";
 export const MODEL_SELECT_PATH = "/v1/model-keys/select";
+/** One owner settings read/write, separate from the legacy strict catalog. */
+export const MODEL_SETTINGS_PATH = "/v1/model-settings";
 export const MODEL_KEY_REMOVE_PATH = "/v1/model-keys/remove";
 /** A separate read so clients built against the strict catalog never see a new field. */
 export const MODEL_SUBSCRIPTIONS_PATH = "/v1/model-keys/subscriptions";
@@ -73,6 +75,77 @@ export const ModelKeysResponseSchema = z
   })
   .strict();
 export type ModelKeysResponse = z.infer<typeof ModelKeysResponseSchema>;
+
+export const ModelIdentitySchema = z
+  .object({
+    providerId: ProviderIdSchema,
+    providerName: z.string().min(1).max(256),
+    modelId: ModelIdSchema,
+    modelName: z.string().min(1).max(512),
+  })
+  .strict();
+export type ModelIdentity = z.infer<typeof ModelIdentitySchema>;
+
+/** Host attestation of existing aliases, not a new catalog or pricing policy. */
+export const IncludedModelMappingsSchema = z
+  .object({
+    mappings: z
+      .array(
+        z
+          .object({
+            ref: ModelRefSchema,
+            actual: ModelIdentitySchema.nullable(),
+            available: z.boolean(),
+            reason: z.string().max(256).nullable(),
+          })
+          .strict(),
+      )
+      .max(256),
+  })
+  .strict();
+export type IncludedModelMappings = z.infer<typeof IncludedModelMappingsSchema>;
+
+export const ModelSettingSchema = z
+  .object({
+    ref: ModelRefSchema,
+    actual: ModelIdentitySchema.nullable(),
+    funding: z.enum(["included", "own_provider"]),
+    available: z.boolean(),
+    reason: z.string().max(256).nullable(),
+  })
+  .strict();
+export const ModelSettingsResponseSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    selected: ModelRefSchema.nullable(),
+    effective: ModelSettingSchema.nullable(),
+    choices: z.array(ModelSettingSchema).max(10000),
+    routing: z
+      .array(
+        z
+          .object({
+            purpose: z.enum(["operator", "discord_social", "discord_granted", "gameplay"]),
+            initial: ModelSettingSchema.nullable(),
+            escalation: ModelSettingSchema.nullable(),
+          })
+          .strict(),
+      )
+      .max(4),
+    /** Policy-dependent work is explicit; no guessed prices or new entitlements. */
+    openItems: z.array(z.enum(["included_catalog_policy", "credit_rate_policy"])).max(2),
+  })
+  .strict();
+export type ModelSettingsResponse = z.infer<typeof ModelSettingsResponseSchema>;
+
+/** Observation for a completed model call. Unknown never means the alias is the actual model. */
+export const TurnModelUsageSchema = z
+  .object({
+    requestedRef: ModelRefSchema,
+    actual: ModelIdentitySchema.nullable(),
+    source: z.enum(["runtime", "hosted_proxy", "unavailable"]),
+  })
+  .strict();
+export type TurnModelUsage = z.infer<typeof TurnModelUsageSchema>;
 
 /**
  * Providers the body is signed in to through their own account (OAuth or a

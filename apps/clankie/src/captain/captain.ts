@@ -118,7 +118,12 @@ import { createConversationRunner, runAutonomyTurn } from "./captain-conversatio
 import { createDiscordTurns } from "./captain-discord-turns.ts";
 import { RoomForkReceipts } from "./room-forks.ts";
 import { roomForkTool } from "./room-fork-tool.ts";
-import { captainModelExtension, modelCard, sessionPurpose } from "./captain-model.ts";
+import {
+  captainModelExtension,
+  captainModelUsageExtension,
+  modelCard,
+  sessionPurpose,
+} from "./captain-model.ts";
 import { createOperatorService } from "./captain-operator-service.ts";
 import {
   assembleLanePrompt,
@@ -1446,7 +1451,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       .filter(Boolean)
       .join("\n\n");
     const purpose = sessionPurpose(lane, systemTools);
-    const route = { current: await prepare("session model route", () => resolveRoute(purpose)) };
+    const route: LaneSession["route"] = {
+      current: await prepare("session model route", () => resolveRoute(purpose)),
+    };
     const budget = { compactBeforeNextRun: false };
     const selection = route.current.selection;
     const hasPersonaImages =
@@ -1523,6 +1530,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             current: () => route.current,
             onEscalated: (record) => console.info("Routine turn escalated:", JSON.stringify(record)),
           }),
+          captainModelUsageExtension(route),
           browserExtension(deps, capture),
           ...(systemTools && access?.privateContext !== false ? [mcpExtension(deps, lane, capture)] : []),
           ...(systemTools && access?.privateContext !== false

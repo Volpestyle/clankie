@@ -25,6 +25,7 @@ import {
 } from "./accounts.ts";
 import {
   MODEL_KEYS_PATH,
+  MODEL_SETTINGS_PATH,
   MODEL_KEY_SET_PATH,
   MODEL_KEY_VALIDATE_PATH,
   MODEL_SELECT_PATH,
@@ -128,6 +129,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: HOSTED_OPERATOR_PATH, target: "control" },
   { method: "POST", path: DISCORD_INGRESS_PATH, target: "control" },
   { method: "GET", path: MODEL_KEYS_PATH, target: "control" },
+  { method: "GET", path: MODEL_SETTINGS_PATH, target: "control" },
+  { method: "POST", path: MODEL_SETTINGS_PATH, target: "control" },
   { method: "POST", path: MODEL_KEY_SET_PATH, target: "control" },
   { method: "POST", path: MODEL_KEY_VALIDATE_PATH, target: "control" },
   { method: "POST", path: MODEL_SELECT_PATH, target: "control" },

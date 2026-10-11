@@ -16,6 +16,8 @@ import {
   setCaptainModel,
   thinkingLevelForVariant,
   updateGlobalConfig,
+  MODEL_PURPOSES,
+  routeFor,
 } from "@clankie/model-provider";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -28,6 +30,8 @@ import type {
   ModelKeysResponse,
   ModelOptionsResponse,
   ModelSubscriptionsResponse,
+  ModelSettingsResponse,
+  IncludedModelMappings,
 } from "@clankie/protocol/model-keys";
 import { BrokerCredentialStore } from "./captain/model.ts";
 
@@ -41,6 +45,7 @@ export interface ModelKeysPort {
   subscriptionStatus?(sessionId: string, principal: string, cancel?: boolean): ModelSubscriptionResult;
   readiness?(): Promise<import("@clankie/protocol/captain-readiness").CaptainReadinessResponse>;
   list(): Promise<ModelKeysResponse>;
+  settings?(): Promise<ModelSettingsResponse>;
   set(providerId: string, apiKey: string, guard?: () => Promise<boolean>): Promise<ModelKeyResult>;
   validate(providerId: string, modelId: string): Promise<ModelKeyResult>;
   select(model: string): Promise<ModelKeyResult>;
@@ -77,6 +82,7 @@ export function createModelKeys(options: {
    * routing, or the included model with the plan's. Unset, nothing else moves.
    */
   onModelChanged?: () => Promise<void>;
+  includedMappings?: () => Promise<IncludedModelMappings>;
 }): ModelKeysPort {
   const { store } = options;
   let writing: Promise<unknown> = Promise.resolve();
@@ -265,6 +271,82 @@ export function createModelKeys(options: {
             models: piModelsFor(state.models, provider.id, state).map(({ id, name }) => ({ id, name })),
           }))
           .sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    },
+    async settings() {
+      const state = await snapshot();
+      const credentials = await store.list();
+      const available = new Set(
+        (await state.models.getAvailable()).map((model) => `${model.provider}/${model.id}`),
+      );
+      const mappings = await options.includedMappings?.().catch(() => undefined);
+      const project = (ref: string): ModelSettingsResponse["choices"][number] => {
+        const parsed = parseModelRef(ref);
+        let resolved: ReturnType<typeof resolvePiModelSelection> | undefined;
+        try {
+          resolved = resolvePiModelSelection({ ...state.config, model: ref }, state.models, {
+            catalog: state.catalog,
+            hasCodexSubscription:
+              !isHostedModelEnvironment(env) && credentials[CODEX_PROVIDER_ID] !== undefined,
+          });
+        } catch {
+          /* Unresolvable settings remain named and unavailable. */
+        }
+        const model = resolved?.model;
+        const provider = state.providers.find((entry) => entry.id === model?.provider);
+        const included = parsed?.providerId === "clankie";
+        const mapping = included ? mappings?.mappings.find((entry) => entry.ref === ref) : undefined;
+        const usable =
+          provider !== undefined &&
+          model !== undefined &&
+          resolved !== undefined &&
+          available.has(resolved.ref) &&
+          modelCredentialAllowed(provider.id, credentials[provider.id], { env });
+        return {
+          ref,
+          actual: included
+            ? (mapping?.actual ?? null)
+            : model === undefined || provider === undefined
+              ? null
+              : {
+                  providerId: model.provider,
+                  providerName: providerDisplayName(provider),
+                  modelId: model.id,
+                  modelName: model.name,
+                },
+          funding: included ? "included" : "own_provider",
+          available: usable && (!included || mapping?.available === true),
+          reason: included
+            ? (mapping?.reason ?? (mapping === undefined ? "hosted_mapping_unavailable" : null))
+            : usable
+              ? null
+              : "model_unavailable",
+        };
+      };
+      const selection = await running(state);
+      return {
+        schemaVersion: 1,
+        selected: state.config.model ?? null,
+        effective: selection === undefined ? null : project(selection.ref),
+        choices: state.providers
+          .flatMap((provider) =>
+            piModelsFor(state.models, provider.id, state).map((model) =>
+              project(`${provider.id}/${model.id}`),
+            ),
+          )
+          .filter((entry) => entry.ref !== "clankie/routine" && entry.ref !== "clankie/escalation")
+          .filter(
+            (entry) => entry.available || entry.funding === "included" || entry.ref === state.config.model,
+          ),
+        routing: MODEL_PURPOSES.map((purpose) => {
+          const route = routeFor(state.config, purpose);
+          return {
+            purpose,
+            initial: route.ref === undefined ? null : project(route.ref),
+            escalation: route.escalation === undefined ? null : project(route.escalation.ref),
+          };
+        }),
+        openItems: isHostedModelEnvironment(env) ? ["included_catalog_policy", "credit_rate_policy"] : [],
       };
     },
     async subscriptions() {

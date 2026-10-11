@@ -8,6 +8,30 @@ writes the same config as `clankie model set`; it is not a second model system.
 `FEATURED_MODEL_PROVIDERS` is the shared promotion order for `/auth` and account
 setup, not an exhaustive support list.
 
+The authoritative settings contract is `GET /v1/model-settings`. It returns
+`selected` (persisted preference), `effective`, eligible `choices`, and read-only
+`routing` targets. Each setting includes `actual` provider/model identity,
+`funding`, `available`, and `reason`. `POST /v1/model-settings` accepts
+`{ "model": "provider/model" }` and uses the same persisted setter as the
+compatibility select route. CLI `model status/set`, TUI `/model`, and the app
+share this API. The service must be running and authorized; ordinary selection
+has no local-write fallback. First-run local-provider setup remains a bootstrap
+operation before a service exists.
+
+Included default/routine/escalation references remain compatible runtime inputs;
+routine and escalation are read-only routing information in the new picker.
+Included identities come from the hosted provider mapping, never alias names.
+Missing mappings or response identity headers mean **unknown**, including when
+an older proxy serves a turn. New completed conversation messages optionally
+carry `modelUsage` with the requested reference, observed identity, and source;
+historical messages without this metadata are not reconstructed from current
+settings. Response headers report the model actually served after fallback.
+
+Provider/catalog and credit-rate policy remain open under VUH-1890. Hosted
+responses label `included_catalog_policy` and `credit_rate_policy` in
+`openItems`; this slice changes neither catalog contents nor credit policy and
+publishes no invented rates.
+
 Every route requires the local operator bearer or an active paired device whose
 current grant includes `terminalControl` (Take Control). Chat, steer, terminal
 observation, captain and worker credentials cannot manage keys. Hosted pairing

@@ -530,7 +530,14 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                     new PiRunError(event.message.errorMessage ?? "").credentialRejected
                   )
                 )
-                  publish({ type: "message", role: "captain", text: said, streaming: false });
+                  publish({
+                    type: "message",
+                    role: "captain",
+                    text: said,
+                    streaming: false,
+                    // Observational metadata must not interrupt delivery when unavailable.
+                    ...(lane.route?.used === undefined ? {} : { modelUsage: lane.route.used }),
+                  });
                 const usage = lane.session.getContextUsage();
                 if (usage !== undefined) {
                   publish({

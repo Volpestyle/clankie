@@ -306,6 +306,11 @@ it("runs a worker report on the service lane exactly once when no seat is live, 
   );
   expect(f.freshSessions()).toBe(1);
   expect(f.sessions[0]!.prompts).toHaveLength(1);
+  // This scripted/legacy lane has no route observation. Delivery still succeeds,
+  // without reconstructing a model identity from the current preference.
+  const reply = f.events(ID).find((event) => event.type === "message" && event.role === "captain");
+  expect(reply).toBeDefined();
+  expect(reply).not.toHaveProperty("modelUsage");
   const prompt = f.sessions[0]!.prompts[0]!;
   expect(prompt).toContain("[Shared conversation context.");
   expect(prompt).toContain("NEWEST harness turn");

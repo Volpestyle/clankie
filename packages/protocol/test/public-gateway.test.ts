@@ -49,6 +49,10 @@ describe("public gateway protocol", () => {
   });
 
   it("keeps one shared allowlist for cloud and Mac routing", () => {
+    expect(publicGatewayTargetFor("GET", "/v1/model-settings")).toBe("control");
+    expect(publicGatewayTargetFor("POST", "/v1/model-settings")).toBe("control");
+    // @ts-expect-error Exercise a method refused by both the typed and runtime allowlist.
+    expect(publicGatewayTargetFor("PUT", "/v1/model-settings")).toBeUndefined();
     expect(publicGatewayTargetFor("POST", "/v1/pairing/complete")).toBe("control");
     expect(publicGatewayTargetFor("POST", "/operator/v1/terminal-tail")).toBe("relay");
     expect(publicGatewayTargetFor("POST", "/v1/hooks/linear")).toBe("control");

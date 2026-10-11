@@ -294,6 +294,8 @@ describe("owner model keys", () => {
     const { call, pair, store } = await setup();
     const requests = [
       ["/v1/model-keys", undefined],
+      ["/v1/model-settings", undefined],
+      ["/v1/model-settings", { model: "openai/test/model" }],
       ["/v1/model-keys/set", { providerId: "openai", apiKey: "secret" }],
       ["/v1/model-keys/validate", { providerId: "openai", modelId: "test/model" }],
       ["/v1/model-keys/select", { model: "openai/test/model" }],
