@@ -4107,6 +4107,9 @@ After assigning a follow-up by `message_seat`, record its issue with an
 evidence-backed efficiency review's `deliverable`. A lead may also report
 `ownedIssues: ["VUH-123", "VUH-456"]` for work its exact live native session or
 subagents hold, including on linked fleets; `ownedIssues: []` clears that claim.
+The daily check also counts an In Progress issue assigned to a configured human
+owner (Linear owner user ID or email) as owned, even without an agent seat.
+An assignee's display name alone does not establish ownership.
 The daily ownerless-issue check uses explicit current native issue assignments,
 or newer explicitly reassigned deliverables, plus these lead-reported live issues and running
 native child labels naming exactly one issue. It never infers ownership from

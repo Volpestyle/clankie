@@ -2433,7 +2433,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     changed: () => fleetChanges.touch(),
   });
   herdrWatches.tidy = paneTidy;
-  const issueStatus = new SeatIssueKeeper(deps.mcp, join(options.stateDir, "seat-issue-status.json"));
+  const issueStatus = new SeatIssueKeeper(deps.mcp, join(options.stateDir, "seat-issue-status.json"), {
+    humanOwners: async () => (await settings()).linearWebhook.wake,
+  });
   herdrWatches.issueStatus = issueStatus;
 
   /**

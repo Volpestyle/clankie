@@ -91,14 +91,23 @@ export class SeatIssueKeeper {
   private readonly exitGraceMs: number;
   private readonly tracker: Tracker;
   private readonly path: string;
+  private readonly humanOwners: () => Promise<{
+    ownerUserIds: readonly string[];
+    ownerUserEmails: readonly string[];
+  }>;
 
   public constructor(
     tracker: Tracker,
     path: string,
-    options: { now?: () => number; exitGraceMs?: number } = {},
+    options: {
+      now?: () => number;
+      exitGraceMs?: number;
+      humanOwners?: () => Promise<{ ownerUserIds: readonly string[]; ownerUserEmails: readonly string[] }>;
+    } = {},
   ) {
     this.tracker = tracker;
     this.path = path;
+    this.humanOwners = options.humanOwners ?? (async () => ({ ownerUserIds: [], ownerUserEmails: [] }));
     this.now = options.now ?? Date.now;
     this.exitGraceMs = options.exitGraceMs ?? 10 * 60_000;
     try {
@@ -190,6 +199,7 @@ export class SeatIssueKeeper {
     const last = this.state.lastCheckAt === undefined ? undefined : Date.parse(this.state.lastCheckAt);
     if (!force && last !== undefined && now - last < DAY_MS) return;
     const orphans: string[] = [];
+    const owners = await this.humanOwners();
     let cursor: string | undefined;
     for (let page = 0; page < 20; page++) {
       const result = await this.call(
@@ -201,6 +211,17 @@ export class SeatIssueKeeper {
       for (const row of rows as Row[]) {
         const key = text(row.identifier) ?? text(row.id);
         if (key === undefined || text(row.status)?.toLowerCase() !== "in progress") continue;
+        const assignee =
+          typeof row.assignee === "object" && row.assignee !== null ? (row.assignee as Row) : undefined;
+        const assigneeId = text(assignee?.id) ?? text(row.assigneeId);
+        const assigneeEmail = text(assignee?.email);
+        // Only configured owner identity counts; names and arbitrary assignees are not proof.
+        if (
+          (assigneeId !== undefined && owners.ownerUserIds.includes(assigneeId)) ||
+          (assigneeEmail !== undefined &&
+            owners.ownerUserEmails.some((email) => email.toLowerCase() === assigneeEmail.toLowerCase()))
+        )
+          continue;
         if (!this.live.has(key)) orphans.push(`- ${key}: ${oneLine(text(row.title) ?? "")}`);
       }
       cursor = !Array.isArray(result) && result.hasNextPage === true ? text(result.cursor) : undefined;

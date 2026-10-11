@@ -23,7 +23,9 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function setup() {
+async function setup(
+  humanOwners?: () => Promise<{ ownerUserIds: readonly string[]; ownerUserEmails: readonly string[] }>,
+) {
   const directory = await mkdtemp(join(tmpdir(), "seat-issue-status-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const provider = await createLinearApiProvider({ issueCount: 3 });
@@ -67,6 +69,7 @@ async function setup() {
   const keeper = new SeatIssueKeeper(host, join(directory, "seat-issue-status.json"), {
     now: () => now,
     exitGraceMs: 60_000,
+    ...(humanOwners ? { humanOwners } : {}),
   });
   const issue = (key: string) => provider.rows.issues!.find((row) => row.identifier === key)!;
   const comments = (key: string) =>
@@ -88,6 +91,33 @@ const seat = (seatId: string, title: string, deliverable: string) => ({
   seatId,
   title,
   keys: [deliverable, undefined],
+});
+
+it("counts explicit human-owner assignments without a seat, preserving unknown and agent flags", async () => {
+  const ownerId = "00000000-0000-4000-8000-000000000099";
+  const { keeper, issue, provider } = await setup(async () => ({
+    ownerUserIds: [ownerId],
+    ownerUserEmails: ["owner@example.test"],
+  }));
+  issue("VUH-1383").assignee = { id: ownerId, name: "James Volpe", email: null };
+  issue("VUH-1384").assignee = {
+    id: "different-provider-id",
+    name: "James Volpe",
+    email: "OWNER@example.test",
+  };
+  // Matching a display name alone must not invent human ownership for Clankie or a worker.
+  issue("VUH-1385").assignee = null;
+  provider.rows.issues!.push({
+    ...issue("VUH-1385"),
+    id: "00000000-0000-4000-8000-000000000098",
+    identifier: "VUH-1386",
+    assignee: { id: "agent-id", name: "James Volpe", email: null },
+  });
+  const result = await keeper.dailyCheck(true);
+  expect(result).toContain("- VUH-1385:");
+  expect(result).toContain("- VUH-1386:");
+  expect(result).not.toMatch(/- VUH-138[34]:/u);
+  expect(provider.validationErrors).toEqual([]);
 });
 
 it("degrades to In Progress or Todo, naming the intended status, until Verifying and Paused exist", async () => {
