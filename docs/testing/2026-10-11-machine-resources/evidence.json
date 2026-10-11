@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "app-check.log",
+      "size": 72483,
+      "sha256": "f7c43996fa3e7ddec998995d5fcc151dd4c260a563efebea258bb0a0e755fb03",
+      "url": "clankie://evidence/sha256/f7c43996fa3e7ddec998995d5fcc151dd4c260a563efebea258bb0a0e755fb03"
+    },
+    {
+      "path": "phone-browser.png",
+      "size": 162559,
+      "sha256": "93ceb13c0263c9a89ab0ba6ac3696ac2c6cc69ed51ee7c0ce842a3abd41f1692",
+      "url": "clankie://evidence/sha256/93ceb13c0263c9a89ab0ba6ac3696ac2c6cc69ed51ee7c0ce842a3abd41f1692"
+    },
+    {
+      "path": "tablet-browser.png",
+      "size": 42014,
+      "sha256": "8c6f02da5f4b15ba0c6638cf2ce54893e4a747b4b42e10f6e3ac3de4f0e791d1",
+      "url": "clankie://evidence/sha256/8c6f02da5f4b15ba0c6638cf2ce54893e4a747b4b42e10f6e3ac3de4f0e791d1"
+    }
+  ]
+}
