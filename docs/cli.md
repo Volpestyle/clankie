@@ -3334,8 +3334,10 @@ works every project on Auto (`project settings PROJECT --auto on`) and fires the
 wakes he schedules. Off stops both at once; nothing already running is
 cancelled. It is the global autonomy runner switch in
 `~/.clankie/captain/autonomy.json`, which reads as off when it cannot be read.
-Turning it on needs the owner operator credential; reading it or turning it off
-does not. Prints `{"auto":"on"|"off"}`. The console's `/auto on|off` is the same
+Turning it on needs the owner operator credential, or a paired Take Control
+device, whose own identity the relay carries to the service; reading it or
+turning it off needs neither, so a chat-only device can still stop unprompted
+work. Prints `{"auto":"on"|"off"}`. The console's `/auto on|off` is the same
 switch.
 
 Each fleet-round interval (30 minutes by default) the service checks the

@@ -10,6 +10,7 @@ import { createClankieApp } from "../../clankie/src/app.ts";
 import { ConversationStore } from "../../clankie/src/captain/conversations.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { QuestionDraftSchema } from "../../clankie/src/captain/conversation-questions.ts";
+import { AutonomyStore } from "../../clankie/src/captain/autonomy.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../../clankie/src/device-session.ts";
 import { HostedPairing } from "../../clankie/src/hosted-pairing.ts";
 import { HostedBodyClient } from "../../clankie/src/hosted-body.ts";
@@ -23,6 +24,7 @@ import { createGatewayEncryptedFetch } from "../../../packages/api-client/src/ga
 import {
   TAKE_CONTROL_GRANTS,
   SUPERVISE_GRANTS,
+  operatorAutonomyCommandRequiresOwner,
   createOperatorConversationServiceClient,
   OperatorConversationServiceResultSchema,
   type OperatorConversationServiceRequest,
@@ -161,11 +163,25 @@ async function fixture(hosted = false, text = false) {
     throw new Error("Settings forbidden");
   });
   const hf = hostedFixture();
+  // Clankie's real master switch; turning it on asks the presented owner, as the captain does.
+  const autonomy = new AutonomyStore(join(root, "autonomy.json"));
   const service = await createClankieApp({
     settings: { load: async () => ClankieSettingsSchema.parse({ schemaVersion: 1 }), update: writeSettings },
     captain: createStubCaptain({
-      serveOperatorConversation: (request, authority) =>
-        store.serve(request as Parameters<typeof store.serve>[0], authority),
+      serveOperatorConversation: async (request, authority) => {
+        if (request.op !== "autonomy")
+          return store.serve(request as Parameters<typeof store.serve>[0], authority);
+        if (
+          operatorAutonomyCommandRequiresOwner(request.command) &&
+          (!authority || !(await authority.authorize()) || !authority.current())
+        )
+          throw new Error("goal_owner_required");
+        return {
+          op: "autonomy",
+          schemaVersion: 1,
+          status: autonomy.command(request.conversationId, request.command),
+        };
+      },
       invalidateQuestionPrincipal: (deviceId) => store.invalidateQuestionPrincipal(deviceId),
     }),
     eventLogPath: log,
@@ -297,6 +313,8 @@ async function fixture(hosted = false, text = false) {
     key,
     clock,
     store,
+    autonomy,
+    url,
     service,
     tokens,
     client,
@@ -799,3 +817,56 @@ it.each([false, true])(
     }
   },
 );
+
+it("turns Auto on as the paired owner device over the relay; chat-only and identity-less requests change nothing (VUH-2029)", async () => {
+  const f = await fixture();
+  const auto = (enabled: boolean, token?: string) =>
+    f.raw(
+      { op: "autonomy", schemaVersion: 1, conversationId: f.id, command: { action: "set_enabled", enabled } },
+      token,
+    );
+  // Status and off stay where the CLI has them: any chat device.
+  expect(await (await auto(false, f.tokens.read)).json()).toMatchObject({ status: { enabled: false } });
+  expect(f.autonomy.status(f.id).enabled).toBe(false);
+
+  // A device without Take Control may read and stop unprompted work, never start it.
+  const refused = await auto(true, f.tokens.read);
+  expect(refused.status).toBe(403);
+  expect(await refused.json()).toEqual({ error: "terminal_control_grant_required" });
+  expect(f.autonomy.status(f.id).enabled).toBe(false);
+  // No device identity at all: refused at the relay, and the captain bearer alone is not an owner.
+  const anonymous = await fetch(`${f.url}/operator/v1/dispatch`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      op: "autonomy",
+      schemaVersion: 1,
+      conversationId: f.id,
+      command: { action: "set_enabled", enabled: true },
+    }),
+  });
+  expect(anonymous.status).toBe(401);
+  const captainOnly = await f.service.app.request("/operator/v1/dispatch", {
+    method: "POST",
+    headers: { authorization: "Bearer fixture-captain-token", "content-type": "application/json" },
+    body: JSON.stringify({
+      op: "autonomy",
+      schemaVersion: 1,
+      conversationId: f.id,
+      command: { action: "set_enabled", enabled: true },
+    }),
+  });
+  expect(captainOnly.status).toBe(403);
+  expect(f.autonomy.status(f.id).enabled).toBe(false);
+
+  // The Take Control device carries its own identity to the service and turns it on.
+  const before = f.seen.length;
+  const on = await auto(true);
+  expect(on.status).toBe(200);
+  expect(await on.json()).toMatchObject({ op: "autonomy", status: { enabled: true } });
+  expect(f.autonomy.status(f.id).enabled).toBe(true);
+  const hop = f.seen.slice(before).find((entry) => entry.path === "/operator/v1/dispatch");
+  expect(hop?.token).toBe(`Bearer ${f.tokens.control}`);
+
+  expect(await (await auto(false, f.tokens.read)).json()).toMatchObject({ status: { enabled: false } });
+});
