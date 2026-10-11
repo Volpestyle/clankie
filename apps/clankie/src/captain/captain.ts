@@ -1,3 +1,4 @@
+import { renderLeadChats, type LeadChat } from "./lead-roster.ts";
 import {
   prepareWorkHandoffIntent as prepareWorkIntent,
   prepareFreeAgentIntent as prepareFreeIntent,
@@ -1285,6 +1286,65 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   };
 
+  function privateLeadConversation(id = conversations.defaultGlobalConversationId()): boolean {
+    const conversation = conversations.conversation(id);
+    return (
+      conversation !== undefined &&
+      conversation.parentConversationId === undefined &&
+      (conversation.scope.kind === "global" || conversation.scope.kind === "workspace")
+    );
+  }
+
+  async function leadChats(): Promise<readonly LeadChat[]> {
+    const current = await settings();
+    const ids = new Set([
+      conversations.defaultGlobalConversationId(),
+      ...current.linearWebhook.projectChats.map((route) => route.conversationId),
+    ]);
+    const observed = await observeFleet();
+    const occupants = [...(observed.head ? [observed.head] : []), ...observed.seats].map((seat) => ({
+      ...observedAgent(seat),
+      ...(seat.workingDirectory === undefined ? {} : { workingDirectory: seat.workingDirectory }),
+    }));
+    const chats: LeadChat[] = [];
+    for (const id of ids) {
+      const conversation = conversations.conversation(id);
+      if (!conversation || !privateLeadConversation(id)) continue;
+      const attached = occupants.filter(
+        (source) => conversations.attachedConversationForNative(source) === id,
+      );
+      const source = attached.length === 1 ? attached[0] : conversations.nativeSource(id);
+      const head = id === conversations.defaultGlobalConversationId() ? headSeat : undefined;
+      const seatId = source?.terminalId ?? head?.seatId;
+      const harness = source?.agent ?? head?.harness;
+      const bridge = seatOutboxes.get(id)?.bridgeStatus(id);
+      const native = seatId !== undefined && harness !== undefined;
+      chats.push({
+        conversationId: id,
+        title: conversation.title,
+        projects: current.linearWebhook.projectChats
+          .filter((route) => route.conversationId === id)
+          .map((route) => ({ id: route.projectId, name: route.name })),
+        workspace:
+          conversation.scope.kind === "workspace"
+            ? conversation.scope.workspaceId
+            : (source?.workingDirectory ?? workingDirectory),
+        machine:
+          conversation.scope.kind === "workspace"
+            ? (conversation.scope.machineId ?? "local")
+            : (splitFleetQualified(source?.paneId ?? head?.seatId ?? "")?.fleet ?? "local"),
+        holder: native ? { kind: "native", seatId, harness } : { kind: "service", lane: "operator" },
+        state: native ? (bridge?.state ?? "disconnected") : "service",
+        activity: conversation.sessionState,
+        lastActiveAt: conversation.updatedAt,
+        ...(bridge?.lastSeenAt === undefined ? {} : { lastBridgeSeenAt: bridge.lastSeenAt }),
+        messageSeat: id,
+        messageAvailable: bridge?.state === "current",
+      });
+    }
+    return chats;
+  }
+
   function systemPrompt(
     lane: CaptainSessionLaneV2,
     systemTools: boolean,
@@ -1292,13 +1352,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     sideConversation: boolean,
     computerUse: readonly ComputerUseHarness[],
     privateContext = true,
+    leadCard = "",
   ): string {
     const prompt = assembleLanePrompt(
       lane,
       systemTools,
       currentSettings,
       undefined,
-      privateContext ? {} : { fleet: "" },
+      privateContext
+        ? { fleet: [fleetInstructions(systemTools, currentSettings), leadCard].filter(Boolean).join("\n\n") }
+        : { fleet: "" },
       computerUse,
     );
     return `${prompt}${sideConversation ? SIDE_CONVERSATION_INSTRUCTIONS : ""}`;
@@ -1355,6 +1418,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ? { privateContext: false, actorId: "", authorize: async () => false }
       : undefined;
     const capture: TurnContext = { shell: systemTools };
+    if (lane === "operator" && privateLeadConversation(_conversationId)) capture.leadChats = leadChats;
     if (systemTools && options.deliveredFiles !== undefined) {
       capture.publishFile = async (input) => {
         if (capture.room === undefined) throw new Error("Delivered files need an active room");
@@ -1377,6 +1441,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       systemTools && access?.privateContext !== false
         ? await prepare("computer-use discovery", harnessesForPrompt)
         : [];
+    const leadCard = capture.leadChats ? renderLeadChats(await capture.leadChats()) : "";
+    const fleetPrompt = [fleetInstructions(systemTools, currentSettings), leadCard]
+      .filter(Boolean)
+      .join("\n\n");
     const purpose = sessionPurpose(lane, systemTools);
     const route = { current: await prepare("session model route", () => resolveRoute(purpose)) };
     const budget = { compactBeforeNextRun: false };
@@ -1404,6 +1472,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             sideConversation,
             computerUse,
             access?.privateContext !== false,
+            leadCard,
           ) + (await houseHuntingInstructions(access)),
         noExtensions: true,
         extensionFactories: [
@@ -1411,9 +1480,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ...(systemTools && access?.privateContext !== false
             ? [
                 captainFleetSettingsExtension({
-                  initialPrompt: fleetInstructions(systemTools, currentSettings),
+                  initialPrompt: fleetPrompt,
                   loadPrompt: async () =>
-                    fleetInstructions(true, await settingsForFleetContext(await settings(), cwd)),
+                    [
+                      fleetInstructions(true, await settingsForFleetContext(await settings(), cwd)),
+                      capture.leadChats ? renderLeadChats(await capture.leadChats()) : "",
+                    ]
+                      .filter(Boolean)
+                      .join("\n\n"),
                 }),
               ]
             : []),
@@ -2953,6 +3027,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         capture.room = roomKey(scope.lane, scope.targetId);
         capture.targetId = scope.targetId;
       } else {
+        if (privateLeadConversation(targetId))
+          capture.leadChats = async () => {
+            await assertConversationAuthority(capture.conversationAuthority!);
+            return leadChats();
+          };
         capture.bodyIdentity = {
           conversationId: targetId,
           route: { owner: { conversationId: targetId }, mode: "machine" },
@@ -5425,6 +5504,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         currentSettings,
         sections,
         {
+          ...(lane === "operator" &&
+          sections.includes("fleet") &&
+          privateLeadConversation(binding?.conversationId)
+            ? {
+                fleet: [fleetInstructions(true, currentSettings), renderLeadChats(await leadChats())].join(
+                  "\n\n",
+                ),
+              }
+            : {}),
           ...(selection === undefined ? {} : { model: modelCard(selection) }),
           ...(projected === undefined ? {} : { conversation: projected }),
         },

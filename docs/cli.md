@@ -1431,6 +1431,20 @@ it does not move history or replay earlier events. The authenticated
 API is `GET /v1/linear/target` and `PUT /v1/linear/target` with
 `{ "conversationId": "global-default" }`.
 
+Private operator leads see the global lead and configured project leads in the
+session card and `get_self_state.leadChats`. Each row names its project,
+conversation, workspace, machine, holder, receiver state, activity time and
+`messageSeat` target. `messageAvailable` reflects a current lead receiver;
+stale, reconnecting and disconnected native heads are shown explicitly.
+Activity timestamps describe recorded activity, not proof of a live receiver.
+Worker and room chats are excluded, and Discord never receives this roster.
+
+Use `message_seat` with the row's conversation ID to contact another lead.
+The existing lead channel carries attributed agent context and a delivery
+receipt; it never adopts that lead or types into its pane. Reconcile an uncertain
+receipt before retrying. A service-held lead without a connected receiver shows
+`messageAvailable: false` rather than promising delivery.
+
 #### `linear wake [show|set …]`
 
 `GET /v1/linear/wake` returns `{schemaVersion: 1, revision, wake}`.

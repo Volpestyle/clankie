@@ -1,3 +1,4 @@
+import type { LeadChat } from "./lead-roster.ts";
 import { huddleSummary } from "./huddles.ts";
 import type { HuddleService } from "./port.ts";
 import type { ProjectProposalDraft } from "@clankie/protocol/projects";
@@ -71,6 +72,8 @@ import { minecraftHostTools } from "./minecraft-host-tools.ts";
  * (which scopes every room-keyed read and write a tool makes).
  */
 export interface TurnContext {
+  /** Host-only private operator projection; never installed for Discord or workers. */
+  leadChats?: (() => Promise<readonly LeadChat[]>) | undefined;
   proposeProjectDefaults?: (() => Promise<unknown>) | undefined;
   proposeProjectCreate?: ((draft: ProjectProposalDraft) => Promise<ConversationQuestionResult>) | undefined;
   mailOwnerUpdate?: ((draft: OwnerUpdateDraft, publicationId: string) => Promise<OwnerUpdate>) | undefined;
@@ -704,7 +707,7 @@ export function captainTools(
       label: "Check on yourself",
       description:
         "A present-tense card of what you are doing right now: live play session, Discord presence, closed " +
-        "voice stays, and recent voice speech scalars (spoken vs suppressed — never words). " +
+        "voice stays, and recent voice speech scalars (spoken vs suppressed — never words). Private operator leads also see leadChats with live receiver state and message_seat targets. " +
         "Read it before answering questions about yourself. voiceHistory is closed stays only and is empty " +
         "while you are still in the channel, not proof of silence; recentVoiceSpeech.currentStay is whether you have " +
         "been talking, and play commentary is trigger 'narration'.",
@@ -723,6 +726,7 @@ export function captainTools(
         ]);
         return json({
           liveSession: live,
+          ...(lane === "operator" && turn.leadChats ? { leadChats: await turn.leadChats() } : {}),
           ...(rivals === undefined ? {} : { rivals }),
           presenceSessions: sessions,
           voiceHistory,
