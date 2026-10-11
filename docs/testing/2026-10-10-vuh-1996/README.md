@@ -71,3 +71,13 @@ the new integration request supplies the authoritative exact-tree gate.
 Formatter on the conflict-resolved skill/test and updated CLI examples passed.
 [Reconciliation evidence](clankie://evidence/sha256/34728dfa600e397aa6014610b44f91d83bf4a2551cdaad50ce9b8ef6b986af2f)
 contains the terminal conflict receipt, rebased diff and passing check output.
+
+## Per-machine skill reconciliation, 2026-10-11
+
+Request `6b03bdcc-fa1e-43d1-bcf2-1a401415ce54` was excluded for a skill
+conflict against main's new per-machine resource guidance. Rebased onto fetched
+`84e6f9dee6a19116da2d68ed17c283e41ebe8d09`, retaining that guidance alongside
+scratch isolation and exact job ownership checks. Affected focused checks passed
+again: two files / 12 tests, 33.61 seconds. Network-isolated Docker regression
+passed: one test, 4.69 seconds. The integrator remains the authoritative landing
+gate; no duplicate local root gate.
