@@ -232,9 +232,7 @@ it("correlates a native display-ID issue write after durable reload, while nonma
       expect(await post(data, envelope)).toMatchObject({ ingested: true });
     // These signed events are not exact own-write echoes, so attribution retains
     // them. None qualifies for a wake; recording is not admission to chat history.
-    expect(f.admitted).toEqual(
-      nonmatching.map(([data]) => expect.objectContaining({ issueId: data.id })),
-    );
+    expect(f.admitted).toEqual(nonmatching.map(([data]) => expect.objectContaining({ issueId: data.id })));
     expect(f.recorded.slice(1)).toEqual(
       f.admitted.map(({ eventId }) => expect.objectContaining({ eventId })),
     );
