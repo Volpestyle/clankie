@@ -12,7 +12,9 @@ export default defineConfig({
   root: repoRoot,
   test: {
     setupFiles: [fileURLToPath(new URL("./scripts/testing/vitest-setup.ts", import.meta.url))],
-    include: packageTestPattern,
+    include: process.env.CLANKIE_RELEASE_RETRY_FILE
+      ? [process.env.CLANKIE_RELEASE_RETRY_FILE]
+      : packageTestPattern,
     exclude: [
       ...(process.env.CLANKIE_COMPUTER_INTEGRATION === "1"
         ? []
@@ -36,6 +38,15 @@ export default defineConfig({
       ? {
           reporters: ["default", "junit"],
           outputFile: { junit: ".data/qa/tests.xml" },
+        }
+      : {}),
+    ...(process.env.CLANKIE_RELEASE_TEST_REPORT
+      ? {
+          reporters: [
+            "default",
+            ...(process.env.CI ? ["junit"] : []),
+            "./scripts/testing/release-test-reporter.mjs",
+          ],
         }
       : {}),
     pool: "forks", // threads aborts on Node 26 worker isolate teardown; see ADR 0179

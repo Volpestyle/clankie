@@ -52,7 +52,16 @@ not execute evaluations.
 | Manual offline eval | `pnpm test:eval`                 | Frozen play-evidence calibration cases. Every assertion must pass; this lane is excluded from full checks and releases.                                                                                |
 
 The host-integration command selects tests already in the full gate. The eval
-command is separate and never runs implicitly. Retries are disabled. CI cancels
+command is separate and never runs implicitly. Vitest retries remain zero. Manual
+macOS CI and tag releases use `node scripts/check-release.mjs`: it first runs the
+full `pnpm check`, then reruns every failed Vitest file once, in a fresh one-worker
+process, with file parallelism disabled. Every rerun must pass, including each
+previously executed case. More than two recovered files blocks the release.
+The job summary lists `Flaky on first attempt`; the original report and isolated
+rerun reports remain in `.data/qa/`. Missing, incomplete, interrupted or unhandled-error
+reports block recovery. A successful recovery also runs the original Vox tests
+and IPC smoke check that the failed Vitest command prevented from running.
+Non-test failures and ordinary push/PR CI have no retry. CI cancels
 superseded runs on the same ref, retains manual full-check reports for seven
 days, and allows 60 minutes for manual checks and 30 for ordinary CI. The macOS
 tag-release job allows 65 minutes, including archive build and smoke; individual
@@ -150,7 +159,9 @@ Ordinary deterministic checks, including `pnpm check`, remain required.
 
 Reproduce the named failing suite first. To investigate flakiness, run the same
 focused command several times with unchanged inputs and retain every result;
-do not enable retries to hide the first failure. Native app evidence belongs in
+retain the first failure even when the release-only isolated rerun passes. The
+bounded release retry is recorded on [VUH-2101](https://linear.app/vuhlp/issue/VUH-2101/macos-release-check-is-load-sensitive-on-3-core-runners);
+continue fixing each load-sensitive fixture. Native app evidence belongs in
 the private app repository. Gateway production and account evidence belongs in
 the private operations repository.
 

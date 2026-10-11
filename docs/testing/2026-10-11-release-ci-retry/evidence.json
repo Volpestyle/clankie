@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "focused-proof.tgz",
+      "size": 156632,
+      "sha256": "8569629f0ec531f8bb1768dfda33d5a8409ec7fc8327e81aec70779b1a031770",
+      "url": "clankie://evidence/sha256/8569629f0ec531f8bb1768dfda33d5a8409ec7fc8327e81aec70779b1a031770"
+    }
+  ]
+}
