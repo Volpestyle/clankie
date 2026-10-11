@@ -163,7 +163,7 @@ import {
   createRemoteWorktreeRootObserver,
 } from "./remote-project-proof.ts";
 import { localFleetAdmissionProof, localProjectProof } from "./local-fleet-proof.ts";
-import { FleetHealthMetrics } from "./fleet-health-metrics.ts";
+import { FleetHealthMetrics, proofAlertCallerSummary } from "./fleet-health-metrics.ts";
 import { localProofDiagnostics } from "./local-fleet-proof-log.ts";
 import { closeNativeProcessObservers } from "./native-process-transport.ts";
 import { FleetLinks } from "./fleet-link.ts";
@@ -1276,7 +1276,7 @@ const fleetResources = await createServiceFleetResourceRuntime({
     logger.warn({ error, event: "fleet_resources.refresh_failed" }, "Fleet resource metadata is unavailable"),
 });
 const fleetHealthMetrics = new FleetHealthMetrics({
-  onAggregateProofAlert: async (window) => {
+  onAggregateProofAlert: async (window, callers) => {
     let delivery: import("./captain/port.ts").FleetHealthAlertDelivery = { outcome: "unavailable" };
     const reasons = Object.entries(window.proof.byReason)
       .sort(([, left], [, right]) => (right ?? 0) - (left ?? 0))
@@ -1295,7 +1295,7 @@ const fleetHealthMetrics = new FleetHealthMetrics({
     await captain
       .notifyFleetHealthAlert(
         undefined,
-        `Fleet proof refusals stayed above 1% for a minute. Aggregate 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). Reasons: ${reasons}. This is the clankie metrics --fleet source and includes requests without a current owned seat.`,
+        `Fleet proof refusals stayed above 1% for a minute. Aggregate 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). Reasons: ${reasons}. Affected workers: ${proofAlertCallerSummary(callers)}. This is the clankie metrics --fleet source and includes requests without a current owned seat.`,
         (result) => {
           delivery = result;
         },
@@ -1303,13 +1303,19 @@ const fleetHealthMetrics = new FleetHealthMetrics({
       .catch(() => undefined);
     return delivery;
   },
-  onProofAlert: async (pane, window) => {
+  onProofAlert: async (pane, window, callers) => {
     let delivery: import("./captain/port.ts").FleetHealthAlertDelivery = { outcome: "unavailable" };
     const exits = `caller_exited (socket claimant exited): ${window.proof.byReason.caller_exited ?? 0}; ancestor_exited (intermediate exited; current ancestry not proven): ${window.proof.byReason.ancestor_exited ?? 0}`;
     await captain
       .notifyFleetHealthAlert(
         pane,
-        `Fleet proof refusals stayed above 1% for a minute. Caller 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). ${exits}. clankie metrics --fleet includes this claimed caller pane and the aggregate; doctor shows the aggregate across all callers.`,
+        `Fleet proof refusals stayed above 1% for a minute. Caller 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). ${exits}. Reasons: ${Object.entries(
+          window.proof.byReason,
+        )
+          .map(([reason, count]) => `${reason}: ${count}`)
+          .join(
+            ", ",
+          )}. Affected workers: ${proofAlertCallerSummary(callers)}. clankie metrics --fleet includes this claimed caller pane and the aggregate; doctor shows the aggregate across all callers.`,
         (result) => {
           delivery = result;
         },

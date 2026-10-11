@@ -4753,6 +4753,16 @@ startup and high machine load do not exempt callers. Sparse or transient bursts
 remain visible in metrics without paging the owner. The aggregate alert goes to the owner's default conversation,
 including refusals without an identifiable or currently owned pane. A live seat
 also alerts its current owning lead under the same sample/persistence rule.
+While an aggregate alert is pending or in its five-minute cooldown, workers
+sharing its cause are listed in that alert instead of paging separately.
+`native_initial_unavailable` and `native_final_unavailable` count as one native
+proof outage. A worker remains separately actionable when its refusal rate is
+at least twice the fleet rate and at least five percentage points higher, or
+when a non-majority cause accounts for at least 20% of its refusals and is
+rare fleet-wide (under 10%) or at least 25 percentage points more prevalent
+for that worker. Workers with the same exceptional cause share one alert and
+its five-minute cooldown. Large pane lists are bounded in the message; the
+full claimed labels remain in `clankie metrics --fleet`.
 A worker alert names the pane and its observed harness; its window counts only that caller pane;
 the aggregate window matches `clankie metrics --fleet` at the alert timestamp.
 Later metric reads can differ as checks arrive and minute buckets expire.

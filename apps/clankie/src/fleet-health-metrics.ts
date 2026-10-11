@@ -10,6 +10,24 @@ import {
 import type { LocalFleetProofDiagnostic } from "./local-fleet-proof.ts";
 import type { FleetHealthAlertDelivery } from "./captain/port.ts";
 
+export type ProofAlertCallers = readonly { claimedPane: string; window: FleetHealthMetricsWindow }[];
+
+/** Alert text is capped by the native delivery boundary; full labels remain in metrics. */
+export function proofAlertCallerSummary(callers: ProofAlertCallers): string {
+  const panes = callers
+    .filter((caller) => caller.window.proof.refusals > 0)
+    .map((caller) => caller.claimedPane);
+  const shown: string[] = [];
+  for (const pane of panes) {
+    if ([...shown, pane].join(", ").length > 1200) break;
+    shown.push(pane);
+  }
+  return (
+    (shown.join(", ") || "none attributed") +
+    (shown.length < panes.length ? `; ${panes.length - shown.length} more in clankie metrics --fleet` : "")
+  );
+}
+
 type ProofAlertResult = boolean | FleetHealthAlertDelivery;
 
 type Counters = FleetHealthMetricsSnapshot["totals"];
@@ -77,22 +95,31 @@ export class FleetHealthMetrics {
   private readonly buckets = new Map<number, Counters>();
   private readonly seats = new Map<string, AlertState>();
   private readonly aggregate: AlertState = { buckets: this.buckets, lastSeen: 0 };
+  private readonly proofCauses = new Map<string, { seat: AlertState; attemptAt: number }>();
   private readonly reports = new Map<string, { signature: string; lastSeen: number }>();
   private readonly options: {
     now?: () => number;
-    onAggregateProofAlert?(window: FleetHealthMetricsWindow): ProofAlertResult | Promise<ProofAlertResult>;
+    onAggregateProofAlert?(
+      window: FleetHealthMetricsWindow,
+      callers: ProofAlertCallers,
+    ): ProofAlertResult | Promise<ProofAlertResult>;
     onProofAlert?(
       pane: string,
       window: FleetHealthMetricsWindow,
+      callers: ProofAlertCallers,
     ): ProofAlertResult | Promise<ProofAlertResult>;
   };
   constructor(
     options: {
       now?: () => number;
-      onAggregateProofAlert?(window: FleetHealthMetricsWindow): ProofAlertResult | Promise<ProofAlertResult>;
+      onAggregateProofAlert?(
+        window: FleetHealthMetricsWindow,
+        callers: ProofAlertCallers,
+      ): ProofAlertResult | Promise<ProofAlertResult>;
       onProofAlert?(
         pane: string,
         window: FleetHealthMetricsWindow,
+        callers: ProofAlertCallers,
       ): ProofAlertResult | Promise<ProofAlertResult>;
     } = {},
   ) {
@@ -146,12 +173,92 @@ export class FleetHealthMetrics {
       }
     };
     const minute = this.record(update);
-    if (this.options.onAggregateProofAlert)
-      this.observeAlert(event, minute, this.aggregate, (rates) => this.options.onAggregateProofAlert!(rates));
     const seat = this.recordCaller(pane, minute, update);
-    if (seat && pane)
-      this.observeAlert(event, minute, seat, (rates) => this.options.onProofAlert?.(pane, rates), pane);
+    const fleet = window(5, this.buckets, minute);
+    if (this.options.onAggregateProofAlert)
+      this.observeAlert(event, minute, this.aggregate, (rates) =>
+        this.options.onAggregateProofAlert!(rates, this.snapshot().callers ?? []),
+      );
+    if (seat && pane && this.options.onProofAlert) {
+      const aggregateActive =
+        !!this.options.onAggregateProofAlert && this.alertActive(this.aggregate, minute);
+      const cause = this.workerCause(window(5, seat.buckets, minute), aggregateActive ? fleet : undefined);
+      const previous = cause === undefined ? undefined : this.proofCauses.get(cause);
+      if (previous) this.reconcileAlert(previous.seat, minute);
+      const allowed =
+        cause !== undefined &&
+        (!previous ||
+          previous.seat === seat ||
+          previous.attemptAt !== previous.seat.attemptAt ||
+          !this.alertActive(previous.seat, minute));
+      this.observeAlert(
+        event,
+        minute,
+        seat,
+        (rates) => {
+          if (cause !== undefined) this.proofCauses.set(cause, { seat, attemptAt: seat.attemptAt! });
+          return this.options.onProofAlert?.(
+            pane,
+            rates,
+            (this.snapshot().callers ?? []).filter(
+              (caller) => this.workerCause(caller.window, aggregateActive ? fleet : undefined) === cause,
+            ),
+          );
+        },
+        pane,
+        allowed,
+      );
+      for (const [key, original] of this.proofCauses)
+        if (original.attemptAt !== original.seat.attemptAt || !this.alertActive(original.seat, minute))
+          this.proofCauses.delete(key);
+    }
   }
+  private alertActive(state: AlertState, minute: number): boolean {
+    return !!state.alertPending || (state.alertAt !== undefined && minute - state.alertAt < 5);
+  }
+  private workerCause(rates: FleetHealthMetricsWindow, fleet?: FleetHealthMetricsWindow): string | undefined {
+    if (rates.proof.attempts < 100 || rates.proof.refusals < 5 || rates.proofRefusalRate <= 0.01) return;
+    const causes = (counts: FleetHealthMetricsWindow["proof"]["byReason"]) => {
+      const result: Record<string, number> = {};
+      for (const [reason, count] of Object.entries(counts)) {
+        // Initial/final are two observations of the same native proof outage.
+        const cause = ["native_initial_unavailable", "native_final_unavailable"].includes(reason)
+          ? "native_unavailable"
+          : reason;
+        result[cause] = (result[cause] ?? 0) + (count ?? 0);
+      }
+      return result;
+    };
+    const reasons = Object.entries(causes(rates.proof.byReason)).filter(([, count]) => count > 0);
+    const fleetCauses = fleet ? causes(fleet.proof.byReason) : {};
+    if (!fleet)
+      return reasons
+        .map(([reason]) => reason)
+        .sort()
+        .join(",");
+    const distinct = reasons.filter(([reason, count]) => {
+      const workerShare = (count ?? 0) / rates.proof.refusals;
+      const fleetShare = (fleetCauses[reason] ?? 0) / fleet.proof.refusals;
+      return fleetShare < 0.5 && workerShare >= 0.2 && (fleetShare < 0.1 || workerShare - fleetShare >= 0.25);
+    });
+    if (distinct.length)
+      return `reasons:${distinct
+        .map(([reason]) => reason)
+        .sort()
+        .join(",")}`;
+    // Small samples above 1% are not outliers merely because their rate is
+    // slightly higher. Require both twice the fleet rate and five extra points.
+    if (
+      rates.proofRefusalRate >= fleet.proofRefusalRate * 2 &&
+      rates.proofRefusalRate - fleet.proofRefusalRate >= 0.05
+    )
+      return `rate:${reasons
+        .map(([reason]) => reason)
+        .sort()
+        .join(",")}`;
+    return;
+  }
+
   private recordCaller(
     pane: string | undefined,
     minute: number,
@@ -170,21 +277,7 @@ export class FleetHealthMetrics {
     update(bucket);
     return seat;
   }
-  private observeAlert(
-    event: Extract<LocalFleetProofDiagnostic, { source: "proof" | "proof_success" }>,
-    minute: number,
-    seat: AlertState,
-    deliver: (rates: FleetHealthMetricsWindow) => ProofAlertResult | Promise<ProofAlertResult> | undefined,
-    pane?: string,
-  ): void {
-    const rates = window(5, seat.buckets, minute);
-    // Count every refusal, including cold startup and overload. Page only on
-    // a meaningful sample that stays elevated for a minute; caller claims and
-    // machine load must never suppress a real outage's telemetry or alert.
-    const elevated =
-      rates.proof.attempts >= 100 && rates.proof.refusals >= 5 && rates.proofRefusalRate > 0.01;
-    if (!elevated) delete seat.elevatedSince;
-    else seat.elevatedSince ??= this.now();
+  private reconcileAlert(seat: AlertState, minute: number): void {
     if (seat.alertPending && seat.acknowledged) {
       try {
         // Read only the original acknowledgment. Never redispatch a held alert.
@@ -197,7 +290,26 @@ export class FleetHealthMetrics {
         // Missing/conflicting original evidence remains held.
       }
     }
+  }
+  private observeAlert(
+    event: Extract<LocalFleetProofDiagnostic, { source: "proof" | "proof_success" }>,
+    minute: number,
+    seat: AlertState,
+    deliver: (rates: FleetHealthMetricsWindow) => ProofAlertResult | Promise<ProofAlertResult> | undefined,
+    pane?: string,
+    allowed = true,
+  ): void {
+    const rates = window(5, seat.buckets, minute);
+    // Count every refusal, including cold startup and overload. Page only on
+    // a meaningful sample that stays elevated for a minute; caller claims and
+    // machine load never change telemetry or aggregate outage eligibility.
+    const elevated =
+      rates.proof.attempts >= 100 && rates.proof.refusals >= 5 && rates.proofRefusalRate > 0.01;
+    if (!elevated) delete seat.elevatedSince;
+    else seat.elevatedSince ??= this.now();
+    this.reconcileAlert(seat, minute);
     if (
+      allowed &&
       event.source === "proof" &&
       elevated &&
       this.now() - seat.elevatedSince! >= MINUTE &&

@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
+import { FleetHealthMetrics, proofAlertCallerSummary } from "../src/fleet-health-metrics.ts";
 import { localFleetProof } from "../src/local-fleet-proof.ts";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -1122,4 +1122,64 @@ it("proof threshold retries an unavailable native alert, then cools down only af
     if ("closeAllConnections" in server) server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+it("collapses the 2026-10-10 03:23 UTC fourteen-alert burst into one real lead notice naming thirteen workers", async () => {
+  const f = await fixture(60 * 60_000, undefined, false, true, undefined, undefined, true, false);
+  let now = Date.parse("2026-10-10T03:22:00Z");
+  const deliveries: Promise<boolean>[] = [];
+  const messages: string[] = [];
+  const panes = Array.from({ length: 13 }, (_, index) => `w1:p${index + 1}`);
+  const notify = (pane: string | undefined, text: string) => {
+    messages.push(text);
+    const delivery = f.captain.notifyFleetHealthAlert(pane, text);
+    deliveries.push(delivery);
+    return delivery;
+  };
+  const metrics = new FleetHealthMetrics({
+    now: () => now,
+    onAggregateProofAlert: (rates, callers = metrics.snapshot().callers ?? []) =>
+      notify(
+        undefined,
+        `Fleet proof outage: ${rates.proof.refusals}/${rates.proof.attempts}. Affected workers: ${proofAlertCallerSummary(callers)}.`,
+      ),
+    onProofAlert: (pane, rates, callers = metrics.snapshot().callers ?? []) =>
+      notify(
+        pane,
+        `Worker proof outage: ${rates.proof.refusals}/${rates.proof.attempts}. Affected workers: ${proofAlertCallerSummary(callers)}.`,
+      ),
+  });
+  const refuse = (pane: string, index: number) =>
+    metrics.observeProof(
+      "fleet",
+      {
+        source: "proof",
+        reason: index % 2 === 0 ? "native_initial_unavailable" : "native_final_unavailable",
+      },
+      pane,
+    );
+  for (const [index, pane] of panes.entries()) for (let check = 0; check < 100; check++) refuse(pane, index);
+  expect(messages).toEqual([]);
+  now += 60_000;
+  // One aggregate and thirteen worker evaluations in the same second.
+  for (const [index, pane] of panes.entries()) refuse(pane, index);
+  expect(messages).toHaveLength(1);
+  expect(await Promise.all(deliveries)).toEqual([true]);
+  for (const pane of panes) expect(messages[0]).toContain(pane);
+  for (let second = 1; second <= 4; second++) {
+    now += 1000;
+    for (const [index, pane] of panes.entries()) refuse(pane, index);
+  }
+  expect(messages).toHaveLength(1);
+  const journal = new ConversationJournal(join(f.root, "conversations")).read("global-default");
+  const notices = journal.filter(
+    (event) =>
+      event.type === "message" && event.role === "external" && event.text.includes("Fleet proof outage"),
+  );
+  expect(notices).toHaveLength(1);
+  if (process.env.VUH2030_EVIDENCE_FILE)
+    await appendFile(
+      process.env.VUH2030_EVIDENCE_FILE,
+      JSON.stringify({ messages, notices, totals: metrics.snapshot().totals }) + "\n",
+    );
 });

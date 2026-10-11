@@ -466,3 +466,56 @@ it("keeps recovered ESRCH and EBADF scan observations separate from terminal pro
     socket_unavailable: 1,
   });
 });
+
+it("groups distinct proof causes and genuine rate outliers while suppressing fleet-like workers", async () => {
+  let now = Date.parse("2026-10-10T03:22:00Z");
+  const aggregate: string[][] = [];
+  const worker: string[][] = [];
+  const metrics = new FleetHealthMetrics({
+    now: () => now,
+    onAggregateProofAlert: (_rates, callers) => {
+      aggregate.push(callers.map((caller) => caller.claimedPane));
+      return true;
+    },
+    onProofAlert: (_pane, _rates, callers) => {
+      worker.push(callers.map((caller) => caller.claimedPane));
+      return true;
+    },
+  });
+  const panes = Array.from({ length: 24 }, (_, index) => `w1:p${index}`);
+  for (const [index, pane] of panes.entries()) {
+    for (let check = 0; check < 100; check++)
+      metrics.observeProof(
+        "fleet",
+        index < 20 && check >= 10
+          ? { source: "proof_success" }
+          : {
+              source: "proof",
+              reason: index >= 20 && index < 22 ? "missing_binding" : "native_initial_unavailable",
+            },
+        pane,
+      );
+  }
+  now += 60_000;
+  for (const [index, pane] of panes.entries())
+    metrics.observeProof(
+      "fleet",
+      {
+        source: "proof",
+        reason: index >= 20 && index < 22 ? "missing_binding" : "native_final_unavailable",
+      },
+      pane,
+    );
+  await Promise.resolve();
+  expect(aggregate).toHaveLength(1);
+  expect(worker).toEqual([
+    ["w1:p20", "w1:p21"],
+    ["w1:p22", "w1:p23"],
+  ]);
+  for (let second = 0; second < 4; second++) {
+    now += 1000;
+    for (const pane of panes)
+      metrics.observeProof("fleet", { source: "proof", reason: "native_initial_unavailable" }, pane);
+  }
+  expect(worker).toHaveLength(2);
+});

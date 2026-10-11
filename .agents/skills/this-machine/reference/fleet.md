@@ -496,3 +496,13 @@ in its `links` directory, defaulting to `~/.clankie/links`. Local hires receive
 the absolute service state path. An explicit private state directory never
 falls back to the shared descriptor. Doctor uses the same state selection.
 SSH fleets retain their own machine's state; no local state path is sent there.
+
+## Proof-refusal alert bursts
+
+`clankie metrics --fleet` retains every refusal. An active aggregate outage
+alert lists affected panes and suppresses matching worker pages, including the
+same native proof outage observed at initial and final checks. Worker notices
+remain for distinct reason profiles or rates at least twice the fleet rate and
+five percentage points higher; workers sharing that exception are grouped.
+Alert delivery receipts and the existing five-minute cooldown still apply.
+See `docs/cli.md` under `metrics --fleet` for the exact comparison thresholds.
