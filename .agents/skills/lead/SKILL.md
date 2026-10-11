@@ -309,7 +309,16 @@ true" in `work-items`. Close a seat with `close_worker_pane` and its
 the issue and comments why; hire a successor on the same `deliverable` first to
 keep it In Progress. A seat that exits without a close is paused after ten
 minutes. A daily check wakes you with every In Progress issue no live seat owns:
-resolve each one.
+resolve each one. For a follow-up sent over `message_seat`, record the new
+`deliverable` with `fleet_efficiency` review and its assignment evidence. When
+one live session holds several issues (including its native subagents), review
+`ownedIssues` with the exact issue keys and the evidence that they are live.
+Clear that list with `[]` when those assignments end. These claims are scoped to
+the exact native occupant and its admitted lead, including linked fleets.
+Current native issue assignments supersede historical hires; newer explicit
+reassignments supersede older native assignments, using `deliverableAssignedAt`; running native
+child labels naming exactly one issue also count. Mere message/report mentions
+and completed or ambiguous child labels do not establish ownership.
 When the owner asks for something on a cadence ("every morning, triage new
 issues", "every Friday, run the cleanup audit"), make it a `routine` targeting
 this conversation instead of promising to remember: a `turn` with the prompt,

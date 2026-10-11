@@ -14,6 +14,10 @@ export const FleetEfficiencyReviewSchema = z.strictObject({
   offScope: z.boolean().optional(),
   assignmentStatus: z.enum(["active", "paused", "canceled", "done"]).optional(),
   deliverable: z.string().trim().min(1).max(512).optional(),
+  ownedIssues: z
+    .array(z.string().regex(/^[A-Z][A-Z0-9]*-\d+$/u))
+    .max(100)
+    .optional(),
   progressAt: z.string().datetime().optional(),
   evidence: z.string().trim().min(1).max(2048),
 });
@@ -41,7 +45,8 @@ export function fleetEfficiencyTools(actions: FleetEfficiencyActions, turn: Turn
         "Show every seat this conversation leads with assignment, native effort/context and reporting/progress flags. " +
         "Load the lead skill for review and intervention guidance. Review records inspected scope/tracker status or " +
         "a substantive finding/commit time for one exact owned native session; include its evidence. " +
-        "It does not change the tracker, issue state, harness effort, ownership or delivery receipts. " +
+        "Use deliverable for a reassigned issue, or ownedIssues for the issues you report live on this session or its subagents; an empty list clears that claim. " +
+        "It does not change the tracker, issue state, harness effort, native seat ownership or delivery receipts. " +
         "Unknown telemetry is omitted, not healthy. Use existing native message/hire/readopt/tidy tools to act.",
       parameters: Type.Union([
         Type.Object({ action: Type.Literal("show") }),
@@ -53,6 +58,9 @@ export function fleetEfficiencyTools(actions: FleetEfficiencyActions, turn: Turn
             Type.Union(["active", "paused", "canceled", "done"].map((value) => Type.Literal(value))),
           ),
           deliverable: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+          ownedIssues: Type.Optional(
+            Type.Array(Type.String({ pattern: "^[A-Z][A-Z0-9]*-[0-9]+$" }), { maxItems: 100 }),
+          ),
           progressAt: Type.Optional(Type.String({ format: "date-time" })),
           evidence: Type.String({ minLength: 1, maxLength: 2048 }),
         }),

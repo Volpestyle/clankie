@@ -227,7 +227,7 @@ import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
 import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { PaneTidy } from "./pane-tidy.ts";
-import { SeatIssueKeeper } from "./seat-issue-status.ts";
+import { SeatIssueKeeper, liveSeatIssue } from "./seat-issue-status.ts";
 import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { createHuddleService, HuddleStore, type HuddleSeatTarget } from "./huddles.ts";
 import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
@@ -3612,19 +3612,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     liveSeats = projected;
     observeReportFailureAlerts(projected);
-    void issueStatus
-      .observe(
-        projected.map((seat) => ({
-          seatId: seat.seatId,
-          title: seat.title,
-          keys: [seat.efficiency?.assignedDeliverable, seat.efficiency?.currentIssue],
-        })),
-      )
-      .then((results) => {
-        for (const result of results)
-          if (result.outcome === "failed")
-            console.warn("Seat issue status unavailable", result.issue, result.detail);
+    const liveIssues = projected.map(liveSeatIssue);
+    // The operator head is intentionally outside the worker roster. Its native
+    // children still hold work; do not mistake that presentation boundary for exit.
+    if (fleet.head?.session && !options.nativeCensusRunner) {
+      const head = fleet.head;
+      const children = await (async () =>
+        head.harness === "codex"
+          ? readCodexSubagents(head.session!)
+          : head.harness === "claude"
+            ? readClaudeSubagents(head.session!)
+            : undefined)().catch(() => undefined);
+      liveIssues.push({
+        seatId: fleet.head.seatId,
+        title: "Clankie",
+        keys: [],
+        ownedKeys: [
+          agentWork.read(fleet.head.occupantId)?.issue?.itemId,
+          ...(children?.recent ?? [])
+            .filter((child) => child.status === "running")
+            .map((child) => child.label),
+        ],
       });
+    }
+    await issueStatus.observe(liveIssues).then((results) => {
+      for (const result of results)
+        if (result.outcome === "failed")
+          console.warn("Seat issue status unavailable", result.issue, result.detail);
+    });
     return projected;
   }
 

@@ -8,7 +8,9 @@ import { createLocalTracker } from "@clankie/work-items";
 import { createAccounts } from "../src/accounts.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
-import { SeatIssueKeeper } from "../src/captain/seat-issue-status.ts";
+import { OperatorFleetSeatSchema } from "@clankie/protocol";
+import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
+import { SeatIssueKeeper, liveSeatIssue } from "../src/captain/seat-issue-status.ts";
 import { createLinearApiProvider, TEAM_ID } from "./fixtures/linear-api-provider.ts";
 
 /**
@@ -186,4 +188,103 @@ it("lists In Progress issues with no live owning seat once a day", async () => {
   expect(await keeper.dailyCheck()).toBeUndefined();
   advance(24 * 60 * 60 * 1000);
   expect(await keeper.dailyCheck()).toContain("VUH-1384");
+});
+
+it("uses current work, evidence-backed lead follow-ups and live native children across leads", async () => {
+  const { keeper, advance, status } = await setup();
+  const directory = await mkdtemp(join(tmpdir(), "issue-ownership-"));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const store = new SeatEfficiencyStore(join(directory, "efficiency.json"));
+  const owner = { conversationId: "remote-work-lead" };
+  store.assign("remote-native-session", { owner, deliverable: "VUH-1383" });
+  store.observe({ occupantId: "remote-native-session", seatId: "remote/seat", owner });
+  const efficiency = store.review({
+    occupantId: "remote-native-session",
+    owner,
+    deliverable: "VUH-1384",
+    ownedIssues: ["VUH-1385"],
+    evidence: "Lead assigned VUH-1384 as a follow-up and reports its child live on VUH-1385",
+  });
+  const remote = OperatorFleetSeatSchema.parse({
+    seatId: "remote/seat",
+    occupantId: "remote-native-session",
+    personaId: "remote-worker",
+    harness: "codex",
+    title: "Remote worker",
+    status: "working",
+    fleet: "remote",
+    efficiency,
+  });
+  await keeper.observe([
+    liveSeatIssue({ ...remote, workerReportRouting: { source: "refused", reason: "authority_unavailable" } }),
+  ]);
+  expect(await keeper.dailyCheck(true)).toMatch(/- VUH-138[45]:/u);
+  const oldNative = {
+    objective: "Old assignment",
+    issue: { repoId: "clankie", itemId: "VUH-1383" },
+    updatedAt: "2026-10-09T12:00:00.000Z",
+  };
+  expect(liveSeatIssue({ ...remote, assignment: oldNative }).keys).toEqual(["VUH-1384"]);
+  const assignedAt = efficiency.deliverableAssignedAt;
+  store.assign("remote-native-session", { owner });
+  expect(
+    store.observe({ occupantId: "remote-native-session", seatId: "remote/seat", owner })
+      .deliverableAssignedAt,
+  ).toBe(assignedAt);
+  await keeper.observe([liveSeatIssue(remote)]);
+  expect(await keeper.dailyCheck(true)).toContain("- VUH-1383:");
+  expect(await keeper.dailyCheck(true)).not.toMatch(/- VUH-138[45]:/u);
+
+  // A native assignment supersedes a historical hire, without needing a captain adoption.
+  expect(
+    new SeatEfficiencyStore(join(directory, "efficiency.json")).observe({
+      occupantId: "remote-native-session",
+      seatId: "remote/seat",
+      owner,
+    }).ownedIssues,
+  ).toEqual(["VUH-1385"]);
+  store.review({ occupantId: "remote-native-session", owner, ownedIssues: [], evidence: "Child finished" });
+  expect(
+    store.observe({ occupantId: "remote-native-session", seatId: "remote/seat", owner }).ownedIssues,
+  ).toEqual([]);
+  expect(
+    store.observe({
+      occupantId: "remote-native-session",
+      seatId: "remote/seat",
+      owner: { conversationId: "new-lead" },
+    }).ownedIssues,
+  ).toBeUndefined();
+
+  const native = OperatorFleetSeatSchema.parse({
+    ...remote,
+    efficiency: { ...efficiency, assignedDeliverable: "VUH-1383", ownedIssues: [] },
+    assignment: {
+      objective: "Deliver VUH-1384",
+      issue: { repoId: "clankie", itemId: "VUH-1384" },
+      updatedAt: new Date().toISOString(),
+    },
+    subagents: { running: 1, recent: [{ label: "Fix VUH-1385", status: "running" }] },
+  });
+  await keeper.observe([liveSeatIssue(native)]);
+  expect(await keeper.dailyCheck(true)).not.toMatch(/- VUH-138[45]:/u);
+
+  // Completion and ambiguous labels confer no ownership; ordinary mentions do not either.
+  native.subagents = {
+    running: 1,
+    recent: [
+      { label: "Fix VUH-1385", status: "done" },
+      { label: "Compare VUH-1383 and VUH-1385", status: "running" },
+    ],
+  };
+  native.summary = "Read about VUH-1385";
+  await keeper.observe([liveSeatIssue(native)]);
+  expect(await keeper.dailyCheck(true)).toContain("- VUH-1385:");
+
+  await keeper.observe([]);
+  advance(61_000);
+  await keeper.observe([]);
+  expect(status("VUH-1384")).toBe("Todo");
+  expect(await keeper.dailyCheck(true)).toContain("- VUH-1385:");
+  // Daily-only child ownership never authorizes changing that child's tracker status.
+  expect(status("VUH-1385")).toBe("In Progress");
 });

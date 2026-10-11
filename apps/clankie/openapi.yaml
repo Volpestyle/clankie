@@ -4858,8 +4858,12 @@ paths:
         `show` returns every seat led by the exact conversation, including
         linked fleets, with optional factual efficiency evidence. `review`
         records inspected scope, tracker status or substantive progress for
-        one exact owned native session. It changes no tracker state, harness
-        settings, ownership or report receipts. Unknown telemetry is omitted,
+        one exact owned native session. A review can record a reassigned
+        deliverable or ownedIssues explicitly reported live on that session
+        or its native children; an empty list clears those claims. Explicit
+        deliverables carry deliverableAssignedAt, which ordinary messages
+        cannot refresh. It changes no tracker state, harness settings, native
+        seat ownership or report receipts. Unknown telemetry is omitted,
         never treated as healthy. Flags are observations for the lead skill;
         they do not prescribe or perform worker actions. Every watch wake calls
         for reviewing all owned seats; periodic lead rounds default to 30 minutes
@@ -7114,6 +7118,11 @@ components:
             assignmentStatus: { type: string, enum: [active, paused, canceled, done] }
             deliverable:
               { type: string, minLength: 1, maxLength: 512, description: Trimmed inspected deliverable }
+            ownedIssues:
+              type: array
+              maxItems: 100
+              items: { type: string, pattern: "^[A-Z][A-Z0-9]*-[0-9]+$" }
+              description: Issues the lead reports live on this native session or its children; empty clears the claim
             progressAt:
               type: string
               format: date-time
@@ -7162,7 +7171,15 @@ components:
           type: array
           maxItems: 12
           items: { type: string, minLength: 1, maxLength: 128 }
+        deliverableAssignedAt:
+          type: string
+          format: date-time
+          description: Explicit deliverable assignment time; ordinary messages never refresh it
         assignedDeliverable: { type: string, minLength: 1, maxLength: 16384 }
+        ownedIssues:
+          type: array
+          maxItems: 100
+          items: { type: string, pattern: "^[A-Z][A-Z0-9]*-[0-9]+$" }
         objective: { type: string, minLength: 1, maxLength: 16384 }
         currentIssue: { type: string, minLength: 1, maxLength: 64 }
         model: { type: string, minLength: 1, maxLength: 256 }

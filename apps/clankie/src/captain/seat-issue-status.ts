@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import type { OperatorFleetSeat } from "@clankie/protocol";
 import type { McpHost } from "../mcp-host.ts";
 import type { LinearRequestPriority } from "../linear-request-budget.ts";
 
@@ -27,6 +28,8 @@ export interface LiveSeatIssue {
   readonly title: string;
   /** The seat's deliverable or current issue; only a single tracker key counts. */
   readonly keys: readonly (string | undefined)[];
+  /** Additional live assignments; daily-check evidence only, never auto-settled on exit. */
+  readonly ownedKeys?: readonly (string | undefined)[];
 }
 
 const FALLBACK: Record<"Verifying" | "Paused", { name: string; type: string }> = {
@@ -48,6 +51,32 @@ function issueKey(value: string | undefined): string | undefined {
   return matches?.length === 1 ? matches[0] : undefined;
 }
 
+/** Explicit native work beats a historical hire; mentions in reports are not assignments. */
+export function liveSeatIssue(seat: OperatorFleetSeat): LiveSeatIssue {
+  const efficiency = ["refused", "unadopted"].includes(seat.workerReportRouting?.source ?? "")
+    ? undefined
+    : seat.efficiency;
+  const nativeIssue = seat.assignment?.issue?.itemId ?? efficiency?.currentIssue;
+  const newerDeliverable =
+    efficiency?.deliverableAssignedAt !== undefined &&
+    seat.assignment !== undefined &&
+    Date.parse(efficiency.deliverableAssignedAt) > Date.parse(seat.assignment.updatedAt);
+  const current = newerDeliverable
+    ? (efficiency?.assignedDeliverable ?? nativeIssue)
+    : (nativeIssue ?? efficiency?.assignedDeliverable);
+  return {
+    seatId: seat.seatId,
+    title: seat.title,
+    keys: [current],
+    ownedKeys: [
+      ...(efficiency?.ownedIssues ?? []),
+      ...(seat.subagents?.recent ?? [])
+        .filter((child) => child.status === "running")
+        .map((child) => issueKey(child.label)),
+    ],
+  };
+}
+
 type Tracker = Pick<McpHost, "call">;
 type Row = Record<string, unknown>;
 const text = (value: unknown) => (typeof value === "string" ? value : undefined);
@@ -56,6 +85,7 @@ const oneLine = (value: string) => value.replace(/\s+/gu, " ").trim().slice(0, 4
 export class SeatIssueKeeper {
   private readonly seats = new Map<string, { title: string; issue: string; goneSince?: number }>();
   private live = new Set<string>();
+  private liveOwners = new Map<string, { seatId: string; title: string }[]>();
   private state: z.infer<typeof StateSchema> = { paused: {} };
   private readonly now: () => number;
   private readonly exitGraceMs: number;
@@ -90,7 +120,18 @@ export class SeatIssueKeeper {
       const issue = seat.keys.map(issueKey).find((key) => key !== undefined);
       if (issue !== undefined) present.set(seat.seatId, { ...seat, issue });
     }
-    this.live = new Set([...present.values()].map((seat) => seat.issue));
+    this.liveOwners.clear();
+    for (const seat of seats) {
+      const primary = present.get(seat.seatId)?.issue;
+      for (const key of [primary, ...(seat.ownedKeys ?? []).map(issueKey)]) {
+        if (key === undefined) continue;
+        this.liveOwners.set(key, [
+          ...(this.liveOwners.get(key) ?? []),
+          { seatId: seat.seatId, title: seat.title },
+        ]);
+      }
+    }
+    this.live = new Set(this.liveOwners.keys());
     const results: SeatIssueSettlement[] = [];
     for (const [seatId, seat] of present) this.seats.set(seatId, { title: seat.title, issue: seat.issue });
     for (const [seatId, seat] of this.seats) {
@@ -121,6 +162,14 @@ export class SeatIssueKeeper {
   }): Promise<SeatIssueSettlement> {
     const seat = this.seats.get(input.seatId);
     this.seats.delete(input.seatId);
+    for (const [key, owners] of this.liveOwners) {
+      const remaining = owners.filter((owner) => owner.seatId !== input.seatId);
+      if (remaining.length) this.liveOwners.set(key, remaining);
+      else {
+        this.liveOwners.delete(key);
+        this.live.delete(key);
+      }
+    }
     if (seat === undefined) return { outcome: "skipped", detail: "The seat had no tracked issue." };
     return this.settle({
       issue: seat.issue,
@@ -176,7 +225,7 @@ export class SeatIssueKeeper {
     evidence?: string | undefined;
     unlanded?: boolean | undefined;
   }): Promise<SeatIssueSettlement> {
-    const successor = [...this.seats.values()].find((seat) => seat.issue === input.issue && !seat.goneSince);
+    const successor = this.liveOwners.get(input.issue)?.[0];
     // Done needs evidence; a stated Done without it is proof pending.
     const intended: SeatIssueStatus = successor
       ? "In Progress"

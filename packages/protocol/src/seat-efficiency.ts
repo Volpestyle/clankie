@@ -6,8 +6,15 @@ export const OperatorSeatEfficiencySchema = z
     checkedAt: z.string().datetime(),
     ownerConversationId: z.string().min(1).max(256),
     flags: z.array(z.string().min(1).max(128)).max(12),
+    /** Time of an explicit deliverable assignment, never refreshed by ordinary messages. */
+    deliverableAssignedAt: z.string().datetime().optional(),
     assignedDeliverable: z.string().min(1).max(16_384).optional(),
     objective: z.string().min(1).max(16_384).optional(),
+    /** Issue assignments explicitly reported live by the lead, including native children. */
+    ownedIssues: z
+      .array(z.string().regex(/^[A-Z][A-Z0-9]*-\d+$/u))
+      .max(100)
+      .optional(),
     currentIssue: z.string().min(1).max(64).optional(),
     model: z.string().min(1).max(256).optional(),
     effort: z.string().min(1).max(64).optional(),

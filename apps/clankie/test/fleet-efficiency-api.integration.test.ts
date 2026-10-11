@@ -157,6 +157,7 @@ it("dispatches exact review fields and rejects body-supplied authority and malfo
     offScope: true,
     assignmentStatus: "paused",
     deliverable: "VUH-1662",
+    ownedIssues: ["VUH-1662", "VUH-2026"],
     progressAt: checkedAt,
     evidence: "Inspected native report and tracker assignment",
   } as const;

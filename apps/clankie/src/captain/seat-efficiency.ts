@@ -18,6 +18,7 @@ const RecordSchema = z
     owner: ConversationOwnerSchema,
     firstObservedAt: Timestamp,
     assignedAt: Timestamp.optional(),
+    deliverableAssignedAt: Timestamp.optional(),
     assignedDeliverable: z.string().min(1).max(16_384).optional(),
     objective: z.string().min(1).max(16_384).optional(),
     model: z.string().min(1).max(256).optional(),
@@ -36,6 +37,7 @@ const RecordSchema = z
     reportFailedAt: Timestamp.optional(),
     reportFailures: z.number().int().nonnegative().optional(),
     reportFailureIds: z.array(z.string().min(1).max(256)).max(2000).optional(),
+    ownedIssues: OperatorSeatEfficiencySchema.shape.ownedIssues,
     observed: OperatorSeatEfficiencySchema.optional(),
   })
   .strict();
@@ -149,7 +151,12 @@ export class SeatEfficiencyStore {
       ...record,
       owner,
       assignedAt: assignment.assignedAt ?? this.timestamp(),
-      ...(assignment.deliverable === undefined ? {} : { assignedDeliverable: assignment.deliverable }),
+      ...(assignment.deliverable === undefined
+        ? {}
+        : {
+            assignedDeliverable: assignment.deliverable,
+            deliverableAssignedAt: assignment.assignedAt ?? this.timestamp(),
+          }),
       ...(assignment.objective === undefined ? {} : { objective: assignment.objective }),
       ...(assignment.model === undefined ? {} : { model: assignment.model }),
       ...(assignment.effort === undefined ? {} : { effort: assignment.effort }),
@@ -292,6 +299,10 @@ export class SeatEfficiencyStore {
       ...((input.assignment?.objective ?? input.goal?.objective ?? record.objective)
         ? { objective: input.assignment?.objective ?? input.goal?.objective ?? record.objective }
         : {}),
+      ...(record.deliverableAssignedAt === undefined
+        ? {}
+        : { deliverableAssignedAt: record.deliverableAssignedAt }),
+      ...(record.ownedIssues === undefined ? {} : { ownedIssues: record.ownedIssues }),
       ...(currentIssue === undefined ? {} : { currentIssue }),
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),
@@ -317,6 +328,7 @@ export class SeatEfficiencyStore {
     offScope?: boolean | undefined;
     assignmentStatus?: "active" | "paused" | "canceled" | "done" | undefined;
     deliverable?: string | undefined;
+    ownedIssues?: string[] | undefined;
     progressAt?: string | undefined;
     evidence: string;
   }): OperatorSeatEfficiency {
@@ -326,7 +338,13 @@ export class SeatEfficiencyStore {
       evidence: input.evidence,
       ...(input.offScope === undefined ? {} : { offScope: input.offScope }),
       ...(input.assignmentStatus === undefined ? {} : { assignmentStatus: input.assignmentStatus }),
-      ...(input.deliverable === undefined ? {} : { assignedDeliverable: input.deliverable }),
+      ...(input.deliverable === undefined
+        ? {}
+        : {
+            assignedDeliverable: input.deliverable,
+            deliverableAssignedAt: this.timestamp(),
+          }),
+      ...(input.ownedIssues === undefined ? {} : { ownedIssues: input.ownedIssues }),
       ...(input.progressAt === undefined
         ? {}
         : {
@@ -354,6 +372,10 @@ export class SeatEfficiencyStore {
       ...(updated.assignedDeliverable === undefined
         ? {}
         : { assignedDeliverable: updated.assignedDeliverable }),
+      ...(updated.deliverableAssignedAt === undefined
+        ? {}
+        : { deliverableAssignedAt: updated.deliverableAssignedAt }),
+      ...(updated.ownedIssues === undefined ? {} : { ownedIssues: updated.ownedIssues }),
       ...(updated.lastProgressAt === undefined ? {} : { lastProgressAt: updated.lastProgressAt }),
       ...(updated.objective === undefined ? {} : { objective: updated.objective }),
     });
