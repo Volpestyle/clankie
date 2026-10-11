@@ -926,10 +926,11 @@ after the proof. Port selection does not reserve ports across later launches:
 a collision fails startup; generate a new directory and preset rather than
 falling back to the installed ports.
 
-`CLANKIE_SCRATCH=1`, `NODE_ENV=development`, or a state directory different from the installed default
-enables the startup guard. Both entrypoints refuse bind or peer ports `4310`
+`CLANKIE_SCRATCH=1` enables the startup guard. Scratch/dev harnesses must set
+this flag; a custom state directory or `NODE_ENV` alone does not imply a scratch
+stack. Both entrypoints refuse bind or peer ports `4310`
 and `4321` with `scratch_live_port_refused`, including explicitly configured
-URLs. A verified owner sandbox retains its normal state directory. Manually
+URLs. Production stacks may use custom state directories and canonical ports. Manually
 configured scratch stacks must set the same peer variables as the preset;
 changing just `PORT` is insufficient.
 

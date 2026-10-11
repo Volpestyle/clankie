@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { assertScratchNetwork, verifyLocalSandbox } from "@clankie/settings";
+import { assertScratchNetwork } from "@clankie/settings";
 import { resolveCaptainCredential } from "@clankie/credential-broker";
 import { ControlPlaneDeviceAuthorizer } from "./device-auth.ts";
 import {
@@ -13,7 +13,6 @@ import {
 } from "./operator-conversations.ts";
 
 // 4320 belongs to the activity surface; the relay's canonical port is 4321.
-await verifyLocalSandbox();
 assertScratchNetwork("relay");
 const port = Number(process.env.CLANKIE_RELAY_PORT ?? process.env.PORT ?? 4321);
 const host = process.env.CLANKIE_RELAY_HOST ?? "127.0.0.1";

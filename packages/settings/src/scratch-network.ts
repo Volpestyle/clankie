@@ -1,18 +1,9 @@
-import { homedir, userInfo } from "node:os";
-import { join, resolve } from "node:path";
-import { verifiedLocalSandbox } from "./local-sandbox.ts";
-
 /** Refuse before credentials, listeners or upstream requests are created. */
 export function assertScratchNetwork(
   service: "clankie" | "relay",
   env: NodeJS.ProcessEnv = process.env,
 ): void {
-  const sandbox = verifiedLocalSandbox();
-  const liveState = sandbox ? join(sandbox.home, "s") : join(userInfo().homedir, ".clankie");
-  const state = resolve(env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie"));
-  const scratch =
-    env.CLANKIE_SCRATCH === "1" || env.NODE_ENV === "development" || state !== resolve(liveState);
-  if (!scratch) return;
+  if (env.CLANKIE_SCRATCH !== "1") return;
   const reject = (name: string, value: string) => {
     throw new Error(`scratch_live_port_refused: ${name}=${value}; use scripts/scratch-stack.mjs`);
   };
