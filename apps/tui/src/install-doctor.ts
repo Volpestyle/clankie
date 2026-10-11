@@ -1,3 +1,9 @@
+import {
+  autonomyDrift,
+  matchingAutonomyLevel,
+  type AutonomyDrift,
+  type AutonomyLevelReading,
+} from "@clankie/protocol";
 import type { FleetToolCatalogHealthPage } from "@clankie/protocol/tool-catalog";
 import { listHerdrSessions } from "./session/herdr-report.ts";
 import { execFile as execFileCallback } from "node:child_process";
@@ -168,6 +174,7 @@ export interface InstallDoctorReport {
   readonly ownerHerdrSessions?: readonly string[];
   readonly herdrPlugin: HerdrPluginReport;
   readonly remoteHarnesses?: readonly unknown[];
+  readonly autonomy?: { readonly level: AutonomyLevelReading; readonly drift?: AutonomyDrift };
   readonly workingPreferences?: import("./command/working-preferences.ts").WorkingPreferencesReport;
   readonly toolCatalogHealth?:
     | FleetToolCatalogHealthPage
@@ -272,6 +279,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   const env = options.env ?? process.env;
   const kind = inspectInstallKind(options.repoRoot);
   const settings = await (options.settings ?? new SettingsStore(defaultSettingsPath(env))).load();
+  const drift = autonomyDrift(settings.autonomy.fleet);
   const config = await (options.loadConfigImpl ?? loadConfig)({ cwd: options.repoRoot, env });
   const credentialStore = options.credentialStore ?? createDefaultCredentialStore({ env });
   const linearServer = settings.mcp.servers.find((server) => server.id === "linear");
@@ -414,6 +422,10 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     version: await readInstallVersion(options.repoRoot, kind),
     repoRoot: options.repoRoot,
     model,
+    autonomy: {
+      level: matchingAutonomyLevel(settings.autonomy.fleet),
+      ...(drift === undefined ? {} : { drift }),
+    },
     captain,
     imageModel: unsetToNull(config.config.image_model),
     videoModel: unsetToNull(config.config.video_model),

@@ -6,6 +6,7 @@ import {
   FleetGatesSchema,
   AutonomyLevelSchema,
   AutonomyLevelReadingSchema,
+  AutonomyDriftSchema,
 } from "./autonomy.ts";
 import { ProjectIdSchema } from "./projects.ts";
 import { FleetResourcePolicySchema } from "./fleet-resources.ts";
@@ -37,6 +38,7 @@ export const FleetSettingsSnapshotSchema = z
     fleetGates: z.literal(true).optional(),
     /** The owner's autonomy dial read back from the leaves (ADR 0263); absent on an older service. */
     autonomyLevel: AutonomyLevelReadingSchema.optional(),
+    autonomyDrift: AutonomyDriftSchema.optional(),
   })
   .strict()
   .refine(

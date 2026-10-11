@@ -11,7 +11,8 @@ import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { SettingsStore } from "@clankie/settings";
 import { createFleetSettingsRoutes } from "../../clankie/src/fleet-settings-routes.ts";
 import { createProjectRoutes } from "../../clankie/src/project-routes.ts";
-import { runFleetCommand } from "../src/command/fleet.ts";
+import { fleetSettingsClient } from "./fixtures/fleet-settings-client.ts";
+import { runAutonomyCommand, runFleetCommand } from "../src/command/fleet.ts";
 import { runHarnessCommand } from "../src/command/harness.ts";
 import { runProjectSettingsCommand } from "../src/command/project-settings.ts";
 import { herdrFleetRuntimeArgs } from "../src/command/herdr.ts";
@@ -625,4 +626,22 @@ it("refuses a captured SSH destination when its registered fleet ID is rebound d
     },
   ]);
   expect(result.ok).toBe(false);
+});
+
+it("the autonomy CLI names drift and explicit level writes use the shared owner API", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => ({
+    ...current,
+    autonomy: { fleet: { ...current.autonomy.fleet, hardToUndo: "owner" } },
+  }));
+  const options = fleetSettingsClient(f.settings);
+  const custom = await runAutonomyCommand([], options);
+  expect(custom.level).toBe("custom");
+  expect(custom.description).toContain("hardToUndo: owner (high: lead)");
+  for (const level of ["off", "low", "high", "full"] as const) {
+    const saved = await runAutonomyCommand([level], options);
+    expect(saved.level).toBe(level);
+    expect(saved.drift).toBeUndefined();
+    expect((await runAutonomyCommand([], options)).level).toBe(level);
+  }
 });

@@ -89,6 +89,13 @@ rules still hold. Running seats keep the mode they started with; the switch's
 `seatsOnOtherMode` names the live ones still on the old mode. It is separate
 from the autonomy dial, which decides what you do without asking.
 
+First-run `/setup` asks the owner to choose Off, Low, High or Full using the
+canonical descriptions from `clankie autonomy`. It writes the same revisioned
+fleet-settings API as `/autonomy` and app settings. A Custom reading shows the
+nearest preset and every differing saved leaf in doctor, the console and your
+fleet session card; it never raises saved authority. If a custom leaf causes an
+owner-gated decision, name that leaf and its saved value in the ask.
+
 `credential_unavailable` or `not_configured` means nobody connected it yet. Say
 that, and point at `clankie model`, `/connect`, or `/auth`, rather than implying
 you refused. Secrets go through `/auth`, the existing wizards or the credential

@@ -78,3 +78,17 @@ Money and accounts stay with the owner at every level.
 - Later VUH-2020 slices read this level rather than adding switches of their
   own: proactive ideas, posts and announcements, an owner intent record, and
   process improvement.
+
+## Onboarding and visible drift (VUH-2088)
+
+First-run setup now requires an explicit level choice through the same owner
+API before model setup becomes ready. Cancelling never advances setup or resets
+saved authority. Hosted `/setup` offers the same choice. App first-run delivery
+is tracked in linked [VUH-2089](https://linear.app/vuhlp/issue/VUH-2089).
+
+Custom reads project a nearest-preset comparison over all nine decision leaves,
+counting each differing leaf once. Ties prefer High (the default), then Off,
+Low and Full. API snapshots expose `autonomyDrift`; doctor, console status and
+the lead's fleet card show each actual and preset value. This is passive
+information, not a request to raise authority. When a custom leaf causes an
+owner gate, the lead names the leaf and its saved value in the question.

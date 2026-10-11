@@ -1,3 +1,4 @@
+import { FleetAutonomySchema, autonomyDrift, formatAutonomyDrift } from "@clankie/protocol";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import { ClankieFooterComponent, type ClankieFooterState } from "../src/shell/footer.ts";
@@ -31,4 +32,18 @@ describe("footer component", () => {
       expect(visibleWidth(line)).toBeLessThanOrEqual(1);
     }
   });
+});
+
+it("keeps every differing autonomy leaf visible in a narrow console", () => {
+  const fleet = FleetAutonomySchema.parse({
+    hardToUndo: "owner",
+    release: { mode: "time_rule", rule: "Weekly" },
+  });
+  const drift = autonomyDrift(fleet)!;
+  const lines = footer({ extras: ["This Mac"], autonomy: formatAutonomyDrift(drift) }).render(40);
+  const rendered = lines.join(" ");
+  expect(rendered).toContain("Autonomy custom");
+  expect(rendered).toContain("hardToUndo: owner");
+  expect(rendered).toContain("release: time_rule");
+  for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
 });

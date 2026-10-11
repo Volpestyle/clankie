@@ -464,7 +464,15 @@ async function restartCaptain(): Promise<void> {
   if (failed !== undefined) throw new Error(failed.error ?? `${failed.label} failed to restart`);
 }
 
+let autonomyStatus: string | undefined;
+async function readAutonomy(args: readonly string[]) {
+  const result = await (await import("./command/fleet.ts")).runAutonomyCommand(args, brokeredCommands);
+  autonomyStatus = result.level === "custom" ? result.description : undefined;
+  shell.refreshStatusView();
+  return result;
+}
 const setupServices: SetupCommandServices = {
+  autonomy: readAutonomy,
   provider: services,
   canTalk: () => conversationSelection.conversationId !== undefined,
   doctor: () => doctorCommand({ repoRoot, env: process.env }),
@@ -536,8 +544,7 @@ const commands = [
         ...(ownerFetcher === undefined ? {} : { ownerFetcher }),
         host: serviceUrl,
       }),
-    commandAutonomy: async (args) =>
-      (await import("./command/fleet.ts")).runAutonomyCommand(args, brokeredCommands),
+    commandAutonomy: async (args) => readAutonomy(args),
     commandMaximumTrustMode: async (args) =>
       (await import("./command/maximum-trust-mode.ts")).runMaximumTrustModeCommand(args, brokeredCommands),
     conversations: conversationsContext,
@@ -637,6 +644,7 @@ const shell: ClankieFaceShell = new ClankieFaceShell({
   voiceTranscripts,
   // Routine body and fleet details live in /status; the dock keeps working context.
   footerData: () => ({
+    autonomy: autonomyStatus,
     contextUsage: currentContextUsage,
     // The configured pi model says nothing about a turn a seated harness takes.
     model: currentDriver === undefined ? currentModelDisplay : `${currentDriver.harness ?? "harness"} seat`,
@@ -787,6 +795,8 @@ async function refreshEvaluatorStatus(): Promise<void> {
   evaluatorStatus = next;
   shell.refreshStatusView();
 }
+void readAutonomy([]).catch(() => undefined);
+setInterval(() => void readAutonomy([]).catch(() => undefined), 30_000).unref();
 void refreshEvaluatorStatus();
 setInterval(() => void refreshEvaluatorStatus(), 30_000).unref();
 

@@ -756,3 +756,24 @@ it("discovers only running owner Herdr sessions using a read-only installed CLI 
   expect(report.ownerHerdrSessions).toEqual(["work"]);
   expect(calls.filter((call) => call[0] === "herdr")).toEqual([["herdr", "session", "list", "--json"]]);
 });
+
+it("doctor shows retained custom leaves and the nearest preset without changing them", async () => {
+  const root = await installRoot();
+  const settings = new SettingsStore(join(root, "settings.json"));
+  await settings.update((current) => ({
+    ...current,
+    autonomy: { fleet: { ...current.autonomy.fleet, hardToUndo: "owner" } },
+  }));
+  const before = await readFile(settings.path, "utf8");
+  const report = await inspectInstall({
+    repoRoot: root,
+    env: { HOME: root },
+    settings,
+    credentialStore: new FileCredentialStore(join(root, "credentials.json")),
+    execFileImpl: missing,
+  });
+  expect(report.autonomy?.level).toBe("custom");
+  expect(formatDoctorReport(report)).toContain("hardToUndo: owner (high: lead)");
+  expect(formatDoctorSummary(report)).toContain("Autonomy custom · nearest High");
+  expect(await readFile(settings.path, "utf8")).toBe(before);
+});

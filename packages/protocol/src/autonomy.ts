@@ -159,6 +159,53 @@ export function matchingAutonomyLevel(
   );
 }
 
+/** Read-only drift from the closest level; ties prefer the default High level. */
+export const AutonomyDriftSchema = z
+  .object({
+    nearest: AutonomyLevelSchema,
+    differences: z
+      .array(
+        z
+          .object({
+            field: z.enum(AUTONOMY_LEVEL_FLEET_FIELDS),
+            actual: z.string(),
+            expected: z.string(),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+export type AutonomyDrift = z.infer<typeof AutonomyDriftSchema>;
+
+export function autonomyDrift(
+  fleet: Pick<FleetAutonomyWire, (typeof AUTONOMY_LEVEL_FLEET_FIELDS)[number]>,
+): AutonomyDrift | undefined {
+  const levels: AutonomyLevel[] = [
+    DEFAULT_AUTONOMY_LEVEL,
+    ...AutonomyLevelSchema.options.filter((level) => level !== DEFAULT_AUTONOMY_LEVEL),
+  ];
+  const candidates = levels.map((nearest) => ({
+    nearest,
+    differences: AUTONOMY_LEVEL_FLEET_FIELDS.flatMap((field) => {
+      const actual = field === "release" ? fleet.release?.mode : fleet[field];
+      const expected =
+        field === "release"
+          ? AUTONOMY_LEVELS[nearest].fleet.release.mode
+          : AUTONOMY_LEVELS[nearest].fleet[field];
+      return actual === expected ? [] : [{ field, actual: actual ?? "unknown", expected }];
+    }),
+  }));
+  candidates.sort((a, b) => a.differences.length - b.differences.length);
+  const closest = candidates[0]!;
+  return closest.differences.length === 0 ? undefined : closest;
+}
+
+/** A passive status indicator, with no suggestion to raise saved authority. */
+export function formatAutonomyDrift(drift: AutonomyDrift): string {
+  return `Autonomy custom · nearest ${AUTONOMY_LEVELS[drift.nearest].label} · ${drift.differences.map((d) => `${d.field}: ${d.actual} (${drift.nearest}: ${d.expected})`).join(", ")}`;
+}
+
 export const FLEET_AUTONOMY_DEFAULTS = {
   ...AUTONOMY_LEVELS[DEFAULT_AUTONOMY_LEVEL].fleet,
   verification: "change_run_read",

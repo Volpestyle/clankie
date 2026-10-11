@@ -13,6 +13,8 @@ import {
   AutonomyLevelSchema,
   type AutonomyLevel,
   type AutonomyLevelReading,
+  type AutonomyDrift,
+  formatAutonomyDrift,
   FleetResourcePolicySchema,
   withoutNoPreference,
 } from "@clankie/protocol";
@@ -299,6 +301,7 @@ export interface AutonomyCommandResult {
   readonly level: AutonomyLevelReading;
   readonly description: string;
   readonly levels: Record<AutonomyLevel, string>;
+  readonly drift?: AutonomyDrift;
 }
 
 /** The owner's one autonomy dial (ADR 0263), over the same fleet settings API. */
@@ -308,18 +311,22 @@ export async function runAutonomyCommand(
 ): Promise<AutonomyCommandResult> {
   const verb = args[0] ?? "status";
   if (args.length > 1) throw new Error(AUTONOMY_USAGE);
-  let report: FleetCommandResult;
-  if (verb === "status") report = await fleetStatus(options);
-  else {
+  const api = await ownerSettingsApi(options);
+  const snapshot = await api.get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
+  if (snapshot.autonomyLevel === undefined)
+    throw new Error("This Clankie service predates the autonomy dial. Update it, then try again.");
+  let report = snapshot;
+  if (verb !== "status") {
     const level = AutonomyLevelSchema.safeParse(verb);
     if (!level.success) throw new Error(AUTONOMY_USAGE);
-    const api = await ownerSettingsApi(options);
-    const snapshot = await api.get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
-    if (snapshot.autonomyLevel === undefined)
-      throw new Error("This Clankie service predates the autonomy dial. Update it, then try again.");
-    report = await fleetUpdate(
-      { autonomyLevel: level.data },
-      { ...options, expectedRevision: snapshot.revision },
+    report = await api.write(
+      FLEET_SETTINGS_PATH,
+      {
+        schemaVersion: 1,
+        expectedRevision: snapshot.revision,
+        changes: { autonomyLevel: level.data },
+      },
+      FleetSettingsSnapshotSchema,
     );
   }
   if (report.autonomyLevel === undefined)
@@ -328,14 +335,16 @@ export async function runAutonomyCommand(
     ok: true,
     revision: report.revision,
     level: report.autonomyLevel,
-    description: autonomyLevelDescription(report.autonomyLevel),
+    description: autonomyLevelDescription(report.autonomyLevel, report.autonomyDrift),
+    ...(report.autonomyDrift === undefined ? {} : { drift: report.autonomyDrift }),
     levels: Object.fromEntries(
       AutonomyLevelSchema.options.map((level) => [level, AUTONOMY_LEVELS[level].description]),
     ) as Record<AutonomyLevel, string>,
   };
 }
 
-export function autonomyLevelDescription(level: AutonomyLevelReading): string {
+export function autonomyLevelDescription(level: AutonomyLevelReading, drift?: AutonomyDrift): string {
+  if (level === "custom" && drift !== undefined) return formatAutonomyDrift(drift);
   return level === "custom"
     ? "Custom: individual settings differ from every level. Choose a level to reset them, or keep tuning them under Advanced."
     : `${AUTONOMY_LEVELS[level].label}: ${AUTONOMY_LEVELS[level].description}`;

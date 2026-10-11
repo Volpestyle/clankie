@@ -336,3 +336,11 @@ inactive state in an enrolled developer root and preserves `.local` evidence
 under Clankie's state directory first. Runtime pins, runtime/update namespaces
 and the running service checkout stay protected regardless of enrollment.
 Keep live workers' owned trees even when their pane startup cwd is main.
+
+## Custom autonomy
+
+`clankie autonomy status` and doctor name the nearest preset and differing
+saved leaves when the dial reads `custom`. Treat this as a comparison, never
+permission to reset or raise authority. If a custom leaf causes an owner-gated
+decision, mention that leaf and its saved value when asking. The autonomy dial
+and maximum trust harness mode are separate controls.

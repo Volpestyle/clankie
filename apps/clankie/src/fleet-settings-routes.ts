@@ -13,6 +13,7 @@ import {
   FleetAutonomySchema,
   autonomyLevelFleet,
   matchingAutonomyLevel,
+  autonomyDrift,
   UpdateFleetSettingsSchema,
   type FleetSettingsSnapshot,
   type FleetResourcePolicy,
@@ -31,6 +32,7 @@ function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot
     ...(settings.fleet.resources === undefined ? {} : { resources: settings.fleet.resources }),
     ...settings.autonomy.fleet,
   };
+  const drift = autonomyDrift(settings.autonomy.fleet);
   return {
     schemaVersion: 1,
     workingPreferences: true,
@@ -38,6 +40,7 @@ function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot
     revision: createHash("sha256").update(JSON.stringify(fleet)).digest("hex"),
     fleet,
     autonomyLevel: matchingAutonomyLevel(settings.autonomy.fleet),
+    ...(drift === undefined ? {} : { autonomyDrift: drift }),
   };
 }
 class InvalidHireDefaults extends Error {}

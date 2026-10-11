@@ -55,11 +55,15 @@ takes: off, low, high (the default) or full. At high he answers his helpers'
 questions, including changes that are hard to undo, commits, pushes and closes
 work, and asks you before releases. Money and accounts always come to you. Set
 it with `/autonomy`, in the app's fleet settings, or with
-[`clankie autonomy`](/cli/#autonomy-dial); the individual settings stay under
-Advanced. Owner defaults apply everywhere, a project
+[`clankie autonomy`](/cli/#autonomy-dial). First-run `/setup` asks you to choose
+Off, Low, High or Full explicitly. The individual settings stay under Advanced. Owner defaults apply everywhere, a project
 can override them, and every helper receives the result. Change them by asking
 Clankie, in the app's project settings, or with `clankie fleet` on a DIY
 installation. Preferences never widen access.
+
+When autonomy reads **Custom**, doctor and the console show the nearest level
+and which saved leaves differ. Nothing is changed automatically. If a custom
+leaf makes a decision wait for you, Clankie names that leaf when he asks.
 
 When Clankie needs your decision or an action only you can take, he can leave a
 structured ask showing what waits, his recommendation and the exact next steps.

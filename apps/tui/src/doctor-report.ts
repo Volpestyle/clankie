@@ -1,3 +1,4 @@
+import { formatAutonomyDrift } from "@clankie/protocol";
 import { stripVTControlCharacters } from "node:util";
 import type { UnreconciledWorktree } from "@clankie/protocol";
 import type { InstallDoctorReport } from "./install-doctor.ts";
@@ -160,6 +161,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
         ]),
     `  Discord · ${report.discord.activeBody ?? "no body"}${report.discord.voiceEnabled ? " · voice" : ""}`,
     ...(report.mcpServers.length ? [`  MCP · ${report.mcpServers.join(", ")}`] : []),
+    ...(report.autonomy?.drift === undefined ? [] : [`  ○ ${formatAutonomyDrift(report.autonomy.drift)}`]),
     ...(report.workingPreferences === undefined
       ? []
       : ["", ...formatWorkingPreferences(report.workingPreferences).map((line) => `  ${line}`)]),

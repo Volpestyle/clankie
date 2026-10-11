@@ -1,3 +1,5 @@
+import { runAutonomyCommand } from "../src/command/fleet.ts";
+import { fleetSettingsClient } from "./fixtures/fleet-settings-client.ts";
 import { mkdtemp, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,6 +51,7 @@ async function fixture() {
   await personas.ready(settings);
   cleanups.push(() => personas.close());
   const services: SetupCommandServices = {
+    autonomy: (args) => runAutonomyCommand(args, fleetSettingsClient(settings)),
     provider: createProviderServices({ env, cwd: root }),
     canTalk: () => true,
     doctor: () => inspectInstall({ repoRoot: root, env, settings, credentialStore: store }),
@@ -70,7 +73,7 @@ async function fixture() {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5_000),
     });
-  return { root, env, host, shell, start, post };
+  return { root, env, host, shell, start, post, settings };
 }
 
 async function prompt(shell: ClankieFaceShell, text: string) {
@@ -106,6 +109,7 @@ it("a fresh model config reaches the first-hire composer through the actual TUI 
   const devices = await listDevices({ controlPlaneUrl: f.host.baseUrl, operatorToken: f.host.operatorToken });
   expect(devices[0]?.status).toBe("pending");
   const running = f.start();
+  await choose(f.shell, "How much should Clankie decide", "Full");
   await pickModel(f.shell);
   await choose(f.shell, "Pair your phone or iPad", "Do this later");
   await choose(f.shell, "Optional:", "Continue to my first agent");
@@ -114,6 +118,7 @@ it("a fresh model config reaches the first-hire composer through the actual TUI 
   await choose(f.shell, "Ask Clankie to hire", "Edit the request first");
   await running;
   const { config } = await loadConfig({ env: f.env, cwd: f.root });
+  expect((await runAutonomyCommand([], fleetSettingsClient(f.settings))).level).toBe("full");
   expect(config.model).toMatch(/^openai\//u);
   expect(f.shell.getDraft()).toContain(JSON.stringify(await realpath(f.root)));
   expect(f.shell.getDraft()).toContain("hire my first native agent");
@@ -140,11 +145,13 @@ it("only a completed phone advances automatically; a completed Mac does not", as
   }
   await pair("macos");
   const first = f.start();
+  await choose(f.shell, "How much should Clankie decide", "Full");
   await pickModel(f.shell);
   (await prompt(f.shell, "Pair your phone or iPad")).handleInput("\x1b");
   await first;
   await pair("ios");
   const second = f.start();
+  await choose(f.shell, "How much should Clankie decide", "High");
   await choose(f.shell, "Optional:", "Continue to my first agent");
   (await prompt(f.shell, "Which folder should your first agent work in?")).handleInput("\r");
   (await prompt(f.shell, "What should your first agent do?")).handleInput("\x1b");
@@ -155,6 +162,22 @@ it("only a completed phone advances automatically; a completed Mac does not", as
   ).find((device) => device.platform === "ios")!;
   expect((await f.host.operator(`/v1/devices/${phone.deviceId}/revoke`)).status).toBe(200);
   const third = f.start();
+  await choose(f.shell, "How much should Clankie decide", "Low");
   (await prompt(f.shell, "Pair your phone or iPad")).handleInput("\x1b");
   await third;
+});
+
+it("cancelling autonomy keeps saved custom leaves and does not advance first-run setup", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => ({
+    ...current,
+    autonomy: { fleet: { ...current.autonomy.fleet, hardToUndo: "owner" } },
+  }));
+  const before = await f.settings.load();
+  const running = f.start();
+  (await prompt(f.shell, "How much should Clankie decide")).handleInput("\x1b");
+  await running;
+  expect((await f.settings.load()).autonomy).toEqual(before.autonomy);
+  expect(f.shell.getDraft()).toBe("");
+  expect((await runAutonomyCommand([], fleetSettingsClient(f.settings))).level).toBe("custom");
 });

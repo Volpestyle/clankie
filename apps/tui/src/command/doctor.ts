@@ -1,3 +1,4 @@
+import { formatAutonomyDrift } from "@clankie/protocol";
 import { z } from "zod";
 import { MachineAccessRefusalSchema } from "@clankie/protocol";
 import { runMachinesCommand } from "./machines.ts";
@@ -39,6 +40,13 @@ export type { ExecFileImpl, InstallDoctorReport };
 
 /** Readiness first; optional rooms never hide the reason a first turn fails. */
 export function formatDoctorSummary(report: InstallDoctorReport): string {
+  const summary = doctorSummary(report);
+  return report.autonomy?.drift === undefined
+    ? summary
+    : `${summary}\n${formatAutonomyDrift(report.autonomy.drift)}`;
+}
+
+function doctorSummary(report: InstallDoctorReport): string {
   const refusal =
     report.machineAccessRefusals && "refusals" in report.machineAccessRefusals
       ? report.machineAccessRefusals.refusals[0]

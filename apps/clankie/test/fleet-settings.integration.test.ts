@@ -970,3 +970,28 @@ it("sets hire defaults, talkativeness and worker-account holds through the owner
   ).toBe(401);
   expect((await f.request(OPERATOR_PERSONA_PATH, { chattiness: "chatty" })).status).toBe(401);
 });
+
+it("exposes retained Balanced drift without raising saved leaves and removes it after explicit level selection", async () => {
+  const f = await fixture();
+  const high = await f.client.fleetSettings();
+  const custom = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: high.revision,
+    changes: { hardToUndo: "owner" },
+  });
+  expect(custom.autonomyLevel).toBe("custom");
+  expect(custom.autonomyDrift).toEqual({
+    nearest: "high",
+    differences: [{ field: "hardToUndo", actual: "owner", expected: "lead" }],
+  });
+  const before = (await new SettingsStore(f.settings.path).load()).autonomy;
+  expect((await f.client.fleetSettings()).autonomyDrift).toEqual(custom.autonomyDrift);
+  expect((await new SettingsStore(f.settings.path).load()).autonomy).toEqual(before);
+  const full = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: custom.revision,
+    changes: { autonomyLevel: "full" },
+  });
+  expect(full.autonomyLevel).toBe("full");
+  expect(full.autonomyDrift).toBeUndefined();
+});

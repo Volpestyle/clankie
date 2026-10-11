@@ -11,50 +11,56 @@ import { OperatorConversationSendError } from "../src/session/operator-conversat
 
 describe("shell assembly", () => {
   it("renders one row per tool call that opens individually from the keyboard or all through Ctrl+O", () => {
-    const shell = new ClankieFaceShell({
-      commands: [],
-      cwd: process.cwd(),
-      env: {},
-      bannerFields: { title: "Clankie" },
-    });
-    const internal = shell as unknown as {
-      chat: { children: unknown[]; render(width: number): string[] };
-      routeInput(data: string): unknown;
-    };
-    const render = () => stripVTControlCharacters(internal.chat.render(80).join("\n"));
-    shell.beginToolCall("a", "read", '{"path":"first.ts"}');
-    expect(render()).toContain("read · first.ts · running");
-    shell.completeToolCall("a", "read", { failed: false, detail: "first contents" });
-    shell.beginToolCall("b", "grep", '{"pattern":"needle","path":"src"}');
-    shell.completeToolCall("b", "grep", { failed: true, detail: "permission denied" });
-    shell.beginToolCall("c", "bash", '{"command":"echo one"}');
-    shell.completeToolCall("c", "bash", { failed: false, detail: "shell output" });
-    // Closed rows: one line each, stacked, with only a failure's first line beneath.
-    expect(
-      render()
-        .split("\n")
-        .filter((line) => line.trim() !== ""),
-    ).toEqual([
-      " ✓ read · first.ts",
-      " ✗ grep · needle · failed",
-      "   ╰ permission denied",
-      " ✓ bash · echo one",
-    ]);
-    expect(render()).not.toContain("first contents");
+    vi.stubEnv("TERM", "xterm-256color");
+    vi.stubEnv("CLANKIE_TUI_UNICODE", "1");
+    try {
+      const shell = new ClankieFaceShell({
+        commands: [],
+        cwd: process.cwd(),
+        env: {},
+        bannerFields: { title: "Clankie" },
+      });
+      const internal = shell as unknown as {
+        chat: { children: unknown[]; render(width: number): string[] };
+        routeInput(data: string): unknown;
+      };
+      const render = () => stripVTControlCharacters(internal.chat.render(80).join("\n"));
+      shell.beginToolCall("a", "read", '{"path":"first.ts"}');
+      expect(render()).toContain("read · first.ts · running");
+      shell.completeToolCall("a", "read", { failed: false, detail: "first contents" });
+      shell.beginToolCall("b", "grep", '{"pattern":"needle","path":"src"}');
+      shell.completeToolCall("b", "grep", { failed: true, detail: "permission denied" });
+      shell.beginToolCall("c", "bash", '{"command":"echo one"}');
+      shell.completeToolCall("c", "bash", { failed: false, detail: "shell output" });
+      // Closed rows: one line each, stacked, with only a failure's first line beneath.
+      expect(
+        render()
+          .split("\n")
+          .filter((line) => line.trim() !== ""),
+      ).toEqual([
+        " ✓ read · first.ts",
+        " ✗ grep · needle · failed",
+        "   ╰ permission denied",
+        " ✓ bash · echo one",
+      ]);
+      expect(render()).not.toContain("first contents");
 
-    // Alt+Up selects the newest row, again the one before it; Enter opens only that one.
-    internal.routeInput("\x1b[1;3A");
-    internal.routeInput("\x1b[1;3A");
-    expect(render()).toContain("grep · needle · failed  enter to open");
-    internal.routeInput("\r");
-    expect(render()).toContain("enter to close");
-    expect(render()).not.toContain("shell output");
-    internal.routeInput("\x1b");
-    expect(render()).not.toContain("enter to");
+      // Alt+Up selects the newest row, again the one before it; Enter opens only that one.
+      internal.routeInput("\x1b[1;3A");
+      internal.routeInput("\x1b[1;3A");
+      expect(render()).toContain("grep · needle · failed  enter to open");
+      internal.routeInput("\r");
+      expect(render()).toContain("enter to close");
+      expect(render()).not.toContain("shell output");
+      internal.routeInput("\x1b");
+      expect(render()).not.toContain("enter to");
 
-    internal.routeInput("\x0f");
-    expect(render()).toContain("first contents");
-    expect(render()).toContain("shell output");
+      internal.routeInput("\x0f");
+      expect(render()).toContain("first contents");
+      expect(render()).toContain("shell output");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("renders bounded pending previews above the editor and clears on conversation change", () => {

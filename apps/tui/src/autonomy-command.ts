@@ -4,7 +4,7 @@ import {
   type OperatorAutonomyCommand,
   type OperatorAutonomyStatus,
 } from "@clankie/protocol";
-import { autonomyLevelDescription, type AutonomyCommandResult } from "./command/fleet.ts";
+import { type AutonomyCommandResult } from "./command/fleet.ts";
 import { onOff, runSettingsMenu } from "./settings-menu.ts";
 import type { FaceShellCommand } from "./shell/shell.ts";
 
@@ -44,7 +44,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
           const status = wakes === undefined ? undefined : await wakes({ action: "status" });
           return {
             title: [
-              ...(dial === undefined ? [] : [autonomyLevelDescription(dial.level)]),
+              ...(dial === undefined ? [] : [dial.description]),
               ...(status === undefined ? [] : [formatWakes(status).split("\n").join(" · ")]),
             ].join(" · "),
             actions: [
@@ -55,7 +55,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
                     label: AUTONOMY_LEVELS[option].label,
                     hint: dial?.level === option ? "current" : AUTONOMY_LEVELS[option].description,
                     async run() {
-                      return autonomyLevelDescription((await level([option])).level);
+                      return (await level([option])).description;
                     },
                   }))),
               ...(status === undefined
@@ -92,11 +92,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
       try {
         const chosen = AutonomyLevelSchema.safeParse(input);
         if (chosen.success && level !== undefined) {
-          shell.insertCommandResult(
-            "/autonomy",
-            autonomyLevelDescription((await level([chosen.data])).level),
-            "success",
-          );
+          shell.insertCommandResult("/autonomy", (await level([chosen.data])).description, "success");
           return;
         }
         const command: OperatorAutonomyCommand | undefined =
@@ -106,11 +102,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
               ? { action: "clear_wake" }
               : undefined;
         if (input === "status" && wakes === undefined && level !== undefined) {
-          shell.insertCommandResult(
-            "/autonomy",
-            autonomyLevelDescription((await level([])).level),
-            "success",
-          );
+          shell.insertCommandResult("/autonomy", (await level([])).description, "success");
           return;
         }
         if (command === undefined || wakes === undefined) {
@@ -121,9 +113,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
         const dial = input === "status" && level !== undefined ? await level([]) : undefined;
         shell.insertCommandResult(
           "/autonomy",
-          [...(dial === undefined ? [] : [autonomyLevelDescription(dial.level)]), formatWakes(status)].join(
-            "\n",
-          ),
+          [...(dial === undefined ? [] : [dial.description]), formatWakes(status)].join("\n"),
           status.error === undefined ? "success" : "error",
         );
       } catch (error) {

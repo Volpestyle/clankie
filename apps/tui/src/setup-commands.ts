@@ -1,7 +1,13 @@
 /** `/setup` chains the existing model, phone and integration commands, then hands hiring to Clankie. */
 import { setTimeout as delay } from "node:timers/promises";
-import type { DeviceListItem, OperatorAgentPersona } from "@clankie/protocol";
+import {
+  AUTONOMY_LEVELS,
+  AutonomyLevelSchema,
+  type DeviceListItem,
+  type OperatorAgentPersona,
+} from "@clankie/protocol";
 import type { CaptainReadiness } from "@clankie/model-provider";
+import type { AutonomyCommandResult } from "./command/fleet.ts";
 import type { InstallDoctorReport } from "./install-doctor.ts";
 import type { AutostartCommandResult } from "./command/autostart.ts";
 import { readCaptainReadiness, runThinkingSetup, type ProviderServices } from "./provider-commands.ts";
@@ -10,6 +16,7 @@ import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export interface SetupCommandServices {
   readonly provider: ProviderServices;
+  readonly autonomy: (args: readonly string[]) => Promise<AutonomyCommandResult>;
   /** Whether this console reaches his service with a conversation to talk in. */
   readonly canTalk: () => boolean;
   readonly doctor: () => Promise<InstallDoctorReport>;
@@ -34,7 +41,7 @@ export function buildSetupCommands(services: SetupCommandServices): FaceShellCom
     {
       name: "setup",
       aliases: ["onboard"],
-      description: "Model sign-in, phone pairing, then your first agent",
+      description: "Model sign-in, autonomy, phone pairing, then your first agent",
       argumentHint: "[rooms]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -56,6 +63,9 @@ export function buildSetupCommands(services: SetupCommandServices): FaceShellCom
 
 /** A fresh console starts here, then stays in the same guided path. */
 export async function runFirstSetup(shell: ClankieFaceShell, services: SetupCommandServices): Promise<void> {
+  // Choose authority before model setup becomes ready, so cancelling cannot
+  // make a partial first run look complete on the next console launch.
+  if (!(await runAutonomySetup(shell, services.autonomy))) return;
   const readiness = await runThinkingSetup(shell, services.provider, {
     restartCaptain: services.restartCaptain,
   });
@@ -65,7 +75,7 @@ export async function runFirstSetup(shell: ClankieFaceShell, services: SetupComm
         "**Clankie can't think yet**",
         "",
         notReadyLine(readiness),
-        "Run `/setup` whenever you're ready — it's two questions.",
+        "Run `/setup` whenever you're ready to choose a model and autonomy level.",
       ].join("\n"),
     );
     return;
@@ -83,7 +93,7 @@ export async function runFirstSetup(shell: ClankieFaceShell, services: SetupComm
     );
     return;
   }
-  await runGuidedSetup(shell, services, readiness);
+  await runGuidedSetup(shell, services, readiness, true);
 }
 
 /** No persisted wizard state: every return reads the actual credentials, devices and roster. */
@@ -91,8 +101,9 @@ async function runGuidedSetup(
   shell: ClankieFaceShell,
   services: SetupCommandServices,
   readiness: Extract<CaptainReadiness, { ready: true }>,
+  autonomySelected = false,
 ): Promise<void> {
-  shell.insertCommandResult("/setup", `1 of 3 · Clankie thinks with ${readiness.model}.`, "success");
+  shell.insertCommandResult("/setup", `1 of 4 · Clankie thinks with ${readiness.model}.`, "success");
   if (!services.canTalk()) {
     shell.insertCommandResult(
       "/setup",
@@ -101,6 +112,7 @@ async function runGuidedSetup(
     );
     return;
   }
+  if (!autonomySelected && !(await runAutonomySetup(shell, services.autonomy))) return;
   if (!(await setupPhone(shell, services))) return;
 
   const flow = shell.setupFlow;
@@ -124,7 +136,7 @@ async function runGuidedSetup(
   if (existing) {
     shell.insertCommandResult(
       "/setup",
-      `3 of 3 · ${existing.name} already has a live agent seat. /agents opens the team; /setup rooms has the other settings.`,
+      `4 of 4 · ${existing.name} already has a live agent seat. /agents opens the team; /setup rooms has the other settings.`,
       "success",
     );
     return;
@@ -136,7 +148,7 @@ async function runGuidedSetup(
   let request = "";
   try {
     workspace = await flow.readText({
-      message: "3 of 3 · Which folder should your first agent work in?",
+      message: "4 of 4 · Which folder should your first agent work in?",
       defaultValue: services.workspace(),
       validate: (value) => {
         try {
@@ -150,7 +162,7 @@ async function runGuidedSetup(
     if (workspace === undefined) return;
     workspace = resolveWorkspacePath(workspace, services.workspace());
     task = await flow.readText({
-      message: "3 of 3 · What should your first agent do?",
+      message: "4 of 4 · What should your first agent do?",
       defaultValue: "Explore this folder and report what is here. Do not change files.",
       validate: (value) => (value.trim() ? undefined : "Give the agent a task, or Escape to stop."),
     });
@@ -180,10 +192,40 @@ async function runGuidedSetup(
     shell.insertCommandResult(
       "/setup",
       hired
-        ? `3 of 3 · ${hired.name} has a live agent seat. /agents opens the team; /setup rooms has the other settings.`
+        ? `4 of 4 · ${hired.name} has a live agent seat. /agents opens the team; /setup rooms has the other settings.`
         : "No live agent seat is observed yet. Continue with Clankie above to finish the hire; /agents shows the team. Return to /setup anytime.",
       hired ? "success" : "error",
     );
+  }
+}
+
+/** Explicit owner choice; cancellation never writes a level or advances onboarding. */
+export async function runAutonomySetup(
+  shell: ClankieFaceShell,
+  autonomy: SetupCommandServices["autonomy"],
+): Promise<boolean> {
+  const flow = shell.setupFlow;
+  flow.begin("setup · autonomy");
+  try {
+    const current = await autonomy([]);
+    const choice = await flow.readSelect({
+      message: "How much should Clankie decide on his own?",
+      options: AutonomyLevelSchema.options.map((value) => ({
+        value,
+        label: AUTONOMY_LEVELS[value].label,
+        description: AUTONOMY_LEVELS[value].description,
+      })),
+      ...(current.level === "custom" ? {} : { initialValue: current.level }),
+    });
+    if (choice === undefined) return false;
+    const level = AutonomyLevelSchema.parse(choice);
+    const saved = await autonomy([level]);
+    if (saved.level !== level)
+      throw new Error("Autonomy selection was not confirmed. Return to /setup to review it.");
+    shell.insertCommandResult("/setup", saved.description, "success");
+    return true;
+  } finally {
+    flow.end();
   }
 }
 
@@ -208,7 +250,7 @@ async function setupPhone(shell: ClankieFaceShell, services: SetupCommandService
         device.grants.chat,
     );
     if (phone) {
-      shell.insertCommandResult("/setup", `2 of 3 · ${phone.name} is paired and active.`, "success");
+      shell.insertCommandResult("/setup", `3 of 4 · ${phone.name} is paired and active.`, "success");
       return true;
     }
     const report = await services.doctor();
@@ -217,7 +259,7 @@ async function setupPhone(shell: ClankieFaceShell, services: SetupCommandService
     let action: string | undefined;
     try {
       action = await flow.readSelect({
-        message: "2 of 3 · Pair your phone or iPad",
+        message: "3 of 4 · Pair your phone or iPad",
         options: [
           {
             value: "pair",
@@ -270,7 +312,7 @@ async function setupPhone(shell: ClankieFaceShell, services: SetupCommandService
             device.grants.chat,
         );
         if (paired) {
-          shell.insertCommandResult("/setup", `2 of 3 · ${paired.name} is paired and active.`, "success");
+          shell.insertCommandResult("/setup", `3 of 4 · ${paired.name} is paired and active.`, "success");
           return true;
         }
         await delay(2_000, undefined, { signal });

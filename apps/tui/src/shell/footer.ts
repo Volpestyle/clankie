@@ -3,11 +3,12 @@
  * Narrow terminals put the stats on a second row; exceptional status gets its own row. Data flows in through a provider so the
  * footer always renders current state without change bookkeeping.
  */
-import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
 import type { HerdrBinding, OperatorConversationContextUsage } from "@clankie/protocol";
 import type { ClankieFaceAnsiTheme } from "../face/clankie-face-theme.ts";
 
 export interface ClankieFooterData {
+  readonly autonomy?: string | undefined;
   readonly model?: string | undefined;
   readonly title?: string | undefined;
   readonly contextUsage?: OperatorConversationContextUsage | undefined;
@@ -100,6 +101,7 @@ export class ClankieFooterComponent implements Component {
         .join(ansi.dim(" · "));
       lines.push(truncateToWidth(joined, safeWidth, ansi.dim("...")));
     }
+    if (state.autonomy !== undefined) lines.push(...wrapTextWithAnsi(ansi.dim(state.autonomy), safeWidth));
     return lines;
   }
 

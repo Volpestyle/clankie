@@ -1,3 +1,4 @@
+import { AutonomyLevelSchema } from "@clankie/protocol";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -159,6 +160,13 @@ async function fixture(options: {
     autostartCalls,
     services: {
       provider,
+      autonomy: async (args) => ({
+        ok: true,
+        revision: "a".repeat(64),
+        level: AutonomyLevelSchema.parse(args[0] ?? "high"),
+        description: "High",
+        levels: { off: "Off", low: "Low", high: "High", full: "Full" },
+      }),
       canTalk: () => options.canTalk ?? true,
       doctor: async () => report,
       devices: async () => [],

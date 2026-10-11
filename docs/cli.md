@@ -3211,10 +3211,19 @@ stops work.
 
 The API is `changes.autonomyLevel` on `POST /v1/operator/fleet-settings`. The
 level's leaves are written first, explicit leaves in the same change win, and
-snapshots report `autonomyLevel`. A snapshot without it comes from an older
+snapshots report `autonomyLevel` and, for `custom`, `autonomyDrift`: the nearest
+preset and each differing leaf with its saved and preset values. Ties prefer
+High, then Off, Low and Full. Doctor, the console footer and the lead's fleet
+card show this passive indicator; reads never change saved authority. A snapshot without it comes from an older
 service, so the CLI refuses to set a level there. In the console, `/autonomy
 LEVEL` sets the dial and `/autonomy clear` cancels the selected chat's scheduled
 wake.
+
+First-run `/setup` explicitly asks for Off, Low, High or Full using the same
+descriptions and API. The choice is confirmed before model setup can become
+ready; cancelling leaves the saved leaves untouched and does not advance setup.
+A ready console's `/setup` also asks before pairing or hiring. The hosted
+console's `/setup` opens this choice before its settings menu.
 
 <a id="auto-switch"></a>
 

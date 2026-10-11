@@ -1,4 +1,4 @@
-import { formatFleetAutonomyGuidance } from "@clankie/protocol";
+import { formatFleetAutonomyGuidance, autonomyDrift, formatAutonomyDrift } from "@clankie/protocol";
 import { effectiveFleetAutonomy } from "@clankie/settings";
 import { type CaptainSessionLaneV2 } from "@clankie/protocol";
 import {
@@ -103,12 +103,19 @@ export function fleetInstructions(systemTools: boolean, currentSettings: Clankie
   if (!systemTools) return "";
   const { notes, size, models } = currentSettings.fleet;
   const policy = effectiveFleetAutonomy(currentSettings.autonomy);
+  const drift = autonomyDrift(currentSettings.autonomy.fleet);
   return [
     "# Your fleet",
     "",
     `Fleet size: ${size}. ${FLEET_SIZE_GUIDANCE[size]}`,
     `Models: ${models}. ${FLEET_MODEL_GUIDANCE[models]}`,
     "Size and models are budget targets, not caps: go past them when the work warrants and say so.",
+    ...(drift === undefined
+      ? []
+      : [
+          formatAutonomyDrift(drift),
+          "When a custom leaf makes a decision owner-gated, mention that leaf and its saved value when asking the owner. The nearest preset is a comparison, not an instruction to change authority.",
+        ]),
     ...formatFleetAutonomyGuidance(policy),
     "Under lead closure, workers report to the lead without parking for owner acceptance. Release publication, including App Store or TestFlight, follows the resolved release preference. Owner-only payments, evals and account sign-ups become linked follow-ups without holding delivered work open; missing implementation or verification is never a pass.",
     "These preferences are standing work guidance within existing authority. They grant no tools, accounts, credentials or machine authority. Sign-ins, codes, CAPTCHAs, payments, account changes, credentials and destructive actions outside fleet workspaces remain owner-only. Evals require explicit owner authorization; a release preference never authorizes them.",

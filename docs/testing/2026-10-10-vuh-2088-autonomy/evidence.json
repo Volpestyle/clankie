@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "verification.txt",
+      "size": 66226,
+      "sha256": "86300e4c0f8584d38debeef4498fc5c4636af21a78a608275c8a03d7810528db",
+      "url": "clankie://evidence/sha256/86300e4c0f8584d38debeef4498fc5c4636af21a78a608275c8a03d7810528db"
+    }
+  ]
+}

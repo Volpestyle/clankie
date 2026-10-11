@@ -288,3 +288,16 @@ it("resolves a real approved sibling Git worktree and refuses unknown namespace 
   }));
   await expect(f.prompt(id)).rejects.toThrow(/ambiguous/u);
 });
+
+it("the lead's native fleet card names custom owner gates and asks it to explain their provenance", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => ({
+    ...current,
+    autonomy: { fleet: { ...current.autonomy.fleet, hardToUndo: "owner" } },
+  }));
+  const prompt = await f.prompt("global-default");
+  expect(prompt).toContain("Autonomy custom · nearest High");
+  expect(prompt).toContain("hardToUndo: owner (high: lead)");
+  expect(prompt).toContain("mention that leaf and its saved value");
+  expect((await f.settings.load()).autonomy.fleet.hardToUndo).toBe("owner");
+});

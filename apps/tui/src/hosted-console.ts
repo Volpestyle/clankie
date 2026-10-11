@@ -1,3 +1,4 @@
+import { runAutonomySetup } from "./setup-commands.ts";
 import { HOST_SETTINGS_WORDING, MAXIMUM_TRUST_MODE_WORDING } from "@clankie/protocol/owner-settings";
 import { runAwakeCommand } from "./command/awake.ts";
 import { runUpdateCommand } from "./command/update.ts";
@@ -222,6 +223,14 @@ export async function runHostedConsole() {
     return runUpdateCommand(args, { ownerFetcher });
   };
   let attentionRevision: string | undefined;
+  let autonomyStatus: string | undefined;
+  const readAutonomy = async (args: readonly string[]) => {
+    const result = await runAutonomyCommand(args, { settings, ownerFetcher });
+    autonomyStatus = result.level === "custom" ? result.description : undefined;
+    shell.refreshStatusView();
+    return result;
+  };
+  let autonomyTimer: NodeJS.Timeout | undefined;
   const commands: FaceShellCommand[] = [
     ...buildConsoleCommands({ repoRoot: process.cwd(), commandAwake, commandUpdate }).filter(
       (command) => command.name === "awake",
@@ -340,7 +349,7 @@ export async function runHostedConsole() {
     ...buildHostedConnectionCommands(settings),
     {
       name: "settings",
-      aliases: ["setup"],
+      aliases: [],
       description: "Hosted settings and connection",
       takesArgument: false,
       async run(_argument, active) {
@@ -352,6 +361,7 @@ export async function runHostedConsole() {
             message: "Hosted settings",
             options: [
               { value: "connection", label: "Connection" },
+              { value: "autonomy", label: "Autonomy" },
               { value: "persona", label: "Persona" },
               { value: "model", label: "Model" },
               { value: "connect", label: "Connected accounts" },
@@ -368,7 +378,17 @@ export async function runHostedConsole() {
       },
     },
     ...buildFleetCommands({ settings, ownerFetcher }),
-    autonomyCommand({ level: (args) => runAutonomyCommand(args, { settings, ownerFetcher }) }),
+    {
+      name: "setup",
+      aliases: [],
+      description: "Choose autonomy and open hosted settings",
+      takesArgument: false,
+      async run(_argument, active) {
+        if (await runAutonomySetup(active, readAutonomy))
+          await commands.find((command) => command.name === "settings")!.run("", active);
+      },
+    },
+    autonomyCommand({ level: readAutonomy }),
     maximumTrustModeCommand((args) => runMaximumTrustModeCommand(args, { ownerFetcher })),
     {
       name: "voice",
@@ -632,7 +652,7 @@ export async function runHostedConsole() {
     }),
     bannerFields: { title: "Clankie" },
     historyPath: join(state, "history.jsonl"),
-    footerData: () => ({ title }),
+    footerData: () => ({ title, autonomy: autonomyStatus }),
     statusExtras: () => [
       `Hosted · ${session.machine?.name ?? session.encryption.hostId}`,
       transport.status(),
@@ -656,7 +676,10 @@ export async function runHostedConsole() {
       await prompt.submit(text, delivery);
     },
     onInterrupt: () => prompt.interruptActive(),
-    onExit: stopObservation,
+    onExit: async () => {
+      clearInterval(autonomyTimer);
+      await stopObservation();
+    },
   });
   transport.subscribe(() => shell.refreshStatusView());
   let historyReady = false;
@@ -669,6 +692,9 @@ export async function runHostedConsole() {
     }
   }
   shell.start();
+  void readAutonomy([]).catch(() => undefined);
+  autonomyTimer = setInterval(() => void readAutonomy([]).catch(() => undefined), 30_000);
+  autonomyTimer.unref();
   if (notice) shell.insertMarkdown(`Hosted Clankie unavailable: ${notice}. Use /reconnect.`);
   if (historyReady) {
     observe();
