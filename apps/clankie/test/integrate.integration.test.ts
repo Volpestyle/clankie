@@ -2,7 +2,18 @@ import { serve } from "@hono/node-server";
 import { execFile, spawn, type ExecFileOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
-import { chmod, glob, mkdir, mkdtemp, readFile, readlink, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  chmod,
+  glob,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +22,7 @@ import { afterEach, aroundEach, expect, it } from "vitest";
 import { IntegrationRunSchema } from "@clankie/protocol/integrate";
 import { DeployHolds, durableJson, withDirectoryLock } from "../src/deploy-holds.ts";
 import { IntegrationQueue, integrationSources } from "../src/integrate.ts";
+import { FleetProgressObserver } from "../src/fleet-progress.ts";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
@@ -492,6 +504,135 @@ fs.writeFileSync(join(root, 'started'), 'gating');
 while (!existsSync(join(root, 'release'))) await new Promise(r => setTimeout(r, 20));
 ${extra}
 `;
+
+it("alerts once for a stale composing head across observer restart, ignores followers and a verified live gate, and records recovery", async () => {
+  const f = await fixture((root) => barrier(root));
+  let releasePlacement!: () => void;
+  let entered!: () => void;
+  const enteredPlacement = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let placed = false;
+  f.queue.options.placeGate = async () => {
+    if (placed) return undefined;
+    placed = true;
+    entered();
+    await new Promise<void>((resolve) => {
+      releasePlacement = resolve;
+    });
+    return undefined;
+  };
+  const first = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [f.core.base] });
+  await f.queue.start(first, guard);
+  await enteredPlacement;
+  const follower = IntegrationRunSchema.parse({
+    action: "run",
+    id: randomUUID(),
+    core: [f.core.base],
+    push: true,
+  });
+  await f.queue.start(follower, guard);
+  const head = await f.queue.status(first.id);
+  expect(head.state).toBe("composing");
+  // A retained checkpoint fixture represents the 33-minute incident; no fake clocks or live registry.
+  head.updatedAt = new Date(Date.now() - 181_000).toISOString();
+  await durableJson(head.evidence, head);
+  const source = { prefix: "integration", read: () => f.queue.progress() };
+  expect(await source.read()).toEqual([
+    expect.objectContaining({ stalled: true, message: expect.stringContaining(first.id) }),
+  ]);
+  const path = join(f.root, "progress-incidents.json");
+  const alerts = join(f.root, "progress-alerts.jsonl");
+  const options = {
+    path,
+    sources: [source],
+    notify: async (text: string) => {
+      await appendFile(alerts, `${JSON.stringify({ text })}\n`);
+      return true;
+    },
+    onError: (error: unknown) => {
+      throw error;
+    },
+  };
+  const observer = new FleetProgressObserver(options);
+  try {
+    await Promise.all([observer.observe(), observer.observe()]);
+    await until(async () => JSON.parse(await readFile(path, "utf8"))[0]?.alert === "submitted");
+    observer.stop();
+    const restarted = new FleetProgressObserver(options);
+    await restarted.observe();
+    expect((await readFile(alerts, "utf8")).trim().split("\n")).toHaveLength(1);
+    releasePlacement();
+    await until(async () => {
+      try {
+        await readFile(join(f.root, "started"));
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    const gating = await f.queue.status(first.id);
+    gating.updatedAt = new Date(Date.now() - 181_000).toISOString();
+    await durableJson(gating.evidence, gating);
+    expect(await source.read()).toEqual([]); // The exact owned native child is alive.
+    await restarted.observe();
+    await until(async () => JSON.parse(await readFile(path, "utf8"))[0]?.recovery === "submitted");
+    expect((await readFile(alerts, "utf8")).trim().split("\n")).toHaveLength(2);
+    restarted.stop();
+  } finally {
+    releasePlacement();
+    observer.stop();
+    await writeFile(join(f.root, "release"), "go");
+  }
+});
+
+it("retains an uncertain progress alert without replay and keeps observing while delivery is unresolved", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-progress-"));
+  roots.push(root);
+  const sourcePath = join(root, "source.json");
+  const incident = { id: "integration:held", stalled: true, message: "Integration head held" };
+  await durableJson(sourcePath, [incident]);
+  const path = join(root, "incidents.json");
+  const sent = join(root, "sent.jsonl");
+  const errors: unknown[] = [];
+  const options = {
+    path,
+    sources: [{ prefix: "integration", read: async () => JSON.parse(await readFile(sourcePath, "utf8")) }],
+    notify: async (text: string): Promise<boolean> => {
+      await appendFile(sent, `${JSON.stringify(text)}\n`);
+      return new Promise(() => {}); // Transport remains uncertain after its original dispatch.
+    },
+    onError: (error: unknown) => {
+      errors.push(error);
+    },
+  };
+  const observer = new FleetProgressObserver(options);
+  await observer.observe();
+  await until(async () => {
+    try {
+      return (await readFile(sent, "utf8")).length > 0;
+    } catch {
+      return false;
+    }
+  });
+  await observer.observe();
+  observer.stop();
+  const restarted = new FleetProgressObserver(options);
+  await restarted.observe();
+  expect((await readFile(sent, "utf8")).trim().split("\n")).toHaveLength(1);
+  await writeFile(sourcePath, "unreadable source");
+  await restarted.observe();
+  expect(errors).toHaveLength(1);
+  expect(JSON.parse(await readFile(path, "utf8"))[0].recovery).toBeUndefined();
+  await durableJson(sourcePath, []);
+  await restarted.observe();
+  await until(async () => (await readFile(sent, "utf8")).trim().split("\n").length === 2);
+  expect(JSON.parse(await readFile(path, "utf8"))[0]).toMatchObject({
+    alert: "claimed",
+    recovery: "claimed",
+  });
+  restarted.stop();
+});
 async function queueCli(f: Awaited<ReturnType<typeof fixture>>, authorized = guard) {
   return fixtureWork().run(async () => {
     const api = createIntegrationRoutes({

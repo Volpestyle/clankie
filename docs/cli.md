@@ -878,6 +878,14 @@ receipt, including its shared batch and attempts. `cancel UUID --actor NAME
 composing, gating or finished is refused. `/integrate` shows this queue in the
 TUI.
 
+The service checks integration progress every 30 seconds. A running head without
+a checkpoint for three minutes alerts the owner through the existing runtime
+health route, unless its owned install/gate process is proven alive or its
+bounded remote runner is active. Waiting followers do not trigger this alert.
+Opening and recovery notices are durably deduplicated across service restarts;
+unavailable observations retain the incident. The observer never cancels,
+restarts or resubmits a batch. Inspect the named receipt with `integrate status`.
+
 Requests arriving during a gate coalesce into the next compatible batch.
 Conflicting members roll back; failed shared gates split to isolate failing
 requests. Gate-only runs and restores stay separate.

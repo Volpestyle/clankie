@@ -124,6 +124,13 @@ means pending: finish the turn, then read `clankie update status` and report the
 old/new commit and actual health, canary or rollback. Never repeat an uncertain
 update; inspect its existing operation.
 
+An integration-head progress alert names the batch and last checkpoint. The
+service observes every 30 seconds and alerts after three minutes without
+progress or a proven active install/gate job. Read `clankie integrate status
+UUID` and its evidence; an alert does not authorize cancellation or another
+submission. Opening and recovery notices survive restarts without replay, and
+an unavailable observation does not prove recovery.
+
 Passed-canary retention runs once per operation per service boot. It shares the
 maintenance lock with update admission; `retentionMaintenance: held` with empty
 `holds` can be an active scan. Read status and the retention journal before

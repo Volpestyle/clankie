@@ -34,6 +34,7 @@ import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { RuntimeCanary, RUNTIME_CANARY_HOLDER } from "./runtime-canary.ts";
 import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
 import { IntegrationQueue, integrationSources } from "./integrate.ts";
+import { FleetProgressObserver } from "./fleet-progress.ts";
 import { gitBundle, placeRemoteGate } from "./integrate-remote.ts";
 import { DeployHolds } from "./deploy-holds.ts";
 import { ViewStore } from "./views.ts";
@@ -1773,6 +1774,14 @@ const workerToolRefresh = createWorkerToolRefresh({
 });
 
 bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
+const fleetProgress = new FleetProgressObserver({
+  path: join(stateRoot, "fleet-progress-incidents.json"),
+  sources: integration ? [{ prefix: "integration", read: () => integration.progress() }] : [],
+  notify: (text) => captain.notifyRuntimeHealthAlert(text),
+  onError: (error) =>
+    logger.warn({ event: "fleet.progress.unavailable", error }, "Fleet progress observation unavailable"),
+});
+fleetProgress.start();
 // Launcher crash recovery restarted this process: tell the owner once (ADR 0055).
 void alertRecoveredCrash(process.env.CLANKIE_CRASH_REPORT?.trim(), (text) =>
   captain.notifyRuntimeHealthAlert(text),
@@ -2317,6 +2326,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
       logger.warn({ event: "fleet_resources.close_failed" }, "Fleet resource observation cleanup failed"),
     );
   runtimeHealth.stop();
+  fleetProgress.stop();
   void closeRuntimeProvider().catch(() =>
     logger.warn({ event: "runtime.provider.close_failed" }, "runtime provider cleanup failed"),
   );

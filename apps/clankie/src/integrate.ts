@@ -3,7 +3,7 @@ import { syncOwnerCheckout } from "@clankie/settings";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, open, readdir, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
   IntegrationBatchSchema,
@@ -15,6 +15,8 @@ import {
 import { durableJson, withDirectoryLock, type LockOwner } from "./deploy-holds.ts";
 import { integrationEnvironment } from "./integrate-environment.ts";
 import { darwinOnlySkips, remoteGateDeadline, type GateRunner } from "./integrate-remote.ts";
+import { processIdentity, probeProcess } from "@clankie/fleet-resources";
+import type { FleetProgressObservation } from "./fleet-progress.ts";
 
 const execute = promisify(execFile);
 const now = () => new Date().toISOString();
@@ -74,6 +76,7 @@ export class IntegrationQueue {
   private running = new Set<string>();
   private pending: PendingIntegration[] = [];
   private draining = false;
+  private readonly commands = new Map<string, { pid?: number; proof: ReturnType<typeof processIdentity> }>();
   readonly options: IntegrationOptions;
   constructor(options: IntegrationOptions) {
     this.options = options;
@@ -153,6 +156,36 @@ export class IntegrationQueue {
       ...(completed[0] ? { lastResult: completed[0] } : {}),
       interrupted: batches.filter((b) => b.state === "interrupted"),
     };
+  }
+  /** Bounded read of this queue's active heads; followers cannot page by waiting age. */
+  async progress(): Promise<readonly FleetProgressObservation[]> {
+    if (this.running.size > 256) throw Error("Integration progress inventory exceeds its bound");
+    const heads = new Map<string, IntegrationBatch>();
+    for (const id of this.running) {
+      const batch = await this.stored(id);
+      if (active.has(batch.state) && batch.state !== "queued") heads.set(batch.batchId ?? batch.id, batch);
+    }
+    const head = [...heads.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+    if (!head) return [];
+    const id = head.batchId ?? head.id;
+    const command = this.commands.get(id);
+    if (command) {
+      const proof = await command.proof;
+      // Remote execution is an explicit active job; the runner owns its bounded deadline.
+      if (!command.pid) return [];
+      if (!proof) throw Error("Integration child identity observation unavailable");
+      const status = await probeProcess(proof);
+      if (status === "unknown") throw Error("Integration child liveness unavailable");
+      if (status === "live") return [];
+    }
+    const age = Date.now() - Date.parse(head.updatedAt);
+    return [
+      {
+        id: `integration:${id}:${head.updatedAt}`,
+        stalled: age >= 180_000,
+        message: `Integration head stalled: batch ${id}, phase ${head.state}, no checkpoint progress since ${head.updatedAt}; ${this.pending.length} requests waiting. No active install/gate job is proven. Inspect clankie integrate status ${id}; no automatic cancellation, restart or resubmission.`,
+      },
+    ];
   }
   async start(request: IntegrationRun, guard: () => Promise<void>): Promise<IntegrationBatch> {
     try {
@@ -408,12 +441,14 @@ export class IntegrationQueue {
     const startedAt = now();
     const head = await this.head(repo);
     const gateScript = name === "install" ? "check" : await landingGateScript(repo.directory);
+    const batchId = basename(evidence);
     const result = await new Promise<{ exitCode: number | null; signal: string | null }>(
       (resolve, reject) => {
         const out = createWriteStream(log, { flags: "wx", mode: 0o600 });
         out.on("error", reject);
         // A linked machine streams the same output into the same log.
         if (runner && name !== "revalidate") {
+          this.commands.set(batchId, { proof: Promise.resolve(undefined) });
           runner.run(name, base, out).then(
             (result) => out.end(() => resolve(result)),
             (error: unknown) => {
@@ -440,6 +475,9 @@ export class IntegrationQueue {
           env: name === "install" ? env : { ...env, CLANKIE_LANDING_BASE: base },
           stdio: ["ignore", "pipe", "pipe"],
         });
+        const proof = child.pid ? processIdentity(child.pid) : Promise.resolve(undefined);
+        void proof.catch(() => undefined);
+        this.commands.set(batchId, { ...(child.pid ? { pid: child.pid } : {}), proof });
         child.stdout.pipe(out, { end: false });
         child.stderr.pipe(out, { end: false });
         child.on("error", (error) => {
@@ -450,7 +488,7 @@ export class IntegrationQueue {
           out.end(() => resolve({ exitCode, signal }));
         });
       },
-    );
+    ).finally(() => this.commands.delete(batchId));
     const file = await open(log, "r");
     try {
       await file.sync();
