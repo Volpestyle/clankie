@@ -1453,6 +1453,30 @@ receipt; it never adopts that lead or types into its pane. Reconcile an uncertai
 receipt before retrying. A service-held lead without a connected receiver shows
 `messageAvailable: false` rather than promising delivery.
 
+The owner's paired devices read the same projection with encrypted dispatch
+`POST /operator/v1/dispatch`, body `{ "op": "lead_chats", "schemaVersion": 1 }`.
+Hosted devices use their existing `/v1/hosted/operator` wrapper. The protocol
+client exposes optional `leadChats()`; existing operations and old devices are
+unchanged. The response has `op: "lead_chats"`, `schemaVersion: 1` and `result`:
+
+```json
+{ "outcome": "ready", "chats": [] }
+```
+
+Each chat has `conversationId`, `title`, `projects: [{id, name}]`, `workspace`,
+`machine`, `holder` (`{kind: "native", seatId, harness}` or
+`{kind: "service", lane: "operator"}`), `state` (`current`, `stale`,
+`reconnecting`, `disconnected` or `service`), `activity` (`unbound`, `active`,
+`waiting`, `completed` or `failed`), `lastActiveAt`, optional `lastBridgeSeenAt`,
+`messageSeat` and `messageAvailable`. These fields follow `LeadChatSchema` in
+`@clankie/protocol`. An unavailable observation returns
+`{outcome: "unavailable", message}`; it is distinct from an empty ready roster.
+
+Only active owner-paired devices with `terminalControl` can read it. Hosted
+visitor, guest and support devices are refused, as are operator/captain bearer
+tokens and Discord. Denial is HTTP 403 `{error: "owner_device_required"}`.
+Device identity, grants and revocation are rechecked before releasing a read.
+
 #### `linear wake [show|set …]`
 
 `GET /v1/linear/wake` returns `{schemaVersion: 1, revision, wake}`.

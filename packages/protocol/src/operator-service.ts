@@ -1,3 +1,4 @@
+import { LeadChatsResultSchema, type LeadChatsResult } from "./lead-chats.ts";
 import { TrackerSyncCommandSchema, TrackerSyncResultSchema } from "./tracker-sync.ts";
 import {
   EvidenceDeviceFetchSchema,
@@ -442,6 +443,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   z
     .object({ op: z.literal("tracker_sync"), schemaVersion: z.literal(1), command: TrackerSyncCommandSchema })
     .strict(),
+  z.object({ op: z.literal("lead_chats"), schemaVersion: z.literal(1) }).strict(),
   EvidenceDeviceFetchRequestSchema.extend({
     op: z.literal("evidence_fetch"),
     schemaVersion: z.literal(1),
@@ -761,6 +763,9 @@ export type OperatorWorkItemsOutcome =
   | { readonly outcome: "unavailable"; readonly message: string };
 
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
+  z
+    .object({ op: z.literal("lead_chats"), schemaVersion: z.literal(1), result: LeadChatsResultSchema })
+    .strict(),
   z
     .object({
       op: z.literal("owner_update_list"),
@@ -1354,6 +1359,7 @@ export interface OperatorConversationServiceClient {
 
   connections?(command?: OperatorConnectionCommand): Promise<z.infer<typeof OperatorConnectionResultSchema>>;
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
+  leadChats?(): Promise<LeadChatsResult>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
   readoptSeat?(seatId: string, conversationId: string): Promise<boolean>;
   workerReports?(conversationId: string, limit?: number): Promise<WorkerReportPage>;
@@ -1669,6 +1675,11 @@ export function createOperatorConversationServiceClient(
       if (result.op !== "acknowledge_worker_report_history")
         throw new Error(`Unexpected ${result.op} result for worker report history acknowledgment`);
       return result.acknowledged;
+    },
+    async leadChats() {
+      const result = await dispatch({ op: "lead_chats", schemaVersion: 1 });
+      if (result.op !== "lead_chats") throw new Error(`Unexpected ${result.op} result for lead_chats`);
+      return result.result;
     },
     async roster() {
       const result = await dispatch({

@@ -1,20 +1,5 @@
-import type { OperatorConversationSessionState, OperatorSeatBridgeStatus } from "@clankie/protocol";
-
-/** Private operator context; no transcript, task content or credentials. */
-export interface LeadChat {
-  conversationId: string;
-  title: string;
-  projects: readonly { id: string; name: string }[];
-  workspace: string;
-  machine: string;
-  holder: { kind: "native"; seatId: string; harness: string } | { kind: "service"; lane: "operator" };
-  state: OperatorSeatBridgeStatus["state"] | "service";
-  activity: OperatorConversationSessionState;
-  lastActiveAt: string;
-  lastBridgeSeenAt?: string;
-  messageSeat: string;
-  messageAvailable: boolean;
-}
+import type { LeadChat } from "@clankie/protocol";
+export type { LeadChat } from "@clankie/protocol";
 
 export function renderLeadChats(chats: readonly LeadChat[]): string {
   return [

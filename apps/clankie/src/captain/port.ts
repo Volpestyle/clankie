@@ -289,6 +289,8 @@ export interface CaptainPort {
     request: DiscordChannelProjectionMessage,
   ): Promise<DiscordChannelProjectionMessageResult>;
   /** Callable operator service; read cancellation stops conversation tails without interrupting turns. */
+  /** Host-only roster, exposed to paired owners at the authenticated app boundary. */
+  leadChats?(): Promise<readonly import("@clankie/protocol").LeadChat[]>;
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
