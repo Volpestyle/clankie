@@ -142,6 +142,17 @@ export function createModelKeys(options: {
       .filter((provider) => !disabled.has(provider.id) && (enabled.size === 0 || enabled.has(provider.id)));
     return { config, catalog, models, providers };
   };
+  const availableModels = async (
+    state: Awaited<ReturnType<typeof snapshot>>,
+    credentials: Awaited<ReturnType<CredentialStore["list"]>>,
+  ) =>
+    (
+      await Promise.all(
+        state.providers
+          .filter((provider) => modelCredentialAllowed(provider.id, credentials[provider.id], { env }))
+          .map((provider) => state.models.getAvailable(provider.id)),
+      )
+    ).flat();
   const apiProvider = async (providerId: string) => {
     const state = await snapshot();
     return state.providers.find((provider) => provider.id === providerId)?.auth.apiKey === undefined
@@ -277,7 +288,7 @@ export function createModelKeys(options: {
       const state = await snapshot();
       const credentials = await store.list();
       const available = new Set(
-        (await state.models.getAvailable()).map((model) => `${model.provider}/${model.id}`),
+        (await availableModels(state, credentials)).map((model) => `${model.provider}/${model.id}`),
       );
       const mappings = await options.includedMappings?.().catch(() => undefined);
       const project = (ref: string): ModelSettingsResponse["choices"][number] => {
@@ -366,7 +377,7 @@ export function createModelKeys(options: {
       const state = await snapshot();
       const selection = await running(state);
       const credentials = selection?.credentials ?? (await store.list());
-      const available = new Set((await state.models.getAvailable()).map((model) => model.provider));
+      const available = new Set((await availableModels(state, credentials)).map((model) => model.provider));
       const usableProviders = state.providers
         .filter(
           (provider) =>

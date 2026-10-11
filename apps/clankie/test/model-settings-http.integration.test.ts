@@ -84,3 +84,91 @@ it("serves one authenticated settings contract, persists selection and reversal,
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("reads hosted settings and options without probing policy-refused subscription credentials", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hosted-model-settings-http-"));
+  const env: NodeJS.ProcessEnv = {
+    XDG_CONFIG_HOME: dir,
+    CLANKIE_DISABLE_MODELS_FETCH: "1",
+    CLANKIE_HOSTED_BOOTSTRAP_FILE: join(dir, "bootstrap.json"),
+  };
+  const store = new FileCredentialStore(join(dir, "credentials.json"));
+  const blocked = { type: "oauth" as const, access: "fixture-old", refresh: "fixture-refresh", expires: 1 };
+  await store.set("openai-codex", blocked);
+  await store.set("anthropic", blocked);
+  await updateGlobalConfig(
+    (config) => {
+      config.model = "clankie/default";
+      config.provider = {
+        clankie: {
+          name: "Clankie (included)",
+          npm: "@ai-sdk/openai",
+          options: { baseURL: "http://127.0.0.1:1/v1" },
+          models: { default: { name: "Clankie default", limit: { context: 32000, output: 512 } } },
+        },
+      };
+    },
+    { env },
+  );
+  const models = createModelKeys({
+    env,
+    cwd: dir,
+    store,
+    includedMappings: async () => ({
+      mappings: [
+        {
+          ref: "clankie/default",
+          actual: {
+            providerId: "openai",
+            providerName: "OpenAI",
+            modelId: "fixture-model",
+            modelName: "Fixture model",
+          },
+          available: true,
+          reason: null,
+        },
+      ],
+    }),
+  });
+  const app = createModelKeyRoutes(models, async (request) =>
+    request.headers.get("authorization") === "Bearer owner" ? true : "authentication_required",
+  );
+  const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 });
+  await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing address");
+  const origin = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${origin}/v1/model-settings`, {
+      headers: { authorization: "Bearer owner" },
+    });
+    expect(response.status).toBe(200);
+    const settings = ModelSettingsResponseSchema.parse(await response.json());
+    expect(settings.effective).toMatchObject({
+      ref: "clankie/default",
+      funding: "included",
+      available: true,
+      actual: { modelId: "fixture-model" },
+    });
+    expect(
+      settings.choices.some(
+        (entry) => entry.ref.startsWith("openai-codex/") || entry.ref.startsWith("anthropic/"),
+      ),
+    ).toBe(false);
+    const options = await fetch(`${origin}/v1/model-keys/options`, {
+      headers: { authorization: "Bearer owner" },
+    });
+    expect(options.status).toBe(200);
+    expect((await options.json()).usableProviders).toContain("clankie");
+    expect(await models.select("openai-codex/gpt-6-luna")).toEqual({ ok: false, error: "unsupported_model" });
+    expect((await fetch(`${origin}/v1/model-settings`)).status).toBe(401);
+    expect(await store.get("openai-codex")).toEqual(blocked);
+    expect(await store.get("anthropic")).toEqual(blocked);
+    expect((await loadConfig({ env })).config.model).toBe("clankie/default");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(dir, { recursive: true, force: true });
+  }
+});
