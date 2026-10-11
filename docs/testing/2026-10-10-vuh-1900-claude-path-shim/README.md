@@ -80,6 +80,12 @@ expect the shim diagnosis: `unverified` when a Mac binding cannot be read, or
 consumer files passed together (38 tests). No other exact-shape doctor consumers
 were found in apps, packages or scripts.
 
+An OS sandbox consumer also exposed eager launcher-asset resolution when importing
+an arbitrary esbuild bundle. Resolution now happens only during explicit shim
+installation; importing a bundle requires no launcher asset. The real sandbox,
+native launches, release layout, assetless bundle and doctor consumers passed
+together (46 tests across five files).
+
 The tests cover `/tmp` resolving to `/private/tmp` and preserve original config
 bytes during setup. The bundled-layout test verifies that preparation copies
 the standalone launcher asset rather than the release entrypoint. Existing

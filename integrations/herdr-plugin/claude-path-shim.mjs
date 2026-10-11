@@ -12,16 +12,19 @@ const channel = `plugin:${plugin}`;
 // Release entrypoints live under apps/*/{src,bin}. Their import.meta.url
 // names the bundle; copy the standalone asset shipped alongside it instead.
 const modulePath = fileURLToPath(import.meta.url);
-const here = await realpath(
-  basename(modulePath) === "claude-path-shim.mjs"
-    ? modulePath
-    : new URL("../../../integrations/herdr-plugin/claude-path-shim.mjs", import.meta.url),
-);
+async function launcherSource() {
+  return realpath(
+    basename(modulePath) === "claude-path-shim.mjs"
+      ? modulePath
+      : new URL("../../../integrations/herdr-plugin/claude-path-shim.mjs", import.meta.url),
+  );
+}
 const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 
 /** Skip every copy/symlink of our launcher, without removing PATH from Claude's children. */
 async function realClaude(env = process.env) {
+  const here = await realpath(modulePath);
   for (const directory of (env.PATH ?? "").split(":")) {
     const candidate = resolve(directory || ".", "claude");
     try {
@@ -110,6 +113,7 @@ export async function installPaneShell({ root, socketPath, owner = process.env, 
   const shell = owner.SHELL?.trim() || "/bin/zsh";
   if (!shell.endsWith("/zsh"))
     throw new Error(`Claude PATH shim requires zsh on this Mac; selected shell: ${shell}`);
+  const here = await launcherSource();
   await mkdir(join(root, "bin"), { recursive: true, mode: 0o700 });
   await mkdir(join(root, "zsh"), { recursive: true, mode: 0o700 });
   const runner = join(root, "claude-path-shim.mjs");
@@ -266,7 +270,11 @@ export async function inspectPaneShim({ root, configPath, env = process.env }) {
   };
 }
 
-if (process.argv[1] && (await realpath(process.argv[1]).catch(() => undefined)) === here) {
+if (
+  basename(modulePath) === "claude-path-shim.mjs" &&
+  process.argv[1] &&
+  (await realpath(process.argv[1]).catch(() => undefined)) === (await realpath(modulePath))
+) {
   try {
     const env = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined));
     const executable = await realClaude(env);

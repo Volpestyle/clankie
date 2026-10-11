@@ -12,6 +12,7 @@ import {
   copyFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { afterEach, expect, it } from "vitest";
 import { build } from "esbuild";
 import { installPaneShell, preparePaneShell, inspectPaneShim } from "../../herdr-plugin/claude-path-shim.mjs";
@@ -61,6 +62,32 @@ async function fixture() {
 }
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+});
+
+it("a bundled consumer can diagnose an unprepared shim without a standalone launcher asset", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-shim-consumer-")));
+  roots.push(root);
+  const entry = join(root, "consumer.mjs");
+  await build({
+    stdin: {
+      contents: `import {inspectPaneShim} from './integrations/herdr-plugin/claude-path-shim.mjs'; console.log(JSON.stringify(await inspectPaneShim(JSON.parse(process.argv[2]))));`,
+      resolveDir: process.cwd(),
+    },
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    outfile: entry,
+  });
+  const result = await exec(process.execPath, [
+    entry,
+    JSON.stringify({ root: join(root, "unprepared"), configPath: join(root, "herdr.toml"), env: {} }),
+  ]);
+  expect(JSON.parse(result.stdout)).toMatchObject({
+    installed: false,
+    configured: false,
+    active: false,
+    state: "not-configured",
+  });
 });
 
 it.skipIf(process.platform !== "darwin")(
