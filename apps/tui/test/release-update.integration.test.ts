@@ -97,15 +97,19 @@ async function fixture(
     readonly providerApis?: readonly number[];
     /** A managed body's fleet answer; absent for a self-run body. */
     readonly approved?: string | null;
+    readonly oldVersion?: string;
+    /** Delay a real HTTP lookup while the body becomes busy or auto installs turn off. */
+    readonly beforeCommitLookup?: () => Promise<void>;
   } = {},
 ) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-release-update-")));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
   const install = join(home, "install");
-  const old = join(install, "releases", "v1.0.0");
-  writeRelease(old, "v1.0.0", "a".repeat(40), "ok", input.replaceCurrentOnDown === "old", input.target);
+  const oldVersion = input.oldVersion ?? "v1.0.0";
+  const old = join(install, "releases", oldVersion);
+  writeRelease(old, oldVersion, "a".repeat(40), "ok", input.replaceCurrentOnDown === "old", input.target);
   writeRelease(join(install, "releases", "v1.2.0"), "v1.2.0", "c".repeat(40));
-  symlinkSync(join("releases", "v1.0.0"), join(install, "current"));
+  symlinkSync(join("releases", oldVersion), join(install, "current"));
   mkdirSync(join(home, ".clankie"), { mode: 0o700 });
   // The published archive, exactly as install.sh downloads and verifies it.
   const published = join(home, "published");
@@ -126,7 +130,7 @@ async function fixture(
     : createHash("sha256").update(readFileSync(archive)).digest("hex");
   let publishedVersion = "v1.1.0";
   let publishedCommit = "b".repeat(40);
-  const server: Server = createServer((request, response) => {
+  const server: Server = createServer(async (request, response) => {
     const send = (status: number, body: string | Buffer) => {
       response.writeHead(status);
       response.end(body);
@@ -134,8 +138,10 @@ async function fixture(
     if (request.url === "/app.tar.gz") return send(200, readFileSync(join(home, "app.tar.gz")));
     if (request.url === "/api/releases/latest")
       return send(200, JSON.stringify({ tag_name: publishedVersion }));
-    if (request.url === `/api/commits/${publishedVersion}`)
+    if (request.url === `/api/commits/${publishedVersion}`) {
+      await input.beforeCommitLookup?.();
       return send(200, JSON.stringify({ sha: publishedCommit }));
+    }
     if (request.url === `/download/${publishedVersion}/${archiveName}`)
       return send(200, readFileSync(archive));
     if (request.url === `/download/${publishedVersion}/${archiveName}.sha256`)
@@ -334,6 +340,63 @@ it("a hosted body's scheduled check installs only while idle and enabled", async
   const result = await f.settled(pending);
   expect(result).toMatchObject({ phase: "healthy", initiator: { kind: "schedule" } });
   expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.1.0"));
+});
+
+it.each(["busy", "disabled"] as const)(
+  "a scheduled install refuses acceptance when the body becomes %s during a real release lookup",
+  async (change) => {
+    const state = { enabled: true, idle: true };
+    const f = await fixture({
+      target: "linux-arm64",
+      beforeCommitLookup: async () => {
+        if (change === "busy") state.idle = false;
+        else state.enabled = false;
+      },
+    });
+    const updater = f.updater(f.old);
+    const scheduled = startScheduledUpdates({
+      updater,
+      enabled: async () => state.enabled,
+      idle: async () => state.idle,
+      logger: { info() {}, warn() {} },
+      initialDelayMs: 3600000,
+    });
+    cleanup.push(() => scheduled.close());
+    expect(await scheduled.check()).toBe("waiting");
+    expect(updater.status().pending).toBeUndefined();
+    expect(f.calls()).toEqual([]);
+    expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+    // Refusal leaves no stuck acceptance/lock; the next idle check can progress.
+    state.enabled = true;
+    state.idle = true;
+    // This fixture's lookup deliberately flips the state each time. Use an
+    // explicit operator pin to prove its failed scheduled attempt left no lock.
+    const accepted = await updater.request("v1.1.0", authority);
+    expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "healthy" });
+  },
+);
+
+it("scheduled latest keeps a newer image seed while an explicit approved pin can roll back", async () => {
+  const f = await fixture({ target: "linux-arm64", oldVersion: "v1.3.0", approved: "v1.1.0" });
+  const updater = f.updater(f.old);
+  const scheduled = startScheduledUpdates({
+    updater,
+    enabled: async () => true,
+    idle: async () => true,
+    logger: { info() {}, warn() {} },
+    initialDelayMs: 3600000,
+  });
+  cleanup.push(() => scheduled.close());
+  expect(await scheduled.check()).toBe("up-to-date");
+  expect(updater.status().pending).toBeUndefined();
+  expect(f.calls()).toEqual([]);
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.3.0"));
+  const accepted = await updater.request("v1.1.0", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({
+    phase: "healthy",
+    warning: "older-than-current-pin",
+    versions: { old: "v1.3.0", new: "v1.1.0" },
+  });
 });
 
 it("restores the previous release when the new one fails to come up", async () => {

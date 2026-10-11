@@ -74,7 +74,10 @@ image's `/opt/clankie`, and also installs official releases on its own while
 idle (no turn, activity share, voice call or hired worker), hourly. A managed body installs
 nothing newer than its fleet-approved release: "holding releases" or "not
 approved" is the fleet's decision, not a fault, so report it and wait. Self-run
-owners switch idle installs with `clankie update auto on|off`. The rest of this
+owners switch idle installs with `clankie update auto on|off`. Scheduling
+rechecks enabled/idle state after release lookup before accepting the helper.
+Hourly checks keep a newer image seed when the approved release is older;
+explicit `--ref vX.Y.Z` retains rollback within the approval cap. The rest of this
 section is a source checkout.
 
 Landed code is not live until the pinned runtime is updated. From an admitted

@@ -442,7 +442,11 @@ install; a managed body installs nothing newer than its fleet-approved release
 (`POST /fleet/v1/body/release`), and refuses with "holding releases" or "not
 approved" otherwise. The hosted image also checks hourly and installs while the
 body is idle; `clankie update auto [status|on|off]` (TUI `/update` → Automatic
-installs) switches that for a self-run body, and managed bodies always install.
+installs) switches that for a self-run body, and managed bodies keep scheduled
+checks enabled. Scheduling rechecks this setting and idle state after release
+lookup, before accepting the helper. Hourly checks keep a newer image seed when
+the approved release is older; an explicit `--ref vX.Y.Z` can still roll back
+within the fleet's approval cap.
 A release install moves to
 the latest official GitHub release, or `--ref vX.Y.Z`; it reports `upToDate` when
 already there, and otherwise stages that verified release beside the running one,
