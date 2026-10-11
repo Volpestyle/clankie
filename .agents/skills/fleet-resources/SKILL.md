@@ -5,6 +5,14 @@ description: "Run heavy commands and lease simulators in Clankie's local native 
 
 # Share the machine
 
+VUH-2091's staged Linux PID-namespace helper is a containment primitive, not
+a second capacity allocator or a shipped WSL heavy-command route. Native
+Windows and WSL still require one Windows host budget and canonical registry.
+Never acquire that Windows `LockFileEx` lock through Linux `flock` on `/mnt/c`.
+Windows interop containment and PC proof remain open; do not route WSL jobs
+through the staged helper. Its private protocol and local Linux proof are in
+[fleet-resources](../../../packages/fleet-resources/README.md).
+
 Run heavy work through the shipped command:
 
 ```sh

@@ -1,5 +1,41 @@
 # Fleet resources
 
+The staged Linux containment primitive for VUH-2091 lives in
+`src/linux-namespace.py`. It is not wired into admission and does not allocate
+capacity. Its private per-job receipt preserves the native birth of a namespace
+init, and its command stays behind an execution gate until that receipt is
+durable. Cancellation uses the pinned init's pidfd. Wrapper/setup crashes kill
+init through race-checked parent-death signals; Linux then kills and drains its
+PID namespace, including detached double-forks and nested namespaces. An
+unavailable observation retains the receipt. A supervisor reply or recorded
+`empty` flag alone cannot authorize release.
+
+Private protocol: start `python3 -I -B src/linux-namespace.py run [DIRECTORY]`
+with a pipe as stdin. Send one JSON line containing UUID `id`, UUID `permitId`,
+64-hex `token`, `command` and string-array `args`. The helper emits `prepared`
+with `namespaceInit` (native PID, UID, boot ID/start ticks, namespace inode and
+PID-1 witness). A future host adapter must durably bind this proof to its
+canonical budget permit before sending `{id, token, action:"go"}`. The helper
+writes `running` before opening the gate. `{id, token, action:"cancel"}`, EOF or
+interruption kills the contained tree. Command output goes to stderr; stdin is
+`/dev/null`. Command exit retains `cleanup` for up to ten seconds while leftovers
+live, then init exits to kill them. Final replies contain `empty`; only
+`released, empty:true` is cleanup evidence. Unknown cleanup reports `held`.
+
+`python3 -I -B src/linux-namespace.py inspect DIRECTORY ID` takes the same
+exclusive per-job lock and re-observes the recorded birth; a live lock or
+uncertain identity retains the receipt. Recovery never signals a reused PID.
+The default receipt root comes from the OS-account profile, independent of
+`HOME`. Receipts are private, atomically replaced and fsynced; the dedicated
+lock releases on process death. No command arguments are persisted.
+
+This slice refuses detected WSL. Windows interop containment, native/WSL
+dispatch through one canonical Windows budget, setup and PC proofs remain
+open. Linux `flock` on `/mnt/c` must never be used to acquire the Windows
+`LockFileEx` budget lock. Existing Mac lanes and KH2's build lock are unchanged.
+See the [local proof](../../docs/testing/2026-10-11-linux-containment/README.md)
+for the container prerequisites and exact tested boundary.
+
 Every heavy command inherits `VITEST_MAX_WORKERS=4` and `TURBO_CONCURRENCY=4`,
 or a lower positive integer supplied by the caller. These tool-native limits
 reach package scripts and verified nested permits. Turbo tasks must allow them
