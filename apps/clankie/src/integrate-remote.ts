@@ -103,7 +103,10 @@ case "$op" in
     rm -rf "$B"; mkdir -p "$B/home" "$B/tmp" "$B/store" "$B/xdg/config" "$B/xdg/cache" "$B/xdg/data" "$B/xdg/state" || exit 3
     [ -d "$REPO" ] || git clone -q --no-checkout "$source" "$REPO" || exit 3
     git -C "$REPO" fetch -q origin && git -C "$REPO" worktree prune || exit 3
-    base64 -d > "$B/head.bundle" || exit 3
+    # A length line, then exactly that many bytes: stdin EOF does not always cross ssh, powershell and wsl.
+    read -r size && [ "$size" -ge 0 ] 2>/dev/null || exit 3
+    head -c "$size" > "$B/head.b64" && [ "$(wc -c < "$B/head.b64")" -eq "$size" ] || exit 3
+    base64 -d < "$B/head.b64" > "$B/head.bundle" || exit 3
     if [ -s "$B/head.bundle" ]; then git -C "$REPO" fetch -q "$B/head.bundle" refs/clankie/gate || exit 3; fi
     git -C "$REPO" worktree add -q --detach "$B/clankie" "$head" || exit 3
     [ "$(git -C "$B/clankie" rev-parse HEAD)" = "$head" ] || exit 3 ;;
@@ -179,6 +182,11 @@ function finished(
   });
 }
 
+/** The stage op reads its length first, so it never waits on an EOF the transport may drop. */
+function framed(payload: string): Buffer {
+  return Buffer.from(`${Buffer.byteLength(payload)}\n${payload}`);
+}
+
 export function wslGateRunner(options: {
   readonly machine: string;
   readonly shell: HerdrSshTransport["shell"];
@@ -212,7 +220,7 @@ export function wslGateRunner(options: {
         "stage",
         [publicSource(options.origin), repo.head],
         undefined,
-        Buffer.from(bundle.toString("base64")),
+        framed(bundle.toString("base64")),
         signal,
       );
       if (staged.exitCode !== 0) throw new Error(`Could not stage ${repo.head} on ${options.machine}`);

@@ -132,7 +132,8 @@ owner processes. Remote install and gate execution keep their existing behavior.
 The linked machine runs the gate in WSL under `~/.clankie-fleet`: its own Node,
 pnpm, Rust and ffmpeg, one clone of the public origin, and one directory per
 batch with a private home, temp and package store. The queue sends the composed
-HEAD as a git bundle over the fleet's existing SSH connection, verifies the
+HEAD as a length-prefixed git bundle over the fleet's existing SSH connection
+(the end of input does not always cross SSH, PowerShell and WSL), verifies the
 remote HEAD before install, streams the install and gate output into
 `core-install-<machine>.log` and `core-gate-<machine>.log`, and copies the gate's
 `.local/landing-gate.json` back, so revalidation and push stay here. No
