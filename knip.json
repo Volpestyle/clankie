@@ -108,6 +108,9 @@
     "packages/protocol": {
       "entry": ["test/fixtures/*.ts", "src/mcp-result.d.mts"]
     },
+    "packages/model-registry": {
+      "entry": ["data/models-dev-snapshot.d.json.ts"]
+    },
     "packages/fleet-resources": {
       "entry": ["test/fixtures/*.mjs"]
     },

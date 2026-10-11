@@ -81,6 +81,11 @@ failed controls are objects in [evidence.json](evidence.json). Integrate owns
 the exact-tree root gate; it was not duplicated locally. Its landing receipt
 and final gate result are attached to VUH-2058.
 
+The first exact-tree batch, `19cf44a0`, failed dead-code checking: Knip did not
+recognize the compiler-consumed JSON declaration as an entry. That nonzero gate
+is retained; the request was withdrawn before its next attempt. The declaration
+now has a targeted workspace entry, matching the existing declaration entries.
+
 ## Follow-up
 
 [VUH-2111](https://linear.app/vuhlp/issue/VUH-2111) owns a checked protocol
