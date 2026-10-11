@@ -1,6 +1,7 @@
 # Distribution
 
-Clankie's downloadable release is a self-contained macOS Apple silicon bundle.
+Clankie's downloadable release is a self-contained bundle for Apple silicon macOS
+and arm64 or x64 Linux.
 It includes the native `clankie` launcher, a pinned Node runtime, compiled
 service entrypoints, runtime assets, a pinned Herdr server, and `clankvox`. The operator invokes one
 executable; the launcher keeps the existing process boundaries behind it.
@@ -30,6 +31,32 @@ panes with an older plugin get a once-only flag naming the resume that loads the
 current plugin. Their
 harnesses are never restarted by installation. See [harness linking](cli.md#linking-native-fleet-harnesses)
 for receipts, source setup and manual remediation.
+
+## Linux
+
+Linux archives target glibc, not Alpine/musl. The supported baseline is Ubuntu
+24.04 LTS and newer, on arm64 (`aarch64`) or x64 (`x86_64`). Install
+host prerequisites before running the same installer:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl tar coreutils python3 git procps lsof
+curl -fsSL https://clankie.bot/install | sh
+```
+
+The archive includes Node and Herdr. The installer verifies its SHA-256 before
+changing `current`, then runs `clankie start clankie`. The portable launcher
+starts and health-checks a detached service, without root or a systemd user
+session. Run `clankie` in a terminal, choose local, and enter `/setup` to configure
+the model, remote phone access and optional workers. Credentials use the private
+user-level Linux file broker; no Mac Keychain is required. Worker harnesses,
+Chrome, FFmpeg and cloudflared are optional external tools.
+
+`clankie down clankie` stops the launcher-owned service. `clankie update` uses
+the installed release's Linux target and keeps settings, credentials and history
+outside the immutable release. Automatic startup after logout/reboot is not
+installed by this script; rerun `clankie` or `clankie start clankie` after login.
+The hosted deployment image remains a separate path.
 
 ## Mac companion app
 

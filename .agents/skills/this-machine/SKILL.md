@@ -361,3 +361,15 @@ Owner-managed state-home symlinks are supported. Keep the link and target owned
 by the service user and deny group/world writes; capability and update
 subdirectories remain private (`0700`). A shared writable target or replaceable
 link is refused. File symlinks are still refused for private update records.
+
+## Linux release install
+
+On Ubuntu 24.04 LTS+, arm64/x64 glibc releases use the same
+checksum-verified `install.sh` as macOS. Prerequisites and immutable paths are in
+[distribution](../../../docs/distribution.md#linux). Installation starts the
+service through the portable launcher supervisor; `clankie` opens its console
+and `/setup` configures model, phone access and optional workers. Linux credentials
+use the private file broker. `clankie update` selects the installed Linux target.
+No systemd user session or root service is required; start again after login with
+`clankie start clankie`. Do not claim phone pairing or model authentication from
+service health alone.

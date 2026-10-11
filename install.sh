@@ -35,10 +35,29 @@ if [ "$requested_version" != "latest" ] && ! valid_version "$requested_version";
   exit 1
 fi
 
-[ "$(uname -s)" = "Darwin" ] || { echo "clankie installer: macOS is required" >&2; exit 1; }
-[ "$(uname -m)" = "arm64" ] || { echo "clankie installer: Apple silicon is required" >&2; exit 1; }
+platform=$(uname -s)
+architecture=$(uname -m)
+case "$platform:$architecture" in
+  Darwin:arm64) target_platform="darwin-arm64" ;;
+  Linux:aarch64|Linux:arm64) target_platform="linux-arm64" ;;
+  Linux:x86_64|Linux:amd64) target_platform="linux-x64" ;;
+  *) echo "clankie installer: supported platforms are Apple silicon macOS and arm64/x64 Linux" >&2; exit 1 ;;
+esac
 command -v curl >/dev/null 2>&1 || { echo "clankie installer: curl is required" >&2; exit 1; }
-command -v shasum >/dev/null 2>&1 || { echo "clankie installer: shasum is required" >&2; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then
+  checksum_command="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+  checksum_command="shasum"
+else
+  echo "clankie installer: sha256sum or shasum is required" >&2
+  exit 1
+fi
+command -v tar >/dev/null 2>&1 || { echo "clankie installer: tar is required" >&2; exit 1; }
+if [ "$platform" = "Linux" ]; then
+  for prerequisite in python3 git ps; do
+    command -v "$prerequisite" >/dev/null 2>&1 || { echo "clankie installer: $prerequisite is required on Linux" >&2; exit 1; }
+  done
+fi
 
 install_root=${CLANKIE_INSTALL_ROOT:-"$HOME/.local/share/clankie"}
 bin_dir=${CLANKIE_BIN_DIR:-"$HOME/.local/bin"}
@@ -57,7 +76,7 @@ fi
 
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/clankie-install.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
-archive="clankie-darwin-arm64.tar.gz"
+archive="clankie-$target_platform.tar.gz"
 checksum="$archive.sha256"
 if [ "$requested_version" = "latest" ]; then
   base_url="https://github.com/$repository/releases/latest/download"
@@ -67,7 +86,11 @@ fi
 
 curl -fL --retry 3 --proto '=https' --tlsv1.2 "$base_url/$archive" -o "$temporary/$archive"
 curl -fL --retry 3 --proto '=https' --tlsv1.2 "$base_url/$checksum" -o "$temporary/$checksum"
-(cd "$temporary" && shasum -a 256 -c "$checksum")
+if [ "$checksum_command" = "sha256sum" ]; then
+  (cd "$temporary" && sha256sum -c "$checksum")
+else
+  (cd "$temporary" && shasum -a 256 -c "$checksum")
+fi
 
 if ! tar -tzf "$temporary/$archive" | awk '
   /^clankie(\/|$)/ && $0 !~ /(^|\/)\.\.(\/|$)/ { next }
@@ -93,7 +116,7 @@ fi
 # The verified release supplies this helper and its own Node; older releases skip it.
 app_helper="$target/apps/tui/bin/mac-app-install.js"
 app_launch="no"
-if [ -f "$app_helper" ]; then
+if [ "$platform" = "Darwin" ] && [ -f "$app_helper" ]; then
   app_result=$("$target/libexec/node" "$app_helper" "$target" "$install_root" "$app_action")
   printf '%s\n' "$app_result"
   case "$app_result" in
@@ -113,7 +136,9 @@ case ":${PATH:-}:" in
   *)
     case "${SHELL:-}" in
       */zsh) profile="$HOME/.zprofile" ;;
-      */bash) profile="$HOME/.bash_profile" ;;
+      */bash)
+        if [ "$platform" = "Linux" ]; then profile="$HOME/.profile"; else profile="$HOME/.bash_profile"; fi
+        ;;
       *) profile="" ;;
     esac
     path_line="export PATH=\"$bin_dir:\$PATH\""
@@ -129,6 +154,13 @@ case ":${PATH:-}:" in
     fi
     ;;
 esac
+
+# The portable launcher supervises a detached, health-checked service; no root
+# privileges or systemd session are needed (including an SSH login/container).
+if [ "$platform" = "Linux" ]; then
+  "$bin_link" start clankie
+  echo "Clankie is running. Run $bin_link, choose local, then /setup."
+fi
 
 # Existing links follow the release, even when installed without a terminal.
 # This script is served from main for every tag; a release older than the

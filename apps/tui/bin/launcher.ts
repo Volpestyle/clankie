@@ -97,7 +97,7 @@ async function runOperatorConsole(): Promise<void> {
     let choice;
     try {
       choice = await input.question(
-        "1. Run Clankie on this Mac\n2. Connect to my hosted Clankie\nChoose 1 or 2: ",
+        "1. Run Clankie on this computer\n2. Connect to my hosted Clankie\nChoose 1 or 2: ",
       );
     } finally {
       input.close();

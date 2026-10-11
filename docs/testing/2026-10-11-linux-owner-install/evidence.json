@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "linux-install-proof.tar",
+      "size": 450560,
+      "sha256": "ba50c723724164117e3fdc55629beb770707741b122826c84d032b3895223e71",
+      "url": "clankie://evidence/sha256/ba50c723724164117e3fdc55629beb770707741b122826c84d032b3895223e71"
+    }
+  ]
+}

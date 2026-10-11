@@ -46,7 +46,7 @@ command above; updates remember that choice. Companion distribution is still
 gated on the signed app release ([distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md#mac-companion-app)).
 
 Open a new Terminal window, run `clankie`, and choose **Run Clankie on this
-Mac**. The launcher starts his service and opens the console, and `/setup`
+computer**. The launcher starts his service and opens the console, and `/setup`
 walks you through the rest:
 
 1. **A model.** Connect a subscription, API key, or local provider, then pick a
@@ -69,6 +69,25 @@ for checksums, pinning, and the installed layout,
 [contributing](https://github.com/Volpestyle/clankie/blob/main/CONTRIBUTING.md)
 to run from source, or the
 [Linux deployment](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md).
+
+## Linux release path
+
+Linux bundles support **Ubuntu 24.04 LTS or newer**, with glibc, on arm64 or x64.
+Install `ca-certificates`, `curl`, `tar`, `coreutils`, `python3`, `git`, `procps`
+and `lsof` using your package manager. Node and Herdr are bundled.
+
+The same installer selects and checksums the matching Linux archive, then starts
+the service with the portable launcher. Run `clankie`, choose local, and enter
+`/setup`. Model authentication, remote phone access and optional worker harnesses
+use the same setup flow. No systemd user session is required. After logout or
+reboot, run `clankie` again; `clankie update` follows the Linux release target.
+
+This path requires an official release containing `clankie-linux-arm64` or
+`clankie-linux-x64`; a release without Linux assets cannot install on Linux.
+See [distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md#linux)
+for prerequisites and lifecycle details. The
+[hosted Linux deployment](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md)
+remains available separately.
 
 ## Bring your Mac's Clankie into the app
 
