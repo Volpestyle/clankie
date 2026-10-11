@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "installed-namespace-proof.json",
+      "size": 31553,
+      "sha256": "786ad02c809b7dfb8abb76a85044dd604dd29317f6a477d2de8145c010efac15",
+      "url": "clankie://evidence/sha256/786ad02c809b7dfb8abb76a85044dd604dd29317f6a477d2de8145c010efac15"
+    },
+    {
       "path": "namespace-proof-bundle.json",
       "size": 46775,
       "sha256": "ce8a287ba9b70819afb6042a8f8bf424b16475055125b54fec3b8891454a7ca9",

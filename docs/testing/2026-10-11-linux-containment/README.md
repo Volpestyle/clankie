@@ -81,3 +81,16 @@ All tests, typechecks, dependency preparation and container runs used
 `clankie heavy`. The integrator supplies the exact-tree landing gate; no
 duplicate local root gate was run. Raw logs and checked sources are archived
 in `evidence.json`.
+
+Release packaging follow-up (Basil review `a7755e38`):
+
+The runtime asset allow-list now includes `linux-namespace.py` beside `native.py`.
+A search of script/integration allow-lists found no other named copy to update.
+The Python proof fixture lives under `test/fixtures`; it is not a release asset.
+An owned Docker container with `--init` and `CLANKIE_LINUX_NAMESPACE_PROOF=1`
+copied only the two runtime helpers to a release-shaped source directory, then
+ran the real eight-case fixture against that directory. All eight passed in
+11.975 seconds, including wrapper/init crash, cancellation, detached descendants
+and exclusive-lock recovery. The same image and resource limits above were used.
+This is a real Python runtime proof, not the ordinary Mac wrapper's skipped test.
+The follow-up is based on fetched `d4eac6a65`; the exact-tree gate is pending.
