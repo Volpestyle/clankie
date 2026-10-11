@@ -251,75 +251,93 @@ it.skipIf(process.platform !== "darwin")(
   20_000,
 );
 
-it("the registered native supervisor bounds aggregate CPU across real server children and preserves exit status", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clankie-server-cpu-"));
-  const store = new ResourceStore(root);
-  const claimOwner = (await processIdentity())!;
-  const id = randomUUID(),
-    token = randomUUID();
-  await store.transaction((state) =>
-    state.leases.push({
-      id,
-      token,
-      kind: "heavy",
-      state: "starting",
-      claimOwner,
-      executable: "node",
-      createdAtMs: Date.now(),
-      lastUsedAtMs: Date.now(),
-    }),
-  );
-  const runner = spawn(resourcePython, ["-I", resourceNativeHelperPath(), "run", root, id, token], {
-    detached: true,
-    stdio: ["ignore", "ignore", "inherit", "pipe", "pipe"],
-  });
-  const done = new Promise<number>((resolve, reject) => {
-    runner.once("error", reject);
-    runner.once("exit", (code) => resolve(code ?? -1));
-  });
-  const replies = createInterface({ input: runner.stdio[4] as Readable });
-  try {
-    const input = runner.stdio[3] as Writable;
-    // Exercise a small fractional budget on every test host. This is the
-    // runner's private control pipe, not a worker environment capacity override.
-    input.write(
-      `${JSON.stringify({ command: process.execPath, args: [serverCommand, join(root, "server.json"), "3"], serverCpuCores: 0.5 })}\n`,
+it.each(process.platform === "darwin" ? [false, true] : [false])(
+  "the registered native supervisor bounds CPU and preserves progress with an unreaped grandchild: %s",
+  async (zombie) => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-server-cpu-"));
+    const store = new ResourceStore(root);
+    const claimOwner = (await processIdentity())!;
+    const id = randomUUID(),
+      token = randomUUID();
+    await store.transaction((state) =>
+      state.leases.push({
+        id,
+        token,
+        kind: "heavy",
+        state: "starting",
+        claimOwner,
+        executable: "node",
+        createdAtMs: Date.now(),
+        lastUsedAtMs: Date.now(),
+      }),
     );
-    await replies[Symbol.asyncIterator]().next();
-    input.write("go\n");
-    const started = (await until(() => receipt(join(root, "server.json")), Boolean))!;
-    await until(
-      () => get(started.port),
-      (sample) => sample.workers === 3,
-    );
-    // A signal to the runner alone does not end the owned server. Its CPU
-    // governance must remain active while group termination still works.
-    process.kill(runner.pid!, "SIGTERM");
-    const before = await get(started.port);
-    const at = performance.now();
-    await delay(6000);
-    const after = await get(started.port);
-    const elapsedMs = performance.now() - at;
-    const cpuCores = (after.cpuMs - before.cpuMs) / elapsedMs;
-    expect(cpuCores).toBeGreaterThan(0);
-    // Allow sampling/IPC bursts; an ungoverned three-worker loop exceeds this.
-    expect(cpuCores).toBeLessThan(0.85);
-    process.stdout.write(
-      `Server CPU proof: ${JSON.stringify({ budgetCores: 0.5, measuredCores: cpuCores, elapsedMs, workers: after.workers })}\n`,
-    );
-    await get(started.port, "/stop");
-    expect(await done).toBe(7);
-    expect((await store.read()).leases).toHaveLength(0);
-  } finally {
-    replies.close();
-    if (runner.exitCode === null && runner.pid) {
-      process.kill(-runner.pid, "SIGTERM");
-      process.kill(-runner.pid, "SIGCONT");
+    const runner = spawn(resourcePython, ["-I", resourceNativeHelperPath(), "run", root, id, token], {
+      detached: true,
+      stdio: ["ignore", "ignore", "inherit", "pipe", "pipe"],
+    });
+    const done = new Promise<number>((resolve, reject) => {
+      runner.once("error", reject);
+      runner.once("exit", (code) => resolve(code ?? -1));
+    });
+    const replies = createInterface({ input: runner.stdio[4] as Readable });
+    try {
+      const input = runner.stdio[3] as Writable;
+      // Exercise a small fractional budget on every test host. This is the
+      // runner's private control pipe, not a worker environment capacity override.
+      const args = [serverCommand, join(root, "server.json"), "3"];
+      if (zombie) args.push(resourcePython, join(import.meta.dirname, "fixtures/unreaped-child.py"));
+      input.write(`${JSON.stringify({ command: process.execPath, args, serverCpuCores: 0.5 })}\n`);
+      await replies[Symbol.asyncIterator]().next();
+      input.write("go\n");
+      const started = (await until(() => receipt(join(root, "server.json")), Boolean))!;
+      await until(
+        () => get(started.port),
+        (sample) => sample.workers === 3,
+      );
+      let zombiePid: number | undefined;
+      if (zombie) {
+        await until(() => receipt(join(root, "server.json.zombie")), Boolean);
+        const proof = JSON.parse(await readFile(join(root, "server.json.zombie"), "utf8")) as {
+          zombie: number;
+        };
+        zombiePid = proof.zombie;
+        // The general lease observer must still report this real libproc failure
+        // as unknown. Only the CPU reader's kernel zombie proof skips its CPU.
+        await expect(processIdentity(zombiePid)).rejects.toThrow();
+      }
+      // A signal to the runner alone does not end the owned server. Its CPU
+      // governance must remain active while group termination still works.
+      process.kill(runner.pid!, "SIGTERM");
+      const before = await get(started.port);
+      const at = performance.now();
+      await delay(6000);
+      const after = await get(started.port);
+      const elapsedMs = performance.now() - at;
+      const cpuCores = (after.cpuMs - before.cpuMs) / elapsedMs;
+      if (zombiePid) await expect(processIdentity(zombiePid)).rejects.toThrow();
+      // The old machine-max uncertainty debt left real transform workers at
+      // roughly budget / machine-cores duty cycle while this zombie remained.
+      expect(cpuCores).toBeGreaterThan(zombie ? 0.2 : 0);
+      // Allow sampling/IPC bursts; an ungoverned three-worker loop exceeds this.
+      expect(cpuCores).toBeLessThan(0.85);
+      process.stdout.write(
+        `Server CPU proof: ${JSON.stringify({ zombie, budgetCores: 0.5, measuredCores: cpuCores, elapsedMs, workers: after.workers })}\n`,
+      );
+      await get(started.port, "/stop");
+      expect(await done).toBe(7);
+      expect((await store.read()).leases).toHaveLength(0);
+    } finally {
+      replies.close();
+      if (runner.exitCode === null && runner.pid) {
+        process.kill(-runner.pid, "SIGTERM");
+        process.kill(-runner.pid, "SIGCONT");
+      }
+      await done;
+      await rm(root, { recursive: true, force: true });
     }
-    await done;
-    await rm(root, { recursive: true, force: true });
-  }
-}, 120_000);
+  },
+  120_000,
+);
 
 it("routes dev and watch commands to servers while bounded commands retain their lanes", () => {
   for (const words of [

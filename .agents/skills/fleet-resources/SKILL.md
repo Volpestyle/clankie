@@ -27,9 +27,11 @@ Do not launch dev servers ungoverned. The lane has up to two slots and shares
 20% of machine cores (at most 64 cores), divided equally between its slots.
 Tool-native parallelism is capped at two; a native supervisor also samples the
 owned process group's CPU every 100 ms and pauses/resumes exact process births
-to pay back excess CPU. Failed CPU observations pause proven members, with short
-resume windows charged at the machine's maximum CPU rate so a launcher can reap
-an exited child. Brief bursts can exceed this sampled budget. Keep
+to pay back excess CPU. Kernel-proven exited Darwin children are skipped even
+before their parent reaps them. Failed CPU observations resume the owned group
+and report degraded enforcement; its server permit stays held. The CPU budget
+can be exceeded until observation recovers, when accounting starts from a fresh
+baseline. Brief bursts can exceed this sampled budget. Keep
 children in the owned group; detached/privileged processes are outside its
 contract. Stop your server when finished. Neither server age nor a long build
 causes an automatic kill. Normal interruption and leftover cleanup still apply.

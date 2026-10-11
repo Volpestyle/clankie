@@ -2881,8 +2881,10 @@ two slots, sharing 20% of machine CPU cores (at most 64 cores), divided equally
 among the slots. Its native supervisor samples aggregate owned-group CPU every
 100 ms and pauses/resumes proven process lifetimes to pay back excess usage;
 brief bursts can exceed this sampled budget. Tool-native fan-out is capped at
-two. Unknown CPU observations pause proven members, with short resume windows
-charged at the machine's maximum CPU rate so a launcher can reap an exited child.
+two. Kernel-proven Darwin zombies are skipped before their parent reaps them.
+Unknown CPU observations resume the owned group and report degraded enforcement;
+its server permit stays held. CPU may exceed its share until observation recovers,
+when accounting restarts from a fresh baseline.
 Detached or privileged children are outside this process-group contract.
 Servers still wait on machine load, memory and FIFO in their own journal under
 `server/`; they hold no build/check slots. Stop them when finished. A server

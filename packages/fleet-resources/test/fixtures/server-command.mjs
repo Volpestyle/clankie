@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { fork } from "node:child_process";
+import { fork, spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 if (process.argv[2] === "burn") {
@@ -11,7 +11,8 @@ if (process.argv[2] === "burn") {
   burn();
   setInterval(() => process.send?.(process.cpuUsage()), 100);
 } else {
-  const [receipt, workerCount = "0"] = process.argv.slice(2);
+  const [receipt, workerCount = "0", python, zombieFixture] = process.argv.slice(2);
+  const zombie = python ? spawn(python, [zombieFixture, `${receipt}.zombie`]) : undefined;
   const workers = Array.from({ length: Number(workerCount) }, () =>
     fork(import.meta.filename, ["burn"], {
       stdio: ["ignore", "ignore", "inherit", "ipc"],
@@ -23,6 +24,7 @@ if (process.argv[2] === "burn") {
     if (request.url === "/stop") {
       response.end("stopping");
       workers.forEach((worker) => worker.kill());
+      zombie?.kill();
       server.close(() => process.exit(7));
       return;
     }

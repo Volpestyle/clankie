@@ -111,9 +111,12 @@ and tool-native fan-out is two. `server-cpu.py`, loaded by the registered native
 runner, samples group CPU without forking every 100 ms, charges reaped child
 time, and pauses/resumes exact PID births to pay back excess usage. Short bursts
 can exceed the sampled budget; reaped children already sampled can conservatively
-be charged twice. CPU sample accounting is atomic across member reads. Unknown
-observations pause proven members, with short resume windows charged at the
-machine's maximum CPU rate so a launcher can reap an exited child.
+be charged twice. CPU sample accounting is atomic across member reads. Darwin
+zombies are skipped only after a kernel status query proves they have exited;
+libproc alone cannot observe their identity. Unknown observations resume the
+owned group and report degraded enforcement while its server permit stays held.
+CPU may exceed its share during that failure; recovery starts from a fresh
+baseline, without charging historical CPU or invented machine-wide debt.
 Verified nested servers reuse a server parent's permit; bounded parents give
 servers their own separately governed permit. It governs same-user children remaining in the owned group,
 not detached or privileged processes. The lane answers to the existing load and
