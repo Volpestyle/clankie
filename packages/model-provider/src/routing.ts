@@ -100,7 +100,10 @@ export function routeFor(config: ClankieConfig, purpose: ModelPurpose): ModelRou
     // judges the task needs it (VUH-1391): no loop limit, no keyword gate.
     const escalationRef = routing.escalation_model;
     const escalates =
-      routing.escalate === true && escalationRef !== undefined && escalationRef !== config.model;
+      routing.escalate === true &&
+      escalationRef !== undefined &&
+      escalationRef !== config.model &&
+      withinPreference(config.model, escalationRef);
     return {
       purpose,
       tier,
@@ -108,12 +111,20 @@ export function routeFor(config: ClankieConfig, purpose: ModelPurpose): ModelRou
       ...(escalates ? { escalation: { ref: escalationRef, onProviderError: false } } : {}),
     };
   }
+  // A saved provider preference bounds the old purpose mappings too. In particular,
+  // an included plan's retained aliases cannot override a newly selected own provider.
+  const initialRef = withinPreference(config.model, routing.routine_model)
+    ? routing.routine_model
+    : config.model;
   const escalationRef = routing.escalation_model ?? config.model;
   return {
     purpose,
     tier,
-    ref: routing.routine_model,
-    ...(routing.escalate === true && escalationRef !== undefined
+    ref: initialRef,
+    ...(routing.escalate === true &&
+    escalationRef !== undefined &&
+    escalationRef !== initialRef &&
+    withinPreference(config.model, escalationRef)
       ? {
           escalation: {
             ref: escalationRef,
@@ -123,6 +134,14 @@ export function routeFor(config: ClankieConfig, purpose: ModelPurpose): ModelRou
         }
       : {}),
   };
+}
+
+/** Existing configured targets are eligible only inside the selected provider. */
+function withinPreference(preference: string | undefined, target: string | undefined): boolean {
+  if (preference === undefined || target === undefined) return false;
+  const selected = parseModelRef(preference);
+  const routed = parseModelRef(target);
+  return selected !== undefined && routed !== undefined && selected.providerId === routed.providerId;
 }
 
 /**

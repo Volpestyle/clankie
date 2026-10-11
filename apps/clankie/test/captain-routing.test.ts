@@ -75,7 +75,9 @@ async function harness(current: () => RoutedSelection | undefined) {
     },
     setModel,
     setThinkingLevel,
-    appendEntry: (_type: string, data: unknown) => entries.push(data),
+    appendEntry: (type: string, data: unknown) => {
+      if (type === "clankie-escalation") entries.push(data);
+    },
   } as unknown as ExtensionAPI);
   const emit = async (event: string, payload: unknown = {}) => await handlers.get(event)?.(payload);
   return {
@@ -104,7 +106,7 @@ describe("captainRoutingExtension", () => {
   it("never moves a routine run when escalation is off, however long it runs or fails", async () => {
     const pi = await harness(() => routineRoute({ escalate: false }));
     const prompt = await pi.startRun();
-    expect(prompt?.systemPrompt).toContain("routine model (`openai/routine-model`)");
+    expect(prompt?.systemPrompt).toContain("requests `openai/routine-model`");
     expect(pi.active()).not.toContain(ESCALATE_TOOL_NAME);
     for (let call = 0; call < 20; call += 1) await pi.modelCall();
     await pi.failedCall("503 Service Unavailable: overloaded");
@@ -140,7 +142,7 @@ describe("captainRoutingExtension", () => {
     await pi.failedCall("503 Service Unavailable: overloaded");
     expect(pi.setModel).not.toHaveBeenCalled();
 
-    expect(await pi.askToEscalate()).toBe("The rest of this turn runs on clankie/escalation.");
+    expect(await pi.askToEscalate()).toContain("requests clankie/escalation");
     expect(pi.setModel).toHaveBeenCalledWith(STRONGER.model);
     expect(pi.escalations).toEqual([
       { purpose: "operator", from: WORK.ref, to: STRONGER.ref, trigger: "asked" },
@@ -154,7 +156,7 @@ describe("captainRoutingExtension", () => {
     expect(prompt?.systemPrompt).toContain("call `escalate`");
     expect(pi.active()).toEqual(["read", "bash", ESCALATE_TOOL_NAME]);
 
-    expect(await pi.askToEscalate()).toBe("The rest of this turn runs on openai/work-model.");
+    expect(await pi.askToEscalate()).toContain("requests openai/work-model");
     expect(await pi.askToEscalate()).toBe("This turn has already escalated.");
     for (let call = 0; call < 20; call += 1) await pi.modelCall();
 
@@ -178,7 +180,7 @@ describe("captainRoutingExtension", () => {
     await pi.startRun();
     await pi.modelCall();
     expect(pi.setModel).toHaveBeenCalledTimes(1);
-    expect(await pi.askToEscalate()).toBe("The rest of this turn runs on openai/work-model.");
+    expect(await pi.askToEscalate()).toContain("requests openai/work-model");
     expect(pi.setModel).toHaveBeenCalledTimes(2);
   });
 

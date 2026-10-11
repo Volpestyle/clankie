@@ -451,6 +451,17 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           activity = phase;
           publish({ type: "activity", phase });
         };
+        const unsubscribeModels = live
+          ? () => undefined
+          : (lane.route?.recorder?.subscribe((observation) => {
+              if (!run.signal.aborted)
+                publish({
+                  type: "activity",
+                  phase: activity ?? "thinking",
+                  runId: context.runId,
+                  ...observation,
+                });
+            }) ?? (() => undefined));
         const drafts = createDraftPacer((text) => {
           if (!run.signal.aborted) context.draft(text);
         });
@@ -729,6 +740,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             lane.starting = undefined;
           }
           unsubscribe();
+          unsubscribeModels();
         }
       },
       signal,

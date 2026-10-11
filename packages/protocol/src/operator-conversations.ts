@@ -15,6 +15,7 @@ import { HireProfileSchema } from "./hire-profile.ts";
 import { DeliveryStageSchema } from "./delivery.ts";
 import { isCanonicalBase64 } from "./base64.ts";
 import { FleetResourceSnapshotSchema } from "./fleet-resources.ts";
+import { TurnModelCallSchema, TurnRoutingDecisionSchema } from "./turn-model.ts";
 
 // ---------------------------------------------------------------------------
 // Operator conversations (ADR 0032, VUH-769).
@@ -1726,6 +1727,12 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("activity"),
     phase: OperatorConversationActivityPhaseSchema,
+    /** Owning turn for provider/routing observations; older activity has no run ID. */
+    runId: OperatorConversationRunIdSchema.optional(),
+    /** Authenticated per-call observations, including calls with no spoken text. */
+    modelCall: TurnModelCallSchema.optional(),
+    /** A decision can fail without changing the serving model. */
+    routingDecision: TurnRoutingDecisionSchema.optional(),
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("message"),

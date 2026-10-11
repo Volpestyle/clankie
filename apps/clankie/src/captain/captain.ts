@@ -263,6 +263,7 @@ import { RoomConversations } from "./room-conversations.ts";
 import { sameLinearWakeRecipient } from "./conversations/linear-wakes.ts";
 import { runOutWarnings } from "./account-allocation.ts";
 import { captainRoutingExtension } from "./routing.ts";
+import { captainTurnModelExtension, TurnModelRecorder } from "./turn-model.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import {
@@ -1454,6 +1455,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const route: LaneSession["route"] = {
       current: await prepare("session model route", () => resolveRoute(purpose)),
     };
+    const modelRecorder = new TurnModelRecorder(
+      () => route.current,
+      () => route.used,
+    );
+    route.recorder = modelRecorder;
     const budget = { compactBeforeNextRun: false };
     const selection = route.current.selection;
     const hasPersonaImages =
@@ -1529,8 +1535,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           captainRoutingExtension({
             current: () => route.current,
             onEscalated: (record) => console.info("Routine turn escalated:", JSON.stringify(record)),
+            onDecision: (record) => modelRecorder.decision(record),
           }),
           captainModelUsageExtension(route),
+          captainTurnModelExtension(modelRecorder),
           browserExtension(deps, capture),
           ...(systemTools && access?.privateContext !== false ? [mcpExtension(deps, lane, capture)] : []),
           ...(systemTools && access?.privateContext !== false

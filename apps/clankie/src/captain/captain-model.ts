@@ -20,6 +20,12 @@ function formatTokens(count: number): string {
 
 /** What he is running on, in his own words. */
 export function modelCard({ model, thinkingLevel, ref }: PiModelSelection): string {
+  if (model.provider === "clankie")
+    return [
+      "## This turn's requested model",
+      `The included route is \`${ref}\`. This names a requested route, not the provider/model actually serving it.`,
+      "Authenticated provider response observations identify the serving model, including fallback. Missing observations mean unknown; never claim this alias is an actual model.",
+    ].join("\n");
   return [
     "## The model you are running on",
     `${model.name} (\`${ref}\`), served by ${model.provider}.`,

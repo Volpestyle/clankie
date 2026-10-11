@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "main-rebase-checks.zip",
+      "size": 79416,
+      "sha256": "4513884edbc812ba0048cbf45525bd4697b668ce37ffb4efd350b9cf5dbc347e",
+      "url": "clankie://evidence/sha256/4513884edbc812ba0048cbf45525bd4697b668ce37ffb4efd350b9cf5dbc347e"
+    }
+  ]
+}

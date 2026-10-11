@@ -27,6 +27,33 @@ carry `modelUsage` with the requested reference, observed identity, and source;
 historical messages without this metadata are not reconstructed from current
 settings. Response headers report the model actually served after fallback.
 
+Clankie decides whether to call `escalate` during a turn, using the existing
+routing capability. Configured automatic targets stay within the saved provider
+preference and pass the same catalog and credential checks as ordinary selection.
+Changing models affects subsequent calls in that turn; completed tools and
+messages continue in the same session. The next turn reloads the saved preference.
+An unavailable target leaves the current model in place.
+
+Authenticated conversation replay/tail events expose `activity.modelCall` for
+each provider attempt, including calls that only request tools. Its stable `id`
+and `sequence` connect `requested`, `responded`, and `completed`/`failed` phases;
+`preference` records the saved preference at turn start. `modelUsage` uses the
+same serving-identity contract as completed messages. A request is intent, and
+missing serving metadata remains unknown. `activity.routingDecision` records
+requested, selected, refused and unavailable escalation decisions; selection
+alone does not prove that the target served a call. Clients use the existing
+conversation run and cursor envelope to follow changes and read retained history.
+
+Completed call observations include provider-reported token counts when
+available, to reconcile usage with the observed model. Missing counts remain
+unknown. These observations do not assert a charged amount or a hosted ledger
+charge ID; charge linkage and unresolved catalog/credit policy belong to the
+VUH-2107 follow-up under VUH-1890.
+The owning `activity.runId` links these calls to authenticated turn usage metrics;
+their reported token totals reconcile with that run's usage. The older metrics
+`execution` field describes the model selected at turn start, and cannot prove
+which model served later calls or a hosted fallback.
+
 Provider/catalog and credit-rate policy remain open under VUH-1890. Hosted
 responses label `included_catalog_policy` and `credit_rate_policy` in
 `openItems`; this slice changes neither catalog contents nor credit policy and

@@ -3,6 +3,7 @@ import { isRetryableAssistantError, type AssistantMessage } from "@earendil-work
 import { defineTool, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { RoutedSelection } from "./model.ts";
+import type { TurnRoutingDecision } from "@clankie/protocol/turn-model";
 
 /**
  * What moved a routine run onto the escalation model.
@@ -79,10 +80,10 @@ class RoutineRunBudget {
 function routineCard(routed: RoutedSelection): string {
   return [
     "## This turn's model",
-    `This turn runs on your routine model (\`${routed.selection.ref}\`), which your person picked for everyday conversation.`,
+    `This turn requests \`${routed.selection.ref}\` for everyday conversation, within your person's saved preference.`,
     routed.resolveEscalation === undefined
       ? "It cannot hand off to a bigger model."
-      : `If it turns out to be real work — code, a multi-step investigation, leading agents, a hard question — call \`${ESCALATE_TOOL_NAME}\` and the rest of the turn runs on \`${routed.route.escalation?.ref ?? "your work model"}\`. Once per turn; it costs more.`,
+      : `If it turns out to need stronger reasoning, call \`${ESCALATE_TOOL_NAME}\` to request \`${routed.route.escalation?.ref ?? "your work model"}\` for subsequent calls. Once per turn; existing catalog, credential and credit limits still apply. Serving-model observations identify what actually runs, including fallback.`,
   ].join("\n");
 }
 
@@ -94,8 +95,8 @@ function routineCard(routed: RoutedSelection): string {
 function workEscalationCard(routed: RoutedSelection): string {
   return [
     "## A stronger model, when you need it",
-    `This turn runs on \`${routed.selection.ref}\`. If the task needs more than it can give — hard reasoning, a subtle bug, careful design, anything where a better answer is worth the cost — call \`${ESCALATE_TOOL_NAME}\` and the rest of this turn runs on \`${routed.route.escalation?.ref ?? "your stronger model"}\`.`,
-    "It costs more, so use it when the work warrants it, not by habit. Once per turn; the next turn starts back here.",
+    `This turn requests \`${routed.selection.ref}\`. If the task needs stronger reasoning, call \`${ESCALATE_TOOL_NAME}\` to request \`${routed.route.escalation?.ref ?? "your stronger model"}\` for subsequent calls.`,
+    "Judge whether the work warrants it. Once per turn; the next turn starts from the saved preference. Existing catalog, credential and credit limits still apply. Serving-model observations identify what actually runs, including fallback.",
   ].join("\n");
 }
 
@@ -112,6 +113,7 @@ function workEscalationCard(routed: RoutedSelection): string {
 export function captainRoutingExtension(input: {
   readonly current: () => RoutedSelection | undefined;
   readonly onEscalated: (record: EscalationRecord) => void;
+  readonly onDecision?: (record: TurnRoutingDecision) => void;
 }) {
   return {
     name: "captain-routing",
@@ -128,16 +130,38 @@ export function captainRoutingExtension(input: {
       /** The model the run moved to, or why it did not move. */
       const escalate = async (
         trigger: EscalationTrigger,
+        reason?: string,
       ): Promise<{ readonly to: string } | { readonly refused: string }> => {
         const current = routed;
+        const decision = (outcome: TurnRoutingDecision["outcome"]): void => {
+          if (current === undefined) return;
+          const record: TurnRoutingDecision = {
+            purpose: current.route.purpose,
+            from: current.selection.ref,
+            ...(current.route.escalation === undefined ? {} : { to: current.route.escalation.ref }),
+            trigger,
+            outcome,
+            ...(reason === undefined ? {} : { reason }),
+          };
+          pi.appendEntry("clankie-routing-decision", record);
+          input.onDecision?.(record);
+        };
         if (current?.resolveEscalation === undefined || !budget.claim()) {
+          decision("refused");
           return {
             refused: budget.hasEscalated ? "This turn has already escalated." : "This turn cannot escalate.",
           };
         }
-        const target = await current.resolveEscalation();
-        if (!(await pi.setModel(target.model))) {
-          throw new Error(`Escalation model ${target.ref} has no usable credential`);
+        decision("requested");
+        let target;
+        try {
+          target = await current.resolveEscalation();
+          if (!(await pi.setModel(target.model))) {
+            throw new Error(`Escalation model ${target.ref} has no usable credential`);
+          }
+        } catch (error) {
+          decision("unavailable");
+          throw error;
         }
         pi.setThinkingLevel(target.thinkingLevel);
         const record: EscalationRecord = {
@@ -148,6 +172,7 @@ export function captainRoutingExtension(input: {
         };
         pi.appendEntry("clankie-escalation", record);
         input.onEscalated(record);
+        decision("selected");
         return { to: target.ref };
       };
 
@@ -173,11 +198,14 @@ export function captainRoutingExtension(input: {
           parameters: Type.Object({
             reason: Type.Optional(Type.String({ maxLength: 500 })),
           }),
-          execute: async () => {
+          execute: async (_id, args) => {
             let text: string;
             try {
-              const outcome = await escalate("asked");
-              text = "to" in outcome ? `The rest of this turn runs on ${outcome.to}.` : outcome.refused;
+              const outcome = await escalate("asked", args.reason);
+              text =
+                "to" in outcome
+                  ? `The rest of this turn requests ${outcome.to}. Serving-model observations identify what actually runs.`
+                  : outcome.refused;
             } catch (error) {
               text = `Could not escalate: ${error instanceof Error ? error.message : String(error)}`;
             }

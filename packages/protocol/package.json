@@ -14,6 +14,7 @@
     "./support-access": "./src/support-access.ts",
     "./captain-readiness": "./src/captain-readiness.ts",
     "./model-keys": "./src/model-keys.ts",
+    "./turn-model": "./src/turn-model.ts",
     "./local-companion": "./src/local-companion.ts",
     "./composer-transcription": "./src/composer-transcription.ts",
     "./hosted-device-security": "./src/hosted-device-security.ts",

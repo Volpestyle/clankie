@@ -126,7 +126,11 @@ export interface LaneSession {
   readonly quietSkills: ReadonlySet<string>;
   readonly purpose: ModelPurpose;
   /** This purpose's route as of the last sync; the routing extension reads it per run. */
-  readonly route: { current: RoutedSelection; used?: import("@clankie/protocol/model-keys").TurnModelUsage };
+  readonly route: {
+    current: RoutedSelection;
+    used?: import("@clankie/protocol/model-keys").TurnModelUsage;
+    recorder?: import("./turn-model.ts").TurnModelRecorder;
+  };
   /** Set when a request had to be trimmed to fit; the next sync compacts first. */
   readonly budget: { compactBeforeNextRun: boolean };
   lastAssistantText: string;

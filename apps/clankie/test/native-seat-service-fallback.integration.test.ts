@@ -311,6 +311,14 @@ it("runs a worker report on the service lane exactly once when no seat is live, 
   const reply = f.events(ID).find((event) => event.type === "message" && event.role === "captain");
   expect(reply).toBeDefined();
   expect(reply).not.toHaveProperty("modelUsage");
+  expect(
+    f
+      .events(ID)
+      .some(
+        (event) =>
+          event.type === "activity" && (event.modelCall !== undefined || event.routingDecision !== undefined),
+      ),
+  ).toBe(false);
   const prompt = f.sessions[0]!.prompts[0]!;
   expect(prompt).toContain("[Shared conversation context.");
   expect(prompt).toContain("NEWEST harness turn");

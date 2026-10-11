@@ -72,11 +72,8 @@ describe("routeFor", () => {
         routine_turn_limit: 4,
       },
     };
-    expect(routeFor(elsewhere, "discord_social").escalation).toEqual({
-      ref: "clankie/escalation",
-      turnLimit: 4,
-      onProviderError: true,
-    });
+    // An old included routing target cannot override a saved own-provider preference.
+    expect(routeFor(elsewhere, "discord_social").escalation).toBeUndefined();
   });
 
   it("lets a work purpose escalate only to a different, named model, and only when he asks (VUH-1391)", () => {

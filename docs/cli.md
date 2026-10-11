@@ -2690,6 +2690,14 @@ model ref, so `clankie effort set LEVEL --model REF` sets the routine model's
 effort. Hosted bodies receive routing from the fleet at start. The console's
 `/routing` takes the same arguments.
 
+These compatibility controls configure eligible targets; Clankie makes the
+per-turn decision through `escalate`. Targets cannot cross the saved provider
+preference. A preference change takes effect on the next turn. Authenticated
+conversation events report each provider attempt's serving identity and reported
+tokens, and record refused/unavailable routing decisions. Requested aliases and
+selected targets are intent, never proof of the served model. See
+[model settings](model-keys.md) for the shared event contract and open charge linkage.
+
 ### `model compaction [status]` / `model compaction set TOKENS` / `model compaction default`
 
 When a long captain session compacts ([ADR 0195](adr/0195-hosted-requests-fit-the-model-proxy.md)).

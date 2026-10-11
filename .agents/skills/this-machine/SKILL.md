@@ -383,3 +383,12 @@ Included aliases are not evidence of the served model: response observations
 name fallback models, and missing hosted metadata is unknown. Do not infer
 historical usage from the current preference. Catalog and credit policy open
 items remain unresolved until the owner decides them.
+
+Per-turn routing: use the existing `escalate` capability when stronger reasoning
+is warranted within the saved preference and eligible targets. Inspect authenticated
+conversation replay/tail `activity.modelCall` for each requested/observed/completed
+provider attempt, and `activity.routingDecision` for refusal or unavailable targets.
+Call IDs connect phases; reported tokens can be reconciled with observed models,
+but are not a charged amount or hosted charge ID. Missing identity or usage stays
+unknown. Completed work continues in the same session after a model change; the
+next turn reloads the saved preference. Do not choose an internal tier for the owner.

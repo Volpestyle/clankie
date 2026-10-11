@@ -20,6 +20,9 @@ The bundled JSON has an `unknown` declaration in
 `CatalogSchema.parse` supplies its validated runtime type. Keep that declaration
 when re-vendoring: inferring every model's literal object shape adds roughly
 124,000 types to every compiler program that imports the registry.
+Source consumers must enable `allowArbitraryExtensions` in their TypeScript
+configuration to resolve this JSON declaration. Separate sibling repositories
+do not inherit Clankie's root compiler options.
 
 ## Refreshing
 

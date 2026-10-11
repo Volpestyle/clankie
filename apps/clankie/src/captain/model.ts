@@ -137,6 +137,8 @@ function fromPiCredential(
 
 /** One purpose's model for this turn, and how it may escalate. */
 export interface RoutedSelection {
+  /** Saved preference captured with the routing policy at this turn's start. */
+  readonly preference?: string;
   readonly route: ModelRoute;
   readonly selection: PiModelSelection;
   /**
@@ -253,6 +255,7 @@ export async function createCaptainModelRuntime(repoRoot: string): Promise<Capta
       return {
         route,
         selection,
+        ...(config.model === undefined ? {} : { preference: config.model }),
         ...(escalation === undefined
           ? {}
           : {
