@@ -2991,7 +2991,14 @@ this queue-head detector.
 `capacity.used` counts heavy leases against `heavySlots`; `simulatorUsed` counts
 simulator reservations against `simulatorSlots`; `lightUsed` counts light-lane
 jobs against `lightSlots`, whose holders and waiters are `lightLeases` and
-`lightQueue`. `heavySlots` is a ceiling: one job per four cores runs on the
+`lightQueue`. When no full lease is held, the FIFO head may start despite a
+load-only refusal if native observation is valid, memory meets the owner floor,
+and load stays below twice `maxLoadRatio`. At or above that cap it still waits.
+Between the normal load guard and the cap, exactly one full job at a time can
+make progress; starting, running and cleanup full leases count as held. Light
+and server jobs use separate budgets and do not count. Low memory and unavailable
+observations still refuse admission. Simulator cold-boot guards remain unchanged.
+`heavySlots` is a ceiling: one job per four cores runs on the
 load guard (each job started in the last minute counts four cores of load), and more start only while measured CPU and load stay under 70% of
 the cores (a waiting `clankie heavy` says `busy`). Simulator status also reports
 external active devices against the simulator budget. The budgets are independent;

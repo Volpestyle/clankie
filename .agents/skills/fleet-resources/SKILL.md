@@ -130,7 +130,14 @@ admitted in the last minute counting four cores of load, as the
 [alternating benchmark](../../../docs/testing/2026-10-08-heavy-parallelism/README.md)
 supports. Each job above that starts only while the measured machine (the busier
 of load and kernel CPU, plus a full four-core share for every job admitted in
-the last minute) stays under 70% of the cores, with memory to spare. A wait
+the last minute) stays under 70% of the cores, with memory to spare. When no full
+job is held, a valid load-only refusal admits the FIFO head if memory meets the
+owner floor and load stays below twice `maxLoadRatio`. At or above that cap,
+true overload still waits. Between the normal guard and the cap it runs at most
+one full job at a time, counting starting/running and cleanup leases; light and
+server jobs use separate budgets and do not count. Unknown observations and low
+memory still refuse. Simulator
+boot guards do not use this exception. A wait
 that names `busy` is this rule; `slots` is the ceiling; `queued` is a FIFO turn;
 `service` means the service is deciding admission for you.
 The service judges admission for every waiter from one view of the machine, so

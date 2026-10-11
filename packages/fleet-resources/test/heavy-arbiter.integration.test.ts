@@ -21,15 +21,17 @@ const wrong: ResourcePressureInput = { loadRatio: 99, cpuRatio: 1, availableMemo
 /** Appends its name to the order file, so the test reads admission order. */
 const record = "require('node:fs').appendFileSync(process.argv[1], process.argv[2] + '\\n')";
 
-async function fixture() {
+async function fixture(options: { heavySlots?: number } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "clankie-heavy-arbiter-"));
   const order = join(directory, "order");
   await writeFile(order, "");
   const governors: ReturnType<typeof createResourceGovernor>[] = [];
   const jobs: Promise<number>[] = [];
   const timers: ReturnType<typeof setInterval>[] = [];
+  const releases: string[] = [];
   cleanup.push(async () => {
     for (const timer of timers) clearInterval(timer);
+    await Promise.all(releases.map((file) => writeFile(file, "")));
     await Promise.allSettled([...jobs, ...passes]);
     for (const governor of governors) await governor.close();
     await rm(directory, { recursive: true, force: true });
@@ -46,7 +48,27 @@ async function fixture() {
     governors.push(created);
     return created;
   };
-  await governor(calm).configure({ ...defaultResourcePolicy(), heavySlots: 1, minAvailableMemoryMb: 0 });
+  await governor(calm).configure({
+    ...defaultResourcePolicy(),
+    heavySlots: options.heavySlots ?? 1,
+    minAvailableMemoryMb: 0,
+  });
+  const holdSlot = async () => {
+    const release = join(directory, "held-slot-release");
+    releases.push(release);
+    jobs.push(
+      governor(calm).runHeavy(process.execPath, [
+        "-e",
+        "const fs=require('node:fs');const t=setInterval(()=>{if(fs.existsSync(process.argv[1]))clearInterval(t)},20)",
+        release,
+      ]),
+    );
+    const deadline = Date.now() + 10_000;
+    while ((await governors[0]!.snapshot()).capacity.used !== 1) {
+      if (Date.now() > deadline) throw new Error("Expected the held full slot");
+      await delay(25);
+    }
+  };
   const run = (waiter: ReturnType<typeof createResourceGovernor>, name: string) => {
     const job = waiter.runHeavy(process.execPath, ["-e", record, order, name], { holderId: name });
     jobs.push(job);
@@ -81,27 +103,30 @@ async function fixture() {
     return () => clearInterval(timer);
   };
   const ran = async () => (await readFile(order, "utf8")).split("\n").filter(Boolean);
-  return { directory, governor, run, queued, arbiter, ran };
+  return { directory, governor, run, queued, arbiter, ran, holdSlot };
 }
 
 it("a waiter with a wrong view of the machine cannot hold the FIFO while an arbiter judges", async () => {
-  const f = await fixture();
+  const f = await fixture({ heavySlots: 2 });
+  await f.holdSlot();
   const misjudged = f.run(f.governor(wrong), "misjudged");
   await f.queued(1);
   const behind = f.run(f.governor(calm), "behind");
   await f.queued(2);
-  // Alone, the misjudging head holds everyone: that is the 2026-10-10 wedge.
+  // With one permit held, a wrong load view still stalls the free FIFO slot.
+  // The empty-lane progress exception must not admit a second full job.
   await delay(1_500);
   expect(await f.ran()).toEqual([]);
   f.arbiter(calm);
   expect(await misjudged).toBe(0);
   expect(await behind).toBe(0);
-  // Granted in queue order, one at a time under the single slot.
+  // Granted in queue order, one at a time under the single free slot.
   expect(await f.ran()).toEqual(["misjudged", "behind"]);
 });
 
 it("while an arbiter judges the machine busy, a waiter that sees it calm does not admit itself", async () => {
-  const f = await fixture();
+  const f = await fixture({ heavySlots: 2 });
+  await f.holdSlot();
   const stop = f.arbiter(wrong);
   await delay(300);
   const waiter = f.run(f.governor(calm), "eager");

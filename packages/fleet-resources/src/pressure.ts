@@ -129,6 +129,17 @@ export function heavyAdmission(
   settleMs = heavyJobSettleMs,
 ): "admit" | "slots" | "pressure" {
   if (held.length >= resourceCapacity(policy)) return "slots";
+  // External work can keep load above the guard indefinitely while we hold
+  // nothing. Let one FIFO full job make progress below the thrash cap, never
+  // a second concurrent one. Only full leases count here; light/server jobs
+  // use separate budgets. Unknown observations and the memory floor still bind.
+  if (
+    held.length === 0 &&
+    pressure.reason === "load" &&
+    pressure.loadRatio < 2 * policy.maxLoadRatio &&
+    pressure.availableMemoryMb >= policy.minAvailableMemoryMb
+  )
+    return "admit";
   if (!pressure.healthy) return "pressure";
   const cores = Math.max(1, availableParallelism());
   const unsettled = held.filter((lease) => at - lease.createdAtMs < settleMs).length;

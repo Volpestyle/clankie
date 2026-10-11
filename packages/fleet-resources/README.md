@@ -10,7 +10,15 @@ not an OS CPU quota.
 
 `heavySlots` is a ceiling, not a fixed pool (VUH-2054). The base slots,
 `min(heavySlots, max(1, min(floor(cores/4), floor(RAM_GiB/24))))`, give each job a full
-four-worker budget and run on the load and memory guards, with a full four-core
+four-worker budget and run on the load and memory guards. When no full lease is
+held, a valid load-only refusal may admit the FIFO head if available memory
+meets the owner floor and load stays below twice `maxLoadRatio`. At or above that
+cap, real thrash still refuses. Between the normal guard and the cap, external
+load then admits at most one full job at a time; starting, running and cleanup
+full leases all count as held. Light and server jobs have separate budgets and
+do not count. Unknown observations and low memory still refuse. Simulator boot
+guards are unchanged.
+Ordinary admission counts a full four-core
 share charged against the load guard for every job admitted in the last minute,
 which load1 cannot see yet (at load 1.48, four waiters once started within a
 second); the
