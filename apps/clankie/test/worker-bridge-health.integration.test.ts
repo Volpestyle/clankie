@@ -421,7 +421,11 @@ it("records a real subprocess binding timeout independently of its healthy tool 
 
 it("carries three real bridge binding timeouts through the inactivity flag, one owning-lead alert and recovery", async () => {
   const workers = await Promise.all([1, 2, 3].map((i) => fixture(true, `w1:p${i}`)));
-  const calls = await Promise.all(workers.map((worker) => startBridge(worker)));
+  // Establish each real catalog before starting the next process. This case
+  // proves three live bridges' binding failures, not concurrent cold discovery
+  // within the deliberately short request budget used to induce those failures.
+  const calls = [];
+  for (const worker of workers) calls.push(await startBridge(worker));
   let now = Date.now() - 16 * 60_000;
   const owner = { conversationId: "global-default" };
   const efficiency = new SeatEfficiencyStore(join(workers[0]!.root, "efficiency.json"), { now: () => now });
