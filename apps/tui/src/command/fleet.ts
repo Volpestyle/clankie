@@ -48,7 +48,7 @@ import type { machineSetupContext } from "./machine-setup.ts";
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH]]",
   `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]`,
-  "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N]",
+  "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N] [--minimum-free-disk-gb N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet processes [retire]",
   "       clankie fleet clear",
@@ -160,7 +160,7 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
     `fleet size: ${fleet.size} — ${FLEET_SIZE_GUIDANCE[fleet.size]}`,
     `models: ${fleet.models} — ${FLEET_MODEL_GUIDANCE[fleet.models]}`,
     `heavy capacity: ${resources.heavySlots ?? "automatic"} shared slots; simulators: ${resources.simulatorSlots ?? "automatic"}`,
-    `simulator idle: ${resources.simulatorIdleMs / 1000}s; load limit: ${resources.maxLoadRatio} per core; minimum available memory: ${resources.minAvailableMemoryMb} MiB`,
+    `simulator idle: ${resources.simulatorIdleMs / 1000}s; load limit: ${resources.maxLoadRatio} per core; minimum available memory: ${resources.minAvailableMemoryMb} MiB; disk floor: ${resources.minFreeDiskGb} GiB; disk warning: ${resources.warnFreeDiskGb} GiB or ${resources.warnFreeDiskPercent}%`,
     ...formatFleetAutonomyGuidance(FleetAutonomySchema.parse(fleetAutonomyFields(fleet))),
     `tools: ${fleet.tools} — ${fleet.tools === "off" ? "fleet tool access disabled" : "every verified connected server through clankie_tools and clankie_call"}`,
     `peer messages: ${fleet.peerMessages} — ${fleet.peerMessages === "off" ? "new messages between fleet workers disabled" : "proven native workers may message their own fleet"}`,
@@ -382,6 +382,9 @@ async function parseSet(
         "--simulator-idle-seconds",
         "--max-load-ratio",
         "--minimum-free-memory-mb",
+        "--minimum-free-disk-gb",
+        "--warn-free-disk-gb",
+        "--warn-free-disk-percent",
       ].includes(flag ?? "")
     ) {
       if (resourceFlags.has(flag!)) throw new Error(FLEET_USAGE);
@@ -391,6 +394,9 @@ async function parseSet(
       else if (flag === "--simulator-slots") resources.simulatorSlots = value === "auto" ? null : number;
       else if (flag === "--simulator-idle-seconds") resources.simulatorIdleMs = number * 1000;
       else if (flag === "--max-load-ratio") resources.maxLoadRatio = number;
+      else if (flag === "--minimum-free-disk-gb") resources.minFreeDiskGb = number;
+      else if (flag === "--warn-free-disk-gb") resources.warnFreeDiskGb = number;
+      else if (flag === "--warn-free-disk-percent") resources.warnFreeDiskPercent = number;
       else resources.minAvailableMemoryMb = number;
       change.resources = FleetResourcePolicySchema.parse(resources);
     } else if (flag === "--hire-profile" && change.hire === undefined) {

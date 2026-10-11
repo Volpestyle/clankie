@@ -4133,12 +4133,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const current = await ledSeats(owner);
         if (!current.length || shutdown.signal.aborted) continue;
         const holds = (await deps.deployHolds?.().catch(() => undefined)) ?? [];
+        const disk = options.fleetResources?.status()?.pressure;
+        const diskNotice = disk?.diskWarning
+          ? `Low disk: ${disk.freeDiskGb?.toFixed(1)} GiB free. Inspect clankie doctor and reclaim safe fleet caches before starting more work.\n`
+          : "";
         const evidence = fleetRoundEvidence(current, holds);
-        if (!evidence.flagged && completedFleetRounds.get(ownerKey) === evidence.fingerprint) continue;
+        if (!diskNotice && !evidence.flagged && completedFleetRounds.get(ownerKey) === evidence.fingerprint)
+          continue;
         pendingFleetRounds.add(ownerKey);
         void wakeConversation(
           owner,
-          fleetReviewContext(current, undefined, holds),
+          diskNotice + fleetReviewContext(current, undefined, holds),
           async () => {
             if (shutdown.signal.aborted || !(await ledSeats(owner)).length)
               throw new Error("Fleet review stopped or has no owned seats");

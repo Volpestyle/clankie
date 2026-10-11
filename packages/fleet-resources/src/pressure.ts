@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { availableParallelism, cpus, freemem, loadavg, totalmem } from "node:os";
+import { readFile, statfs } from "node:fs/promises";
+import { availableParallelism, cpus, freemem, loadavg, totalmem, userInfo } from "node:os";
 import type { FleetResourcePolicy, ResourcePressure, ResourcePressureInput } from "./model.ts";
 import { darwinAvailableMemoryMb, nativeBoundaryAvailable } from "./process.ts";
 import { heavyJobParallelism } from "./parallelism.ts";
@@ -147,6 +147,12 @@ export function heavyAdmission(
   settleMs = heavyJobSettleMs,
   host = localSpecs(),
 ): "admit" | "slots" | "pressure" {
+  if (
+    pressure.reason === "disk" ||
+    pressure.reason === "probe-unavailable" ||
+    (pressure.freeDiskGb !== undefined && pressure.freeDiskGb < policy.minFreeDiskGb)
+  )
+    return "pressure";
   if (held.length >= resourceCapacity(policy, host)) return "slots";
   // External work can keep load above the guard indefinitely while we hold
   // nothing. Let one FIFO full job make progress below the thrash cap, never
@@ -198,7 +204,23 @@ export class ResourcePressureSampler {
   private pending: Promise<ResourcePressureInput> | undefined;
   private readonly probe: () => Promise<ResourcePressureInput>;
   constructor(probe: () => Promise<ResourcePressureInput> = defaultProbe) {
-    this.probe = probe;
+    this.probe = async () => {
+      const input = await probe();
+      // Always measure real filesystems, including the canonical registry volume.
+      const disks = await Promise.all(
+        [process.cwd(), userInfo().homedir].map(async (path) => {
+          const fs = await statfs(path);
+          return {
+            freeDiskGb: (fs.bavail * fs.bsize) / 1024 ** 3,
+            totalDiskGb: (fs.blocks * fs.bsize) / 1024 ** 3,
+          };
+        }),
+      );
+      const disk = disks.sort((a, b) => a.freeDiskGb - b.freeDiskGb)[0]!;
+      if (!Number.isFinite(disk.freeDiskGb) || disk.freeDiskGb < 0 || !(disk.totalDiskGb > 0))
+        throw new Error("Invalid disk sample");
+      return { ...input, ...disk };
+    };
   }
   async sample(policy: FleetResourcePolicy): Promise<ResourcePressure> {
     try {
@@ -228,14 +250,19 @@ export class ResourcePressureSampler {
         throw new Error("Invalid pressure sample");
       const minimum = policy.minAvailableMemoryMb;
       const reason =
-        input.loadRatio > policy.maxLoadRatio
-          ? "load"
-          : input.availableMemoryMb < minimum
-            ? "memory"
-            : undefined;
+        input.freeDiskGb! < policy.minFreeDiskGb
+          ? "disk"
+          : input.loadRatio > policy.maxLoadRatio
+            ? "load"
+            : input.availableMemoryMb < minimum
+              ? "memory"
+              : undefined;
       return {
         ...input,
         sampledAtMs: Date.now(),
+        diskWarning:
+          input.freeDiskGb! < policy.warnFreeDiskGb ||
+          (input.freeDiskGb! / input.totalDiskGb!) * 100 < policy.warnFreeDiskPercent,
         healthy: reason === undefined,
         ...(reason ? { reason } : {}),
       };

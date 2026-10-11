@@ -211,6 +211,11 @@ function formatResourceLines(resources: InstallDoctorReport["resources"]): strin
     (entry.holderId ? ` / ${clean(entry.holderId)}` : "");
   return [
     `  ${mark(resources.pressure.healthy)} Fleet resources · ${resources.capacity.used}/${resources.capacity.heavySlots} heavy · ${resources.capacity.simulatorUsed ?? resources.leases.filter((lease) => lease.kind === "simulator").length}/${resources.capacity.simulatorSlots} simulators · ${resources.queue.length} queued${resources.capacity.lightSlots === undefined ? "" : ` · ${resources.capacity.lightUsed ?? 0}/${resources.capacity.lightSlots} light, ${resources.lightQueue?.length ?? 0} queued`}`,
+    ...(resources.pressure.diskWarning
+      ? [
+          `    ○ Low disk · ${resources.pressure.freeDiskGb?.toFixed(1)} GiB free · new heavy jobs held below ${resources.policy.minFreeDiskGb} GiB`,
+        ]
+      : []),
     ...(!resources.pressure.healthy ? [`    Pressure · ${resources.pressure.reason ?? "unavailable"}`] : []),
     ...resources.leases.map(
       (lease) =>

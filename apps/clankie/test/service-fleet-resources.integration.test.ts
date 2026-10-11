@@ -36,6 +36,9 @@ it("isolates a fixture service and denies native simulator access (VUH-2038)", a
       simulatorIdleMs: 600_000,
       maxLoadRatio: 1.5,
       minAvailableMemoryMb: 4096,
+      minFreeDiskGb: 20,
+      warnFreeDiskGb: 200,
+      warnFreeDiskPercent: 10,
     });
     expect((await runtime.simulators.externalDevices()).inventory).toEqual([]);
     expect(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).leases).toEqual([]);

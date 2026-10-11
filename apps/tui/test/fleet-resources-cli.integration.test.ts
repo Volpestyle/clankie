@@ -468,6 +468,12 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
           "2",
           "--minimum-free-memory-mb",
           "512",
+          "--minimum-free-disk-gb",
+          "30",
+          "--warn-free-disk-gb",
+          "250",
+          "--warn-free-disk-percent",
+          "12",
         ],
         f.options,
       );
@@ -477,6 +483,9 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
         simulatorIdleMs: 90_000,
         maxLoadRatio: 2,
         minAvailableMemoryMb: 512,
+        minFreeDiskGb: 30,
+        warnFreeDiskGb: 250,
+        warnFreeDiskPercent: 12,
       });
       const independent = createResourceGovernor({
         directory: join(f.directory, "registry"),
@@ -576,6 +585,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       const status = await runResourceStatusCommand(f.options);
       expect(status.leases[0]!.pid).toBeGreaterThan(1);
       expect(status.queue[0]).toMatchObject({ seatId: "Bex", kind: "heavy" });
+      await runFleetCommand(["set", "--warn-free-disk-gb", "1048576"], f.options);
       const report = await doctorCommand({
         repoRoot: f.directory,
         settings: f.settings,
@@ -584,6 +594,10 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
         credentialStore: f.credentials,
       });
       const rendered = formatDoctorReport(report);
+      expect(rendered).toContain("Low disk");
+      expect(
+        report.resources && "pressure" in report.resources && report.resources.pressure.freeDiskGb,
+      ).toBeGreaterThan(0);
       expect(rendered).toContain(`PID ${status.leases[0]!.pid}`);
       expect(rendered).toContain(`Queued Bex · heavy ${basename(process.execPath)}`);
       expect(rendered).toContain("1/1 heavy");

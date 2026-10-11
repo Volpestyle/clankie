@@ -138,7 +138,11 @@ export async function createFleetResourceRuntime(input: {
     const next = JSON.stringify({
       policy: snapshot.policy,
       capacity: snapshot.capacity,
-      pressure: { healthy: snapshot.pressure.healthy, reason: snapshot.pressure.reason },
+      pressure: {
+        healthy: snapshot.pressure.healthy,
+        reason: snapshot.pressure.reason,
+        diskWarning: snapshot.pressure.diskWarning,
+      },
       leases: snapshot.leases.map(({ lastUsedAtMs: _lastUsedAtMs, ...lease }) => lease),
       queue: snapshot.queue,
       lightLeases: snapshot.lightLeases,

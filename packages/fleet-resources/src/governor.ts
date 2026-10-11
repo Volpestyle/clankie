@@ -635,7 +635,9 @@ export function createResourceGovernor(
     // load already holds the full gates it runs beside (VUH-2023). A full
     // job above the base slots needs measured room (VUH-2054).
     return lane === "light"
-      ? sampled.reason !== "probe-unavailable" && sampled.availableMemoryMb >= policy.minAvailableMemoryMb
+      ? sampled.reason !== "probe-unavailable" &&
+          sampled.reason !== "disk" &&
+          sampled.availableMemoryMb >= policy.minAvailableMemoryMb
       : heavyAdmission(policy, sampled, held, Date.now(), jobSettleMs) === "admit";
   }
   /** A lease for a queued request, carrying that waiter's own identity and token. */

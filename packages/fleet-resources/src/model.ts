@@ -8,6 +8,9 @@ export const FleetResourcePolicySchema = z
     simulatorIdleMs: z.number().int().min(1_000).max(86_400_000).default(600_000),
     maxLoadRatio: z.number().positive().max(16).default(1.5),
     minAvailableMemoryMb: z.number().int().min(0).max(1_048_576).default(4096),
+    minFreeDiskGb: z.number().finite().nonnegative().max(1_048_576).default(20),
+    warnFreeDiskGb: z.number().finite().nonnegative().max(1_048_576).default(200),
+    warnFreeDiskPercent: z.number().finite().min(0).max(100).default(10),
   })
   .strict();
 export type FleetResourcePolicy = z.infer<typeof FleetResourcePolicySchema>;
@@ -17,11 +20,14 @@ export interface ResourcePressureInput {
   /** Share of all cores busy over the last sample window; absent from injected probes. */
   cpuRatio?: number;
   availableMemoryMb: number;
+  freeDiskGb?: number;
+  totalDiskGb?: number;
+  diskWarning?: boolean;
 }
 export interface ResourcePressure extends ResourcePressureInput {
   sampledAtMs: number;
   healthy: boolean;
-  reason?: "load" | "memory" | "probe-unavailable";
+  reason?: "load" | "memory" | "disk" | "probe-unavailable";
 }
 export interface ProcessIdentity {
   pid: number;

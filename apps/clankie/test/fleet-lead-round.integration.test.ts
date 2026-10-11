@@ -1,3 +1,6 @@
+import { createResourceGovernor } from "@clankie/fleet-resources";
+import { createFleetResourceRuntime, type FleetResourceRuntime } from "../src/fleet-resource-runtime.ts";
+import { FleetResourcePolicySchema } from "@clankie/protocol";
 import { once } from "node:events";
 import { FleetHealthMetrics, proofAlertCallerSummary } from "../src/fleet-health-metrics.ts";
 import { localFleetProof } from "../src/local-fleet-proof.ts";
@@ -61,6 +64,7 @@ async function fixture(
   oneOwner = false,
   bind = true,
   deployHolds?: CaptainDeps["deployHolds"],
+  resourceFixture?: (root: string) => Promise<FleetResourceRuntime>,
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-lead-round-"));
   const conversations = new ConversationStore(join(root, "conversations"), async () => {});
@@ -176,6 +180,7 @@ async function fixture(
     else throw new Error(`Unexpected native transport request: ${args.join(" ")}`);
     return JSON.stringify({ result });
   };
+  const fleetResources = await resourceFixture?.(root);
   const captain = createCaptain(
     {
       herdrAvailable: () => true,
@@ -198,6 +203,7 @@ async function fixture(
       seatAdapters: [],
       discordEnvironment: {},
       fleetRoundIntervalMs: roundMs,
+      ...(fleetResources ? { fleetResources } : {}),
       // These cases park a seat with one short poll and expect it gone within
       // the original 2s; the 30s head hold has its own coverage (VUH-2045).
       headBoundGraceMs: 2_000,
@@ -1182,4 +1188,32 @@ it("collapses the 2026-10-10 03:23 UTC fourteen-alert burst into one real lead n
       process.env.VUH2030_EVIDENCE_FILE,
       JSON.stringify({ messages, notices, totals: metrics.snapshot().totals }) + "\n",
     );
+});
+
+it("a periodic lead round warns from the real filesystem's low-disk observation", async () => {
+  const f = await fixture(
+    500,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    false,
+    true,
+    undefined,
+    async (root) => {
+      const governor = createResourceGovernor({ directory: join(root, "resource-registry") });
+      const runtime = await createFleetResourceRuntime({
+        governor,
+        policy: async () => FleetResourcePolicySchema.parse({ warnFreeDiskGb: 1_048_576 }),
+      });
+      resources.push(() => runtime.close());
+      await runtime.refresh();
+      expect(runtime.status()?.pressure.diskWarning).toBe(true);
+      return runtime;
+    },
+  );
+  const events = await f.captain.pollSeatEvents(3000, undefined, "global-default");
+  expect(events[0]?.content).toContain("Low disk:");
+  expect(events[0]?.content).toContain("GiB free");
 });

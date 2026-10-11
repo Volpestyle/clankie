@@ -36,6 +36,9 @@ const resources: ResourceSnapshot = {
     simulatorIdleMs: 600000,
     maxLoadRatio: 1.5,
     minAvailableMemoryMb: 4096,
+    minFreeDiskGb: 20,
+    warnFreeDiskGb: 200,
+    warnFreeDiskPercent: 10,
   },
   capacity: { heavySlots: 2, simulatorSlots: 1, used: 0, simulatorUsed: 0, lightSlots: 2, lightUsed: 0 },
   pressure: {

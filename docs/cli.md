@@ -3081,6 +3081,16 @@ The owner sets `fleet.resources` with these flags or the TUI `/fleet resources`:
 | `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                       |
 | `--minimum-free-memory-mb N`              | `4096`  | Minimum OS available memory, 0–1048576 MiB                                            |
 
+Free disk is sampled on the working-directory and OS-account home volumes.
+Doctor and the lead's fleet round warn below either 200 GiB or 10% free.
+All new heavy jobs (full, light and server lanes) wait below 20 GiB free;
+existing jobs keep running. An unavailable disk observation refuses admission.
+Set `minFreeDiskGb`, `warnFreeDiskGb` and `warnFreeDiskPercent` through the
+revision-guarded fleet settings API, `/fleet resources`, or
+`clankie fleet set --minimum-free-disk-gb N --warn-free-disk-gb N --warn-free-disk-percent N`.
+Values are in GiB despite the CLI's `-gb` spelling. These guards also apply to
+simulator admission, but do not stop existing leases or deny low-load social turns.
+
 Available memory on macOS is the smaller of the kernel's
 `kern.memorystatus_level` percentage of RAM and free plus file-backed resident
 pages, excluding speculative pages already counted as free. Anonymous and

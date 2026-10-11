@@ -11,6 +11,9 @@ export const FleetResourcePolicySchema = z
     simulatorIdleMs: z.number().int().min(1000).max(86_400_000).default(600_000),
     maxLoadRatio: z.number().finite().positive().max(16).default(1.5),
     minAvailableMemoryMb: z.number().int().min(0).max(1_048_576).default(4096),
+    minFreeDiskGb: z.number().finite().nonnegative().max(1_048_576).default(20),
+    warnFreeDiskGb: z.number().finite().nonnegative().max(1_048_576).default(200),
+    warnFreeDiskPercent: z.number().finite().min(0).max(100).default(10),
   })
   .strict();
 export type FleetResourcePolicy = z.infer<typeof FleetResourcePolicySchema>;
@@ -59,8 +62,11 @@ export const FleetResourceSnapshotSchema = z
         loadRatio: z.number().finite().nonnegative(),
         cpuRatio: z.number().finite().min(0).max(1).optional(),
         availableMemoryMb: z.number().finite().nonnegative(),
+        freeDiskGb: z.number().finite().nonnegative().optional(),
+        totalDiskGb: z.number().finite().positive().optional(),
+        diskWarning: z.boolean().optional(),
         healthy: z.boolean(),
-        reason: z.enum(["load", "memory", "probe-unavailable"]).optional(),
+        reason: z.enum(["load", "memory", "disk", "probe-unavailable"]).optional(),
       })
       .strict(),
     leases: z
@@ -314,7 +320,7 @@ const FleetSimulatorBlockersSchema = z
       .optional(),
     pressure: z
       .object({
-        reason: z.enum(["load", "memory", "probe-unavailable"]).optional(),
+        reason: z.enum(["load", "memory", "disk", "probe-unavailable"]).optional(),
         loadRatio: z.number().finite().nonnegative(),
         availableMemoryMb: z.number().finite().nonnegative(),
       })

@@ -46,6 +46,9 @@ it("alerts for a real live unmarked head only after consecutive eligible verdict
       simulatorIdleMs: 600_000,
       maxLoadRatio: 16,
       minAvailableMemoryMb: 1_048_576,
+      minFreeDiskGb: 20,
+      warnFreeDiskGb: 200,
+      warnFreeDiskPercent: 10,
     });
     const ticketId = randomUUID();
     const owner = (await processIdentity())!;
@@ -80,6 +83,9 @@ it("alerts for a real live unmarked head only after consecutive eligible verdict
       simulatorIdleMs: 600_000,
       maxLoadRatio: 16,
       minAvailableMemoryMb: 0,
+      minFreeDiskGb: 20,
+      warnFreeDiskGb: 200,
+      warnFreeDiskPercent: 10,
     });
     // First eligible pass is not enough; the next pass proves it remains queued.
     await until(

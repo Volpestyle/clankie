@@ -327,3 +327,13 @@ from successful cleanup.
 
 Run resource stress checks only manually or in the release gate. Personal-repo
 push and PR checks remain fast and scoped; evals remain explicit manual runs.
+
+Free disk is sampled on the working-directory and OS-account home volumes.
+Doctor and the lead's fleet round warn below either 200 GiB or 10% free.
+All new heavy jobs (full, light and server lanes) wait below 20 GiB free;
+existing jobs keep running. An unavailable disk observation refuses admission.
+Set `minFreeDiskGb`, `warnFreeDiskGb` and `warnFreeDiskPercent` through the
+revision-guarded fleet settings API, `/fleet resources`, or
+`clankie fleet set --minimum-free-disk-gb N --warn-free-disk-gb N --warn-free-disk-percent N`.
+Values are in GiB despite the CLI's `-gb` spelling. These guards also apply to
+simulator admission, but do not stop existing leases or deny low-load social turns.

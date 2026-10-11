@@ -180,6 +180,23 @@ async function editFleetResources(shell: ClankieFaceShell, services: FleetComman
     });
     if (memory === undefined) return;
     resources.minAvailableMemoryMb = Number(memory);
+    for (const [key, label, max] of [
+      ["minFreeDiskGb", "minimum free disk in GiB", 1048576],
+      ["warnFreeDiskGb", "low disk warning in GiB", 1048576],
+      ["warnFreeDiskPercent", "low disk warning percent", 100],
+    ] as const) {
+      const value = await flow.readText({
+        message: `Fleet — ${label}`,
+        defaultValue: String(resources[key]),
+        allowBack: true,
+        validate: (value: string) =>
+          Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= max
+            ? undefined
+            : `Use a number from 0 to ${max}.`,
+      });
+      if (value === undefined) return;
+      resources[key] = Number(value);
+    }
     await fleetUpdate(
       snapshot.resourceMachines ? { machineResources: { [machine]: resources } } : { resources },
       { ...services, expectedRevision: snapshot.revision },

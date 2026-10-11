@@ -99,7 +99,7 @@ export interface SimulatorBlockers {
   /** Tickets ahead of this waiter in its device queue, oldest first (VUH-2083). */
   readonly ahead?: readonly { id: string; seatId?: string; holderId?: string; position: number }[];
   readonly pressure?: {
-    reason?: "load" | "memory" | "probe-unavailable";
+    reason?: "load" | "memory" | "disk" | "probe-unavailable";
     loadRatio: number;
     availableMemoryMb: number;
   };
