@@ -486,30 +486,52 @@ it("signed owner-user comments wake, but missing origin and app actors with owne
   expect(f.wakes[0]?.prompt).toContain("Owner comment from Linear app or web");
 });
 
-it("preserves owner wakes for Linear's published signed user-actor Comment envelope (VUH-1985)", async () => {
-  const f = await fixture();
-  // Published provider example, not a fabricated human-origin marker:
-  // https://linear.app/developers/webhooks#webhook-payload
-  const sample = JSON.parse(
-    await readFile(new URL("./fixtures/linear-user-comment.json", import.meta.url), "utf8"),
-  );
-  await f.settings.update((current) => ({
-    ...current,
-    linearWebhook: {
-      ...current.linearWebhook,
-      wake: { ...current.linearWebhook.wake, ownerUserIds: [sample.actor.id] },
-    },
-  }));
-  const raw = JSON.stringify({
-    ...sample,
-    webhookTimestamp: NOW.getTime(),
-    organizationId: f.account.workspaceId,
-    createdAt: NOW.toISOString(),
-    data: { ...sample.data, issueId: f.issueId, updatedAt: NOW.toISOString() },
-  });
-  expect(await (await f.post(raw)).json()).toMatchObject({ ingested: true });
-  await f.closeTurns();
-  expect(f.wakes).toHaveLength(1);
-  expect(f.wakes[0]).toMatchObject({ id: "global-default" });
-  expect(f.wakes[0]?.prompt).toContain(sample.data.body);
-});
+it.each(["current", "legacy"])(
+  "preserves %s owner wakes for Linear's published signed user-actor Comment envelope (VUH-1985)",
+  async (shape) => {
+    const f = await fixture();
+    // Published provider example, not a fabricated human-origin marker:
+    // https://linear.app/developers/webhooks#webhook-payload
+    const sample = JSON.parse(
+      await readFile(new URL("./fixtures/linear-user-comment.json", import.meta.url), "utf8"),
+    );
+    await f.settings.update((current) => ({
+      ...current,
+      linearWebhook: {
+        ...current.linearWebhook,
+        wake: { ...current.linearWebhook.wake, ownerUserIds: [sample.actor.id] },
+      },
+    }));
+    if (shape === "legacy") {
+      const current = await f.settings.load();
+      await writeFile(
+        f.settings.path,
+        JSON.stringify({
+          ...current,
+          linearWebhook: {
+            ...current.linearWebhook,
+            wake: {
+              ownerUserIds: [sample.actor.id],
+              actors: ["owner"],
+              userIds: [],
+              notificationTypes: [],
+              excludedNotificationTypes: ["issueSubscribed"],
+            },
+          },
+        }),
+      );
+    }
+    const raw = JSON.stringify({
+      ...sample,
+      webhookTimestamp: NOW.getTime(),
+      organizationId: f.account.workspaceId,
+      createdAt: NOW.toISOString(),
+      data: { ...sample.data, issueId: f.issueId, updatedAt: NOW.toISOString() },
+    });
+    expect(await (await f.post(raw)).json()).toMatchObject({ ingested: true });
+    await f.closeTurns();
+    expect(f.wakes).toHaveLength(1);
+    expect(f.wakes[0]).toMatchObject({ id: "global-default" });
+    expect(f.wakes[0]?.prompt).toContain(sample.data.body);
+  },
+);
