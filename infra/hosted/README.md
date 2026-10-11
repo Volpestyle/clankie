@@ -113,7 +113,11 @@ previous release for rollback. The service then checks hourly and installs the
 latest official `clankie-linux-<arch>` release while idle, with the same health
 rollback as a Mac install; `clankie update auto off` leaves installs to
 `clankie update`. Scheduling rechecks enabled/idle state after release lookup
-before accepting the helper. Hourly checks keep a newer image seed even when a
+before accepting the helper and after staging, immediately before stopping
+services. If work starts during download, the body keeps running and the
+verified release stays staged for the next enabled idle check, without another
+archive download. The ready check closes turn admission before idle shutdown.
+Hourly checks keep a newer image seed even when a
 managed fleet's approved release is older; an explicit `--ref vX.Y.Z` can still
 roll back within that cap. Rebuilding the image (`up -d --build --wait`) still updates the
 base system, Node tooling and global harnesses, and a newer seed takes over. Back up both volumes

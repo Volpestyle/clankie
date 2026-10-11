@@ -171,6 +171,8 @@ interface ReleaseUpdatePorts {
   readonly fetchImpl?: typeof fetch;
   /** The release's own supervisor, as `runtimeUpdateServices` drives a checkout. */
   readonly services: (release: string, action: "down" | "restart") => Promise<RuntimeServiceReceipt>;
+  /** Exact-operation live-body check after staging. Missing/unknown never stops a scheduled body. */
+  readonly scheduledCutover?: () => Promise<{ outcome: "ready" } | { outcome: "waiting"; reason: string }>;
   readonly refreshHarnesses?: (release: string) => Promise<{ ok: boolean }>;
   readonly applicationsDirectory?: string | undefined;
   readonly launchApp?: (release: string, path: string) => Promise<void>;
@@ -261,7 +263,20 @@ export async function executeReleaseUpdate(
     if (currentRelease(plan.installRoot) !== plan.oldRelease)
       return persist("refused", { reason: "current-release-changed" });
     persist("installing");
-    const staged = await stageRelease(plan, ports.fetchImpl ?? fetch);
+    // A deferred scheduled install leaves its verified immutable target in place.
+    // Reuse only that exact version/revision/target; never download it again merely
+    // because the previous idle window ended while the archive was arriving.
+    let staged: string;
+    if (existsSync(target)) {
+      const existing = releaseManifest(target);
+      if (
+        existing.version !== plan.newVersion ||
+        existing.revision !== plan.newCommit ||
+        existing.target !== plan.target
+      )
+        return persist("refused", { reason: "release-directory-conflict" });
+      staged = target;
+    } else staged = await stageRelease(plan, ports.fetchImpl ?? fetch);
     // Managed policy must keep working: never install a release its provider cannot serve.
     if (plan.providerApis && !plan.providerApis.includes(releaseManifest(staged).runtimeProviderApi))
       return persist("refused", { reason: "provider-api-unsupported" });
@@ -278,6 +293,14 @@ export async function executeReleaseUpdate(
     rmSync(join(plan.directory, "unpacked"), { recursive: true, force: true });
     if (currentRelease(plan.installRoot) !== plan.oldRelease)
       return persist("refused", { reason: "current-release-changed" });
+    if (plan.initiator?.kind === "schedule") {
+      const cutover = (await ports.scheduledCutover?.()) ?? {
+        outcome: "waiting",
+        reason: "cutover-unavailable",
+      };
+      if (cutover.outcome !== "ready")
+        return persist("refused", { reason: `scheduled-install-${cutover.reason}` });
+    }
     persist("stopping");
     stopAttempted = true;
     if (!(await service(plan.oldRelease, "down", plan.oldCommit)))
