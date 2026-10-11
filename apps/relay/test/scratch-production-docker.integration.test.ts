@@ -66,6 +66,7 @@ it.skipIf(process.env.VUH_1996_DOCKER_PROOF !== "1")(
           "--cidfile",
           cidfile,
           "--rm",
+          "--init",
           "--network",
           "none",
           "--entrypoint",
@@ -80,6 +81,10 @@ it.skipIf(process.env.VUH_1996_DOCKER_PROOF !== "1")(
           "CLANKIE_CAPTAIN_TOKEN=production-regression-captain",
           "--env",
           "CLANKIE_SETTINGS_FILE=/state/config/scratch-production-settings.json",
+          "--env",
+          "CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE=/opt/clankie/apps/discord-bridge/src/presence-runtime-module.js",
+          "--env",
+          "CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE=/opt/clankie/apps/discord-user-session/src/presence-runtime-module.js",
           "--mount",
           `type=bind,src=${settings},dst=/state/config/scratch-production-settings.json,readonly`,
           ...["clankie", "relay"].flatMap((service) => [

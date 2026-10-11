@@ -20,8 +20,9 @@ and explicit unsafe overrides, then boots a real service and relay, completes
 device pairing, checks the advertised scratch relay, and reads host settings
 through that relay using the scratch device token. Its parent environment
 deliberately contains live-port overrides to prove the launcher removes them.
-No fixture service or relay binds or targets `4310`/`4321`; only owned temporary
-processes are stopped. No simulators or evals are used.
+Host scratch fixtures never bind or target `4310`/`4321`; the production
+regression uses those ports only inside a network-isolated Docker container.
+Only owned temporary processes and that exact container are stopped. No simulators or evals are used.
 
 Verification:
 
@@ -33,7 +34,17 @@ The [initial candidate capture](clankie://evidence/sha256/fbb2bfae9e68fbd7b76d5b
 retains that output and candidate source. Lead review found its state-path
 inference would refuse hosted `/state/runtime` on port `4310`. The current
 guard requires the explicit scratch flag; neither state paths nor `NODE_ENV`
-infer it. Final focused checks and landing are pending.
+infer it. The corrected focused rerun passed thirteen tests across four files;
+its first Docker attempt failed because the seed image used different presence
+module paths. A second attempt exposed PID 1 violating the existing health
+response contract. The fixture now supplies the seed image paths and `--init`,
+matching a service launched as a child. The final Docker-only rerun passed
+(exit `0`, one test, `7.16s`). Neither failure changed product assertions.
+The requested `service-fleet-resources.integration.test.ts` is absent in this
+checkout and was not counted as a pass; the lead is checking its ownership.
+The [review-correction capture](clankie://evidence/sha256/aaf79a8c13f99df987c32079647c719ac252365e16bc5b05248e7d83181ce720)
+retains the rerun results, fixture failures and corrected source. Final landing
+verification remains pending.
 
 The manual Docker regression bundles the current service and relay with the
 release's JavaScript bundle options, mounts those bundles into an existing
