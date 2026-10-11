@@ -753,7 +753,7 @@ export function createResourceGovernor(
       );
     let fullPassAt = Date.now() + jittered(FULL_PASS_MS);
     let reportedAt = 0;
-    const report = async (state: ResourceState) => {
+    const report = async (state: ResourceState, arbiter = false) => {
       if (!options.onWait || Date.now() - reportedAt < FULL_PASS_MS) return;
       reportedAt = Date.now();
       options.onWait(
@@ -762,6 +762,7 @@ export function createResourceGovernor(
           : options.lane === "light"
             ? await project(await mainStore.read(), state)
             : await project(state),
+        { arbiter },
       );
     };
     try {
@@ -779,7 +780,7 @@ export function createResourceGovernor(
           // Re-assert this ticket's marker: without it the arbiter treats this
           // waiter as an older client and the FIFO stalls behind it.
           if (!grantable(id)) writeFileSync(join(grantsDirectory, id), "", { mode: 0o600 });
-          await report(peek);
+          await report(peek, true);
           await wait(jittered(PEEK_MS), signal);
           continue;
         }

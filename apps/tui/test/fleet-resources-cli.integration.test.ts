@@ -631,6 +631,33 @@ it("a heavy CLI behind another waiter says it is queued; the head of the queue n
   }
 });
 
+it("a heavy CLI waiting on the service's admission says so, not busy", async () => {
+  const f = await fixture();
+  // The service's arbiter judges the machine busy (VUH-2080), so it grants nothing.
+  const arbiter = createResourceGovernor({
+    directory: join(f.directory, "registry"),
+    probe: async () => ({ loadRatio: 99, cpuRatio: 1, availableMemoryMb: 1_000_000 }),
+  });
+  const passes = setInterval(() => void arbiter.arbitrate().catch(() => {}), 200);
+  try {
+    await f.governor.configure({ ...defaultResourcePolicy(), heavySlots: 1, minAvailableMemoryMb: 0 });
+    await arbiter.arbitrate();
+    const run = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"]);
+    await eventually(
+      async () => run.output.join(""),
+      (text) => text.includes("waiting for machine capacity"),
+    );
+    expect(run.output.join("")).toContain("(service; 0/1 held, 1 queued)");
+    clearInterval(passes);
+    // Without the arbiter's heartbeat the waiter judges for itself and starts.
+    expect(await run.done).toBe(0);
+  } finally {
+    clearInterval(passes);
+    await arbiter.close();
+    await f.close();
+  }
+}, 20_000);
+
 it("native child heavy CLIs under the same pane keep separate holder labels and permits", async () => {
   const f = await fixture();
   try {

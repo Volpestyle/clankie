@@ -96,7 +96,8 @@ admitted in the last minute counting four cores of load, as the
 supports. Each job above that starts only while the measured machine (the busier
 of load and kernel CPU, plus a full four-core share for every job admitted in
 the last minute) stays under 70% of the cores, with memory to spare. A wait
-that names `busy` is this rule; `slots` is the ceiling; `queued` is a FIFO turn.
+that names `busy` is this rule; `slots` is the ceiling; `queued` is a FIFO turn;
+`service` means the service is deciding admission for you.
 The service judges admission for every waiter from one view of the machine, so
 don't run `clankie heavy` itself under a shim that changes what Node reports
 about the machine (cores, memory); put such shims on the child command. Task-specific owner budgets still bind;
@@ -191,7 +192,7 @@ sibling’s identity. Outcomes:
   you stop waiting. The blocking acquire waits for it; a bounded request can resume its matching lease.
 - `waiting`: every slot is held. `hint` and `blockers` name the seats holding
   leases, devices booted outside leases (and the seats whose processes use
-  them). Heavy commands use their own budget. Keep the blocking request open; inspect its persisted ticket, or ask the named holder to release.
+  them), and in `blockers.ahead` the queued tickets ahead of yours. Heavy commands use their own budget. Keep the blocking request open; inspect its persisted ticket, or ask the named holder to release.
 - `rejected`: `reason` is the cause. `service_restarting`: retry shortly.
   `owner_unavailable`: your seat's live occupant could not be proven; `detail`
   names why. A failed observation (common under load right after a service

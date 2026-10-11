@@ -881,6 +881,22 @@ it("boot history prefers a warm exact device even when a cold one sorts first", 
   expect(lease(await f.http("/acquire", { ...f.request, exact: true })).deviceId).toBe(warm);
 });
 
+it("a waiter behind a queued ticket is told who is ahead of it, not an unknown holder", async () => {
+  const f = await fixture();
+  const a = lease(await f.http("/acquire", f.request));
+  const first = { ...f.request, holderId: "ahead-first", deviceId: a.deviceId!, exact: true, waitMs: 0 };
+  expect((await f.http("/acquire", first)).outcome).toBe("waiting");
+  await queued(f, "ahead-first");
+  const second = await f.http("/acquire", { ...first, holderId: "ahead-second" });
+  if (second.outcome !== "waiting") throw new Error("expected a waiter");
+  expect(second.blockers.ahead).toEqual([
+    expect.objectContaining({ seatId: f.request.seatId, holderId: "ahead-first", position: 1 }),
+  ]);
+  expect(second.hint).toContain("Queued ahead: seat");
+  expect(second.hint).toContain("holder ahead-first");
+  await f.http("/release", { id: a.id, owner: f.owner });
+});
+
 it("two native children in one seat have separate idempotency and release identities across restart", async () => {
   const f = await fixture();
   const a = { ...f.request, holderId: "claude:parent:agent:dock" };
@@ -891,7 +907,11 @@ it("two native children in one seat have separate idempotency and release identi
   const held = lease(acquired);
   const waiting = results.find((result) => result.outcome === "waiting")!;
   if (waiting.outcome !== "waiting") throw new Error("expected waiter");
-  expect(waiting.blockers.leases[0]).toMatchObject({ seatId: a.seatId, holderId: held.holderId });
+  // The winner may still be a ticket ahead rather than a lease when this reply is built (VUH-2083).
+  expect([...waiting.blockers.leases, ...(waiting.blockers.ahead ?? [])][0]).toMatchObject({
+    seatId: a.seatId,
+    holderId: held.holderId,
+  });
   expect(waiting.hint).toContain(held.holderId);
   const winner = held.holderId === a.holderId ? a : b;
   const loser = held.holderId === a.holderId ? b : a;

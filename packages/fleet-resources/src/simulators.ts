@@ -96,6 +96,8 @@ export interface SimulatorBlockers {
   }[];
   readonly external: readonly ExternalSimulatorView[];
   readonly heavy: readonly { seatId?: string; executable?: string; pid?: number }[];
+  /** Tickets ahead of this waiter in its device queue, oldest first (VUH-2083). */
+  readonly ahead?: readonly { id: string; seatId?: string; holderId?: string; position: number }[];
   readonly pressure?: {
     reason?: "load" | "memory" | "probe-unavailable";
     loadRatio: number;
@@ -915,8 +917,44 @@ export function createSimulatorManager(input: {
     if (target) preview = await choose({ ...request, deviceId: target }, devices, leases);
     const waiting = async (result: SimulatorResult): Promise<SimulatorResult> => {
       if (result.outcome !== "waiting") return result;
-      const ticket = (await input.governor.snapshot()).queue.find((entry) => entry.id === queued.id);
-      return { ...result, ...(ticket ? { ticket } : {}) };
+      const { queue } = await input.governor.snapshot();
+      const ticket = queue.find((entry) => entry.id === queued.id);
+      // A request ahead may still be a ticket, not yet a lease: name it, so a
+      // waiter never hears "unknown holder" while a known request is first.
+      const ahead = ticket?.position
+        ? queue
+            .filter(
+              (entry) =>
+                entry.kind === "simulator" &&
+                entry.id !== ticket.id &&
+                entry.position !== undefined &&
+                entry.position < ticket.position! &&
+                entry.deviceId === ticket.deviceId &&
+                entry.deviceType === ticket.deviceType &&
+                entry.runtime === ticket.runtime,
+            )
+            .map((entry) => ({
+              id: entry.id,
+              ...(entry.seatId ? { seatId: entry.seatId } : {}),
+              ...(entry.holderId ? { holderId: entry.holderId } : {}),
+              position: entry.position!,
+            }))
+        : [];
+      return {
+        ...result,
+        ...(ahead.length
+          ? {
+              blockers: { ...result.blockers, ahead },
+              hint: `${result.hint} Queued ahead: ${ahead
+                .map(
+                  (entry) =>
+                    `seat ${entry.seatId ?? "unknown"}${entry.holderId ? ` holder ${entry.holderId}` : ""}`,
+                )
+                .join(", ")}.`,
+            }
+          : {}),
+        ...(ticket ? { ticket } : {}),
+      };
     };
     if (
       !request.deviceId &&

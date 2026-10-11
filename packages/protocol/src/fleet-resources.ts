@@ -298,6 +298,19 @@ const FleetSimulatorBlockersSchema = z
           .strict(),
       )
       .max(256),
+    ahead: z
+      .array(
+        z
+          .object({
+            id: reference,
+            seatId: reference.optional(),
+            holderId: reference.optional(),
+            position: z.number().int().positive(),
+          })
+          .strict(),
+      )
+      .max(512)
+      .optional(),
     pressure: z
       .object({
         reason: z.enum(["load", "memory", "probe-unavailable"]).optional(),

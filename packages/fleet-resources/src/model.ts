@@ -280,7 +280,8 @@ export interface ResourceSnapshot {
 }
 export interface ResourceWaitOptions {
   signal?: AbortSignal;
-  onWait?: (snapshot: ResourceSnapshot) => void;
+  /** `arbiter`: the service is judging admission for this waiter (VUH-2080). */
+  onWait?: (snapshot: ResourceSnapshot, detail?: { arbiter: boolean }) => void;
 }
 export interface SimulatorAcquireOptions {
   seatId: string;
