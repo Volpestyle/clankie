@@ -190,7 +190,8 @@ separately enabled personal-lab body.
 
 ### Choose his models
 
-`/setup` gets the first model working. Then `/model` changes it, `/auth`
+`/setup` asks you to choose Off, Low, High or Full autonomy explicitly, then
+gets the first model working. Then `/model` changes it, `/auth`
 manages provider sign-ins, and `/provider` adds custom providers such as a
 local runtime. Chat, image (`/image-model`), video (`/video-model`), and voice
 (`/voice`) are separate choices; a chat model alone enables none of the others.

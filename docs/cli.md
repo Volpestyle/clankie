@@ -6267,12 +6267,13 @@ Unknown names fail closed without signalling any process.
 These carry secrets, external consent, or live session chrome, so entry stays
 interactive in the console. The capability exists — only the flag does not:
 
-- `/setup` — first-run sign-in and model choice → phone sign-in and `/pair` →
+- `/setup` — explicit autonomy level → first-run sign-in and model choice →
+  phone sign-in and `/pair` →
   optional `/connect` → first agent's folder/task and a reviewed request through
   Clankie's normal conversation. An active phone with chat access is required
   to mark pairing complete; a minted QR is only an offer. `/setup rooms` opens
   the other settings checklist. Escape or `/cancel` stops the current step;
-  re-entry reads live device/roster state. `doctor --json`'s `captain` field is
+  re-entry reads live settings/device/roster state. `doctor --json`'s `captain` field is
   its headless model readiness
 - `/auth` and `/connect` secret entry — provider keys, OAuth, Linear (MCP token
   and webhook signing secret), and email
