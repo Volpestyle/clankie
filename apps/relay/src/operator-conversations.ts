@@ -92,6 +92,7 @@ import {
   DISCORD_SETUP_TEST_POST_PATH,
   DiscordSetupTestPostRequestSchema,
   DiscordSetupTestPostResultSchema,
+  operatorAutonomyCommandRequiresOwner,
   safeParseProtocolResponse,
 } from "../../../packages/protocol/src/index.ts";
 import { createHash } from "node:crypto";
@@ -613,6 +614,10 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "input_get" ||
       serviceRequest.op === "input_answer" ||
       serviceRequest.op === "input_cancel";
+    // Turning unprompted work back on is the owner's (ADR 0264): the device's own
+    // identity carries it. Status and off stay on chat, as the CLI's do.
+    const autoOnOp =
+      serviceRequest.op === "autonomy" && operatorAutonomyCommandRequiresOwner(serviceRequest.command);
     const workWriteOp =
       serviceRequest.op === "work_item_write" ||
       serviceRequest.op === "work_item_write_receipt" ||
@@ -623,6 +628,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         : nativeMessageOp ||
             questionOp ||
             workWriteOp ||
+            autoOnOp ||
             serviceRequest.op === "terminal_control" ||
             serviceRequest.op === "terminal_input"
           ? "terminalControl"
@@ -709,6 +715,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       nativeMessageOp ||
       questionOp ||
       workWriteOp ||
+      autoOnOp ||
       serviceRequest.op === "tracker_sync" ||
       serviceRequest.op === "evidence_fetch" ||
       (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);
@@ -740,6 +747,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "input_get" ||
           serviceRequest.op === "input_answer" ||
           serviceRequest.op === "input_cancel" ||
+          serviceRequest.op === "autonomy" ||
           serviceRequest.op === "send")
           ? options.deviceDispatch!(
               serviceRequest,
