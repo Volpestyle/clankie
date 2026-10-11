@@ -242,19 +242,32 @@ it.skipIf(process.platform !== "darwin")(
           .split("\n")
           .filter(Boolean)
           .map((row) => JSON.parse(row));
-      await until(async () => (await rows()).length === 1, sustainedMs + 15000);
+      // The receiver can persist its acknowledgment before notify() settles and
+      // the observer publishes the alarm. Wait for both real boundaries.
+      await until(async () => {
+        const snapshot = observer.snapshot();
+        return (await rows()).length === 1 && snapshot.state === "alarm" && snapshot.delivery === "accepted";
+      }, sustainedMs + 15000);
       expect(observer.snapshot()).toMatchObject({
         state: "alarm",
         delivery: "accepted",
         reasons: ["cpu", "health"],
       });
-      await new Promise((r) => setTimeout(r, 500));
+      // Prove another completed unhealthy sample does not duplicate the notice;
+      // a fixed sleep can elapse before that sample runs on a busy machine.
+      const alarmObservation = observer.snapshot().observedAt;
+      await until(async () => observer.snapshot().observedAt !== alarmObservation);
       expect(await rows()).toHaveLength(1);
       hot = false;
       clearInterval(burn);
       await Promise.all(burners.splice(0).map((worker) => worker.terminate()));
       await until(
-        async () => (await rows()).length === 2 && observer.snapshot().state === "healthy",
+        async () => {
+          const snapshot = observer.snapshot();
+          return (
+            (await rows()).length === 2 && snapshot.state === "healthy" && snapshot.delivery === "accepted"
+          );
+        },
         fullDuration ? 60000 : 12000,
       );
       observer.stop();
