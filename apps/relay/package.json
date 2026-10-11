@@ -10,7 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@clankie/credential-broker": "workspace:*"
+    "@clankie/credential-broker": "workspace:*",
+    "@clankie/settings": "workspace:*"
   },
   "devDependencies": {
     "@hono/node-server": "2.0.8",

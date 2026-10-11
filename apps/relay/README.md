@@ -104,6 +104,10 @@ pnpm --filter @clankie/relay start
 
 Configuration:
 
+These installed-stack defaults are refused when using a different state directory
+or `CLANKIE_SCRATCH=1`. For scratch proofs, use the paired free-port preset and
+launcher in [Scratch service and relay proofs](../../docs/cli.md#scratch-service-and-relay-proofs).
+
 - `CLANKIE_CONTROL_PLANE_URL` defaults to `http://127.0.0.1:4310` (device verification; the env name is a compatibility alias for the clankie service URL).
 - `CLANKIE_CAPTAIN_URL` defaults to `http://127.0.0.1:4310` (conversation dispatch on the same service).
 - The captain bootstraps its service credential in the shared broker; the relay resolves it on startup. `CLANKIE_CAPTAIN_TOKEN` explicitly overrides that credential. Conversation requests fail closed when neither source is available, and the relay refuses a token under 16 characters.
