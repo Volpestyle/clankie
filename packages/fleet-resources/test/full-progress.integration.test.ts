@@ -1,4 +1,4 @@
-// Real native pressure → shared admission → arbiter and fallback runner FIFO.
+// Explicit pressure → shared admission → real native arbiter and fallback runner FIFO.
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -35,12 +35,17 @@ require('node:child_process').spawn(process.execPath, ['-e',
   process.argv[1], process.argv[3]], {stdio:'ignore'}).unref();
 const timer=setInterval(()=>{if(fs.existsSync(process.argv[2]))clearInterval(timer)},20);
 `;
-async function fixture() {
+async function fixture(availableMemoryMb = 65_536) {
   const root = await mkdtemp(join(tmpdir(), "clankie-full-progress-"));
   const directory = join(root, "registry");
-  const governor = createResourceGovernor({ directory });
-  const service = createResourceGovernor({ directory });
-  const policy = { ...defaultResourcePolicy(), heavySlots: 4, maxLoadRatio: 0.000001 };
+  // Admission preconditions are explicit: shared CI can be below the owner's
+  // memory floor or idle. Native process births, runners, journals, grants and
+  // leftover cleanup remain real. Both clients observe the same pressure.
+  const probe = async () => ({ loadRatio: 2.25, cpuRatio: 0.9, availableMemoryMb });
+  const governor = createResourceGovernor({ directory, probe });
+  const service = createResourceGovernor({ directory, probe });
+  // Initially at the exact thrash cap; busyPolicy opens bounded progress.
+  const policy = { ...defaultResourcePolicy(), heavySlots: 4, maxLoadRatio: 1.125 };
   const stop = new AbortController();
   const runs: Promise<number>[] = [];
   const files: string[] = [];
@@ -57,12 +62,7 @@ async function fixture() {
     return { job, started, release, cleanupRelease };
   };
   const busyPolicy = async (minAvailableMemoryMb = 4096) => {
-    const observed = await governor.snapshot();
-    expect(observed.pressure.reason).not.toBe("probe-unavailable");
-    expect(observed.pressure.loadRatio).toBeGreaterThan(0);
-    // Use the actual one-minute load, with room on both sides of the exception's
-    // bound. No fabricated probe or extra load generator is needed.
-    policy.maxLoadRatio = observed.pressure.loadRatio / 1.5;
+    policy.maxLoadRatio = 1.5;
     await governor.configure({ ...policy, minAvailableMemoryMb });
     const busy = await governor.snapshot();
     expect(busy.pressure.reason).toBe("load");
@@ -92,8 +92,8 @@ it("a busy machine admits one full job and holds its follower through running an
   let servicePass: Promise<number> | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
   try {
-    // Queue both real waiters before opening the memory floor. The private
-    // ceiling tracks actual native load, between the normal and thrash guards.
+    // Queue both real waiters before opening the memory floor, with load
+    // between the normal and thrash guards after busyPolicy takes effect.
     await f.governor.configure({ ...f.policy, minAvailableMemoryMb: 1_048_576 });
     const first = f.start("progress-first", holdWithLeftover);
     await until(
@@ -174,11 +174,11 @@ it("a busy machine admits one full job and holds its follower through running an
   }
 }, 60_000);
 
-it("the empty-lane exception still refuses a real memory-floor breach at high load", async () => {
-  const f = await fixture();
+it("the empty-lane exception still refuses a memory-floor breach at high load", async () => {
+  const f = await fixture(2048);
   try {
     await f.governor.configure({ ...f.policy, minAvailableMemoryMb: 1_048_576 });
-    await f.busyPolicy(1_048_576);
+    await f.busyPolicy(4096);
     const job = f.start("progress-low-memory");
     const queued = await until(
       () => f.governor.snapshot(),
@@ -279,7 +279,7 @@ it("an exception-admitted real starting grant holds its second full waiter", asy
   }
 }, 30_000);
 
-it("an empty full lane still refuses native load at or above the thrash cap", async () => {
+it("an empty full lane still refuses load at the thrash cap", async () => {
   const f = await fixture();
   try {
     await f.governor.configure({ ...f.policy, minAvailableMemoryMb: 4096 });
@@ -290,7 +290,7 @@ it("an empty full lane still refuses native load at or above the thrash cap", as
     );
     expect(queued.pressure.reason).toBe("load");
     expect(queued.pressure.availableMemoryMb).toBeGreaterThanOrEqual(4096);
-    expect(queued.pressure.loadRatio).toBeGreaterThanOrEqual(2 * f.policy.maxLoadRatio);
+    expect(queued.pressure.loadRatio).toBe(2 * f.policy.maxLoadRatio);
     expect(await f.service.arbitrate()).toBe(0);
     await delay(1000);
     const blocked = await f.governor.snapshot();

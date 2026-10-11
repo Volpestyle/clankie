@@ -1,0 +1,28 @@
+# Fleet resource admission fixtures under CI pressure
+
+[VUH-2103](https://linear.app/vuhlp/issue/VUH-2103) release follow-up. Official [run 38136410348](https://github.com/Volpestyle/clankie/actions/runs/38136410348) on `68dd9c547` failed three full-progress cases in both the full run and its isolated rerun. The runner reported 3421.6 MiB available against the fixture's 4096 MiB floor. A queued full holder could not start, its starting grant was absent, and the thrash test's memory precondition failed.
+
+Admission fixtures now supply their required pressure explicitly. Full progress uses load 2.25 with a 1.5 normal guard and ample memory; a separate case supplies 2048 MiB against the 4096 MiB floor. The thrash case supplies load exactly twice its guard. Native process births, runners, FIFO markers, starting grants, sampled admission decisions, real leftover children and cleanup remain real. Production policy, timeouts and safety assertions are unchanged.
+
+The audit covered every fleet-resources integration suite and their subprocess drivers:
+
+| Suite             | Pressure boundary and result                                                                                                                                                                                               |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| full-progress     | Fixed busy/low-memory/thrash samples for both clients; native runner/grant/cleanup proofs retained.                                                                                                                        |
+| probe-failure     | Parent and generated child in nested cancellation now use calm pressure. PID-one case requires successful native observation, independently of host load. Native failed/unreadable process receipts remain real.           |
+| darwin-pressure   | Native memory, cache and malformed-receipt tests require successful observations rather than an idle host. Memory admission uses actual native memory with controlled load, so load cannot mask the memory refusal reason. |
+| heavy-admission   | Admission fixture already injects pressure. Busy-core case retains actual kernel CPU sampling and its measured CPU bounds; successful observation is independent of host admission health.                                 |
+| heavy-process     | Already injects calm pressure; nested heavy-command driver now does too. Native process ownership, reuse, exits and cleanup retained.                                                                                      |
+| scoped-code-check | Already corrected in VUH-2102: explicit calm pressure with real pnpm/formatter/linter commands and a saturated full permit.                                                                                                |
+| heavy-arbiter     | Already supplies explicit calm/busy/failed probes to each client.                                                                                                                                                          |
+| light-lane        | Already supplies explicit mutable memory/load samples.                                                                                                                                                                     |
+| server-lane       | All clients, including nested-server driver, already supply explicit pressure. Actual CPU supervisor tests retained.                                                                                                       |
+| simulators        | Already supplies explicit mutable load and memory samples. Simulator boot/process safety unchanged.                                                                                                                        |
+| simulator-usage   | Already supplies calm pressure; native per-device usage sampling retained.                                                                                                                                                 |
+| lock-traffic      | Already supplies calm pressure to all clients.                                                                                                                                                                             |
+| store-lock        | Exercises real native locks and journals without pressure admission.                                                                                                                                                       |
+| linux-namespace   | Exercises real containment/cleanup without pressure admission. Linux-only proof retains its separate runtime requirement.                                                                                                  |
+
+Native observation success and admission health are different contracts: a valid kernel sample may correctly report excessive load. Observation tests still refuse malformed/unavailable native receipts and retain the memory and CPU measurements they assert. Admission tests control only the pressure preconditions they need; they do not replace process identities or journal/cleanup boundaries.
+
+Focused checks and original failure logs are recorded in the adjacent evidence manifest. The integrator owns the exact-tree landing gate; final source, push and gate receipts are attached to VUH-2103. The official release rerun remains the release lead's check.

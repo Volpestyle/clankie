@@ -145,11 +145,15 @@ Object.defineProperty(process,'pid',{value:1});
 const available=await nativeBoundaryAvailable();
 const pidOneAuthorized=Boolean(await processIdentity(1));
 const pressure=await new ResourcePressureSampler().sample({heavySlots:1,simulatorSlots:1,simulatorIdleMs:600000,maxLoadRatio:16,minAvailableMemoryMb:0});
-console.log(JSON.stringify({available,pidOneAuthorized,pressureHealthy:pressure.healthy}));
+console.log(JSON.stringify({available,pidOneAuthorized,pressureObserved:pressure.reason!=="probe-unavailable"}));
 `,
       );
       const { stdout } = await execute(process.execPath, [driver], { timeout: 8_000 });
-      expect(JSON.parse(stdout)).toEqual({ available: true, pidOneAuthorized: false, pressureHealthy: true });
+      expect(JSON.parse(stdout)).toEqual({
+        available: true,
+        pidOneAuthorized: false,
+        pressureObserved: true,
+      });
       await expect(
         execute(resourcePython, ["-I", resourceNativeHelperPath(), "available", "--unexpected"]),
       ).rejects.toMatchObject({ code: 1 });
@@ -225,7 +229,11 @@ console.log(JSON.stringify({available,pidOneAuthorized,pressureHealthy:pressure.
 
   it("never submits a nested command after cancellation despite a valid inherited permit", async () => {
     const directory = await mkdtemp(join(tmpdir(), "clankie-nested-cancelled-"));
-    const governor = createResourceGovernor({ directory });
+    // Cancellation owns the admission precondition, not the host's pressure.
+    const governor = createResourceGovernor({
+      directory,
+      probe: async () => ({ loadRatio: 0, availableMemoryMb: 65_536 }),
+    });
     const receipt = join(directory, "command-submitted"),
       result = join(directory, "result.json"),
       driver = join(directory, "driver.mjs");
@@ -240,7 +248,7 @@ console.log(JSON.stringify({available,pidOneAuthorized,pressureHealthy:pressure.
         driver,
         `import {createResourceGovernor} from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "../src/governor.ts")).href)};
 import {writeFile} from 'node:fs/promises';
-const governor=createResourceGovernor({directory:${JSON.stringify(directory)}});
+const governor=createResourceGovernor({directory:${JSON.stringify(directory)},probe:async()=>({loadRatio:0,availableMemoryMb:65536})});
 const controller=new AbortController();
 controller.abort();
 const before=await governor.snapshot();

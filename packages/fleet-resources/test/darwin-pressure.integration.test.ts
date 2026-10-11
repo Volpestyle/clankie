@@ -69,8 +69,8 @@ console.log(JSON.stringify({before,after,first,refreshed,totalMemoryBytes:totalm
 `);
     await mkdir(evidenceDirectory, { recursive: true });
     await writeFile(join(evidenceDirectory, "live.json"), JSON.stringify(observation, null, 2) + "\n");
-    expect(observation.first.healthy).toBe(true);
-    expect(observation.refreshed.healthy).toBe(true);
+    expect(observation.first.reason).not.toBe("probe-unavailable");
+    expect(observation.refreshed.reason).not.toBe("probe-unavailable");
     expect(
       Math.min(
         Math.abs(observation.first.availableMemoryMb - observation.before.availableMemoryMb),
@@ -90,11 +90,19 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir,totalmem} from 'node:os';
 import {join} from 'node:path';
 import {createResourceGovernor} from ${JSON.stringify(governorUrl)};
+import {ResourcePressureSampler} from ${JSON.stringify(pressureUrl)};
 const directory=await mkdtemp(join(tmpdir(),'clankie-memory-admission-'));
-const governor=createResourceGovernor({directory});
+const policy={heavySlots:1,simulatorSlots:1,simulatorIdleMs:600000,maxLoadRatio:16,minAvailableMemoryMb:0};
+const sampler=new ResourcePressureSampler();
+// Keep the kernel memory source real; unrelated host load must not mask the
+// memory reason this admission boundary proves. Failed native reads still fail.
+const governor=createResourceGovernor({directory,probe:async()=>{
+  const sample=await sampler.sample(policy);
+  if(sample.reason==='probe-unavailable') throw Error('Native memory unavailable');
+  return {...sample,loadRatio:0};
+}});
 try{
   const minimum=Math.floor(totalmem()/1024**2)+1;
-  const policy={heavySlots:1,simulatorSlots:1,simulatorIdleMs:600000,maxLoadRatio:16,minAvailableMemoryMb:0};
   await governor.configure(policy);
   const admitted=await governor.admitBuilder();
   await governor.configure({...policy,minAvailableMemoryMb:minimum});
@@ -110,7 +118,7 @@ try{
   expect(observation.admission.pressure.availableMemoryMb).toBeLessThan(observation.minimum);
 });
 
-darwinIt("does not reuse an expired healthy value when the native reply becomes invalid", async () => {
+darwinIt("does not reuse an expired native value when the native reply becomes invalid", async () => {
   const directory = await mkdtemp(join(tmpdir(), "clankie-memory-reply-"));
   try {
     for (const file of ["process.ts", "pressure.ts", "parallelism.ts"])
@@ -160,13 +168,13 @@ console.log(JSON.stringify({before,refused,recovered}));
     );
     const { stdout } = await execute(process.execPath, [path], { timeout: 10_000 });
     const observation = JSON.parse(stdout);
-    expect(observation.before.healthy).toBe(true);
+    expect(observation.before.reason).not.toBe("probe-unavailable");
     expect(observation.refused).toMatchObject({
       healthy: false,
       reason: "probe-unavailable",
       availableMemoryMb: 0,
     });
-    expect(observation.recovered.healthy).toBe(true);
+    expect(observation.recovered.reason).not.toBe("probe-unavailable");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

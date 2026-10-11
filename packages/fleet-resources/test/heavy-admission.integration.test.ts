@@ -153,10 +153,10 @@ it("the real sampler reports busy cores the kernel counts", async () => {
   try {
     // The first sample opens the CPU window; the second measures across it.
     const sampler = new ResourcePressureSampler();
-    expect((await sampler.sample(policy)).healthy).toBe(true);
+    expect((await sampler.sample(policy)).reason).not.toBe("probe-unavailable");
     await delay(500);
     const sampled = await sampler.sample(policy);
-    expect(sampled.healthy).toBe(true);
+    expect(sampled.reason).not.toBe("probe-unavailable");
     // Half the cores spin; anything else on the machine only adds to it.
     expect(sampled.cpuRatio).toBeGreaterThanOrEqual(0.4);
     expect(sampled.cpuRatio).toBeLessThanOrEqual(1);
