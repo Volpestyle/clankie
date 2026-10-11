@@ -21,7 +21,7 @@ if (hook.hook_event_name === "SessionStart") {
     }) + "\n",
   );
 } else if (hook.hook_event_name === "PreToolUse" && typeof hook.tool_name === "string") {
-  const server = /^mcp__(.+)__[^_].*$/u.exec(hook.tool_name)?.[1];
+  const server = /^mcp__(.+)__.+$/u.exec(hook.tool_name)?.[1];
   if (server && /linear/iu.test(server))
     process.stdout.write(
       JSON.stringify({
