@@ -26,11 +26,17 @@ it("real file format and lint finish while a full permit is held and its followe
   const started = join(root, "gate-started");
   const source = join(root, "answer.ts");
   const untouched = join(root, "untouched.ts");
-  const governor = createResourceGovernor({ directory: join(root, "registry") });
+  // This proof saturates the full permit budget, not the host's CPU/memory
+  // guard. Shared CI pressure must not prevent its required holder from starting.
+  // All runners, formatter/linter children, journals and queue reads stay real.
+  const governor = createResourceGovernor({
+    directory: join(root, "registry"),
+    probe: async () => ({ loadRatio: 0, cpuRatio: 0, availableMemoryMb: 65_536 }),
+  });
   const stopFollower = new AbortController();
   const jobs: Promise<number>[] = [];
   try {
-    await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1, maxLoadRatio: 16 });
+    await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1 });
     await writeFile(source, "export const answer={value:42}\n");
     await writeFile(untouched, "export const untouched={value:0}\n");
     const gate = governor.runHeavy(
