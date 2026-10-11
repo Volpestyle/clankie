@@ -168,6 +168,13 @@ Messages to a hire arrive numbered per lead; set `replaces` when a message
 overrides earlier guidance so a late, older one is not acted on.
 Mechanics, routing and recovery: [fleet tools](reference/fleet-tools.md).
 
+For scratch service/relay proof briefs, require the paired preset from
+`node scripts/scratch-stack.mjs .local/PROOF`, then both
+`clankie heavy -- node scripts/scratch-stack.mjs run .local/PROOF clankie|relay`
+entrypoints. Never brief a scratch stack with only `PORT` changed; its peer
+addresses and advertised relay must use that same preset. See `docs/cli.md`,
+"Scratch service and relay proofs".
+
 Keep one current brief: result, owner, owned checkout and paths, acceptance,
 destination and next action, and who may change scope. **Done stays fixed**: a
 handoff or ticket split cannot add a gate. A discovery can change scope only

@@ -244,7 +244,7 @@ it("serves the real VUH-1608 golden through the production service, client and C
       CLANKIE_OPERATOR_TOKEN: "metrics-journey-private-operator",
       CLANKIE_CAPTAIN_TOKEN: "metrics-journey-private-captain",
       CLANKIE_BROWSER_ENABLED: "false",
-      CLANKIE_RELAY_PORT: "0",
+      CLANKIE_RELAY_PORT: String(await unusedPort()),
       PORT: String(port),
       CLANKIE_CONTROL_PLANE_URL: host,
     };

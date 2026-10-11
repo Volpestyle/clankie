@@ -5,7 +5,7 @@ import { LinearCutover } from "./linear-cutover.ts";
 import { linearGraphqlCredential } from "./linear-graphql.ts";
 import { alertRecoveredCrash } from "./crash-report-alert.ts";
 import { requireMachineAccess } from "./machine-access.ts";
-import { verifyLocalSandbox } from "@clankie/settings";
+import { assertScratchNetwork, verifyLocalSandbox } from "@clankie/settings";
 import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
 import { JoinedComputer } from "./joined-computer.ts";
@@ -262,6 +262,7 @@ loadRepoEnvFile();
 const captainDiscordEnvironment = { ...process.env };
 // A locator alone never establishes enforcement. Refuse an unbounded or broken launch.
 await verifyLocalSandbox();
+assertScratchNetwork("clankie");
 const settingsStore = new SettingsStore();
 const startupSettings = await settingsStore.load();
 const settingsFilledNames = [
@@ -269,6 +270,7 @@ const settingsFilledNames = [
   ...applyVoiceSettingsToEnvironment(startupSettings.voice),
   ...applyRelaySettingsToEnvironment(startupSettings.relay),
 ];
+assertScratchNetwork("clankie");
 
 const stateRoot = resolve(process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie"));
 // Workers inherit private Herdr XDG paths; Clankie commands still use this owner settings file.
