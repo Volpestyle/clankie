@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "proof.log",
+      "size": 323081,
+      "sha256": "4caee85af44ca2782718a25f902a8d834aaed768738c3fb1586b480582cc7366",
+      "url": "clankie://evidence/sha256/4caee85af44ca2782718a25f902a8d834aaed768738c3fb1586b480582cc7366"
+    }
+  ]
+}
