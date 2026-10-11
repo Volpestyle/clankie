@@ -4,6 +4,7 @@ import { WorkerReportBridgeReasonSchema } from "./worker-report-health.ts";
 export const FLEET_HEALTH_METRICS_PATH = "/v1/fleet/metrics";
 export const FleetProofRefusalReasonSchema = z.enum([
   "unsupported_platform",
+  "unsupported_pid_namespace",
   "invalid_pane",
   "closed_socket",
   "missing_binding",
@@ -21,6 +22,7 @@ export const FleetProofRefusalReasonSchema = z.enum([
 ]);
 export type FleetProofRefusalReason = z.infer<typeof FleetProofRefusalReasonSchema>;
 export const FleetNativeDiagnosticReasonSchema = z.enum([
+  "unsupported_pid_namespace",
   "clock_unavailable",
   "invalid_arguments",
   "process_census_unavailable",

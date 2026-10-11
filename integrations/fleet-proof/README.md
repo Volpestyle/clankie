@@ -6,6 +6,59 @@ registration. Request headers supply the candidate pane, never a trusted PID.
 This helper replaces the `lsof` socket and global `ps` ancestry scans; the
 accepted boundary remains [ADR 0217](../../docs/adr/0217-fleet-membership-gets-connected-tools.md).
 
+## Linux host boundary
+
+Linux uses the shipped Python helper, `linux-process-proof.py`, with the same
+private transport and body admission checks. It requires a 64-bit Linux kernel
+with pidfds (5.3 or newer) and Python 3.9 or newer. Only the **initial PID
+namespace** is supported. The helper authenticates procfs with `fstatfs`, checks
+the PID namespace through its nsfs descriptor and kernel initial-namespace inode,
+and rejects mismatched proc views, `hidepid`, and nested mounts under `/proc`.
+Containers refuse with `unsupported_pid_namespace`; neither a pane label nor a
+hosted account bypasses this boundary. A future trusted hosted containment receipt
+is tracked separately in [VUH-2120](https://linear.app/vuhlp/issue/VUH-2120).
+
+| Guarantee                         | Darwin observation                                | Linux observation                                                                                            |
+| --------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Exact connected socket            | libproc reversed TCP endpoint and socket identity | `SOCK_DIAG` reversed loopback endpoint, inode and kernel cookie                                              |
+| Unique process owner              | Complete observable descriptor census             | Complete visible PID and every thread's FD table, including descriptor zero and readable foreign-user tables |
+| Original process lifetime         | Full BSD birth snapshots                          | Held pidfd, proc-directory inode, boot UUID and start ticks, rechecked before emission                       |
+| Same account                      | Kernel effective UID                              | Stable real, effective, saved and filesystem UIDs                                                            |
+| Harness ancestry                  | Bracketed kernel parent chain                     | Pinned, bounded parent chain with repeated PID/birth/parent observations                                     |
+| Executable and retained arguments | `proc_pidpath` and `KERN_PROCARGS2`               | `/proc/PID/exe` and bounded `/proc/PID/cmdline`, bracketed by lifetime checks                                |
+| Private-seat recovery             | Fresh birth and named Codex listener              | Fresh kernel birth and repeated Unix `SOCK_DIAG` listener/cookie/owner proof                                 |
+
+A shared descriptor, unreadable same-user table, missing cookie, changed birth,
+ancestry race or exhausted bound refuses the entire observation. An unreadable
+foreign-user table is skipped only after repeated kernel UID/lifetime checks
+establish it cannot be inspected by this account. Confirmed exits are established
+through pidfds; a still-listed zombie does not establish a live holder.
+Requests remain fresh and bounded to 600 ms, 16,384 PIDs, 64 ancestors and
+4,194,304 descriptors per thread. No `ps`, `lsof`, header PID or bearer fallback
+supplies missing authority.
+
+Census-only PID/FD churn (`ENOENT`, `ESRCH` or a changed list) may restart the
+whole census, discarding every partial owner and descriptor observation. At most
+16 total census attempts share the original 600 ms request deadline. Seeing a
+second holder is immediately terminal; permission, lifetime, ancestry, cookie
+and namespace failures do not enter this retry. Exhaustion refuses, never returns
+the last partial attempt. Successful Linux receipts retain `census.attempts` and
+fixed refusal reasons; opt-in native diagnostics retain each retry and the final
+attempt count. The body validates this telemetry separately from identity, so
+different retry counts cannot make an unchanged process appear replaced.
+
+Linux output adds `kernelIdentity` (`boot-UUID:proc-inode:start-ticks`). Existing
+decimal birth fields remain compatible, while body lifetime receipts retain the
+complete kernel identity rather than rounding it to microseconds. As on Darwin,
+these repeated observations are not an atomic kernel transaction: an unobserved
+change and reversal or a descriptor queued in `SCM_RIGHTS` is outside the existing
+boundary. No environment or later arguments enter proof output.
+
+The real host-PID-namespace and native Pi TUI evidence is recorded in
+[VUH-2118 verification](../../docs/testing/2026-10-11-linux-native-fleet-proof/README.md).
+
+## Darwin observations
+
 The macOS C helper uses the public SDK's `libproc` process and socket structures.
 It scans observable processes for the exact reversed TCP endpoint, requires one
 distinct owner PID, and records its microsecond birth, socket identity and
@@ -251,9 +304,11 @@ pnpm fleet-proof:build
 Source `dev` and `start` run this preparation before the body starts. The helper
 is built under ignored `.local/fleet-proof/`, outside the request path. An
 unchanged source, architecture, flags and binary digest reuse that build.
-macOS releases ship the signed binary at `libexec/local-fleet-proof`, so installed
-users need no compiler. The helper is currently macOS only, matching the existing
-local admission support.
+macOS releases ship the signed binary at `libexec/local-fleet-proof`. Linux
+preparation atomically copies the executable Python helper to the same location;
+Linux release assembly includes it beside the bundled Node and Herdr runtimes.
+Installed users need no compiler. Linux hosts need the system Python described
+above; Windows remains unsupported by this admission helper.
 
 ## Verification
 

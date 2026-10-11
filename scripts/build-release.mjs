@@ -162,6 +162,9 @@ try {
     // A self-installed release brings its own Node, so it never depends on the image's.
     await installNodeRuntime(releaseRoot, temporaryRoot);
     await buildHerdr(join(releaseRoot, "libexec/herdr"));
+    const fleetProof = join(releaseRoot, "libexec/local-fleet-proof");
+    await buildFleetProof(fleetProof);
+    await rm(`${fleetProof}.json`, { force: true });
     await installHostedLauncher(releaseRoot);
   } else {
     await installNodeRuntime(releaseRoot, temporaryRoot);

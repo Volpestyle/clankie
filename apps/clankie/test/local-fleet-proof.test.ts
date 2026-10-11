@@ -91,7 +91,7 @@ it("permits service-owned private seats only while their exact registry entry re
 });
 it("fails closed on unsupported platforms", async () => {
   expect(
-    await localFleetProof({ platform: "linux", herdrBinary: "herdr", binding: async () => binding })(
+    await localFleetProof({ platform: "win32", herdrBinary: "herdr", binding: async () => binding })(
       socket(),
       "w1:p1",
     ),

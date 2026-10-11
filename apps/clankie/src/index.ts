@@ -2298,7 +2298,7 @@ if (publicGatewayConnector !== undefined) {
   else server.once("listening", () => publicGatewayConnector?.start());
 }
 const localFleetServer =
-  process.platform === "darwin" && herdr.available()
+  ["darwin", "linux"].includes(process.platform) && herdr.available()
     ? serve({ fetch: localFleet.fetch(clankie.app.fetch), port: 0, hostname: "127.0.0.1" })
     : undefined;
 localFleetServer?.once("listening", () => {

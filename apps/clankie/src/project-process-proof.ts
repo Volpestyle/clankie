@@ -217,7 +217,7 @@ export function createProjectProcessObserver(options: {
           );
     if (
       fleet !== "default" ||
-      (options.platform ?? process.platform) !== "darwin" ||
+      !["darwin", "linux"].includes(options.platform ?? process.platform) ||
       !/^w[\w]+:p[\w]+$/u.test(pane)
     )
       return refuse("unsupported_scope");
@@ -487,10 +487,10 @@ export function createProjectProcessObserver(options: {
           socketPath: binding.socketPath,
           ...(binding.session === undefined ? {} : { session: binding.session }),
         },
-        shell: { pid: shell.pid, startTime: nativeProcessStart(shell.birth) },
+        shell: { pid: shell.pid, startTime: nativeProcessStart(shell.birth, shell.kernelIdentity) },
         // The release is reported beside the proof, never inside it: process
         // identity and keys derived from it do not change when the harness updates.
-        processes: [{ pid: agent.pid, startTime: nativeProcessStart(agent.birth) }],
+        processes: [{ pid: agent.pid, startTime: nativeProcessStart(agent.birth, agent.kernelIdentity) }],
       };
     } catch (error) {
       return failure(error);

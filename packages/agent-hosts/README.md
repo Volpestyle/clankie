@@ -106,6 +106,9 @@ view admits Pi only with verified native capability and an authenticated worker
 model; automatic choice respects holds and falls back to Pi after eligible
 Claude/Codex accounts. Linux process proof uses the original kernel PID/birth,
 executable/cwd and socket ownership, and fails closed when observation fails.
+Local fleet-MCP admission supports Linux only in the initial host PID namespace.
+Containers explicitly refuse; the future hosted containment receipt is VUH-2120.
+See [the kernel proof boundary](../../integrations/fleet-proof/README.md#linux-host-boundary).
 Without opt-in, ordinary unbriefed Pi launches preserve their hosted model/provider
 preparation and automated briefs remain unavailable. Opt-in requires the pinned
 Pi 0.87.1 files; upgrades need compatibility validation before opting in.

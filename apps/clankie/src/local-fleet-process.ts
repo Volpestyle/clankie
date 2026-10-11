@@ -6,20 +6,48 @@ import { FleetNativeDiagnosticReasonSchema } from "@clankie/protocol";
 import { nativeProcessRequest, type NativeTransportReason } from "./native-process-transport.ts";
 
 const birth = z.tuple([z.string().regex(/^[1-9]\d{0,19}$/u), z.string().regex(/^\d{1,6}$/u)]);
+const kernelIdentity = z.string().regex(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}:[1-9]\d*:[1-9]\d*$/u);
 const pid = z.number().int().min(2).max(2_147_483_647);
+const census = z
+  .object({
+    attempts: z.number().int().min(1).max(16),
+    refusals: z
+      .array(
+        z
+          .object({
+            attempt: z.number().int().min(1).max(16),
+            reason: z.literal("process_census_changed"),
+            errno: z.number().int().nonnegative(),
+          })
+          .strict(),
+      )
+      .max(16),
+  })
+  .strict();
 const SnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
+    census: census.optional(),
     owner: z
       .object({
         pid,
         uid: z.number().int().min(0),
         birth,
+        kernelIdentity: kernelIdentity.optional(),
         socket: z.string().regex(/^\d+:\d+:\d+$/u),
       })
       .strict(),
     ancestors: z
-      .array(z.object({ pid, ppid: z.number().int().min(0).max(2_147_483_647), birth }).strict())
+      .array(
+        z
+          .object({
+            pid,
+            ppid: z.number().int().min(0).max(2_147_483_647),
+            birth,
+            kernelIdentity: kernelIdentity.optional(),
+          })
+          .strict(),
+      )
       .min(1)
       .max(64),
   })
@@ -36,6 +64,7 @@ const ProcessSnapshotSchema = z
             ppid: z.number().int().min(0).max(2_147_483_647),
             uid: z.number().int().min(0),
             birth,
+            kernelIdentity: kernelIdentity.optional(),
             executable: z.string().min(1).max(4096).refine(isAbsolute),
             argv: z.array(z.string().max(4096)).max(2),
           })
@@ -52,18 +81,22 @@ const ClaudeProcessSnapshotSchema = ProcessSnapshotSchema.extend({
 export type NativeProcessSnapshot = z.infer<typeof ProcessSnapshotSchema>;
 
 /** Lossless kernel birth, including microseconds; never a display timestamp. */
-export function nativeProcessStart(birth: readonly [string, string]): string {
-  return `${birth[0]}.${birth[1].padStart(6, "0")}`;
+export function nativeProcessStart(birth: NativeBirth, kernelIdentity = birth.kernelIdentity): string {
+  return `${birth[0]}.${birth[1].padStart(6, "0")}${kernelIdentity === undefined ? "" : `@${kernelIdentity}`}`;
 }
+
+type NativeBirth = readonly [string, string] & { readonly kernelIdentity?: string };
 
 const ProcessBirthSchema = z
   .object({
     schemaVersion: z.literal(1),
+    census: census.optional(),
     process: z
       .object({
         pid,
         uid: z.number().int().nonnegative(),
         birth,
+        kernelIdentity: kernelIdentity.optional(),
       })
       .strict(),
   })
@@ -73,13 +106,21 @@ const ProcessBirthSchema = z
 export async function observeNativeBirth(
   processPid: number,
   signal?: AbortSignal,
-): Promise<readonly [string, string] | undefined> {
-  if (process.platform !== "darwin" || !pid.safeParse(processPid).success) return undefined;
+): Promise<NativeBirth | undefined> {
+  if (!["darwin", "linux"].includes(process.platform) || !pid.safeParse(processPid).success) return undefined;
   try {
     const reply = await nativeProcessRequest(fleetProcessHelper(), ["--birth", String(processPid)], signal);
     if (!reply) return undefined;
     const result = ProcessBirthSchema.parse(JSON.parse(reply.stdout)).process;
-    return result.pid === processPid && result.uid === process.getuid?.() ? result.birth : undefined;
+    if (
+      result.pid !== processPid ||
+      result.uid !== process.getuid?.() ||
+      (process.platform === "linux" && result.kernelIdentity === undefined)
+    )
+      return undefined;
+    return result.kernelIdentity === undefined
+      ? result.birth
+      : Object.assign(result.birth, { kernelIdentity: result.kernelIdentity });
   } catch {
     return undefined;
   }
@@ -91,8 +132,8 @@ export async function observeCodexServer(
   endpoint: string,
   canonicalSocketPath: string,
   signal?: AbortSignal,
-): Promise<readonly [string, string] | undefined> {
-  if (process.platform !== "darwin" || !pid.safeParse(processPid).success) return undefined;
+): Promise<NativeBirth | undefined> {
+  if (!["darwin", "linux"].includes(process.platform) || !pid.safeParse(processPid).success) return undefined;
   try {
     const reply = await nativeProcessRequest(
       fleetProcessHelper(),
@@ -106,14 +147,27 @@ export async function observeCodexServer(
     );
     if (!reply) return undefined;
     const result = ProcessBirthSchema.parse(JSON.parse(reply.stdout)).process;
-    return result.pid === processPid && result.uid === process.getuid?.() ? result.birth : undefined;
+    if (
+      result.pid !== processPid ||
+      result.uid !== process.getuid?.() ||
+      (process.platform === "linux" && result.kernelIdentity === undefined)
+    )
+      return undefined;
+    return result.kernelIdentity === undefined
+      ? result.birth
+      : Object.assign(result.birth, { kernelIdentity: result.kernelIdentity });
   } catch {
     return undefined;
   }
 }
 
 /** Compatibility comparison for old server-owned ps receipts; new receipts retain microseconds. */
-export function nativeProcessReceipt(birth: readonly [string, string], previous?: string): string {
+export function nativeProcessReceipt(
+  birth: NativeBirth,
+  previous?: string,
+  kernelIdentity = birth.kernelIdentity,
+): string {
+  if (kernelIdentity !== undefined) return nativeProcessStart(birth, kernelIdentity);
   if (previous === undefined || /^\d+\.\d{6}$/u.test(previous)) return nativeProcessStart(birth);
   const date = new Date(Number(birth[0]) * 1_000);
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -132,7 +186,7 @@ export async function observeNativeProcesses(
   claudePid?: number,
 ): Promise<NativeProcessSnapshot | undefined> {
   if (
-    (execute === undefined && process.platform !== "darwin") ||
+    (execute === undefined && !["darwin", "linux"].includes(process.platform)) ||
     !isAbsolute(processHelper) ||
     !pid.safeParse(shellPid).success ||
     !pid.safeParse(agentPid).success ||
@@ -173,7 +227,13 @@ export async function observeNativeProcesses(
         (snapshot.processes[2]!.pid !== claudePid ||
           snapshot.processes[2]!.ppid !== agentPid ||
           snapshot.processes[1]!.ppid !== shellPid)) ||
-      snapshot.processes.some((processIdentity) => processIdentity.uid !== process.getuid?.())
+      snapshot.processes.some(
+        (processIdentity) =>
+          processIdentity.uid !== process.getuid?.() ||
+          (execute === undefined &&
+            process.platform === "linux" &&
+            processIdentity.kernelIdentity === undefined),
+      )
     )
       return undefined;
     return snapshot;
@@ -251,6 +311,7 @@ export interface NativeSocketOwner {
   readonly uid: number;
   readonly birth: readonly [string, string];
   readonly socket: string;
+  readonly kernelIdentity?: string | undefined;
 }
 export interface NativeSocketProcess {
   readonly schemaVersion: 1;
@@ -259,6 +320,7 @@ export interface NativeSocketProcess {
     readonly pid: number;
     readonly ppid: number;
     readonly birth: readonly [string, string];
+    readonly kernelIdentity?: string | undefined;
   }[];
 }
 
@@ -282,7 +344,7 @@ export async function observeSocketProcess(
   signal?: AbortSignal,
 ): Promise<NativeSocketProcess | undefined> {
   if (
-    process.platform !== "darwin" ||
+    !["darwin", "linux"].includes(process.platform) ||
     !isAbsolute(processHelper) ||
     socket.destroyed ||
     !socket.readable ||
@@ -299,7 +361,14 @@ export async function observeSocketProcess(
       [
         String(socket.remotePort),
         String(socket.localPort),
-        ...(expected === undefined ? [] : [String(expected.pid), ...expected.birth, expected.socket]),
+        ...(expected === undefined
+          ? []
+          : [
+              String(expected.pid),
+              ...expected.birth,
+              expected.socket,
+              ...(expected.kernelIdentity === undefined ? [] : [expected.kernelIdentity]),
+            ]),
         ...(report === undefined ? [] : ["--diagnostics"]),
       ],
       signal,
@@ -314,6 +383,10 @@ export async function observeSocketProcess(
     const first = snapshot.ancestors[0]!;
     if (
       snapshot.owner.uid !== process.getuid?.() ||
+      (process.platform === "linux" &&
+        (snapshot.owner.kernelIdentity === undefined ||
+          snapshot.ancestors.some((ancestor) => ancestor.kernelIdentity === undefined))) ||
+      first.kernelIdentity !== snapshot.owner.kernelIdentity ||
       first.pid !== snapshot.owner.pid ||
       JSON.stringify(first.birth) !== JSON.stringify(snapshot.owner.birth) ||
       new Set(snapshot.ancestors.map((ancestor) => ancestor.pid)).size !== snapshot.ancestors.length ||
@@ -327,10 +400,13 @@ export async function observeSocketProcess(
           snapshot.owner.uid !== expected.uid ||
           snapshot.owner.birth[0] !== expected.birth[0] ||
           snapshot.owner.birth[1] !== expected.birth[1] ||
-          snapshot.owner.socket !== expected.socket))
+          snapshot.owner.socket !== expected.socket ||
+          snapshot.owner.kernelIdentity !== expected.kernelIdentity))
     )
       return undefined;
-    return snapshot;
+    // Retry telemetry describes the observation, not the process/socket
+    // lifetime. Initial/final identity comparisons must not compare its count.
+    return { schemaVersion: snapshot.schemaVersion, owner: snapshot.owner, ancestors: snapshot.ancestors };
   } catch (error) {
     if (error !== null && typeof error === "object" && "stderr" in error && typeof error.stderr === "string")
       nativeDiagnostics(error.stderr, report);

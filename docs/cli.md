@@ -4822,6 +4822,13 @@ privacy and migration behavior.
 
 ### `metrics --fleet`
 
+Local native workers on Linux use the same kernel-backed admission route as
+Darwin. Linux v1 requires the initial host PID namespace and genuine, visible
+procfs; containers refuse with the fixed reason `unsupported_pid_namespace`.
+Read that reason here or in doctor instead of supplying a PID or token to bypass
+the refusal. Hosted container admission remains a separate follow-up, VUH-2120.
+See [the native proof boundary](../integrations/fleet-proof/README.md#linux-host-boundary).
+
 Read operator-only `GET /v1/fleet/metrics` for proof attempts and refusals, worker
 report attempts and failures, and fixed native/transport reason counters. The
 five- and sixty-minute windows show failure fractions and failures per minute;

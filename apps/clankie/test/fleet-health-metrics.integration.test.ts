@@ -365,6 +365,13 @@ it("carries the helper's complete fixed diagnostic vocabulary through the collec
   );
   expect(exhausted).not.toBeNull();
   for (const reason of exhausted!.slice(1)) declarations.set(reason, "completion");
+  const linuxSource = await readFile(
+    new URL("../../../integrations/fleet-proof/linux-process-proof.py", import.meta.url),
+    "utf8",
+  );
+  for (const [, stage, reason] of linuxSource.matchAll(/"(\w+)",\s*"(\w+)"/gu)) {
+    if (NativeProcessDiagnosticSchema.shape.stage.safeParse(stage).success) declarations.set(reason!, stage!);
+  }
   expect([...declarations.keys()].sort()).toEqual([...FleetNativeDiagnosticReasonSchema.options].sort());
   const metrics = new FleetHealthMetrics();
   const captured = JSON.parse(

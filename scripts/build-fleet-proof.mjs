@@ -8,11 +8,16 @@ const digest = (value) => createHash("sha256").update(value).digest("hex");
 
 /** Prepare off the request path. Installed releases contain the compiled helper. */
 export async function buildFleetProof(destination = join(root, ".local/fleet-proof/native-process-proof")) {
-  if (process.platform !== "darwin") return;
-  const source = join(root, "integrations/fleet-proof/native-process-proof.c");
+  if (!["darwin", "linux"].includes(process.platform)) return;
+  const linux = process.platform === "linux";
+  const source = join(
+    root,
+    "integrations/fleet-proof",
+    linux ? "linux-process-proof.py" : "native-process-proof.c",
+  );
   const sourceHash = digest(await readFile(source));
   const flags = ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-mmacosx-version-min=14.0", "-lproc"];
-  const buildHash = digest(JSON.stringify([sourceHash, process.arch, flags]));
+  const buildHash = digest(JSON.stringify([sourceHash, process.platform, process.arch, linux ? [] : flags]));
   const metadataPath = `${destination}.json`;
   try {
     const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
@@ -25,11 +30,13 @@ export async function buildFleetProof(destination = join(root, ".local/fleet-pro
   const temporary = `${destination}.${randomUUID()}.tmp`;
   const metadataTemporary = `${metadataPath}.${randomUUID()}.tmp`;
   try {
-    execFileSync("cc", [...flags, source, "-o", temporary], {
-      timeout: 60_000,
-      maxBuffer: 1_000_000,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    if (linux) await writeFile(temporary, await readFile(source), { flag: "wx" });
+    else
+      execFileSync("cc", [...flags, source, "-o", temporary], {
+        timeout: 60_000,
+        maxBuffer: 1_000_000,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
     await chmod(temporary, 0o755);
     const binaryHash = digest(await readFile(temporary));
     await writeFile(metadataTemporary, `${JSON.stringify({ buildHash, binaryHash })}\n`, { flag: "wx" });

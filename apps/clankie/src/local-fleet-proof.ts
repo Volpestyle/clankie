@@ -119,7 +119,7 @@ function diagnostic(
   }
 }
 
-/** macOS local proof. Unsupported platforms and disconnected sockets fail closed. */
+/** Kernel-backed local proof. Unsupported platforms and disconnected sockets fail closed. */
 export function localFleetProof(options: LocalFleetProofOptions) {
   return createLocalFleetProof(options, false);
 }
@@ -148,6 +148,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       if (
         admission &&
         reason !== "unsupported_platform" &&
+        reason !== "unsupported_pid_namespace" &&
         reason !== "invalid_pane" &&
         reason !== "pane_unavailable" &&
         reason !== "not_member" &&
@@ -166,7 +167,10 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
             expected,
             (event) => {
               nativeReason =
-                !event.retry && (event.reason === "caller_exited" || event.reason === "ancestor_exited")
+                !event.retry &&
+                (event.reason === "caller_exited" ||
+                  event.reason === "ancestor_exited" ||
+                  event.reason === "unsupported_pid_namespace")
                   ? event.reason
                   : undefined;
               emit({ source: "native", checkpoint, event });
@@ -174,7 +178,8 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
             (reason) => emit({ source: "transport", reason }),
             signal,
           );
-    if ((options.platform ?? process.platform) !== "darwin") return refuse("unsupported_platform");
+    if (!["darwin", "linux"].includes(options.platform ?? process.platform))
+      return refuse("unsupported_platform");
     if (!/^w[\w]+:p[\w]+$/u.test(pane)) return refuse("invalid_pane");
     const clientPort = socket.remotePort;
     const serverPort = socket.localPort;
@@ -306,7 +311,10 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     let nativeReason: FleetProofRefusalReason | undefined;
     const report = (event: NativeProcessDiagnostic) => {
       nativeReason =
-        !event.retry && (event.reason === "caller_exited" || event.reason === "ancestor_exited")
+        !event.retry &&
+        (event.reason === "caller_exited" ||
+          event.reason === "ancestor_exited" ||
+          event.reason === "unsupported_pid_namespace")
           ? event.reason
           : undefined;
     };
@@ -334,7 +342,8 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       emit({ source: "proof", reason });
       return undefined;
     };
-    if ((options.platform ?? process.platform) !== "darwin") return refuse("unsupported_platform");
+    if (!["darwin", "linux"].includes(options.platform ?? process.platform))
+      return refuse("unsupported_platform");
     if (!/^w[\w]+:p[\w]+$/u.test(pane)) return refuse("invalid_pane");
     const clientPort = socket.remotePort;
     const serverPort = socket.localPort;
@@ -384,7 +393,8 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       const hasLifetime = (snapshot: NativeSocketProcess, process: { pid: number; startTime: string }) =>
         snapshot.ancestors.some(
           (ancestor) =>
-            ancestor.pid === process.pid && nativeProcessStart(ancestor.birth) === process.startTime,
+            ancestor.pid === process.pid &&
+            nativeProcessStart(ancestor.birth, ancestor.kernelIdentity) === process.startTime,
         );
       const directShell = hasLifetime(initial, proof.shell);
       if (!directShell && (await options.privateSeat?.(chain, pane, binding, signal)) !== true)

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "capture.json",
+      "size": 213891,
+      "sha256": "4b774b966e88589019613bfe37fa32465ae7fe062802afb4b5ff701c631dc218",
+      "url": "clankie://evidence/sha256/4b774b966e88589019613bfe37fa32465ae7fe062802afb4b5ff701c631dc218"
+    },
+    {
+      "path": "knip-isolation.json",
+      "size": 30378,
+      "sha256": "e810edf257a9b1cb2c445e85c8f435449aee68f4002c87393b3171837d5ba2ee",
+      "url": "clankie://evidence/sha256/e810edf257a9b1cb2c445e85c8f435449aee68f4002c87393b3171837d5ba2ee"
+    }
+  ]
+}

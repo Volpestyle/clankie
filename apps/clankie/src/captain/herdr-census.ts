@@ -288,7 +288,11 @@ export async function recoverLocalCodexSession(
         options.signal?.throwIfAborted();
         if (!observed || basename(observed.executable) !== "codex")
           throw new Error("Native process lifetime unavailable");
-        return nativeProcessReceipt(observed.birth, pid === launch.pid ? launch.start : undefined);
+        return nativeProcessReceipt(
+          observed.birth,
+          pid === launch.pid ? launch.start : undefined,
+          observed.kernelIdentity,
+        );
       }
       const output = (await run("/bin/ps", ["-p", String(pid), "-o", "lstart=,comm="])).stdout;
       options.signal?.throwIfAborted();

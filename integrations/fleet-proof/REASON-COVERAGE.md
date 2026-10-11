@@ -1,5 +1,14 @@
 # Proof reason coverage
 
+Linux adds `unsupported_pid_namespace` to the fixed terminal and native reason
+vocabularies. A real private-PID-namespace container emits this refusal before
+process or socket observation. The manual host-only Linux fixture exercises
+real TCP cookies, shared descriptors (including private per-thread tables),
+unreadable same-user processes, pinned births, ancestry exits and serial transport.
+The portable vocabulary check compares the protocol with both production helper
+sources. Linux evidence and its initial-PID-namespace limits are recorded in
+[VUH-2118 verification](../../docs/testing/2026-10-11-linux-native-fleet-proof/README.md).
+
 `fleet-health-metrics-native.integration.test.ts` runs the real macOS helper,
 live loopback TCP sockets, an isolated Herdr daemon and a service-owned private
 registry. It asserts thirteen existing terminal refusal cases independently of

@@ -31,7 +31,7 @@ const processStart = async (
   signal?: AbortSignal,
 ): Promise<string | undefined> => {
   signal?.throwIfAborted();
-  if (process.platform !== "darwin") {
+  if (!["darwin", "linux"].includes(process.platform)) {
     // Preserve existing private-launch support elsewhere. This never supplies
     // macOS socket admission or substitutes after a failed native observation.
     try {

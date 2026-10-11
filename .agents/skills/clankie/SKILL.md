@@ -85,6 +85,13 @@ at 64 KiB, so large captures download only when opened.
 
 ## Find the usable route
 
+Local Linux workers require kernel-backed admission on a host in its initial PID
+namespace, with genuine, fully visible procfs. Containers are unsupported;
+`unsupported_pid_namespace` in `clankie metrics --fleet` means this host boundary
+refused the request. Do not substitute a bearer, caller PID, another account or
+weaker process scan. The hosted containment-receipt route is a separate open
+follow-up (VUH-2120). Details: `integrations/fleet-proof/README.md`.
+
 Start with the route your session actually exposes. Native `worker` MCP tools (`clankie` on older installs)
 are the worker path: use their current schemas, not another account's similarly
 named connector. `message_clankie` reaches him as agent output. Send a concrete
