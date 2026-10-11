@@ -39,6 +39,17 @@ const missing: ExecFileImpl = async () => {
 /** Probes are a seam so a run never depends on what happens to answer locally. */
 const offline: typeof fetch = () => Promise.reject(new Error("no probe in tests"));
 
+const unavailableClaudePathShim =
+  process.platform === "darwin"
+    ? {
+        state: "unverified",
+        detail: "Active local Herdr binding unavailable; no PATH activation was proven.",
+      }
+    : {
+        state: "unsupported",
+        detail: "Automatic Claude PATH shim currently supports Mac zsh panes; linked Windows is a follow-up.",
+      };
+
 it("doctor resolves current workspace preferences before any agent is started and explains project versus global", async () => {
   const root = await realpath(await installRoot());
   const settings = new SettingsStore(join(root, "settings.json"));
@@ -355,6 +366,7 @@ describe("install doctor", () => {
     expect(report.herdrPlugin).toEqual({
       bundled: true,
       bundlePath: join(root, "integrations", "herdr-plugin"),
+      claudePathShim: unavailableClaudePathShim,
     });
     expect(report.remediations).toEqual([
       "Pick a captain model with `clankie model set provider/model` or `/setup`.",
@@ -663,7 +675,12 @@ describe("install doctor", () => {
     expect(report.version).toBe("v0.2.0");
     expect(report.model).toBe("xai/grok-4");
     expect(report.commands.herdr).toEqual({ present: true, detail: "herdr 0.7.3" });
-    expect(report.herdrPlugin).toEqual({ bundled: true, bundlePath: pluginPath, linked: false });
+    expect(report.herdrPlugin).toEqual({
+      bundled: true,
+      bundlePath: pluginPath,
+      linked: false,
+      claudePathShim: unavailableClaudePathShim,
+    });
     expect(report.remediations).toEqual([`herdr plugin link ${pluginPath}`]);
     await writeFile(join(configHome, "clankie", "settings.json"), JSON.stringify({ schemaVersion: 1 }));
     const owned = await inspectInstall({

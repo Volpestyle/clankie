@@ -74,6 +74,12 @@ preservation and API/CLI authorization. Service and TUI typechecks passed.
 All commands ran through `clankie heavy --`; the final focused log is retained
 in the evidence bundle.
 
+Integration exposed two older exact-shape doctor assertions. Both now explicitly
+expect the shim diagnosis: `unverified` when a Mac binding cannot be read, or
+`unsupported` on other platforms. The doctor, setup command and owner command
+consumer files passed together (38 tests). No other exact-shape doctor consumers
+were found in apps, packages or scripts.
+
 The tests cover `/tmp` resolving to `/private/tmp` and preserve original config
 bytes during setup. The bundled-layout test verifies that preparation copies
 the standalone launcher asset rather than the release entrypoint. Existing
