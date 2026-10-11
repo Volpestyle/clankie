@@ -1,3 +1,8 @@
+import { createServer } from "node:http";
+import { text } from "node:stream/consumers";
+import { setTimeout as delay } from "node:timers/promises";
+import { runAgentsCommand } from "../../tui/src/command/agents.ts";
+import { createClankieApp } from "../src/app.ts";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import fsAsync, { appendFile, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
@@ -5,7 +10,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { SettingsStore } from "@clankie/settings";
+import { ClankieSettingsSchema, SettingsStore } from "@clankie/settings";
 import { OperatorConversationServiceResultSchema, type OperatorFleetSeat } from "@clankie/protocol";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
@@ -20,8 +25,10 @@ const CALLERS = 16;
 const DIRECTORY_COUNT = 1024;
 const UNRELATED_PER_DIRECTORY = 1;
 const roots: string[] = [];
+const httpCleanups: (() => Promise<void>)[] = [];
 const captains: ReturnType<typeof createCaptain>[] = [];
 afterEach(async ({ signal }) => {
+  for (const cleanup of httpCleanups.splice(0).reverse()) await cleanup();
   await Promise.all(captains.splice(0).map((captain) => captain.close()));
   vi.restoreAllMocks();
   syncBuiltinESMExports();
@@ -40,7 +47,7 @@ async function temporaryRoot() {
 // Native record shapes come from the inspected Codex 0.160 fixture. The trees
 // contain many unrelated sessions and substantial parent journals, rather than
 // ten model agents or a substituted filesystem.
-async function sessionTree() {
+async function sessionTree(seats = SEATS, directories = DIRECTORY_COUNT) {
   const root = await temporaryRoot();
   const now = new Date().toISOString();
   const sessions = join(root, "sessions");
@@ -56,7 +63,7 @@ async function sessionTree() {
     },
   }).repeat(256);
   const parents = await Promise.all(
-    Array.from({ length: SEATS }, async (_, index) => {
+    Array.from({ length: seats }, async (_, index) => {
       const id = randomUUID();
       const childId = randomUUID();
       const path = join(current, `rollout-parent-${id}.jsonl`);
@@ -98,9 +105,9 @@ async function sessionTree() {
   );
   // Bound fixture creation too: opening a thousand files simultaneously would
   // benchmark the test's setup and can exhaust smaller CI descriptor limits.
-  for (let batch = 0; batch < DIRECTORY_COUNT; batch += 32)
+  for (let batch = 0; batch < directories; batch += 32)
     await Promise.all(
-      Array.from({ length: Math.min(32, DIRECTORY_COUNT - batch) }, async (_, offset) => {
+      Array.from({ length: Math.min(32, directories - batch) }, async (_, offset) => {
         const index = batch + offset;
         const directory = join(
           sessions,
@@ -156,6 +163,7 @@ async function captainFixture(tree: Awaited<ReturnType<typeof sessionTree>>) {
       occupantIdForHerdrSession(row.agent_session),
     );
   let calls = 0;
+  let onCensus: (() => Promise<void>) | undefined;
   let gate: { entered(): void; wait: Promise<void> } | undefined;
   const execute = async (args: readonly string[]) => {
     if (args[0] === "agent" && args[1] === "list") return JSON.stringify({ result: { agents: rows } });
@@ -193,6 +201,7 @@ async function captainFixture(tree: Awaited<ReturnType<typeof sessionTree>>) {
           held.entered();
           await held.wait;
         }
+        await onCensus?.();
         return { stdout: JSON.stringify({ result: { agents: snapshot } }), stderr: "" };
       },
       nativeSummariesPath: join(tree.root, "summaries.json"),
@@ -206,6 +215,9 @@ async function captainFixture(tree: Awaited<ReturnType<typeof sessionTree>>) {
     captain,
     rows,
     calls: () => calls,
+    onCensus: (callback?: () => Promise<void>) => {
+      onCensus = callback;
+    },
     hold: () => {
       let entered!: () => void;
       let release!: () => void;
@@ -436,3 +448,108 @@ it("real addressed-seat subagent projection shares large-tree discovery and avoi
   );
   expect((await read())[1]?.subagents?.running).toBe(2);
 });
+
+async function contactsHttp(captain: ReturnType<typeof createCaptain>, root: string) {
+  const service = await createClankieApp({
+    captain,
+    settings: { load: async () => ClankieSettingsSchema.parse({ schemaVersion: 1 }) },
+    eventLogPath: join(root, "http-events.jsonl"),
+    authenticateCaptain: async (request) =>
+      request.headers.get("authorization") === "Bearer contacts-test"
+        ? { captainId: "contacts-test" }
+        : undefined,
+  });
+  const server = createServer(async (request, response) => {
+    try {
+      const result = await service.app.request(request.url!, {
+        method: request.method ?? "POST",
+        headers: { authorization: request.headers.authorization ?? "", "content-type": "application/json" },
+        body: await text(request),
+      });
+      response.writeHead(result.status, { "content-type": "application/json" });
+      response.end(await result.text());
+    } catch (error) {
+      response.writeHead(500);
+      response.end(JSON.stringify({ error: String(error) }));
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing contacts fixture address");
+  httpCleanups.push(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    service.close();
+  });
+  return () =>
+    runAgentsCommand(["contacts"], {
+      host: `http://127.0.0.1:${address.port}`,
+      env: { CLANKIE_CAPTAIN_TOKEN: "contacts-test" },
+    });
+}
+
+it("busy fleet changes during a slow census return partial contacts instead of starving the HTTP read", async () => {
+  const tree = await sessionTree(1, 0);
+  const f = await captainFixture(tree);
+  const contacts = await contactsHttp(f.captain, tree.root);
+  const initial = (await contacts()) as { personaId: string }[];
+  expect(initial).toHaveLength(1);
+  await delay(1050);
+  const before = f.calls();
+  let changes = 0;
+  f.onCensus(async () => {
+    await delay(20);
+    await f.captain.serveOperatorConversation({
+      op: "update_persona",
+      schemaVersion: 1,
+      persona: { schemaVersion: 1, personaId: initial[0]!.personaId, name: `Busy worker ${++changes}` },
+    });
+  });
+  const pending = contacts();
+  try {
+    const result = await Promise.race([pending, delay(1500).then(() => undefined)]);
+    expect(result).toMatchObject({
+      personas: [{ personaId: initial[0]!.personaId, name: "Busy worker 2" }],
+      readWarnings: [{ source: "fleet_consistency", reason: "changed_during_read" }],
+    });
+    expect(f.calls() - before).toBe(2);
+  } finally {
+    f.onCensus();
+    await pending;
+  }
+  expect(await contacts()).toEqual(
+    expect.arrayContaining([expect.objectContaining({ personaId: initial[0]!.personaId })]),
+  );
+}, 20_000);
+
+it("a stalled Herdr census returns named partial contacts by the display deadline and shares its in-flight work", async () => {
+  const tree = await sessionTree(1, 0);
+  const f = await captainFixture(tree);
+  const contacts = await contactsHttp(f.captain, tree.root);
+  const initial = (await contacts()) as { personaId: string }[];
+  await delay(1050);
+  const before = f.calls();
+  const held = f.hold();
+  const pending = contacts();
+  await held.started;
+  const concurrent = f.captain.serveOperatorConversation({ op: "fleet", schemaVersion: 1 });
+  try {
+    const [result, fleet] = await Promise.all([pending, concurrent]);
+    expect(result).toMatchObject({
+      personas: [{ personaId: initial[0]!.personaId }],
+      readWarnings: [
+        { source: "herdr:default", reason: "timeout", message: expect.stringContaining("5000 ms") },
+      ],
+    });
+    expect(fleet.op).toBe("fleet");
+    if (fleet.op !== "fleet") throw new Error("Wrong snapshot result");
+    expect(fleet.snapshot.seats).toHaveLength(1);
+    expect(fleet.snapshot.readWarnings).toMatchObject([{ source: "herdr:default", reason: "timeout" }]);
+    expect(f.calls() - before).toBe(1);
+  } finally {
+    held.release();
+    await pending;
+    await f.captain.serveOperatorConversation({ op: "roster", schemaVersion: 1 });
+  }
+  expect(await contacts()).toHaveLength(1);
+}, 20_000);

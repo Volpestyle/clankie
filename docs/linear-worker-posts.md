@@ -46,7 +46,9 @@ credentials too.
 
 ## Publish a result
 
-Read the fleet's existing `personaId` (`clankie agents contacts`). The operator tool bank
+Read the fleet's existing `personaId` (`clankie agents contacts`). A partial reply
+contains `personas` and `readWarnings`; retained identities are not live-seat
+proof. The operator tool bank
 offers `linear_create_worker_comment` and `linear_create_worker_issue` only when
 a verified app is connected. The service resolves that persona's current name
 and color; callers cannot supply arbitrary author names or icons.

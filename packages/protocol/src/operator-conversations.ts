@@ -1096,6 +1096,19 @@ export type RoomHandoffMetadata = z.infer<typeof RoomHandoffMetadataSchema>;
 export const OperatorFleetSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
+    /** Incomplete display reads name the pending component; they are never live authority. */
+    readWarnings: z
+      .array(
+        z
+          .object({
+            source: z.string().min(1).max(128),
+            reason: z.enum(["timeout", "changed_during_read"]),
+            message: z.string().min(1).max(512),
+          })
+          .strict(),
+      )
+      .max(16)
+      .optional(),
     /** Cached host capacity and holders; no process probing on a snapshot read. */
     resources: FleetResourceSnapshotSchema.optional(),
     cursor: OperatorConversationCursorSchema,

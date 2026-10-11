@@ -31,6 +31,13 @@ it("removes historical personas without losing seated people or room participant
   const snapshot: OperatorFleetSnapshot = {
     schemaVersion: 1,
     cursor: "fleet:1",
+    readWarnings: [
+      {
+        source: "herdr:pc",
+        reason: "timeout",
+        message: "PC census did not finish; retained seats are not live proof.",
+      },
+    ],
     channels: [],
     seats: [
       {
@@ -50,5 +57,6 @@ it("removes historical personas without losing seated people or room participant
   expect(projected.personas.map((p) => p.personaId)).toEqual(["live"]);
   expect(projected.seats).toBe(snapshot.seats);
   expect(projected.cursor).toBe(snapshot.cursor);
+  expect(projected.readWarnings).toEqual(snapshot.readWarnings);
   expect(snapshot.personas).toHaveLength(420);
 });

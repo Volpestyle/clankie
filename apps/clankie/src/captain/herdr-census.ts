@@ -794,18 +794,28 @@ export async function readFleet(
     readonly runtimePid?: number;
     readonly localAvailable?: boolean;
     readonly localCodexRecordsPath?: string;
+    /** Display diagnostics only; an unfinished census never establishes absence. */
+    readonly onPending?: (source: string, pending: boolean) => void;
   } = {},
 ): Promise<ObservedFleet> {
   // Herdr's snapshot contains the same complete AgentInfo rows as agent.list,
   // alongside placement. Read them together, once, without an authority cache.
+  async function observe<T>(source: string, read: () => Promise<T>): Promise<T> {
+    options.onPending?.(source, true);
+    try {
+      return await read();
+    } finally {
+      options.onPending?.(source, false);
+    }
+  }
   const [local, remote] = await Promise.all([
     options.localAvailable === false
       ? Promise.resolve<ObservedFleet>({ seats: [] })
-      : readLocalFleet(options),
+      : observe("herdr:default", () => readLocalFleet(options)),
     Promise.all(
       (options.fleets ?? []).map(async (fleet) => {
         try {
-          const stdout = await fleet.run(["api", "snapshot"]);
+          const stdout = await observe(`herdr:${fleet.id}`, () => fleet.run(["api", "snapshot"]));
           const snapshot = JSON.parse(stdout).result?.snapshot;
           if (!Array.isArray(snapshot?.agents)) throw new Error("Complete Herdr snapshot unavailable");
           return {

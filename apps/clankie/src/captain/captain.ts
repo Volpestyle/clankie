@@ -2989,13 +2989,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const parentEdges = new HerdrParentEdges(join(options.stateDir, "herdr-parent-edges.json"));
 
   /** Admission reads this fresh census; cached roster/bridge cards confer no authority. */
-  async function observeFleet(localOnly = false) {
+  async function observeFleet(localOnly = false, onPending?: (source: string, pending: boolean) => void) {
     const binding = await deps.runtimes?.configuredBinding("default");
     return parentEdges.observe(
       await readFleet({
         ...(options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner, summaries: {} } : {}),
         fleets: localOnly ? [] : await censusFleets(),
         localAvailable: deps.herdrAvailable?.() !== false,
+        ...(onPending ? { onPending } : {}),
         ...(binding ? { herdrSession: binding.session, bridgeSocket: binding.socketPath } : {}),
       }),
     );
@@ -3247,6 +3248,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   const FLEET_FRESH_MS = 1000;
+  const FLEET_READ_TIMEOUT_MS = 5_000;
+  let lastProjectedSeats: readonly OperatorFleetSeat[] = [];
+  const pendingFleetSources = new Set<string>();
   let fleetRefresh: Promise<readonly OperatorFleetSeat[]> | undefined;
   let refreshedFleet:
     | { seats: readonly OperatorFleetSeat[]; cursor: string; completedAt: number }
@@ -3305,7 +3309,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
   async function observeFleetProjection(): Promise<readonly OperatorFleetSeat[]> {
     await personas.ready(settingsStore);
-    const fleet = await observeFleet();
+    const fleet = await observeFleet(false, (source, pending) => {
+      if (pending) pendingFleetSources.add(source);
+      else pendingFleetSources.delete(source);
+    });
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
     const goalList = await conversations.serve({ op: "list", schemaVersion: 1 });
@@ -3611,6 +3618,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       fleetChanges.touch();
     }
     liveSeats = projected;
+    lastProjectedSeats = projected;
     observeReportFailureAlerts(projected);
     const liveIssues = projected.map(liveSeatIssue);
     // The operator head is intentionally outside the worker roster. Its native
@@ -3868,14 +3876,50 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
-  /** Read every fleet-owned record against one stable Herdr change cursor. */
+  /** Prefer a stable cursor, but a busy or slow fleet must not starve display reads. */
   async function fleetSnapshot({ includeCheckouts = false }: { includeCheckouts?: boolean } = {}): Promise<
     Extract<OperatorConversationServiceResult, { op: "fleet" }>
   > {
-    for (;;) {
+    const deadline = performance.now() + FLEET_READ_TIMEOUT_MS;
+    const readWarnings: NonNullable<import("@clankie/protocol").OperatorFleetSnapshot["readWarnings"]> = [];
+    async function bounded<T>(source: string, read: Promise<T>): Promise<{ value: T } | undefined> {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          read.then((value) => ({ value })),
+          new Promise<undefined>((resolve) => {
+            timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - performance.now()));
+          }),
+        ]);
+        if (result === undefined) {
+          const sources =
+            source === "native_fleet_projection" && pendingFleetSources.size
+              ? [...pendingFleetSources].slice(0, 16)
+              : [source];
+          for (const pending of sources)
+            readWarnings.push({
+              source: pending,
+              reason: "timeout",
+              message: `${pending} did not finish within ${FLEET_READ_TIMEOUT_MS} ms; this response contains the last available observation, not confirmed live seats.`,
+            });
+        }
+        return result;
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    }
+    // Only one shared refresh can remain in flight after a display deadline.
+    // It retains its native transport deadlines and is never cancelled/reused
+    // as the fresh census that authorizes a mutation.
+    for (let attempt = 0; ; attempt++) {
       const cursor = fleetChanges.current();
-      const observed = await refreshFleet();
-      const seats = includeCheckouts ? await enrichCheckoutSeats(observed) : observed;
+      const observed = await bounded("native_fleet_projection", refreshFleet());
+      const basicSeats = observed?.value ?? lastProjectedSeats;
+      const checkout =
+        includeCheckouts && observed !== undefined
+          ? await bounded("checkout_observations", enrichCheckoutSeats(basicSeats))
+          : undefined;
+      const seats = checkout?.value ?? basicSeats;
       const channelsResult = await conversations.serve({ op: "channels", schemaVersion: 1 });
       const goalConversations = await conversations.serve({ op: "list", schemaVersion: 1 });
       const goals =
@@ -3895,7 +3939,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             })
           : [];
       if (channelsResult.op !== "channels") throw new Error("Fleet channel read returned the wrong result");
-      if (cursor !== fleetChanges.current()) continue;
+      if (cursor !== fleetChanges.current() && readWarnings.length === 0) {
+        if (attempt === 0 && performance.now() < deadline) continue;
+        readWarnings.push({
+          source: "fleet_consistency",
+          reason: "changed_during_read",
+          message:
+            "Fleet activity changed during this read; these contacts and seats are a partial view. Read again for current state.",
+        });
+      }
       const fleetPersonas = [
         ...personas.all(seats, (personaId) => conversations.conversationForPersona(personaId)),
       ];
@@ -3905,6 +3957,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         snapshot: {
           schemaVersion: 1,
           cursor,
+          ...(readWarnings.length === 0 ? {} : { readWarnings }),
           goals,
           assignments,
           closedPanes: [...paneTidy.history()],

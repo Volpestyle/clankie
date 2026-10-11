@@ -296,12 +296,22 @@ export async function runAgentsCommand(
       createCaptainRouteClient({
         host: commandHost(options),
         ...(token ? { captainToken: token } : {}),
-        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+        fetchImpl: (url, init) =>
+          (options.fetchImpl ?? fetch)(url, {
+            ...init,
+            signal: AbortSignal.any([AbortSignal.timeout(12_000), ...(init?.signal ? [init.signal] : [])]),
+          }),
       }),
     );
     if (args[0] === "roles") return client.roles!();
-    const personas = (await client.fleet!()).personas;
-    if (args[0] === "contacts") return personas;
+    const snapshot = await client.fleet!();
+    const personas = snapshot.personas;
+    if (args[0] === "contacts")
+      return snapshot.readWarnings?.length ? { personas, readWarnings: snapshot.readWarnings } : personas;
+    if (snapshot.readWarnings?.length)
+      throw new Error(
+        `Contact lookup is incomplete: ${snapshot.readWarnings.map((warning) => warning.message).join(" ")}`,
+      );
     if (args[0] === "rename")
       return client.updatePersona!({
         schemaVersion: 1,

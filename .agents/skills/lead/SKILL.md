@@ -167,6 +167,11 @@ undelivered or uncertain send is followed up from its receipt through Clankie.
 Messages to a hire arrive numbered per lead; set `replaces` when a message
 overrides earlier guidance so a late, older one is not acted on.
 Mechanics, routing and recovery: [fleet tools](reference/fleet-tools.md).
+`clankie agents contacts` normally returns an identity array; a busy or slow
+fleet returns `{ personas, readWarnings }` within its display-read budget.
+Warnings name the pending fleet/component. Retained contacts in a partial read
+are not proof of a live owner; inspect the warning and reread before assigning
+ownership or changing a persona.
 
 For scratch service/relay proof briefs, require the paired preset from
 `node scripts/scratch-stack.mjs .local/PROOF`, then both

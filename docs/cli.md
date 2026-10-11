@@ -3808,7 +3808,15 @@ with none. `clankie sessions` is also an alias for these CLI commands. Existing
 `/agents` session arguments remain supported, but `/agents` without arguments
 now opens the agents that are live, with offline agents that kept a thread behind
 one "Past agents" entry. `clankie agents contacts` returns every known identity,
-live or not, through the existing fleet API.
+live or not, through the existing fleet API. A quiet fleet returns the usual
+identity array. The display read has a five-second budget and retries a changing
+fleet once. If it cannot finish, contacts returns `{ personas, readWarnings }`:
+`personas` contains the last available identities; each warning names the pending
+Herdr fleet (`herdr:FLEET_ID`), native projection, checkout observation, or changing
+fleet consistency, with `timeout` or `changed_during_read`. These observations do
+not confirm live ownership. The command's HTTP requests also have a twelve-second
+transport deadline. Rename and role lookups refuse incomplete contact reads;
+read again before making that change.
 
 `clankie agents role NAME|PERSONA_ID ROLE|none [--project PROJECT]` assigns a current
 member's role in the selected project. Omit `--project` for the default project.

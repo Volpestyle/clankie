@@ -4091,7 +4091,15 @@ paths:
         hours removes it and changes the cursor without changing the mood.
         Clients discard expired actions even while disconnected, honor Focus,
         and never take keyboard focus to show an expression.
-        `fleet` returns one cursor-coherent snapshot. Optional `view: home`
+        `fleet` prefers one cursor-coherent snapshot, with one retry and a
+        five-second display observation budget. An incomplete snapshot carries
+        optional `readWarnings`: `{source, reason, message}[]`, where reason is
+        `timeout` or `changed_during_read`. Sources name the pending Herdr fleet
+        (`herdr:FLEET_ID`), `native_fleet_projection`, `checkout_observations`, or
+        `fleet_consistency`. Seats and personas reflect the last available
+        observation, never fresh admission or ownership proof. The returned
+        cursor remains the cursor from before the read so the next poll can
+        catch changes. Optional `view: home`
         omits historical personas that are neither seated
         contacts nor channel participants. Seats, channels, tallies and edges
         are unchanged. Omitting the selector preserves the full directory;
