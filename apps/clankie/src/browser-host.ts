@@ -89,7 +89,7 @@ const tools = {
 } satisfies Record<string, { schema: z.ZodType; description: string; requiresShell?: boolean }>;
 type ToolName = keyof typeof tools;
 
-export interface BrowserCallAuthority {
+interface BrowserCallAuthority {
   /** Host-resolved stable conversation, never supplied by tool arguments. */
   conversationId?: string | undefined;
   /** Revalidated after the browser queue and before native effects. */
