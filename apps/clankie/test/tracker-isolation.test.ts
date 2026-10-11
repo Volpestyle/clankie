@@ -132,6 +132,18 @@ else {
     ).toThrow("unsupported ID");
   });
 
+  it("retains native app-server startup errors while refusing the hire", async () => {
+    const bin = await scratch();
+    await writeFile(
+      join(bin, "codex"),
+      "#!/bin/sh\nif [ \"$1\" = mcp ]; then echo '[]'; else echo 'bootstrap config rejected' >&2; exit 23; fi\n",
+    );
+    await chmod(join(bin, "codex"), 0o755);
+    await expect(codexTrackerOverrides(bin, { PATH: `${bin}:/usr/bin:/bin` })).rejects.toThrow(
+      /bootstrap config rejected/u,
+    );
+  });
+
   it("fails closed when Codex cannot list its servers", async () => {
     const bin = await scratch();
     await writeFile(join(bin, "codex"), "#!/bin/sh\necho broken >&2\nexit 1\n");

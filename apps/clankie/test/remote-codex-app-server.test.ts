@@ -1,6 +1,8 @@
 import { windowsCodexBridge, windowsCodexLaunchCommand } from "../src/windows-codex-launch.ts";
 import * as externalCodex from "../src/captain/external-codex-control.ts";
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { EventEmitter, once } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, spawn } from "node:child_process";
@@ -212,6 +214,38 @@ describe("a remote Codex app-server (VUH-1527)", () => {
     const tracker = decoded(commands.at(-1)!);
     expect(tracker).toContain(`$start.EnvironmentVariables['CODEX_HOME'] = '${home}'`);
     expect(tracker).not.toContain("HERDR_PANE_ID");
+  });
+
+  it.skipIf(process.env.CODEX_HIRE_PC_HOST === undefined)(
+    "reads the real PC catalog and disables its inherited Linear connectors",
+    async () => {
+      const run = promisify(execFile);
+      const overrides = await remoteCodexTrackerOverrides(windows, async (command) => {
+        const result = await run(
+          "ssh",
+          ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", process.env.CODEX_HIRE_PC_HOST!, command],
+          {
+            timeout: 45_000,
+            maxBuffer: 4 * 1024 * 1024,
+          },
+        );
+        return result.stdout;
+      })("C:\\Users\\volpe\\repos\\kh2-multiplayer-vuh1515");
+      expect(overrides.some((value) => /^apps\.[A-Za-z0-9_-]+\.enabled=false$/u.test(value))).toBe(true);
+    },
+    60_000,
+  );
+
+  it("retains the PC app catalog failure while refusing the hire", async () => {
+    let reads = 0;
+    await expect(
+      remoteCodexTrackerOverrides(windows, async () => {
+        if (++reads === 1) return "[]";
+        throw new Error("spawn codex.exe ENOENT");
+      })("C:\\src"),
+    ).rejects.toThrow(
+      "Could not read Codex's apps on fleet pc to switch off inherited Linear connectors: spawn codex.exe ENOENT",
+    );
   });
 
   it("reads tracker connectors from the remote machine's own Codex configuration", async () => {

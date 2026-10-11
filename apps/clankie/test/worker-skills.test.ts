@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -91,6 +92,24 @@ describe("hired worker skill discovery", () => {
     expect(config.split(`${join(overlay, "hooks.json")}:session_start:0:0`)).toHaveLength(2);
     expect(config).toContain("[other]\nvalue = 1");
   });
+
+  it.skipIf(process.env.CODEX_HIRE_NATIVE_HOME === undefined)(
+    "boots the real Codex MCP reader with the owner's copied hook trust",
+    async () => {
+      const root = await realpath(await mkdtemp(join(tmpdir(), "worker-skills-native-")));
+      roots.push(root);
+      const home = process.env.CODEX_HIRE_NATIVE_HOME!;
+      const before = await readFile(join(home, "config.toml"), "utf8");
+      const launch = await workerSkills("codex", join(import.meta.dirname, "../../.."), root, home);
+      const output = execFileSync("codex", ["mcp", "list", "--json"], {
+        env: { ...process.env, ...launch.env },
+        encoding: "utf8",
+        timeout: 15_000,
+      });
+      expect(Array.isArray(JSON.parse(output))).toBe(true);
+      expect(await readFile(join(home, "config.toml"), "utf8")).toBe(before);
+    },
+  );
 
   it("gives every worker loader every shipped skill and no merged names", async () => {
     const repo = join(import.meta.dirname, "../../..");

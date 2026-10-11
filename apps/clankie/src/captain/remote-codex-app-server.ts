@@ -421,9 +421,9 @@ export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShell
         cwd,
         env?.CODEX_HOME === undefined ? undefined : { CODEX_HOME: env.CODEX_HOME },
       ),
-    ).catch(() => {
+    ).catch((error: unknown) => {
       throw new Error(
-        `Could not read Codex's apps on fleet ${fleet.id} to switch off inherited Linear connectors`,
+        `Could not read Codex's apps on fleet ${fleet.id} to switch off inherited Linear connectors: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
     return [...codexTrackerAppOverrides(apps), ...codexTrackerOverridesFromList(stdout)];

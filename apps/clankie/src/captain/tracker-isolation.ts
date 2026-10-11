@@ -150,8 +150,10 @@ export async function codexTrackerOverrides(
       { cwd, env: { ...process.env, ...env }, timeout: 35_000, maxBuffer: 4 * 1024 * 1024 },
       (error, out) => (error ? reject(error) : resolveApps(out)),
     );
-  }).catch(() => {
-    throw new Error("Could not read Codex's apps to switch off inherited Linear connectors");
+  }).catch((error: unknown) => {
+    throw new Error(
+      `Could not read Codex's apps to switch off inherited Linear connectors: ${error instanceof Error ? error.message : String(error)}`,
+    );
   });
   return [...codexTrackerAppOverrides(apps), ...codexTrackerOverridesFromList(stdout)];
 }

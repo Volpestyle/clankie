@@ -3,12 +3,18 @@
  */
 export const CODEX_APP_CATALOG_PROGRAM = String.raw`
 const { spawn } = require('node:child_process');
-const child = spawn(process.platform === 'win32' ? 'codex.exe' : 'codex', ['app-server', '--stdio'], { stdio: ['pipe', 'pipe', 'ignore'] });
+// Windows installations expose codex.cmd (including the selected-account wrapper),
+// rather than a codex.exe on PATH. Only this fixed command crosses cmd.exe.
+const child = process.platform === 'win32'
+  ? spawn('cmd.exe', ['/d', '/s', '/c', 'codex app-server --stdio'], { stdio: ['pipe', 'pipe', 'pipe'] })
+  : spawn('codex', ['app-server', '--stdio'], { stdio: ['pipe', 'pipe', 'pipe'] });
+let stderr = '';
+child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-8192); });
 let sequence = 0, buffer = '', failure;
 const pending = new Map();
 const fail = (error) => { failure ??= error; for (const entry of pending.values()) entry.reject(error); pending.clear(); };
 child.on('error', fail);
-child.on('exit', () => fail(new Error('Codex app catalog process exited')));
+child.on('close', (code, signal) => fail(new Error('Codex app catalog process exited (' + (signal ?? code) + ')' + (stderr.trim() ? ': ' + stderr.trim() : ''))));
 child.stdin.on('error', fail);
 child.stdout.on('data', (chunk) => {
   buffer += chunk.toString();
@@ -23,14 +29,14 @@ child.stdout.on('data', (chunk) => {
     const entry = pending.get(message.id);
     if (!entry) continue;
     pending.delete(message.id);
-    if (message.error) entry.reject(new Error('Codex app catalog request failed'));
+    if (message.error) entry.reject(new Error('Codex app catalog ' + entry.method + ' failed: ' + JSON.stringify(message.error)));
     else entry.resolve(message.result);
   }
 });
 const request = (method, params) => new Promise((resolve, reject) => {
   if (failure) return reject(failure);
   const id = ++sequence;
-  pending.set(id, { resolve, reject });
+  pending.set(id, { resolve, reject, method });
   child.stdin.write(JSON.stringify({ id, method, params }) + '\n');
 });
 const timer = setTimeout(() => { fail(new Error('Codex app catalog timed out')); child.kill(); }, 30000);
@@ -49,7 +55,13 @@ const timer = setTimeout(() => { fail(new Error('Codex app catalog timed out'));
   } catch (error) {
     process.stderr.write(error.message + '\n');
     process.exitCode = 1;
-  } finally { clearTimeout(timer); child.kill(); }
+  } finally {
+    // Closing stdin lets the launcher and app-server drain together on Windows.
+    // Killing cmd.exe here would leave its native Codex child behind.
+    child.stdin.end();
+    if (child.exitCode !== null) clearTimeout(timer);
+    else child.once('close', () => clearTimeout(timer));
+  }
 })();
 `;
 

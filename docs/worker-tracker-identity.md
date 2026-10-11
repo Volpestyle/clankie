@@ -30,7 +30,9 @@ edited. Codex launches also set
 `apps.<discovered-id>.enabled=false` for every Linear app connector found by
 runtime name in Codex's native `app/installed` catalog, which is absent from
 `codex mcp list`. Discovery runs a bounded read-only app-server without creating
-a thread or model turn; an unreadable catalog refuses the launch. This session-only
+a thread or model turn; an unreadable catalog refuses the launch and retains the
+native startup, RPC or remote-shell error. On Windows it uses the installed
+`codex.cmd` account launcher instead of assuming `codex.exe` is on PATH. This session-only
 override applies to local and remote hires and operator seats; other apps stay
 available. Existing running sessions retain their launch configuration.
 IDs are resolved on the selected machine/account rather than assumed universal;
