@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
@@ -945,7 +945,7 @@ it("two real heavy runners and a simulator use independent budgets in either adm
       await new Promise((resolve) => setTimeout(resolve, 40));
     }
     const held = lease(await f.http("/acquire", f.request));
-    expect((await f.governor.snapshot()).capacity).toMatchObject({
+    expect((await f.governor.snapshot()).capacity).toEqual({
       heavySlots: 2,
       simulatorSlots: 1,
       used: 2,
@@ -953,6 +953,9 @@ it("two real heavy runners and a simulator use independent budgets in either adm
       // The light lane is sized from the base slots, which depend on the machine.
       lightSlots: baseHeavySlots({ ...defaultResourcePolicy(), heavySlots: 2 }),
       lightUsed: 0,
+      serverSlots: Math.min(2, Math.max(1, Math.floor(availableParallelism() / 4))),
+      serverUsed: 0,
+      serverCpuCores: Math.min(64, availableParallelism() / 5),
     });
     expect(
       (await f.governor.snapshot()).leases
