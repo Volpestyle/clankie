@@ -268,7 +268,7 @@ describe("Mac companion local pairing boundary", () => {
         controlPlaneUrl: f.origin,
         operatorToken: "owner",
       }),
-    ).rejects.toThrow();
+    ).resolves.toBeDefined();
     const insecure = join(f.dir, "insecure");
     await mkdir(insecure, { mode: 0o777 });
     await chmod(insecure, 0o777);

@@ -345,3 +345,10 @@ closure, complete live-pane absence, no reattached client and every loaded nativ
 thread idle. An empty inventory needs the original thread to read `notLoaded`
 with no in-progress turn; independent roots refuse retirement. Others remain report-only. Read the before/after outcomes; never
 retry an uncertain retirement or fall back to `kill`, group signals or KILL.
+
+## Symlinked local state
+
+Owner-managed state-home symlinks are supported. Keep the link and target owned
+by the service user and deny group/world writes; capability and update
+subdirectories remain private (`0700`). A shared writable target or replaceable
+link is refused. File symlinks are still refused for private update records.

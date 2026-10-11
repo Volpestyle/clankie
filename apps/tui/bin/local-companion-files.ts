@@ -1,19 +1,13 @@
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { privateDirectory } from "./update-files.ts";
 
 /** Existing installs have a readable state root. Only the companion subtree carries capabilities. */
 export function prepareCompanionDirectory(root: string): string {
   if (!process.getuid) throw Error("local_owner_unavailable");
   mkdirSync(root, { recursive: true, mode: 0o700 });
-  const stat = lstatSync(root);
-  if (
-    !stat.isDirectory() ||
-    stat.uid !== process.getuid() ||
-    (stat.mode & 0o022) !== 0 ||
-    realpathSync(root) !== resolve(root)
-  )
-    throw Error("unsafe_state_root");
+  privateDirectory(root, { allowReadable: true });
+  root = realpathSync(root);
   // An unprotected ancestor could rename a private child underneath us. Sticky
   // temp directories keep their normal owner-only rename boundary.
   for (let parent = dirname(root); ; parent = dirname(parent)) {

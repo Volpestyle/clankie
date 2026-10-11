@@ -100,7 +100,9 @@ created, and default-global conversations are protected from automatic removal.
 The service stays up when a console exits, so sibling Herdr panes do not
 disconnect each other. Logs live under
 `${XDG_STATE_HOME:-~/.local/state}/clankie/` rather than entering the fullscreen
-display.
+display. State-home symlinks are supported when owned by the user and their
+targets are owned and not writable by others. Private capability and update
+directories remain owner-only; links in shared writable directories are refused.
 
 ## Supervised services
 

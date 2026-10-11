@@ -6,20 +6,64 @@ import {
   lstatSync,
   openSync,
   readSync,
-  realpathSync,
+  readlinkSync,
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-export function privateDirectory(path: string): void {
-  const stat = lstatSync(path);
+import { dirname, join, parse, resolve, sep } from "node:path";
+export function privateDirectory(path: string, options: { allowReadable?: boolean } = {}): void {
+  const uid = process.getuid?.();
+  const fail = () => {
+    throw Error("Update directory must be owned and private; unsafe symlink or target");
+  };
+  // Follow each link ourselves so realpath cannot hide a foreign-owned link in
+  // an ancestor or in a link chain. OS-owned aliases (/tmp on macOS) are safe
+  // only when their containing directory cannot be changed by other users.
+  const inspect = (input: string, target: boolean, depth = 0): string => {
+    if (depth > 40) return fail();
+    const absolute = resolve(input);
+    let current = parse(absolute).root;
+    for (const component of absolute.slice(current.length).split(sep).filter(Boolean)) {
+      const candidate = join(current, component);
+      const stat = lstatSync(candidate);
+      if (stat.isSymbolicLink()) {
+        const parent = lstatSync(current);
+        const protectedParent =
+          (parent.mode & 0o022) === 0 || (parent.uid === 0 && (parent.mode & 0o1000) !== 0);
+        const systemAlias = stat.uid === 0 && parent.uid === 0 && (parent.mode & 0o022) === 0;
+        if (
+          !protectedParent ||
+          (uid !== undefined && parent.uid !== uid && parent.uid !== 0) ||
+          (uid !== undefined && stat.uid !== uid && !systemAlias)
+        )
+          return fail();
+        current = inspect(resolve(current, readlinkSync(candidate)), !systemAlias, depth + 1);
+        const destination = lstatSync(current);
+        // POSIX symlink mode bits do not control access; check the directory
+        // they designate instead. User links must designate an owned directory without shared write access.
+        if (
+          !systemAlias &&
+          ((destination.mode & 0o022) !== 0 || (uid !== undefined && destination.uid !== uid))
+        )
+          return fail();
+      } else {
+        if (!stat.isDirectory()) return fail();
+        if (target && uid !== undefined && stat.uid !== uid && stat.uid !== 0) return fail();
+        if (target && (stat.mode & 0o022) !== 0 && !(stat.uid === 0 && (stat.mode & 0o1000) !== 0))
+          return fail();
+        current = candidate;
+      }
+    }
+    return current;
+  };
+  const canonical = inspect(path, false);
+  const stat = lstatSync(canonical);
   if (
     !stat.isDirectory() ||
-    realpathSync(path) !== resolve(path) ||
-    (stat.mode & 0o077) !== 0 ||
-    (process.getuid && stat.uid !== process.getuid())
+    (stat.mode & (options.allowReadable ? 0o022 : 0o077)) !== 0 ||
+    (uid !== undefined && stat.uid !== uid)
   )
-    throw Error("Update directory must be canonical, owned and private");
+    fail();
 }
 export function readPrivateJson(path: string): unknown {
   privateDirectory(dirname(path));
