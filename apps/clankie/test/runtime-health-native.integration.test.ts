@@ -19,6 +19,7 @@ import { localFleetProof, localProjectProof } from "../src/local-fleet-proof.ts"
 import { Worker } from "node:worker_threads";
 import { ExecutionConnections } from "../src/herdr-session.ts";
 import { RuntimeHealthObserver } from "../src/runtime-health.ts";
+import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fence.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 const fullDuration = process.env.RUNTIME_HEALTH_NATIVE_MANUAL === "1";
 const sustainedMs = fullDuration ? 300000 : 400;
@@ -109,7 +110,7 @@ it.skipIf(process.platform !== "darwin")(
       prove: localFleetProof(proofOptions),
       projectProof: localProjectProof(proofOptions),
     });
-    const results: unknown[] = [];
+    const results: { fingerprint: string; conversationId: string; outcome: string; reason: string }[] = [];
     let modelTurns = 0;
     const captain = createCaptain(
       {
@@ -176,10 +177,11 @@ it.skipIf(process.platform !== "darwin")(
     const ready = join(herdr.root, "ready.json");
     const failure = join(herdr.root, "receiver-error.txt");
     const notices = join(herdr.root, "notices.jsonl");
+    const acknowledgeAlarm = join(herdr.root, "acknowledge-alarm");
     await writeFile(
       receiver,
       `
-    import {writeFile,appendFile} from 'node:fs/promises';
+    import {writeFile,appendFile,readFile} from 'node:fs/promises';
     import {execFileSync} from 'node:child_process';
     process.on('unhandledRejection',e=>{writeFile(${JSON.stringify(failure)},String(e)).then(()=>process.exit(1))});
     process.on('uncaughtException',e=>{writeFile(${JSON.stringify(failure)},String(e)).then(()=>process.exit(1))});
@@ -193,7 +195,7 @@ it.skipIf(process.platform !== "darwin")(
     const r=await fetch(host+'/v1/fleet/seats/'+encodeURIComponent(pane)+'/tool-catalog',{method:'POST',headers,body:JSON.stringify({schemaVersion:1,harness:'claude',sessionId:${JSON.stringify(sessionId)},bridge:'operator',conversationId:'global-default',tools:[],checkedAt:new Date().toISOString()})});
     const catalog={status:r.status,body:await r.json()};
     await writeFile(${JSON.stringify(ready)},JSON.stringify(catalog));
-    for(;;){const r=await fetch(host+${JSON.stringify(OPERATOR_SEAT_EVENTS_PATH)}+'?wait=1000',{headers});if(!r.ok)throw Error('poll '+r.status);const page=await r.json();for(const e of page.events){const ack=await post(${JSON.stringify(OPERATOR_SEAT_EVENTS_PATH)}+'/'+e.id+'/ack',{});await appendFile(${JSON.stringify(notices)},JSON.stringify({event:e,ack})+'\\n')}}
+    for(;;){const r=await fetch(host+${JSON.stringify(OPERATOR_SEAT_EVENTS_PATH)}+'?wait=1000',{headers});if(!r.ok)throw Error('poll '+r.status);const page=await r.json();for(const e of page.events){if(e.source==='service'&&e.content.startsWith('Runtime health alarm:')){while(!(await readFile(${JSON.stringify(acknowledgeAlarm)},'utf8').catch(()=>'')))await new Promise(r=>setTimeout(r,20))}const ack=await post(${JSON.stringify(OPERATOR_SEAT_EVENTS_PATH)}+'/'+e.id+'/ack',{});await appendFile(${JSON.stringify(notices)},JSON.stringify({event:e,ack})+'\\n')}}
   `,
     );
     const until = async (test: () => Promise<boolean>, timeoutMs = 12000) => {
@@ -241,7 +243,14 @@ it.skipIf(process.platform !== "darwin")(
           .trim()
           .split("\n")
           .filter(Boolean)
-          .map((row) => JSON.parse(row));
+          .map((row) => JSON.parse(row))
+          // Transport uncertainty can publish its own advisory. This proof counts
+          // runtime incidents, while the receiver acknowledges every channel event.
+          .filter((row) => row.event.source === "service" && row.event.content.startsWith("Runtime health "));
+      // Exercise a real late acknowledgment, not the runner's scheduling luck.
+      // The original call's audit stays unconfirmed; its exact durable ack settles later.
+      await until(async () => results.some((result) => result.reason === "owner_mailbox_unconfirmed"));
+      await writeFile(acknowledgeAlarm, "acknowledge the original alarm");
       // The receiver can persist its acknowledgment before notify() settles and
       // the observer publishes the alarm. Wait for both real boundaries.
       await until(async () => {
@@ -272,6 +281,21 @@ it.skipIf(process.platform !== "darwin")(
       );
       observer.stop();
       const delivered = await rows();
+      const receipts = () =>
+        new Map(
+          new DeliveryFence(
+            join(herdr.root, "captain/delivery-receipts/head/global-default.json.delivered"),
+          ).all(),
+        );
+      await until(async () => {
+        const published = receipts();
+        return (
+          results.length === 2 &&
+          delivered.every(
+            (row) => published.get(row.event.id)?.fingerprint === deliveryFingerprint(row.event.content),
+          )
+        );
+      });
       expect(delivered[0].event.content).toContain("Runtime health alarm: cpu and health");
       expect(delivered[1].event.content).toContain("Runtime health recovered after");
       for (const row of delivered)
@@ -280,12 +304,26 @@ it.skipIf(process.platform !== "darwin")(
       expect(observer.snapshot().lastIncidentDurationMs).toBeGreaterThanOrEqual(sustainedMs);
       expect(results).toHaveLength(2);
       expect(results).toEqual(
-        delivered.map((row) => ({
-          fingerprint: expect.any(String),
-          conversationId: row.event.conversationId,
-          outcome: "submitted",
-          reason: "owner_mailbox_delivered",
-        })),
+        expect.arrayContaining(
+          delivered.map((row) => ({
+            fingerprint: deliveryFingerprint(row.event.content),
+            conversationId: row.event.conversationId,
+            outcome: "submitted",
+            reason: expect.stringMatching(/^owner_mailbox_(delivered|unconfirmed)$/u),
+          })),
+        ),
+      );
+      expect(
+        results.find((result) => result.fingerprint === deliveryFingerprint(delivered[0].event.content)),
+      ).toMatchObject({ reason: "owner_mailbox_unconfirmed" });
+      expect(delivered.map((row) => receipts().get(row.event.id))).toEqual(
+        delivered.map((row) =>
+          expect.objectContaining({
+            messageId: row.event.id,
+            fingerprint: deliveryFingerprint(row.event.content),
+            conversationId: row.event.conversationId,
+          }),
+        ),
       );
       expect(modelTurns).toBe(0);
       await writeFile(

@@ -293,7 +293,12 @@ it("fresh census commands reuse the resident relay and never replay a failed obs
   await expect(run(["api", "snapshot"])).resolves.toBe("proof-complete");
   await expect(run(["agent", "list"])).resolves.toBe("proof-complete");
   expect((await f.ssh()).filter((call) => call.kind === "command")).toHaveLength(before);
-  expect((await f.relays()).filter((call) => call.kind === "execute-result")).toHaveLength(2);
+  // The relay can send its result before its own journal append completes.
+  // Wait for publication rather than treating the transport response as a log fence.
+  await vi.waitFor(
+    async () => expect((await f.relays()).filter((call) => call.kind === "execute-result")).toHaveLength(2),
+    { timeout: 5_000 },
+  );
   // Extra argv and writes continue through the command transport.
   await expect(run(["pane", "get", "w8:p1"])).resolves.toContain('"accepted":true');
   const after = (await f.ssh()).filter((call) => call.kind === "command").length;

@@ -97,14 +97,14 @@ it("the sustained detector probes after idle through fresh metadata-only connect
 it("real busy process and slow HTTP sustain one alarm, recover once with duration, and spool content-free metadata", async () => {
   const root = await mkdtemp(join(tmpdir(), "runtime-health-loop-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  let hotUntil = Infinity;
+  let hot = true;
   const server = createServer((_request, response) => {
     setTimeout(
       () => {
         response.writeHead(200, { "content-type": "application/json" });
         response.end('{"ok":true}');
       },
-      Date.now() < hotUntil ? 200 : 0,
+      hot ? 200 : 0,
     );
   });
   server.listen(0, "127.0.0.1");
@@ -121,23 +121,29 @@ it("real busy process and slow HTTP sustain one alarm, recover once with duratio
   await writeFile(
     script,
     `
-    import { performance } from 'node:perf_hooks';
+    import { once } from 'node:events';
+    import { Worker } from 'node:worker_threads';
     import { RuntimeHealthObserver } from ${JSON.stringify(observer)};
     import { createBodyTelemetry } from ${JSON.stringify(telemetry)};
     const spool = createBodyTelemetry({dir:process.argv[3],writer:'runtime-test'});
-    const stopHot = Date.now()+1800;
     const output = (value) => process.stdout.write(JSON.stringify(value)+'\\n');
     let notices=0;
+    let hot=true, alarmObserved=false, cooling=false;
+    const burners=[0,1].map(()=>new Worker('for(;;);',{eval:true}));
+    await Promise.all(burners.map(worker=>once(worker,'online')));
+    const cool=async()=>{hot=false;await Promise.all(burners.map(worker=>worker.terminate()));output({cooled:true})};
     // Fail against the live snapshot if the required recovery never arrives.
-    const deadline=setTimeout(()=>{monitor.stop();output({final:monitor.snapshot()});},6000);
+    const deadline=setTimeout(()=>{monitor.stop();void cool().then(()=>output({final:monitor.snapshot()}));},6000);
     const monitor = new RuntimeHealthObserver({
       settings:async()=>({enabled:true,cpuPercent:30,healthLatencyMs:100,sustainedMs:400,sampleIntervalMs:100,cooldownMs:60000}),
       healthUrl:process.argv[2],
       notify:async(text)=>{notices++;output({notice:text});return true},
       // Capture the recovery transition, before a later independent sample can start another incident.
-      observed:(observation)=>{output({observation});spool.emit({event:'body.runtime_health',state:observation.state,cpuPercent:observation.cpuPercent,healthLatencyMs:observation.healthLatencyMs,durationMs:observation.durationMs,reasons:observation.reasons});if(notices===2&&observation.state==='healthy'&&observation.lastRecoveryAt){monitor.stop();clearTimeout(deadline);output({final:monitor.snapshot()})}},
+      observed:(observation)=>{output({observation});spool.emit({event:'body.runtime_health',state:observation.state,cpuPercent:observation.cpuPercent,healthLatencyMs:observation.healthLatencyMs,durationMs:observation.durationMs,reasons:observation.reasons});if(observation.state==='alarm'&&observation.reasons.includes('cpu')&&observation.reasons.includes('health')){if(alarmObserved&&!cooling){cooling=true;void cool()}alarmObserved=true}if(notices===2&&observation.state==='healthy'&&observation.lastRecoveryAt){monitor.stop();clearTimeout(deadline);output({final:monitor.snapshot()})}},
     });
-    function busy(){if(Date.now()>=stopHot)return;const until=performance.now()+25;let total=0;while(performance.now()<until){for(let i=0;i<10000;i++)total+=Math.sqrt(i)};if(!Number.isFinite(total))throw Error('loop');setImmediate(busy)}
+    // CPU time survives descheduling; workers add process CPU without starving
+    // the observer's HTTP/timers. Stay hot through a second completed alarm sample.
+    function busy(){if(!hot)return;const start=process.cpuUsage();for(;;){const used=process.cpuUsage(start);if(used.user+used.system>=25000)break}setImmediate(busy)}
     monitor.start();busy();output({started:true});
   `,
   );
@@ -159,7 +165,7 @@ it("real busy process and slow HTTP sustain one alarm, recover once with duratio
   let stderr = "";
   child.stdout.on("data", (chunk) => {
     stdout += String(chunk);
-    if (hotUntil === Infinity && stdout.includes('"started":true')) hotUntil = Date.now() + 1800;
+    if (stdout.includes('"cooled":true')) hot = false;
   });
   child.stderr.on("data", (chunk) => {
     stderr += String(chunk);
