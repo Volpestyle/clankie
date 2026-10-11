@@ -76,19 +76,35 @@ function busyCpuRatio(): number | undefined {
   }
   return cpuWindow.ratio;
 }
+/** Measured by the resource runtime's host, never supplied by a heavy-command client. */
+export interface ResourceHostSpecs {
+  cores: number;
+  memoryBytes: number;
+}
+function localSpecs(): ResourceHostSpecs {
+  return { cores: availableParallelism(), memoryBytes: totalmem() };
+}
+function validateHostSpecs(host: ResourceHostSpecs): void {
+  if (
+    !Number.isSafeInteger(host.cores) ||
+    host.cores < 1 ||
+    host.cores > 4096 ||
+    !Number.isSafeInteger(host.memoryBytes) ||
+    host.memoryBytes < 1
+  )
+    throw new Error("Invalid resource host specs");
+}
 /**
  * Heavy slots sized for the worst case: every job using its full core share
  * and 24 GiB. Up to this many run on the load guard alone (VUH-1981).
  */
-export function baseHeavySlots(policy: FleetResourcePolicy): number {
+export function baseHeavySlots(policy: FleetResourcePolicy, host = localSpecs()): number {
+  validateHostSpecs(host);
   return Math.min(
-    resourceCapacity(policy),
+    resourceCapacity(policy, host),
     Math.max(
       1,
-      Math.min(
-        Math.floor(availableParallelism() / heavyJobParallelism),
-        Math.floor(totalmem() / 1024 ** 3 / 24),
-      ),
+      Math.min(Math.floor(host.cores / heavyJobParallelism), Math.floor(host.memoryBytes / 1024 ** 3 / 24)),
     ),
   );
 }
@@ -96,14 +112,16 @@ export function baseHeavySlots(policy: FleetResourcePolicy): number {
  * The automatic ceiling: two cores and 12 GiB per job. Jobs above the base
  * slots are admitted only while measured pressure stays low (VUH-2054).
  */
-export function automaticHeavySlots(): number {
-  return Math.max(
-    1,
-    Math.min(Math.floor(availableParallelism() / 2), Math.floor(totalmem() / 1024 ** 3 / 12)),
+export function automaticHeavySlots(host = localSpecs()): number {
+  validateHostSpecs(host);
+  return Math.min(
+    64,
+    Math.max(1, Math.min(Math.floor(host.cores / 2), Math.floor(host.memoryBytes / 1024 ** 3 / 12))),
   );
 }
-export function resourceCapacity(policy: FleetResourcePolicy): number {
-  return policy.heavySlots ?? automaticHeavySlots();
+export function resourceCapacity(policy: FleetResourcePolicy, host = localSpecs()): number {
+  validateHostSpecs(host);
+  return policy.heavySlots ?? automaticHeavySlots(host);
 }
 /**
  * A job admitted this recently is charged its full core share: neither load1
@@ -127,8 +145,9 @@ export function heavyAdmission(
   held: readonly { createdAtMs: number }[],
   at: number,
   settleMs = heavyJobSettleMs,
+  host = localSpecs(),
 ): "admit" | "slots" | "pressure" {
-  if (held.length >= resourceCapacity(policy)) return "slots";
+  if (held.length >= resourceCapacity(policy, host)) return "slots";
   // External work can keep load above the guard indefinitely while we hold
   // nothing. Let one FIFO full job make progress below the thrash cap, never
   // a second concurrent one. Only full leases count here; light/server jobs
@@ -141,11 +160,11 @@ export function heavyAdmission(
   )
     return "admit";
   if (!pressure.healthy) return "pressure";
-  const cores = Math.max(1, availableParallelism());
+  const cores = host.cores;
   const unsettled = held.filter((lease) => at - lease.createdAtMs < settleMs).length;
   // Base slots answer to the load guard, counting the jobs load1 cannot see
   // yet: at load 1.48 four waiters once started within a second (VUH-2054).
-  if (held.length < baseHeavySlots(policy))
+  if (held.length < baseHeavySlots(policy, host))
     return pressure.loadRatio * cores + unsettled * heavyJobParallelism > policy.maxLoadRatio * cores
       ? "pressure"
       : "admit";
