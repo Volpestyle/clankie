@@ -250,6 +250,7 @@ async function copyRuntimeAssets(targetRoot) {
     ["README.md", "README.md"],
     ["docs/bundled-skills.md", "docs/bundled-skills.md"],
     ["docs/cli.md", "docs/cli.md"],
+    ["packages/lead-skin/README.md", "packages/lead-skin/README.md"],
     ["docs/worker-access.md", "docs/worker-access.md"],
     ["docs/model-keys.md", "docs/model-keys.md"],
     ["docs/rivals.md", "docs/rivals.md"],

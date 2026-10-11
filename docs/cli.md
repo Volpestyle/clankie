@@ -39,6 +39,28 @@ to arrive while older history loads. This applies to local and hosted consoles.
 An unknown command exits 1 without starting anything. Common near-misses name
 the real command: `clankie up` suggests `clankie start`.
 
+## Lead-skin data tools
+
+`clankie skin sample IMAGE OPTIONS.json --out NEW_DIRECTORY` samples a reference
+onto its native grid. Options select the pitch/origin/grid, palette size or an
+approved palette and edge-connected background cleanup. An automatic pitch is
+reported as an estimate and can be corrected explicitly; tall bodies are never
+squashed into a shorter cell.
+
+`clankie skin compile SOURCE --out NEW_DIRECTORY` compiles text grids into
+`manifest.json`, `lead.png`, paginated `review-N.png` sheets and `artifact.json`
+with digests and review metadata. `clankie skin check DIRECTORY` mechanically
+validates the complete pack against those local digests. Both return JSON and
+reject malformed geometry, timing, coverage, bytes or digests. Existing output
+directories are refused.
+
+These local commands work without a running service, sibling app or art editor.
+They make no generation request and do not change the live look. Local hashes
+prove consistency, not catalog authorization. Owner key-pose approval must precede
+animation; independent visual review must precede publication. See the
+[shared compiler contract](../packages/lead-skin/README.md) for the data format,
+limits and runtime verification API.
+
 ## Conventions
 
 | Rule                            | What it means                                                                                                                          |

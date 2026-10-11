@@ -13,11 +13,11 @@ install and is always on. There is one class and no selection setting:
 `clankie doctor` includes it. Checkout-only skills live in `.agents/dev-skills`
 and do not ship.
 
-The catalog holds 20 skills: leadership and process skills (`lead`,
+The catalog holds 21 skills: leadership and process skills (`lead`,
 `shared-checkout`, `tidy`, `linear-issues`, `linear-orient`, `codebase-cleanup`)
 beside product and tool skills (`clankie`, `this-machine`, `trace-clankie`,
 `work-items`, `views`, `research-team`, `browser-use`, `connected-accounts`,
-`desktop-control`, `herdr`, `fleet-resources`, `pokeagents`, `minecraft`, `rivals`). Each teaches Clankie,
+`desktop-control`, `herdr`, `fleet-resources`, `pokeagents`, `minecraft`, `rivals`, `lead-skin-tools`). Each teaches Clankie,
 his seat or his workers how to use his own body and tools
 ([ADR 0236](adr/0236-clankie-owns-the-skills-he-ships.md)). The directory listing is the authoritative inventory.
 

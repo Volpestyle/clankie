@@ -48,6 +48,10 @@ export async function runHeadlessCaptainCommand(
   const stderr = options.stderr ?? process.stderr;
   try {
     const env = options.env ?? process.env;
+    if (command === "skin") {
+      outputJson(stdout, await (await import("../src/command/skin.ts")).runSkinCommand(rest));
+      return 0;
+    }
     if (command === "heavy")
       return await (
         await import("../src/command/heavy.ts")

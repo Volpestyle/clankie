@@ -1,0 +1,21 @@
+{
+  "name": "@clankie/lead-skin",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contract": "./src/contract.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "jpeg-js": "0.4.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

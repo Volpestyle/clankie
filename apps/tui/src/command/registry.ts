@@ -3,6 +3,12 @@ import { operatorHarness } from "./harness-command.ts";
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["skin"],
+    lines: [
+      "  skin compile SOURCE --out NEW_DIRECTORY | sample IMAGE OPTIONS.json --out NEW_DIRECTORY | check DIRECTORY  Compile, sample or mechanically check lead-skin data; never generates or publishes art",
+    ],
+  },
+  {
     nouns: ["heavy", "simulator"],
     lines: [
       "  heavy [--server] [--seat LABEL] [--holder ID] -- COMMAND [ARGS...]  Run a governed build/check or long-lived server",

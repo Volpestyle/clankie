@@ -20,6 +20,7 @@ it("ships every repo-owned skill, leadership included, without retired names", (
     "shared-checkout",
     "tidy",
     "this-machine",
+    "lead-skin-tools",
     "trace-clankie",
     "work-items",
     "research-team",
