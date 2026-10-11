@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "focused-checks.tar",
+      "size": 26624,
+      "sha256": "016c3aee485536df6192edf5febf1baf9a519ef60af3220e8e3947c0cd471447",
+      "url": "clankie://evidence/sha256/016c3aee485536df6192edf5febf1baf9a519ef60af3220e8e3947c0cd471447"
+    },
+    {
+      "path": "fresh-main-checks.tar",
+      "size": 17920,
+      "sha256": "e869d6fcea5d9d2ad5da4d7d535321e88df48a4d1bfa8784e0cf1193a3935f2d",
+      "url": "clankie://evidence/sha256/e869d6fcea5d9d2ad5da4d7d535321e88df48a4d1bfa8784e0cf1193a3935f2d"
+    },
+    {
+      "path": "prerequisite-2099-landing.tar",
+      "size": 543744,
+      "sha256": "97953339cd6326423aa00836a7f33c14b23fb2fddab98feb6680cce5aa39cbcb",
+      "url": "clankie://evidence/sha256/97953339cd6326423aa00836a7f33c14b23fb2fddab98feb6680cce5aa39cbcb"
+    }
+  ]
+}

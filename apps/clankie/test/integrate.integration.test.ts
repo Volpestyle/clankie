@@ -884,6 +884,25 @@ if (stage) {
 if (existsSync('broken')) process.exit(9);
 `,
   );
+  let releaseIsolationPlacement!: () => void;
+  let isolationPlacementEntered!: () => void;
+  const isolationPlacement = new Promise<void>((resolve) => {
+    isolationPlacementEntered = resolve;
+  });
+  let heldIsolationPlacement = false;
+  f.queue.options.placeGate = async ({ id }) => {
+    const batch = await f.queue.status(id);
+    if (batch.isolation && !heldIsolationPlacement) {
+      heldIsolationPlacement = true;
+      isolationPlacementEntered();
+      await new Promise<void>((resolve) => {
+        releaseIsolationPlacement = resolve;
+        fixtureWork().signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    }
+    return undefined;
+  };
+  cleanups.push(() => releaseIsolationPlacement?.());
   const cli = await queueCli(f);
   const inputs = names.map((name) => ({ name, id: randomUUID() }));
   // Serialize edits to the real source index; each request carries just its own approved commit.
@@ -909,7 +928,29 @@ if (existsSync('broken')) process.exit(9);
   );
   await submit("late");
   await release("shared");
+  await isolationPlacement;
+  const childBeforeLaunch = await status("withdraw");
+  const parentId = childBeforeLaunch.isolation!.rootBatchId;
+  const parent = await f.queue.status(parentId);
+  const ageCheckpoint = async (path: string) => {
+    const record = JSON.parse(await readFile(path, "utf8"));
+    record.updatedAt = new Date(Date.now() - 181_000).toISOString();
+    await durableJson(path, record);
+  };
+  await ageCheckpoint(parent.evidence);
+  await ageCheckpoint(childBeforeLaunch.evidence);
+  // An isolation child parked before launch does not indefinitely hide a stale head.
+  expect(await f.queue.progress()).toEqual([
+    expect.objectContaining({
+      stalled: true,
+      message: expect.stringContaining(childBeforeLaunch.batchId ?? childBeforeLaunch.id),
+    }),
+  ]);
+  releaseIsolationPlacement();
   await started("withdraw");
+  await ageCheckpoint(parent.evidence);
+  // The real isolation gate proves progress for the old parent checkpoint (VUH-2106).
+  expect(await f.queue.progress()).toEqual([]);
 
   // Later arrivals cannot pass the older isolated requests.
   for (const name of ["green1", "green2", "green3"]) expect((await status(name)).state).toBe("queued");
