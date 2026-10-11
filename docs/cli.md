@@ -3614,6 +3614,24 @@ the old capability cannot reconnect, including after service restart. A new
 join needs a new code, owner approval and machine identity. Interrupting the
 foreground command disconnects it without revoking approval.
 
+From an approved folder on a joined install, `clankie claude [--new | --conversation ID]`
+opens the local Claude Code seat in a workspace chat stored at Clankie's home.
+Plain `clankie claude` reuses an existing chat for that machine and folder, or
+creates one; `--new` creates a separate chat. An exact `--conversation` must
+belong to this joined machine and folder. `--dry-run` creates no chat and opens
+no seat. The bundled seat plugin supplies Clankie's identity, channel and
+transcript hooks. The home supplies maximum trust and the delegated project
+lead tools, including its connected tracker; home configuration, accounts and
+unrelated chats remain outside that delegation. Traffic uses the authenticated,
+encrypted join channel, with no SSH or local Clankie service. A second launch
+in an occupied chat is refused. Closing the launcher revokes its seat grant;
+an unconfirmed close expires after one hour without traffic. A home restart
+invalidates these grants; reopen the seat rather than replaying a tool call.
+Joined `--resume`, other harness seats, native worker adapters, Windows release
+packaging and real PC/production-gateway proof remain follow-ups. Plain `clankie`
+on a joined install explains how to open a seat; `start`, `restart` and `recover`
+point to the home instead of starting another Clankie.
+
 Inventory reports `transport: join` and `accessEnforcement: joined-host` for
 these approved identities. The receiver checks the current access level and
 intersects the service-approved directories with its own canonical directories
@@ -5311,8 +5329,10 @@ at the launch directory, with its own transcript, tool context and wake channel.
 Two launches started within seconds of each other can both find the global chat
 free, because a seat holds it only once its channel starts polling; use `--new`
 for the second. Every chat is available in the app and `clankie conversations list`.
-A running service and operator credential are required, including for
+A running home service and, for a home-machine seat, an operator credential are required, including for
 `--dry-run` without `--new`; failure to resolve or create the chat stops the launch.
+Joined installs use their brokered join registration instead; see [`join`](#join)
+for their folder-bound Claude seat behavior and current limits.
 `--resume` reopens the last seat for that Claude command and its chat. The
 conversation selection is retained on resume, and a different `--conversation` is refused.
 `clankie claude --resume SESSION_ID --conversation ID` reattaches one exact Claude

@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, realpath, symlink } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, realpath, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 /** Every skill authored in `.agents/skills` ships with this body and is always on. */
@@ -20,7 +20,7 @@ async function projectSkillDirectory(
   await mkdir(parent, { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(join(parent, "launch-")));
   await mkdir(join(root, "skills"));
-  for (const skill of skills) await symlink(skill.path, join(root, "skills", skill.name));
+  for (const skill of skills) await projectComponent(skill.path, join(root, "skills", skill.name));
   return root;
 }
 
@@ -32,7 +32,13 @@ export async function projectSkillPlugin(
 ): Promise<string> {
   const root = await projectSkillDirectory(stateDir, skills);
   for (const name of await readdir(source)) {
-    if (name !== "skills") await symlink(resolve(source, name), join(root, name));
+    if (name !== "skills") await projectComponent(resolve(source, name), join(root, name));
   }
   return root;
+}
+
+async function projectComponent(source: string, destination: string): Promise<void> {
+  // Ordinary Windows installs cannot assume symlink privileges or Developer Mode.
+  if (process.platform === "win32") await cp(source, destination, { recursive: true, dereference: true });
+  else await symlink(source, destination);
 }

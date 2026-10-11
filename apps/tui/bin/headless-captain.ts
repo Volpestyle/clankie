@@ -48,6 +48,38 @@ export async function runHeadlessCaptainCommand(
   const stderr = options.stderr ?? process.stderr;
   try {
     const env = options.env ?? process.env;
+    if (["start", "restart", "recover"].includes(command ?? "")) {
+      const { createDefaultCredentialStore } = await import("@clankie/credential-broker");
+      const joined = await (
+        await import("./joined-machine-client.ts")
+      ).readJoinedMachineCredential(createDefaultCredentialStore({ env }));
+      if (joined)
+        throw Error(
+          `Clankie's service runs at the joined home (${joined.origin}); run ${command} there. Use clankie join resume on this machine.`,
+        );
+    }
+    if (env.CLANKIE_JOINED_SEAT_TOKEN) {
+      const joined = await (
+        await import("../src/command/joined-seat.ts")
+      ).runJoinedSeatHook(command, rest, options);
+      if (joined !== undefined) return joined;
+    }
+    // Joined installs launch locally even when their home is hosted. The
+    // hosted portal dispatcher must not turn their native seat into a home action.
+    if (command === "seat" || /^claude\d*$/u.test(command ?? "")) {
+      const joined = await (
+        await import("../src/command/joined-seat.ts")
+      ).runJoinedClaudeSeat(rest, {
+        repoRoot: options.repoRoot,
+        ...(command === "seat" ? {} : { harnessCommand: command! }),
+        ...(options.env === undefined ? {} : { env: options.env }),
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
+        stdout,
+        stderr,
+      });
+      if (joined !== undefined) return joined;
+    }
     if (command === "skin" && rest[0] !== "draft") {
       outputJson(stdout, await (await import("../src/command/skin.ts")).runSkinCommand(rest));
       return 0;

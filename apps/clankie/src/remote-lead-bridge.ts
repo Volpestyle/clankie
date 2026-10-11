@@ -28,11 +28,20 @@ const PROJECT_TOOLS = new Set([
   "mcp_tool_search",
   "mcp_tool_call",
 ]);
-type Authority = NonNullable<Awaited<ReturnType<RemoteLeadDelegations["authorize"]>>>;
+export interface RemoteSeatAuthority {
+  readonly id: string;
+  readonly binding: { readonly conversationId: string; readonly nativeOccupantId: string };
+  readonly signal: AbortSignal;
+  current(): boolean;
+  authorize(): Promise<boolean>;
+}
+type Authority = RemoteSeatAuthority;
 
 export function createRemoteLeadBridge(input: {
   captain: CaptainPort;
-  delegations: RemoteLeadDelegations;
+  delegations: Pick<RemoteLeadDelegations, "isRevoked" | "close"> & {
+    authorize(request: Request, identity: LocalFleetIdentity | undefined): Promise<Authority | undefined>;
+  };
   identity(request: Request): LocalFleetIdentity | undefined;
   receiptPath?: string;
 }) {
@@ -154,15 +163,22 @@ export function createRemoteLeadBridge(input: {
         await requireCurrent(admitted);
         return context.text(prompt);
       }
+      if (path === "/v1/fleet/lead/memory-card" && context.req.method === "GET") {
+        const card = await input.captain.laneMemoryCard("operator");
+        await requireCurrent(admitted);
+        return context.text(card);
+      }
       if (path === "/v1/fleet/lead/events" && context.req.method === "GET") {
         const raw = context.req.header("x-clankie-seat-capabilities");
         const capabilities = OperatorSeatCapabilitiesSchema.safeParse(raw ? JSON.parse(raw) : undefined);
         if (!capabilities.success) return context.json({ error: "invalid_seat_capabilities" }, 400);
+        const wait = Number(context.req.query("wait") ?? 25_000);
         const events = await input.captain.pollSeatEvents(
-          25_000,
+          Number.isFinite(wait) ? Math.min(25_000, Math.max(0, Math.trunc(wait))) : 25_000,
           AbortSignal.any([context.req.raw.signal, admitted.signal]),
           conversationId,
           capabilities.data,
+          { owner: { conversationId }, current: admitted.current, authorize: admitted.authorize },
         );
         await requireCurrent(admitted);
         return context.json({ schemaVersion: 1, events });

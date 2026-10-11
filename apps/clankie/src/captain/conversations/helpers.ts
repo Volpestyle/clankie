@@ -7,7 +7,7 @@ import {
   type OperatorConversationScope,
 } from "@clankie/protocol";
 import { readdirSync, statSync } from "node:fs";
-import { isAbsolute, join, win32 } from "node:path";
+import { isAbsolute, join, posix, win32 } from "node:path";
 import type { HerdrTranscriptEntry } from "../herdr-transcript.ts";
 import { type ConversationMeta } from "./types.ts";
 
@@ -15,7 +15,7 @@ import { type ConversationMeta } from "./types.ts";
  * A workspace scope names the directory the conversation's session works in.
  * That directory becomes the cwd of an unsandboxed shell, so the registry
  * refuses anything but an absolute path that already resolves to a directory.
- * Remote Windows scopes are service-authored only after approval on that linked
+ * Remote scopes are service-authored only after approval on that joined/linked
  * machine; their directory is validated there, never on this host.
  */
 export function workspaceOf(scope: OperatorConversationScope): string | undefined {
@@ -24,7 +24,8 @@ export function workspaceOf(scope: OperatorConversationScope): string | undefine
   if (
     !(scope.machineId === undefined
       ? isAbsolute(workspace)
-      : win32.isAbsolute(workspace) && win32.parse(workspace).root.length > 1)
+      : posix.isAbsolute(workspace) ||
+        (win32.isAbsolute(workspace) && win32.parse(workspace).root.length > 1))
   ) {
     throw new Error(`Workspace ${workspace} is not an absolute path`);
   }

@@ -26,6 +26,7 @@ import {
   type JoinedMachinePolicy,
   type JoinedMachineRequest,
   type JoinedMachineResult,
+  type JoinedSeatRequest,
 } from "@clankie/protocol/machine-join";
 
 const JOINED_MACHINE_CREDENTIAL = "clankie-joined-machine";
@@ -172,7 +173,9 @@ class JoinedMachineRevoked extends Error {}
 /** A fresh one-use challenge binds each encrypted request and independently keyed response. */
 export async function exchangeJoinedMachine(
   credential: JoinedMachineCredential,
-  input: { op: "poll" | "leave"; results: JoinedMachineResult[] },
+  input:
+    | { op: "poll" | "leave"; results: JoinedMachineResult[] }
+    | { op: "seat"; request: JoinedSeatRequest },
   fetcher: typeof fetch = fetch,
   signal: AbortSignal = AbortSignal.timeout(10_000),
 ): Promise<unknown> {
@@ -202,7 +205,7 @@ export async function exchangeJoinedMachine(
     .object({ sealedResponse: z.string().max(1_500_000) })
     .strict()
     .parse(
-      await post(input.op === "poll" ? MACHINE_JOIN_CHANNEL_PATH : MACHINE_JOIN_LEAVE_PATH, {
+      await post(input.op === "leave" ? MACHINE_JOIN_LEAVE_PATH : MACHINE_JOIN_CHANNEL_PATH, {
         machineId: credential.lease.machineId,
         challenge,
         requestId,

@@ -10,6 +10,7 @@ import { defaultSettingsPath, SettingsStore } from "@clankie/settings";
 const FAST_COMMANDS = new Set(["memory-card", "seat-sync", "seat-hook"]);
 
 export async function runFastSeatHook(argv: readonly string[]): Promise<number | undefined> {
+  if (process.env.CLANKIE_JOINED_SEAT_TOKEN) return undefined;
   const [command, ...rest] = argv;
   if (command === undefined || !FAST_COMMANDS.has(command) || rest.includes("--chat")) return undefined;
   // A hosted install routes these through its device transport; only the
