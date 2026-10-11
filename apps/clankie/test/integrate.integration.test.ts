@@ -70,6 +70,7 @@ function fixture(
   gateExtra: string | ((root: string) => string) = "",
   withApp = false,
   appGateExtra: string | ((root: string) => string) = "",
+  landingGate = false,
 ) {
   return fixtureWork().run(async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-integrate-")));
@@ -88,7 +89,7 @@ function fixture(
         JSON.stringify({
           name,
           private: true,
-          scripts: { check: "node gate.mjs" },
+          scripts: { check: "node gate.mjs", ...(landingGate ? { "check:landing": "node gate.mjs" } : {}) },
           packageManager: "pnpm@11.11.0",
         }),
       );
@@ -1087,8 +1088,8 @@ fs.appendFileSync(${JSON.stringify(join(root, "events"))}, JSON.stringify({ repo
   );
 }, 120_000);
 
-it.each([false, true])(
-  "reuses the actual app pass only for an unchanged candidate (app base advanced: %s)",
+it.each(["unchanged", "before composition", "after reused pass"])(
+  "reuses the actual app pass only for an unchanged candidate (app base: %s)",
   async (advanceBase) => {
     const f = await fixture(
       (root) => `
@@ -1112,8 +1113,16 @@ if (existsSync(join(root, 'failed-once')) && !existsSync('../clankie-app/feature
 const fs = await import('node:fs');
 assert.equal(fs.readFileSync('../clankie/initial', 'utf8'), 'initial');
 assert.equal(fs.readFileSync('feature', 'utf8'), 'app');
+if (process.argv.includes('--revalidate')) {
+  const old = JSON.parse(fs.readFileSync(${JSON.stringify(join(root, "app-gates"))}, 'utf8').trim().split('\\n')[0]);
+  assert.equal(execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim(), execFileSync('git', ['rev-parse', old.head + '^{tree}'], { encoding: 'utf8' }).trim());
+  assert.equal(execFileSync('git', ['-C', '../clankie', 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), old.coreHead);
+  fs.appendFileSync(${JSON.stringify(join(root, "revalidations"))}, 'covered\\n');
+  process.exit(0);
+}
 fs.appendFileSync(${JSON.stringify(join(root, "app-gates"))}, JSON.stringify({ head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), coreHead: execFileSync('git', ['-C', '../clankie', 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() }) + '\\n');
 `,
+      true,
     );
     const initial = await commit(f.core.source, "initial", "initial");
     const feature = await commit(f.app!.source, "feature", "app");
@@ -1127,9 +1136,23 @@ fs.appendFileSync(${JSON.stringify(join(root, "app-gates"))}, JSON.stringify({ h
       });
     const first = request([initial]);
     const members = [request([initial]), request([initial]), request([], [feature])];
+    let advanced = false;
+    const advanceOrigin = async () => {
+      advanced = true;
+      await git(f.app!.source, "checkout", "-b", "remote", f.app!.base);
+      await git(f.app!.source, "commit", "--allow-empty", "-m", "same tree, newer app base");
+      await git(f.app!.source, "push", "origin", "HEAD:main");
+      await git(f.app!.source, "checkout", "main");
+    };
     await f.queue.start(first, guard);
     await until(async () => (await f.queue.status(first.id)).state === "gating");
-    for (const member of members) await f.queue.start(member, guard);
+    for (const member of members)
+      await f.queue.start(member, async () => {
+        await guard();
+        if (advanceBase !== "after reused pass" || advanced || !member.app) return;
+        const attempt = await f.queue.status(member.id);
+        if (attempt.repos.find((repo) => repo.name === "app")?.gateReuse) await advanceOrigin();
+      });
     await writeFile(join(f.root, "initial-release"), "go");
     await until(async () =>
       Boolean(await readFile(join(f.root, "first-retry-started")).catch(() => undefined)),
@@ -1138,12 +1161,7 @@ fs.appendFileSync(${JSON.stringify(join(root, "app-gates"))}, JSON.stringify({ h
     const shared = await f.queue.status(sharedId);
     const oldApp = shared.repos.find((repo) => repo.name === "app")!;
     expect(oldApp.gate?.exitCode).toBe(0);
-    if (advanceBase) {
-      await git(f.app!.source, "checkout", "-b", "remote", f.app!.base);
-      await git(f.app!.source, "commit", "--allow-empty", "-m", "same tree, newer app base");
-      await git(f.app!.source, "push", "origin", "HEAD:main");
-      await git(f.app!.source, "checkout", "main");
-    }
+    if (advanceBase === "before composition") await advanceOrigin();
     await writeFile(join(f.root, "first-retry-release"), "go");
     await f.queue.wait();
     for (const member of members) expect((await f.queue.status(member.id)).state).toBe("pushed");
@@ -1154,10 +1172,10 @@ fs.appendFileSync(${JSON.stringify(join(root, "app-gates"))}, JSON.stringify({ h
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { head: string; coreHead: string });
-    expect(gates).toHaveLength(advanceBase ? 2 : 1);
+    expect(gates).toHaveLength(advanceBase === "unchanged" ? 1 : 2);
     expect(app.gate).toMatchObject({ exitCode: 0, head: app.head });
     expect(core.gate).toMatchObject({ exitCode: 0, head: core.head });
-    if (advanceBase) expect(app.gateReuse).toBeUndefined();
+    if (advanceBase !== "unchanged") expect(app.gateReuse).toBeUndefined();
     else {
       expect(app.head).toBe(oldApp.head);
       expect(app.gate!.log).toBe(oldApp.gate!.log);
@@ -1168,6 +1186,14 @@ fs.appendFileSync(${JSON.stringify(join(root, "app-gates"))}, JSON.stringify({ h
       });
     }
     expect(gates[0]!.coreHead).toBe(core.head);
+    if (advanceBase === "after reused pass") {
+      expect(result.regateReason).toContain("reused gate requires an unchanged base");
+      const held = await f.queue.status(result.attempts!.at(-2)!);
+      expect(held.state).toBe("held");
+      expect(held.repos.find((repo) => repo.name === "app")!.gate?.exitCode).toBe(0);
+      expect(held.repos.every((repo) => repo.push === undefined)).toBe(true);
+      expect(await readFile(join(f.root, "revalidations")).catch(() => undefined)).toBeUndefined();
+    }
     expect(await git(f.app!.source, "ls-remote", "origin", "refs/heads/main")).toContain(app.head);
     process.stdout.write(
       "vuh-2112-reuse-evidence " +

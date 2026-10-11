@@ -1247,9 +1247,11 @@ export class IntegrationQueue {
                     ? "origin/main kept moving"
                     : recorded.request.restore
                       ? "a restore is composed again on the current main"
-                      : repo.name === "core" && recorded.repos.some((r) => r.name === "app")
-                        ? "the app gate ran against the earlier core"
-                        : await this.revalidate(recorded, repo);
+                      : repo.gateReuse
+                        ? "a reused gate requires an unchanged base"
+                        : repo.name === "core" && recorded.repos.some((r) => r.name === "app")
+                          ? "the app gate ran against the earlier core"
+                          : await this.revalidate(recorded, repo);
                 if (why)
                   throw new GateNotCovering(
                     `${repo.name}: origin/main moved from ${from} to ${current} and the gate no longer covers HEAD: ${why}`,

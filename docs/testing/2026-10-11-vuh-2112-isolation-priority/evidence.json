@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "final-queue-proof.json",
+      "size": 842005,
+      "sha256": "13a4d77600fe1ab5d2310b9b1c0f380bb45fa89828baf391c8dceb14c8fef95f",
+      "url": "clankie://evidence/sha256/13a4d77600fe1ab5d2310b9b1c0f380bb45fa89828baf391c8dceb14c8fef95f"
+    },
+    {
       "path": "queue-proof.json",
       "size": 430651,
       "sha256": "6c33a9cb13a17ed7a10cd96e4ebc7c066726341f6cdd88e0e114ae028d927689",

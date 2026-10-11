@@ -58,7 +58,9 @@ is installed again, and any repository without a valid pass gates again. The
 app consumes core sources: excluding a failed core contribution invalidates the
 earlier app pass even when the app tree itself is unchanged. A withdrawal always
 requires fresh gates. Landing checks the durable pass and reused tree/core input;
-an unchanged app tree alone never authorizes landing.
+an unchanged app tree alone never authorizes landing. If origin advances after a
+pass is reused, it requires a fresh gate even if normal selection revalidation
+could cover the same tree; reuse requires the original base too.
 
 Requests retain their UUID and input. `batchId` follows the current attestation,
 `attempts` retains attempt IDs, and `isolation.rootBatchId` identifies the failed

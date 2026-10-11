@@ -140,7 +140,9 @@ priority, before later arrivals. Read `progress.queuePosition` and the isolation
 chain together. A retained `gateReuse` pass covers only its unchanged exact tree,
 base, approved contributions and sibling core candidate. The app depends on core:
 excluding a core member requires a new app gate. Withdrawals still require fresh
-composition and gates; priority does not authorize an ungated tree.
+composition and gates. An origin move after reuse also requires a fresh gate;
+selection revalidation cannot replace its unchanged-base condition. Priority
+does not authorize an ungated tree.
 
 Passed-canary retention runs once per operation per service boot. It shares the
 maintenance lock with update admission; `retentionMaintenance: held` with empty
