@@ -351,3 +351,13 @@ its own governor snapshot. Status/configure calls are bounded to five seconds; a
 wrong-host response is unavailable. The shared node-free protocol sizing function
 uses those specs, not the observing Mac's hardware. Windows provisioning and
 native/WSL admission belong to VUH-2091.
+
+The package exports `ResourceHostSpecs` (`cores`, `memoryBytes`) and the shared
+heavy policy functions `automaticHeavySlots`, `resourceCapacity`,
+`baseHeavySlots` and `heavyAdmission`. A separate host runtime passes its own
+validated native observations to these functions; omitted specs retain local OS
+sizing. Admission uses the same host facts for the ceiling, base and unsettled
+core charge. Invalid facts throw rather than falling back to the observing Mac.
+These are runtime inputs, never client flags or registry-selection authority.
+The existing POSIX governor continues to observe its local hardware. This seam
+alone supplies neither a Windows runtime nor native/WSL containment.

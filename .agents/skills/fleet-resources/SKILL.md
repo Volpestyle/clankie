@@ -9,6 +9,9 @@ VUH-2091's staged Linux PID-namespace helper is a containment primitive, not
 a second capacity allocator or a shipped WSL heavy-command route. Native
 Windows and WSL still require one Windows host budget and canonical registry.
 Never acquire that Windows `LockFileEx` lock through Linux `flock` on `/mnt/c`.
+The shared heavy admission functions accept host-measured `ResourceHostSpecs`
+for the later native runtime; these facts are not worker flags or a second
+registry. Existing POSIX commands still size against their own local hardware.
 Windows interop containment and PC proof remain open; do not route WSL jobs
 through the staged helper. Its private protocol and local Linux proof are in
 [fleet-resources](../../../packages/fleet-resources/README.md).
