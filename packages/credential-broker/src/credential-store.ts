@@ -3,7 +3,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
+import { existsSync } from "node:fs";
 import { z } from "zod";
 import lockfile from "proper-lockfile";
 
@@ -93,7 +93,24 @@ export function redactCredential(credential: ProviderCredential): RedactedCreden
  */
 export type CredentialGroup = Record<string, ProviderCredential | undefined>;
 
+export interface CredentialStoreHealth {
+  state: "ready" | "locked" | "unavailable";
+  message?: string;
+  retryAt?: string;
+}
+
+export class KeychainLockedError extends Error {
+  constructor() {
+    super(
+      "Keychain locked: unlock it in Keychain Access; Clankie will retry without opening password dialogs.",
+    );
+    this.name = "KeychainLockedError";
+  }
+}
+
 export interface CredentialStore {
+  health?(): CredentialStoreHealth;
+  observeHealth?(listener: (health: CredentialStoreHealth) => void): () => void;
   get(providerId: string): Promise<ProviderCredential | undefined>;
   set(providerId: string, credential: ProviderCredential): Promise<void>;
   /** Revoke the exact current credential under the mutation lock before deleting it; callback must not call this store again. */
@@ -336,12 +353,114 @@ export class FileCredentialStore implements CredentialStore {
   }
 }
 
-const execFileAsync = promisify(execFileCallback);
-
-async function defaultExecFile(file: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
-  const { stdout, stderr } = await execFileAsync(file, args);
-  return { stdout, stderr };
+function keychainHelperPath(): string {
+  for (const root of [import.meta.dirname, process.argv[1] ? dirname(resolve(process.argv[1])) : undefined]) {
+    if (!root) continue;
+    let ancestor = root;
+    for (let depth = 0; depth < 8; depth++) {
+      const path = join(ancestor, "packages/credential-broker/src/keychain-status.py");
+      if (existsSync(path)) return path;
+      const next = dirname(ancestor);
+      if (next === ancestor) break;
+      ancestor = next;
+    }
+  }
+  throw new Error("Keychain status helper is missing; repair this Clankie install");
 }
+
+type KeychainCommandObserver = (event: {
+  command: "lock-check" | "read" | "write";
+  phase: "start" | "exit";
+  pid: number;
+}) => void;
+
+async function assertKeychainUnlocked(keychain?: string, observe?: KeychainCommandObserver): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFileCallback(
+      "/usr/bin/python3",
+      [keychainHelperPath()],
+      { timeout: 3_000, maxBuffer: 1024 * 1024 },
+      (error, stdout) => {
+        if (child.pid) observe?.({ command: "lock-check", phase: "exit", pid: child.pid });
+        let result: { code?: number; path?: string };
+        try {
+          result = JSON.parse(stdout);
+        } catch {
+          reject(new Error("Keychain read unavailable (native helper failed or timed out)"));
+          return;
+        }
+        if (result.code === -25308 || result.code === -25293) {
+          reject(new KeychainLockedError());
+          return;
+        }
+        if (error || result.code) {
+          reject(new Error("Keychain read unavailable (native Keychain error)"));
+          return;
+        }
+        if (!result.path) {
+          reject(new Error("Keychain path unavailable"));
+          return;
+        }
+        resolve(result.path);
+      },
+    );
+    if (child.pid) observe?.({ command: "lock-check", phase: "start", pid: child.pid });
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(JSON.stringify({ keychain }));
+  });
+}
+
+async function defaultExecFile(
+  file: string,
+  args: string[],
+  keychain?: string,
+  observe?: KeychainCommandObserver,
+): Promise<{ stdout: string; stderr: string }> {
+  // One bounded security command at a time across CLI/service processes.
+  // This is separate from the OAuth mutation lock, which may span network I/O.
+  const path = join(homedir(), ".config", "clankie", "credential-locks", "keychain-io");
+  // A locked CLI must not wait behind another process's I/O lock.
+  let actualKeychain = await enqueueSerialized(`${path}:checks`, () =>
+    assertKeychainUnlocked(keychain, observe),
+  );
+  const checkedAt = Date.now();
+  return withCredentialLock(path, async () => {
+    if (Date.now() - checkedAt > 100) actualKeychain = await assertKeychainUnlocked(actualKeychain, observe);
+    // Existing Keychain ACLs continue to recognize security(1). A native,
+    // noninteractive lock check prevents it from opening unlock dialogs. The
+    // deadline bounds the race where the owner locks the keychain after the check.
+    try {
+      const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        const command = args[0] === "find-generic-password" ? "read" : "write";
+        const child = execFileCallback(
+          file,
+          [...args, actualKeychain],
+          { timeout: 3_000 },
+          (error, stdout, stderr) => {
+            if (child.pid) observe?.({ command, phase: "exit", pid: child.pid });
+            if (error) reject(error);
+            else resolve({ stdout, stderr });
+          },
+        );
+        if (child.pid) observe?.({ command, phase: "start", pid: child.pid });
+      });
+      return { stdout, stderr };
+    } catch (error) {
+      if (isKeychainNotFound(error)) throw new Error("Keychain item could not be found");
+      throw new Error("Keychain operation unavailable (locked, denied, or timed out)");
+    }
+  });
+}
+
+interface KeychainReadState {
+  revisions: Map<string, string>;
+  values: Map<string, string | undefined>;
+  reads: Map<string, Promise<string | undefined>>;
+  failure?: { error: Error; until: number };
+  health: CredentialStoreHealth;
+  listeners: Set<(health: CredentialStoreHealth) => void>;
+}
+const keychainStates = new WeakMap<object, Map<string, KeychainReadState>>();
 
 /** Account name that holds the JSON array of providerIds, so list() never dumps the keychain. */
 const INDEX_ACCOUNT = "__index__";
@@ -350,6 +469,10 @@ const SECURITY_CLI = "/usr/bin/security";
 export interface KeychainCredentialStoreOptions {
   /** Keychain service name; defaults to "bot.clankie.credentials". */
   service?: string;
+  /** Explicit keychain path, for isolated native proofs; never changes the OS search list. */
+  keychain?: string;
+  /** Fixed process metadata for native evidence; never includes argv or secrets. */
+  observeCommand?: KeychainCommandObserver;
   /** Injectable command runner so tests never touch the real keychain. */
   execFile?: (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 }
@@ -366,6 +489,8 @@ export interface KeychainCredentialStoreOptions {
  */
 export class KeychainCredentialStore implements CredentialStore {
   private readonly service: string;
+  private readonly state: KeychainReadState;
+  private readonly revisionPath: string;
   private readonly lockPath: string;
   private readonly execFile: (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 
@@ -376,9 +501,33 @@ export class KeychainCredentialStore implements CredentialStore {
       ".config",
       "clankie",
       "credential-locks",
-      createHash("sha256").update(this.service).digest("hex"),
+      createHash("sha256")
+        .update(options.keychain ? `${this.service}:${options.keychain}` : this.service)
+        .digest("hex"),
     );
-    this.execFile = options.execFile ?? defaultExecFile;
+    this.revisionPath = `${this.lockPath}.revision`;
+    const runner = options.execFile ?? defaultExecFile;
+    let states = keychainStates.get(runner);
+    if (!states) {
+      states = new Map();
+      keychainStates.set(runner, states);
+    }
+    const key = `${this.lockPath}:${options.keychain ?? "default"}`;
+    let state = states.get(key);
+    if (!state) {
+      state = {
+        values: new Map(),
+        revisions: new Map(),
+        reads: new Map(),
+        health: { state: "ready" },
+        listeners: new Set(),
+      };
+      states.set(key, state);
+    }
+    this.state = state;
+    this.execFile =
+      options.execFile ??
+      ((file, args) => defaultExecFile(file, args, options.keychain, options.observeCommand));
   }
 
   public get(providerId: string): Promise<ProviderCredential | undefined> {
@@ -401,7 +550,7 @@ export class KeychainCredentialStore implements CredentialStore {
   ): Promise<ProviderCredential | undefined> {
     const id = normalizeProviderId(providerId);
     return this.enqueue(async (assertHeld) => {
-      const current = await this.getDirect(id);
+      const current = await this.getDirect(id, true);
       if (current === undefined) return undefined;
       const transformed = await transform(current);
       const next = ProviderCredentialSchema.parse(transformed);
@@ -419,7 +568,7 @@ export class KeychainCredentialStore implements CredentialStore {
     const ids = [...new Set(providerIds.map(normalizeProviderId))];
     return this.enqueue(async (assertHeld) => {
       const current: CredentialGroup = {};
-      for (const id of ids) current[id] = await this.getDirect(id);
+      for (const id of ids) current[id] = await this.getDirect(id, true);
       const previous = { ...current };
       const next = await transform(current);
       // Validate the entire group before the first Keychain publication.
@@ -433,7 +582,7 @@ export class KeychainCredentialStore implements CredentialStore {
         if (value === undefined) {
           if (previous[id] !== undefined) {
             await this.deleteDirect(id);
-            const index = await this.readIndex();
+            const index = await this.readIndex(true);
             await this.writeIndex(index.filter((entry) => entry !== id));
           }
         } else await this.setDirect(id, ProviderCredentialSchema.parse(value), assertHeld);
@@ -443,8 +592,8 @@ export class KeychainCredentialStore implements CredentialStore {
   }
 
   private async setDirect(id: string, parsed: ProviderCredential, assertHeld: () => void): Promise<void> {
-    const previous = await this.read(id);
-    const index = await this.readIndex();
+    const previous = await this.read(id, true);
+    const index = await this.readIndex(true);
     const indexChanged = !index.includes(id);
     try {
       // Publish the index before creating a new secret. If the index write
@@ -468,11 +617,11 @@ export class KeychainCredentialStore implements CredentialStore {
   ): Promise<boolean> {
     const id = normalizeProviderId(providerId);
     return this.enqueue(async (assertHeld) => {
-      const previous = await this.read(id);
+      const previous = await this.read(id, true);
       if (previous === undefined) return false;
       if (beforeDelete) await beforeDelete(ProviderCredentialSchema.parse(JSON.parse(previous)));
       assertHeld();
-      const index = await this.readIndex();
+      const index = await this.readIndex(true);
       assertHeld();
       if (!(await this.deleteDirect(id))) return false;
       // A failed index update leaves only a stale index entry: list() skips the
@@ -485,14 +634,15 @@ export class KeychainCredentialStore implements CredentialStore {
   }
 
   public list(): Promise<Record<string, RedactedCredential>> {
-    return this.enqueue(async () => {
+    return enqueueSerialized(`${this.lockPath}:list`, async () => {
       const redacted: Record<string, RedactedCredential> = {};
       for (const id of await this.readIndex()) {
         if (id === "google-oauth-app") continue;
         try {
           const credential = await this.getDirect(id);
           if (credential !== undefined) redacted[id] = redactCredential(credential);
-        } catch {
+        } catch (error) {
+          if (this.state.failure) throw error;
           // A missing or malformed entry must not break listing the rest.
         }
       }
@@ -500,34 +650,133 @@ export class KeychainCredentialStore implements CredentialStore {
     });
   }
 
+  public health(): CredentialStoreHealth {
+    return { ...this.state.health };
+  }
+
+  public observeHealth(listener: (health: CredentialStoreHealth) => void): () => void {
+    this.state.listeners.add(listener);
+    listener(this.health());
+    return () => {
+      this.state.listeners.delete(listener);
+    };
+  }
+
+  private reportHealth(health: CredentialStoreHealth): void {
+    const changed = this.state.health.state !== health.state;
+    this.state.health = health;
+    if (changed)
+      for (const listener of this.state.listeners) {
+        try {
+          listener({ ...health });
+        } catch {
+          /* Diagnostics never break credential operations. */
+        }
+      }
+  }
+
   private enqueue<T>(operation: (assertHeld: () => void) => Promise<T>): Promise<T> {
+    // Reads validate their account's publication witness after taking this lock;
+    // unchanged cached entries remain authoritative, including no-op OAuth checks.
     return withCredentialLock(this.lockPath, operation);
   }
 
-  private async getDirect(id: string): Promise<ProviderCredential | undefined> {
-    const raw = await this.read(id);
+  private accountRevisionPath(account: string): string {
+    return `${this.revisionPath}.${createHash("sha256").update(account).digest("hex")}`;
+  }
+
+  private async published(account: string): Promise<void> {
+    // Secret-free witness, published under the cross-process mutation lock.
+    // Fail closed if a writer cannot tell other processes about a change.
+    const revision = randomUUID();
+    const path = this.accountRevisionPath(account);
+    const temporary = `${path}.${process.pid}.tmp`;
+    this.state.values.delete(account);
+    await writeFile(temporary, revision, { mode: 0o600 });
+    await rename(temporary, path);
+    this.state.revisions.set(account, revision);
+  }
+
+  private async getDirect(id: string, durable = false): Promise<ProviderCredential | undefined> {
+    const raw = await this.read(id, durable);
     if (raw === undefined) return undefined;
     return ProviderCredentialSchema.parse(JSON.parse(raw));
   }
 
-  private async read(account: string): Promise<string | undefined> {
+  private async read(account: string, durable = false): Promise<string | undefined> {
+    let revision: string;
     try {
-      const { stdout } = await this.execFile(SECURITY_CLI, [
-        "find-generic-password",
-        "-s",
-        this.service,
-        "-a",
-        account,
-        "-w",
-      ]);
-      return stdout.replace(/\r?\n$/, "");
+      revision = await readFile(this.accountRevisionPath(account), "utf8");
     } catch (error) {
-      if (isKeychainNotFound(error)) return undefined;
-      throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      revision = "absent";
+    }
+    if (revision !== this.state.revisions.get(account)) {
+      this.state.values.delete(account);
+      this.state.revisions.set(account, revision);
+    }
+    if (revision.startsWith("pending:") && !durable)
+      throw new Error("Credential change in progress; retry shortly");
+    if (this.state.values.has(account)) return this.state.values.get(account);
+    if (this.state.failure && Date.now() < this.state.failure.until) throw this.state.failure.error;
+    const readKey = `${revision}:${account}`;
+    const pending = this.state.reads.get(readKey);
+    if (pending) return pending;
+    const read = enqueueSerialized(`${this.lockPath}:reads`, async () => {
+      if (this.state.failure && Date.now() < this.state.failure.until) throw this.state.failure.error;
+      try {
+        let value: string | undefined;
+        try {
+          const { stdout } = await this.execFile(SECURITY_CLI, [
+            "find-generic-password",
+            "-s",
+            this.service,
+            "-a",
+            account,
+            "-w",
+          ]);
+          value = stdout.replace(/\r?\n$/, "");
+        } catch (error) {
+          if (!isKeychainNotFound(error)) throw error;
+        }
+        // An overlapping mutation invalidates this read's cache publication.
+        if (this.state.revisions.get(account) === revision) this.state.values.set(account, value);
+        delete this.state.failure;
+        this.reportHealth({ state: "ready" });
+        return value;
+      } catch (error) {
+        const failure =
+          error instanceof KeychainLockedError
+            ? error
+            : new Error("Keychain read unavailable; retrying in 30 seconds");
+        const until = Date.now() + 30_000;
+        this.state.failure = { error: failure, until };
+        this.reportHealth({
+          state: error instanceof KeychainLockedError ? "locked" : "unavailable",
+          message: failure.message,
+          retryAt: new Date(until).toISOString(),
+        });
+        throw failure;
+      }
+    });
+    this.state.reads.set(readKey, read);
+    try {
+      return await read;
+    } finally {
+      if (this.state.reads.get(readKey) === read) this.state.reads.delete(readKey);
     }
   }
 
+  private async changing(account: string): Promise<void> {
+    const path = this.accountRevisionPath(account);
+    const temporary = `${path}.${process.pid}.tmp`;
+    await writeFile(temporary, `pending:${randomUUID()}`, { mode: 0o600 });
+    await rename(temporary, path);
+    this.state.values.delete(account);
+  }
+
   private async write(account: string, secret: string): Promise<void> {
+    await this.changing(account);
     // -U updates an existing item in place instead of failing with "already exists".
     await this.execFile(SECURITY_CLI, [
       "add-generic-password",
@@ -539,14 +788,20 @@ export class KeychainCredentialStore implements CredentialStore {
       "-w",
       secret,
     ]);
+    await this.published(account);
   }
 
   private async deleteDirect(account: string): Promise<boolean> {
+    await this.changing(account);
     try {
       await this.execFile(SECURITY_CLI, ["delete-generic-password", "-s", this.service, "-a", account]);
+      await this.published(account);
       return true;
     } catch (error) {
-      if (isKeychainNotFound(error)) return false;
+      if (isKeychainNotFound(error)) {
+        await this.published(account);
+        return false;
+      }
       throw error;
     }
   }
@@ -559,8 +814,8 @@ export class KeychainCredentialStore implements CredentialStore {
     await this.write(account, previous);
   }
 
-  private async readIndex(): Promise<string[]> {
-    const raw = await this.read(INDEX_ACCOUNT);
+  private async readIndex(durable = false): Promise<string[]> {
+    const raw = await this.read(INDEX_ACCOUNT, durable);
     if (raw === undefined) return [];
     try {
       const parsed: unknown = JSON.parse(raw);

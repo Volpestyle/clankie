@@ -1765,6 +1765,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({
       ok: true,
       service: "clankie",
+      ...(dependencies.credentialStoreHealth
+        ? { credentialStoreHealth: dependencies.credentialStoreHealth() }
+        : {}),
       processHealth: ProcessHealthSnapshotSchema.parse(
         (() => {
           const cpu = process.cpuUsage();

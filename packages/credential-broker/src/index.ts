@@ -11,6 +11,8 @@ export {
   createDefaultCredentialStore,
   FileCredentialStore,
   KeychainCredentialStore,
+  KeychainLockedError,
+  type CredentialStoreHealth,
   normalizeProviderId,
   ProviderCredentialSchema,
   ProviderAccountSchema,

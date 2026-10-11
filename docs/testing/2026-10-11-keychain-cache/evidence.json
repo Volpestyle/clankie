@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "bundle.json",
+      "size": 58620,
+      "sha256": "c26fc7df88f0f4b5c271dedc28372d1f1031271507cecd5cd48c49b4d7dee260",
+      "url": "clankie://evidence/sha256/c26fc7df88f0f4b5c271dedc28372d1f1031271507cecd5cd48c49b4d7dee260"
+    }
+  ]
+}

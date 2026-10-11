@@ -20,6 +20,14 @@ This reference owns credential identities and trust boundaries. The
 [broker implementation](../packages/credential-broker/README.md) owns storage
 and locking; [worker access](worker-access.md) owns restricted delegation.
 
+Clankie caches Keychain credentials in each process. Broker changes and rotations
+invalidate the affected entry in running clients and the service. When the keychain
+is locked, new credential reads fail promptly with **Keychain locked**, back off
+for 30 seconds, and open no unlock dialogs. Already cached credentials keep working.
+Doctor shows `credentialStoreHealth`; the app's owner conversation receives one
+notice per incident. Unlock the keychain in Keychain Access. Clankie does not unlock
+it or ask for your password. Direct manual edits outside the broker need a restart.
+
 ## Discord bot token versus user token
 
 These credentials are not interchangeable.

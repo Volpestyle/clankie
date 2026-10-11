@@ -54,7 +54,27 @@ Disconnect waits for an admitted refresh, then deletes its result. Once disconne
 completes, that refresh cannot restore the account. Replacement follows the same
 ordering. Token requests have a 20-second deadline. One lock covers the whole file
 or Keychain service, so a refresh can briefly delay unrelated credential writes.
-Single-item Keychain reads do not acquire that write lock: Keychain atomically
+Keychain reads share a process cache (including missing entries) and single-flight
+reads across store instances. Each account has a secret-free revision witness;
+broker writes, rotations and deletes invalidate only that account across processes.
+Read-modify-write operations validate the publication witness under their mutation
+lock, re-reading only changed entries (including after waiting for another writer). Direct edits
+outside the broker require a process restart; use the broker's rotation commands.
+A pending or failed publication refuses cached authorization rather than retaining
+an old bearer.
+
+A native, noninteractive `SecKeychainGetStatus` check precedes every cold read/write.
+A locked keychain spawns no `security` process or unlock dialog. A separate OS-account
+I/O lock serializes bounded `security` commands across processes. Noninteractive
+lock checks run before that lock so a locked CLI fails promptly;
+it never spans OAuth network requests. Commands time out after three seconds.
+Uncached read failures back off for 30 seconds across the store's accounts. Cached
+credentials remain usable while locked; Clankie never unlocks the keychain himself.
+Doctor exposes one `credentialStoreHealth` state, and the service records one owner
+notice per incident in the default conversation, visible in the app. Unlock in
+Keychain Access; the next cold read after backoff clears the incident.
+
+Single-item Keychain reads do not acquire the OAuth write lock: Keychain atomically
 publishes each item, so a hook reading the operator bearer need not wait for an
 unrelated OAuth network refresh. A read can observe the previous or next complete
 credential; callers that refresh or modify credentials must still use `update`.

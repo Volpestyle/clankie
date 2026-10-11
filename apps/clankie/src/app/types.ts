@@ -213,6 +213,7 @@ export interface ClankieAppDependencies {
   keepAwakeStatus?: () => Promise<
     NonNullable<import("@clankie/protocol/owner-settings").HostSettingsSnapshot["keepAwakeService"]>
   >;
+  credentialStoreHealth?: () => import("@clankie/credential-broker").CredentialStoreHealth;
   runtimeHealth?: () => import("@clankie/protocol").RuntimeHealthObservation;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;

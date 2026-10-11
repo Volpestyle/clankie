@@ -1783,6 +1783,11 @@ const workerToolRefresh = createWorkerToolRefresh({
   revision: workerRuntimeRevision,
 });
 
+// One durable owner notice per Keychain incident, visible in the app without a model turn.
+operatorCredentialStore.observeHealth?.((health) => {
+  if (health.state !== "ready") captain.recordRuntimeHealthNotice(health.message ?? "Keychain unavailable");
+});
+
 bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
 const fleetProgress = new FleetProgressObserver({
   path: join(stateRoot, "fleet-progress-incidents.json"),
@@ -1867,6 +1872,7 @@ const clankie = await createClankieApp({
   }),
   fleetResources,
   views: new ViewStore(join(stateRoot, "views")),
+  credentialStoreHealth: () => operatorCredentialStore.health?.() ?? { state: "ready" },
   runtimeHealth: () => runtimeHealth.snapshot(),
   fleetHealthMetrics,
   linearRequestBudget,

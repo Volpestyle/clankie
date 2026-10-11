@@ -1,5 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { createDefaultCredentialStore, type CredentialStore } from "./credential-store.ts";
+import {
+  createDefaultCredentialStore,
+  KeychainLockedError,
+  type CredentialStore,
+} from "./credential-store.ts";
 
 export const OPERATOR_CREDENTIAL_PROVIDER_ID = "clankie_operator";
 const OPERATOR_TOKEN_PREFIX = "clankie_op_";
@@ -91,7 +95,8 @@ export async function ensureOperatorCredential(
       type: "api",
       key: mintOperatorToken(options.randomBytes),
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof KeychainLockedError) throw error;
     throw new OperatorCredentialError(
       "store_unavailable",
       "Operator credential bootstrap could not update the credential store",
@@ -122,7 +127,8 @@ export async function rotateOperatorCredential(
       type: "api",
       key: mintOperatorToken(options.randomBytes),
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof KeychainLockedError) throw error;
     throw new OperatorCredentialError(
       "store_unavailable",
       "Operator credential rotation could not update the credential store",

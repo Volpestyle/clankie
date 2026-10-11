@@ -64,7 +64,11 @@ This skill is the installed agent companion to the canonical launcher command
 layer. Do not write Keychain entries, `~/.config/clankie/clankie.json`, or
 `~/.config/clankie/settings.json` yourself. The full flag/JSON/exit-code
 contract is `{repoRoot}/docs/cli.md` (every install) and `clankie help` (same
-index); the [full command table](reference/launcher.md#command-table) maps every
+index). If a command says **Keychain locked**, do not repeat commands or launch
+parallel credential reads. Doctor's `credentialStoreHealth` and one notice in the
+owner's conversation explain the state. The owner unlocks it in Keychain Access;
+uncached reads retry after 30 seconds. Cached credentials keep working. Never
+unlock the owner's keychain or ask for their password. The [full command table](reference/launcher.md#command-table) maps every
 job to its command. JSON is on stdout and progress on stderr. The most common:
 
 | Job                         | Command                                                              |

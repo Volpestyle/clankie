@@ -13,7 +13,11 @@ import {
   FLEET_TOOL_CATALOG_HEALTH_PATH,
   FleetToolCatalogHealthPageSchema,
 } from "@clankie/protocol/tool-catalog";
-import { resolveOperatorCredential, resolveCaptainCredential } from "@clankie/credential-broker";
+import {
+  createDefaultCredentialStore,
+  resolveOperatorCredential,
+  resolveCaptainCredential,
+} from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
 import { readWorkingPreferences } from "./working-preferences.ts";
@@ -47,6 +51,8 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
 }
 
 function doctorSummary(report: InstallDoctorReport): string {
+  if (report.credentialStoreHealth?.state !== undefined && report.credentialStoreHealth.state !== "ready")
+    return report.credentialStoreHealth.message ?? "Keychain unavailable";
   const refusal =
     report.machineAccessRefusals && "refusals" in report.machineAccessRefusals
       ? report.machineAccessRefusals.refusals[0]
@@ -172,6 +178,11 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 export async function doctorCommand(
   options: InspectInstallOptions & { cwd?: string; host?: string },
 ): Promise<InstallDoctorReport> {
+  options = {
+    ...options,
+    credentialStore:
+      options.credentialStore ?? createDefaultCredentialStore({ env: options.env ?? process.env }),
+  };
   const [report, workerObservations, resources, simulators, checkouts, seatBridges, seatDeliveries] =
     await Promise.all([
       inspectInstall(options),
@@ -350,6 +361,7 @@ export async function doctorCommand(
   }
   return {
     ...report,
+    ...(options.credentialStore?.health ? { credentialStoreHealth: options.credentialStore.health() } : {}),
     machineAccessRefusals: await inspectMachineAccessRefusals({
       ...options,
       ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),

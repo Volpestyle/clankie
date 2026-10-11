@@ -241,6 +241,10 @@ async function copyRuntimeAssets(targetRoot) {
   const files = [
     ["integrations/remote-lead/bootstrap.mjs", "integrations/remote-lead/bootstrap.mjs"],
     ["integrations/remote-lead/claude-setup.mjs", "integrations/remote-lead/claude-setup.mjs"],
+    [
+      "packages/credential-broker/src/keychain-status.py",
+      "packages/credential-broker/src/keychain-status.py",
+    ],
     ["packages/fleet-resources/src/native.py", "packages/fleet-resources/src/native.py"],
     ["packages/fleet-resources/src/linux-namespace.py", "packages/fleet-resources/src/linux-namespace.py"],
     ["packages/fleet-resources/src/server-cpu.py", "packages/fleet-resources/src/server-cpu.py"],

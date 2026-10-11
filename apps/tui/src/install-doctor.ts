@@ -18,6 +18,7 @@ import {
   LINEAR_PROVIDER_ID,
   LINEAR_WEBHOOK_PROVIDER_ID,
   type CredentialStore,
+  type CredentialStoreHealth,
   type RedactedCredential,
 } from "@clankie/credential-broker";
 import {
@@ -101,6 +102,7 @@ interface HerdrPluginReport {
 
 export interface InstallDoctorReport {
   readonly ok: true;
+  readonly credentialStoreHealth?: CredentialStoreHealth;
   readonly checkouts?: import("@clankie/protocol").CheckoutReport | { status: "unavailable"; detail: string };
   readonly resources?: FleetResourceSnapshot | { readonly status: "unavailable"; readonly detail: string };
   /** Simulator leases and devices booted outside them; absent when the service could not say. */
@@ -296,7 +298,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   const trackerConnected =
     linearServer?.enabled !== false &&
     ((linearServer !== undefined && linearServer.credential === undefined) ||
-      (await credentialStore.get(trackerCredential)) !== undefined);
+      (await credentialStore.get(trackerCredential).catch(() => undefined)) !== undefined);
   const tracker: NonNullable<InstallDoctorReport["tracker"]> = trackerConnected
     ? { backend: "linear", reason: "owner_connected" }
     : {
@@ -420,6 +422,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
 
   return {
     ok: true,
+    ...(credentialStore.health ? { credentialStoreHealth: credentialStore.health() } : {}),
     ...(runtimeHealth === undefined ? {} : { runtimeHealth }),
     kind,
     version: await readInstallVersion(options.repoRoot, kind),

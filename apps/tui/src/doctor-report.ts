@@ -136,6 +136,9 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
               `  ${account.status === "normal" ? "✓" : "!"} Linear requests · ${account.accountId} · ${account.requests} observed/hour · ${Math.round(account.utilization * 100)}% of ${account.limit} · ${account.status}${account.backgroundMinIntervalMs ? " · background reads at most once/minute" : ""}`,
           )
         : [`  ○ Linear requests · unknown · ${clean(report.linearRequestBudget.detail)}`]),
+    ...(report.credentialStoreHealth?.state !== undefined && report.credentialStoreHealth.state !== "ready"
+      ? [`  ! Credentials · ${clean(report.credentialStoreHealth.message ?? "Keychain unavailable")}`]
+      : []),
     `  Credentials · ${report.credentials.length ? report.credentials.map((c) => c.id).join(", ") : "none"}`,
     ...Object.entries(report.credentialRejections ?? {}).map(
       ([providerId, rejection]) =>

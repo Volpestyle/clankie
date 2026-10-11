@@ -12,7 +12,7 @@ export interface CredentialBackedOperatorAuthenticatorOptions {
 }
 
 /**
- * Resolves the authoritative operator credential for every request. This keeps
+ * Resolves the process-cached authoritative credential, invalidated by broker changes. This keeps
  * rotation atomic across the server and local clients without restarting the
  * service. Store failures and invalid credentials fail closed.
  */
