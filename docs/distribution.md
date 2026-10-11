@@ -22,10 +22,12 @@ each version immutably under `~/.local/share/clankie/releases/`. It updates
 `CLANKIE_NO_MODIFY_PATH=1` to only print that line, and `CLANKIE_INSTALL_ROOT` or
 `CLANKIE_BIN_DIR` before running the installer to choose different roots.
 
-Both release installation and `clankie update` refresh already-linked Claude and
+Installation into the default root and `clankie update` refresh already-linked Claude and
 Codex worker plugins, including profiles on enabled SSH fleet machines, through
 the existing harness installer. First-time linking still uses interactive
-consent. Managed Codex profiles reuse a previously approved source-owned setup;
+consent. A non-default `CLANKIE_INSTALL_ROOT` skips all harness linking, including
+fleet refresh and the interactive prompt, and prints that it skipped it.
+Managed Codex profiles reuse a previously approved source-owned setup;
 missing setup or an unreachable machine returns an incomplete receipt. Native
 panes with an older plugin get a once-only flag naming the resume that loads the
 current plugin. Their

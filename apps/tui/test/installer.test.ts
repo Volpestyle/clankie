@@ -16,7 +16,7 @@ it.skipIf(
   const installer = fileURLToPath(new URL("../../../install.sh", import.meta.url));
   const downloads = join(root, "downloads");
   const commands = join(root, "commands");
-  const installation = join(root, "install");
+  const installation = join(root, "home", ".local", "share", "clankie");
   const bin = join(root, "bin");
   const home = join(root, "home");
   const configHome = join(home, ".config");
@@ -108,6 +108,19 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
         `export PATH="${bin}:$PATH"`,
       ),
     ).toHaveLength(2);
+    // Custom roots must not dispatch any harness refresh, locally or to the fleet.
+    await writeFile(env.INSTALL_TEST_REFRESHES, "");
+    const custom = spawnSync("sh", [installer, "--version", "v0.2.0"], {
+      env: { ...env, CLANKIE_INSTALL_ROOT: join(root, "custom") },
+      encoding: "utf8",
+    });
+    expect(custom.status, custom.stderr).toBe(0);
+    expect(custom.stdout).toContain("Skipped harness linking: non-default install root");
+    expect(await readFile(env.INSTALL_TEST_REFRESHES, "utf8")).toBe(
+      process.platform === "linux"
+        ? JSON.stringify({ version: "v0.2.0", args: ["start", "clankie"] }) + "\n"
+        : "",
+    );
     const retained = join(installation, "releases", "v0.1.0", "retained");
     await writeFile(retained, "immutable directory");
     expect(spawnSync("sh", [installer, "--version", "v0.1.0"], { env }).status).toBe(0);

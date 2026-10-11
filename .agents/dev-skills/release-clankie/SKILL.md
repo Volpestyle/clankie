@@ -131,6 +131,24 @@ run `clankie work releases sync` from the checkout. This records the release
 and moves the built-in items it shipped to delivered. Watch
 the Release workflow through completion, verify every uploaded archive (macOS
 and both Linux targets) against its checksum, then test the documented installer against that published version.
+Run that installer proof under an isolated `HOME`, never the owner's home:
+
+```sh
+installer_proof=$(mktemp -d "${TMPDIR:-/tmp}/clankie-installer-proof.XXXXXX")
+mkdir -p "$installer_proof/home"
+clankie heavy -- env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u CLANKIE_STATE -u CLANKIE_SETTINGS_FILE \
+  HOME="$installer_proof/home" XDG_CONFIG_HOME="$installer_proof/home/.config" \
+  XDG_STATE_HOME="$installer_proof/home/.local/state" \
+  CLANKIE_INSTALL_ROOT="$installer_proof/root" CLANKIE_BIN_DIR="$installer_proof/bin" \
+  CLANKIE_NO_MODIFY_PATH=1 sh install.sh --version vX.Y.Z --no-app
+"$installer_proof/bin/clankie" --version
+```
+
+Require the non-default-root harness-skip message. Keep the logs as evidence,
+then remove only this proof directory. Never use live harness profiles or start
+an installed service for this check. Linux installation starts a service, so run
+its proof in an isolated container rather than on the owner's machine.
+
 Never weaken or skip the workflow's repository gate to make a release pass.
 
 Developer ID signing, notarization, Intel macOS, Linux, package-manager

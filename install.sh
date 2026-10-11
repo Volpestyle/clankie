@@ -162,22 +162,27 @@ if [ "$platform" = "Linux" ]; then
   echo "Clankie is running. Run $bin_link, choose local, then /setup."
 fi
 
-# Existing links follow the release, even when installed without a terminal.
-# This script is served from main for every tag; a release older than the
-# harness command (v0.3.3 and earlier) has nothing to link, so the install ends.
-if ! refreshed=$("$bin_link" harness install --refresh-linked 2>&1); then
-  case "$refreshed" in
-    *'unknown command "harness"'*) exit 0 ;;
-  esac
-  printf '%s\n' "$refreshed" >&2
-  exit 1
-fi
-printf '%s\n' "$refreshed"
-# Review new optional harness installations only in an interactive owner terminal.
-if [ -t 0 ] && [ -t 1 ]; then
-  "$bin_link" harness install
+# Custom installs must never repoint the owner's local or fleet harnesses.
+if [ "$install_root" != "$HOME/.local/share/clankie" ]; then
+  echo "Skipped harness linking: non-default install root ($install_root)."
 else
-  echo "Run clankie harness install in a terminal to review optional harness linking."
+  # Existing links follow the release, even when installed without a terminal.
+  # This script is served from main for every tag; a release older than the
+  # harness command (v0.3.3 and earlier) has nothing to link, so the install ends.
+  if ! refreshed=$("$bin_link" harness install --refresh-linked 2>&1); then
+    case "$refreshed" in
+      *'unknown command "harness"'*) exit 0 ;;
+    esac
+    printf '%s\n' "$refreshed" >&2
+    exit 1
+  fi
+  printf '%s\n' "$refreshed"
+  # Review new optional harness installations only in an interactive owner terminal.
+  if [ -t 0 ] && [ -t 1 ]; then
+    "$bin_link" harness install
+  else
+    echo "Run clankie harness install in a terminal to review optional harness linking."
+  fi
 fi
 
 # Skip launch when no artifact is pinned or the owner opted out. Pairing output is private.
