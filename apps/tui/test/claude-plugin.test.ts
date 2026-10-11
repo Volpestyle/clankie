@@ -174,6 +174,20 @@ describe("clankie-worker claude plugin", () => {
               },
             ]
           : []),
+        ...(["SessionStart", "PreToolUse"].includes(event)
+          ? [
+              {
+                ...(event === "PreToolUse" ? { matcher: "mcp__.*" } : {}),
+                hooks: [
+                  {
+                    type: "command",
+                    command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/tracker-hook.mjs"',
+                    timeout: 10,
+                  },
+                ],
+              },
+            ]
+          : []),
       ]);
     }
   });

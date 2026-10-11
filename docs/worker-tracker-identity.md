@@ -47,6 +47,32 @@ through the connected account, or uses an explicit grant.
 | Native `hire_agent`        | Local Claude and Codex hires get the same deny rules and overrides. Local Claude gets the mailbox-only seat bridge; pi its Herdr extension. | No automatic tracker grant, so writes go through the lead. pi inherits extensions unfiltered. Remote launches read no remote configuration. |
 | Explicit worker grant      | `WorkerMcp` verifies account binding, principal, tool and arguments on every call. Account replacement invalidates access.                  | A grant protects the bridge; it does not remove credentials already available to the worker.                                                |
 
+Worker and operator Claude plugins also carry a local `PreToolUse` guard that
+denies inherited Linear-named MCP servers (including `linear-server` and the
+claude.ai connector), even in hand-started sessions without a linked pane or
+working bridge. Reads are denied too; use Clankie's connected tools. The plugin's
+SessionStart notice identifies that boundary visibly. Loading neither plugin
+adds no guard to a plain Claude session. No user profile configuration is changed.
+Existing sessions need the updated plugin loaded through the normal native
+plugin update/reload or a deliberate resume; a source change alone is not proof
+of a running session's guard.
+
+For a hand-started session without a plugin, use `clankie claude` for the operator
+seat or load the worker plugin for a fleet session and publish through
+`clankie_tools` / `clankie_call`. An unlinked worker asks its lead to publish.
+The owner keeps personal `linear-server` use in plain Claude. Any profile-wide
+deny remains an owner decision; this feature does not edit it.
+
+Owner and human wake selectors require an explicit signed `actor.type=user`;
+missing types and app/integration actors do not qualify even when their ID or
+email matches an owner. Host-recorded worker provenance still takes precedence.
+A user-authenticated external connector can emit the same signed user actor as
+Linear app/web comments: the provider's documented envelope has no reliable
+client-origin flag. That unknown origin cannot be identified as human from
+actor ID alone. Preventing the plugin's connector write is the structural fix;
+the wake rule rejects knowable non-user/worker origins without suppressing real
+owner comments. See [Linear's webhook envelope](https://linear.app/developers/webhooks).
+
 Signed Linear webhooks that pass the actor/type rules wake one ordinary chat:
 the project's configured lead chat, otherwise `global-default`
 ([ADR 0214](adr/0214-linear-wakes-require-attribution-and-rules.md)). The

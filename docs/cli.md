@@ -1591,6 +1591,15 @@ schema defaults. Both require the operator bearer; invalid rules return 400.
 API, CLI, tool, and TUI edits apply to the next event without restart. They
 never promote old passive history. Use `follow off` to stop queued turns.
 
+Clankie's worker and operator Claude plugins also deny inherited Linear MCP
+tools in hand-started plugin sessions, even without a live bridge. Their visible
+startup notice directs evidence to `clankie_tools` / `clankie_call`; an unlinked
+worker asks its lead to post. Plain Claude sessions without these plugins keep
+the owner's personal connector. To enter the operator boundary reversibly, use
+`clankie claude`; exit it and launch plain `claude` to use the personal session.
+No profile configuration changes. See [tracker identity](worker-tracker-identity.md)
+for the limit of signed user-actor provenance and plugin update requirements.
+
 The Claude seat denies the inherited `linear-server` MCP server with Claude
 Code’s server-prefix permission rule. It uses Clankie’s connected `linear_*`
 tools as the owner-connected account. Whatever tracker identity the owner connects
