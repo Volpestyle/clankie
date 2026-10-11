@@ -54,12 +54,20 @@ not execute evaluations.
 The host-integration command selects tests already in the full gate. The eval
 command is separate and never runs implicitly. Retries are disabled. CI cancels
 superseded runs on the same ref, retains manual full-check reports for seven
-days, and keeps its 30-minute ceiling. The private app's full client/host journey
+days, and allows 60 minutes for manual checks and 30 for ordinary CI. The macOS
+tag-release job allows 65 minutes, including archive build and smoke; individual
+test deadlines remain unchanged. The private app's full client/host journey
 and native builds run at release time or on an explicit manual run.
 
 On fleet machines, run full gates through `clankie heavy -- pnpm check`, one
-gate at a time. Vitest uses at most four isolated forked processes inside that
-permit. Each file gets its own fixture HOME, temp directory and stores; the full suite selection
+gate at a time. Vitest defaults to four isolated forked processes locally and
+three in CI, reducing contention from the test files' real service, SSH and
+process fixtures on the three-core macOS runner. A two-fork full-suite estimate
+would exceed the manual job's former 45-minute ceiling; see the
+[release CI measurements](2026-10-11-release-ci-concurrency/README.md).
+`VITEST_MAX_WORKERS` overrides the
+default, including the lower limits supplied by `clankie heavy`.
+Each file gets its own fixture HOME, temp directory and stores; the full suite selection
 and manual eval boundary are the same as a single-file-at-a-time run.
 
 The fleet load gate is separate from `pnpm check` and default tests. Version-tag

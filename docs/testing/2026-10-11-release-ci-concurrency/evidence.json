@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "acceptance-3.json",
+      "size": 18208,
+      "sha256": "307af6a7aa6c528e1ca4378c234be08315f84a1442be34c1b95847829ccc221c",
+      "url": "clankie://evidence/sha256/307af6a7aa6c528e1ca4378c234be08315f84a1442be34c1b95847829ccc221c"
+    },
+    {
+      "path": "acceptance-3.log",
+      "size": 26325,
+      "sha256": "1c72c9ea25d7c0904f1355418314c95be608b11737d48aede579bfaf5955b6b4",
+      "url": "clankie://evidence/sha256/1c72c9ea25d7c0904f1355418314c95be608b11737d48aede579bfaf5955b6b4"
+    },
+    {
+      "path": "comparison-1-4.json",
+      "size": 18269,
+      "sha256": "39d5c544571f9ab9b7037f65825ffc364be6a2d86d743827b3aa66bf60e0785e",
+      "url": "clankie://evidence/sha256/39d5c544571f9ab9b7037f65825ffc364be6a2d86d743827b3aa66bf60e0785e"
+    },
+    {
+      "path": "comparison-1-4.log",
+      "size": 25570,
+      "sha256": "2c6dc2bdf4e3cb977e125df4b53eaa4e5bba22663dff8d7ff4c3e60cff1f0bf4",
+      "url": "clankie://evidence/sha256/2c6dc2bdf4e3cb977e125df4b53eaa4e5bba22663dff8d7ff4c3e60cff1f0bf4"
+    },
+    {
+      "path": "comparison-2-2.json",
+      "size": 18207,
+      "sha256": "c79be8e241096ce10d8e97cb075f5c5c25c2e7f4895f2a3e97fee9ebc97c7f64",
+      "url": "clankie://evidence/sha256/c79be8e241096ce10d8e97cb075f5c5c25c2e7f4895f2a3e97fee9ebc97c7f64"
+    },
+    {
+      "path": "comparison-2-2.log",
+      "size": 25804,
+      "sha256": "10f10b767e65846f54ff079dd0c7d4785e52011bdaf198a333b71facf9e40284",
+      "url": "clankie://evidence/sha256/10f10b767e65846f54ff079dd0c7d4785e52011bdaf198a333b71facf9e40284"
+    },
+    {
+      "path": "comparison-3-2.json",
+      "size": 18217,
+      "sha256": "777983b8f00af051e2ae1912a306e528013b902e7cf0ddc35e4b4e1ede45d2bb",
+      "url": "clankie://evidence/sha256/777983b8f00af051e2ae1912a306e528013b902e7cf0ddc35e4b4e1ede45d2bb"
+    },
+    {
+      "path": "comparison-3-2.log",
+      "size": 27494,
+      "sha256": "be29461226a438b135b7eadaa5b26676a02544434325101f448ed4096384be90",
+      "url": "clankie://evidence/sha256/be29461226a438b135b7eadaa5b26676a02544434325101f448ed4096384be90"
+    },
+    {
+      "path": "comparison-4-4.json",
+      "size": 18206,
+      "sha256": "a535df820da8bc40e17c3263c606b6236eeae92676d1225241600a5721091a10",
+      "url": "clankie://evidence/sha256/a535df820da8bc40e17c3263c606b6236eeae92676d1225241600a5721091a10"
+    },
+    {
+      "path": "comparison-4-4.log",
+      "size": 27270,
+      "sha256": "2486a083a4516023b56f9676efc1275f130cf376dfb5cdb3f66392cab959afae",
+      "url": "clankie://evidence/sha256/2486a083a4516023b56f9676efc1275f130cf376dfb5cdb3f66392cab959afae"
+    },
+    {
+      "path": "full-suite-estimate.json",
+      "size": 232052,
+      "sha256": "7b43c2c333dbbd3acf251acd1c21980b4f977022f9bafb4b9f529a71b7c64861",
+      "url": "clankie://evidence/sha256/7b43c2c333dbbd3acf251acd1c21980b4f977022f9bafb4b9f529a71b7c64861"
+    },
+    {
+      "path": "reproduction.tar",
+      "size": 111104,
+      "sha256": "1059434dc1b3a26d2c66d46830d5faa36d29f02b6a95e486fb63fe5c2f673bc2",
+      "url": "clankie://evidence/sha256/1059434dc1b3a26d2c66d46830d5faa36d29f02b6a95e486fb63fe5c2f673bc2"
+    },
+    {
+      "path": "run-38096093705-full.log",
+      "size": 1164434,
+      "sha256": "917c6d9cec0fb97402149e794157df9992e8601c8d76c7637e9cebc7ae4ff6f5",
+      "url": "clankie://evidence/sha256/917c6d9cec0fb97402149e794157df9992e8601c8d76c7637e9cebc7ae4ff6f5"
+    },
+    {
+      "path": "run-38112212045-attempt1-full.log",
+      "size": 1125847,
+      "sha256": "5019a6f12991f4b8cf64272ad3e3eee6958f6de98fb1227671058764165e8eb9",
+      "url": "clankie://evidence/sha256/5019a6f12991f4b8cf64272ad3e3eee6958f6de98fb1227671058764165e8eb9"
+    },
+    {
+      "path": "run-38112212045-attempt2-full.log",
+      "size": 1109003,
+      "sha256": "66bca04bc891de01d3515b08b2118f0d263ac44bcee48dcc0862f06f28daeb62",
+      "url": "clankie://evidence/sha256/66bca04bc891de01d3515b08b2118f0d263ac44bcee48dcc0862f06f28daeb62"
+    },
+    {
+      "path": "run-38112212045-attempt2.log",
+      "size": 1008362,
+      "sha256": "ee29cb60de82c90be83694427320a750d8f53e521f2dcb46260313b076d7c897",
+      "url": "clankie://evidence/sha256/ee29cb60de82c90be83694427320a750d8f53e521f2dcb46260313b076d7c897"
+    },
+    {
+      "path": "run-38112212045.log",
+      "size": 1008362,
+      "sha256": "ee29cb60de82c90be83694427320a750d8f53e521f2dcb46260313b076d7c897",
+      "url": "clankie://evidence/sha256/ee29cb60de82c90be83694427320a750d8f53e521f2dcb46260313b076d7c897"
+    },
+    {
+      "path": "run-38116629927-full.log",
+      "size": 1098854,
+      "sha256": "a93ee2a187eebc03280f2d4ab4e98180c373e7b65f5030b746a19b64e7177e82",
+      "url": "clankie://evidence/sha256/a93ee2a187eebc03280f2d4ab4e98180c373e7b65f5030b746a19b64e7177e82"
+    },
+    {
+      "path": "run-38116629927.log",
+      "size": 998167,
+      "sha256": "849bd92f3afcf0ca3aee0411a8b37456a1248aae8006b67a333fb0a10aeedc19",
+      "url": "clankie://evidence/sha256/849bd92f3afcf0ca3aee0411a8b37456a1248aae8006b67a333fb0a10aeedc19"
+    },
+    {
+      "path": "tag-timings.tar",
+      "size": 1822720,
+      "sha256": "018bac5679d38eb6510a4224787b53854ed71f6bb6b48d957ede156020cb999f",
+      "url": "clankie://evidence/sha256/018bac5679d38eb6510a4224787b53854ed71f6bb6b48d957ede156020cb999f"
+    }
+  ]
+}

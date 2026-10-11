@@ -26,10 +26,11 @@ export default defineConfig({
       "artifacts/**",
       "packages/play/test/free-play-corpus.test.ts", // Explicit manual eval lane.
     ],
-    // Each fork has its own fixture HOME and stores. Bound concurrency inside
-    // the fleet heavy permit instead of paying every file's import/wait serially.
+    // Each fork has its own fixture HOME and stores. CI's three-core macOS
+    // runner also starts real service/SSH/process fixtures. Three forks reduce
+    // contention without doubling the full suite's import and file-wait costs.
     fileParallelism: true,
-    maxWorkers: 4,
+    maxWorkers: process.env.CI ? 3 : 4,
     retry: 0,
     ...(process.env.CI
       ? {
