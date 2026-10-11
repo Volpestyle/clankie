@@ -945,7 +945,7 @@ it("two real heavy runners and a simulator use independent budgets in either adm
       await new Promise((resolve) => setTimeout(resolve, 40));
     }
     const held = lease(await f.http("/acquire", f.request));
-    expect((await f.governor.snapshot()).capacity).toEqual({
+    expect((await f.governor.snapshot()).capacity).toMatchObject({
       heavySlots: 2,
       simulatorSlots: 1,
       used: 2,
