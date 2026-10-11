@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "native-rest.png",
+      "size": 118,
+      "sha256": "46276455a550f8930ab6fb532c79c6035935e08eee8dc1a529188cc7c0481b28",
+      "url": "clankie://evidence/sha256/46276455a550f8930ab6fb532c79c6035935e08eee8dc1a529188cc7c0481b28"
+    }
+  ]
+}

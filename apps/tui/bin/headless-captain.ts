@@ -48,7 +48,7 @@ export async function runHeadlessCaptainCommand(
   const stderr = options.stderr ?? process.stderr;
   try {
     const env = options.env ?? process.env;
-    if (command === "skin") {
+    if (command === "skin" && rest[0] !== "draft") {
       outputJson(stdout, await (await import("../src/command/skin.ts")).runSkinCommand(rest));
       return 0;
     }
@@ -117,7 +117,9 @@ export async function runHeadlessCaptainCommand(
       // These existing commands are HTTP-only. The transport replaces their local
       // bearer inside the envelope; no Mac credential is read or transmitted.
       if (
-        ["conversations", "conversation", "send", "runtime-health", "join", "auto"].includes(command ?? "") ||
+        ["conversations", "conversation", "send", "runtime-health", "join", "auto", "skin"].includes(
+          command ?? "",
+        ) ||
         discordHttp
       )
         return runHeadlessCaptainCommand(args, {
@@ -130,6 +132,13 @@ export async function runHeadlessCaptainCommand(
           },
         });
       outputJson(stdout, await (await import("../src/command/hosted.ts")).hostedCommand(args, transport));
+      return 0;
+    }
+    if (command === "skin" && rest[0] === "draft") {
+      outputJson(
+        stdout,
+        await (await import("../src/command/skin-draft.ts")).runSkinDraftCommand(rest.slice(1), options),
+      );
       return 0;
     }
     if (command === "health" || command === "status") {

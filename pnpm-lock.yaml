@@ -79,6 +79,9 @@ importers:
       '@clankie/interactive-environment':
         specifier: workspace:*
         version: link:../../packages/interactive-environment
+      '@clankie/lead-skin':
+        specifier: workspace:*
+        version: link:../../packages/lead-skin
       '@clankie/media-connector':
         specifier: workspace:*
         version: link:../../packages/media-connector
@@ -326,12 +329,12 @@ importers:
 
   apps/relay:
     dependencies:
-      '@clankie/settings':
-        specifier: workspace:*
-        version: link:../../packages/settings
       '@clankie/credential-broker':
         specifier: workspace:*
         version: link:../../packages/credential-broker
+      '@clankie/settings':
+        specifier: workspace:*
+        version: link:../../packages/settings
     devDependencies:
       '@hono/node-server':
         specifier: 2.0.8

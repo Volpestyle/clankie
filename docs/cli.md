@@ -61,6 +61,14 @@ animation; independent visual review must precede publication. See the
 [shared compiler contract](../packages/lead-skin/README.md) for the data format,
 limits and runtime verification API.
 
+`clankie skin draft` uses the owner-authenticated service for durable briefs,
+native rest/work/comms poses and exact-revision owner approval. Use `create
+SENTENCE [--request UUID]`, `list`, `get ID [--version N]`, `pose COMMAND.json`,
+`revise ID REVISION SENTENCE`, or `approve|decline|cancel ID REVISION`.
+See [owner key-pose drafts](skin-drafts.md) for owned attachments, sampling,
+preview routes, approval provenance and cancellation. Draft operations make no
+generation request and leave the live look unchanged.
+
 ## Conventions
 
 | Rule                            | What it means                                                                                                                          |

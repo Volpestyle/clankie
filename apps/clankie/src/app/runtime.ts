@@ -95,6 +95,7 @@ import { createComposerTranscriptionRoutes } from "../composer-transcription.ts"
 import { createEvidenceRoutes } from "../evidence-store.ts";
 import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { createAppearanceRoutes } from "../appearance-routes.ts";
+import { createSkinDraftRoutes } from "../skin-draft-routes.ts";
 import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
@@ -2733,6 +2734,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return recordEvent;
     },
   });
+
+  app.route(
+    "/",
+    createSkinDraftRoutes({ service: dependencies.skinDrafts, authorize: questionOwnerAuthority }),
+  );
 
   /**
    * Delivery for devices that authorized it. The dispatcher owns coalescing and

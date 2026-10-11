@@ -123,6 +123,7 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
+import { SkinDraftService } from "./skin-drafts.ts";
 import { RemoteProjectLeads } from "./remote-project-leads.ts";
 import { RuntimeHealthObserver } from "./runtime-health.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
@@ -559,6 +560,11 @@ const memory = createFileMemory({ dataDir: defaultMemoryDir(process.env) });
 // that serves the bytes back resolves the same directory this wrote them to.
 const attachmentRoot = discordAttachmentRoot(process.env);
 const deliveredFiles = new DeliveredFileStore(attachmentRoot);
+const skinDrafts = new SkinDraftService({
+  root: join(stateRoot, "skin-drafts"),
+  ownerId: hostedBody?.bootstrap.accountId ?? process.env.CLANKIE_OPERATOR_ID ?? "local-operator",
+  files: deliveredFiles,
+});
 const personaImages = createPersonaImageSource(settingsStore, repoRoot);
 // Snapshot on startup without holding service readiness behind a caption call.
 void personaImages()
@@ -1374,6 +1380,7 @@ const captain = createCaptain(
       shell: (fleet) => runtimes.fleetShell(fleet),
       remoteWorkspace: (fleet, directory) => runtimes.remoteWorkspace(fleet, directory),
     },
+    skinDrafts,
     mcp: mcpHost,
     email,
     rivals,
@@ -2105,6 +2112,7 @@ const clankie = await createClankieApp({
   },
   prepareLocalClaudeShim: (action, binding) => prepareLocalClaudeShim(action, binding),
   deliveredFiles,
+  skinDrafts,
   herdrRuntime: herdr.status,
   activitySharing,
   ...(hostedBody === undefined ? {} : { hostedActivity: hostedBody }),

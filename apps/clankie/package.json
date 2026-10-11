@@ -28,6 +28,7 @@
     "@clankie/fleet-resources": "workspace:*",
     "@clankie/game-extension": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
+    "@clankie/lead-skin": "workspace:*",
     "@clankie/media-connector": "workspace:*",
     "@clankie/minecraft": "workspace:*",
     "@clankie/model-provider": "workspace:*",

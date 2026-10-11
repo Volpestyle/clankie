@@ -71,3 +71,7 @@ poses, retain the approved palette, and complete independent visual review and
 refinement before publication. Mechanical checks return `ownerApproval` and
 `visualReview` as `not_checked`. Provider choice, generation credits, owner catalog
 storage and live selection are separate capabilities.
+
+The service also offers [durable owner key-pose drafts](../../docs/skin-drafts.md)
+for already-owned images. Its API/CLI stores exact-revision owner approval; these
+offline compiler commands continue to report approval as not checked.

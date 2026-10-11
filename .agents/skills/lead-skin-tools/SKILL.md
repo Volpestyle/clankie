@@ -1,6 +1,6 @@
 ---
 name: lead-skin-tools
-description: Compile, sample or mechanically check a lead avatar with Clankie's installed deterministic skin tools. Use when preparing native-grid avatar data or checking a lead pack. This skill does not generate images or publish a look.
+description: Prepare owner key-pose drafts, compile, sample or mechanically check a lead avatar with Clankie's installed deterministic skin tools. Use when preparing native-grid avatar data or checking a lead pack. This skill does not generate images or publish a look.
 ---
 
 # Prepare a lead skin
@@ -31,3 +31,22 @@ Keep private art, references and reference-derived palettes in their authorized
 private location. This package ships only generic contracts and deterministic
 tooling. Image generation, spend limits, catalog publication and applying the
 live look require their own authorized flow.
+
+# Durable owner pose approval
+
+Use `clankie skin draft` or the operator-lane `skin_draft` tool to prepare a
+brief and already-owned rest/work/comms poses. The [draft contract](../../../docs/skin-drafts.md)
+names the commands and exact-revision image preview routes. Commit each image
+through the owner's conversation attachment API, sample rest first with an
+explicit native grid, then keep its geometry and palette for work/comms.
+Show source/native poses side by side with Classic before asking the owner to
+approve the returned revision through the owner API or CLI. Agents cannot
+approve or decline through `skin_draft`; no model argument supplies authority.
+
+Any brief or pose edit clears approval; replacing rest also clears work/comms.
+Read current state after a conflict or lost reply. Reuse create's request UUID
+only for the same intent; never automatically replay uncertain edits.
+Cancellation is terminal. Owner approval binds exact source/native bytes and
+three native digests; it does not authorize animation generation, spending,
+independent visual review, publication or changing the live look. Those later
+stages must verify the exact approved revision again.

@@ -65,6 +65,7 @@ import { minecraftTools } from "./minecraft-tools.ts";
 import { fleetEfficiencyTools } from "./fleet-efficiency-tools.ts";
 import { routineTool } from "./routine-tools.ts";
 import { minecraftHostTools } from "./minecraft-host-tools.ts";
+import { skinDraftTool } from "./skin-draft-tools.ts";
 
 /**
  * What the running turn is, as its tools need to see it: the last attachable
@@ -72,6 +73,8 @@ import { minecraftHostTools } from "./minecraft-host-tools.ts";
  * (which scopes every room-keyed read and write a tool makes).
  */
 export interface TurnContext {
+  /** Host-stamped owner principal for this live private turn, never model input. */
+  skinDraftAuthority?: import("./conversation-questions.ts").QuestionAuthority | undefined;
   /** Host-only private operator projection; never installed for Discord or workers. */
   leadChats?: (() => Promise<readonly LeadChat[]>) | undefined;
   proposeProjectDefaults?: (() => Promise<unknown>) | undefined;
@@ -206,6 +209,7 @@ export function captainTools(
   );
   return [
     ...desktopTools(deps.desktop),
+    ...(lane === "operator" ? [skinDraftTool(deps.skinDrafts, turn)] : []),
     ...(lane === "operator" && deps.refreshWorkerCatalogs
       ? [
           defineTool({

@@ -5,6 +5,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["skin"],
     lines: [
+      "  skin draft create SENTENCE [--request UUID] | list | get ID [--version N] | pose COMMAND.json | revise ID REV SENTENCE | approve|decline|cancel ID REV  Owner key-pose drafts; no generation or live-look change",
       "  skin compile SOURCE --out NEW_DIRECTORY | sample IMAGE OPTIONS.json --out NEW_DIRECTORY | check DIRECTORY  Compile, sample or mechanically check lead-skin data; never generates or publishes art",
     ],
   },

@@ -109,3 +109,8 @@ pnpm --filter @clankie/protocol test
 
 This package is Apache-2.0. The [public/private boundary](../../docs/adr/0183-the-harness-is-public-the-hosted-service-is-private.md)
 keeps client and managed-service implementation in their respective repositories.
+
+`@clankie/protocol/skin-drafts` defines owner-scoped briefs, native key poses,
+revision-fenced edits and exact-artifact approval. The [draft API and CLI](../../docs/skin-drafts.md)
+require host-proven owner authority; no schema field grants generation, spending
+or publication.

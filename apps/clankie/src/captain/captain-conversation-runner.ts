@@ -364,6 +364,15 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
               ? ctx.conversations.conversation(conversationId) !== undefined
               : ctx.conversations.runsCaptainTurns(conversationId),
         };
+        const draftOwner = context.ownerAuthority;
+        lane.capture.skinDraftAuthority =
+          !socialContinuation && draftOwner
+            ? {
+                principal: { ...draftOwner.principal },
+                current: () => bodyIdentity.current() && draftOwner.current(),
+                authorize: () => draftOwner.authorize(),
+              }
+            : undefined;
         lane.capture.shell = !socialContinuation;
         lane.capture.bodyIdentity = socialContinuation ? undefined : bodyIdentity;
         lane.capture.conversationAuthority = {

@@ -1,4 +1,5 @@
 import { APPEARANCE_SETTINGS_PATH, HOST_SETTINGS_PATH, MAXIMUM_TRUST_MODE_PATH } from "./owner-settings.ts";
+import { isSkinDraftRoute } from "./skin-drafts.ts";
 import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
 import { hostedDiscordAllows } from "./hosted-discord.ts";
 export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
@@ -19,6 +20,7 @@ import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */
 export function hostedOperatorAllows(method: string, path: string, body?: string): boolean {
+  if (isSkinDraftRoute(method, path)) return true;
   if (hostedDiscordAllows(method, path)) return true;
   // A self-hosted machine's free official bot (VUH-1766); never the edge's web permits.
   if (path === OFFICIAL_DISCORD_BODY_PATH) return method === "GET" || method === "POST";

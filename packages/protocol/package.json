@@ -53,7 +53,8 @@
     "./evidence": "./src/evidence.ts",
     "./huddles": "./src/huddles.ts",
     "./routines": "./src/routines.ts",
-    "./fleet-resources": "./src/fleet-resources.ts"
+    "./fleet-resources": "./src/fleet-resources.ts",
+    "./skin-drafts": "./src/skin-drafts.ts"
   },
   "scripts": {
     "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json",
