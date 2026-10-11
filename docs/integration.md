@@ -121,6 +121,14 @@ least `workers` access and answers that it is provisioned, runs no other gate,
 and is under the same load and memory guards plus 8 GiB. Otherwise, or when
 staging fails, the gate runs here and the batch's `placement` records why.
 
+Remote placement and staging share a two-minute deadline. If discovery, SSH or
+staging stalls, the batch records the phase and machine (when selected) in its
+local placement reason and runs the normal gate here. Cleanup has a separate
+ten-second limit, so an unavailable remote workspace cannot hold the serial
+queue. Cancellation stops only the SSH child created by that request, with a
+one-second grace before SIGKILL; it does not stop another batch or steer remote
+owner processes. Remote install and gate execution keep their existing behavior.
+
 The linked machine runs the gate in WSL under `~/.clankie-fleet`: its own Node,
 pnpm, Rust and ffmpeg, one clone of the public origin, and one directory per
 batch with a private home, temp and package store. The queue sends the composed

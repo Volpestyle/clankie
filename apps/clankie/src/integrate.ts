@@ -14,7 +14,7 @@ import {
 } from "@clankie/protocol/integrate";
 import { durableJson, withDirectoryLock, type LockOwner } from "./deploy-holds.ts";
 import { integrationEnvironment } from "./integrate-environment.ts";
-import { darwinOnlySkips, type GateRunner } from "./integrate-remote.ts";
+import { darwinOnlySkips, remoteGateDeadline, type GateRunner } from "./integrate-remote.ts";
 
 const execute = promisify(execFile);
 const now = () => new Date().toISOString();
@@ -31,7 +31,13 @@ interface IntegrationOptions {
    * Where a core-only batch's install and gate run when not here (VUH-2066):
    * a linked machine's runner when this one is saturated and that one has room.
    */
-  placeGate?: (batch: { id: string; origin: string }) => Promise<GateRunner | undefined>;
+  placeGate?: (
+    batch: { id: string; origin: string },
+    signal?: AbortSignal,
+  ) => Promise<GateRunner | undefined>;
+  /** Internal deadlines, overridable by real-process integration fixtures. */
+  remotePreparationTimeoutMs?: number;
+  remoteCleanupTimeoutMs?: number;
 }
 /** Main moved after the gate and its recorded selection no longer covers the result. */
 class GateNotCovering extends Error {}
@@ -588,8 +594,27 @@ export class IntegrationQueue {
     try {
       await this.installAndGate(batch, root, runner);
     } finally {
-      await runner?.dispose().catch(() => undefined);
+      const cleanup = await this.disposeRunner(runner);
+      if (cleanup) {
+        batch.placement = {
+          machine: batch.placement?.machine ?? runner!.machine,
+          reason: `${batch.placement?.reason ?? ""}; ${cleanup}`.slice(0, 500),
+        };
+        await this.save(batch);
+      }
     }
+  }
+
+  private async disposeRunner(runner?: GateRunner): Promise<string | undefined> {
+    if (!runner) return;
+    return remoteGateDeadline(
+      `${runner.machine} cleanup`,
+      this.options.remoteCleanupTimeoutMs ?? 10_000,
+      (signal) => runner.dispose(signal),
+    ).then(
+      () => undefined,
+      (error) => String(error),
+    );
   }
 
   /** The linked machine that will gate this batch, staged at its exact HEAD, or here. */
@@ -597,18 +622,37 @@ export class IntegrationQueue {
     const repo = batch.repos[0];
     if (!this.options.placeGate || batch.repos.length !== 1 || repo?.name !== "core") return undefined;
     let runner: GateRunner | undefined;
+    let phase = "placement";
     try {
-      runner = await this.options.placeGate({ id: batch.id, origin: repo.origin });
+      await remoteGateDeadline(
+        () => phase,
+        this.options.remotePreparationTimeoutMs ?? 120_000,
+        async (signal) => {
+          const placed = await this.options.placeGate!({ id: batch.id, origin: repo.origin }, signal);
+          // A late provider response cannot start staging after fallback has begun.
+          if (signal.aborted) {
+            void this.disposeRunner(placed);
+            signal.throwIfAborted();
+          }
+          runner = placed;
+          if (!runner) return;
+          await this.clean(repo);
+          signal.throwIfAborted();
+          phase = `${runner.machine} stage`;
+          await runner.stage(repo, signal);
+        },
+      );
       if (!runner) return undefined;
-      await this.clean(repo);
-      await runner.stage(repo);
       batch.placement = { machine: runner.machine };
       await this.save(batch);
       return runner;
     } catch (error) {
       // The gate still runs: here, with the reason it could not go there.
-      await runner?.dispose().catch(() => undefined);
-      batch.placement = { machine: "local", reason: String(error).slice(0, 500) };
+      const cleanup = await this.disposeRunner(runner);
+      batch.placement = {
+        machine: "local",
+        reason: `${String(error)}; gating locally${cleanup ? `; ${cleanup}` : ""}`.slice(0, 500),
+      };
       await this.save(batch);
       return undefined;
     }

@@ -73,6 +73,9 @@ for another HEAD, gate against live shared state, or force push a rollback:
 `integrate revert PASSED_BATCH_UUID` restores a known good tree with a new gated
 commit. Integration clones disable client hooks; the live checkout guard does
 not affect their attested landing.
+Remote placement/staging has a shared two-minute deadline and falls back to the
+local gate with its reason in the batch receipt. Cleanup is bounded to ten
+seconds, so an unavailable linked machine cannot hold the serial queue there.
 
 A deploy hold keeps `clankie update` from replacing the running service, for a
 live test against it: `integrate hold --holder NAME --reason TEXT --minutes N

@@ -199,3 +199,82 @@ it("a linked machine's green that skipped darwin-only tests gates again here, ke
     ".clankie-fleet",
   );
 }, 120_000);
+
+it.each(["placement", "stage"])(
+  "a hung remote %s falls back locally, bounds cleanup and releases the serial queue",
+  async (phase) => {
+    const f = await fixture();
+    const change = await f.commit("feature", "timeout");
+    const children: ReturnType<typeof spawn>[] = [];
+    const exits: Promise<unknown>[] = [];
+    let ready!: () => void;
+    const started = new Promise<void>((resolve) => (ready = resolve));
+    // An actual transport child which stays connected and even ignores TERM.
+    // No remote machine or existing service-owned process is touched.
+    const hang = () => {
+      const child = spawn(
+        process.execPath,
+        ["-e", "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)"],
+        { stdio: ["pipe", "pipe", "pipe"] },
+      );
+      children.push(child);
+      exits.push(new Promise((resolve) => child.once("close", resolve)));
+      child.stdout!.once("data", ready);
+      return child;
+    };
+    let placements = 0;
+    const queue = new IntegrationQueue({
+      directory: join(f.root, "integration"),
+      core: f.source,
+      remotePreparationTimeoutMs: 5_000,
+      remoteCleanupTimeoutMs: 100,
+      placeGate: async (batch, signal) => {
+        if (++placements > 1) return undefined;
+        const runner = wslGateRunner({
+          machine: "pc",
+          shell: "posix",
+          batch: batch.id,
+          origin: batch.origin,
+          stream: hang,
+          bundle: gitBundle,
+        });
+        if (phase === "placement") {
+          // Exercise cancellation while the placement provider is still preparing.
+          const base = await git(f.source, "rev-parse", "origin/main");
+          await runner.stage({ directory: f.source, base, head: change }, signal);
+        }
+        return runner;
+      },
+    });
+    try {
+      const first = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [change] });
+      await queue.start(first, guard);
+      await started;
+      const next = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [change] });
+      await queue.start(next, guard);
+      await queue.wait();
+      const batch = await queue.status(first.id);
+      expect(batch.state, batch.error).toBe("passed");
+      expect(batch.placement).toMatchObject({
+        machine: "local",
+        reason: expect.stringContaining(
+          `${phase === "stage" ? "pc stage" : "placement"} timed out after 5000ms`,
+        ),
+      });
+      if (phase === "stage") expect(batch.placement!.reason).toContain("pc cleanup timed out after 100ms");
+      expect(batch.repos[0]!.gate).toMatchObject({ exitCode: 0 });
+      expect(batch.repos[0]!.gate!.machine).toBeUndefined();
+      expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toContain("gated-in");
+      expect((await queue.status(next.id)).state).toBe("passed");
+      expect((await queue.snapshot()).running).toEqual([]);
+      expect((await queue.snapshot()).waiting).toEqual([]);
+      await Promise.all(exits);
+      expect(children.every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(true);
+    } finally {
+      for (const child of children)
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await Promise.all(exits);
+    }
+  },
+  120_000,
+);

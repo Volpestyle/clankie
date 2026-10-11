@@ -20,7 +20,10 @@ export interface GateRunner {
   /** The machine ID recorded on install and gate. */
   readonly machine: string;
   /** Put HEAD in a fresh workspace there; refuses unless the remote HEAD is exactly `head`. */
-  stage(repo: { readonly directory: string; readonly base: string; readonly head: string }): Promise<void>;
+  stage(
+    repo: { readonly directory: string; readonly base: string; readonly head: string },
+    signal?: AbortSignal,
+  ): Promise<void>;
   run(
     step: "install" | "gate",
     base: string,
@@ -29,7 +32,31 @@ export interface GateRunner {
   /** Copy the gate's recorded selection into the local worktree. */
   collect(directory: string): Promise<void>;
   /** Remove the remote workspace. */
-  dispose(): Promise<void>;
+  dispose(signal?: AbortSignal): Promise<void>;
+}
+
+/** Bound optional remote preparation even when a provider ignores cancellation. */
+export async function remoteGateDeadline<T>(
+  phase: string | (() => string),
+  timeoutMs: number,
+  work: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout>;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(
+        `Remote gate ${typeof phase === "string" ? phase : phase()} timed out after ${timeoutMs}ms`,
+      );
+      controller.abort(error);
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([work(controller.signal), expired]);
+  } finally {
+    clearTimeout(timer!);
+  }
 }
 
 /** What the linked machine has room for, read before a gate is placed there. */
@@ -114,6 +141,7 @@ function wslGateCommand(shell: HerdrSshTransport["shell"], op: string, args: rea
 function finished(
   child: ChildProcess,
   out?: Writable,
+  signal?: AbortSignal,
 ): Promise<{ exitCode: number | null; signal: string | null; stdout: string }> {
   return new Promise((resolve, reject) => {
     let stdout = "";
@@ -124,8 +152,30 @@ function finished(
       child.stdout?.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
       child.stderr?.resume();
     }
-    child.on("error", reject);
-    child.on("close", (exitCode, signal) => resolve({ exitCode, signal, stdout }));
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const abort = () => {
+      // Only this call's SSH child: never a shared connection or another batch.
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+      child.stdin?.destroy();
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      reject(signal?.reason ?? new Error("Remote gate cancelled"));
+    };
+    const cleanup = () => {
+      signal?.removeEventListener("abort", abort);
+      clearTimeout(killTimer);
+    };
+    child.on("error", (error) => {
+      cleanup();
+      reject(error);
+    });
+    child.on("close", (exitCode, childSignal) => {
+      cleanup();
+      resolve({ exitCode, signal: childSignal, stdout });
+    });
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
   });
 }
 
@@ -137,25 +187,33 @@ export function wslGateRunner(options: {
   /** A process for one remote command over the fleet's own SSH connection. */
   readonly stream: (remoteCommand: string) => ChildProcess;
   /** `git bundle` of base..head from the local worktree; empty when head is base. */
-  readonly bundle: (directory: string, base: string, head: string) => Promise<Buffer>;
+  readonly bundle: (directory: string, base: string, head: string, signal?: AbortSignal) => Promise<Buffer>;
 }): GateRunner {
   if (!/^[0-9a-f-]{36}$/u.test(options.batch)) throw new Error("Invalid batch ID");
-  const call = (op: string, args: readonly string[] = [], out?: Writable, input?: Buffer) => {
+  const call = (
+    op: string,
+    args: readonly string[] = [],
+    out?: Writable,
+    input?: Buffer,
+    signal?: AbortSignal,
+  ) => {
+    signal?.throwIfAborted();
     const child = options.stream(wslGateCommand(options.shell, op, [options.batch, ...args]));
     child.stdin?.end(input ?? "");
-    return finished(child, out);
+    return finished(child, out, signal);
   };
   return {
     machine: options.machine,
-    async stage(repo) {
+    async stage(repo, signal) {
       if (![repo.base, repo.head].every((sha) => /^[0-9a-f]{40}$/u.test(sha)))
         throw new Error("Invalid commit");
-      const bundle = await options.bundle(repo.directory, repo.base, repo.head);
+      const bundle = await options.bundle(repo.directory, repo.base, repo.head, signal);
       const staged = await call(
         "stage",
         [publicSource(options.origin), repo.head],
         undefined,
         Buffer.from(bundle.toString("base64")),
+        signal,
       );
       if (staged.exitCode !== 0) throw new Error(`Could not stage ${repo.head} on ${options.machine}`);
     },
@@ -174,8 +232,8 @@ export function wslGateRunner(options: {
         await writeFile(target, Buffer.from(body, "base64"));
       }
     },
-    async dispose() {
-      await call("dispose");
+    async dispose(signal) {
+      await call("dispose", [], undefined, undefined, signal);
     },
   };
 }
@@ -184,10 +242,12 @@ export function wslGateRunner(options: {
 async function remoteCapacity(
   shell: HerdrSshTransport["shell"],
   stream: (remoteCommand: string) => ChildProcess,
+  signal?: AbortSignal,
 ): Promise<RemoteCapacity> {
+  signal?.throwIfAborted();
   const child = stream(wslGateCommand(shell, "capacity", ["00000000-0000-0000-0000-000000000000"]));
   child.stdin?.end();
-  const { exitCode, stdout } = await finished(child);
+  const { exitCode, stdout } = await finished(child, undefined, signal);
   const parsed = exitCode === 0 ? (JSON.parse(stdout.trim()) as Record<string, number>) : undefined;
   return {
     ready: parsed?.ready === 1,
@@ -216,11 +276,13 @@ const REMOTE_GATE_MEMORY_MB = 8192;
 export async function placeRemoteGate(input: {
   readonly batch: { readonly id: string; readonly origin: string };
   readonly settings: ClankieSettings;
+  readonly signal?: AbortSignal;
   readonly local: LocalHeavyState | undefined;
   readonly fleets: readonly HerdrFleet[];
   readonly stream: (fleet: HerdrFleet) => (remoteCommand: string) => ChildProcess;
-  readonly bundle: (directory: string, base: string, head: string) => Promise<Buffer>;
+  readonly bundle: (directory: string, base: string, head: string, signal?: AbortSignal) => Promise<Buffer>;
 }): Promise<GateRunner | undefined> {
+  input.signal?.throwIfAborted();
   const { settings, local } = input;
   if (settings.fleet.remoteGates !== "on" || !local) return undefined;
   const saturated =
@@ -233,7 +295,8 @@ export async function placeRemoteGate(input: {
     const machine = settings.execution.connections.find((entry) => entry.id === fleet.id)?.machine;
     if (!machine || !machineAccessAllows(machineAccessLevel(settings, machine), "workers")) continue;
     const stream = input.stream(fleet);
-    const room = await remoteCapacity(fleet.ssh.shell, stream).catch(() => undefined);
+    const room = await remoteCapacity(fleet.ssh.shell, stream, input.signal).catch(() => undefined);
+    input.signal?.throwIfAborted();
     if (
       !room?.ready ||
       room.gates > 0 ||
@@ -254,14 +317,21 @@ export async function placeRemoteGate(input: {
 }
 
 /** base..head of a local worktree as a git bundle; empty when there is nothing past base. */
-export async function gitBundle(directory: string, base: string, head: string): Promise<Buffer> {
+export async function gitBundle(
+  directory: string,
+  base: string,
+  head: string,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  signal?.throwIfAborted();
   if (base === head) return Buffer.alloc(0);
   // A bundle carries refs, so the batch's own clone names HEAD for the trip.
-  await execute("git", ["-C", directory, "update-ref", "refs/clankie/gate", head]);
+  await execute("git", ["-C", directory, "update-ref", "refs/clankie/gate", head], { signal });
   const { stdout } = await execute(
     "git",
     ["-C", directory, "bundle", "create", "-", "refs/clankie/gate", `^${base}`],
     {
+      signal,
       encoding: "buffer",
       maxBuffer: 256 * 1024 * 1024,
     },

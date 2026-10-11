@@ -3116,7 +3116,7 @@ a fleet bearer alone cannot send. See [worker peer messages](worker-access.md#me
 and [ADR 0213](adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608).
 
 `--remote-gates on` lets an integrate batch gate on a linked machine while this
-one is saturated; it defaults to off. See [gates on a linked machine](integration.md#gates-on-a-linked-machine).
+one is saturated; it defaults to off. Remote placement/staging times out after two minutes and falls back to the local gate with the reason recorded; cleanup is bounded to ten seconds. See [gates on a linked machine](integration.md#gates-on-a-linked-machine).
 
 `--closure` and `--machine-setup` both default to `lead`:
 

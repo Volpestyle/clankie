@@ -904,9 +904,10 @@ const integration =
         directory: integrationDirectory,
         ...(await integrationSources(repoRoot)),
         // A saturated Mac may gate on a linked machine's fleet workspace (VUH-2066).
-        placeGate: async (batch) =>
+        placeGate: async (batch, signal) =>
           placeRemoteGate({
             batch,
+            ...(signal ? { signal } : {}),
             settings: await settingsStore.load(),
             local: fleetResources.status(),
             fleets: await runtimes.fleets(),
