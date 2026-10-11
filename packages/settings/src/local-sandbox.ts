@@ -42,7 +42,13 @@ async function runtimeFiles(binary: string): Promise<string[]> {
     if (files.has(file) || file.startsWith("/usr/lib/") || file.startsWith("/System/")) continue;
     if (files.size >= 256) throw new Error("Too many native runtime dependencies");
     files.add(file);
-    const { stdout } = await exec("/usr/bin/otool", ["-L", file], { timeout: 5_000, maxBuffer: 1024 * 1024 });
+    // The first inspection on the macOS CI runner exceeded 5 s and was killed
+    // with no output (run 38105529951). Keep a bounded cold-tool budget; failure
+    // still refuses preparation rather than omitting runtime dependencies.
+    const { stdout } = await exec("/usr/bin/otool", ["-L", file], {
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+    });
     for (const line of stdout.split("\n").slice(1)) {
       const dependency = line.trim().split(" (compatibility")[0];
       // System dylibs may exist only in dyld's shared cache, not as files.
