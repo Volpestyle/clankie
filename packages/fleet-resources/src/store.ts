@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { defaultResourcePolicy, ResourceStateSchema, type ResourceState } from "./model.ts";
 import { resourceNativeHelperPath, resourcePython } from "./process.ts";
 
@@ -22,7 +22,7 @@ function parseState(raw: unknown): ResourceState {
 /** Kernel advisory locking releases automatically when the transaction process dies. */
 /** Native stages that precede the journal write; a fault there committed nothing. */
 const uncommittedHelperFault =
-  /^Fleet resource lock helper exited with code 1: Fleet resource lock helper failed: [A-Za-z][A-Za-z0-9_]*(?: \(errno -?\d+\))? at (?:directory-create|lock-open|lock-mode|lock-acquire|journal-read|request-read)$/u;
+  /^Fleet resource lock helper exited with code 1: Fleet resource lock helper failed: [A-Za-z][A-Za-z0-9_]*(?: \(errno -?\d+\))? at (?:begin-read|directory-create|lock-open|lock-mode|lock-acquire|journal-read|request-read)$/u;
 export class ResourceStore {
   readonly directory: string;
   private readonly onRetry: ((error: Error, attempt: number) => void) | undefined;
@@ -61,105 +61,149 @@ export class ResourceStore {
       }
     }
   }
+  /** This journal's long-lived lock helper (VUH-2082); a fault or cancellation replaces it. */
+  private helper: LockHelper | undefined;
+  /** One transaction at a time on the helper; the OS lock would serialize them anyway. */
+  private turn: Promise<void> = Promise.resolve();
+  /** Stops the lock helper; the next transaction starts a fresh one. */
+  close(): void {
+    this.helper?.child.kill("SIGTERM");
+    this.helper = undefined;
+  }
+  private start(): LockHelper {
+    // Its own process group, like the observer: never a heavy runner's member.
+    const child = spawn(resourcePython, ["-I", resourceNativeHelperPath(), "lock-serve", this.directory], {
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
+    });
+    const helper: LockHelper = {
+      child,
+      diagnostic: "",
+      lines: createInterface({ input: child.stdout })[Symbol.asyncIterator](),
+      closed: new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal }))),
+    };
+    child.once("error", (error: NodeJS.ErrnoException) => {
+      helper.startFailure = `Fleet resource lock helper could not start (${error.code ?? error.name}); Python 3 is required`;
+    });
+    child.stderr.on("data", (bytes: Buffer) => {
+      helper.diagnostic = (helper.diagnostic + bytes.toString()).slice(0, 4_096);
+    });
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      helper.inputFailure = `Fleet resource lock helper input failed (${error.code ?? error.name})`;
+    });
+    void helper.closed.then(() => {
+      if (this.helper === helper) this.helper = undefined;
+    });
+    return helper;
+  }
   private async attempt<T>(
     apply: (state: ResourceState) => T | Promise<T>,
     { signal }: { signal?: AbortSignal } = {},
   ): Promise<T> {
     if (signal?.aborted) throw new DOMException("Fleet resource wait cancelled", "AbortError");
-    const child = spawn(resourcePython, ["-I", resourceNativeHelperPath(), "lock", this.directory], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let diagnostic = "";
+    const previous = this.turn;
+    let release!: () => void;
+    this.turn = new Promise((resolve) => (release = resolve));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const cancelled = () => reject(new DOMException("Fleet resource wait cancelled", "AbortError"));
+        if (signal?.aborted) return cancelled();
+        signal?.addEventListener("abort", cancelled, { once: true });
+        void previous.then(() => {
+          signal?.removeEventListener("abort", cancelled);
+          resolve();
+        });
+      });
+      return await this.run(apply, signal);
+    } finally {
+      release();
+    }
+  }
+  private async run<T>(apply: (state: ResourceState) => T | Promise<T>, signal?: AbortSignal): Promise<T> {
+    const helper = (this.helper ??= this.start());
     let timedOut = false;
     let cancelled = false;
-    let inputFailure: string | undefined;
+    let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    child.stderr.on("data", (bytes: Buffer) => {
-      diagnostic = (diagnostic + bytes.toString()).slice(0, 4_096);
-    });
-    const failure = (reason: string) => {
-      // Only the helper's bounded cause format is public. Python startup
-      // diagnostics can contain paths; never forward arbitrary stderr.
+    const stop = (how: NodeJS.Signals) => {
+      if (this.helper === helper) this.helper = undefined;
+      helper.child.kill(how);
+    };
+    /** The helper's exit, described only by its bounded cause format. */
+    const failure = async () => {
+      const { code, signal: exitSignal } = await helper.closed;
+      if (cancelled) return new DOMException("Fleet resource wait cancelled", "AbortError");
+      if (timedOut) return new Error("Fleet resource lock transaction exceeded 15000ms after acquisition");
+      if (helper.startFailure) return new Error(helper.startFailure);
+      // Python startup diagnostics can contain paths; never forward arbitrary stderr.
       const detail =
         /^Fleet resource lock helper failed: [A-Za-z][A-Za-z0-9_]*(?: \(errno -?\d+\))?(?: at [a-z]+(?:-[a-z]+)*)?$/u.test(
-          diagnostic.trim(),
+          helper.diagnostic.trim(),
         )
-          ? `: ${diagnostic.trim()}`
+          ? `: ${helper.diagnostic.trim()}`
           : "";
-      return cancelled
-        ? new DOMException("Fleet resource wait cancelled", "AbortError")
-        : new Error(
-            timedOut
-              ? "Fleet resource lock transaction exceeded 15000ms after acquisition"
-              : `${reason}${detail}`,
-          );
+      const reason =
+        code === 0 && helper.inputFailure
+          ? helper.inputFailure
+          : exitSignal
+            ? `Fleet resource lock helper terminated by ${exitSignal}`
+            : `Fleet resource lock helper exited with code ${code}`;
+      return new Error(`${reason}${detail}`);
     };
-    const completion = new Promise<void>((resolve, reject) => {
-      child.once("error", (error: NodeJS.ErrnoException) =>
-        reject(
-          failure(
-            `Fleet resource lock helper could not start (${error.code ?? error.name}); Python 3 is required`,
-          ),
-        ),
-      );
-      child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-        inputFailure = `Fleet resource lock helper input failed (${error.code ?? error.name})`;
-      });
-      // close includes drained stderr; exit alone can lose the native cause.
-      child.once("close", (code, exitSignal) => {
-        if (code === 0 && !timedOut && !cancelled && !inputFailure) resolve();
-        else
-          reject(
-            failure(
-              code === 0 && inputFailure
-                ? inputFailure
-                : exitSignal
-                  ? `Fleet resource lock helper terminated by ${exitSignal}`
-                  : `Fleet resource lock helper exited with code ${code}`,
-            ),
-          );
-      });
-    });
-    void completion.catch(() => undefined);
     const cancel = () => {
       cancelled = true;
-      child.kill("SIGTERM");
+      stop("SIGTERM");
     };
     signal?.addEventListener("abort", cancel, { once: true });
-    const lines = createInterface({ input: child.stdout });
-    const iterator = lines[Symbol.asyncIterator]();
+    hold(helper.child, true);
     try {
-      const first = await iterator.next();
-      if (first.done) {
-        await completion;
-        throw new Error("Fleet resource lock helper closed without returning the journal");
-      }
+      helper.child.stdin.write('{"op":"begin"}\n');
+      const first = await helper.lines.next();
+      if (first.done) throw await failure();
       signal?.removeEventListener("abort", cancel);
-      if (cancelled) await completion;
+      if (cancelled) throw await failure();
       // Native stdout is emitted only after flock succeeds. Waiting for another
       // transaction is not a stalled transaction and must not spend its deadline.
       timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGKILL");
+        stop("SIGKILL");
       }, 15_000);
       const state = parseState(JSON.parse(first.value));
       const before = JSON.stringify(state);
       const result = await apply(state);
-      if (timedOut || child.exitCode !== null || child.signalCode !== null) await completion;
+      if (timedOut) throw await failure();
       if (signal?.aborted) throw new DOMException("Fleet resource wait cancelled", "AbortError");
       parseState(state);
       // Once sent, settle the write. Cancellation must not turn a committed
       // ticket/lease into an unacknowledged failure at the governor boundary.
-      child.stdin.end(`${JSON.stringify(before === JSON.stringify(state) ? {} : { write: state })}\n`);
-      await completion;
+      helper.child.stdin.write(
+        `${JSON.stringify(before === JSON.stringify(state) ? {} : { write: state })}\n`,
+      );
+      const done = await helper.lines.next();
+      if (done.done || done.value !== "done") throw await failure();
+      settled = true;
       return result;
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", cancel);
-      lines.close();
-      child.stdin.destroy();
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-      await completion.catch(() => undefined);
+      // An unsettled transaction may still hold the OS lock: end that helper.
+      if (!settled && this.helper === helper) stop("SIGTERM");
+      else if (!settled) helper.child.kill("SIGTERM");
+      hold(helper.child, false);
     }
   }
+}
+type LockHelper = {
+  child: ChildProcessWithoutNullStreams;
+  diagnostic: string;
+  lines: AsyncIterator<string>;
+  closed: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+  startFailure?: string;
+  inputFailure?: string;
+};
+/** An idle helper never keeps its process alive; it exits when this process closes its pipe. */
+function hold(child: ChildProcessWithoutNullStreams, busy: boolean) {
+  for (const handle of [child, child.stdin, child.stdout, child.stderr] as { ref?(): void; unref?(): void }[])
+    if (busy) handle.ref?.();
+    else handle.unref?.();
 }

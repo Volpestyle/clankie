@@ -38,6 +38,16 @@ or when the arbiter's own probe is unavailable, every waiter judges for itself
 as before. A grant its waiter never took up is returned with the ticket, and
 one whose waiter died is reaped like any starting lease.
 
+Native observations go through one long-lived helper per process (VUH-2082):
+`native.py serve` answers identity, observe, group, memory, snapshot and
+availability requests, one JSON line each, and each registry journal has one
+`native.py lock-serve` that runs its transactions in turn. Both run in their
+own process group, never keep an idle process alive, and exit when their
+parent closes the pipe. A timeout or fault ends that helper; pending requests
+read as unknown and the next one starts afresh. A FIFO test case went from
+about 110-210 Python starts to four or five. The heavy runner and rare reads
+(simulator usage and referents, leftovers, harness census) stay one-shot.
+
 The governor shares one OS-account registry in `~/.clankie/fleet-resources` across
 Clankie worktrees and native worker environments. Owner-authenticated control
 calls `configure`; command callers read that policy. `HOME`, `CLANKIE_STATE`,

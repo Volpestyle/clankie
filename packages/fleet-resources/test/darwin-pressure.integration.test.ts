@@ -30,17 +30,19 @@ darwinIt(
   "bounds memory_pressure by free and file-backed pages and reuses one native read across repeated samplers",
   async () => {
     const observation = await driver(`
-import {ChildProcess,execFile} from 'node:child_process';
+import {execFile} from 'node:child_process';
+import {Socket} from 'node:net';
 import {totalmem} from 'node:os';
 import {promisify} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
 import {ResourcePressureSampler} from ${JSON.stringify(pressureUrl)};
 const execute=promisify(execFile);
+// Native reads are requests to the long-lived observer (VUH-2082).
 let nativeMemoryReads=0;
-const original=ChildProcess.prototype.spawn;
-ChildProcess.prototype.spawn=function(...args){
-  if(args[0].args?.at(-1)==='memory') nativeMemoryReads++;
-  return Reflect.apply(original,this,args);
+const original=Socket.prototype.write;
+Socket.prototype.write=function(chunk,...rest){
+  if(typeof chunk==='string'&&chunk.includes('"op":"memory"')) nativeMemoryReads++;
+  return Reflect.apply(original,this,[chunk,...rest]);
 };
 const query=async()=>{
   const {stdout}=await execute('/usr/bin/memory_pressure',['-Q']);
@@ -61,7 +63,7 @@ const repeated=await Promise.all(Array.from({length:12},()=>new ResourcePressure
 const readsBeforeExpiry=nativeMemoryReads;
 await delay(1100);
 const refreshed=await new ResourcePressureSampler().sample(policy);
-ChildProcess.prototype.spawn=original;
+Socket.prototype.write=original;
 console.log(JSON.stringify({before,after,first,refreshed,totalMemoryBytes:totalmem(),
   repeated:repeated.map(row=>row.availableMemoryMb),readsBeforeExpiry,nativeMemoryReads}));
 `);
@@ -118,15 +120,24 @@ darwinIt("does not reuse an expired healthy value when the native reply becomes 
     // observations still come from the production helper and real kernel.
     await writeFile(
       join(directory, "native.py"),
-      `import json, pathlib, runpy, sys
+      `import json, os, pathlib, runpy, sys
 scope = runpy.run_path(${JSON.stringify(resourceNativeHelperPath())})
-if sys.argv[1] == "memory":
-    reply = scope["darwin_memory"]()
-    if pathlib.Path(${JSON.stringify(fault)}).exists():
-        reply["availablePercent"] = 101
-    print(json.dumps(reply))
-else:
-    runpy.run_path(${JSON.stringify(resourceNativeHelperPath())}, run_name="__main__")
+# The long-lived observer's protocol (VUH-2082), answering what the sampler asks.
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    request = json.loads(line)
+    if request["op"] == "memory":
+        reply = scope["darwin_memory"]()
+        if pathlib.Path(${JSON.stringify(fault)}).exists():
+            reply["availablePercent"] = 101
+        answer = {"id": request["id"], "result": reply}
+    elif request["op"] == "available":
+        answer = {"id": request["id"], "result": scope["identity"](os.getpid()) is not None}
+    else:
+        answer = {"id": request["id"], "error": "RuntimeError"}
+    print(json.dumps(answer), flush=True)
 `,
     );
     const path = join(directory, "driver.mjs");

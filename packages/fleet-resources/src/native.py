@@ -168,7 +168,10 @@ def observe_processes():
     request = json.loads(raw)
     if not isinstance(request, dict) or set(request) != {"pids"}:
         raise RuntimeError("Process identity request unavailable")
-    pids = request["pids"]
+    return observe_pids(request["pids"])
+
+
+def observe_pids(pids):
     if not isinstance(pids, list) or len(pids) > 640 or any(
         type(pid) is not int or pid < 2 or pid > 2147483647 for pid in pids
     ) or len(set(pids)) != len(pids):
@@ -726,6 +729,83 @@ def locked_pipe(directory):
         lock_stage = "lock-close"
 
 
+def serve():
+    """One long-lived observer per governor process (VUH-2082).
+
+    Each request is one JSON line {"id", "op", ...}; each reply is one line with
+    the same id and either "result" or a bounded "error" (an exception type,
+    never paths or arguments). Exact semantics match the one-shot modes; this
+    only removes a Python start per observation."""
+    while True:
+        line = sys.stdin.readline(65537)
+        if not line:
+            return
+        reply = {"id": None}
+        try:
+            if len(line) > 65536:
+                raise RuntimeError("Request too large")
+            request = json.loads(line)
+            if not isinstance(request, dict) or type(request.get("id")) is not int:
+                raise RuntimeError("Request unavailable")
+            reply["id"] = request["id"]
+            op = request.get("op")
+            if op == "identity":
+                pid = request.get("pid")
+                if type(pid) is not int:
+                    raise RuntimeError("Process identity request unavailable")
+                reply["result"] = identity(pid)
+            elif op == "observe":
+                reply["result"] = observe_pids(request.get("pids"))
+            elif op == "group-occupied":
+                pgid = request.get("pgid")
+                if type(pgid) is not int or pgid < 2:
+                    raise RuntimeError("Process group request unavailable")
+                reply["result"] = group_occupied(pgid)
+            elif op == "memory":
+                reply["result"] = darwin_memory()
+            elif op == "snapshot":
+                reply["result"] = snapshot()
+            elif op == "available":
+                reply["result"] = identity(os.getpid()) is not None
+            else:
+                raise RuntimeError("Unknown native operation")
+        except Exception as error:
+            reply.pop("result", None)
+            reply["error"] = type(error).__name__
+        sys.stdout.write(json.dumps(reply, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+
+
+def lock_serve(directory):
+    """One long-lived lock helper per registry journal (VUH-2082).
+
+    Repeats the one-shot transaction for each {"op":"begin"} line: lock, print
+    the journal, read one request line, optionally write, print done, unlock.
+    Any fault exits with the same bounded stage diagnostic as `lock`; the
+    caller starts a fresh helper. End of input releases any lock it holds."""
+    global lock_stage
+    while True:
+        lock_stage = "begin-read"
+        line = sys.stdin.readline(1024)
+        if not line:
+            return
+        if json.loads(line) != {"op": "begin"}:
+            raise RuntimeError("Lock request unavailable")
+        with lock(directory):
+            lock_stage = "journal-read"
+            print(json.dumps(read_state(directory)), flush=True)
+            lock_stage = "request-read"
+            line = sys.stdin.readline(1024 * 1024 + 1)
+            if not line:
+                return
+            request = json.loads(line)
+            if "write" in request:
+                write_state(directory, request["write"])
+            lock_stage = "reply-write"
+            print("done", flush=True)
+            lock_stage = "lock-close"
+
+
 def heavy_runner(directory, lease_id, token):
     control = os.fdopen(3, "r")
     replies = os.fdopen(4, "w")
@@ -846,12 +926,20 @@ if __name__ == "__main__":
             print(json.dumps(stop_leftovers(sys.argv[2], lease, int(sys.argv[3]), os.getpid()), separators=(",", ":")))
         elif mode == "lock":
             locked_pipe(sys.argv[2])
+        elif mode == "lock-serve":
+            if len(sys.argv) != 3:
+                raise RuntimeError("Lock request unavailable")
+            lock_serve(sys.argv[2])
+        elif mode == "serve":
+            if len(sys.argv) != 2:
+                raise RuntimeError("Native observer unavailable")
+            serve()
         elif mode == "run":
             sys.exit(heavy_runner(sys.argv[2], sys.argv[3], sys.argv[4]))
         else:
             raise RuntimeError("Unknown native operation")
     except Exception as error:
-        if len(sys.argv) > 1 and sys.argv[1] == "lock":
+        if len(sys.argv) > 1 and sys.argv[1] in ("lock", "lock-serve"):
             # Report cause, never journal data, paths or command arguments.
             detail = type(error).__name__
             if isinstance(error, OSError) and error.errno is not None:

@@ -13,8 +13,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { execFile, spawn } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import {
@@ -32,7 +31,13 @@ import {
   type SimulatorUpdate,
   type ResourceQueueEntry,
 } from "./model.ts";
-import { processIdentity, observeProcesses, resourceNativeHelperPath, resourcePython } from "./process.ts";
+import {
+  processGroupOccupied,
+  processIdentity,
+  observeProcesses,
+  resourceNativeHelperPath,
+  resourcePython,
+} from "./process.ts";
 import {
   baseHeavySlots,
   heavyAdmission,
@@ -70,7 +75,6 @@ const ticketOwner = (
   entry.holderId === owner.holderId &&
   entry.simulator?.occupantId === owner.occupantId &&
   (entry.simulator?.fleet ?? "default") === (owner.fleet ?? "default");
-const execute = promisify(execFile);
 const abort = () => new DOMException("Fleet resource wait cancelled", "AbortError");
 type SimulatorBlock = "simulator_capacity" | "shared_capacity" | "pressure";
 /** The owner's simulator limit is zero; distinct from an unavailable registry. */
@@ -349,14 +353,7 @@ export function createResourceGovernor(
   /** Kernel group existence, confirmed by a census that excludes zombies; failures retain. */
   async function groupOccupied(pgid: number): Promise<boolean> {
     if (!groupAlive(pgid)) return false;
-    const { stdout } = await execute(
-      resourcePython,
-      ["-I", resourceNativeHelperPath(), "group-occupied", String(pgid)],
-      { encoding: "utf8", timeout: 5_000, maxBuffer: 16_384, killSignal: "SIGKILL" },
-    );
-    const occupied: unknown = JSON.parse(stdout);
-    if (typeof occupied !== "boolean") throw new Error("Process group observation unavailable");
-    return occupied;
+    return processGroupOccupied(pgid);
   }
   type ReapReceipt = ReturnType<typeof reapReceipt>;
   function reapReceipt(lease: HeavyLease, reason: "claim_owner_exited" | "runner_exited", pid: number) {
@@ -1265,6 +1262,7 @@ export function createResourceGovernor(
     async close() {
       shutdown.abort();
       await Promise.allSettled(active);
+      for (const journal of [store, lightStore, serverStore]) journal.close();
     },
   };
 }

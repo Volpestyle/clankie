@@ -88,24 +88,33 @@ async function changedObservationReply(
       join(directory, "native.py"),
       `import json, runpy, sys
 scope = runpy.run_path(${JSON.stringify(resourceNativeHelperPath())})
-reply = scope["observe_processes"]()
 mode = ${JSON.stringify(mode)}
-rows = reply["observations"]
-if mode == "omitted":
-    reply["observations"] = rows[1:]
-elif mode == "identity-type":
-    rows[0]["identity"]["startTime"] = 123
-elif mode == "duplicate":
-    rows[1] = rows[0]
-elif mode == "unexpected":
-    rows[0]["pid"] = 2147483647
-elif mode == "identity-pid":
-    rows[0]["identity"]["pid"] = rows[1]["pid"]
-elif mode == "version":
-    reply["schemaVersion"] = 2
-elif mode == "failure":
-    sys.exit(1)
-print(json.dumps(reply, separators=(",", ":")))
+# The long-lived observer's protocol (VUH-2082): one request and one reply per line.
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    request = json.loads(line)
+    if request["op"] != "observe":
+        print(json.dumps({"id": request["id"], "error": "RuntimeError"}), flush=True)
+        continue
+    reply = scope["observe_pids"](request["pids"])
+    rows = reply["observations"]
+    if mode == "omitted":
+        reply["observations"] = rows[1:]
+    elif mode == "identity-type":
+        rows[0]["identity"]["startTime"] = 123
+    elif mode == "duplicate":
+        rows[1] = rows[0]
+    elif mode == "unexpected":
+        rows[0]["pid"] = 2147483647
+    elif mode == "identity-pid":
+        rows[0]["identity"]["pid"] = rows[1]["pid"]
+    elif mode == "version":
+        reply["schemaVersion"] = 2
+    elif mode == "failure":
+        sys.exit(1)
+    print(json.dumps({"id": request["id"], "result": reply}, separators=(",", ":")), flush=True)
 `,
     );
     const driver = join(directory, "driver.mjs");

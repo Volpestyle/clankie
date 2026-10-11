@@ -1,10 +1,9 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
+import { createInterface } from "node:readline";
 import type { ProcessIdentity, ProcessProof } from "./model.ts";
 
-const execute = promisify(execFile);
 /**
  * One native helper read. A timeout is uncertainty, which refuses admission,
  * so this is sized for a cold Python start on a loaded machine: the first
@@ -31,28 +30,95 @@ export function resourceNativeHelperPath(): string {
   }
   throw new Error("Fleet resource native helper is missing; repair this Clankie install");
 }
+/**
+ * One long-lived native observer per process (VUH-2082). Every observation
+ * used to start its own Python, 150-210 per FIFO test case and one per waiter
+ * pass on the live machine. Requests carry an id; a timeout or a dead helper
+ * fails every pending request, which callers already treat as unknown, and
+ * the next request starts a fresh helper. Idle, it never keeps a process alive,
+ * and it exits when its parent closes the pipe.
+ */
+type ObserverRequest = {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+let observer: { child: ChildProcess; pending: Map<number, ObserverRequest> } | undefined;
+let nextRequest = 1;
+function hold(child: ChildProcess, busy: boolean) {
+  for (const handle of [child, child.stdin, child.stdout] as ({ ref?(): void; unref?(): void } | null)[])
+    if (busy) handle?.ref?.();
+    else handle?.unref?.();
+}
+function nativeObserver() {
+  if (observer) return observer;
+  // Its own process group: never a member of the caller's (a heavy runner's
+  // leftovers or occupancy) and never sent the caller's group signals.
+  const child = spawn(resourcePython, ["-I", resourceNativeHelperPath(), "serve"], {
+    stdio: ["pipe", "pipe", "ignore"],
+    detached: true,
+  });
+  const current = { child, pending: new Map<number, ObserverRequest>() };
+  const fail = (reason: string) => {
+    if (observer === current) observer = undefined;
+    for (const request of current.pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error(reason));
+    }
+    current.pending.clear();
+  };
+  child.once("error", () => fail("Fleet resource native observer could not start; Python 3 is required"));
+  child.once("exit", () => fail("Fleet resource native observer exited"));
+  child.stdin?.on("error", () => {});
+  createInterface({ input: child.stdout! }).on("line", (line) => {
+    let reply: unknown;
+    try {
+      reply = JSON.parse(line);
+    } catch {
+      reply = undefined;
+    }
+    const request = record(reply) && typeof reply.id === "number" ? current.pending.get(reply.id) : undefined;
+    if (!record(reply) || !request) {
+      // An unmatched reply means the stream is out of step; nothing it says can be trusted.
+      child.kill("SIGKILL");
+      return;
+    }
+    current.pending.delete(reply.id as number);
+    clearTimeout(request.timer);
+    if (current.pending.size === 0) hold(child, false);
+    if ("error" in reply) request.reject(new Error("Fleet resource native observation failed"));
+    else request.resolve(reply.result);
+  });
+  observer = current;
+  hold(child, false);
+  return current;
+}
+function observe(op: string, payload: Record<string, unknown>, timeoutMs: number): Promise<unknown> {
+  const current = nativeObserver();
+  const id = nextRequest++;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      current.pending.delete(id);
+      reject(new Error("Fleet resource native observation timed out"));
+      // Later replies would be out of step; start over with a fresh helper.
+      current.child.kill("SIGKILL");
+    }, timeoutMs);
+    current.pending.set(id, { resolve, reject, timer });
+    hold(current.child, true);
+    current.child.stdin?.write(`${JSON.stringify({ id, op, ...payload })}\n`);
+  });
+}
 /** Verify the observer's own identity, independently of a service running as PID 1. */
 export async function nativeBoundaryAvailable(): Promise<boolean> {
-  const { stdout } = await execute(resourcePython, ["-I", resourceNativeHelperPath(), "available"], {
-    encoding: "utf8",
-    timeout: helperTimeoutMs,
-    maxBuffer: 16_384,
-  });
-  return JSON.parse(stdout) === true;
+  return (await observe("available", {}, helperTimeoutMs)) === true;
 }
 let pendingMemory: Promise<number> | undefined;
 let memoryCache: { at: number; availableMemoryMb: number } | undefined;
 /** Shared one-second pressure cache, bounded by free/file-backed pages, never lease authority. */
 export async function darwinAvailableMemoryMb(): Promise<number> {
   if (memoryCache && performance.now() - memoryCache.at < 1_000) return memoryCache.availableMemoryMb;
-  pendingMemory ??= execute(resourcePython, ["-I", resourceNativeHelperPath(), "memory"], {
-    encoding: "utf8",
-    timeout: 1_500,
-    maxBuffer: 16_384,
-    killSignal: "SIGKILL",
-  })
-    .then(({ stdout }) => {
-      const reply: unknown = JSON.parse(stdout);
+  pendingMemory ??= observe("memory", {}, 1_500)
+    .then((reply) => {
       if (
         !record(reply) ||
         !keys(reply, ["schemaVersion", "availablePercent", "totalMemoryBytes", "availableMemoryBytes"]) ||
@@ -73,12 +139,7 @@ export async function darwinAvailableMemoryMb(): Promise<number> {
 }
 /** Undefined means proved absence; uncertain native reads reject and retain leases. */
 export async function processIdentity(pid = process.pid): Promise<ProcessIdentity | undefined> {
-  const { stdout } = await execute(
-    resourcePython,
-    ["-I", resourceNativeHelperPath(), "identity", String(pid)],
-    { encoding: "utf8", timeout: helperTimeoutMs, maxBuffer: 16_384 },
-  );
-  return (JSON.parse(stdout) as ProcessIdentity | null) ?? undefined;
+  return ((await observe("identity", { pid }, helperTimeoutMs)) as ProcessIdentity | null) ?? undefined;
 }
 export async function probeProcess(proof: ProcessProof): Promise<"live" | "exited" | "unknown"> {
   try {
@@ -136,23 +197,7 @@ export async function observeProcesses(pids: readonly number[]): Promise<Map<num
   if (requested.length > 640 || !requested.every((pid) => integer(pid, 2, 2_147_483_647))) return unknown();
   if (requested.length === 0) return unknown();
   try {
-    const stdout = await new Promise<string>((resolve, reject) => {
-      const child = execFile(
-        resourcePython,
-        ["-I", resourceNativeHelperPath(), "observe"],
-        {
-          encoding: "utf8",
-          timeout: helperTimeoutMs,
-          maxBuffer: 1_048_576,
-          killSignal: "SIGKILL",
-        },
-        (error, output) => (error ? reject(error) : resolve(output)),
-      );
-      // A failed helper can close this private request pipe before its exit receipt.
-      child.stdin?.on("error", () => {});
-      child.stdin?.end(JSON.stringify({ pids: requested }));
-    });
-    const reply: unknown = JSON.parse(stdout);
+    const reply = await observe("observe", { pids: requested }, helperTimeoutMs);
     if (
       !record(reply) ||
       !keys(reply, ["schemaVersion", "observations"]) ||
@@ -238,13 +283,9 @@ let snapshotCache: { at: number; rows: ProcessIdentity[] } | undefined;
 export async function processSnapshot(): Promise<ProcessIdentity[]> {
   if (snapshotCache && Date.now() - snapshotCache.at < 250) return snapshotCache.rows;
   if (pendingSnapshot) return pendingSnapshot;
-  pendingSnapshot = execute(resourcePython, ["-I", resourceNativeHelperPath(), "snapshot"], {
-    encoding: "utf8",
-    timeout: helperTimeoutMs,
-    maxBuffer: 2_000_000,
-  })
-    .then(({ stdout }) => {
-      const rows = JSON.parse(stdout) as ProcessIdentity[];
+  pendingSnapshot = observe("snapshot", {}, helperTimeoutMs)
+    .then((reply) => {
+      const rows = reply as ProcessIdentity[];
       if (!Array.isArray(rows) || rows.length > 10_000) throw new Error("Fleet process snapshot unavailable");
       snapshotCache = { at: Date.now(), rows };
       return rows;
@@ -253,4 +294,11 @@ export async function processSnapshot(): Promise<ProcessIdentity[]> {
       pendingSnapshot = undefined;
     });
   return pendingSnapshot;
+}
+
+/** Count occupancy only, across all UIDs; this is never signal authority. */
+export async function processGroupOccupied(pgid: number): Promise<boolean> {
+  const occupied = await observe("group-occupied", { pgid }, 5_000);
+  if (typeof occupied !== "boolean") throw new Error("Process group observation unavailable");
+  return occupied;
 }
