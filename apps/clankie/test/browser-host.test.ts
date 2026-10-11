@@ -6,8 +6,6 @@ import { BrowserUse, CDP, Page, CellError, type BrowserUseOptions } from "@brows
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
 import { startBrowserRecording } from "../src/browser-recording.ts";
-import { BodyLeaseStore } from "../src/body-leases.ts";
-import { BodyLeaseRouter } from "../src/body-lease-router.ts";
 
 vi.mock("../src/browser-recording.ts", () => ({ startBrowserRecording: vi.fn() }));
 
@@ -15,7 +13,11 @@ const logger = { info: vi.fn(), warn: vi.fn() };
 const jpeg = Buffer.from("test screenshot bytes");
 let stateRoot: string;
 let host: BrowserHost | undefined;
-const execute = vi.fn(async () => ({ text: "cell result", images: [], targetId: "tab-1" }));
+const execute = vi.fn(async (code: string) => ({
+  text: code.includes("JSON.stringify([...__ownedTabs])") ? '["tab-1"]' : "cell result",
+  images: [],
+  targetId: "tab-1",
+}));
 const close = vi.fn(async () => {});
 const page = {
   targetId: "tab-1",
@@ -31,18 +33,21 @@ const page = {
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  execute.mockImplementation(async () => ({ text: "cell result", images: [], targetId: "tab-1" }));
+  execute.mockImplementation(async (code: string) => ({
+    text: code.includes("JSON.stringify([...__ownedTabs])") ? '["tab-1"]' : "cell result",
+    images: [],
+    targetId: "tab-1",
+  }));
   stateRoot = await mkdtemp(join(tmpdir(), "clankie-browser-unit-"));
   vi.spyOn(BrowserUse, "create").mockImplementation(async (options: BrowserUseOptions) => {
     const browser = options.browser;
-    if (!browser || !("profileDir" in browser) || !browser.profileDir)
-      throw new Error("private profile required");
-    await writeFile(join(browser.profileDir, "DevToolsActivePort"), "1234\n/devtools/browser/test");
+    if (browser && "profileDir" in browser && browser.profileDir)
+      await writeFile(join(browser.profileDir, "DevToolsActivePort"), "1234\n/devtools/browser/test");
     return { execute, close } as unknown as BrowserUse;
   });
   vi.spyOn(CDP, "connect").mockResolvedValue({
     close: vi.fn(),
-    send: vi.fn(async () => ({})),
+    send: vi.fn(async () => ({ targetId: "tab-1", targetInfos: [], browserContextIds: [] })),
   } as unknown as CDP);
   vi.spyOn(Page, "attach").mockResolvedValue(page as unknown as Page);
 });
@@ -113,11 +118,11 @@ describe("browser host", () => {
       }),
     ).toMatchObject({ content: "useful text ".repeat(6000) });
     await current.call(code(), undefined, { shell: true });
-    expect(BrowserUse.create).toHaveBeenCalledTimes(1);
+    expect(BrowserUse.create).toHaveBeenCalledTimes(2);
     expect(BrowserUse.create).toHaveBeenCalledWith(
       expect.objectContaining({
         telemetry: false,
-        workspace: join(stateRoot, "browser", "workspace"),
+        workspace: join(stateRoot, "browser", "lifecycle"),
         browser: expect.objectContaining({
           profileDir: join(stateRoot, "browser", "profile"),
           headless: true,
@@ -139,51 +144,15 @@ describe("browser host", () => {
     const current = await build(20);
     await current.call(open());
     await current.call(open(true));
-    expect(close).toHaveBeenCalledTimes(1);
-    expect(BrowserUse.create).toHaveBeenLastCalledWith(
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(BrowserUse.create).toHaveBeenCalledWith(
       expect.objectContaining({ browser: expect.objectContaining({ headless: false }) }),
     );
-    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(4));
     await current.call(open());
-    expect(BrowserUse.create).toHaveBeenLastCalledWith(
+    expect(BrowserUse.create).toHaveBeenCalledWith(
       expect.objectContaining({ browser: expect.objectContaining({ headless: true }) }),
     );
-  });
-  it("releases a held browser lease once idle close stops the burst, but never under a live call", async () => {
-    const store = new BodyLeaseStore(join(stateRoot, "leases"));
-    const router = new BodyLeaseRouter(store);
-    const released: string[] = [];
-    host = await createBrowserHost({
-      stateRoot,
-      attachmentRoot: stateRoot,
-      logger,
-      idleMs: 20,
-      onIdleClosed: () => {
-        const held = store.recoveryReference("browser");
-        if (held !== undefined) released.push(store.reconcileStopped(held).outcome);
-      },
-    });
-    const seat = { conversationId: "native-seat", current: () => true, authorize: async () => true };
-    const read = { schemaVersion: 1 as const, tool: "browser_use_tabs", arguments: {} };
-    const ran = await router.run(seat, "browser", (guard) => host!.call(read, undefined, { guard }), {
-      lifetime: "session",
-    });
-    expect(ran).toMatchObject({ outcome: "completed" });
-    expect(store.status("browser")).toMatchObject({ conversationId: "native-seat", state: "active" });
-    await vi.waitFor(() => expect(store.status("browser")).toBeUndefined());
-    expect(released).toEqual(["released"]);
-    expect(close).toHaveBeenCalledTimes(1);
-
-    const held = store.acquire("browser", "native-seat", 60_000);
-    if (held.outcome !== "acquired") throw Error("No lease");
-    const live = store.begin(held.lease);
-    if (live.outcome !== "admitted") throw Error("No operation");
-    await host.call(open());
-    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() => expect(released).toEqual(["released", "rejected"]));
-    expect(store.recoveryReference("browser")).toEqual(held.lease);
-    store.finish(held.lease, live.operationId, "settled");
-    store.close();
   });
   it("drains accepted calls before shutdown and rejects later calls", async () => {
     const current = await build();
@@ -194,7 +163,7 @@ describe("browser host", () => {
     expect(await first).toMatchObject({ outcome: "ok" });
     expect(await second).toMatchObject({ outcome: "ok" });
     await stopped;
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(2);
   });
   it("reports worker loss without replaying the uncertain cell", async () => {
     const current = await build();
@@ -249,7 +218,7 @@ describe("browser host", () => {
     await host.call({ ...open(), arguments: { url: "https://example.com" } });
     await host.close();
     expect(stopped).toHaveBeenCalledTimes(1);
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(2);
   });
 
   it("keeps browsing and cleanup working when recording fails", async () => {
@@ -262,7 +231,7 @@ describe("browser host", () => {
     });
     expect(await host.call(open())).toMatchObject({ outcome: "ok" });
     await host.close();
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(2);
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ event: "browser.recording.failed" }),
       expect.any(String),
@@ -273,7 +242,7 @@ describe("browser host", () => {
     const current = await build(20);
     await current.call(open());
     await current.call(open(), AbortSignal.abort());
-    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2));
   });
   it("refuses old tools and unknown arguments before starting a browser", async () => {
     const current = await build();
@@ -287,7 +256,7 @@ describe("browser host", () => {
   });
 });
 
-it("rechecks the body lease inside the browser queue before any queued effect", async () => {
+it("rechecks conversation authority inside the browser queue before any queued effect", async () => {
   const current = await build();
   await current.call(open());
   let release!: () => void;
@@ -311,18 +280,18 @@ it("rechecks the body lease inside the browser queue before any queued effect", 
     undefined,
     {
       guard: async () => {
-        if (!permitted) throw new Error("stale body lease");
+        if (!permitted) throw new Error("stale conversation authority");
       },
     },
   );
   permitted = false;
   release();
   await first;
-  await expect(second).rejects.toThrow("stale body lease");
+  await expect(second).rejects.toThrow("stale conversation authority");
   expect(page.clickAt).not.toHaveBeenCalled();
 });
 
-it("rechecks a body lease after asynchronous browser setup before page actions", async () => {
+it("rechecks conversation authority after asynchronous browser setup before page actions", async () => {
   const current = await build();
   let allowed = true;
   vi.mocked(Page.attach).mockImplementationOnce(async () => {
@@ -334,7 +303,7 @@ it("rechecks a body lease after asynchronous browser setup before page actions",
     undefined,
     {
       guard: async () => {
-        if (!allowed) throw new Error("lease changed during browser setup");
+        if (!allowed) throw new Error("authority changed during browser setup");
       },
     },
   );

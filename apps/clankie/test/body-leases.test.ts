@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,7 +19,7 @@ function fixture() {
   };
 }
 function acquire(store: BodyLeaseStore, conversationId = "thread-a") {
-  const result = store.acquire("browser", conversationId, 1000);
+  const result = store.acquire("play", conversationId, 1000);
   if (result.outcome !== "acquired") throw new Error(JSON.stringify(result));
   return result.lease;
 }
@@ -27,12 +28,40 @@ afterEach(() => {
 });
 
 describe("exclusive conversation body leases", () => {
+  it("retires legacy browser claims on restart without holding conversation tabs for recovery", () => {
+    const { store, root } = fixture();
+    store.close();
+    writeFileSync(
+      join(root, "body-leases.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        claims: [
+          {
+            resource: "browser",
+            conversationId: "old-room",
+            token: randomUUID(),
+            expiresAt: 0,
+            recovery: true,
+            operations: [],
+          },
+        ],
+        requests: [],
+      }),
+    );
+    const restarted = new BodyLeaseStore(root);
+    expect(restarted.status("browser")).toBeUndefined();
+    expect(restarted.acquire("browser", "new-room", 1000)).toEqual({
+      outcome: "rejected",
+      reason: "unavailable",
+    });
+    restarted.close();
+  });
   it("admits only one simultaneous claimant while leaving other resources free", async () => {
     const { store } = fixture();
-    const results = await Promise.all(["a", "b"].map(async (id) => store.acquire("browser", id, 1000)));
+    const results = await Promise.all(["a", "b"].map(async (id) => store.acquire("play", id, 1000)));
     expect(results.map((r) => r.outcome)).toEqual(["acquired", "busy"]);
     expect(store.acquire("voice", "b", 1000).outcome).toBe("acquired");
-    expect(JSON.stringify(store.status("browser"))).not.toContain("token");
+    expect(JSON.stringify(store.status("play"))).not.toContain("token");
     store.close();
   });
 
@@ -51,7 +80,7 @@ describe("exclusive conversation body leases", () => {
       outcome: "rejected",
       reason: "stale_lease",
     });
-    expect(store.status("browser")?.conversationId).toBe("thread-a");
+    expect(store.status("play")?.conversationId).toBe("thread-a");
     store.close();
   });
 
@@ -65,14 +94,14 @@ describe("exclusive conversation body leases", () => {
       outcome: "rejected",
       reason: "recovery_required",
     });
-    expect(store.acquire("browser", "b", 1000).outcome).toBe("busy");
+    expect(store.acquire("play", "b", 1000).outcome).toBe("busy");
     expect(store.renew(lease, 1000).outcome).toBe("rejected");
     expect(store.reconcileStopped(lease).outcome).toBe("rejected");
     expect(() => store.close()).toThrow("must settle");
     store.finish(lease, operation.operationId, "settled");
     expect(store.release(lease).outcome).toBe("rejected");
     expect(store.reconcileStopped(lease).outcome).toBe("released");
-    expect(store.acquire("browser", "b", 1000).outcome).toBe("acquired");
+    expect(store.acquire("play", "b", 1000).outcome).toBe("acquired");
     store.close();
   });
 
@@ -84,7 +113,7 @@ describe("exclusive conversation body leases", () => {
     store.finish(lease, operation.operationId, "uncertain");
     expect(store.begin(lease).outcome).toBe("rejected");
     expect(store.release(lease).outcome).toBe("rejected");
-    expect(store.status("browser")?.state).toBe("recovery_required");
+    expect(store.status("play")?.state).toBe("recovery_required");
     expect(store.reconcileStopped(lease).outcome).toBe("released");
     store.close();
   });
@@ -95,9 +124,9 @@ describe("exclusive conversation body leases", () => {
     expect(() => new BodyLeaseStore(root)).toThrow();
     store.close();
     const restarted = new BodyLeaseStore(root);
-    expect(restarted.status("browser")?.state).toBe("recovery_required");
+    expect(restarted.status("play")?.state).toBe("recovery_required");
     expect(restarted.release(lease)).toEqual({ outcome: "rejected", reason: "stale_lease" });
-    const recovery = restarted.recoveryReference("browser");
+    const recovery = restarted.recoveryReference("play");
     if (recovery === undefined) throw new Error("missing recovery");
     expect(restarted.reconcileStopped(recovery).outcome).toBe("released");
     restarted.close();
@@ -108,16 +137,16 @@ describe("exclusive conversation body leases", () => {
     store.close();
     writeFileSync(join(root, "body-leases.json"), "{corrupt");
     const corrupt = new BodyLeaseStore(root);
-    expect(corrupt.acquire("browser", "a", 1000)).toEqual({
+    expect(corrupt.acquire("play", "a", 1000)).toEqual({
       outcome: "rejected",
       reason: "store_unavailable",
     });
-    expect(() => corrupt.status("browser")).toThrow();
+    expect(() => corrupt.status("play")).toThrow();
     corrupt.close();
     rmSync(join(root, "body-leases.json"));
     const healthy = new BodyLeaseStore(root);
     rmSync(root, { recursive: true });
-    expect(healthy.acquire("browser", "a", 1000)).toEqual({
+    expect(healthy.acquire("play", "a", 1000)).toEqual({
       outcome: "rejected",
       reason: "store_unavailable",
     });

@@ -633,7 +633,10 @@ call-time revocation checks still apply.
   turns receive `browser_use_javascript`; social turns receive browser-only
   navigation, DOM evaluation, accessibility, input and screenshot tools.
   The host enforces the same boundary behind tool discovery and the HTTP API.
-  Browser calls are sequential across rooms.
+  Each conversation has independent tabs, a JavaScript worker/workspace and a call
+  queue. Calls serialize within that conversation; rooms browse concurrently in
+  the shared signed-in profile. `browser_use_open` with `isolated: true` creates
+  a logged-out CDP context. Browser use does not acquire an exclusive body lease.
   Model-facing JSON previews retain up to 50 KiB or 2,000 serialized lines,
   followed by a truncation notice when needed. A large page string keeps a
   UTF-8-safe prefix instead of being dropped as an oversized line; full results
@@ -644,10 +647,12 @@ call-time revocation checks still apply.
   `browser_use_open` tool's `headed` argument relaunches Chrome visible on the operator's
   screen, so he can hand over the window for a signup, a CAPTCHA, or a phone
   check rather than grinding at it ([ADR 0127](adr/0127-his-accounts-are-his.md)).
-  Browsing defaults to headless. After 60 seconds without a browser call, the
-  host saves any recording and closes the burst's tabs/windows, including a
-  takeover window. Persistent logins remain; the next burst starts headless.
-  The SDK launches Chrome lazily with that private profile and owns its shutdown.
+  Browsing defaults to headless. After 60 idle seconds in a conversation, the host saves its recording and
+  closes its tabs. The last workspace closing also closes Chrome. Persistent logins remain; the next burst starts headless.
+  One lifecycle owner launches Chrome lazily, holds the SDK profile lock and
+  owns shutdown/recovery. Other workspaces attach to its CDP endpoint. Mode
+  changes refuse while other conversations browse; crashes invalidate handles
+  without replaying effects.
   JavaScript bindings reset at idle close, mode changes or worker timeout; workspace
   files and persistent logins survive. Opt-in recordings sample the current tab
   every 750 ms through the SDK's public CDP primitives and encode WebM with FFmpeg.

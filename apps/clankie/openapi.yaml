@@ -6046,7 +6046,7 @@ paths:
             application/json:
               example:
                 leases:
-                  - resource: browser
+                  - resource: voice
                     conversationId: conversation-1
                     state: active
                     expiresAt: 1791000000000
@@ -6064,9 +6064,9 @@ paths:
           application/json:
             example:
               action: queue
-              resource: browser
+              resource: voice
               conversationId: conversation-1
-              request: Notify me when the browser is free
+              request: Notify me when voice is free
               ttlMs: 300000
       responses:
         "200":
@@ -6214,7 +6214,7 @@ paths:
           schema: { type: string }
           description: Exact selected runnable operator conversation
       summary: Call a browser tool
-      description: Calls one Browser Use Pi tool under the selected operator conversation and existing machine authority. Direct captain requests without a host-admitted conversation binding are refused.
+      description: Calls one Browser Use Pi tool in the selected conversation’s tabs and JavaScript workspace, serialized within that conversation only. Conversations share the signed-in Chrome profile; browser_use_open accepts isolated:true for a disposable logged-out context. Browser use has no exclusive body lease. Existing machine authority remains required. Direct captain requests without a host-admitted conversation binding are refused.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       requestBody:
         required: true

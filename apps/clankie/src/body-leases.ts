@@ -55,7 +55,10 @@ export type LeaseRef = Pick<Claim, "resource" | "conversationId" | "token">;
 type LeaseView = Pick<Claim, "resource" | "conversationId" | "expiresAt"> & {
   state: "active" | "recovery_required";
 };
-type Refusal = { outcome: "rejected"; reason: "stale_lease" | "recovery_required" | "store_unavailable" };
+type Refusal = {
+  outcome: "rejected";
+  reason: "stale_lease" | "recovery_required" | "store_unavailable" | "unavailable";
+};
 type Busy = { outcome: "busy"; lease: LeaseView };
 type Admission = { outcome: "acquired"; lease: LeaseRef; expiresAt: number } | Refusal | Busy;
 const MAX_TTL_MS = 5 * 60_000;
@@ -79,8 +82,9 @@ export class BodyLeaseStore {
     try {
       if (existsSync(this.path)) {
         const state = StateSchema.parse(JSON.parse(readFileSync(this.path, "utf8")));
-        this.requests = state.requests;
+        this.requests = state.requests.filter((request) => request.resource !== "browser");
         for (const claim of state.claims) {
+          if (claim.resource === "browser") continue;
           if (this.claims.has(claim.resource)) throw new Error("Duplicate body resource");
           const { recoveryOperation: _recoveryOperation, ...saved } = claim;
           this.claims.set(claim.resource, { ...saved, token: randomUUID(), recovery: true, operations: [] });
@@ -252,6 +256,7 @@ export class BodyLeaseStore {
     ttlMs: number,
     route?: BodyOwnerRoute,
   ): Admission {
+    if (resource === "browser") return this.refused("unavailable");
     if (this.unavailable || this.closed) return this.refused("store_unavailable");
     this.validateTtl(ttlMs);
     if (route !== undefined && route.owner.conversationId !== conversationId)

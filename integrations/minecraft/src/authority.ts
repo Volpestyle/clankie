@@ -35,7 +35,7 @@ interface MinecraftLeaseReference {
 }
 type Refusal = {
   outcome: "rejected";
-  reason: "stale_lease" | "recovery_required" | "store_unavailable";
+  reason: "stale_lease" | "recovery_required" | "store_unavailable" | "unavailable";
 };
 
 /** The core's durable ledger implements this port. No extension-owned ledger. */

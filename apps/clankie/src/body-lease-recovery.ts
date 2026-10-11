@@ -59,7 +59,8 @@ export class BodyLeaseRecovery {
     const maximum = this.options.maxRetryMs ?? 60_000;
     for (const resource of BodyResourceSchema.options) {
       // Computer sessions own their separate verified adapter stop/recovery contract.
-      if (resource === "computer" || this.closed || !this.options.current()) continue;
+      if (resource === "computer" || resource === "browser" || this.closed || !this.options.current())
+        continue;
       const lease = this.options.store.status(resource);
       const ref = this.options.store.recoveryReference(resource);
       if (lease?.state !== "recovery_required" || !ref) {

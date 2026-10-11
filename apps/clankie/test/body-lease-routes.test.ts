@@ -93,7 +93,7 @@ async function fixture() {
   };
 }
 
-it("requires an authenticated existing writable conversation and returns the other browser owner", async () => {
+it("requires an authenticated existing writable conversation and binds independent browser conversations", async () => {
   const { post, call } = await fixture();
   const request = { schemaVersion: 1, tool: "browser_use_read", arguments: {} };
   expect((await post("/v1/browser/call", request)).status).toBe(409);
@@ -103,9 +103,9 @@ it("requires an authenticated existing writable conversation and returns the oth
     result: { outcome: "ok" },
   });
   expect(await (await post("/v1/browser/call", request, "b")).json()).toMatchObject({
-    result: { outcome: "busy", lease: { conversationId: "a" } },
+    result: { outcome: "ok" },
   });
-  expect(call).toHaveBeenCalledTimes(1);
+  expect(call).toHaveBeenCalledTimes(2);
 });
 
 it("ordinary release verifies actual stop and cannot use a stale token", async () => {
@@ -145,12 +145,17 @@ it("an attachable room context does not grant generic operator body authority", 
   expect(store.status("browser")).toBeUndefined();
 });
 
-it("retains the browser claim when close is refused", async () => {
+it("does not block other browser conversations when close is refused", async () => {
   const { post, call, store } = await fixture();
   await post("/v1/browser/call", { schemaVersion: 1, tool: "browser_use_read", arguments: {} }, "a");
   call.mockResolvedValueOnce({ outcome: "refused", tool: "browser_use_close", reason: "approval_required" });
   await post("/v1/browser/call", { schemaVersion: 1, tool: "browser_use_close", arguments: {} }, "a");
-  expect(store.status("browser")).toMatchObject({ conversationId: "a", state: "recovery_required" });
+  expect(store.status("browser")).toBeUndefined();
+  expect(
+    await (
+      await post("/v1/browser/call", { schemaVersion: 1, tool: "browser_use_read", arguments: {} }, "b")
+    ).json(),
+  ).toMatchObject({ result: { outcome: "ok" } });
 });
 
 it.each(["acquire", "renew"])("reauthorizes %s after seat lookup", async (action) => {

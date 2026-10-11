@@ -22,9 +22,9 @@ it("two independent seats conflict without executing the second body effect", as
   const { store, router } = fixture();
   const second = vi.fn();
   expect(
-    (await router.run(identity("a"), "browser", async () => "opened", { lifetime: "session" })).outcome,
+    (await router.run(identity("a"), "play", async () => "opened", { lifetime: "session" })).outcome,
   ).toBe("completed");
-  expect(await router.run(identity("b"), "browser", second, { lifetime: "session" })).toMatchObject({
+  expect(await router.run(identity("b"), "play", second, { lifetime: "session" })).toMatchObject({
     outcome: "busy",
     lease: { conversationId: "a" },
     actions: ["queue", "ask"],
@@ -69,7 +69,7 @@ it("a final body guard fences authority revoked during async discovery", async (
   const actor = { ...identity("a"), authorize: async () => allowed };
   const result = await router.run(
     actor,
-    "browser",
+    "play",
     async (guard) => {
       await Promise.resolve();
       allowed = false;
@@ -80,7 +80,7 @@ it("a final body guard fences authority revoked during async discovery", async (
   );
   expect(result).toEqual({ outcome: "rejected", reason: "not_authorized" });
   expect(effect).not.toHaveBeenCalled();
-  expect(store.status("browser")?.state).toBe("recovery_required");
+  expect(store.status("play")?.state).toBe("recovery_required");
   store.close();
 });
 
@@ -105,11 +105,11 @@ it("recovery requires a confirmed stop and prevents replacement during its await
 
 it("queues only an explicit scoped wake, persists attempted delivery, and never replays uncertainty", async () => {
   const { store, router } = fixture();
-  await router.run(identity("a"), "browser", async () => "open", { lifetime: "session" });
+  await router.run(identity("a"), "play", async () => "open", { lifetime: "session" });
   const queued = await router.request(identity("b"), {
     kind: "queue",
-    resource: "browser",
-    text: "My browsing task is waiting",
+    resource: "play",
+    text: "My play task is waiting",
     ttlMs: 1000,
   });
   expect(queued.outcome).toBe("queued");
@@ -121,7 +121,7 @@ it("queues only an explicit scoped wake, persists attempted delivery, and never 
     deliver,
   };
   expect(await router.deliverRequests(ports)).toEqual([]);
-  await router.recover(identity("a"), "browser", async () => true);
+  await router.recover(identity("a"), "play", async () => true);
   expect(await router.deliverRequests(ports)).toMatchObject([
     { outcome: "asked", deliveryStage: "uncertain" },
   ]);
@@ -129,14 +129,14 @@ it("queues only an explicit scoped wake, persists attempted delivery, and never 
     "b",
     {
       requester: "b",
-      resource: "browser",
-      text: "My browsing task is waiting",
+      resource: "play",
+      text: "My play task is waiting",
       kind: "queue",
     },
     expect.any(Function),
   );
   expect(await router.deliverRequests(ports)).toEqual([]);
-  expect(store.status("browser")).toBeUndefined();
+  expect(store.status("play")).toBeUndefined();
   store.close();
 });
 

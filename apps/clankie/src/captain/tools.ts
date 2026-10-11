@@ -2276,13 +2276,18 @@ export async function callConversationBrowser(
   request: CallBrowserToolRequest,
 ): Promise<CallBrowserToolResult | BodyLeaseResult> {
   const shell = turn.shell === true;
-  if (deps.bodyLeases === undefined) return deps.browser.call(request, undefined, { shell });
+  if (deps.bodyLeases === undefined)
+    return deps.browser.call(request, undefined, {
+      shell,
+      conversationId: turn.bodyIdentity?.conversationId,
+    });
   const identity = turn.bodyIdentity;
   if (identity === undefined) return { outcome: "rejected", reason: "identity_required" };
   const result = await deps.bodyLeases.run(
     identity,
     "browser",
-    (guard) => deps.browser.call(request, undefined, { shell, guard }),
+    (guard) =>
+      deps.browser.call(request, undefined, { shell, guard, conversationId: identity.conversationId }),
     {
       lifetime: request.tool === "browser_use_close" ? "operation" : "session",
       uncertain: (value) => value.outcome !== "ok" || value.isError === true,

@@ -34,7 +34,7 @@ async function until(check: () => boolean, description: string) {
 async function fixture(
   reboot = false,
   options: {
-    resource?: "browser" | "play";
+    resource?: "voice" | "play";
     holderEvidence?: "missing" | "unreadable" | "native_responding";
   } = {},
 ) {
@@ -52,7 +52,7 @@ async function fixture(
     finished.resolve();
     await conversations.close();
   });
-  const resource = options.resource ?? "browser";
+  const resource = options.resource ?? "voice";
   let conversationId = "global-default";
   if (options.holderEvidence) {
     const created = await conversations.serve({
@@ -176,11 +176,11 @@ async function fixture(
 }
 
 it.each([
-  { resource: "browser", holderEvidence: "missing" },
+  { resource: "voice", holderEvidence: "missing" },
   { resource: "play", holderEvidence: "missing" },
-  { resource: "browser", holderEvidence: "unreadable" },
+  { resource: "voice", holderEvidence: "unreadable" },
   { resource: "play", holderEvidence: "unreadable" },
-  { resource: "browser", holderEvidence: "native_responding" },
+  { resource: "voice", holderEvidence: "native_responding" },
   { resource: "play", holderEvidence: "native_responding" },
 ] as const)(
   "never automatically stops a restored $resource with $holderEvidence holder evidence",
@@ -237,8 +237,8 @@ it.each([
   },
 );
 
-it("reminds a native holder once that its expired browser blocks others, without stopping it", async () => {
-  const f = await fixture(true, { resource: "browser", holderEvidence: "native_responding" });
+it("reminds a native holder once that its expired voice blocks others, without stopping it", async () => {
+  const f = await fixture(true, { resource: "voice", holderEvidence: "native_responding" });
   await f.allowStop();
   f.recovery.start();
   await pause(150);
@@ -247,23 +247,23 @@ it("reminds a native holder once that its expired browser blocks others, without
   expect(f.reminders).toEqual([{ conversationId: f.conversationId, token: f.held.token }]);
   expect(f.attempts).toEqual([]);
   expect(f.child.exitCode).toBeNull();
-  expect(f.store.recoveryReference("browser")).toEqual(f.held);
+  expect(f.store.recoveryReference("voice")).toEqual(f.held);
 });
 
 it("never reminds a service-owned holder the sweep can recover itself", async () => {
   const f = await fixture(true);
   await f.allowStop();
   f.recovery.start();
-  await until(() => f.store.status("browser") === undefined, "confirmed body release");
+  await until(() => f.store.status("voice") === undefined, "confirmed body release");
   expect(f.reminders).toEqual([]);
 });
 
 it("automatically recovers a boot-restored idle lease only after the real host confirms stop, with capped backoff", async () => {
   const f = await fixture(true);
-  expect(f.store.status("browser")?.state).toBe("recovery_required");
+  expect(f.store.status("voice")?.state).toBe("recovery_required");
   f.recovery.start();
   await until(() => f.attempts.length >= 5, "bounded retries");
-  expect(f.store.status("browser")?.state).toBe("recovery_required");
+  expect(f.store.status("voice")?.state).toBe("recovery_required");
   expect(f.child.exitCode).toBeNull();
   const intervals = f.attempts.slice(1).map((at, index) => at - f.attempts[index]!);
   expect(intervals[0]).toBeGreaterThanOrEqual(20);
@@ -271,7 +271,7 @@ it("automatically recovers a boot-restored idle lease only after the real host c
   expect(intervals[2]).toBeGreaterThanOrEqual(80);
   expect(intervals.slice(-2).every((ms) => ms < 300)).toBe(true);
   await f.allowStop();
-  await until(() => f.store.status("browser") === undefined, "confirmed body release");
+  await until(() => f.store.status("voice") === undefined, "confirmed body release");
   expect(f.child.exitCode).toBe(0);
   expect(JSON.parse(await readFile(join(f.root, "leases/body-leases.json"), "utf8")).claims).toEqual([]);
 });
@@ -287,7 +287,7 @@ it("does not attempt stop during a real holder turn, then retries after the turn
   expect(f.attempts).toEqual([]);
   expect(f.child.exitCode).toBeNull();
   await turn.finish();
-  await until(() => f.store.status("browser") === undefined, "release after ended turn");
+  await until(() => f.store.status("voice") === undefined, "release after ended turn");
   expect(f.attempts).toHaveLength(1);
 });
 
@@ -295,7 +295,7 @@ it("cannot stop or release a live body operation even if its holder turn is idle
   const f = await fixture();
   // A normal active effect becomes uncertain only after its operation has settled.
   f.store.reconcileStopped(f.held);
-  const acquired = f.store.acquire("browser", "global-default", 300000);
+  const acquired = f.store.acquire("voice", "global-default", 300000);
   if (acquired.outcome !== "acquired") throw Error("No live lease");
   const operation = f.store.begin(acquired.lease);
   if (operation.outcome !== "admitted") throw Error("No live operation");
@@ -306,9 +306,9 @@ it("cannot stop or release a live body operation even if its holder turn is idle
   f.recovery.start();
   await pause(90);
   expect(f.attempts).toEqual([]);
-  expect(f.store.status("browser")?.state).toBe("recovery_required");
+  expect(f.store.status("voice")?.state).toBe("recovery_required");
   f.store.finish(acquired.lease, operation.operationId, "settled");
-  await until(() => f.store.status("browser") === undefined, "release after body operation settles");
+  await until(() => f.store.status("voice") === undefined, "release after body operation settles");
 });
 
 it("waits for a service driver to settle even when conversation metadata already says waiting", async () => {
@@ -332,7 +332,7 @@ it("waits for a service driver to settle even when conversation metadata already
   expect(f.attempts).toEqual([]);
   finish.resolve();
   await drive;
-  await until(() => f.store.status("browser") === undefined, "driver settles before recovery");
+  await until(() => f.store.status("voice") === undefined, "driver settles before recovery");
 });
 
 it("reauthorizes after awaited discovery when a holder starts a new turn", async () => {
@@ -346,11 +346,11 @@ it("reauthorizes after awaited discovery when a holder starts a new turn", async
   f.recovery.start();
   await until(() => f.attempts.length > 0, "stop discovery");
   await pause(90);
-  expect(f.store.status("browser")?.state).toBe("recovery_required");
+  expect(f.store.status("voice")?.state).toBe("recovery_required");
   expect(f.child.exitCode).toBeNull();
   f.beforeStop(async () => {});
   await turn!.finish();
-  await until(() => f.store.status("browser") === undefined, "guarded retry");
+  await until(() => f.store.status("voice") === undefined, "guarded retry");
 });
 
 it("shutdown cancels the original check's authority and waits for it without releasing the lease", async () => {
@@ -367,7 +367,7 @@ it("shutdown cancels the original check's authority and waits for it without rel
   f.recovery.close();
   finish.resolve();
   await f.recovery.settled();
-  expect(f.store.status("browser")?.state).toBe("recovery_required");
+  expect(f.store.status("voice")?.state).toBe("recovery_required");
   expect(f.child.exitCode).toBeNull();
   const count = f.attempts.length;
   await pause(90);
@@ -377,7 +377,7 @@ it("shutdown cancels the original check's authority and waits for it without rel
 it("leaves active leases and the separate computer recovery contract untouched", async () => {
   const f = await fixture();
   f.store.reconcileStopped(f.held);
-  expect(f.store.acquire("browser", "global-default", 300000).outcome).toBe("acquired");
+  expect(f.store.acquire("voice", "global-default", 300000).outcome).toBe("acquired");
   const computer = f.store.acquire("computer", "global-default", 300000);
   if (computer.outcome !== "acquired") throw Error("No computer lease");
   const operation = f.store.begin(computer.lease);
@@ -387,6 +387,6 @@ it("leaves active leases and the separate computer recovery contract untouched",
   f.recovery.start();
   await pause(90);
   expect(f.attempts).toEqual([]);
-  expect(f.store.status("browser")?.state).toBe("active");
+  expect(f.store.status("voice")?.state).toBe("active");
   expect(f.store.status("computer")?.state).toBe("recovery_required");
 });

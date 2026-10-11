@@ -89,7 +89,7 @@ interface BrowserToolPort {
   call(
     request: CallBrowserToolRequest,
     signal?: AbortSignal,
-    authority?: { shell?: boolean; guard?: () => Promise<void> },
+    authority?: { shell?: boolean; guard?: () => Promise<void>; conversationId?: string },
   ): Promise<CallBrowserToolResult>;
 }
 

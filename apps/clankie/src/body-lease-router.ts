@@ -187,6 +187,19 @@ export class BodyLeaseRouter {
     const conversationId = identity.conversationId;
     const authorized = await this.authorize(identity, conversationId, resource, "effect");
     if (authorized !== undefined) return authorized;
+    if (resource === "browser") {
+      const guard = async () => {
+        const denied = await this.authorize(identity, conversationId, resource, "effect");
+        if (denied !== undefined) throw new BodyLeaseDenied(denied);
+      };
+      try {
+        await guard();
+        return { outcome: "completed", value: await effect(guard) };
+      } catch (error) {
+        if (error instanceof BodyLeaseDenied) return error.result;
+        throw error;
+      }
+    }
     let lease: LeaseRef;
     try {
       const held = this.store.status(resource);

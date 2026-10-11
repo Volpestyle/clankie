@@ -29,14 +29,14 @@ function setup() {
     current: () => true,
     authorize: async () => true,
   };
-  const claim = store.acquire("browser", owner.conversationId, 10000, owner.route);
+  const claim = store.acquire("play", owner.conversationId, 10000, owner.route);
   if (claim.outcome !== "acquired") throw new Error("claim");
   return { store, router, owner, requester, claim };
 }
 it("delivers an explicit ask only to the captured holder and queues no effect", async () => {
   const f = setup();
   await f.router.request(f.requester, {
-    resource: "browser",
+    resource: "play",
     kind: "ask",
     text: "Could you finish?",
     ttlMs: 10000,
@@ -53,11 +53,11 @@ it("delivers an explicit ask only to the captured holder and queues no effect", 
   expect(wakes).toEqual([
     { owner: f.owner.route.owner, text: expect.stringContaining("Could you finish?"), mode: "machine" },
   ]);
-  expect(f.store.status("browser")?.conversationId).toBe("owner");
+  expect(f.store.status("play")?.conversationId).toBe("owner");
 });
 it("wakes the captured social requester only after release and preserves its mode", async () => {
   const f = setup();
-  await f.router.request(f.requester, { resource: "browser", kind: "queue", text: "next", ttlMs: 10000 });
+  await f.router.request(f.requester, { resource: "play", kind: "queue", text: "next", ttlMs: 10000 });
   const wakes: unknown[] = [];
   const captain = {
     validateConversationOwner: async () => true,
@@ -77,11 +77,11 @@ it("wakes the captured social requester only after release and preserves its mod
   f.store.release(f.claim.lease);
   await pumpBodyRequests(f.router, captain);
   expect(wakes).toEqual([{ owner: f.requester.route.owner, mode: "social" }]);
-  expect(f.store.status("browser")).toBeUndefined();
+  expect(f.store.status("play")).toBeUndefined();
 });
 it("rechecks requester authority at eventual wake and never retries uncertain delivery", async () => {
   const f = setup();
-  await f.router.request(f.requester, { resource: "browser", kind: "ask", text: "question", ttlMs: 10000 });
+  await f.router.request(f.requester, { resource: "play", kind: "ask", text: "question", ttlMs: 10000 });
   let sourceAllowed = true;
   let effects = 0;
   const captain = {
@@ -103,9 +103,9 @@ it("rechecks requester authority at eventual wake and never retries uncertain de
 });
 it("does not redirect an ask to a replacement incarnation or unknown holder route", async () => {
   const f = setup();
-  await f.router.request(f.requester, { resource: "browser", kind: "ask", text: "question", ttlMs: 10000 });
+  await f.router.request(f.requester, { resource: "play", kind: "ask", text: "question", ttlMs: 10000 });
   f.store.release(f.claim.lease);
-  f.store.acquire("browser", "owner", 10000, f.owner.route);
+  f.store.acquire("play", "owner", 10000, f.owner.route);
   let effects = 0;
   await pumpBodyRequests(f.router, {
     validateConversationOwner: async () => true,
@@ -120,7 +120,7 @@ it("does not redirect an ask to a replacement incarnation or unknown holder rout
 it("tries the exact owner first and uses only its explicit head after definite unavailability", async () => {
   const f = setup();
   await f.router.request(f.requester, {
-    resource: "browser",
+    resource: "play",
     kind: "ask",
     text: "Please finish",
     ttlMs: 10000,
@@ -138,12 +138,12 @@ it("tries the exact owner first and uses only its explicit head after definite u
   });
   expect(wakes).toEqual(["owner", "head"]);
   expect(result[0]).toMatchObject({ deliveryStage: "accepted" });
-  expect(f.store.status("browser")?.conversationId).toBe("owner");
+  expect(f.store.status("play")?.conversationId).toBe("owner");
 });
 
 it("checks the head mapping after a suspended final grant check", async () => {
   const f = setup();
-  await f.router.request(f.requester, { resource: "browser", kind: "ask", text: "question", ttlMs: 10000 });
+  await f.router.request(f.requester, { resource: "play", kind: "ask", text: "question", ttlMs: 10000 });
   let head = "head";
   let inHeadDispatch = false;
   let effects = 0;
@@ -170,7 +170,7 @@ it("checks the head mapping after a suspended final grant check", async () => {
 
 it.each(["accepted", "uncertain"])("never falls back after %s owner dispatch", async (stage) => {
   const f = setup();
-  await f.router.request(f.requester, { resource: "browser", kind: "ask", text: "question", ttlMs: 10000 });
+  await f.router.request(f.requester, { resource: "play", kind: "ask", text: "question", ttlMs: 10000 });
   const wakes: string[] = [];
   await pumpBodyRequests(f.router, {
     designatedConversationHead: () => ({ conversationId: "head" }),
@@ -186,7 +186,7 @@ it.each(["accepted", "uncertain"])("never falls back after %s owner dispatch", a
 
 it("fences source disconnection during the final destination grant await", async () => {
   const f = setup();
-  await f.router.request(f.requester, { resource: "browser", kind: "ask", text: "question", ttlMs: 10000 });
+  await f.router.request(f.requester, { resource: "play", kind: "ask", text: "question", ttlMs: 10000 });
   let sourcePresent = true;
   let inDispatch = false;
   let effects = 0;

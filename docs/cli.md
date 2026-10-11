@@ -2874,6 +2874,13 @@ estimate from registry prices, not an invoice. Terminal receipts name
 
 ### `browser tools` / `browser call TOOL JSON`
 
+Each conversation browses concurrently in its own tabs and workspace. Calls
+serialize within that conversation. The shared profile retains Clankie's logins;
+`isolated: true` opens a logged-out context. Close/60-second idle cleanup affects
+only that conversation, with no browser body lease or recovery hold. One service
+owner launches and recovers Chrome; a headed mode change is unavailable while
+other conversations browse.
+
 Inspect or call Clankie's Browser Use Pi tools with the operator credential:
 
 ```sh
@@ -2881,6 +2888,7 @@ clankie browser tools
 clankie browser call browser_use_open '{"url":"https://example.com"}' --conversation CONVERSATION_ID
 clankie browser call browser_use_javascript '{"code":"console.log(await page.info())"}' --conversation CONVERSATION_ID
 clankie browser call browser_use_close '{}' --conversation CONVERSATION_ID
+clankie browser call browser_use_open '{"isolated":true,"url":"https://example.com"}' --conversation CONVERSATION_ID
 ```
 
 The same catalog and call contract are available at `GET /v1/browser/tools`
@@ -2931,7 +2939,7 @@ failed response does not imply termination. Uncertain operations remain held
 until exact delivery or termination evidence resolves them. Recovery never
 silently retries a Discord send.
 
-For `recovery_required` browser, voice, play and Discord mouth leases, the
+For `recovery_required` voice, play and Discord mouth leases, the
 service tries the same verified stop-check automatically at boot, then retries
 with backoff from 5 seconds up to 60 seconds. It requires a known service-owned
 holder whose turn and body operations have ended, and checks both again across

@@ -593,20 +593,6 @@ if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
       logger,
       environment: process.env,
       recordSessions: async () => (await settingsStore.load()).browser.recordSessions,
-      // The host just stopped the burst itself, so the lease covers nothing; a live operation keeps it.
-      onIdleClosed: () => {
-        const held = bodyLeaseStore.recoveryReference("browser");
-        if (held === undefined) return;
-        const result = bodyLeaseStore.reconcileStopped(held);
-        logger.info(
-          {
-            event: "browser.lease.idle_release",
-            conversationId: held.conversationId,
-            outcome: result.outcome,
-          },
-          "browser lease reconciled after idle close",
-        );
-      },
     });
     logger.info({ event: "browser.capability.enabled" }, "in-process browser host started");
   } catch (error) {
@@ -1944,15 +1930,7 @@ const clankie = await createClankieApp({
     store: bodyLeaseStore,
     async confirmStopped(resource, guard) {
       await guard();
-      if (resource === "browser") {
-        if (browserHost === undefined) return true;
-        const result = await browserHost.call(
-          { schemaVersion: 1, tool: "browser_use_close", arguments: {} },
-          undefined,
-          { guard },
-        );
-        return result.outcome === "ok" && !result.isError;
-      }
+      if (resource === "browser") return true; // Conversation tabs have no exclusive body claim.
       if (resource === "voice") {
         return bodyVoiceStays.reconcile(reconcileDiscordVoice, guard);
       }

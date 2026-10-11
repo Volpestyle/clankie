@@ -252,11 +252,11 @@ it("rechecks actual presence after suspended captain grant validation before que
       },
       mode: "social" as const,
     };
-    const claim = f.store.acquire("browser", "owner", 10000, route);
+    const claim = f.store.acquire("play", "owner", 10000, route);
     if (claim.outcome !== "acquired") throw new Error("claim");
     await f.router.request(
       { conversationId: "owner", route, current: () => true, authorize: async () => true },
-      { resource: "browser", kind: "queue", text: "next", ttlMs: 10000 },
+      { resource: "play", kind: "queue", text: "next", ttlMs: 10000 },
     );
     f.store.release(claim.lease);
     await vi.advanceTimersByTimeAsync(1000);

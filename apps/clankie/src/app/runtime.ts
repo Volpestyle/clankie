@@ -2552,7 +2552,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           identity,
           "browser",
           (guard) =>
-            dependencies.browserTools!.call(parsed.data, context.req.raw.signal, { shell: true, guard }),
+            dependencies.browserTools!.call(parsed.data, context.req.raw.signal, {
+              shell: true,
+              guard,
+              conversationId: identity.conversationId,
+            }),
           {
             lifetime: parsed.data.tool === "browser_use_close" ? "operation" : "session",
             uncertain: (value) => value.outcome !== "ok" || value.isError === true,

@@ -2,7 +2,16 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Browser, BrowserUse, CDP, CellError, Page, Tabs, type CellResult } from "@browser_use/pi";
+import {
+  Browser,
+  BrowserUse,
+  CDP,
+  CellError,
+  Page,
+  Tabs,
+  type CellResult,
+  type BrowserOptions,
+} from "@browser_use/pi";
 import { z } from "zod";
 import { discordAttachmentRoot } from "@clankie/settings";
 import {
@@ -25,9 +34,13 @@ const url = z.url();
 const empty = z.strictObject({});
 const tools = {
   browser_use_open: {
-    schema: z.strictObject({ url: url.optional(), headed: z.boolean().optional() }),
+    schema: z.strictObject({
+      url: url.optional(),
+      headed: z.boolean().optional(),
+      isolated: z.boolean().optional(),
+    }),
     description:
-      "Open Clankie's private browser and optionally navigate. headed:true opens his own login/takeover window; changing mode resets JavaScript bindings. Logins persist. Idle cleanup closes the browser after 60 seconds.",
+      "Open Clankie's private browser and optionally navigate. headed:true opens his own login/takeover window; changing mode resets JavaScript bindings. Logins persist. isolated:true uses a logged-out context. Idle cleanup closes only this conversation after 60 seconds. Mode changes are unavailable while other conversations browse.",
   },
   browser_use_javascript: {
     schema: z.strictObject({ code: string, timeoutMs: z.number().int().min(1).max(120_000).optional() }),
@@ -60,7 +73,10 @@ const tools = {
     description:
       "Focus an input by its observed accessibility backend node ID and replace its text using browser input.",
   },
-  browser_use_tabs: { schema: empty, description: "List browser tabs and their target IDs." },
+  browser_use_tabs: {
+    schema: empty,
+    description: "List this conversation’s browser tabs and their target IDs.",
+  },
   browser_use_select_tab: {
     schema: z.strictObject({ targetId: string }),
     description: "Select a tab by an observed target ID. Subsequent browser tools and JavaScript use it.",
@@ -68,12 +84,14 @@ const tools = {
   browser_use_close: {
     schema: empty,
     description:
-      "Close Clankie's browser and finish its recording. Logins and workspace files persist; JavaScript bindings reset.",
+      "Close this conversation’s browser tabs and finish its recording. Logins and workspace files persist; JavaScript bindings reset.",
   },
 } satisfies Record<string, { schema: z.ZodType; description: string; requiresShell?: boolean }>;
 type ToolName = keyof typeof tools;
 
-interface BrowserCallAuthority {
+export interface BrowserCallAuthority {
+  /** Host-resolved stable conversation, never supplied by tool arguments. */
+  conversationId?: string | undefined;
   /** Revalidated after the browser queue and before native effects. */
   guard?: () => Promise<void>;
   /** Supplied by the host's authority plan, never by tool arguments. */
@@ -90,8 +108,6 @@ export interface BrowserHostOptions {
   blockedTools?: readonly string[];
   recordSessions?: () => Promise<boolean>;
   idleMs?: number;
-  /** Runs inside the call queue after an idle close stopped the burst, before any later call. */
-  onIdleClosed?: () => void;
 }
 export interface BrowserHost {
   catalog(signal?: AbortSignal): Promise<BrowserToolCatalog>;
@@ -104,10 +120,332 @@ export interface BrowserHost {
 }
 
 export async function createBrowserHost(options: BrowserHostOptions): Promise<BrowserHost> {
+  const root = join(options.stateRoot, "browser");
+  const profileDir = join(root, "profile");
+  const env = options.environment ?? process.env;
+  const lanes = new Map<
+    string,
+    {
+      tail: Promise<void>;
+      workspace?: BrowserHost | undefined;
+      targets: Set<string>;
+      contextId?: string | undefined;
+      isolated: boolean;
+      idle?: NodeJS.Timeout;
+    }
+  >();
+  let owner: BrowserUse | undefined;
+  let connection: CDP | undefined;
+  let endpoint: string | undefined;
+  let headed = false;
+  let closing = false;
+  let lifecycle = Promise.resolve();
+  const locked = <T>(action: () => Promise<T>): Promise<T> => {
+    const next = lifecycle.then(action);
+    lifecycle = next.then(
+      () => {},
+      () => {},
+    );
+    return next;
+  };
+  async function stopChrome() {
+    // Keep the owner until shutdown succeeds: never launch a competing profile owner.
+    // Graceful Chrome shutdown flushes persistent cookies before the SDK reaps it.
+    if (connection) {
+      const processes = await connection.send("SystemInfo.getProcessInfo").catch(() => undefined);
+      const pid = processes?.processInfo?.find((process) => process.type === "browser")?.id;
+      await connection.send("Browser.close").catch(() => {});
+      // Browser.close is acknowledged before Chrome finishes flushing its profile.
+      // Wait for this endpoint's browser to exit before SDK.close can send SIGTERM.
+      const deadline = Date.now() + 5000;
+      while (pid && Date.now() < deadline) {
+        try {
+          process.kill(pid, 0);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ESRCH") break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    await owner?.close();
+    owner = undefined;
+    connection?.close();
+    connection = undefined;
+    endpoint = undefined;
+    headed = false;
+  }
+  async function recoverChrome() {
+    // Stop the sole owner before retiring workers whose targets died with Chrome.
+    await stopChrome();
+    for (const lane of lanes.values()) {
+      await lane.workspace
+        ?.close()
+        .catch((error) =>
+          options.logger.warn(
+            { event: "browser.crash.workspace_closed", detail: errorText(error) },
+            "crashed workspace retired",
+          ),
+        );
+      lane.workspace = undefined;
+      lane.targets.clear();
+      lane.contextId = undefined;
+    }
+  }
+  async function ensureChrome() {
+    if (connection) {
+      try {
+        await connection.send("Browser.getVersion");
+        return;
+      } catch {
+        await recoverChrome();
+      }
+    }
+    await mkdir(profileDir, { recursive: true, mode: 0o700 });
+    owner = await BrowserUse.create({
+      model: "openai/gpt-5.4",
+      streamFn: () => {
+        throw new Error("No nested browser agent");
+      },
+      browser: Browser.chromium({
+        profileDir,
+        headless: !headed,
+        ...(env.CLANKIE_BROWSER_EXECUTABLE ? { executablePath: env.CLANKIE_BROWSER_EXECUTABLE } : {}),
+      }),
+      workspace: join(root, "lifecycle"),
+      telemetry: false,
+      log: false,
+    });
+    try {
+      const [port, path] = (await readFile(join(profileDir, "DevToolsActivePort"), "utf8"))
+        .trim()
+        .split("\n");
+      if (!port || !/^\d+$/u.test(port) || !path?.startsWith("/devtools/browser/"))
+        throw new Error("Owned Chrome did not publish its browser endpoint");
+      endpoint = `ws://127.0.0.1:${port}${path}`;
+      connection = await CDP.connect(endpoint, 15_000);
+    } catch (error) {
+      await stopChrome();
+      throw error;
+    }
+  }
+  async function retire(_id: string, lane: NonNullable<ReturnType<typeof lanes.get>>) {
+    clearTimeout(lane.idle);
+    try {
+      await lane.workspace?.close();
+    } catch (error) {
+      const healthy = await connection?.send("Browser.getVersion").then(
+        () => true,
+        () => false,
+      );
+      if (healthy) throw error;
+      await recoverChrome();
+    }
+    lane.workspace = undefined;
+    if (connection) {
+      const live = await connection.send("Target.getTargets").catch(() => undefined);
+      if (live) {
+        for (let previous = -1; previous !== lane.targets.size;) {
+          previous = lane.targets.size;
+          for (const target of live.targetInfos)
+            if (target.openerId && lane.targets.has(target.openerId)) lane.targets.add(target.targetId);
+        }
+        if (lane.contextId) {
+          const contexts = await connection.send("Target.getBrowserContexts");
+          if (contexts.browserContextIds.includes(lane.contextId))
+            await connection.send("Target.disposeBrowserContext", { browserContextId: lane.contextId });
+        } else
+          for (const targetId of lane.targets) {
+            if (!live.targetInfos.some((target) => target.targetId === targetId)) continue;
+            await connection.send("Target.closeTarget", { targetId }).catch(async (error) => {
+              const remaining = await connection!.send("Target.getTargets");
+              if (remaining.targetInfos.some((target) => target.targetId === targetId)) throw error;
+            });
+          }
+      }
+    }
+    lane.targets.clear();
+    lane.contextId = undefined;
+    if (![...lanes.values()].some((other) => other.workspace)) await stopChrome();
+  }
+  function armLaneIdle(
+    id: string,
+    lane: NonNullable<ReturnType<typeof lanes.get>>,
+    delay = options.idleMs ?? IDLE_MS,
+  ) {
+    clearTimeout(lane.idle);
+    lane.idle = setTimeout(() => {
+      let failed = false;
+      const cleanup = lane.tail
+        .then(() => locked(() => retire(id, lane)))
+        .catch((error) => {
+          failed = true;
+          options.logger.warn(
+            { event: "browser.cleanup.failed", detail: errorText(error) },
+            "browser cleanup failed",
+          );
+        });
+      lane.tail = cleanup;
+      void cleanup.then(() => {
+        if (lane.tail !== cleanup || lanes.get(id) !== lane || closing) return;
+        if (failed) armLaneIdle(id, lane, 5000);
+        else lanes.delete(id);
+      });
+    }, delay);
+    lane.idle.unref();
+  }
+  // Catalog construction is side-effect free; Chrome is launched only by ensureChrome.
+  const discovery = await createBrowserWorkspace(
+    options,
+    Browser.chrome({ cdpUrl: "ws://127.0.0.1:1" }),
+    "catalog",
+    new Set(),
+  );
+  return {
+    catalog: (signal) =>
+      closing
+        ? Promise.resolve({ schemaVersion: 1, available: false, tools: [] })
+        : discovery.catalog(signal),
+    call(request, signal, authority) {
+      if (closing)
+        return Promise.resolve({
+          outcome: "refused",
+          tool: request.tool,
+          reason: "browser_unavailable",
+          detail: "browser_host_closed",
+        });
+      const id = authority?.conversationId ?? "operator";
+      let lane = lanes.get(id);
+      if (!lane) {
+        lane = { tail: Promise.resolve(), targets: new Set(), isolated: false };
+        lanes.set(id, lane);
+      }
+      const current = lane;
+      clearTimeout(current.idle);
+      const next = current.tail.then(async (): Promise<CallBrowserToolResult> => {
+        await authority?.guard?.();
+        if (signal?.aborted)
+          return {
+            outcome: "refused",
+            tool: request.tool,
+            reason: "browser_unavailable",
+            detail: "Browser call aborted",
+          };
+        const tool = tools[request.tool as ToolName];
+        if (!tool) return { outcome: "refused", tool: request.tool, reason: "unknown_tool" };
+        if ("requiresShell" in tool && authority?.shell !== true)
+          return {
+            outcome: "refused",
+            tool: request.tool,
+            reason: "approval_required",
+            detail: "Browser JavaScript needs a machine-authorized turn.",
+          };
+        const parsed = tool.schema.safeParse(request.arguments);
+        if (!parsed.success)
+          return {
+            outcome: "ok",
+            tool: request.tool,
+            content: parsed.error.message,
+            isError: true,
+            artifacts: [],
+          };
+        if (request.tool === "browser_use_close") {
+          await locked(() => retire(id, current));
+          return {
+            outcome: "ok",
+            tool: request.tool,
+            content: "Conversation browser closed; logins persist.",
+            isError: false,
+            artifacts: [],
+          };
+        }
+        try {
+          await locked(async () => {
+            // A preceding close/idle may have removed this accepted lane.
+            lanes.set(id, current);
+            const args =
+              request.tool === "browser_use_open" ? tools.browser_use_open.schema.parse(parsed.data) : {};
+            const nextHeaded = args.headed ?? headed;
+            if (args.headed !== undefined && args.headed !== headed) {
+              if ([...lanes.entries()].some(([otherId, other]) => otherId !== id && other.workspace))
+                throw new Error("Chrome mode change unavailable while other conversations are browsing");
+              await retire(id, current);
+              lanes.set(id, current);
+              headed = args.headed;
+            }
+            if (args.isolated !== undefined && args.isolated !== current.isolated) {
+              await retire(id, current);
+              lanes.set(id, current);
+              current.isolated = args.isolated;
+            }
+            headed = nextHeaded;
+            await ensureChrome();
+            await authority?.guard?.();
+            if (!current.workspace) {
+              if (current.isolated)
+                current.contextId = (
+                  await connection!.send("Target.createBrowserContext", { disposeOnDetach: true })
+                ).browserContextId;
+              const { targetId } = await connection!.send("Target.createTarget", {
+                url: "about:blank",
+                ...(current.contextId ? { browserContextId: current.contextId } : {}),
+              });
+              current.targets.add(targetId);
+              current.workspace = await createBrowserWorkspace(
+                options,
+                Browser.chrome({ cdpUrl: endpoint!, targetId }),
+                createHash("sha256").update(id).digest("hex"),
+                current.targets,
+                current.contextId,
+              );
+            }
+          });
+          return await current.workspace!.call(request, signal, authority);
+        } catch (error) {
+          return {
+            outcome: "refused",
+            tool: request.tool,
+            reason: "browser_unavailable",
+            detail: errorText(error),
+          };
+        }
+      });
+      current.tail = next.then(
+        () => {},
+        () => {},
+      );
+      void current.tail.then(() => {
+        if (current.tail === settled && lanes.get(id) === current && !closing) armLaneIdle(id, current);
+      });
+      const settled = current.tail;
+      return next;
+    },
+    async close() {
+      closing = true;
+      for (const lane of lanes.values()) clearTimeout(lane.idle);
+      await Promise.all([...lanes.values()].map((lane) => lane.tail));
+      await locked(async () => {
+        try {
+          for (const [id, lane] of lanes) await retire(id, lane);
+        } finally {
+          await stopChrome();
+        }
+      });
+      await discovery.close();
+    },
+  };
+}
+
+async function createBrowserWorkspace(
+  options: BrowserHostOptions,
+  browser: BrowserOptions,
+  key: string,
+  targets: Set<string>,
+  contextId?: string,
+): Promise<BrowserHost> {
   const env = options.environment ?? process.env;
   const root = join(options.stateRoot, "browser");
   const profileDir = join(root, "profile");
-  const workspace = join(root, "workspace");
+  const workspace = join(root, "workspace", key);
   const artifactRoot = options.attachmentRoot ?? discordAttachmentRoot(env);
   for (const directory of [profileDir, workspace, join(artifactRoot, "browser")]) {
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -135,9 +473,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   let page: Page | undefined;
   let recording: Awaited<ReturnType<typeof startBrowserRecording>> | undefined;
   let recordingRequested = false;
-  let headed = false;
   let closing = false;
-  let idle: NodeJS.Timeout | undefined;
   let tail = Promise.resolve();
 
   async function select(targetId: string) {
@@ -148,8 +484,6 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       await connection.send("Target.detachFromTarget", { sessionId: previous.sessionId }).catch(() => {});
   }
   async function finishBurst() {
-    clearTimeout(idle);
-    idle = undefined;
     recordingRequested = false;
     if (recording) {
       const current = recording;
@@ -168,25 +502,9 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     connection = undefined;
     page = undefined;
     const current = session;
-    session = undefined;
-    headed = false;
     await current?.close();
+    session = undefined;
     if (current) options.logger.info({ event: "browser.burst.closed" }, "browser burst closed");
-  }
-  function armIdle() {
-    clearTimeout(idle);
-    idle = setTimeout(() => {
-      tail = tail
-        .then(finishBurst)
-        .then(() => options.onIdleClosed?.())
-        .catch((error: unknown) => {
-          options.logger.warn(
-            { event: "browser.burst.close_failed", detail: errorText(error) },
-            "browser cleanup failed",
-          );
-        });
-    }, options.idleMs ?? IDLE_MS);
-    idle.unref();
   }
   async function ensureSession() {
     if (session) return;
@@ -196,11 +514,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       streamFn: () => {
         throw new Error("Clankie's browser uses execute(), not a nested agent");
       },
-      browser: Browser.chromium({
-        profileDir,
-        headless: !headed,
-        ...(env.CLANKIE_BROWSER_EXECUTABLE ? { executablePath: env.CLANKIE_BROWSER_EXECUTABLE } : {}),
-      }),
+      browser,
       workspace,
       telemetry: false,
       log: false,
@@ -232,6 +546,14 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       await finishBurst();
       throw error;
     }
+  }
+  async function ownedTabs() {
+    const listed = await new Tabs(connection!, () => {}).list();
+    for (let previous = -1; previous !== targets.size;) {
+      previous = targets.size;
+      for (const tab of listed) if (tab.openerId && targets.has(tab.openerId)) targets.add(tab.targetId);
+    }
+    return listed.filter((tab) => targets.has(tab.targetId));
   }
   async function images(blocks: CellResult["images"], tool: string): Promise<BrowserArtifact[]> {
     const artifacts: BrowserArtifact[] = [];
@@ -270,7 +592,6 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     if (!parsed.success)
       return { outcome: "ok", tool: name, content: parsed.error.message, isError: true, artifacts: [] };
     await authority?.guard?.();
-    clearTimeout(idle);
     if (name === "browser_use_close") {
       await finishBurst();
       return {
@@ -281,19 +602,11 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         artifacts: [],
       };
     }
-    if (name === "browser_use_open") {
-      const args = tools.browser_use_open.schema.parse(parsed.data);
-      if (args.headed !== undefined && args.headed !== headed) {
-        await finishBurst();
-        headed = args.headed;
-      }
-    }
     try {
       signal?.throwIfAborted();
       await ensureSession();
       await authority?.guard?.();
     } catch (error) {
-      if (session) armIdle();
       return { outcome: "refused", tool: name, reason: "browser_unavailable", detail: errorText(error) };
     }
     let result: CellResult = { text: "", images: [] };
@@ -305,11 +618,34 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       switch (name) {
         case "browser_use_javascript": {
           const args = tools.browser_use_javascript.schema.parse(parsed.data);
+          // Reinstall after worker recovery. Each workspace owns only its normal tab helpers;
+          // machine-authorized Node/root CDP remains a machine tool, not a sandbox.
+          await ownedTabs();
+          await session.execute(`
+            var __nativeTabs = typeof __nativeTabs === 'undefined' ? tabs : __nativeTabs;
+            var __ownedTabs = typeof __ownedTabs === 'undefined' ? new Set() : __ownedTabs;
+            ${JSON.stringify([...targets])}.forEach(id => __ownedTabs.add(id));
+            tabs = {
+              list: async () => (await __nativeTabs.list()).filter(t => __ownedTabs.has(t.targetId)),
+              get: async id => { if (!__ownedTabs.has(id)) throw Error('Tab belongs to another conversation'); return __nativeTabs.get(id); },
+              open: async (url = 'about:blank') => {
+                ${contextId ? `var t = await browser.send('Target.createTarget', {url:'about:blank', browserContextId:${JSON.stringify(contextId)}}); var p = await __nativeTabs.get(t.targetId);` : `var p = await __nativeTabs.open();`}
+                __ownedTabs.add(p.targetId);
+                if (url !== 'about:blank') await p.goto(url);
+                return p;
+              }
+            };
+          `);
           result = await session.execute(args.code, {
             timeoutMs: args.timeoutMs ?? 30_000,
             ...(signal ? { signal } : {}),
           });
-          if (result.targetId) await select(result.targetId);
+          if (result.targetId) {
+            targets.add(result.targetId);
+            await select(result.targetId);
+          }
+          const owned = await session.execute("console.log(JSON.stringify([...__ownedTabs]))");
+          for (const id of JSON.parse(owned.text)) targets.add(id);
           break;
         }
         case "browser_use_open":
@@ -351,14 +687,19 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
           break;
         }
         case "browser_use_tabs":
-          value = await new Tabs(connection, () => {}).list();
+          value = await ownedTabs();
           break;
         case "browser_use_select_tab": {
           const args = tools.browser_use_select_tab.schema.parse(parsed.data);
+          await ownedTabs();
+          if (!targets.has(args.targetId)) throw new Error("Tab belongs to another conversation");
           result = await session.execute(
             `page = await tabs.get(${JSON.stringify(args.targetId)}); console.log(await page.info())`,
           );
-          if (result.targetId) await select(result.targetId);
+          if (result.targetId) {
+            targets.add(result.targetId);
+            await select(result.targetId);
+          }
           break;
         }
         case "browser_use_screenshot":
@@ -376,6 +717,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         `${result.text}\n${errorText(error)}\nActions may have partially executed. Inspect before retrying.`.trim();
       if (result.targetId) {
         try {
+          targets.add(result.targetId);
           await select(result.targetId);
         } catch (selectionError) {
           result.text += `\nCurrent tab unavailable: ${errorText(selectionError)}`;
@@ -394,7 +736,6 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
           );
         }
       }
-      armIdle();
     }
     const content =
       result.text.length > 190_000
@@ -424,7 +765,6 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     },
     async close() {
       closing = true;
-      clearTimeout(idle);
       await tail;
       await finishBurst();
     },

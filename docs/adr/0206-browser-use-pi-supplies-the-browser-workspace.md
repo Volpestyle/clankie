@@ -61,3 +61,31 @@ forged arguments. A real local Chrome exercise covers long pages, variables
 across cells, accessibility, form input, clicks, screenshot artifacts,
 worker timeout recovery, headed/headless transitions, local storage across
 session restarts, and decodable WebM output.
+
+## Amendment: concurrent conversation browsers (2026-10-11, VUH-2129)
+
+The service owns one Chrome lifecycle: launch, SDK private-profile lock, crash
+recovery and final shutdown. Each host-authenticated conversation attaches its
+own Browser Use Pi workspace/worker and tab to that Chrome endpoint. Calls are
+serialized per conversation, so independent rooms browse concurrently while
+sharing Clankie's signed-in profile. Tab helpers list and select only that
+conversation's tabs. Machine-authorized Node/root CDP retains its existing
+machine authority; tab ownership is not a Node sandbox.
+
+Browser use no longer acquires an exclusive body lease. Persisted browser claims
+and requests are retired on startup. Idle cleanup after 60 seconds closes only
+that conversation's tabs and recording; Chrome closes when no workspace remains.
+A refused or uncertain operation cannot hold other rooms for recovery. Existing
+authority guards remain revalidated after queueing and setup, before effects.
+
+`browser_use_open` accepts `isolated: true` to use a disposable logged-out CDP
+context in the same Chrome; returning to `isolated: false` resets that workspace
+onto the persistent profile. Isolated cookies/storage are never copied back.
+Headed mode changes are refused while other conversations have workspaces,
+rather than closing their pages. A Chrome crash invalidates all handles; the
+single lifecycle owner stops its SDK instance before relaunching. Failed cleanup
+or a locked profile returns bounded `browser_unavailable`; no effect is replayed
+and no caller can steal a lock or manufacture machine authority.
+
+The earlier whole-browser serialization and burst/lease descriptions above are
+historical and superseded by this amendment.
