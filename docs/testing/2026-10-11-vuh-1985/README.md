@@ -33,3 +33,16 @@ Verification on fetched main `cdd373cab41ca375c2bccea59cff1322ba8c6200`:
   user actor type. Corrected without weakening quoted-context assertions.
 
 Integration gate and push are pending; no local duplicate root gate was run.
+
+Correction and rebased verification:
+
+- Original combined integration gate exited 1 because the runtime hook was not
+  registered as an explicit knip entry. The failed gate is retained in correction
+  evidence. No landing or successful full gate is claimed.
+- Registered the runtime entry and closed a leading-underscore MCP tool-name
+  bypass in the matcher. Corrective deadcode check and direct formatter exited 0.
+- Rebased cleanly on `cf61cc10a9b0af7558b84d6b9bc40c8a7d137269`. All seven focused
+  files passed: 47 tests including the private native install proof, 34.93s.
+- Corrected code tip: `6f79608c7c2228bddab511216da72cc48e97482c`. The original
+  request `357cd184-5425-481e-8688-6e2c147d7599` remains in isolation. Per the lead,
+  preserve it until terminal, then submit the corrected tree.
