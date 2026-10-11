@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json",
     "test": "vitest run --config ../../vitest.config.ts",
     "conformance": "node scripts/conformance.ts"
   },

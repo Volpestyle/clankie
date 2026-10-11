@@ -53,6 +53,11 @@ pnpm docs:public:build
 Preview the built site through a local HTTP server; its links are root-relative.
 The [docs app guide](apps/docs/README.md) gives the command and source map.
 
+TypeScript checks use a shared heap ceiling and bounded compiler programs;
+[typechecking](docs/typechecking.md) explains the budget, retained diagnostics,
+and how to investigate a failure. Run `clankie heavy -- pnpm typecheck` on a
+shared machine. Raising `NODE_OPTIONS` does not raise the compiler's ceiling.
+
 ## Keep the boundaries clear
 
 - The [CLI contract](docs/cli.md), OpenAPI catalog, and owning package references

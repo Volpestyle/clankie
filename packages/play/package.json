@@ -8,7 +8,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json",
     "test": "vitest run",
     "gameplay:evaluate-journal": "tsx scripts/evaluate-free-play-journal.ts"
   },

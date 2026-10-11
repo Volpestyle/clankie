@@ -45,7 +45,11 @@ export function landingTypechecks(root, base) {
   const all = projects.map((project) => project.name).sort();
   let allReason;
   // Compiler/installation settings can change resolution even without a source edit.
-  if ([...changed].some((path) => /^(?:tsconfig[^/]*\.json|pnpm-workspace\.yaml|turbo\.json)$/u.test(path)))
+  if (
+    [...changed].some((path) =>
+      /^(?:tsconfig[^/]*\.json|pnpm-workspace\.yaml|turbo\.json|scripts\/typecheck\.mjs)$/u.test(path),
+    )
+  )
     allReason = "compiler or dependency configuration";
   // A lockfile change reaches only the packages whose resolved dependencies
   // changed; they are checked as if their own manifest changed (VUH-2044).

@@ -10,7 +10,7 @@
     "live-proof": "tsx src/live-proof-cli.ts",
     "watch-live-proof": "tsx src/live-proof-cli.ts watch",
     "publish-live-proof": "tsx src/live-proof-cli.ts publish",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {

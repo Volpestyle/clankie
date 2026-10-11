@@ -61,6 +61,11 @@ Do not override Turbo's limit with a higher `--concurrency` or `--parallel`.
 These tool-native limits do not restrict arbitrary subprocesses or CPU affinity;
 serialize compilers and other tools that do not honor them.
 Serialize multi-package compilers inside one permit.
+Clankie's checkout `pnpm typecheck` already serializes compiler tasks and uses
+the shared heap budget in `scripts/typecheck.mjs`. Keep that entrypoint;
+`docs/typechecking.md` describes bounded programs and the retained failure
+diagnostics under `.local/typechecks/`. A higher `NODE_OPTIONS` does not raise
+the compiler budget.
 `clankie heavy` sizes the command for you. Vitest naming up to eight test files,
 `tsc` without `--build`, or `pnpm --filter ONE typecheck` runs in the light lane:
 two cores, its own slots, held only by the memory floor, so it starts beside full

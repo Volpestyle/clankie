@@ -43,6 +43,9 @@ This directory and the module READMEs hold the technical references.
 sessions, and connections in the TUI. [Contributing](../CONTRIBUTING.md) owns the
 source setup and checks.
 
+[Typechecking](typechecking.md) owns the compiler heap budget, program boundaries
+and retained diagnostics.
+
 | Area                              | Owning reference                                                                                                                                                     |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Service HTTP contract             | [OpenAPI](../apps/clankie/openapi.yaml), rendered as the [API docs](https://docs.clankie.bot/api/)                                                                   |

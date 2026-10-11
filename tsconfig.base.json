@@ -19,6 +19,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"]
+    "types": ["node"],
+    "allowArbitraryExtensions": true
   }
 }

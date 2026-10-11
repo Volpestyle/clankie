@@ -11,7 +11,7 @@
     "person-memory-live-proof": "tsx src/live-proof-cli.ts person-memory",
     "voice-readiness": "tsx src/voice-readiness-cli.ts",
     "voice-live-proof": "tsx src/live-proof-cli.ts voice",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {

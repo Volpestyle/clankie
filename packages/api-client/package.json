@@ -11,7 +11,7 @@
     "./accounts": "./src/accounts.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

@@ -15,5 +15,6 @@
     "clean": {
       "cache": false
     }
-  }
+  },
+  "globalDependencies": ["scripts/typecheck.mjs"]
 }

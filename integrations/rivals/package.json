@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json"
   },
   "dependencies": {
     "@clankie/game-extension": "workspace:*",

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "failed-trace.tgz",
+      "size": 11654267,
+      "sha256": "2b68a9e3164ec4f402ce627356860c42edc833459fcc0e347e56e5c056a291f6",
+      "url": "clankie://evidence/sha256/2b68a9e3164ec4f402ce627356860c42edc833459fcc0e347e56e5c056a291f6"
+    },
+    {
+      "path": "measurement-proof.json",
+      "size": 740013,
+      "sha256": "c9a7050758d9b8784173f10893b7a26b13eee56abbf795caec9e093f807ee45b",
+      "url": "clankie://evidence/sha256/c9a7050758d9b8784173f10893b7a26b13eee56abbf795caec9e093f807ee45b"
+    }
+  ]
+}

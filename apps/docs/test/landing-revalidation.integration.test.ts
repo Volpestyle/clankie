@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { changePatchId, sourceFingerprint } from "../../../scripts/testing/landing-validity.mjs";
 import { changedLockfileImporters } from "../../../scripts/testing/lockfile-importers.mjs";
+import { landingTypechecks } from "../../../scripts/testing/landing-typechecks.mjs";
 
 // VUH-2024: a green landing gate survives a base move that touches nothing it
 // checked. Real git history and the real gate entrypoint; the recorded gate is
@@ -143,6 +144,12 @@ it.each([
     "// changed\n",
     "repository-wide input scripts/check-landing.mjs",
   ],
+  [
+    "the shared compiler budget",
+    "scripts/typecheck.mjs",
+    "// new compiler policy\n",
+    "repository-wide input scripts/typecheck.mjs",
+  ],
 ])("forces a rerun when the incoming commit changes %s", async (_name, path, text, reason) => {
   const repo = repository();
   await recordGreenGate(repo.root, repo.base, repo.head);
@@ -151,6 +158,28 @@ it.each([
   expect(status).toBe(1);
   expect(verdict.valid).toBe(false);
   expect(verdict.reasons.join("\n")).toContain(reason);
+});
+
+it("selects every compiler when the shared budget changes without package source edits", () => {
+  const repo = repository();
+  mkdirSync(join(repo.root, "integrations"));
+  mkdirSync(join(repo.root, "packages"));
+  for (const name of ["one", "two"]) {
+    repo.write(
+      `apps/${name}/package.json`,
+      JSON.stringify({ name: `@fixture/${name}`, scripts: { typecheck: "tsc --noEmit" } }),
+    );
+    repo.write(
+      `apps/${name}/tsconfig.json`,
+      JSON.stringify({ compilerOptions: { types: [] }, include: ["src/**/*.ts"] }),
+    );
+  }
+  repo.write("scripts/typecheck.mjs", "// initial budget\n");
+  const base = repo.commit("compiler projects");
+  repo.write("scripts/typecheck.mjs", "// changed budget\n");
+  const scope = landingTypechecks(repo.root, base);
+  expect(scope.packages).toEqual(["@fixture/one", "@fixture/two"]);
+  expect(scope.reason).toBe("compiler or dependency configuration");
 });
 
 it("forces a rerun when the incoming commit deletes a file", async () => {

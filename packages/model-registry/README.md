@@ -15,6 +15,12 @@ Schemas are lenient by design: unknown keys pass through and malformed or missin
 
 The default cache dir is `${XDG_CACHE_HOME ?? ~/.cache}/clankie`.
 
+The bundled JSON has an `unknown` declaration in
+[`data/models-dev-snapshot.d.json.ts`](data/models-dev-snapshot.d.json.ts).
+`CatalogSchema.parse` supplies its validated runtime type. Keep that declaration
+when re-vendoring: inferring every model's literal object shape adds roughly
+124,000 types to every compiler program that imports the registry.
+
 ## Refreshing
 
 `registry.refresh(force?)` fetches `${url}/api.json` (10 s timeout) and atomically rewrites the disk cache as a `{ fetchedAt, catalog }` envelope. Without `force`, a fresh cache short-circuits. Network failures fall back to cache or the bundled snapshot instead of throwing.

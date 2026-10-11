@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "turbo run build --filter=@clankie/vox",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck --concurrency=1",
     "test": "vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug",
     "lint": "oxlint --deny-warnings . && pnpm --filter @clankie/vox lint",
     "deadcode": "knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers",
