@@ -5,6 +5,8 @@ import {
   FLEET_RESOURCES_PATH,
   FLEET_SIMULATORS_PATH,
   FleetResourceSnapshotSchema,
+  FleetMachineResourceSnapshotSchema,
+  FleetResourceMachineIdSchema,
   FleetSimulatorRequestSchema,
   FleetSimulatorResultSchema,
   FleetSimulatorStatusSchema,
@@ -93,6 +95,12 @@ function transportError(error: unknown): Error {
 
 export async function runResourceStatusCommand(options: BrowserCommandOptions = {}) {
   return FleetResourceSnapshotSchema.parse(await request(FLEET_RESOURCES_PATH, undefined, options));
+}
+export async function runMachineResourceStatusCommand(machine: string, options: BrowserCommandOptions = {}) {
+  const query = new URLSearchParams({ machine: FleetResourceMachineIdSchema.parse(machine) });
+  return FleetMachineResourceSnapshotSchema.parse(
+    await request(`${FLEET_RESOURCES_PATH}?${query}`, undefined, options),
+  );
 }
 
 export async function runSimulatorCommand(

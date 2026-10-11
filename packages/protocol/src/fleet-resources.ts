@@ -386,3 +386,51 @@ export const FleetSimulatorResultSchema = z.discriminatedUnion("outcome", [
     .strict(),
 ]);
 export type FleetSimulatorStatus = z.infer<typeof FleetSimulatorStatusSchema>;
+
+/** Measured by the governor's host, never inferred from the observing service. */
+export const FleetResourceMachineIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u);
+export const FleetResourceMachineSpecsSchema = z.strictObject({
+  platform: z.enum(["darwin", "linux", "win32"]),
+  cores: z.number().int().positive().max(4096),
+  memoryBytes: z.number().int().positive(),
+});
+export type FleetResourceMachineSpecs = z.infer<typeof FleetResourceMachineSpecsSchema>;
+const machineResourceFields = {
+  schemaVersion: z.literal(1),
+  machine: FleetResourceMachineIdSchema,
+  policy: FleetResourcePolicySchema,
+};
+export const FleetMachineResourceSnapshotSchema = z.discriminatedUnion("status", [
+  z.strictObject({
+    ...machineResourceFields,
+    status: z.literal("available"),
+    specs: FleetResourceMachineSpecsSchema,
+    snapshot: FleetResourceSnapshotSchema,
+  }),
+  z.strictObject({
+    ...machineResourceFields,
+    status: z.literal("unavailable"),
+    reason: z.enum(["governor-unavailable", "probe-unavailable"]),
+  }),
+]);
+export type FleetMachineResourceSnapshot = z.infer<typeof FleetMachineResourceSnapshotSchema>;
+
+/** Same sizing on every host; native Windows and WSL use the Windows host's facts. */
+export function resolveFleetResourcePolicy(
+  policy: FleetResourcePolicy,
+  specs: FleetResourceMachineSpecs,
+): FleetResourcePolicy {
+  const host = FleetResourceMachineSpecsSchema.parse(specs);
+  const gib = host.memoryBytes / 1024 ** 3;
+  return {
+    ...policy,
+    heavySlots:
+      policy.heavySlots ??
+      Math.min(64, Math.max(1, Math.min(Math.floor(host.cores / 2), Math.floor(gib / 12)))),
+    simulatorSlots:
+      host.platform === "darwin"
+        ? (policy.simulatorSlots ??
+          Math.min(64, Math.max(1, Math.min(Math.floor(host.cores / 4), Math.floor(gib / 68)))))
+        : 0,
+  };
+}

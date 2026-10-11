@@ -3140,6 +3140,29 @@ to on. Workers still need proven native pane/process and matching session identi
 a fleet bearer alone cannot send. See [worker peer messages](worker-access.md#messages-between-workers)
 and [ADR 0213](adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608).
 
+Machine resources retain their local defaults. `clankie fleet resources` returns
+the existing local snapshot; `clankie fleet resources --machine local` (or
+`default`) returns a machine-identified status with measured CPU/RAM. A registered
+machine ID selects that host alone. An unavailable host returns its saved policy
+and an explicit unavailable status, never the local machine's capacity.
+
+`clankie fleet set --machine ID --heavy-slots auto|N --simulator-slots auto|N`
+saves limits for that machine. The same owner API backs the TUI resource editor
+and shared app settings on phone, web and desktop. Without `--machine`, existing
+local resource settings keep their behavior. Machine-specific local settings
+take precedence over those defaults. Automatic counts resolve against the target
+host's measured specs; simulator capacity is zero on hosts without macOS.
+Machine settings are stored as `fleet.machineResources`; updates merge entries
+and preserve policies belonging to other machines.
+
+The status API is `GET /v1/operator/fleet-resources?machine=ID`; omitting the
+selector preserves the existing snapshot shape. Machine policy updates use
+`POST /v1/operator/fleet-settings`, its existing revision guard, and
+`changes.machineResources`. `resourceMachines` in the settings snapshot lists the
+supported IDs. A linked governor supplies its own specs, status and configuration
+through the service's host adapter; native Windows provisioning is VUH-2091.
+No shell or Herdr connection is opened by these resource API/UI paths.
+
 `--remote-gates on` lets an integrate batch gate on a linked machine while this
 one is saturated; it defaults to off. Remote placement/staging times out after two minutes and falls back to the local gate with the reason recorded; cleanup is bounded to ten seconds. See [gates on a linked machine](integration.md#gates-on-a-linked-machine).
 

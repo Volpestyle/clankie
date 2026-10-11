@@ -277,3 +277,15 @@ have a five-second cache and grant no device/process authority. Admission uses
 whole-machine load and available memory, which already include the simulator;
 subtracting its footprint again would double-count it. The device ceiling and
 explicit owner overrides still bind.
+
+## Machine-scoped control
+
+The service adds `fleet-resources?machine=ID` without changing the unselected
+local snapshot. Owner `fleet.machineResources` entries are independent policies;
+only local falls back to the legacy `fleet.resources`. Unknown IDs are refused,
+and offline hosts expose their desired policy without a fabricated snapshot.
+The remote host adapter must supply its canonical machine ID, measured specs and
+its own governor snapshot. Status/configure calls are bounded to five seconds; a
+wrong-host response is unavailable. The shared node-free protocol sizing function
+uses those specs, not the observing Mac's hardware. Windows provisioning and
+native/WSL admission belong to VUH-2091.

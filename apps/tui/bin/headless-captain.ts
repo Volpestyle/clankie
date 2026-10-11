@@ -458,6 +458,15 @@ export async function runHeadlessCaptainCommand(
         );
         return 0;
       }
+      if (rest.length === 3 && rest[0] === "resources" && rest[1] === "--machine" && rest[2]) {
+        outputJson(
+          stdout,
+          await (
+            await import("../src/command/fleet-resources.ts")
+          ).runMachineResourceStatusCommand(rest[2], options),
+        );
+        return 0;
+      }
       if (rest.length === 1 && rest[0] === "resources") {
         outputJson(
           stdout,

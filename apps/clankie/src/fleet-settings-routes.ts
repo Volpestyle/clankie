@@ -23,6 +23,7 @@ import {
   resolveFleetSettingsContext,
   type FleetSettingsContextDependencies,
 } from "./fleet-settings-context.ts";
+import { resourceMachine, machineResourcePolicy } from "./machine-fleet-resources.ts";
 
 function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot {
   const fleet = {
@@ -37,6 +38,7 @@ function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot
     schemaVersion: 1,
     workingPreferences: true,
     fleetGates: true,
+    resourceMachines: ["local", ...settings.machines.map((machine) => machine.id)],
     revision: createHash("sha256").update(JSON.stringify(fleet)).digest("hex"),
     fleet,
     autonomyLevel: matchingAutonomyLevel(settings.autonomy.fleet),
@@ -61,7 +63,7 @@ export function createFleetSettingsRoutes(
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
   settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>,
   dependencies: FleetSettingsContextDependencies & {
-    configureResources?: ((policy: FleetResourcePolicy) => Promise<unknown>) | undefined;
+    configureResources?: ((policy: FleetResourcePolicy, machine?: string) => Promise<unknown>) | undefined;
   } = {},
 ): Hono {
   const app = new Hono();
@@ -94,6 +96,7 @@ export function createFleetSettingsRoutes(
             size,
             models,
             resources,
+            machineResources,
             notes,
             tools,
             peerMessages,
@@ -102,6 +105,11 @@ export function createFleetSettingsRoutes(
             autonomyLevel,
             ...preferences
           } = input.data.changes;
+          if (machineResources)
+            for (const machine of Object.keys(machineResources)) {
+              if (resourceMachine(current, machine) !== machine)
+                throw new Error("Use the canonical machine ID");
+            }
           const defaults = FleetAutonomySchema.parse({});
           const resolved = Object.fromEntries(
             Object.entries(preferences).map(([field, value]) => [
@@ -116,6 +124,18 @@ export function createFleetSettingsRoutes(
               ...(size === undefined ? {} : { size }),
               ...(models === undefined ? {} : { models }),
               ...(resources === undefined ? {} : { resources }),
+              ...(machineResources === undefined
+                ? {}
+                : { machineResources: { ...current.fleet.machineResources, ...machineResources } }),
+              ...(resources !== undefined && current.fleet.machineResources?.local && !machineResources?.local
+                ? {
+                    machineResources: {
+                      ...current.fleet.machineResources,
+                      ...machineResources,
+                      local: resources,
+                    },
+                  }
+                : {}),
               ...(notes === undefined ? {} : { notes }),
               ...(tools === undefined ? {} : { tools }),
               ...(peerMessages === undefined ? {} : { peerMessages }),
@@ -138,7 +158,9 @@ export function createFleetSettingsRoutes(
         },
       );
       if (input.data.changes.resources !== undefined)
-        await dependencies.configureResources?.(input.data.changes.resources);
+        await dependencies.configureResources?.(machineResourcePolicy(updated, "local"));
+      for (const machine of Object.keys(input.data.changes.machineResources ?? {}))
+        await dependencies.configureResources?.(machineResourcePolicy(updated, machine), machine);
       return context.json(fleetSettingsSnapshot(updated));
     } catch {
       return context.json({ error: "fleet_settings_conflict" }, 409);

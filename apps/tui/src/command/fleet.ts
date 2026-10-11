@@ -48,8 +48,8 @@ import type { machineSetupContext } from "./machine-setup.ts";
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH]]",
   `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]`,
-  "       clankie fleet set [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N]",
-  "       clankie fleet resources",
+  "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N]",
+  "       clankie fleet resources [--machine ID]",
   "       clankie fleet processes [retire]",
   "       clankie fleet clear",
 ].join("\n");
@@ -64,6 +64,7 @@ export type FleetCommandOptions = NonNullable<Parameters<typeof machineSetupCont
 
 export interface FleetCommandResult {
   readonly ok: true;
+  readonly resourceMachines?: string[];
   readonly revision: string;
   readonly fleet: FleetSettings & FleetAutonomy;
   readonly workingPreferences: WorkingPreferencesReport;
@@ -243,6 +244,7 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
   return {
     ...report,
     revision: snapshot.revision,
+    ...(snapshot.resourceMachines ? { resourceMachines: snapshot.resourceMachines } : {}),
     fleet: { ...report.fleet, ...FleetAutonomySchema.parse(fleetAutonomyFields(snapshot.fleet)) },
     ...(snapshot.autonomyLevel === undefined ? {} : { autonomyLevel: snapshot.autonomyLevel }),
     deployHolds: await deployHoldStatus(api),
@@ -511,7 +513,33 @@ export async function runFleetCommand(
     const snapshot = await (
       await ownerSettingsApi(options)
     ).get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
-    const { change, hire } = await parseSet(args.slice(1), snapshot.fleet.resources);
+    const selector = args.indexOf("--machine");
+    const machine = selector === -1 ? undefined : args[selector + 1];
+    if (
+      selector !== -1 &&
+      (!machine || !snapshot.resourceMachines?.includes(machine === "default" ? "local" : machine))
+    )
+      throw new Error("Unknown resource machine");
+    const canonical = machine === "default" ? "local" : machine;
+    const flags = args.slice(1);
+    if (selector !== -1) flags.splice(selector - 1, 2);
+    const { change, hire } = await parseSet(
+      flags,
+      canonical === undefined
+        ? (snapshot.fleet.machineResources?.local ?? snapshot.fleet.resources)
+        : (snapshot.fleet.machineResources?.[canonical] ??
+            (canonical === "local" ? snapshot.fleet.resources : undefined)),
+    );
+    if (canonical !== undefined) {
+      if (
+        !change.resources ||
+        Object.keys(change).some((key) => key !== "resources") ||
+        Object.keys(hire).length
+      )
+        throw new Error("--machine applies only to resource settings");
+      change.machineResources = { [canonical]: change.resources };
+      delete change.resources;
+    }
     return await fleetUpdate(
       change,
       { ...options, expectedRevision: snapshot.revision },

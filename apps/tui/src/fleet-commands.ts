@@ -112,7 +112,19 @@ async function editFleetResources(shell: ClankieFaceShell, services: FleetComman
   try {
     const snapshot = await fleetStatus(services);
     const current = snapshot.fleet;
-    const resources = FleetResourcePolicySchema.parse(current.resources ?? {});
+    const machine = await flow.readText({
+      message: "Machine (local or a registered machine ID)",
+      defaultValue: "local",
+      allowBack: true,
+      validate: (value: string) =>
+        value === "local" || snapshot.resourceMachines?.includes(value)
+          ? undefined
+          : "Choose a registered machine.",
+    });
+    if (machine === undefined) return;
+    const resources = FleetResourcePolicySchema.parse(
+      current.machineResources?.[machine] ?? (machine === "local" ? (current.resources ?? {}) : {}),
+    );
     const capacity = await flow.readText({
       message: "Fleet — shared heavy capacity (auto or 1–64)",
       defaultValue: String(resources.heavySlots ?? "auto"),
@@ -168,11 +180,11 @@ async function editFleetResources(shell: ClankieFaceShell, services: FleetComman
     });
     if (memory === undefined) return;
     resources.minAvailableMemoryMb = Number(memory);
-    await fleetUpdate({ resources }, { ...services, expectedRevision: snapshot.revision });
-    flow.renderLine(
-      "Saved. Resource capacity and pressure limits apply to the shared machine governor.",
-      "success",
+    await fleetUpdate(
+      snapshot.resourceMachines ? { machineResources: { [machine]: resources } } : { resources },
+      { ...services, expectedRevision: snapshot.revision },
     );
+    flow.renderLine("Saved. Resource limits apply to this machine when it is connected.", "success");
   } finally {
     flow.end();
   }

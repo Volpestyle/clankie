@@ -67,6 +67,14 @@ Stop helpers in your own teardown anyway: a leftover is killed, not drained.
 A lock-helper fault before the journal write committed nothing and is retried
 on a fresh helper, so a queued job does not die from it.
 
+`clankie fleet resources --machine ID` selects a registered host, with its own
+specs, capacity, holders and queue. `local` and `default` select this service's
+machine; without the selector the existing local response stays unchanged.
+An unavailable remote host never reports the local machine's snapshot.
+`clankie fleet set --machine ID --heavy-slots auto|N --simulator-slots auto|N`
+saves owner limits for that machine; auto resolves against its host's CPU/RAM.
+All surfaces use the same resource status and revision-guarded fleet settings API.
+
 `clankie fleet resources` and `clankie doctor --json` show capacity, actual holders,
 queue and pressure. Status includes executable names and labels, never arguments
 or credentials. A wait can mean a full pool, high load, low available memory or

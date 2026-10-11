@@ -750,6 +750,12 @@ export { RoomHandoffMetadataSchema, type RoomHandoffMetadata } from "./operator-
 export {
   FLEET_RESOURCES_PATH,
   FLEET_SIMULATORS_PATH,
+  FleetResourceMachineIdSchema,
+  FleetResourceMachineSpecsSchema,
+  FleetMachineResourceSnapshotSchema,
+  resolveFleetResourcePolicy,
+  type FleetResourceMachineSpecs,
+  type FleetMachineResourceSnapshot,
   FleetResourcePolicySchema,
   FleetResourceSnapshotSchema,
   FleetSimulatorRequestSchema,

@@ -1,4 +1,12 @@
 import {
+  FLEET_RESOURCES_PATH,
+  FleetResourceSnapshotSchema,
+  FleetMachineResourceSnapshotSchema,
+  FleetResourceMachineIdSchema,
+  type FleetResourceSnapshot,
+  type FleetMachineResourceSnapshot,
+} from "@clankie/protocol/fleet-resources";
+import {
   MinecraftHostCommandSchema,
   PairingOfferWireSchema,
   type PairingOfferWire,
@@ -269,6 +277,21 @@ export class ClankieApiClient {
     }
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
+  }
+
+  public async fleetResources(): Promise<FleetResourceSnapshot>;
+  public async fleetResources(machine: string): Promise<FleetMachineResourceSnapshot>;
+  public async fleetResources(
+    machine?: string,
+  ): Promise<FleetResourceSnapshot | FleetMachineResourceSnapshot> {
+    const path =
+      machine === undefined
+        ? FLEET_RESOURCES_PATH
+        : `${FLEET_RESOURCES_PATH}?${new URLSearchParams({ machine: FleetResourceMachineIdSchema.parse(machine) })}`;
+    const value = await this.request(path, { headers: this.operatorHeaders(), redirect: "error" });
+    return machine === undefined
+      ? parseProtocolResponse(FleetResourceSnapshotSchema, value)
+      : parseProtocolResponse(FleetMachineResourceSnapshotSchema, value);
   }
 
   public async fleetSettings(): Promise<FleetSettingsSnapshot> {

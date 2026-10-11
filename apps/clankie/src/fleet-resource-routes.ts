@@ -9,12 +9,14 @@ import {
   FleetSimulatorStatusSchema,
 } from "@clankie/protocol";
 import { SimulatorRequestError, type FleetResourceRuntime } from "./fleet-resource-runtime.ts";
+import type { createMachineFleetResources } from "./machine-fleet-resources.ts";
 
 /** Resource metadata and simulator control remain behind current owner authority. */
 export function createFleetResourceRoutes(
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
   resources?: FleetResourceRuntime,
   onError?: (error: unknown) => void,
+  machines?: ReturnType<typeof createMachineFleetResources>,
 ): Hono {
   const app = new Hono();
   for (const path of [FLEET_RESOURCES_PATH, FLEET_SIMULATORS_PATH])
@@ -23,10 +25,25 @@ export function createFleetResourceRoutes(
       const authority = await authorize(context.req.raw);
       if (authority !== true)
         return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
-      if (!resources) return context.json({ error: "fleet_resources_unavailable" }, 503);
+      if (
+        !resources &&
+        !(path === FLEET_RESOURCES_PATH && context.req.query("machine") !== undefined && machines)
+      )
+        return context.json({ error: "fleet_resources_unavailable" }, 503);
       await next();
     });
   app.get(FLEET_RESOURCES_PATH, async (context) => {
+    const selector = context.req.query("machine");
+    if (selector !== undefined) {
+      if (!machines) return context.json({ error: "fleet_resources_unavailable" }, 503);
+      try {
+        const selected = await machines.status(selector);
+        if ((await authorize(context.req.raw)) !== true) return context.json({ error: "forbidden" }, 403);
+        return context.json(selected);
+      } catch {
+        return context.json({ error: "unknown_resource_machine" }, 400);
+      }
+    }
     const snapshot = resources!.status();
     if (!snapshot) return context.json({ error: "fleet_resources_unavailable" }, 503);
     if ((await authorize(context.req.raw)) !== true) return context.json({ error: "forbidden" }, 403);

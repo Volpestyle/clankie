@@ -52,7 +52,8 @@
     "./linear-settings": "./src/linear-settings.ts",
     "./evidence": "./src/evidence.ts",
     "./huddles": "./src/huddles.ts",
-    "./routines": "./src/routines.ts"
+    "./routines": "./src/routines.ts",
+    "./fleet-resources": "./src/fleet-resources.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

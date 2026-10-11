@@ -1,3 +1,4 @@
+import { createMachineFleetResources } from "../machine-fleet-resources.ts";
 import { createMachineJoinRoutes } from "../machine-join-routes.ts";
 import { createPersonaVoiceSettingsRoutes } from "../persona-voice-settings-routes.ts";
 import { createMachineAccessRoutes } from "../machine-access-routes.ts";
@@ -1068,8 +1069,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   app.route(
     "/",
-    createFleetResourceRoutes(authorizeOwnerSecrets, dependencies.fleetResources, (error) =>
-      logger.warn({ error, event: "fleet_resources.simulator_failed" }, "Simulator request failed"),
+    createFleetResourceRoutes(
+      authorizeOwnerSecrets,
+      dependencies.fleetResources,
+      (error) =>
+        logger.warn({ error, event: "fleet_resources.simulator_failed" }, "Simulator request failed"),
+      createMachineFleetResources({
+        settings: () => settingsSource.load(),
+        local: dependencies.fleetResources,
+        remote: dependencies.remoteFleetResources,
+      }),
     ),
   );
   app.route(
@@ -1108,10 +1117,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     createFleetSettingsRoutes(authorizeOwnerSecrets, settingsSource, {
       runtimes: dependencies.runtimes,
       herdrBinding: dependencies.herdrBinding,
-      configureResources:
-        dependencies.fleetResources === undefined
-          ? undefined
-          : (policy) => dependencies.fleetResources!.configure(policy),
+      configureResources: (_policy, machine) =>
+        createMachineFleetResources({
+          settings: () => settingsSource.load(),
+          local: dependencies.fleetResources,
+          remote: dependencies.remoteFleetResources,
+        }).configure(machine ?? "local"),
     }),
   );
   app.route(

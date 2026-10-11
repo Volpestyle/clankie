@@ -9,7 +9,7 @@ import {
   AutonomyDriftSchema,
 } from "./autonomy.ts";
 import { ProjectIdSchema } from "./projects.ts";
-import { FleetResourcePolicySchema } from "./fleet-resources.ts";
+import { FleetResourcePolicySchema, FleetResourceMachineIdSchema } from "./fleet-resources.ts";
 import { HireProfileSchema, HIRE_NO_PREFERENCE } from "./hire-profile.ts";
 import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
 
@@ -20,6 +20,7 @@ const FleetPolicySchema = z
     size: z.enum(["max", "large", "small", "solo"]),
     models: z.enum(["optimal", "efficient"]),
     resources: FleetResourcePolicySchema.optional(),
+    machineResources: z.record(FleetResourceMachineIdSchema, FleetResourcePolicySchema).optional(),
     notes: z.string().max(4000).optional(),
     tools: z.enum(["connected", "off"]).optional(),
     peerMessages: z.enum(["on", "off"]).optional(),
@@ -36,6 +37,7 @@ export const FleetSettingsSnapshotSchema = z
     /** Advertises support explicitly; absence identifies an older service. */
     workingPreferences: z.literal(true).optional(),
     fleetGates: z.literal(true).optional(),
+    resourceMachines: z.array(FleetResourceMachineIdSchema).max(31).optional(),
     /** The owner's autonomy dial read back from the leaves (ADR 0263); absent on an older service. */
     autonomyLevel: AutonomyLevelReadingSchema.optional(),
     autonomyDrift: AutonomyDriftSchema.optional(),

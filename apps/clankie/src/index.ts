@@ -1266,7 +1266,10 @@ const minecraftHost = new MinecraftHostService({
 });
 let fleetProjectMembership: FleetProjectMembership | undefined;
 const fleetResources = await createServiceFleetResourceRuntime({
-  policy: async () => (await settingsStore.load()).fleet.resources,
+  policy: async () => {
+    const { fleet } = await settingsStore.load();
+    return fleet.machineResources?.local ?? fleet.resources;
+  },
   onError: (error) =>
     logger.warn({ error, event: "fleet_resources.refresh_failed" }, "Fleet resource metadata is unavailable"),
 });

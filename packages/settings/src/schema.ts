@@ -7,6 +7,7 @@ import {
   FLEET_WORKING_PREFERENCE_FIELDS,
   HireProfileSchema,
   FleetResourcePolicySchema,
+  FleetResourceMachineIdSchema,
 } from "@clankie/protocol";
 import { z } from "zod";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
@@ -392,6 +393,7 @@ export const FleetSettingsSchema = z
     remoteGates: z.enum(["on", "off"]).default("off"),
     /** Physical machine capacity is separate from the fleet-size staffing preference. */
     resources: FleetResourcePolicySchema.optional(),
+    machineResources: z.record(FleetResourceMachineIdSchema, FleetResourcePolicySchema).optional(),
   })
   .strict();
 export type FleetSettings = z.infer<typeof FleetSettingsSchema>;
