@@ -163,6 +163,28 @@ function denied(hook: FleetSeatHook, message: string): ClaudeHookAnswer {
       };
 }
 
+/** An operator's own native prompt needs no hiring-conversation route. */
+export class NativeQuestionUnownedError extends Error {
+  constructor() {
+    super("Native question has no exact hiring conversation");
+    this.name = "NativeQuestionUnownedError";
+  }
+}
+
+function notifyFailureDetail(error: unknown): string {
+  const chain: string[] = [];
+  const seen = new Set<unknown>();
+  for (let depth = 0; error !== undefined && depth < 4 && !seen.has(error); depth++) {
+    seen.add(error);
+    chain.push(String(error));
+    error = error instanceof Error ? error.cause : undefined;
+  }
+  // Redact before bounding: truncation must not cut a credential before its redaction.
+  return redactSensitiveText(chain.join("; caused by: "))
+    .replace(/\p{Cc}/gu, " ")
+    .slice(0, 400);
+}
+
 /** A live command hook is the harness answer channel; no pane input is involved. */
 export class ClaudeHookQuestions {
   private readonly requests = new Map<string, Pending>();
@@ -338,8 +360,32 @@ export class ClaudeHookQuestions {
     if (this.requests.has(id))
       void Promise.resolve()
         .then(() => notify(structuredClone(question)))
-        .catch(() => {
-          this.finish(pending, denied(snapshot, "claude_hook_question_notify_failed"));
+        .catch((error: unknown) => {
+          if (this.requests.get(id) !== pending) return;
+          const reason = `claude_hook_question_notify_failed: ${notifyFailureDetail(error)}`;
+          const nativeFallback =
+            snapshot.event === "PreToolUse" && error instanceof NativeQuestionUnownedError;
+          console.warn(
+            "Claude question notification failed",
+            JSON.stringify({
+              paneId: ref.paneId,
+              requestId: id,
+              reason,
+              nativeFallback,
+            }),
+          );
+          this.finish(
+            pending,
+            nativeFallback
+              ? {
+                  hookSpecificOutput: {
+                    hookEventName: "PreToolUse",
+                    permissionDecision: "allow",
+                    permissionDecisionReason: `${reason}; answer in Claude's native prompt in this pane`,
+                  },
+                }
+              : denied(snapshot, reason),
+          );
         });
     return result;
   }

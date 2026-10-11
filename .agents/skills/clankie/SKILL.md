@@ -91,6 +91,12 @@ not prove nothing was sent. Reconcile an uncertain original through
 `message_clankie` rather than starting another send. The CLI equivalent in your
 native pane is `clankie agents message-status DELIVERY_ID`.
 
+Claude seats forward native questions to their exact hiring conversation. An
+operator or lead seat with no such conversation keeps `AskUserQuestion` in its
+own pane's native prompt; this does not create an app ask or supply an answer.
+Notification failures include a credential-redacted cause in the hook reason
+and service log. Permission prompts remain denied if notification fails.
+
 Sender progress also arrives automatically as `worker-report-receipt` channel
 events: stored, taken into a lead turn, then acknowledged. These are receipts,
 not new assignments; no reply is needed. The acknowledgment includes the lead's

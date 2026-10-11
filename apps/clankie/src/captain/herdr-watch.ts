@@ -11,6 +11,7 @@ import { realpath } from "node:fs/promises";
 import { ProjectHires, projectHireProfile, type ProjectHireProcessProof } from "./project-hires.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
 import { HireOwners } from "./hire-owners.ts";
+import { NativeQuestionUnownedError } from "./claude-hook-questions.ts";
 import {
   captureConversationAuthority,
   ConversationOwnerSchema,
@@ -1508,7 +1509,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   public async forwardNativeQuestion(ref: SeatRef, question: SeatQuestion): Promise<void> {
-    if (this.closed || !this.wake) throw new Error("The hiring conversation question channel is unavailable");
     const agent = await this.runner.get(ref.paneId);
     if (!agent.session || agent.agent !== ref.harness || nativeSessionId(agent) !== ref.sessionId)
       throw new Error("Native question occupant changed before forwarding");
@@ -1517,7 +1517,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       agent.terminalId,
       occupantIdForHerdrSession(agent.session),
     );
-    if (!owner) throw new Error("Native question has no exact hiring conversation");
+    if (!owner) throw new NativeQuestionUnownedError();
+    if (this.closed || !this.wake) throw new Error("The hiring conversation question channel is unavailable");
     const guard = async () => {
       if (this.closed) throw new Error("Native question channel closed");
       const current = await this.runner.resolveTerminal(agent.terminalId);

@@ -5477,6 +5477,13 @@ original request and question IDs, never terminal typing. Native delivery is
 attempted once; uncertainty is retained and reported to Clankie in the source
 conversation rather than retried. A changed occupant or resolved native question
 cannot receive an answer to its replacement.
+Claude operator and lead seats without an exact hiring conversation keep
+`AskUserQuestion` in Claude's native prompt in their own pane. The hook supplies
+no answers and does not claim app delivery. Hired seats still forward questions
+to their exact lead. Other notification failures deny the invocation and include
+the bounded, credential-redacted error cause in the hook reason and service log.
+Permission requests always remain denied when notification fails, including
+unowned seats; native question fallback grants no permission to another tool.
 Local Codex async questions remain answerable when Clankie no longer has the
 launch controller in memory. The host reconnects only to the dedicated Unix
 socket observed on that exact native pane and verifies its original loaded
