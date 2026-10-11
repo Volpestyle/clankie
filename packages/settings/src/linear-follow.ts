@@ -27,7 +27,9 @@ export function linearFollowStatus(settings: LinearWebhookSettings, secretPresen
   };
 }
 
-/** Unknown authors never wake. Own-account/worker provenance takes precedence over human. */
+/** Unknown origins never match owner/human. User actors still cannot prove a person
+ * used Linear rather than an independently user-authenticated connector.
+ * Own-account/worker provenance takes precedence over the provider user type. */
 export function linearWakeMatches(
   rules: LinearWakeSettings,
   notificationType: string,
@@ -39,8 +41,7 @@ export function linearWakeMatches(
   const self = actor.id === ownUserId || actor.worker !== undefined;
   const human = !self && actor.type === "user";
   const owner =
-    !self &&
-    (actor.type === undefined || actor.type === "user") &&
+    human &&
     (rules.ownerUserIds.includes(actor.id) ||
       (actor.email !== undefined &&
         rules.ownerUserEmails.some((email) => email.toLowerCase() === actor.email!.toLowerCase())));

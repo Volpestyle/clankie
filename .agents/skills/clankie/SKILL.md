@@ -195,7 +195,14 @@ Linear worker-publishing tools requiring an exact `personaId` remain excluded.
 Project roles, caps, hiring and tracker binding are separate. Tool access is not
 permission for every write. If tools are absent, report the machine/session,
 catalog and refusal so the lead can inspect admission, the setting and account.
-Never substitute a harness's independent Linear connector.
+Never substitute a harness's independent Linear connector. Claude worker and operator plugins deny
+inherited Linear MCP tools locally, including in hand-started sessions without
+a bridge. Their startup notice explains posting through Clankie's tools; plain
+Claude without either plugin keeps the owner's connector. Use `clankie claude`
+for the operator seat, or load the worker plugin for a fleet session. Do not edit
+the owner's profile to enforce this. An explicit signed user actor is necessary
+for owner wakes, but user-authenticated external connector output may be
+indistinguishable from human comments; do not claim actor identity proves origin.
 Codex launches discover and disable Linear-named app connectors as well as inherited
 Linear MCP servers for that session. Existing running seats may still expose
 `codex_apps.linear`; always use `clankie_tools` and `clankie_call` for Linear.
