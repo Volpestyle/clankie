@@ -31,14 +31,21 @@ to pay back excess CPU. Kernel-proven exited Darwin children are skipped even
 before their parent reaps them. Failed CPU observations resume the owned group
 and report degraded enforcement; its server permit stays held. The CPU budget
 can be exceeded until observation recovers, when accounting starts from a fresh
-baseline. Brief bursts can exceed this sampled budget. Keep
+baseline. Status exposes `serverLeases[].cpuLimitUnenforcedSinceMs`; doctor says
+"CPU limit not enforced" and highlights failures lasting at least one minute.
+The supervisor warns after one minute, then every five minutes, without killing
+or pausing the server for an unavailable observation. Brief bursts can exceed
+this sampled budget. Keep
 children in the owned group; detached/privileged processes are outside its
 contract. Stop your server when finished. Neither server age nor a long build
 causes an automatic kill. Normal interruption and leftover cleanup still apply.
 `fleet resources`, doctor, the TUI and waiting commands show server holders and
-queue separately. The owning lead hears a holder alert for a governed server or
-a build/check permit held over 15 minutes; `holderAlerts` identifies its lane,
-seat, holder, executable and start time without exposing arguments.
+queue separately. The owning lead hears a holder alert only after a governed
+server or build/check permit has been held for 15 minutes, at most once per lease
+across concurrent refreshes and service restarts. Definite undelivered notices
+retry; uncertain delivery retains its claim to prevent duplicates. `holderAlerts`
+identifies its lane, seat, holder, executable and start time without arguments;
+servers remain visible there immediately.
 For source-checkout scratch service/relay proofs, use
 `node scripts/scratch-stack.mjs .local/PROOF` and the same generated `stack.env`
 for both heavy-wrapped entrypoints (commands in `docs/cli.md`, "Scratch service

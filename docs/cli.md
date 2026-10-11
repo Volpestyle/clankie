@@ -2944,6 +2944,10 @@ two. Kernel-proven Darwin zombies are skipped before their parent reaps them.
 Unknown CPU observations resume the owned group and report degraded enforcement;
 its server permit stays held. CPU may exceed its share until observation recovers,
 when accounting restarts from a fresh baseline.
+`serverLeases[].cpuLimitUnenforcedSinceMs` exposes degradation in resource JSON;
+doctor displays "CPU limit not enforced", with a warning after one minute. The
+supervisor also warns after one minute and then every five minutes, retaining
+the server permit and restoring progress throughout.
 Detached or privileged children are outside this process-group contract.
 Servers still wait on machine load, memory and FIFO in their own journal under
 `server/`; they hold no build/check slots. Stop them when finished. A server
@@ -2976,7 +2980,9 @@ Server status adds `capacity.serverSlots`, `serverUsed`, `serverCpuCores`,
 identifies governed servers and build/check permits held over 15 minutes by
 lane, seat, holder, executable and creation time. Waiting commands show these
 holders, and the service notifies their owning lead through the existing fleet
-alert channel once per lease/reason, retrying failed delivery. Age never kills a
+alert channel only after 15 minutes, once per lease across concurrent refreshes
+and service restarts. Definite undelivered notices retry; uncertain delivery or
+a crash retains the persistent claim to prevent duplicates. Age never kills a
 bounded job; explicit interruption and command-exit leftover cleanup retain
 their existing behavior. The additive status fields are absent on older servers.
 The operator fleet snapshot also carries recent confirmed native peer exchanges

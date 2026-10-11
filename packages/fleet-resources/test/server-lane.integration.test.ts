@@ -273,8 +273,10 @@ it.each(process.platform === "darwin" ? [false, true] : [false])(
     );
     const runner = spawn(resourcePython, ["-I", resourceNativeHelperPath(), "run", root, id, token], {
       detached: true,
-      stdio: ["ignore", "ignore", "inherit", "pipe", "pipe"],
+      stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"],
     });
+    let diagnostics = "";
+    runner.stderr!.on("data", (data) => (diagnostics += data.toString()));
     const done = new Promise<number>((resolve, reject) => {
       runner.once("error", reject);
       runner.once("exit", (code) => resolve(code ?? -1));
@@ -315,6 +317,12 @@ it.each(process.platform === "darwin" ? [false, true] : [false])(
       const elapsedMs = performance.now() - at;
       const cpuCores = (after.cpuMs - before.cpuMs) / elapsedMs;
       if (zombiePid) await expect(processIdentity(zombiePid)).rejects.toThrow();
+      if (zombie) {
+        expect(diagnostics).not.toContain("CPU enforcement degraded");
+        expect(
+          await readFile(join(root, "cpu", `${id}.json`), "utf8").catch(() => undefined),
+        ).toBeUndefined();
+      }
       // The old machine-max uncertainty debt left real transform workers at
       // roughly budget / machine-cores duty cycle while this zombie remained.
       expect(cpuCores).toBeGreaterThan(zombie ? 0.2 : 0);

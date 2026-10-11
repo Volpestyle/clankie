@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { spawn, type ChildProcess } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -70,16 +70,17 @@ async function fixture() {
   const token = mintOperatorToken();
   await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
   // CLI and doctor boundaries, not machine pressure: a busy host must not queue them (VUH-1981).
-  const governor = createResourceGovernor({ directory: join(directory, "registry"), probe: calmPressure });
-  const resources = await createFleetResourceRuntime({
+  let governor = createResourceGovernor({ directory: join(directory, "registry"), probe: calmPressure });
+  let resources = await createFleetResourceRuntime({
     governor,
+    holderNoticeDirectory: join(directory, "holder-notices"),
     policy: async () => (await settings.load()).fleet.resources,
   });
   const authorize = async (request: Request) =>
     request.headers.get("authorization") === `Bearer ${token}`
       ? (true as const)
       : ("authentication_required" as const);
-  const resourceRoutes = createFleetResourceRoutes(authorize, resources);
+  let resourceRoutes = createFleetResourceRoutes(authorize, resources);
   const settingsRoutes = createFleetSettingsRoutes(authorize, settings, {
     configureResources: (policy) => resources.configure(policy),
   });
@@ -174,8 +175,23 @@ try {process.exitCode=await runHeadlessCaptainCommand(parseDirectConversation(pr
     settings,
     credentials,
     token,
-    governor,
-    resources,
+    get governor() {
+      return governor;
+    },
+    get resources() {
+      return resources;
+    },
+    async restartResources() {
+      await resources.close();
+      governor = createResourceGovernor({ directory: join(directory, "registry"), probe: calmPressure });
+      resources = await createFleetResourceRuntime({
+        governor,
+        holderNoticeDirectory: join(directory, "holder-notices"),
+        policy: async () => (await settings.load()).fleet.resources,
+      });
+      options.resourceGovernor = governor;
+      resourceRoutes = createFleetResourceRoutes(authorize, resources);
+    },
     calls,
     options,
     host,
@@ -201,10 +217,17 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
     const f = await fixture();
     const alerts: { pane: string; text: string }[] = [];
     let acceptAlert = false;
+    let holdDelivery = false;
+    const deliveries = new Set<() => void>();
+    const releaseDelivery = () => {
+      for (const release of deliveries) release();
+      deliveries.clear();
+    };
     const lead = createServer(async (incoming, outgoing) => {
       const bytes: Buffer[] = [];
       for await (const piece of incoming) bytes.push(Buffer.from(piece));
       alerts.push(JSON.parse(Buffer.concat(bytes).toString("utf8")));
+      if (holdDelivery) await new Promise<void>((resolve) => deliveries.add(resolve));
       outgoing.statusCode = acceptAlert ? 200 : 503;
       outgoing.end();
     });
@@ -212,19 +235,21 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
     await once(lead, "listening");
     const leadPort = (lead.address() as { port: number }).port;
     try {
-      f.resources.bindSeats({
+      const resolver = {
         resolve: async () => undefined,
         proof: async () => undefined,
         isLocalFleet: async () => true,
-        notify: async (pane, text) =>
+        notify: async (pane: string, text: string) =>
           (
             await fetch(`http://127.0.0.1:${leadPort}`, {
               method: "POST",
               body: JSON.stringify({ pane, text }),
             })
           ).ok,
-      });
-      await f.resources.observeSeats([{ seatId: "server-seat", paneId: "owned-pane", status: "working" }]);
+      };
+      const roster = [{ seatId: "server-seat", paneId: "owned-pane", status: "working" }];
+      f.resources.bindSeats(resolver);
+      await f.resources.observeSeats(roster);
       const path = join(f.directory, "server.json");
       const run = await f.headless([
         "heavy",
@@ -245,12 +270,58 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       expect(status.capacity).toMatchObject({ used: 0, serverUsed: 1 });
       expect(status.serverLeases?.[0]).toMatchObject({ holderId: "owned-service", seatId: "server-seat" });
       expect(status.holderAlerts?.[0]).toMatchObject({ lane: "server", reason: "server" });
+      expect(alerts).toHaveLength(0); // Status is immediate; lead notices wait for the threshold.
+      await Promise.all([f.resources.refresh(), f.resources.observeSeats(roster)]);
+      expect(alerts).toHaveLength(0);
+      await new ResourceStore(join(f.directory, "registry/server")).transaction((state) => {
+        const lease = state.leases.find((lease) => lease.holderId === "owned-service")!;
+        lease.createdAtMs = Date.now() - longHeldJobMs - 1000;
+      });
+      await f.resources.refresh();
       expect(alerts).toHaveLength(1);
       expect(alerts[0]).toMatchObject({ pane: "owned-pane", text: expect.stringContaining("owned-service") });
       acceptAlert = true;
-      await f.resources.refresh();
+      holdDelivery = true;
+      const delivering = f.resources.refresh();
+      await eventually(
+        async () => alerts.length,
+        (count) => count === 2,
+      );
+      // A real HTTP delivery is pending while roster observations independently
+      // notice the same holder. Only its exclusive persistent claim may send.
+      await Promise.all(Array.from({ length: 4 }, () => f.resources.observeSeats(roster)));
+      expect(alerts).toHaveLength(2);
+      holdDelivery = false;
+      releaseDelivery();
+      await delivering;
       await f.resources.refresh();
       expect(alerts).toHaveLength(2); // Failed delivery retried; successful delivery deduplicated.
+      await f.restartResources();
+      f.resources.bindSeats(resolver);
+      await f.resources.observeSeats(roster);
+      await f.resources.refresh();
+      expect(alerts).toHaveLength(2); // New runtime and governor, same holder and persisted claim.
+      process.stdout.write(
+        `Holder alert proof: ${JSON.stringify({ freshHolderNotices: 0, rejectedAttempts: 1, concurrentRosterReads: 4, acceptedNoticesAfterRestart: alerts.length - 1 })}\n`,
+      );
+      // CPU status crosses the real private sidecar -> snapshot -> validated
+      // HTTP/CLI -> doctor boundary. A stale runner birth cannot name this lease.
+      const holder = status.serverLeases![0]!;
+      const runner = (await processIdentity(holder.pid!))!;
+      const cpuDirectory = join(f.directory, "registry/server/cpu");
+      const cpuStatus = join(cpuDirectory, `${holder.id}.json`);
+      const sinceMs = Date.now() - 120_000;
+      await mkdir(cpuDirectory, { recursive: true });
+      await writeFile(cpuStatus, JSON.stringify({ pid: runner.pid, startTime: "stale", sinceMs }));
+      await f.resources.refresh();
+      expect(
+        (await runResourceStatusCommand(f.options)).serverLeases![0]!.cpuLimitUnenforcedSinceMs,
+      ).toBeUndefined();
+      await writeFile(cpuStatus, JSON.stringify({ pid: runner.pid, startTime: runner.startTime, sinceMs }));
+      await f.resources.refresh();
+      expect((await runResourceStatusCommand(f.options)).serverLeases![0]!.cpuLimitUnenforcedSinceMs).toBe(
+        sinceMs,
+      );
       const report = await doctorCommand({
         repoRoot: f.directory,
         settings: f.settings,
@@ -260,6 +331,12 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       });
       expect(formatDoctorReport(report)).toContain("owned-service");
       expect(formatDoctorReport(report)).toContain("CPU cores");
+      expect(formatDoctorReport(report)).toContain("WARNING: CPU limit not enforced");
+      await unlink(cpuStatus);
+      await f.resources.refresh();
+      expect(
+        (await runResourceStatusCommand(f.options)).serverLeases![0]!.cpuLimitUnenforcedSinceMs,
+      ).toBeUndefined();
 
       // An old full-lane job also reaches the lead and keeps its listener alive.
       const boundedPath = join(f.directory, "bounded.json");
@@ -290,6 +367,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       await fetch(`http://127.0.0.1:${port}/stop`);
       expect(await run.done).toBe(7);
     } finally {
+      releaseDelivery();
       await f.close();
       lead.closeAllConnections();
       await new Promise<void>((resolve) => lead.close(() => resolve()));

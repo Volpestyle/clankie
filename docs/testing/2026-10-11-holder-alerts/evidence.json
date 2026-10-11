@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "proof-bundle.json",
+      "size": 240527,
+      "sha256": "56ffa8658c28c8caa1f17540113eb562ecbcbc953df335d0772949b0713758ea",
+      "url": "clankie://evidence/sha256/56ffa8658c28c8caa1f17540113eb562ecbcbc953df335d0772949b0713758ea"
+    }
+  ]
+}

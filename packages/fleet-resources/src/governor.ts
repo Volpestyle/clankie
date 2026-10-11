@@ -103,6 +103,28 @@ const LEFTOVER_GRACE_MS = 10_000;
 function leftoverMarker(directory: string, id: string): string {
   return join(directory, "leftovers", `${basename(id)}.json`);
 }
+/** Display metadata only: never supplies exit, signal or admission authority. */
+function serverCpuStatus(directory: string, lease: HeavyLease): { cpuLimitUnenforcedSinceMs?: number } {
+  if (!lease.runner) return {};
+  try {
+    const status = JSON.parse(readFileSync(join(directory, "cpu", `${basename(lease.id)}.json`), "utf8")) as {
+      pid?: unknown;
+      startTime?: unknown;
+      sinceMs?: unknown;
+    };
+    if (
+      status.pid === lease.runner.pid &&
+      status.startTime === lease.runner.startTime &&
+      typeof status.sinceMs === "number" &&
+      Number.isSafeInteger(status.sinceMs) &&
+      status.sinceMs >= 0
+    )
+      return { cpuLimitUnenforcedSinceMs: status.sinceMs };
+  } catch {
+    // Missing or unverified metadata says nothing about an individual process.
+  }
+  return {};
+}
 function leftoversSince(directory: string, id: string): number | undefined {
   try {
     const value = (
@@ -424,6 +446,7 @@ export function createResourceGovernor(
                 executable: lease.executable,
                 createdAtMs: lease.createdAtMs,
                 cpuCores: serverCapacity.jobCpuCores,
+                ...serverCpuStatus(serverStore.directory, lease),
                 ...(lease.runner ? { pid: lease.runner.pid } : {}),
               },
             ]

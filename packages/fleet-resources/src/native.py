@@ -845,7 +845,8 @@ def heavy_runner(directory, lease_id, token):
             reader = budget.cpu_reader()
         child = subprocess.Popen([request["command"], *request["args"]], env=environment)
         if budget is not None:
-            code = budget.wait(child, mine, request["serverCpuCores"], identity, born_since, signal_bound, reader)
+            code = budget.wait(child, mine, request["serverCpuCores"], identity, born_since, signal_bound, reader,
+                               os.path.join(directory, "cpu", os.path.basename(lease_id) + ".json"))
         else:
             code = child.wait()
         if group_occupied(mine["pgid"]):

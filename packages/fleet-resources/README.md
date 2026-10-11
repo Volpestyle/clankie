@@ -117,6 +117,11 @@ libproc alone cannot observe their identity. Unknown observations resume the
 owned group and report degraded enforcement while its server permit stays held.
 CPU may exceed its share during that failure; recovery starts from a fresh
 baseline, without charging historical CPU or invented machine-wide debt.
+During degradation, `serverLeases[].cpuLimitUnenforcedSinceMs` exposes the start
+time through resource status and doctor displays "CPU limit not enforced". The
+supervisor warns after one minute, then every five minutes, while retaining the
+permit and restoring progress. Its atomic sidecar is bound to the exact runner
+birth and supplies display metadata only, never admission or signal authority.
 Verified nested servers reuse a server parent's permit; bounded parents give
 servers their own separately governed permit. It governs same-user children remaining in the owned group,
 not detached or privileged processes. The lane answers to the existing load and
@@ -126,9 +131,13 @@ Arbiter heartbeats advertise lane support: a new server waiter falls back to
 its own admission while an installed older service handles only full/light.
 
 Status adds server capacity, holders, queue and per-holder CPU budgets through
-the API, CLI and TUI. `holderAlerts` names servers and full/light jobs held for
-15 minutes, without arguments. The service routes them through the native seat's
-existing lead alert channel once per lease/reason (failed delivery retries).
+the API, CLI and TUI. `holderAlerts` names servers immediately and full/light jobs
+after 15 minutes, without arguments. The service routes them through the native seat's
+existing lead alert channel only after 15 minutes, once per lease across refreshes
+and service restarts. An exclusive claim in the canonical OS-account registry's
+`holder-notices/` directory precedes delivery. Definite undelivered notices retry;
+uncertain delivery or a crash retains the claim, so a notice may be missed but
+cannot repeat. Server metadata stays visible immediately in status.
 Unknown labels do not select a conversation. Duration is diagnostic: no bounded
 job is killed automatically because it ran too long.
 

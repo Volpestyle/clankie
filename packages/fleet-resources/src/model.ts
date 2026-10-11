@@ -265,7 +265,11 @@ export interface ResourceSnapshot {
     queuedAtMs: number;
     pid: number;
   }[];
-  serverLeases?: (ResourceSnapshot["lightLeases"][number] & { cpuCores: number })[];
+  serverLeases?: (ResourceSnapshot["lightLeases"][number] & {
+    cpuCores: number;
+    /** The runner retained its permit but resumed its group after an unknown CPU observation. */
+    cpuLimitUnenforcedSinceMs?: number;
+  })[];
   serverQueue?: ResourceSnapshot["lightQueue"];
   holderAlerts?: {
     id: string;

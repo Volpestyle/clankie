@@ -148,6 +148,7 @@ export const FleetResourceSnapshotSchema = z
           executable: z.string().min(1).max(256),
           createdAtMs: timestamp,
           cpuCores: z.number().finite().positive().max(64),
+          cpuLimitUnenforcedSinceMs: timestamp.optional(),
         }),
       )
       .max(128)

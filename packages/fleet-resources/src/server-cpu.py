@@ -6,9 +6,11 @@ child time is charged too; a child already sampled may be charged again when
 its parent reaps it, conservatively slowing rapid fork/reap workloads.
 """
 import ctypes
+import json
 import os
 import signal
 import sys
+import tempfile
 import time
 
 
@@ -91,7 +93,7 @@ def cpu_reader():
     raise RuntimeError("Server CPU governance requires Darwin or Linux")
 
 
-def wait(child, runner, cores, identity, born_since, signal_bound, reader):
+def wait(child, runner, cores, identity, born_since, signal_bound, reader, status_path):
     if not 0 < cores <= 64:
         raise RuntimeError("Invalid server CPU budget")
     members, cpu, zombie = reader
@@ -101,7 +103,15 @@ def wait(child, runner, cores, identity, born_since, signal_bound, reader):
     at = time.monotonic()
     interrupted = False
     uncertain = False
+    degraded_since = None
+    next_warning = None
     handlers = {}
+    def warning(message):
+        try:
+            print(message, file=sys.stderr, flush=True)
+        except OSError:
+            # A disconnected log pipe must not kill the registered supervisor.
+            pass
     def resume():
         for key, proof in list(stopped.items()):
             if signal_bound(proof, runner["pgid"], signal.SIGCONT):
@@ -123,16 +133,33 @@ def wait(child, runner, cores, identity, born_since, signal_bound, reader):
             if zombie(pid):
                 return None
             raise
+    def record_degraded():
+        directory = os.path.dirname(status_path)
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(dir=directory)
+        try:
+            with os.fdopen(descriptor, "w") as file:
+                json.dump({"pid": runner["pid"], "startTime": runner["startTime"],
+                           "sinceMs": degraded_since}, file)
+            os.replace(temporary, status_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    def clear_degraded():
+        try:
+            os.unlink(status_path)
+        except FileNotFoundError:
+            pass
     def interrupt(*_):
         nonlocal interrupted
         interrupted = True
-        resume()
+        resume_group()
     for sig in (signal.SIGTERM, signal.SIGINT):
         handlers[sig] = signal.signal(sig, interrupt)
     try:
         while child.poll() is None:
             if interrupted:
-                resume()
+                resume_group()
                 # Give pending group termination a chance to run. A signal
                 # sent only to the runner must not disable CPU governance of
                 # a server that kept running.
@@ -187,6 +214,9 @@ def wait(child, runner, cores, identity, born_since, signal_bound, reader):
                         if current is None or current["startTime"] != key[1]:
                             retired.append(key)
                 balance -= charge
+                if uncertain:
+                    clear_degraded()
+                    degraded_since = next_warning = None
                 previous.update(live)
                 for key in retired:
                     previous.pop(key, None)
@@ -199,9 +229,10 @@ def wait(child, runner, cores, identity, born_since, signal_bound, reader):
                             stopped[key] = proof
                 uncertain = False
             except Exception as error:
+                newly_degraded = not uncertain
                 if not uncertain:
-                    print("Server CPU observation unavailable; CPU enforcement degraded, server resumed: " + str(error),
-                          file=sys.stderr, flush=True)
+                    degraded_since = int(time.time() * 1000)
+                    next_warning = now + 60
                 uncertain = True
                 # Unknown CPU cannot be bounded by stopping observable siblings:
                 # the parent may need them to recover observation. Keep the lease
@@ -209,9 +240,25 @@ def wait(child, runner, cores, identity, born_since, signal_bound, reader):
                 # rather than repaying invented machine-wide or historical debt.
                 balance = 0.0
                 resume_group()
+                if newly_degraded:
+                    warning("Server CPU observation unavailable; CPU enforcement degraded, server resumed: " + str(error))
+                    try:
+                        record_degraded()
+                    except OSError:
+                        warning("WARNING: Server CPU limit not enforced; status could not be recorded")
+                if now >= next_warning:
+                    minutes = max(1, int((time.time() * 1000 - degraded_since) / 60_000))
+                    warning("WARNING: Server CPU limit not enforced for " + str(minutes) +
+                            (" minute" if minutes == 1 else " minutes") +
+                            "; observation remains unavailable, server resumed and permit held")
+                    next_warning = now + 300
             time.sleep(0.1)
         return child.returncode
     finally:
         resume_group()
+        try:
+            clear_degraded()
+        except OSError:
+            warning("WARNING: Server CPU status could not be cleared")
         for sig, handler in handlers.items():
             signal.signal(sig, handler)

@@ -2,6 +2,7 @@ import {
   automaticSimulatorSlots,
   createResourceGovernor,
   createSimulatorManager,
+  longHeldJobMs,
   observeSimulatorReferents,
   unprovenSeatDetail,
   type FleetResourceGovernor,
@@ -12,12 +13,15 @@ import {
   type SimulatorReferents,
 } from "@clankie/fleet-resources";
 import { setTimeout as delay } from "node:timers/promises";
+import { userInfo } from "node:os";
+import { join } from "node:path";
 import type { FleetResourcePolicy, SpawnOperatorSeat } from "@clankie/protocol";
 import type { HerdrAgentSnapshot } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
 import type { ProjectHireProcessProof } from "./captain/project-hires.ts";
 import { fleetQualified, splitFleetQualified } from "./herdr-fleet.ts";
 import type { FleetProgressObservation } from "./fleet-progress.ts";
+import { notifyResourceHolderOnce } from "./resource-holder-notices.ts";
 
 /** A simulator request's first proof: three observations about two seconds apart (VUH-2055). */
 const PROOF_ATTEMPTS = 3;
@@ -103,6 +107,8 @@ export async function createFleetResourceRuntime(input: {
   externalNoticeMs?: number;
   /** Pause between a simulator request's first-proof attempts. */
   proofRetryMs?: number;
+  /** Isolated runtime fixtures may use their own persistent notice directory. */
+  holderNoticeDirectory?: string;
   onError?(error: unknown): void;
 }): Promise<FleetResourceRuntime> {
   const governor = input.governor ?? createResourceGovernor();
@@ -121,7 +127,8 @@ export async function createFleetResourceRuntime(input: {
   let priorHeads = new Set<string>();
   /** `${udid}:${seatId}` pairs already told; forgotten once the device is no longer external. */
   const noticed = new Set<string>();
-  const noticedHolders = new Set<string>();
+  const holderNoticeDirectory =
+    input.holderNoticeDirectory ?? join(userInfo().homedir, ".clankie/fleet-resources/holder-notices");
   let lastNotice = 0;
 
   const publish = (snapshot: ResourceSnapshot) => {
@@ -250,11 +257,8 @@ export async function createFleetResourceRuntime(input: {
   const noticeHolders = async () => {
     if (!resolver?.notify || closed) return;
     const alerts = cached?.holderAlerts ?? [];
-    const live = new Set(alerts.map((alert) => `${alert.id}:${alert.reason}`));
-    for (const key of noticedHolders) if (!live.has(key)) noticedHolders.delete(key);
     for (const alert of alerts) {
-      const key = `${alert.id}:${alert.reason}`;
-      if (noticedHolders.has(key) || !alert.seatId) continue;
+      if (!alert.seatId || Date.now() - alert.createdAtMs < longHeldJobMs) continue;
       // Caller labels confer no authority: route only through a known native
       // seat/pane from the fleet census, never a caller-chosen conversation.
       const seat = seen.find((seat) => seat.seatId === alert.seatId || seat.paneId === alert.seatId);
@@ -265,7 +269,9 @@ export async function createFleetResourceRuntime(input: {
           ? `This long-lived server uses its own slots and shares a ${cached?.capacity.serverCpuCores} CPU-core budget; stop it when finished.`
           : "This bounded job has held its permit over 15 minutes; check whether it is a custom service and use `clankie heavy --server -- COMMAND` on its next launch. It has not been killed for its age."
       }`;
-      if (await resolver.notify(seat.paneId, text).catch(() => false)) noticedHolders.add(key);
+      await notifyResourceHolderOnce(holderNoticeDirectory, alert.id, () =>
+        resolver!.notify!(seat.paneId!, text),
+      ).catch(input.onError ?? (() => {}));
     }
   };
   let seatProcesses: { at: number; byPid: Map<number, { seatId: string; pane: string }> } | undefined;

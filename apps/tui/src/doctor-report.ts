@@ -234,7 +234,11 @@ function formatResourceLines(resources: InstallDoctorReport["resources"]): strin
         ]),
     ...(resources.serverLeases ?? []).map(
       (lease) =>
-        `    ${holder(lease)} · server ${clean(lease.executable)} · ${clean(lease.state)} · ${lease.cpuCores} CPU cores`,
+        `    ${holder(lease)} · server ${clean(lease.executable)} · ${clean(lease.state)} · ${lease.cpuCores} CPU cores${
+          lease.cpuLimitUnenforcedSinceMs === undefined
+            ? ""
+            : ` · ${Date.now() - lease.cpuLimitUnenforcedSinceMs >= 60_000 ? "WARNING: " : ""}CPU limit not enforced (${Math.floor((Date.now() - lease.cpuLimitUnenforcedSinceMs) / 60_000)} minutes)`
+        }`,
     ),
     ...(resources.serverQueue ?? []).map(
       (entry) => `    Queued ${holder(entry)} · server ${clean(entry.executable ?? "process")}`,
