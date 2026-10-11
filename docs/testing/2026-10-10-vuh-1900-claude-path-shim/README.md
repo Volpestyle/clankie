@@ -42,6 +42,23 @@ and assistant reply. This proves model awareness of the idle wake, beyond a
 transport receipt or argument capture. No agent prompt or fallback message was
 typed. The owned proof pane was closed after saving its result.
 
+## Refreshed live result after the bundle import fix
+
+The final launcher source at `e3a055beb` was installed again with `changed: false`.
+Its source and installed SHA-256 both were
+`b68364b5a64f776bea5e170c412c4a171c393a83ba50b43d1c628004d5733524`.
+Plain `claude` in fresh owned pane `w47:p2Y` selected the worker channel and
+became idle, with native session `117d0213-5c35-4b41-86ed-b53898d31810`.
+
+Clankie's original wake `seat-1e62935a-7a7f-4e32-9ce7-438d5126bcfc` to
+seat `term_65d88e97618e8147` arrived as a native channel event at
+`2026-10-11T04:21:56.457Z`. The assistant replied
+`VUH1900_IDLE_WAKE_REFRESH_OK` at `2026-10-11T04:22:04.599Z`.
+The receiver receipt, filtered transcript, before/after native observations,
+launcher hashes, setup result and latest 46-test log are in `refresh-proof.json`
+in [evidence.json](evidence.json). The pane was closed; a subsequent lookup
+returned `pane_not_found`.
+
 ## Machine setup
 
 The exact canonical Herdr config diff is in `config.diff`:
