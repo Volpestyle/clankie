@@ -48,6 +48,9 @@ Stop helpers in your own teardown anyway: a leftover is killed, not drained.
 A lock-helper fault before the journal write committed nothing and is retried
 on a fresh helper, so a queued job does not die from it.
 
+Before stopping a queued job, verify its exact command, working directory and
+your own launch record. A matching seat or holder alone does not identify the job.
+
 `clankie fleet resources` and `clankie doctor --json` show capacity, actual holders,
 queue and pressure. Status includes executable names and labels, never arguments
 or credentials. A wait can mean a full pool, high load, low available memory or

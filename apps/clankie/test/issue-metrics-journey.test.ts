@@ -189,6 +189,7 @@ it("serves the real VUH-1608 golden through the production service, client and C
       CLAUDE_CONFIG_DIR: join(home, "claude"),
       CI: "1",
       CLANKIE_STATE: state,
+      CLANKIE_SCRATCH: "1",
       CLANKIE_SETTINGS_FILE: settings,
       CLANKIE_CREDENTIALS_FILE: join(dir, "credentials.json"),
       CLANKIE_OPERATOR_TOKEN: "metrics-journey-private-operator",

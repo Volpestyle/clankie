@@ -53,6 +53,7 @@ it.each(unsafeStacks)(
             PATH: process.env.PATH,
             HOME: directory,
             CLANKIE_STATE: join(directory, "state"),
+            CLANKIE_SCRATCH: "1",
             ...overrides,
           },
         },
