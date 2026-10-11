@@ -2520,6 +2520,8 @@ Captain model and every config-declared provider. JSON:
 present). `model` and `effort` are `null` when unset. The running service does
 not pick up a write until `clankie restart captain`.
 
+The JSON `display` array gives plain provider/model, funding, automatic routing and explicit unavailable-rate information from the same API. Restore a prior eligible preference with `model set provider/model`; input/output/cache credit rates remain unavailable while their policy is open.
+
 ### `model add-local --id ID --base-url URL [--context N] [--models id,id] [--set]`
 
 Declare a credential-less OpenAI-compatible local runtime (ds4, Ollama, LM

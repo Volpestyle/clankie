@@ -53,6 +53,7 @@ import {
   modelSetForSetup,
   modelStatus,
   readModelSettings,
+  modelSettingsSummary,
 } from "./command/model.ts";
 import { effortSet, effortStatus } from "./command/effort.ts";
 import {
@@ -1000,14 +1001,7 @@ async function showModelStatus(shell: ClankieFaceShell, services: ProviderServic
     cwd: services.cwd,
     fetchImpl: services.fetchImpl,
   });
-  const actual = settings.effective?.actual;
-  shell.insertCommandResult(
-    "/model status",
-    actual === undefined || actual === null
-      ? `Model unavailable (${settings.effective?.reason ?? "unset"})`
-      : `${actual.modelName} · ${actual.providerName} · ${settings.effective?.funding === "included" ? "included" : "own provider"}`,
-    "success",
-  );
+  shell.insertCommandResult("/model status", modelSettingsSummary(settings).join("\n"), "success");
 }
 
 async function showProviderStatus(
@@ -1230,12 +1224,13 @@ async function runModelWizard(
         shell.insertCommandResult("/model", "No models are available from Clankie right now.", "error");
         return selectedProvider;
       }
+      for (const line of modelSettingsSummary(settings)) flow.renderLine(line);
       const picked = await flow.readSelect({
         message: "Clankie's model",
         options: choices.map((entry) => ({
           value: providerId === undefined ? entry.ref : parseModelRef(entry.ref)!.modelId,
           label: entry.actual ? `${entry.actual.modelName} · ${entry.actual.providerName}` : "Unknown model",
-          hint: entry.funding === "included" ? "included" : "own provider",
+          hint: `${entry.funding === "included" ? "Included AI credits" : "Your own provider"} · Credit rate unavailable`,
         })),
         statusActions: [{ value: "__refresh__", label: "refresh model catalogs" }],
         ...(settings.selected === null

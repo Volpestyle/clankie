@@ -392,3 +392,5 @@ Call IDs connect phases; reported tokens can be reconciled with observed models,
 but are not a charged amount or hosted charge ID. Missing identity or usage stays
 unknown. Completed work continues in the same session after a model change; the
 next turn reloads the saved preference. Do not choose an internal tier for the owner.
+
+The `model status` JSON includes `display`, plain text for the same identity, funding, automatic targets and unavailable-rate information shown by `/model`. Read `settings.choices` before selecting; restore a previous eligible preference with `clankie model set provider/model`. Credit-rate and included-catalog policy gaps stay explicitly unavailable.

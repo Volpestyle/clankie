@@ -61,6 +61,7 @@ export type ModelCommandResult =
       readonly issues?: readonly { path: string; message: string }[];
       readonly restart: string;
       readonly settings?: ModelSettingsResponse;
+      readonly display?: readonly string[];
     }
   | {
       readonly ok: false;
@@ -113,6 +114,24 @@ export async function modelStatus(
     ...(issues.length === 0 ? {} : { issues }),
     restart: "clankie restart",
   };
+}
+
+/** Plain settings text from the same authenticated read used by every client. */
+export function modelSettingsSummary(settings: ModelSettingsResponse): string[] {
+  const name = (entry: ModelSettingsResponse["effective"]) =>
+    entry?.actual ? `${entry.actual.modelName} · ${entry.actual.providerName}` : "Model unavailable";
+  return [
+    `${name(settings.effective)} · ${settings.effective?.funding === "included" ? "Included AI credits" : settings.effective ? "Your own provider" : "Funding unavailable"}`,
+    "Credit rates are unavailable. Input, output and cached usage rates cannot be compared yet.",
+    ...(settings.openItems.includes("included_catalog_policy")
+      ? ["Included model choices are unavailable."]
+      : []),
+    "Clankie routes each turn automatically. Your choice applies to new turns.",
+    ...settings.routing.map(
+      (route) =>
+        `${{ operator: "Your conversations", discord_social: "Discord chat", discord_granted: "Discord tasks", gameplay: "Gameplay" }[route.purpose]}: ${name(route.initial)}${route.escalation ? `; stronger model: ${name(route.escalation)}` : ""}`,
+    ),
+  ];
 }
 
 /** All ordinary model reads/writes use the service's owner authorization. */
@@ -333,6 +352,7 @@ export async function runModelCommand(
       ...(await modelStatus(options)),
       model: settings.selected,
       settings,
+      display: modelSettingsSummary(settings),
       restart: "applies to new turns",
     };
   }
