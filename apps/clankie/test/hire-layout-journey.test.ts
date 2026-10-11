@@ -43,12 +43,17 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       timeout: 10_000,
       maxBuffer: 2 * 1024 * 1024,
     });
-    calls.push({ args, result: stdout.trim() ? JSON.parse(stdout) : null });
+    calls.push({
+      args,
+      result: args[0] === "pane" && args[1] === "read" ? stdout : stdout.trim() ? JSON.parse(stdout) : null,
+    });
     return stdout;
   };
   const snapshot = async () => JSON.parse(await run(["api", "snapshot"])).result.snapshot;
   let server: ChildProcess | undefined;
   let logs = "";
+  const ownedClosedPanes: string[] = [];
+  let firstHireSnapshot: unknown;
   try {
     const repoA = join(root, "long-repository-path-".repeat(5), "alpha");
     const repoB = join(root, "other", "alpha");
@@ -100,11 +105,45 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       }
     }
     if (!ready) throw new Error(`Herdr did not answer: ${logs}`);
+    // VUH-2031 residual edge: the first prepared command on an entirely
+    // empty server still launches. Herdr needs a workspace before layout.apply,
+    // so this fallback deliberately retains its starter shell.
+    expect((await snapshot()).workspaces).toEqual([]);
+    const firstSession = JSON.parse(await run(["session", "list", "--json"])).sessions.find(
+      (s: any) => s.name === session,
+    );
+    const firstNative = createPreparedNativeHost({
+      harness: "pi",
+      binding: async () => ({ runtime: "external", socketPath: firstSession.socket_path, session }),
+      processHelper: "unused-capture-helper",
+    });
+    const firstRunner = createHerdrWatchRunner(undefined, run, firstNative.createCommandTab);
+    const firstPrepared = await firstRunner.createTab!({
+      cwd: plain,
+      label: "First prepared hire",
+      command: ["/bin/sh", "-c", "sleep 60"],
+    });
+    const firstSnapshot = await snapshot();
+    firstHireSnapshot = firstSnapshot;
+    const firstMember = firstSnapshot.panes.find((p: any) => p.pane_id === firstPrepared);
+    expect(firstMember).toBeDefined();
+    const firstMembers = firstSnapshot.panes.filter((p: any) => p.workspace_id === firstMember.workspace_id);
+    expect(firstMembers).toHaveLength(2);
+    expect(
+      JSON.parse(await run(["pane", "process-info", "--pane", firstPrepared])).result.process_info.shell_pid,
+    ).toBeGreaterThan(1);
+    // All these panes were allocated above by this test's fresh isolated server.
+    for (const member of firstMembers) {
+      await firstRunner.closePane!(member.pane_id);
+      ownedClosedPanes.push(member.pane_id);
+    }
+    expect((await snapshot()).workspaces).toEqual([]);
     // Unrelated lane, deliberately focused. No later operation may rename,
     // move, close or split its pane merely because it has focus.
     const original = JSON.parse(
       await run(["workspace", "create", "--cwd", repoB, "--label", "Owner lane", "--focus"]),
     ).result;
+    await run(["pane", "send-text", original.root_pane.pane_id, "owner unsent draft"]);
     const mixed = JSON.parse(
       await run(["workspace", "create", "--cwd", repoA, "--label", "Legacy mixed lane", "--no-focus"]),
     ).result;
@@ -149,6 +188,15 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     expect(p1.workspace_id).not.toBe(original.workspace.workspace_id);
     expect(p1.workspace_id).not.toBe(mixed.workspace.workspace_id);
     expect(p1.tab_id).not.toBe(p2.tab_id);
+    // VUH-2031: a new repo workspace contains exactly the hired allocations,
+    // with no idle root shell left beside them.
+    expect(
+      afterSolo.panes
+        .filter((p: any) => p.workspace_id === p1.workspace_id)
+        .map((p: any) => p.pane_id)
+        .sort(),
+    ).toEqual([firstPane, secondPane].sort());
+
     expect(afterSolo.workspaces.find((w: any) => w.workspace_id === p1.workspace_id).label).toBe("alpha");
     expect(afterSolo.tabs.find((t: any) => t.tab_id === p1.tab_id).label).toBe("Noor · implementer");
     expect(afterSolo.tabs.find((t: any) => t.tab_id === p2.tab_id).label).toBe("Rafa · reviewer");
@@ -224,6 +272,51 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     ).rejects.toThrow("not a verified");
     expect((await snapshot()).panes.length).toBe(foreignBefore.panes.length);
     expect(foreignBefore.panes.length).toBe(count + 1);
+    // Closing the only hired allocation leaves no starter shell. Existing owner
+    // panes, including the same-repo shell, keep their original terminal identity.
+    const soloDirectory = join(root, "single-hire");
+    await mkdir(soloDirectory);
+    const soloPane = await runner.createTab!({ cwd: soloDirectory, label: "Solo hire" });
+    const soloSnapshot = await snapshot();
+    const soloWorkspace = soloSnapshot.panes.find((p: any) => p.pane_id === soloPane).workspace_id;
+    expect(
+      soloSnapshot.panes.filter((p: any) => p.workspace_id === soloWorkspace).map((p: any) => p.pane_id),
+    ).toEqual([soloPane]);
+    await runner.closePane!(soloPane);
+    ownedClosedPanes.push(soloPane);
+    expect((await snapshot()).panes.filter((p: any) => p.workspace_id === soloWorkspace)).toEqual([]);
+    // A prepared initial-command pane survives its new-workspace move with
+    // the same native terminal/process, and leaves no shell beside it.
+    const preparedDirectory = join(root, "prepared-new-workspace");
+    await mkdir(preparedDirectory);
+    let originalCommand: { terminalId: string; pid: number } | undefined;
+    const preparedNewRunner = createHerdrWatchRunner(undefined, run, async (input) => {
+      const id = await firstNative.createCommandTab(input);
+      const pane = (await snapshot()).panes.find((p: any) => p.pane_id === id);
+      const info = JSON.parse(await run(["pane", "process-info", "--pane", id])).result.process_info;
+      originalCommand = { terminalId: pane.terminal_id, pid: info.shell_pid };
+      return id;
+    });
+    const preparedNewPane = await preparedNewRunner.createTab!({
+      cwd: preparedDirectory,
+      label: "Prepared new workspace",
+      command: ["/bin/sh", "-c", "sleep 60"],
+    });
+    const preparedSnapshot = await snapshot();
+    const preparedMember = preparedSnapshot.panes.find((p: any) => p.pane_id === preparedNewPane);
+    expect(
+      preparedSnapshot.panes.filter((p: any) => p.workspace_id === preparedMember.workspace_id),
+    ).toHaveLength(1);
+    expect(preparedMember.terminal_id).toBe(originalCommand!.terminalId);
+    expect(
+      JSON.parse(await run(["pane", "process-info", "--pane", preparedNewPane])).result.process_info
+        .shell_pid,
+    ).toBe(originalCommand!.pid);
+    await preparedNewRunner.closePane!(preparedNewPane);
+    ownedClosedPanes.push(preparedNewPane);
+    expect((await snapshot()).panes.some((p: any) => p.workspace_id === preparedMember.workspace_id)).toBe(
+      false,
+    );
     // Non-Git directories also get an exact-cwd workspace reused on the socket.
     const routed = routeHerdrFleets(
       runner,
@@ -322,13 +415,19 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     // Real transport fault after a successful mutation: preserve the uncertain
     // hire receipt across a new store instance, never start/retry a harness.
     const uncertainty: unknown[] = [];
-    for (const fault of ["tab-reply", "pane-label"] as const) {
+    for (const fault of ["tab-reply", "pane-label", "workspace-move"] as const) {
+      const faultCwd = fault === "workspace-move" ? join(root, "uncertain-new-workspace") : plain;
+      if (fault === "workspace-move") await mkdir(faultCwd);
       let dropped = false;
       const faultRunner = createHerdrWatchRunner(undefined, async (args) => {
         const raw = await run(args);
         if (
           !dropped &&
-          ((fault === "tab-reply" && args[0] === "tab" && args[1] === "create") ||
+          ((fault === "workspace-move" &&
+            args[0] === "pane" &&
+            args[1] === "move" &&
+            args.includes("--new-workspace")) ||
+            (fault === "tab-reply" && args[0] === "tab" && args[1] === "create") ||
             (fault === "pane-label" && args[0] === "pane" && args[1] === "rename"))
         ) {
           dropped = true;
@@ -343,7 +442,7 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
         title: "Transport fault",
         placement: "new-tab",
         role: "implementer",
-        workingDirectory: plain,
+        workingDirectory: faultCwd,
       });
       const paneCount = (await snapshot()).panes.length;
       const store = new HerdrWatchStore(path, { runner: faultRunner });
@@ -386,6 +485,17 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       tab: original.tab.tab_id,
       terminal: original.root_pane.terminal_id,
     });
+    expect(
+      await run([
+        "pane",
+        "read",
+        original.root_pane.pane_id,
+        "--source",
+        "recent-unwrapped",
+        "--lines",
+        "20",
+      ]),
+    ).toContain("owner unsent draft");
     expect(final.workspaces.find((w: any) => w.workspace_id === original.workspace.workspace_id).label).toBe(
       "Owner lane",
     );
@@ -395,7 +505,7 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     expect(final.tabs.filter((t: any) => t.workspace_id === mixed.workspace.workspace_id)).toEqual(
       before.tabs.filter((t: any) => t.workspace_id === mixed.workspace.workspace_id),
     );
-    expect(calls.some((c) => c.args.includes("close"))).toBe(false);
+    expect(calls.filter((c) => c.args.includes("close")).map((c) => c.args[2])).toEqual(ownedClosedPanes);
     expect(
       calls
         .filter((c) => c.args[0] === "pane" && c.args[1] === "move")
@@ -408,6 +518,7 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
           {
             session,
             before,
+            firstHireSnapshot,
             afterSolo,
             pipelineSnapshot,
             gridSnapshot,

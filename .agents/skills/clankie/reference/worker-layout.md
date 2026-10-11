@@ -4,6 +4,11 @@ Use the group's repository workspace, explicit pane IDs and `--no-focus`.
 Create your own named worker tab, fill four positions, then open a second
 named tab. Do not reuse a lead pane or rearrange existing owner panes.
 Record each returned ID; labels are display names, never ownership proof.
+Clankie creates a new repo workspace by moving only its newly allocated hire
+pane there; no blank starter shell is left beside it. Closing its last hire
+leaves no starter shell to clean up. Existing shells are never cleanup targets.
+An entirely empty Herdr server uses the first-hire workspace-create fallback;
+that first workspace still has a starter shell so prepared hires keep working.
 
 ```sh
 herdr tab create --workspace WORKSPACE --cwd CHECKOUT --label "kh2 authors" --no-focus

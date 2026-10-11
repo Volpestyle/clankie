@@ -3902,8 +3902,12 @@ it absent. Retry reconciliation retains the original profile.
 New hires use one Herdr workspace per repository on the selected fleet, even
 when the lead or another client is focused elsewhere. Herdr's observed Git
 identity groups linked worktrees of the same repo; equal directory names do not
-group unrelated repos. A workspace is created and named from the repo once,
-with a separate root tab reserved as `Clankie`. Existing labels are preserved.
+group unrelated repos. A new workspace is built around only the newly allocated
+hire pane, named from the repo, with no blank starter shell. The temporary hire
+tab closes automatically when that pane moves. Existing labels and owner panes
+are preserved; no older starter shell is inferred safe to close. On an entirely
+empty server, the first hire retains the existing workspace-create path and
+its starter shell, so a fresh install can still launch prepared hires.
 An unmarked hand-created workspace is reused only when all its observed pane
 directories belong to that repo. Mixed legacy workspaces stay untouched.
 Non-Git directories use their exact working directory instead.

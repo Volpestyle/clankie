@@ -134,31 +134,43 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
         Number(a.worktree?.is_linked_worktree ?? false) - Number(b.worktree?.is_linked_worktree ?? false) ||
         a.number - b.number,
     );
-    let workspace = candidates[0];
+    // An entirely empty server cannot stage a command tab. Preserve the first
+    // hire's existing workspace-create path until Herdr can create a workspace
+    // directly from an initial command; its starter shell remains in that case.
+    let workspace = candidates[0] ?? current.workspaces[0];
+    const newWorkspace = candidates.length === 0 && workspace !== undefined;
     if (!workspace) {
-      const created = z
-        .object({ result: z.object({ workspace: Workspace, tab: z.object({ tab_id: z.string() }) }) })
-        .parse(
-          JSON.parse(
-            await run(["workspace", "create", "--cwd", repo.cwd, "--label", repo.label, "--no-focus"]),
-          ),
-        ).result;
-      workspace = created.workspace;
-      // Only this newly created root tab is renamed; it stays separate from hires.
-      await run(["tab", "rename", created.tab.tab_id, "Clankie"]);
-      await run([
-        "workspace",
-        "report-metadata",
-        workspace.workspace_id,
-        "--source",
-        SOURCE,
-        "--token",
-        `${REPO}=${repoToken}`,
-      ]);
-      current = await snapshot();
+      try {
+        const created = z
+          .object({ result: z.object({ workspace: Workspace, tab: z.object({ tab_id: z.string() }) }) })
+          .parse(
+            JSON.parse(
+              await run(["workspace", "create", "--cwd", repo.cwd, "--label", repo.label, "--no-focus"]),
+            ),
+          ).result;
+        workspace = created.workspace;
+        await run(["tab", "rename", created.tab.tab_id, "Clankie"]);
+        await run([
+          "workspace",
+          "report-metadata",
+          created.workspace.workspace_id,
+          "--source",
+          SOURCE,
+          "--token",
+          `${REPO}=${repoToken}`,
+        ]);
+        current = await snapshot();
+      } catch (error) {
+        throw new HireLayoutUnconfirmed(
+          `First hire workspace creation unconfirmed; inspect Herdr before retrying: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
+    const allocationWorkspace = workspace;
     const grouped = input.placement !== "new-tab";
-    const tabs = current.tabs.filter((t) => t.workspace_id === workspace!.workspace_id);
+    const tabs = newWorkspace
+      ? []
+      : current.tabs.filter((t) => t.workspace_id === allocationWorkspace.workspace_id);
     const matching = tabs.filter((t) => {
       const members = current.panes.filter((p) => p.tab_id === t.tab_id);
       return (
@@ -255,7 +267,7 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
         commandTab({
           cwd: input.cwd,
           label: target ? `${group} · allocating` : tabLabel,
-          workspaceId: workspace.workspace_id,
+          workspaceId: allocationWorkspace.workspace_id,
           command: input.command!,
           ...(input.env === undefined ? {} : { env: input.env }),
         }),
@@ -304,7 +316,7 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
                   "tab",
                   "create",
                   "--workspace",
-                  workspace.workspace_id,
+                  allocationWorkspace.workspace_id,
                   "--cwd",
                   input.cwd,
                   "--label",
@@ -315,6 +327,56 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
               ),
             ).result.root_pane.pane_id,
       );
+    }
+    if (newWorkspace) {
+      let moveConfirmed = false;
+      try {
+        const moved = z
+          .object({
+            result: z.object({
+              move_result: z.object({
+                changed: z.literal(true),
+                previous_pane_id: z.literal(paneId),
+                pane: z.object({ pane_id: z.string().min(1) }),
+                created_workspace: Workspace,
+              }),
+            }),
+          })
+          .parse(
+            JSON.parse(
+              await run([
+                "pane",
+                "move",
+                paneId,
+                "--new-workspace",
+                "--label",
+                repo.label,
+                "--tab-label",
+                tabLabel,
+                "--no-focus",
+              ]),
+            ),
+          ).result.move_result;
+        paneId = moved.pane.pane_id;
+        moveConfirmed = true;
+        workspace = moved.created_workspace;
+        await run([
+          "workspace",
+          "report-metadata",
+          workspace.workspace_id,
+          "--source",
+          SOURCE,
+          "--token",
+          `${REPO}=${repoToken}`,
+        ]);
+      } catch (error) {
+        throw new HireLayoutUnconfirmed(
+          `Hire workspace move unconfirmed at ${paneId}; inspect Herdr before retrying: ${error instanceof Error ? error.message : String(error)}`,
+          // Cross-workspace moves change the public pane ID. A lost reply
+          // cannot bind the receipt to the old, now absent ID and permit replay.
+          moveConfirmed ? paneId : undefined,
+        );
+      }
     }
     // Failure after creation must be reconciled, never retried with a new pane.
     try {
