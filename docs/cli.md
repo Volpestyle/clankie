@@ -2033,7 +2033,10 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   keys named by commits since the previous version, in version order:
   `LOCAL-…` plus the convention's Linear team. Built-in items move to
   `delivered` on the first release that ships them, provided their evidence bundle
-  has an independent check. Missing proof refuses the sync atomically. Syncing again is a no-op
+  has an independent check. Imported items with no recorded delivery stage retain
+  release membership without a stage move. Missing proof or another item refusal
+  does not abort the sync: `skipped` names each unchanged built-in item, its version,
+  reason and detail. Syncing again is a no-op
   for items that are already delivered. `clankie work releases [--lane L]
 [--item KEY] [--limit N]` lists releases newest first. `clankie work release
 ID|VERSION` shows one release, with each item's commits and, for built-in

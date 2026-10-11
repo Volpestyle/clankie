@@ -257,7 +257,11 @@ Releases are records on the built-in tracker. `clankie work releases sync`
 reads the repository's `v*` tags and assigns each release the item keys named
 in its commits since the previous version: built-in keys (`LOCAL-…`) and the
 convention's Linear team (`VUH-…`). Built-in items move to `delivered` on the
-first release that ships them, as a `stage` event `via: release`. That raises
+first release that ships them, as a `stage` event `via: release`, when their
+evidence bundle has an independent check. Imported items without a recorded
+delivery stage retain release membership without a stage move. An item refusal
+does not abort the sync; read `skipped` for each unchanged built-in item's version,
+reason and detail. A delivery move raises
 the owner's "check it works" ask if landing has not already raised one. Linear keys
 are listed by key only. Nobody types a release's items, so name the item key in
 the commit message. Read releases with `linear_list_releases` (`query` also

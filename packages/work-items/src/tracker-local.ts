@@ -352,6 +352,8 @@ export interface ReleaseSyncResult {
   readonly releases: readonly { id: string; version: string; items: number; builtIn: number }[];
   /** Items this sync moved to delivered, with the version that shipped them. */
   readonly delivered: readonly { identifier: string; version: string }[];
+  /** Release membership was retained, but these built-in items did not move stage. */
+  readonly skipped: readonly { identifier: string; version: string; reason: string; detail: string }[];
 }
 
 export interface LocalTrackerOptions {
@@ -944,13 +946,34 @@ function syncReleases(
     synced.push(release);
   }
   const delivered: { identifier: string; version: string }[] = [];
+  const skipped: ReleaseSyncResult["skipped"][number][] = [];
   // The history is oldest version first.
   for (const release of synced)
     for (const item of release.items) {
       const issue = store.issues.find((entry) => entry.id === item.issueId);
-      if (issue === undefined || DELIVERY_STAGES.indexOf(stageOf(issue)) >= DELIVERED) continue;
-      if (["canceled", "duplicate"].includes(categoryOf(store, issue.statusId) ?? "")) continue;
-      moveStage(store, issue, "delivered", context, now, `Shipped in ${release.version} (${release.lane})`);
+      if (issue === undefined) continue;
+      const skip = (reason: string, detail: string) =>
+        skipped.push({ identifier: issue.identifier, version: release.version, reason, detail });
+      if (issue.stage === undefined) {
+        skip("delivery_stage_missing", "No delivery stage is recorded; release membership retained.");
+        continue;
+      }
+      if (DELIVERY_STAGES.indexOf(issue.stage) >= DELIVERED) {
+        skip("already_delivered", `Current delivery stage is ${issue.stage}.`);
+        continue;
+      }
+      const category = categoryOf(store, issue.statusId);
+      if (category === "canceled" || category === "duplicate") {
+        skip(category, `Item status is ${category}.`);
+        continue;
+      }
+      try {
+        moveStage(store, issue, "delivered", context, now, `Shipped in ${release.version} (${release.lane})`);
+      } catch (error) {
+        if (!(error instanceof TrackerWriteRefused)) throw error;
+        skip(error.reason, error.message);
+        continue;
+      }
       issue.updatedAt = now;
       delivered.push({ identifier: issue.identifier, version: release.version });
     }
@@ -964,6 +987,7 @@ function syncReleases(
       builtIn: release.items.filter((item) => item.issueId !== undefined).length,
     })),
     delivered,
+    skipped,
   };
 }
 /** Oldest first by ship date, then by version. */

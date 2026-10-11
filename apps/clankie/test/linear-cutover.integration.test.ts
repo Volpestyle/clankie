@@ -6,7 +6,13 @@ import { afterEach, expect, it } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { ProjectsSettingsSchema } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
-import { createLocalTracker, writeConvention, type LinearImportSnapshot } from "@clankie/work-items";
+import {
+  createLocalTracker,
+  writeConvention,
+  TRACKER_OWNER,
+  TRACKER_LEAD,
+  type LinearImportSnapshot,
+} from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
 import { ProjectHires } from "../src/captain/project-hires.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -534,6 +540,77 @@ it("refuses to cut over when the copy has drifted from Linear, and changes nothi
   expect(refused.body.counts.issues).toMatchObject({ missing: 1, stale: 1 });
   expect(refused.body.refusals.join(" ")).toMatch(/drifted from Linear/u);
   expect(await f.files()).toEqual(before);
+});
+
+it("retains imported release membership without inventing a delivery stage and continues past individual evidence refusals (VUH-2086)", async () => {
+  const f = await cutoverFixture();
+  const applied = await f.post("/v1/tracker/cutover/linear", {
+    worldProject: "clankie-work",
+    scratch: "work",
+    linearProjectId: f.projectId,
+  });
+  expect(applied.status, JSON.stringify(applied.body)).toBe(200);
+  const before = JSON.parse((await f.files()).live);
+  const imported = before.issues.filter((issue: { identifier: string }) =>
+    ["VUH-1962", "VUH-1907"].includes(issue.identifier),
+  );
+  expect(imported).toHaveLength(2);
+  expect(imported.every((issue: { stage?: string }) => issue.stage === undefined)).toBe(true);
+  const native = [];
+  for (const title of ["No bundle", "Unchecked bundle", "Checked bundle"])
+    native.push(await f.live.call("save_issue", { team: "VUH", title }));
+  for (const issue of native.slice(1)) {
+    const bundle = await f.live.call(
+      "save_evidence_bundle",
+      {
+        issueId: issue.identifier,
+        references: [await f.evidence.record(issue.identifier as string)],
+        gaps: [],
+      },
+      { actor: TRACKER_LEAD },
+    );
+    if (issue === native[2])
+      await f.live.call("post_bundle_check", { bundleId: bundle.id }, { actor: TRACKER_OWNER });
+  }
+  const keys = [...imported, ...native].map((issue) => issue.identifier as string);
+  const history = {
+    repository: "github.com/Volpestyle/clankie",
+    lane: "repository",
+    releases: [
+      {
+        version: "v0.4.3",
+        tag: "v0.4.3",
+        commit: "a".repeat(40),
+        date: "2026-10-10T00:00:00.000Z",
+        dateKind: "tag" as const,
+        items: keys.map((key) => ({ key, commits: ["b".repeat(40)] })),
+      },
+    ],
+  };
+  const result = await f.live.syncReleases(history);
+  expect(result.delivered).toEqual([{ identifier: native[2]!.identifier, version: "v0.4.3" }]);
+  expect(result.skipped).toEqual([
+    ...imported.map((issue: { identifier: string }) =>
+      expect.objectContaining({
+        identifier: issue.identifier,
+        version: "v0.4.3",
+        reason: "delivery_stage_missing",
+      }),
+    ),
+    expect.objectContaining({ identifier: native[0]!.identifier, reason: "evidence_bundle_required" }),
+    expect.objectContaining({ identifier: native[1]!.identifier, reason: "bundle_check_required" }),
+  ]);
+  expect(result.skipped.every((item) => item.detail.length > 0)).toBe(true);
+  const after = JSON.parse((await f.files()).live);
+  for (const issue of imported)
+    expect(after.issues.find((entry: { id: string }) => entry.id === issue.id)).toEqual(issue);
+  expect(after.releases[0].items.map((item: { key: string }) => item.key)).toEqual(keys);
+  expect(after.events.filter((event: { to?: string }) => event.to === "delivered")).toHaveLength(1);
+  const reopened = createLocalTracker({ directory: f.trackerDirectory });
+  expect((await reopened.call("get_release", { id: "v0.4.3" })).items).toHaveLength(5);
+  expect((await f.live.syncReleases(history)).delivered).toEqual([]);
+  const repeated = JSON.parse((await f.files()).live);
+  expect(repeated.events.filter((event: { to?: string }) => event.to === "delivered")).toHaveLength(1);
 });
 
 it("carries releases synced from repository tags into the promoted store, and still refuses an authored record", async () => {

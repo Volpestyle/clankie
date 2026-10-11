@@ -260,6 +260,11 @@ everything that ships: a stage move that passes landed without stopping there
 raises the same "check it works" `verify` ask that landing does, once per item.
 Items already at `delivered` or
 `owner-verified` stay put, and canceled or duplicate items are not delivered.
+Imported items without a recorded delivery stage retain their release membership
+without a stage move. Delivery still requires an independently checked evidence
+bundle. An individual refusal does not abort release recording or other items'
+delivery; the sync returns `skipped` entries with identifier, version, reason and
+detail for each built-in item that stays put (VUH-2086).
 Keys from a connected tracker are listed by key only and have no stage effects
 until the mirror (VUH-1907). The sync is deterministic: run again, it upserts
 the same releases and moves nothing.
