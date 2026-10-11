@@ -162,7 +162,7 @@ async function fixture() {
       createdAt: NOW.toISOString(),
       webhookTimestamp: NOW.getTime(),
       organizationId: account.workspaceId,
-      actor: { id: "james-fixture", name: "James", email: "owner@example.test" },
+      actor: { id: "james-fixture", type: "user", name: "James", email: "owner@example.test" },
       url: "https://linear.app/fixture/issue/VUH-1678/linear-wake",
       data: {
         id: randomUUID(),
@@ -245,7 +245,7 @@ it("keeps issue titles and actor names inside quoted JSON through the signed web
     await (
       await f.post(
         f.body(
-          { actor: { id: "james-fixture", name, email: "owner@example.test" } },
+          { actor: { id: "james-fixture", type: "user", name, email: "owner@example.test" } },
           { issue: { id: f.issueId, identifier: "VUH-1678", title } },
         ),
       )
@@ -460,4 +460,56 @@ it("keeps failed journal writes retryable and drops unavailable configured targe
   expect(await unavailable.json()).toMatchObject({ ingested: false });
   await f.closeTurns();
   expect(f.wakes).toHaveLength(1);
+});
+
+it("signed owner-user comments wake, but missing origin and app actors with owner identity do not (VUH-1985)", async () => {
+  const f = await fixture();
+  for (const type of [undefined, "app", "integration", "oauthClient"]) {
+    await f.post(
+      f.body({ actor: { id: "james-fixture", email: "owner@example.test", ...(type ? { type } : {}) } }),
+    );
+  }
+  await f.closeTurns();
+  expect(f.wakes).toHaveLength(0);
+  await f.restart();
+  // Linear's documented Comment envelope has an explicit user actor. Both
+  // app and web comments share it; the provider supplies no client surface flag.
+  await f.post(
+    f.body(
+      { actor: { id: "james-fixture", type: "user", name: "James", email: "owner@example.test" } },
+      { userId: "james-fixture", body: "Owner comment from Linear app or web" },
+    ),
+  );
+  await f.closeTurns();
+  expect(f.wakes).toHaveLength(1);
+  expect(f.wakes[0]).toMatchObject({ id: "global-default" });
+  expect(f.wakes[0]?.prompt).toContain("Owner comment from Linear app or web");
+});
+
+it("preserves owner wakes for Linear's published signed user-actor Comment envelope (VUH-1985)", async () => {
+  const f = await fixture();
+  // Published provider example, not a fabricated human-origin marker:
+  // https://linear.app/developers/webhooks#webhook-payload
+  const sample = JSON.parse(
+    await readFile(new URL("./fixtures/linear-user-comment.json", import.meta.url), "utf8"),
+  );
+  await f.settings.update((current) => ({
+    ...current,
+    linearWebhook: {
+      ...current.linearWebhook,
+      wake: { ...current.linearWebhook.wake, ownerUserIds: [sample.actor.id] },
+    },
+  }));
+  const raw = JSON.stringify({
+    ...sample,
+    webhookTimestamp: NOW.getTime(),
+    organizationId: f.account.workspaceId,
+    createdAt: NOW.toISOString(),
+    data: { ...sample.data, issueId: f.issueId, updatedAt: NOW.toISOString() },
+  });
+  expect(await (await f.post(raw)).json()).toMatchObject({ ingested: true });
+  await f.closeTurns();
+  expect(f.wakes).toHaveLength(1);
+  expect(f.wakes[0]).toMatchObject({ id: "global-default" });
+  expect(f.wakes[0]?.prompt).toContain(sample.data.body);
 });
