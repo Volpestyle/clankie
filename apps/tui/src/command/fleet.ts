@@ -155,7 +155,7 @@ function formatHireDefaults(hire: HireProfile | undefined): string {
 
 export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>): string[] {
   const notes = fleet.notes.trim();
-  const resources = FleetResourcePolicySchema.parse(fleet.resources ?? {});
+  const resources = FleetResourcePolicySchema.parse(fleet.machineResources?.local ?? fleet.resources ?? {});
   return [
     `fleet size: ${fleet.size} — ${FLEET_SIZE_GUIDANCE[fleet.size]}`,
     `models: ${fleet.models} — ${FLEET_MODEL_GUIDANCE[fleet.models]}`,

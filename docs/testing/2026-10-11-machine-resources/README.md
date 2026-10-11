@@ -28,8 +28,13 @@ gate result are published on VUH-2092.
 
 ## Limits
 
-Browser captures are not native-device proof. Standalone iPhone build/install is
-running separately. No PC shell, Herdr, simulator boot or eval was used.
+Browser captures are not native-device proof. The standalone iPhone Release
+build passed on Xcode 27.0 (27A266a), installed through bounded CoreDevice after
+Expo's installer stalled, and cold-launched successfully. Its process remained
+running on follow-up; the bundle contains the new resource-control label. The
+sanitized proof is attached to VUH-2092 as `959ae913-c71b-43c8-9898-0e54db7c93c7`.
+This proves packaging and launch, not the new controls on a live native screen.
+No PC shell, Herdr, simulator boot or eval was used.
 Remote host facts in the integration fixture are declared Linux 16-core/64-GiB
 facts, not a live PC measurement. Windows runtime/transport and KH2 exclusivity
 remain sibling VUH-2091 and VUH-2093. The bounded remote adapter seam is present;

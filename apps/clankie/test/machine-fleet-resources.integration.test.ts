@@ -1,5 +1,5 @@
 import { runMachineResourceStatusCommand } from "../../tui/src/command/fleet-resources.ts";
-import { runFleetCommand } from "../../tui/src/command/fleet.ts";
+import { formatFleetLines, runFleetCommand } from "../../tui/src/command/fleet.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir, availableParallelism, totalmem } from "node:os";
 import { join } from "node:path";
@@ -158,6 +158,11 @@ it("the real settings/API/client keeps host policies and observations separate, 
       },
     });
     expect((await client.fleetResources()).capacity.heavySlots).toBe(3);
+    const localSummary = await runFleetCommand(
+      ["set", "--machine", "local", "--heavy-slots", "3"],
+      cliOptions,
+    );
+    expect(formatFleetLines(localSummary.fleet)).toContain("heavy capacity: 3 shared slots; simulators: 0");
     await runFleetCommand(["set", "--heavy-slots", "6"], cliOptions);
     expect((await client.fleetResources()).capacity.heavySlots).toBe(6);
     expect((await client.fleetSettings()).fleet.machineResources?.local?.heavySlots).toBe(6);
