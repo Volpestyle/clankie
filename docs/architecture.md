@@ -78,7 +78,7 @@ The source-checkout service owns an approved-commit integration queue through
 `POST /v1/integrate` and `clankie integrate`. Landings go directly to `main`
 (ADR 0240); the queue is an optional gated path. Requests waiting during a gate share the next compatible batch;
 each compatible batch has at most three requests. Conflicting requests roll back;
-failed shared gates retry members individually, alternating with fresh work.
+failed shared gates retry members individually at their original admission priority.
 `integrate status` and `/integrate` expose running/waiting work, the isolation chain,
 a conditional measured ETA and the last result. An owner can withdraw a waiting
 or active isolated request before landing; a gate containing withdrawn input

@@ -40,14 +40,25 @@ of **at most three requests**. Push requests coalesce past gate-only ones;
 gate-only requests never land. Restores run alone and remain admission-order
 barriers, including retries admitted before the restore.
 
-A failed shared gate queues each surviving member for an individual fresh gate.
-The scheduler alternates those retries with new waiting batches, so diagnosis
-does not drain a recursive isolation tree before other work can progress.
+A failed shared gate queues each surviving member for an individual attempt.
+Retries keep their original admission priority, ahead of later requests; fresh
+batches cannot coalesce across an older retry. Innocent members re-gate and land
+first rather than returning to the back of the queue.
 Each member needs at most its shared attempt and one individual attempt to
 attribute that failure. Main moving into checked inputs still requires the
 existing bounded re-gating described below. Failure of a single request is
 terminal; base or infrastructure faults may independently fail every member.
 Every attempt retains its logs and exact tree.
+
+An individual attempt can retain a repository's earlier zero-exit gate only when
+its exact tree, base, approved contributions, source, destination and sibling
+core candidate are unchanged. It retains the actual gated commit and log, with
+`gateReuse` recording the original batch, tree and core HEAD. Every repository
+is installed again, and any repository without a valid pass gates again. The
+app consumes core sources: excluding a failed core contribution invalidates the
+earlier app pass even when the app tree itself is unchanged. A withdrawal always
+requires fresh gates. Landing checks the durable pass and reused tree/core input;
+an unchanged app tree alone never authorizes landing.
 
 Requests retain their UUID and input. `batchId` follows the current attestation,
 `attempts` retains attempt IDs, and `isolation.rootBatchId` identifies the failed

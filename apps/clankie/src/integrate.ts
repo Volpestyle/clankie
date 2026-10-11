@@ -26,20 +26,20 @@ const active = new Set(["queued", "composing", "installing", "gating", "isolatin
 interface PendingIntegration {
   batch: IntegrationBatch;
   guard: () => Promise<void>;
+  admission: number;
 }
 interface IntegrationJob {
   members: PendingIntegration[];
   fresh: boolean;
   regates: number;
   regateReason?: string;
+  reuse?: IntegrationBatch;
 }
 /** The scheduler and its status estimate use the same ordering, including restore barriers. */
-function nextJob(pending: PendingIntegration[], retries: IntegrationJob[], preferRetry: boolean) {
-  const restore = pending[0]?.batch.request.restore;
-  const retryBeforeRestore =
-    restore && retries[0] && retries[0].members[0]!.batch.createdAt <= pending[0]!.batch.createdAt;
-  if (retries.length && (!pending.length || (restore ? retryBeforeRestore : preferRetry)))
-    return { job: retries.shift()!, preferRetry: false };
+function nextJob(pending: PendingIntegration[], retries: IntegrationJob[]) {
+  retries.sort((a, b) => a.members[0]!.admission - b.members[0]!.admission);
+  if (retries.length && (!pending.length || retries[0]!.members[0]!.admission < pending[0]!.admission))
+    return retries.shift()!;
   const first = pending.shift()!;
   const members = [first];
   const request = first.batch.request;
@@ -49,11 +49,11 @@ function nextJob(pending: PendingIntegration[], retries: IntegrationJob[], prefe
     !request.restore && members.length < INTEGRATE_MAX_BATCH_MEMBERS && index < pending.length;
   ) {
     const next = pending[index]!.batch.request;
-    if (next.restore) break;
+    if (next.restore || (retries[0] && pending[index]!.admission > retries[0].members[0]!.admission)) break;
     if (next.push === request.push) members.push(...pending.splice(index, 1));
     else index++;
   }
-  return { job: { members, fresh: false, regates: 0 }, preferRetry: true };
+  return { members, fresh: false, regates: 0 };
 }
 interface IntegrationOptions {
   directory: string;
@@ -117,7 +117,7 @@ export class IntegrationQueue {
   private running = new Set<string>();
   private pending: PendingIntegration[] = [];
   private retries: IntegrationJob[] = [];
-  private preferRetry = false;
+  private nextAdmission = 0;
   private current: { job: IntegrationJob; batch?: IntegrationBatch; startedAt: number } | undefined;
   private withdrawn = new Set<string>();
   private durations: number[] = [];
@@ -174,11 +174,8 @@ export class IntegrationQueue {
     const pending = this.pending.slice();
     const retries = this.retries.filter((job) => job.members.length).slice();
     const jobs: IntegrationJob[] = [];
-    let preferRetry = this.preferRetry;
     while (pending.length || retries.length) {
-      const selected = nextJob(pending, retries, preferRetry);
-      preferRetry = selected.preferRetry;
-      jobs.push(selected.job);
+      jobs.push(nextJob(pending, retries));
     }
     return jobs;
   }
@@ -360,9 +357,11 @@ export class IntegrationQueue {
         await mkdir(dirname(this.path(request.id)), { mode: 0o700 });
       },
     );
+    const admission = this.nextAdmission++;
     this.running.add(batch.id);
     await this.save(batch);
-    this.pending.push({ batch, guard });
+    this.pending.push({ batch, guard, admission });
+    this.pending.sort((a, b) => a.admission - b.admission);
     this.schedule();
     return batch;
   }
@@ -406,9 +405,7 @@ export class IntegrationQueue {
             join(this.options.directory, "queue.lock"),
             async () => {
               while (this.pending.length || this.retries.length) {
-                const selected = nextJob(this.pending, this.retries, this.preferRetry);
-                this.preferRetry = selected.preferRetry;
-                const { job } = selected;
+                const job = nextJob(this.pending, this.retries);
                 this.current = { job, startedAt: Date.now() };
                 try {
                   await this.runMembers(job);
@@ -468,12 +465,14 @@ export class IntegrationQueue {
     regates: number,
     regateReason?: string,
     isolationRoot?: string,
+    reuse?: IntegrationBatch,
   ): Promise<void> {
     const job: IntegrationJob = {
       members: members.filter((m) => !this.withdrawn.has(m.batch.id)),
       fresh: true,
       regates,
       ...(regateReason === undefined ? {} : { regateReason }),
+      ...(reuse === undefined ? {} : { reuse }),
     };
     if (!job.members.length) return;
     this.retries.push(job);
@@ -545,7 +544,7 @@ export class IntegrationQueue {
     let remaining = members;
     try {
       try {
-        await this.composeAndGate(batch);
+        await this.composeAndGate(batch, job.reuse);
       } catch (error) {
         batch.state = "failed";
         batch.error = String(error);
@@ -576,9 +575,9 @@ export class IntegrationQueue {
         batch.error = `${batch.error ?? "Shared gate failed"}; individual retries queued (use request IDs)`;
         await this.save(batch);
         // Cap the diagnosis at a shared attempt plus one individual gate per member.
-        // The scheduler gives waiting work a turn between these retries.
-        for (const member of remaining) await this.retry([member], regates, undefined, isolationRoot ?? id);
-        this.preferRetry = false;
+        // Each retry keeps its original admission priority, before later arrivals.
+        for (const member of remaining)
+          await this.retry([member], regates, undefined, isolationRoot ?? id, batch);
       } else if (batch.state === "passed" && batch.request.push) {
         let uncovered = false;
         await this.land(
@@ -768,7 +767,7 @@ export class IntegrationQueue {
     return record;
   }
 
-  private async composeAndGate(batch: IntegrationBatch): Promise<void> {
+  private async composeAndGate(batch: IntegrationBatch, reuse?: IntegrationBatch): Promise<void> {
     const root = dirname(batch.evidence);
     const restore = batch.request.restore ? await this.status(batch.request.restore) : undefined;
     if (restore && !["passed", "held", "pushed", "partial"].includes(restore.state))
@@ -890,6 +889,7 @@ export class IntegrationQueue {
       await this.save(batch);
       return;
     }
+    if (reuse && !restore) await this.reusePassedGates(batch, reuse);
     // A core-only batch may gate on a linked machine; an app pair gates together here.
     const runner = await this.place(batch);
     try {
@@ -903,6 +903,55 @@ export class IntegrationQueue {
         };
         await this.save(batch);
       }
+    }
+  }
+
+  /** Preserve the actual gated commit, never relabel a pass for a newly composed HEAD. */
+  private async reusePassedGates(batch: IntegrationBatch, previous: IntegrationBatch): Promise<void> {
+    for (const member of previous.members ?? [previous.request])
+      if (this.withdrawn.has(member.id) || (await this.read(member.id)).state === "cancelled") return;
+    for (const repo of batch.repos) {
+      const good = previous.repos.find((candidate) => candidate.name === repo.name);
+      if (
+        !good ||
+        good.gate?.exitCode !== 0 ||
+        good.gate.head !== good.head ||
+        good.base !== repo.base ||
+        good.source !== repo.source ||
+        good.origin !== repo.origin
+      )
+        continue;
+      // The app consumes the core candidate. Treat other siblings conservatively too.
+      if (
+        previous.repos.some(
+          (sibling) =>
+            sibling.name !== repo.name &&
+            batch.repos.find((candidate) => candidate.name === sibling.name)?.head !== sibling.head,
+        )
+      )
+        continue;
+      const contributions = (candidate: IntegrationRepo) =>
+        candidate.commits
+          .filter((item) => item.state === "applied" || item.state === "already_present")
+          .map(({ commit, memberId }) => ({ commit, memberId }));
+      if (JSON.stringify(contributions(repo)) !== JSON.stringify(contributions(good))) continue;
+      let tree: string;
+      try {
+        if ((await this.head(good)) !== good.head) continue;
+        await this.clean(good);
+        tree = await this.git(repo.directory, ["rev-parse", `${repo.head}^{tree}`]);
+        if (tree !== (await this.git(good.directory, ["rev-parse", `${good.head}^{tree}`]))) continue;
+      } catch {
+        // Missing prior evidence cannot authorize reuse; the fresh candidate must gate.
+        continue;
+      }
+      await this.git(repo.directory, ["fetch", good.directory, good.head]);
+      await this.git(repo.directory, ["reset", "--hard", good.head]);
+      repo.head = good.head;
+      repo.commits = good.commits.map((item) => ({ ...item }));
+      repo.gate = { ...good.gate };
+      repo.gateReuse = { batchId: previous.id, tree, coreHead: previous.repos[0]!.head };
+      await this.save(batch);
     }
   }
 
@@ -987,6 +1036,7 @@ export class IntegrationQueue {
     await this.save(batch);
     for (const repo of batch.repos) {
       const env = await integrationEnvironment(join(root, "isolation", repo.name));
+      if (repo.gateReuse) continue;
       try {
         repo.gate = await this.command(repo, "gate", env, root, repo.base, runner);
         // A connected report transport must not strand a completed remote gate either.
@@ -1154,6 +1204,13 @@ export class IntegrationQueue {
           recorded.repos.sort((a, b) => (a.name === b.name ? 0 : a.name === "core" ? -1 : 1));
           if (!recorded.repos.length) throw Error("No repositories were gated");
           for (const repo of recorded.repos) {
+            if (
+              repo.gateReuse &&
+              (repo.gateReuse.coreHead !== recorded.repos[0]!.head ||
+                repo.gateReuse.tree !==
+                  (await this.git(repo.directory, ["rev-parse", `${repo.head}^{tree}`])))
+            )
+              throw Error(`${repo.name}: reused gate does not cover this tree and core candidate`);
             if (
               repo.gate?.exitCode !== 0 ||
               attested(repo) !== repo.head ||

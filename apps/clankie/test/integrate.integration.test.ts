@@ -66,7 +66,11 @@ afterEach(async (context) => {
 async function git(directory: string, ...args: string[]): Promise<string> {
   return (await execute("git", ["-c", "core.hooksPath=/dev/null", "-C", directory, ...args])).stdout.trim();
 }
-function fixture(gateExtra: string | ((root: string) => string) = "", withApp = false) {
+function fixture(
+  gateExtra: string | ((root: string) => string) = "",
+  withApp = false,
+  appGateExtra: string | ((root: string) => string) = "",
+) {
   return fixtureWork().run(async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-integrate-")));
     roots.push(root);
@@ -89,6 +93,7 @@ function fixture(gateExtra: string | ((root: string) => string) = "", withApp = 
         }),
       );
       await writeFile(join(source, ".gitignore"), "node_modules/\n");
+      const extra = name === "core" ? gateExtra : appGateExtra;
       await writeFile(
         join(source, "gate.mjs"),
         `
@@ -115,7 +120,7 @@ writeFileSync(descriptor, 'private-fixture');
 mkdirSync(dirname(process.env.CLANKIE_CREDENTIALS_FILE), { recursive: true });
 writeFileSync(process.env.CLANKIE_CREDENTIALS_FILE, '{}');
 console.log('fixture-gate-isolated', process.cwd());
-${name === "core" ? (typeof gateExtra === "function" ? gateExtra(root) : gateExtra) : ""}
+${typeof extra === "function" ? extra(root) : extra}
 `,
       );
       await execute("pnpm", ["install", "--lockfile-only"], { cwd: source });
@@ -858,7 +863,7 @@ it("retries a failed shared real gate individually, reports the bad request, and
   );
 }, 90_000);
 
-it("CLI/API caps batches, advances waiting work during isolation and fences active and waiting withdrawals from landing", async () => {
+it("CLI/API caps batches, preserves retry admission priority and fences active and waiting withdrawals from landing", async () => {
   const names = ["initial", "withdraw", "broken", "survivor", "green1", "green2", "green3", "green4", "late"];
   const f = await fixture(
     (root) => `
@@ -905,8 +910,8 @@ if (existsSync('broken')) process.exit(9);
   await release("shared");
   await started("withdraw");
 
-  // New work clears the failed batch before the isolation chain is exhausted.
-  for (const name of ["green1", "green2", "green3"]) expect((await status(name)).state).toBe("pushed");
+  // Later arrivals cannot pass the older isolated requests.
+  for (const name of ["green1", "green2", "green3"]) expect((await status(name)).state).toBe("queued");
   const isolated = await status("withdraw");
   expect(isolated.state).toBe("gating");
   expect(isolated.progress).toMatchObject({
@@ -942,13 +947,16 @@ if (existsSync('broken')) process.exit(9);
   await expect(f.queue.land(withdrawn.batchId!, guard)).rejects.toThrow("no landable pass");
   expect((await new IntegrationQueue(f.queue.options).status(byName("withdraw").id)).state).toBe("cancelled");
   expect((await status("broken")).state).toBe("cancelled");
-  for (const name of ["survivor", "green4", "late"]) expect((await status(name)).state).toBe("pushed");
+  for (const name of ["survivor", "green1", "green2", "green3", "green4", "late"])
+    expect((await status(name)).state).toBe("pushed");
   const survivor = await status("survivor");
   const head = survivor.repos[0]!.head;
   const tree = await git(survivor.repos[0]!.directory, "ls-tree", "--name-only", head);
   expect(tree).not.toContain("withdraw");
   expect(tree).not.toContain("broken");
-  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(head);
+  const final = (await status("late")).repos[0]!;
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(final.head);
+  expect(await git(final.directory, "merge-base", "--is-ancestor", head, final.head)).toBe("");
   for (const input of inputs) expect((await status(input.name)).members?.length ?? 1).toBeLessThanOrEqual(3);
   const gates = (await readFile(join(f.root, "gate-heads"), "utf8"))
     .trim()
@@ -968,6 +976,207 @@ if (existsSync('broken')) process.exit(9);
       "\n",
   );
 }, 120_000);
+
+it("mixed isolation re-gates innocent members before later arrivals and invalidates an app pass on excluded core", async () => {
+  const f = await fixture(
+    (root) => `
+const fs = await import('node:fs');
+const root = ${JSON.stringify(root)};
+fs.appendFileSync(join(root, 'events'), JSON.stringify({ repo: 'core', head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), broken: existsSync('broken'), late: existsSync('late') }) + '\\n');
+let stage;
+if (!existsSync('good') && !existsSync('broken')) stage = 'initial';
+else if (existsSync('broken')) stage = 'shared';
+else if (!existsSync('../clankie-app/feature')) stage = 'first-retry';
+if (stage) {
+  fs.writeFileSync(join(root, stage + '-started'), 'gating');
+  while (!existsSync(join(root, stage + '-release')) && !existsSync(join(root, 'release')))
+    await new Promise(resolve => setTimeout(resolve, 20));
+}
+if (existsSync('broken')) process.exit(9);
+`,
+    true,
+    (root) => `
+const fs = await import('node:fs');
+assert.equal(fs.readFileSync('feature', 'utf8'), 'app');
+assert.equal(fs.readFileSync('../clankie/good', 'utf8'), 'good');
+fs.appendFileSync(${JSON.stringify(join(root, "events"))}, JSON.stringify({ repo: 'app', head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), coreHead: execFileSync('git', ['-C', '../clankie', 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), broken: existsSync('../clankie/broken') }) + '\\n');
+`,
+  );
+  const cli = await queueCli(f);
+  const initial = await commit(f.core.source, "initial", "initial");
+  const good = await commit(f.core.source, "good", "good");
+  const broken = await commit(f.core.source, "broken", "broken");
+  const late = await commit(f.core.source, "late", "late");
+  const feature = await commit(f.app!.source, "feature", "app");
+  const ids = Array.from({ length: 5 }, () => randomUUID());
+  const submit = (index: number, sha: string, app = false) =>
+    runIntegrationCommand(
+      [...(app ? ["--app", sha] : [sha]), "--id", ids[index]!, "--push", "--no-wait"],
+      cli,
+    );
+  const status = async (index: number) => (await runIntegrationCommand(["status", ids[index]!], cli)).batch!;
+  const started = (stage: string) =>
+    until(async () => Boolean(await readFile(join(f.root, stage + "-started")).catch(() => undefined)));
+  const release = (stage: string) => writeFile(join(f.root, stage + "-release"), "go");
+  await submit(0, initial);
+  await started("initial");
+  await submit(1, good);
+  await submit(2, broken);
+  await submit(3, feature, true);
+  await release("initial");
+  await started("shared");
+  await submit(4, late);
+  await release("shared");
+  await started("first-retry");
+  const firstRetry = await status(1);
+  expect(firstRetry.state).toBe("gating");
+  expect((await status(4)).state).toBe("queued");
+  const appPosition = (await status(3)).progress!.queuePosition;
+  const laterPosition = (await status(4)).progress!.queuePosition;
+  expect(appPosition).not.toBeNull();
+  expect(laterPosition).not.toBeNull();
+  expect(appPosition).toBeLessThan(laterPosition!);
+  const shared = await f.queue.status(firstRetry.attempts![0]!);
+  expect(shared.repos.find((repo) => repo.name === "core")!.gate?.exitCode).toBe(9);
+  expect(shared.repos.find((repo) => repo.name === "app")!.gate?.exitCode).toBe(0);
+  await release("first-retry");
+  await f.queue.wait();
+  for (const index of [0, 1, 3, 4]) expect((await status(index)).state).toBe("pushed");
+  expect((await status(2)).state).toBe("failed");
+  const appBatch = await status(3);
+  const app = appBatch.repos.find((repo) => repo.name === "app")!;
+  const core = appBatch.repos.find((repo) => repo.name === "core")!;
+  expect(app.gateReuse).toBeUndefined();
+  expect(app.gate).toMatchObject({ exitCode: 0, head: app.head });
+  const events = (await readFile(join(f.root, "events"), "utf8"))
+    .trim()
+    .split("\n")
+    .map(
+      (line) =>
+        JSON.parse(line) as {
+          repo: string;
+          head: string;
+          coreHead?: string;
+          broken: boolean;
+          late?: boolean;
+        },
+    );
+  const appGates = events.filter((event) => event.repo === "app");
+  expect(appGates).toHaveLength(2);
+  expect(appGates[0]!.broken).toBe(true);
+  expect(appGates[1]).toMatchObject({ head: app.head, coreHead: core.head, broken: false });
+  expect(appGates[0]!.coreHead).not.toBe(core.head);
+  expect(events.findIndex((event) => event.late)).toBeGreaterThan(events.indexOf(appGates[1]!));
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(
+    (await status(4)).repos[0]!.head,
+  );
+  expect(await git(f.app!.source, "ls-remote", "origin", "refs/heads/main")).toContain(app.head);
+  expect(await git((await status(4)).repos[0]!.directory, "ls-tree", "--name-only", "HEAD")).not.toContain(
+    "broken",
+  );
+  process.stdout.write(
+    "vuh-2112-mixed-evidence " +
+      JSON.stringify({
+        firstRetry: firstRetry.progress,
+        sharedId: shared.id,
+        events,
+        appHead: app.head,
+        coreHead: core.head,
+      }) +
+      "\n",
+  );
+}, 120_000);
+
+it.each([false, true])(
+  "reuses the actual app pass only for an unchanged candidate (app base advanced: %s)",
+  async (advanceBase) => {
+    const f = await fixture(
+      (root) => `
+const fs = await import('node:fs');
+const root = ${JSON.stringify(root)};
+if (!existsSync(join(root, 'initial-release')))
+  while (!existsSync(join(root, 'initial-release')) && !existsSync(join(root, 'release')))
+    await new Promise(resolve => setTimeout(resolve, 20));
+if (existsSync('../clankie-app/feature') && !existsSync(join(root, 'failed-once'))) {
+  fs.writeFileSync(join(root, 'failed-once'), 'failed');
+  process.exit(9);
+}
+if (existsSync(join(root, 'failed-once')) && !existsSync('../clankie-app/feature')) {
+  fs.writeFileSync(join(root, 'first-retry-started'), 'gating');
+  while (!existsSync(join(root, 'first-retry-release')) && !existsSync(join(root, 'release')))
+    await new Promise(resolve => setTimeout(resolve, 20));
+}
+`,
+      true,
+      (root) => `
+const fs = await import('node:fs');
+assert.equal(fs.readFileSync('../clankie/initial', 'utf8'), 'initial');
+assert.equal(fs.readFileSync('feature', 'utf8'), 'app');
+fs.appendFileSync(${JSON.stringify(join(root, "app-gates"))}, JSON.stringify({ head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), coreHead: execFileSync('git', ['-C', '../clankie', 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() }) + '\\n');
+`,
+    );
+    const initial = await commit(f.core.source, "initial", "initial");
+    const feature = await commit(f.app!.source, "feature", "app");
+    const request = (core: string[], app?: string[]) =>
+      IntegrationRunSchema.parse({
+        action: "run",
+        id: randomUUID(),
+        core,
+        ...(app ? { app } : {}),
+        push: true,
+      });
+    const first = request([initial]);
+    const members = [request([initial]), request([initial]), request([], [feature])];
+    await f.queue.start(first, guard);
+    await until(async () => (await f.queue.status(first.id)).state === "gating");
+    for (const member of members) await f.queue.start(member, guard);
+    await writeFile(join(f.root, "initial-release"), "go");
+    await until(async () =>
+      Boolean(await readFile(join(f.root, "first-retry-started")).catch(() => undefined)),
+    );
+    const sharedId = (await f.queue.status(members[0]!.id)).attempts![0]!;
+    const shared = await f.queue.status(sharedId);
+    const oldApp = shared.repos.find((repo) => repo.name === "app")!;
+    expect(oldApp.gate?.exitCode).toBe(0);
+    if (advanceBase) {
+      await git(f.app!.source, "checkout", "-b", "remote", f.app!.base);
+      await git(f.app!.source, "commit", "--allow-empty", "-m", "same tree, newer app base");
+      await git(f.app!.source, "push", "origin", "HEAD:main");
+      await git(f.app!.source, "checkout", "main");
+    }
+    await writeFile(join(f.root, "first-retry-release"), "go");
+    await f.queue.wait();
+    for (const member of members) expect((await f.queue.status(member.id)).state).toBe("pushed");
+    const result = await f.queue.status(members[2]!.id);
+    const app = result.repos.find((repo) => repo.name === "app")!;
+    const core = result.repos.find((repo) => repo.name === "core")!;
+    const gates = (await readFile(join(f.root, "app-gates"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { head: string; coreHead: string });
+    expect(gates).toHaveLength(advanceBase ? 2 : 1);
+    expect(app.gate).toMatchObject({ exitCode: 0, head: app.head });
+    expect(core.gate).toMatchObject({ exitCode: 0, head: core.head });
+    if (advanceBase) expect(app.gateReuse).toBeUndefined();
+    else {
+      expect(app.head).toBe(oldApp.head);
+      expect(app.gate!.log).toBe(oldApp.gate!.log);
+      expect(app.gateReuse).toMatchObject({
+        batchId: sharedId,
+        coreHead: core.head,
+        tree: await git(app.directory, "rev-parse", "HEAD^{tree}"),
+      });
+    }
+    expect(gates[0]!.coreHead).toBe(core.head);
+    expect(await git(f.app!.source, "ls-remote", "origin", "refs/heads/main")).toContain(app.head);
+    process.stdout.write(
+      "vuh-2112-reuse-evidence " +
+        JSON.stringify({ advanceBase, sharedId, gates, appHead: app.head, gateReuse: app.gateReuse }) +
+        "\n",
+    );
+  },
+  120_000,
+);
 
 it("keeps older isolated retries before a restore and gates the later forward change on its restored tree", async () => {
   const f = await fixture(

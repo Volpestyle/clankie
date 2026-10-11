@@ -893,7 +893,11 @@ non-isolated gate and a landing already under way refuse cancellation.
 
 Requests arriving during a gate coalesce into compatible batches of at most
 three requests. Conflicting members roll back; failed shared gates retry members
-individually, alternating with fresh waiting batches. Gate-only runs stay
+individually at their original admission priority, before later arrivals. An
+earlier repository pass is reusable only for the same exact tree, base, approved
+contributions and sibling core candidate; `gateReuse` records the retained pass.
+Removing a core contribution invalidates the app pass and requires a new gate.
+Gate-only runs stay
 separate and never land; restores remain admission-order barriers.
 An ordered approved batch composes on fresh origin in independent throwaway
 core/app worktrees, performs real installs and full checks with private home,

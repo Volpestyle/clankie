@@ -133,6 +133,8 @@ const IntegrationRepoSchema = z.object({
   ),
   install: CommandRecordSchema.optional(),
   gate: CommandRecordSchema.optional(),
+  /** The prior exact-tree pass retained after isolation, including its sibling core input. */
+  gateReuse: z.object({ batchId: Id, tree: Sha, coreHead: Sha }).optional(),
   /**
    * Each move onto a newer origin/main after the gate: the incoming commits it checked and
    * whether the recorded selection still covered the rebased HEAD (VUH-2068).

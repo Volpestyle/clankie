@@ -135,6 +135,13 @@ fresh local gate, and a ninety-minute wall-clock limit holds even with output.
 The remote timeout cause and log remain evidence; fallback never attests a
 remote pass. These deadlines stop only that request's owned transport.
 
+Failed shared integration gates retry members at their original admission
+priority, before later arrivals. Read `progress.queuePosition` and the isolation
+chain together. A retained `gateReuse` pass covers only its unchanged exact tree,
+base, approved contributions and sibling core candidate. The app depends on core:
+excluding a core member requires a new app gate. Withdrawals still require fresh
+composition and gates; priority does not authorize an ungated tree.
+
 Passed-canary retention runs once per operation per service boot. It shares the
 maintenance lock with update admission; `retentionMaintenance: held` with empty
 `holds` can be an active scan. Read status and the retention journal before
