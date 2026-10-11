@@ -26,12 +26,12 @@ The API and per-app flag are documented in the official
 Executed the production discovery program against the installed signed-in
 `codex-cli 0.162.1`, then repeated the native read with its returned overrides.
 
-| Observation | Before | With discovered override |
-| --- | --- | --- |
-| Linear installed app ID | `asdk_app_69a089a326dc8191b32a3f2553f5be2c` | Same returned ID |
-| Linear effective `enabled` | `true` | `false` |
-| Other installed apps | 14 enabled | All 14 unchanged |
-| Installed app count | 15 | 15 |
+| Observation                | Before                                      | With discovered override |
+| -------------------------- | ------------------------------------------- | ------------------------ |
+| Linear installed app ID    | `asdk_app_69a089a326dc8191b32a3f2553f5be2c` | Same returned ID         |
+| Linear effective `enabled` | `true`                                      | `false`                  |
+| Other installed apps       | 14 enabled                                  | All 14 unchanged         |
+| Installed app count        | 15                                          | 15                       |
 
 Native `config/read` also confirmed that the discovered ID's effective
 `enabled` value is `false`. Raw local captures: `.local/vuh-1952/native-proof.json`
