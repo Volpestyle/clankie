@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "reproduction.tar",
+      "size": 133120,
+      "sha256": "d24c4758d9c70329b6804be995163c5b9962b9765e106da808d060f7da97e182",
+      "url": "clankie://evidence/sha256/d24c4758d9c70329b6804be995163c5b9962b9765e106da808d060f7da97e182"
+    },
+    {
+      "path": "type-correction.tar",
+      "size": 52736,
+      "sha256": "4a78a57c4bf1c057ffc0b27c05ef14bdb462aac9555c5fe6d9978f649fa1593f",
+      "url": "clankie://evidence/sha256/4a78a57c4bf1c057ffc0b27c05ef14bdb462aac9555c5fe6d9978f649fa1593f"
+    }
+  ]
+}

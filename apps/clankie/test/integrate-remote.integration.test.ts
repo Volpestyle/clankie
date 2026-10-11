@@ -104,9 +104,22 @@ it.each(["silent", "chatty", "report"] as const)(
     try {
       const request = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [change] });
       await queue.start(request, guard);
-      await started;
-      await new Promise((resolve) => setTimeout(resolve, 650));
+      // A fallback before the injected phase must report its cause rather than
+      // leave this fixture waiting forever for a child that will never start.
+      await Promise.race([
+        started,
+        queue.wait().then(async () => {
+          const batch = await queue.status(request.id);
+          throw new Error(`Remote ${mode} fixture never became ready: ${JSON.stringify(batch)}`);
+        }),
+      ]);
       if (mode !== "report") {
+        await expect
+          .poll(async () => {
+            const observations = await queue.progress();
+            return observations.length === 1 && observations[0]!.stalled === (mode === "silent");
+          })
+          .toBe(true);
         const observations = await queue.progress();
         expect(observations).toHaveLength(1);
         expect(observations[0]!.stalled).toBe(mode === "silent");

@@ -5,6 +5,7 @@ export default {
   ...config,
   test: {
     ...config.test,
+    projects: undefined,
     include: [fileURLToPath(new URL("./store-isolation.fixture.ts", import.meta.url))],
     reporters: ["default"],
   },

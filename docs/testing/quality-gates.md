@@ -79,6 +79,16 @@ default, including the lower limits supplied by `clankie heavy`.
 Each file gets its own fixture HOME, temp directory and stores; the full suite selection
 and manual eval boundary are the same as a single-file-at-a-time run.
 
+`integrate-remote.integration.test.ts` runs in a later serial project, after the
+parallel files finish. Its deliberately short remote silence and execution
+deadlines exercise fallback and cleanup; competing process fixtures could expire
+an earlier install before the intended failure phase began. The fixture waits
+for actual readiness or terminal queue state, preserving every deadline. Package
+selection and exact-file release retries still select the same files, and reports
+include both projects. Local sampled three-core passes measured a 69–78 second
+serial phase; this is potential added release wall time, not a runner measurement.
+See [VUH-2119 evidence](2026-10-11-vuh-2119-remote-readiness/README.md).
+
 The fleet load gate is separate from `pnpm check` and default tests. Version-tag
 releases and explicit `workflow_dispatch` runs select it; ordinary pushes and
 pull requests do not. It exercises fixture workers and a local Linear provider,

@@ -6,6 +6,7 @@ export default {
   ...config,
   test: {
     ...config.test,
+    projects: undefined,
     include: [corpus],
     exclude: config.test.exclude.filter((pattern) => pattern !== corpus),
   },
