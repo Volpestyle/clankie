@@ -29,7 +29,10 @@ function dataValue(value) {
 
 function summary(value, name, isError) {
   const data = object(value) && value.outcome === "ok" ? value.content : value;
-  const state = value?.outcome === "ok" && object(data) ? (data.outcome ?? data.status) : value?.outcome;
+  const state =
+    value?.outcome === "ok" && object(data)
+      ? (data.outcome ?? data.status ?? data.state)
+      : (value?.outcome ?? value?.state);
   const label = name ? name.replace(/^.*__/, "").replaceAll("_", " ") : "Tool";
   if (value?.outcome === "uncertain" || value?.deliveryStage === "uncertain") {
     // The ID and detail are the only way to reconcile or report it (VUH-2100).
@@ -47,7 +50,7 @@ function summary(value, name, isError) {
     value?.isError === true ||
     ["refused", "error", "unavailable", "unconfirmed", "waiting_user"].includes(state)
   )
-    return `${label}: ${state ?? "failed"}${typeof value?.reason === "string" ? ` — ${value.reason.slice(0, 180)}` : ""}.`;
+    return `${label}: ${typeof state === "string" ? state : "failed"}${typeof (data?.reason ?? data?.code ?? data?.error) === "string" ? ` — ${(data.reason ?? data.code ?? data.error).slice(0, 256)}` : ""}.`;
   if (object(data)) {
     const id = data.identifier ?? data.id;
     const status = typeof data.status === "string" ? data.status : data.state?.name;

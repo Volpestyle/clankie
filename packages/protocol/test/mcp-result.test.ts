@@ -89,3 +89,20 @@ it("a settled-original refusal preserves the unsent-follow-up instruction instea
   expect(result.content[0]?.text).not.toMatch(/reconcile/i);
   expect(decodeMcpResult(result)).toMatchObject({ received: false, deliveryStage: "unavailable", detail });
 });
+
+// Retained shape of the read-only #house-hunting refusal (VUH-2142).
+it("shows a room-turn refusal's real code through the worker MCP projection", () => {
+  const failure = { state: "failed", code: "discord_owner_audience_required" };
+  for (const value of [failure, { outcome: "ok", content: failure }]) {
+    const result = readableMcpResult(
+      {
+        content: [{ type: "text", text: JSON.stringify(value) }],
+        isError: true,
+      },
+      "room_turn",
+    );
+    expect(result.content[0]?.text).toContain("discord_owner_audience_required");
+    expect(result.content[0]?.text).toContain("failed");
+    expect(decodeMcpResult(result)).toEqual(value);
+  }
+});

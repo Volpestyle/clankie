@@ -1040,7 +1040,10 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       )
       .digest("hex");
     const id = input.requestId ?? fingerprint.slice(0, 32);
-    const refuse = (code: string): RoomForkResult => ({ state: "failed", room: input.room, code });
+    const refuse = (code: string): RoomForkResult => {
+      console.error({ room: input.room, requestId: id, code }, "Owner-directed room turn failed");
+      return { state: "failed", room: input.room, code };
+    };
     const scope = ctx.conversations.conversation(input.room)?.scope;
     if (scope?.kind !== "room" || scope.lane !== "discord_presence")
       return refuse("room_fork_not_a_text_room");
@@ -1091,6 +1094,11 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     roomForksRunning.add(id);
     const settle = (result: RoomForkResult): RoomForkResult => {
       const settled = ctx.roomForks.settle(id, fingerprint, result);
+      if (settled.state === "failed" || settled.state === "uncertain")
+        console.error(
+          { room: input.room, requestId: id, code: settled.code },
+          "Owner-directed room turn failed",
+        );
       ctx.conversations.recordToolAction(input.sourceConversationId, {
         toolCallId: `room-fork-${id}`,
         name: ROOM_FORK_TOOL,
