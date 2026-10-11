@@ -40,6 +40,8 @@ function summary(value, name, isError) {
       ...(typeof value.detail === "string" ? [value.detail.slice(0, 300)] : []),
     ].join(" ");
   }
+  if (value?.deliveryStage === "unavailable" && typeof value.detail === "string")
+    return `Message unavailable. ${value.detail.slice(0, 300)}`;
   if (
     isError ||
     value?.isError === true ||

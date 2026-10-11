@@ -316,7 +316,12 @@ Keep an uncertain original receipt and reconcile it through the bridge's read
 path. Never send the same intent again, switch bridges or remove receipt state
 to bypass uncertainty. While the original is unresolved, another call reads only
 that receipt. After it settles, a different follow-up remains unsent; invoke again
-deliberately if that message is still needed. A confirmed delivery means the stated native handoff;
+deliberately if that message is still needed. For `message_clankie`, a recovered
+positive keeps a five-minute reconciliation window: matching text returns its
+original stored ID, including after a bridge restart. Starting a distinct fresh
+report closes that window; after expiry, the same text can be a new status report.
+Ordinary successful sends do not open this window, and unresolved claims never
+expire because of it. A confirmed delivery means the stated native handoff;
 it does not prove the recipient model read it or accepted its authority.
 
 A refused connection before an inbound POST reaches the service releases only

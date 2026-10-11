@@ -170,11 +170,13 @@ function worker(
   root: string,
   current: () => Awaited<ReturnType<typeof service>>,
   metrics?: FleetHealthMetrics,
+  now?: () => number,
 ) {
   let controller: AbortController | undefined;
   const send = createInboundSender({
     directory: join(root, "worker-claims"),
     scope: pane,
+    ...(now ? { now } : {}),
     ...(metrics
       ? {
           onObservation: (report: WorkerReportBridgeStatus) =>
@@ -333,7 +335,8 @@ it("keeps a live same-instance original uncertain and reconciles its later accep
   expect(await sender.send("replacement must still not send")).toMatchObject({
     received: false,
     deliveryStage: "unavailable",
-    detail: "The original message is stored. This different follow-up was not sent.",
+    detail:
+      "The original message is stored. This different follow-up was not sent. Call again with the distinct follow-up if still needed; do not resend the original.",
   });
   expect(claim(root)).toBeUndefined();
   const afterReconciliation = metrics.snapshot().totals.reports;
@@ -346,6 +349,47 @@ it("keeps a live same-instance original uncertain and reconciles its later accep
   });
   expect(calls(root).filter((call) => call.method === "POST")).toHaveLength(1);
   expect(effects(root)).toEqual([{ message: "Worker output: still in flight" }]);
+  // The refusal settled the original, but an exact resend must still identify
+  // that receipt after a worker bridge restart, never allocate another POST.
+  let clock = Date.now();
+  const restarted = worker(
+    root,
+    () => current,
+    undefined,
+    () => clock,
+  );
+  expect(await restarted.send(`${original.text}\r\n`)).toMatchObject({
+    received: true,
+    deliveryStage: "stored",
+    deliveryId: original.deliveryId,
+    binding: original.binding,
+    fingerprint: original.fingerprint,
+  });
+  expect(calls(root).filter((call) => call.method === "POST")).toHaveLength(1);
+  expect(effects(root)).toEqual([{ message: "Worker output: still in flight" }]);
+  const fresh = await restarted.send("next distinct report");
+  expect(fresh).toMatchObject({ received: true, deliveryStage: "stored" });
+  expect(fresh.deliveryId).not.toBe(original.deliveryId);
+  expect(calls(root).filter((call) => call.method === "POST")).toHaveLength(2);
+  await expect
+    .poll(() => effects(root))
+    .toEqual([
+      { message: "Worker output: still in flight" },
+      { message: "Worker output: next distinct report" },
+    ]);
+  // A later fresh report may deliberately repeat the same status text.
+  clock += 60 * 60_000;
+  const later = await restarted.send(original.text);
+  expect(later).toMatchObject({ received: true, deliveryStage: "stored" });
+  expect(later.deliveryId).not.toBe(original.deliveryId);
+  expect(calls(root).filter((call) => call.method === "POST")).toHaveLength(3);
+  await expect
+    .poll(() => effects(root))
+    .toEqual([
+      { message: "Worker output: still in flight" },
+      { message: "Worker output: next distinct report" },
+      { message: "Worker output: still in flight" },
+    ]);
 });
 
 it("fences an aborted HTTP request before its delayed acceptance callback can run", async () => {
@@ -609,3 +653,50 @@ it.each(["admission-held", "admission-post-held", "nonmember", "admission-post-n
     expect(claim(root)).toBeUndefined();
   },
 );
+
+it("a settled reconciliation window expires without any intervening distinct report", async () => {
+  const root = fixtureRoot();
+  const current = await service(root, "hold");
+  let clock = Date.now();
+  const sender = worker(
+    root,
+    () => current,
+    undefined,
+    () => clock,
+  );
+  const controller = sender.interruptNextPost();
+  const pending = sender.send("still blocked on X");
+  await expect
+    .poll(() => current.messages.some((message) => message.state === "held"), { timeout: 10_000 })
+    .toBe(true);
+  const original = claim(root)!;
+  controller.abort();
+  expect(await pending).toMatchObject({ deliveryStage: "uncertain" });
+  sender.clearInterruption();
+  current.release();
+  await expect
+    .poll(
+      () =>
+        current.messages.some((message) => message.state === "settled" && message.id === original.deliveryId),
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+  expect(await sender.send(original.text)).toMatchObject({ received: true, deliveryId: original.deliveryId });
+  expect(calls(root).filter((call) => call.method === "POST")).toHaveLength(1);
+  clock += 60 * 60_000;
+  const later = await sender.send(original.text);
+  expect(later).toMatchObject({ received: true, deliveryStage: "stored" });
+  expect(later.deliveryId).not.toBe(original.deliveryId);
+  expect(calls(root).filter((call) => call.method === "POST")).toHaveLength(2);
+  await expect
+    .poll(() => effects(root))
+    .toEqual([
+      { message: "Worker output: still blocked on X" },
+      { message: "Worker output: still blocked on X" },
+    ]);
+  // A normal successful fresh send opens no reconciliation window at all.
+  const repeated = await sender.send(original.text);
+  expect(repeated).toMatchObject({ received: true, deliveryStage: "stored" });
+  expect(repeated.deliveryId).not.toBe(later.deliveryId);
+  expect(calls(root).filter((call) => call.method === "POST")).toHaveLength(3);
+});

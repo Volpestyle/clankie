@@ -72,3 +72,20 @@ it("an uncertain result names its receipt and why, so it can be reconciled or re
   expect(result.content[0]?.text).toContain("no replacement was sent");
   expect(decodeMcpResult(result)).toMatchObject({ deliveryId, deliveryStage: "uncertain" });
 });
+
+it("a settled-original refusal preserves the unsent-follow-up instruction instead of inviting reconciliation", () => {
+  const detail =
+    "The original message is stored. This different follow-up was not sent. Call again with the distinct follow-up if still needed; do not resend the original.";
+  const result = readableMcpResult(
+    {
+      content: [
+        { type: "text", text: JSON.stringify({ received: false, deliveryStage: "unavailable", detail }) },
+      ],
+      isError: true,
+    },
+    "message_clankie",
+  );
+  expect(result.content[0]?.text).toContain(detail);
+  expect(result.content[0]?.text).not.toMatch(/reconcile/i);
+  expect(decodeMcpResult(result)).toMatchObject({ received: false, deliveryStage: "unavailable", detail });
+});

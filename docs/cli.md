@@ -5483,6 +5483,17 @@ Consumption does not prove task completion. Unknown receipts return 404 and do
 not prove nothing was sent; preserve and reconcile an uncertain original with
 `message_clankie`.
 
+When an uncertain original is reconciled to `stored`, the worker retains a
+five-minute matching window keyed by its native binding and normalized text.
+An exact resend in that window returns the original receipt without a POST,
+including across a bridge restart. A different follow-up used to reconcile the
+original stays unsent; the refusal says to call again with the distinct follow-up,
+not to resend the original. Starting fresh distinct intent closes the window.
+After expiry, identical text can be a deliberate new status report; an ordinary
+successful send does not open a window. This does not expire unresolved claims.
+The small private matching record is separate from the exclusive claim in
+`~/.clankie/inbound-receipts`; never delete either to bypass uncertainty.
+
 Worker output remains in the owning conversation independently of a worker pane.
 `clankie agents reports --conversation ID [--limit N]` (or `worker_reports`)
 returns the oldest unread reports with their original delivery IDs and exact text.

@@ -61,6 +61,11 @@ export function createInboundSender({ directory, scope, request, onObservation, 
     return receipt;
   };
   const path = join(directory, `${hash(scope)}.json`);
+  // A recovered original has a short, durable reconciliation window, separate
+  // from its unresolved claim. Ordinary successful sends do not open one.
+  const storedDirectory = join(directory, `${hash(scope)}.stored`);
+  const storedPath = join(storedDirectory, "reconcile.json");
+  const RECONCILE_WINDOW_MS = 5 * 60_000;
   const uncertain = (record, detail = "The original receipt is unresolved; no replacement was sent.") => ({
     received: false,
     deliveryStage: "uncertain",
@@ -76,6 +81,30 @@ export function createInboundSender({ directory, scope, request, onObservation, 
     value.deliveryId === record.deliveryId &&
     value.binding === record.binding &&
     value.fingerprint === record.fingerprint;
+  const inspectStored = (record) => {
+    try {
+      const window = JSON.parse(readFileSync(storedPath, "utf8"));
+      const value = window.receipt;
+      if (
+        !Number.isFinite(window.expiresAt) ||
+        !uuid(value?.deliveryId) ||
+        !hex(value.binding) ||
+        !hex(value.fingerprint) ||
+        !stored(value, value)
+      )
+        throw new Error("Unreadable settled reconciliation receipt");
+      if (
+        window.expiresAt <= now() ||
+        value.binding !== record.binding ||
+        value.fingerprint !== record.fingerprint
+      )
+        return undefined;
+      return value;
+    } catch (error) {
+      if (error?.code === "ENOENT") return undefined;
+      throw error;
+    }
+  };
   const inspect = () => {
     try {
       const value = JSON.parse(readFileSync(path, "utf8"));
@@ -107,9 +136,22 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       unlinkSync(`${path}.lock`);
     }
   };
-  const settle = (record) =>
+  const settle = (record, receipt, reconciled = false) =>
     mutate(() => {
-      if (inspect()?.deliveryId === record.deliveryId) unlinkSync(path);
+      // A delayed GET cannot reopen an older reconciliation window after a
+      // newer original has acquired or already released this pane's claim.
+      if (inspect()?.deliveryId !== record.deliveryId) return;
+      if (reconciled && stored(receipt, record)) {
+        // Retain the exact authenticated positive before releasing its claim.
+        // A failed window write leaves the original fenced for GET recovery.
+        mkdirSync(storedDirectory, { recursive: true, mode: 0o700 });
+        writeFileSync(
+          storedPath,
+          `${JSON.stringify({ receipt, expiresAt: now() + RECONCILE_WINDOW_MS })}\n`,
+          { mode: 0o600 },
+        );
+      }
+      unlinkSync(path);
     });
   const reconcile = async (record, text) => {
     const query = new URLSearchParams({ binding: record.binding, fingerprint: record.fingerprint });
@@ -155,7 +197,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       return observed(uncertain(record), response.ok ? "receipt_invalid" : "receipt_unresolved");
     // Only unlink this exact claim. Another process may have reconciled it;
     // never remove a newer original that took its place.
-    settle(record);
+    settle(record, value, true);
     lastStoredAt = new Date(now()).toISOString();
     return observed(
       hash(text) === record.fingerprint
@@ -163,7 +205,9 @@ export function createInboundSender({ directory, scope, request, onObservation, 
         : {
             received: false,
             deliveryStage: "unavailable",
-            detail: "The original message is stored. This different follow-up was not sent.",
+            deliveryId: record.deliveryId,
+            detail:
+              "The original message is stored. This different follow-up was not sent. Call again with the distinct follow-up if still needed; do not resend the original.",
           },
       "stored",
     );
@@ -204,7 +248,21 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       mkdirSync(directory, { recursive: true, mode: 0o700 });
       try {
         // Exclusive creation fences concurrent bridges before the first POST.
-        mutate(() => writeFileSync(path, `${JSON.stringify(record)}\n`, { flag: "wx", mode: 0o600 }));
+        const previous = mutate(() => {
+          // Recheck under the same claim lock: another bridge may have settled
+          // this payload after our binding lookup and before exclusive creation.
+          const retained = inspectStored(record);
+          if (retained) return retained;
+          writeFileSync(path, `${JSON.stringify(record)}\n`, { flag: "wx", mode: 0o600 });
+          // Fresh intent closes the recovered original's matching window.
+          // Receipt reconciliation itself never allocates or sends that intent.
+          try {
+            unlinkSync(storedPath);
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+          }
+        });
+        if (previous) return observed(previous, "stored");
       } catch (error) {
         if (error?.code !== "EEXIST") throw error;
         const original = inspect();
@@ -266,7 +324,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
         value.fingerprint === record.fingerprint;
       if (!(response.ok && stored(value, record)) && !exactRefusal)
         return observed(uncertain(record), response.ok ? "receipt_invalid" : "receipt_unresolved");
-      settle(record);
+      settle(record, value);
       return observed(value, value.deliveryStage === "stored" ? "stored" : "receipt_unresolved");
     } catch (error) {
       // A timeout, reset, lost reply, or failed receipt read retains the claim.
