@@ -62,3 +62,29 @@ governor transaction or sampling edits were needed. The exact-tree integrator
 gate supplies landing verification; no duplicate local root gate was run.
 
 Raw logs and checked sources are archived in `evidence.json`.
+
+## Landing-gate fixture correction
+
+The combined core gate for batch `44ed77b9-3157-493a-8eac-b10ba3007d44`
+failed at `simulators.integration.test.ts:1014`: its old load-only fixture
+expected an empty full lane to refuse at load 2, but the approved exception
+correctly executed the first full command below the new cap. This was an
+obsolete test input in this change's affected suite, not an unrelated flake.
+
+The fixture now uses exactly twice the default load ceiling, retaining its
+marker-absent, zero-held and simulator-pressure refusal assertions. No
+production policy or simulator guard changed. Its focused real-runner/API
+check passed (one case, 41 skipped, 2.04 seconds). The progress, arbiter and
+simulator suites also passed all 52 cases in a broader follow-up run. That
+run exited nonzero because an additional CLI suite could not import missing
+worktree dependencies; it is not reported as a green combined check.
+
+The lead authorized cancelling the old isolation request `1b862202` before
+resubmission. The separate native-child CLI exit-1 failure from batch `8c4539be`
+is still under investigation on its exact tree. Its fixture injects calm
+pressure, so the admission load guard is not its direct cause. The original
+failure omitted child stderr; diagnostic assertion messages are being checked
+separately. No cause or load-flake attribution is claimed yet.
+
+The actual nonzero gate log and focused follow-up results are retained in
+`gate-followup.json` in the evidence store.

@@ -994,9 +994,11 @@ it("two real heavy runners and a simulator use independent budgets in either adm
   }
 });
 
-it("the load guard gates both independent budgets with concurrent requests", async () => {
+it("load at the full-job progress cap gates both independent budgets with concurrent requests", async () => {
   const f = await fixture();
-  f.setLoad(2);
+  // VUH-2103 permits an empty full lane below twice the load ceiling. At the
+  // cap both budgets still refuse; simulator admission has no such exception.
+  f.setLoad(2 * defaultResourcePolicy().maxLoadRatio);
   const marker = join(f.directory, "pressure-build");
   const cancel = new AbortController();
   const heavy = f.governor.runHeavy(
