@@ -32,6 +32,9 @@ For a new Windows Claude head on an already-linked fleet, the owner CLI offers
 [the CLI reference](../../../docs/cli.md#conversations-lead-prepare-fleet--launch---json-stdin--revoke-id).
 Remote heads use a seat/chat/machine-bound, revocable delegation and require the
 machine's current `workers` ceiling and approved working directory.
+Launch allows the session's delegated lead MCP tools, including `message_seat`,
+in auto mode independently of maximum trust; other harness permissions remain
+subject to the selected profile and mode.
 Launch may name `account` to select exactly the target machine's existing
 `~/.claude-<label>` profile (the labels from `worker_accounts --fleet`). It wins
 over the SSH `CLAUDE_CONFIG_DIR` and refuses unless native Claude.ai sign-in is

@@ -4304,6 +4304,9 @@ disabled channel policy is refused. Setup failures return a diagnostic in the
 launch journal before allocating a pane. Plugin activation is session-only:
 the installed lead plugin is disabled for ordinary sessions, and this launch
 enables it with `--settings` and `--channels`, without the development prompt.
+The session allows its own delegated lead MCP tools, including `message_seat`,
+so auto mode can use them without a classifier prompt. This adds no shell or
+other plugin permissions and does not depend on maximum trust mode.
 It also disables inherited Clankie worker/operator plugins for this session,
 so their hooks do not bind the lead as a worker or suggest its worker channel.
 Setup also installs Herdr's Claude integration into the selected profile when

@@ -66,6 +66,7 @@ if (process.argv[2] === "--head") {
         outputStyle: "clankie",
         autoMemoryEnabled: false,
         enabledPlugins: { [leadPlugin]: true, "clankie-worker@clankie": false, "clankie@clankie": false },
+        permissions: { allow: ["mcp__plugin_clankie-remote-lead_lead"] },
       }),
       // A lead never drives a browser; answering here keeps the Chrome-extension
       // question off a fresh profile's first screen (VUH-2075).

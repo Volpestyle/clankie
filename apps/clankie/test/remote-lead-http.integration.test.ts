@@ -407,6 +407,11 @@ else console.log('{}');
       };
       const head = await launchHead();
       expect(head.args).not.toContain("--dangerously-skip-permissions");
+      // VUH-1998: auto mode admits the delegated lead tools without widening
+      // shell or other plugin permissions, independently of maximum trust.
+      expect(JSON.parse(head.args[head.args.indexOf("--settings") + 1]).permissions).toEqual({
+        allow: ["mcp__plugin_clankie-remote-lead_lead"],
+      });
       maximumTrust = true;
       expect((await launchHead()).args).toContain("--dangerously-skip-permissions");
       expect(head.profile).toBe(profile);
