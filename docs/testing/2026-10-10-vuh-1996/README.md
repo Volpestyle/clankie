@@ -54,3 +54,20 @@ state, no scratch flag, and `NODE_ENV=development`. The production defaults
 must remain healthy. Run it with `VUH_1996_DOCKER_PROOF=1` and optionally
 `VUH_1996_DOCKER_IMAGE` under `clankie heavy`; ordinary gates skip this Docker
 test. It is a runtime regression proof, not a full image/release build.
+
+## Conflict reconciliation, 2026-10-11
+
+Original request `1cee7398-ac4e-409d-8ca3-6eaf93bc19f8` terminated in a skill
+conflict and was excluded from landing. The reconciled branch is based on fetched
+`origin/main` at `8c93bbc09e60740d57eddc47bb2254fa3f45d17c`. It preserves the newer
+server-lane guidance and the metrics harness's test mode/private fleet registry.
+Scratch launch examples now use `clankie heavy --server`.
+
+Focused affected checks on this rebased input passed: scratch-stack integration
+and issue-metrics journey, two files / 12 tests, exit 0, 69.83 seconds. The manual
+Docker production regression passed again: one test, exit 0, 9.59 seconds, with
+network disabled and no published host ports. No duplicate local root gate runs;
+the new integration request supplies the authoritative exact-tree gate.
+Formatter on the conflict-resolved skill/test and updated CLI examples passed.
+[Reconciliation evidence](clankie://evidence/sha256/34728dfa600e397aa6014610b44f91d83bf4a2551cdaad50ce9b8ef6b986af2f)
+contains the terminal conflict receipt, rebased diff and passing check output.
