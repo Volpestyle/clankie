@@ -130,6 +130,43 @@ it("a core batch gates on the linked machine at its exact HEAD, recorded as a lo
   expect(await git(f.source, "ls-remote", "origin", "refs/heads/main")).toContain(repo.head);
 }, 120_000);
 
+it("a bundle stages on the linked machine even when its stdin EOF never arrives", async () => {
+  const f = await fixture();
+  const change = await f.commit("feature", "framed");
+  // Every byte reaches the remote, but the end of input does not: seen through ssh, powershell and wsl.
+  const lostEof = (remoteCommand: string) => {
+    const child = f.stream(remoteCommand);
+    const stdin = child.stdin!;
+    stdin.end = ((chunk?: Buffer | string) => {
+      if (chunk !== undefined) stdin.write(chunk);
+      return stdin;
+    }) as typeof stdin.end;
+    child.once("close", () => stdin.destroy());
+    return child;
+  };
+  const queue = new IntegrationQueue({
+    directory: join(f.root, "integration"),
+    core: f.source,
+    remotePreparationTimeoutMs: 30_000,
+    placeGate: async (batch) =>
+      wslGateRunner({
+        machine: "pc",
+        shell: "posix",
+        batch: batch.id,
+        origin: batch.origin,
+        stream: lostEof,
+        bundle: gitBundle,
+      }),
+  });
+  const request = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [change] });
+  await queue.start(request, guard);
+  await queue.wait();
+  const batch = await queue.status(request.id);
+  expect(batch.state, batch.error).toBe("passed");
+  expect(batch.placement).toEqual({ machine: "pc" });
+  expect(batch.repos[0]!.gate).toMatchObject({ exitCode: 0, machine: "pc", head: batch.repos[0]!.head });
+}, 120_000);
+
 it("a linked machine that cannot take the batch leaves the gate here, with the reason recorded", async () => {
   const f = await fixture();
   const change = await f.commit("feature", "local");
