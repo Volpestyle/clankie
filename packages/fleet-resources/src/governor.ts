@@ -3,7 +3,16 @@ import { randomUUID } from "node:crypto";
 import { appendFile, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { constants, userInfo } from "node:os";
 import { basename, join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createInterface } from "node:readline";
@@ -172,6 +181,8 @@ const FULL_PASS_MS = 5_000;
  * waiters take the arbiter's judgment instead of their own (VUH-2080).
  */
 const ARBITER_FRESH_MS = 5_000;
+/** An unqueued grant marker younger than this may belong to a waiter still enqueueing. */
+const GRANT_MARKER_GRACE_MS = 600_000;
 const readdirSyncSafe = (path: string) => {
   try {
     return readdirSync(path);
@@ -592,8 +603,17 @@ export function createResourceGovernor(
           state.queue.map((entry) => entry.id),
         ),
       );
-      for (const name of readdirSyncSafe(grantsDirectory))
-        if (!live.has(name)) rmSync(join(grantsDirectory, name), { force: true });
+      // A waiter marks its ticket before it can enqueue, which may wait on the
+      // lock for seconds: only a marker that old and still unqueued is stale.
+      for (const name of readdirSyncSafe(grantsDirectory)) {
+        if (live.has(name)) continue;
+        const path = join(grantsDirectory, name);
+        try {
+          if (Date.now() - statSync(path).mtimeMs >= GRANT_MARKER_GRACE_MS) rmSync(path, { force: true });
+        } catch {
+          // Removed by its waiter meanwhile.
+        }
+      }
     }
     return granted;
   }
@@ -671,6 +691,9 @@ export function createResourceGovernor(
         // A live arbiter judges admission from one view; this waiter only
         // waits for its grant, so its own view cannot hold the FIFO (VUH-2080).
         if (peek && (await arbiterFresh())) {
+          // Re-assert this ticket's marker: without it the arbiter treats this
+          // waiter as an older client and the FIFO stalls behind it.
+          if (!grantable(id)) writeFileSync(join(grantsDirectory, id), "", { mode: 0o600 });
           await report(peek);
           await wait(jittered(PEEK_MS), signal);
           continue;

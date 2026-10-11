@@ -1,5 +1,5 @@
 // One arbiter's view of pressure → FIFO grants → real heavy child processes (VUH-2080).
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -131,4 +131,53 @@ it("an arbiter never grants a waiter that cannot take a grant up; that waiter ke
   const snapshot = await judge.snapshot();
   expect(snapshot.leases).toEqual([]);
   expect(snapshot.queue.map((entry) => entry.id)).toEqual([id]);
+});
+
+it("a waiter whose grant marker was pruned before it enqueued is still granted, in order", async () => {
+  const f = await fixture();
+  const marks = join(f.directory, "grants");
+  // The 2026-10-11 wedge: the arbiter's prune ran between a waiter writing its
+  // marker and enqueueing, so the queued head had no marker and all waited.
+  const release = join(f.directory, "release");
+  const holding = f
+    .governor(calm)
+    .runHeavy(process.execPath, [
+      "-e",
+      "const fs=require('node:fs');const t=setInterval(()=>{if(fs.existsSync(process.argv[1]))clearInterval(t)},20)",
+      release,
+    ]);
+  f.arbiter(calm);
+  const waiter = f.run(f.governor(calm), "unmarked");
+  await f.queued(1);
+  for (const name of await readdir(marks)) await rm(join(marks, name), { force: true });
+  await writeFile(release, "");
+  expect(await holding).toBe(0);
+  expect(await waiter).toBe(0);
+  expect(await f.ran()).toEqual(["unmarked"]);
+});
+
+it("an arbiter keeps a fresh marker whose ticket is not queued yet, and prunes a stale one", async () => {
+  const f = await fixture();
+  const marks = join(f.directory, "grants");
+  await mkdir(marks, { recursive: true });
+  // A queued ticket from an older client makes the arbiter take its full pass.
+  const owner = await processIdentity();
+  await new ResourceStore(f.directory).transaction((state) => {
+    state.queue.push({
+      id: randomUUID(),
+      token: randomUUID(),
+      kind: "heavy",
+      owner: owner!,
+      queuedAtMs: Date.now(),
+      executable: "node",
+    });
+  });
+  const enqueueing = randomUUID();
+  const abandoned = randomUUID();
+  await writeFile(join(marks, enqueueing), "");
+  await writeFile(join(marks, abandoned), "");
+  const old = new Date(Date.now() - 3_600_000);
+  await utimes(join(marks, abandoned), old, old);
+  await f.governor(calm).arbitrate();
+  expect((await readdir(marks)).sort()).toEqual([enqueueing]);
 });
