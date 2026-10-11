@@ -586,6 +586,9 @@ async function fixture(
     startNextPrompt: () => {
       nextPromptStartsTurn = true;
     },
+    finishPrompt: () => {
+      sessionStatus = "idle";
+    },
     completeTask,
     counts: () => ({ exitCommands, physicalCloses }),
     ssh,
@@ -750,9 +753,14 @@ test("SSH native hire, API history and follow-up reuse the original controller w
   expect((await f.sessions.list({ host })).sessions).toEqual([
     expect.objectContaining({ ref: host + ":ses_nativeWorker123", host, harness: "opencode" }),
   ]);
+  // Resume must observe native pickup too, rather than spending the pickup
+  // window on a fixture SDK that remains idle forever.
+  f.startNextPrompt();
   const reused = await remoteFollowup(f);
   expect(reused).toMatchObject({ result: { outcome: "spawned", seat: { seatId: f.hired.seat.seatId } } });
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
+  expect(f.reportedStates).toContain("working");
+  f.finishPrompt();
   expect(
     f.ssh!.commands.some(
       (command) => command.includes("ControlPath=none") && command.includes("127.0.0.1:0:127.0.0.1:"),

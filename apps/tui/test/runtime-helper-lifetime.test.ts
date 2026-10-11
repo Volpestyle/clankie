@@ -7,10 +7,10 @@ import {
   realpathSync,
   existsSync,
   readFileSync,
+  watch,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { expect, it } from "vitest";
 
 it("the actual scheduled detached process survives its fixture service process group exiting", async () => {
@@ -21,12 +21,28 @@ it("the actual scheduled detached process survives its fixture service process g
   mkdirSync(common, { recursive: true });
   writeFileSync(join(pin, ".git"), "fixture");
   const ready = join(home, "ready.json"),
-    completed = join(home, "completed.json");
+    completed = join(home, "completed.json"),
+    helperReady = join(home, "helper-ready.json");
+  // Subscribe before either process starts. Startup is a condition, not a
+  // two-second assumption; the unchanged test deadline still catches a hang.
+  const pendingFiles = [ready, helperReady, completed].map((path) => {
+    let finish!: () => void;
+    const promise = new Promise<void>((resolveFile) => {
+      finish = resolveFile;
+    });
+    const watcher = watch(home, () => {
+      if (existsSync(path)) {
+        watcher.close();
+        finish();
+      }
+    });
+    return { promise, close: () => watcher.close() };
+  });
   const helper = join(home, "fake-helper.mjs"),
     service = join(home, "fake-service.mjs");
   writeFileSync(
     helper,
-    `import { writeFileSync } from 'node:fs';\nconst parent=Number(process.argv[2]);\nconst timer=setInterval(()=>{try{process.kill(parent,0);}catch{writeFileSync(${JSON.stringify(completed)},JSON.stringify({survived:true,pid:process.pid}));clearInterval(timer);}},20);\nsetTimeout(()=>process.exit(2),4000).unref();\n`,
+    `import { writeFileSync } from 'node:fs';\nconst parent=Number(process.argv[2]);\nwriteFileSync(${JSON.stringify(helperReady)},JSON.stringify({pid:process.pid}));\nconst timer=setInterval(()=>{try{process.kill(parent,0);}catch{writeFileSync(${JSON.stringify(completed)},JSON.stringify({survived:true,pid:process.pid}));clearInterval(timer);}},20);\nsetTimeout(()=>process.exit(2),4000).unref();\n`,
   );
   writeFileSync(
     service,
@@ -43,18 +59,28 @@ it("the actual scheduled detached process survives its fixture service process g
     stderr += String(chunk);
   });
   const exited = new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
+  const beforeExit = async (condition: Promise<void>) =>
+    Promise.race([
+      condition,
+      exited.then(() => {
+        throw new Error(`Fixture service exited before readiness: ${stderr}`);
+      }),
+    ]);
   try {
-    for (let count = 0; count < 100 && !existsSync(ready); count++) await sleep(20);
+    await beforeExit(pendingFiles[0]!.promise);
     expect(existsSync(ready), stderr).toBe(true);
     const proof = JSON.parse(readFileSync(ready, "utf8"));
     expect(proof.detached).toBe(true);
     expect(proof.service).toBe(child.pid);
+    await beforeExit(pendingFiles[1]!.promise);
+    expect(JSON.parse(readFileSync(helperReady, "utf8"))).toEqual({ pid: proof.helper });
     process.kill(-child.pid!, "SIGTERM");
     await exited;
-    for (let count = 0; count < 100 && !existsSync(completed); count++) await sleep(20);
+    await pendingFiles[2]!.promise;
     expect(existsSync(completed), stderr).toBe(true);
     expect(JSON.parse(readFileSync(completed, "utf8"))).toEqual({ survived: true, pid: proof.helper });
   } finally {
+    for (const file of pendingFiles) file.close();
     if (child.exitCode === null && child.signalCode === null) {
       process.kill(-child.pid!, "SIGTERM");
       await exited;
