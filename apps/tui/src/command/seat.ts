@@ -115,6 +115,13 @@ interface SeatRecord {
 }
 
 export interface SeatCommandOptions {
+  readonly joinCredentialStore?: CredentialStore;
+  /** Internal joined-install transport; never grants an operator credential. */
+  readonly joinedSeat?: {
+    readonly sessionId: string;
+    resolveContext(input: Parameters<typeof resolveSeatContext>[0]): ReturnType<typeof resolveSeatContext>;
+    maximumTrust(): Promise<{ readonly enabled: boolean }>;
+  };
   readonly repoRoot: string;
   /** Owner-facing harness command; pins selection even if --harness is supplied. */
   readonly harnessCommand?: string;
@@ -280,7 +287,7 @@ async function defaultExecFile(
   return { stdout: String(result.stdout), stderr: String(result.stderr) };
 }
 
-function defaultSpawn(
+export function defaultSpawn(
   command: string,
   args: readonly string[],
   cwd: string,
@@ -410,31 +417,32 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   if (flags.resume && previous === undefined) {
     throw new Error(`No Claude chat to resume; run \`clankie ${command}\` first.`);
   }
-  const sessionId = previous?.sessionId ?? randomUUID();
+  const sessionId = previous?.sessionId ?? options.joinedSeat?.sessionId ?? randomUUID();
   if (
     previous !== undefined &&
     flags.conversationId !== undefined &&
     flags.conversationId !== (previous.conversationId ?? "global-default")
   )
     throw new Error("A resumed seat keeps its conversation; start a new seat to select another one.");
-  const context = await resolveSeatContext(
-    {
-      conversationId:
-        previous === undefined ? flags.conversationId : (previous.conversationId ?? "global-default"),
-      fresh: flags.newConversation === true,
-      cwd: previous?.cwd ?? process.cwd(),
-      command,
-      dryRun: true,
-    },
-    options,
-  );
+  const context = await (
+    options.joinedSeat?.resolveContext ?? ((input) => resolveSeatContext(input, options))
+  )({
+    conversationId:
+      previous === undefined ? flags.conversationId : (previous.conversationId ?? "global-default"),
+    fresh: flags.newConversation === true,
+    cwd: previous?.cwd ?? process.cwd(),
+    command,
+    dryRun: true,
+  });
   const { conversationId } = context;
   // Claude finds a resumed session only from its own project directory.
   const cwd = explicit?.cwd ?? context.cwd;
   // Session-only plugins have the native @inline identity. Keep wakes on the
   // same projected plugin, without enabling an older installed skill catalog.
   const channel = true;
-  const trust = await readSeatMaximumTrust(options);
+  const trust: { enabled: boolean; unreadable?: string } = options.joinedSeat
+    ? await options.joinedSeat.maximumTrust()
+    : await readSeatMaximumTrust(options);
   const args = [
     "--name",
     "Clankie",
@@ -517,6 +525,10 @@ async function claimHerdrSeat(
 }
 
 export async function runSeatCommand(args: readonly string[], options: SeatCommandOptions): Promise<number> {
+  if (!options.joinedSeat) {
+    const joined = await (await import("./joined-seat.ts")).runJoinedClaudeSeat(args, options);
+    if (joined !== undefined) return joined;
+  }
   const env = options.env ?? process.env;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
@@ -547,10 +559,12 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   if (plan.newConversation !== undefined) {
     plan = {
       ...plan,
-      ...(await resolveSeatContext(
-        { cwd: plan.cwd, command: plan.command, fresh: true, dryRun: false },
-        options,
-      )),
+      ...(await (options.joinedSeat?.resolveContext ?? ((input) => resolveSeatContext(input, options)))({
+        cwd: plan.cwd,
+        command: plan.command,
+        fresh: true,
+        dryRun: false,
+      })),
     };
   }
   if (!plan.resumed || plan.explicitResume !== undefined) {

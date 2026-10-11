@@ -24,6 +24,8 @@ import {
   type JoinedMachineOperation,
   type JoinedMachineRequest,
   type JoinedMachineResult,
+  type JoinedSeatRequest,
+  type JoinedSeatResponse,
 } from "@clankie/protocol/machine-join";
 import { machineAccessLevel } from "./machine-access.ts";
 import { privateDirectory, readPrivateJson, writePrivateJson } from "../../tui/bin/update-files.ts";
@@ -54,6 +56,13 @@ interface Work {
   settle(result: JoinedMachineResult): void;
 }
 export class MachineJoins {
+  private seatHandler?: (
+    machine: JoinedSeatMachine,
+    request: JoinedSeatRequest,
+  ) => Promise<JoinedSeatResponse>;
+  setSeatHandler(handler: NonNullable<MachineJoins["seatHandler"]>): void {
+    this.seatHandler = handler;
+  }
   private readonly registrations = new Map<string, Registration>();
   private readonly tickets = new Map<string, Ticket>();
   private readonly seen = new Map<string, number>();
@@ -204,17 +213,33 @@ export class MachineJoins {
     );
     const challenge = this.challenges.get(envelope.challenge);
     if (
-      payload.op !== op ||
+      (payload.op !== op && !(op === "poll" && payload.op === "seat")) ||
       !challenge ||
       challenge.machineId !== record.id ||
       challenge.expiresAt <= this.now()
     )
       throw Error("invalid_machine_request");
     this.challenges.delete(envelope.challenge); // Consume before any dispatch; a replay cannot execute again.
+    const authorize = async () => {
+      if (this.registrations.get(record.id) !== record) throw Error("revoked");
+      const settings = await this.options.settings.load();
+      const level = machineAccessLevel(settings, record.id, this);
+      if (this.registrations.get(record.id) !== record || level === "portal")
+        throw Error("machine_access_refused");
+    };
     const result =
-      op === "poll"
-        ? await this.poll(secret.key, { results: payload.results })
-        : await this.leave(secret.key);
+      payload.op === "seat"
+        ? await (async () => {
+            await authorize();
+            if (!this.seatHandler) throw Error("joined_seats_unavailable");
+            return this.seatHandler(
+              { machineId: record.id, platform: record.platform, directories: record.directories, authorize },
+              payload.request,
+            );
+          })()
+        : payload.op === "poll"
+          ? await this.poll(secret.key, { results: payload.results })
+          : await this.leave(secret.key);
     return {
       sealedResponse: sealGatewayValue(
         machineJoinKey(payload.responseSecret),
@@ -320,4 +345,11 @@ export class MachineJoins {
       this.work.set(request.id, { request, machineId: id, claimed: false, settle });
     });
   }
+}
+
+export interface JoinedSeatMachine {
+  readonly machineId: string;
+  readonly platform: "darwin" | "win32" | "linux";
+  readonly directories: readonly string[];
+  authorize(): Promise<void>;
 }

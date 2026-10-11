@@ -581,6 +581,16 @@ call-time revocation checks still apply.
   shell. [Proposed ADR 0253](adr/0253-owner-confirmation-needs-an-isolated-authority.md)
   separates protected confirmation from these actor and machine preferences;
   its authority, native signing and protected effects are not implemented.
+  A joined install can open its local Claude seat in a home-owned workspace chat.
+  `joined-seats.ts` binds an ephemeral lead grant to the approved machine, folder,
+  conversation and native session. Seat HTTP is a strict `seat` operation inside
+  the existing encrypted join exchange; the gateway sees no grant or seat body.
+  The local bundled plugin uses the same prompt, MCP, event polling and transcript
+  consumers through `joined-seat.ts`. The delegated lead bridge rechecks current
+  machine access for every request and tool effect. It never issues an owner bearer
+  or lets the joined seat choose an unrelated chat. Chat and transcript state stay
+  at the home; no service starts on the joined machine. Worker admission and
+  Windows installer/production-gateway proof remain follow-ups.
   A joined screen is selected explicitly through `/v1/computer`'s `machineId`;
   hosted Clankie can borrow it without a local desktop. Encrypted join traffic
   carries strict commands and bounded frame chunks. The host intersects its

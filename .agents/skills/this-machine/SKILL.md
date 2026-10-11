@@ -41,6 +41,17 @@ for a workspace conversation. Reopening the TUI does not reset model context.
 The console opens on a blank page; the latest messages wait just above it.
 Scroll up to load older retained history; loading a page preserves the visible text and does not pause live events.
 
+On a joined install, Clankie's service, memory and accounts stay at the home.
+Use `clankie join status` to read its registration, `join resume` for the outbound
+machine channel, and `clankie claude [--new | --conversation ID]` in an approved
+folder for a local seat in the home's workspace chat. Plain `clankie claude`
+reuses that machine/folder's chat; `--new` makes another. Exact conversation IDs
+must belong to that machine and folder. The home supplies delegated lead tools
+and maximum trust through encrypted join traffic; no SSH or second local service
+is needed. Joined resume, other harness seats, worker adapters and Windows
+installer/live gateway proof remain follow-ups. Run service start/restart/recover
+at the home; a joined install refuses them locally.
+
 ## Configure through the CLI
 
 This skill is the installed agent companion to the canonical launcher command

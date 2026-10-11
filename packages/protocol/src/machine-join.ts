@@ -172,13 +172,34 @@ export const MachineJoinEnvelopeSchema = z
     sealedRequest: z.string().min(1).max(1_500_000),
   })
   .strict();
-export const MachineJoinPayloadSchema = z
-  .object({
+/** Seat HTTP is carried inside the existing join envelope, never gateway-readable. */
+export const JoinedSeatRequestSchema = z.strictObject({
+  method: z.enum(["GET", "POST", "DELETE"]),
+  path: z.string().min(1).max(4096),
+  headers: z.record(z.string().max(128), z.string().max(4096)),
+  body: z.string().max(1_000_000).optional(),
+});
+export const JoinedSeatResponseSchema = z.strictObject({
+  status: z.number().int().min(200).max(599),
+  headers: z.record(z.string().max(128), z.string().max(4096)),
+  body: z.string().max(1_000_000),
+});
+export const MachineJoinPayloadSchema = z.union([
+  z
+    .object({
+      responseSecret: MachineJoinSecretSchema,
+      op: z.enum(["poll", "leave"]),
+      results: JoinedMachinePollSchema.shape.results,
+    })
+    .strict(),
+  z.strictObject({
     responseSecret: MachineJoinSecretSchema,
-    op: z.enum(["poll", "leave"]),
-    results: JoinedMachinePollSchema.shape.results,
-  })
-  .strict();
+    op: z.literal("seat"),
+    request: JoinedSeatRequestSchema,
+  }),
+]);
+export type JoinedSeatRequest = z.infer<typeof JoinedSeatRequestSchema>;
+export type JoinedSeatResponse = z.infer<typeof JoinedSeatResponseSchema>;
 export const machineJoinLeaseAad = (joinId: string): string => `clankie-machine-lease-v1:${joinId}`;
 export const machineJoinExchangeAad = (
   direction: "request" | "response",

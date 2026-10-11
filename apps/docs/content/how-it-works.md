@@ -79,7 +79,10 @@ a scratch built-in store for inspection while Linear remains authoritative.
 watch and type into. Clankie hires and messages Claude Code, Codex, Pi, OpenCode,
 and Grok Build through each harness's own channel, never by typing into the
 pane, and reports when delivery is uncertain. Agents on other machines join
-through a fleet link. In Machines, the owner chooses portal, workers, shell or
+through an approved outbound connection. A joined install can open its own
+`clankie claude` seat in the home's workspace chat; identity, tools and memory
+stay with the one Clankie. See the [join command](/cli/#join) for current limits.
+Older remote workers use a fleet link. In Machines, the owner chooses portal, workers, shell or
 screen access. Ordinary self-hosted limits are service preferences. On an installed
 Mac, the owner can prepare an OS-bounded launch with a private home and approved
 workspaces; the running service reports verified enforcement. A new launch is

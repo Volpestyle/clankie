@@ -1,5 +1,6 @@
 import { createMachineFleetResources } from "../machine-fleet-resources.ts";
 import { createMachineJoinRoutes } from "../machine-join-routes.ts";
+import { createJoinedSeats } from "../joined-seats.ts";
 import { createPersonaVoiceSettingsRoutes } from "../persona-voice-settings-routes.ts";
 import { createMachineAccessRoutes } from "../machine-access-routes.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -1791,6 +1792,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
   });
   const remoteLeads = remoteLeadRoutes(dependencies);
+  const joinedSeats = dependencies.machineJoins
+    ? createJoinedSeats({
+        joins: dependencies.machineJoins,
+        captain: dependencies.captain,
+        ...(dependencies.settings === undefined ? {} : { settings: dependencies.settings }),
+        ...(dependencies.seatCallReceiptPath === undefined
+          ? {}
+          : { receiptPath: dependencies.seatCallReceiptPath }),
+      })
+    : undefined;
   app.route("/", remoteLeads.app);
   const { laneMcp } = registerSeatRoutes({
     get dependencies() {
@@ -2817,7 +2828,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     conversationBodyRouteAuthorized,
     stopBodyRequests,
     close: async (): Promise<void> => {
-      const closing = [remoteLeads.close()];
+      const closing = [remoteLeads.close(), joinedSeats?.close()];
       dependencies.modelKeys?.close?.();
       managedDiscordClosed = true;
       if (managedDiscordTimer !== undefined) clearInterval(managedDiscordTimer);

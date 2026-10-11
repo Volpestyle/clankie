@@ -3,7 +3,11 @@ import { createInterface } from "node:readline/promises";
 // The `clankie` command exposes non-interactive controls or attaches the
 // fullscreen face to the one healthy clankie service.
 import { resolve } from "node:path";
-import { ensureCaptainCredential, ensureOperatorCredential } from "@clankie/credential-broker";
+import {
+  createDefaultCredentialStore,
+  ensureCaptainCredential,
+  ensureOperatorCredential,
+} from "@clankie/credential-broker";
 import { discordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
 import packageMetadata from "../../../package.json" with { type: "json" };
 import {
@@ -80,6 +84,15 @@ async function applyLauncherDiscordEnvironment(): Promise<void> {
 }
 
 async function runOperatorConsole(): Promise<void> {
+  const joined = await (
+    await import("./joined-machine-client.ts")
+  ).readJoinedMachineCredential(createDefaultCredentialStore({ env: process.env }));
+  if (joined) {
+    process.stderr.write(
+      `This machine is joined to Clankie's home at ${joined.origin}. Open a seat with clankie claude in an approved folder, or reconnect with clankie join resume.\n`,
+    );
+    return;
+  }
   const settings = new SettingsStore();
   let current = await settings.load();
   if (

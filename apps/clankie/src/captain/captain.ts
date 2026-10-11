@@ -5793,13 +5793,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     roomForkGrant,
 
-    async pollSeatEvents(waitMs, signal, conversationId, capabilities) {
+    async pollSeatEvents(waitMs, signal, conversationId, capabilities, delegation) {
       // A closing service must refuse the poll, not answer an empty page: the
       // bridge would keep its keep-alive socket on this process and never
       // reach the replacement (2026-10-07).
       shutdown.signal.throwIfAborted();
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
+      if (
+        delegation &&
+        (binding.machineId === undefined || delegation.owner.conversationId !== binding.conversationId)
+      )
+        throw new Error("remote_lead_conversation_mismatch");
+      const admit = () =>
+        delegation ? assertConversationAuthority(delegation) : requireAccess(machineFleet, "shell");
       // Register pending native intent before asynchronous policy preparation;
       // conversation driver admission still fences actual delivery.
       const outbox = seatOutbox(binding.conversationId);
@@ -5808,9 +5815,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // A wake held after model failures can go to the seat that just bound.
       autonomy.releaseHeldWake(binding.conversationId);
       const pollSignal = signal === undefined ? shutdown.signal : AbortSignal.any([signal, shutdown.signal]);
+      let machineFleet: string | undefined;
       try {
         let recipientBinding: string | undefined;
-        let machineFleet: string | undefined;
         return await conversations
           .pollConversationDriver(
             binding.conversationId,
@@ -5827,11 +5834,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               machineFleet = source === undefined ? undefined : splitFleetQualified(source.paneId)?.fleet;
               recipientBinding = inboundBinding(source);
               if (source !== undefined) conversations.rememberNativeSource(binding.conversationId, source);
-              await requireAccess(machineFleet, "shell");
+              await admit();
             },
           )
           .then(async (events) => {
-            await requireAccess(machineFleet, "shell");
+            await admit();
             return events;
           })
           .catch((error: unknown) => {

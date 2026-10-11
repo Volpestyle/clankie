@@ -358,6 +358,8 @@ export interface CaptainPort {
     signal?: AbortSignal,
     conversationId?: string,
     capabilities?: import("@clankie/protocol").OperatorSeatCapabilities,
+    /** Service-authenticated remote lead; its machine consent replaces local shell admission. */
+    delegation?: ConversationAuthority,
   ): Promise<readonly OperatorSeatEvent[]>;
   /**
    * A fleet seat's mailbox (ADR 0161): a DM or room turn for the agent in that
