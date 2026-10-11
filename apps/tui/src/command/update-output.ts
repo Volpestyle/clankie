@@ -281,7 +281,10 @@ export async function runUpdateCli(
     stdout.write(`${UPDATE_USAGE}\n`);
     return 0;
   }
-  const json = args.includes("--json") || !(options.isTTY ?? (stdout as NodeJS.WriteStream).isTTY);
+  const json =
+    args[0] === "cutover" ||
+    args.includes("--json") ||
+    !(options.isTTY ?? (stdout as NodeJS.WriteStream).isTTY);
   const rest = args.filter((a) => a !== "--json");
   if (json || rest[0] === "canary") {
     const result = await runUpdateCommand(rest, options);

@@ -25,7 +25,12 @@ import { createRuntimeUpdateRoutes } from "../../clankie/src/runtime-update-rout
 import { createBearerAuthenticator } from "../../clankie/src/app/http-auth.ts";
 import { writePrivateJson } from "../bin/update-files.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
-import { startScheduledUpdates } from "../../clankie/src/scheduled-update.ts";
+import {
+  bodyIdleCheck,
+  startScheduledUpdates,
+  withBodyActivity,
+} from "../../clankie/src/scheduled-update.ts";
+import { SettingsStore } from "@clankie/settings";
 
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).forEach((step) => step()));
@@ -70,7 +75,13 @@ if (action === "down" && ${JSON.stringify(replaceCurrentOnDown)}) {
   rmSync(current);
   symlinkSync(join("releases", "v1.2.0"), current);
 }
-if (action === "update") print({ runtime: { root, commit: ${JSON.stringify(revision)}, instanceId: randomUUID(), pid: process.pid } });
+if (action === "update" && target === "cutover") {
+  import(${JSON.stringify(import.meta.resolve("tsx/esm/api"))})
+    .then(({ tsImport }) => tsImport(${JSON.stringify(new URL("../src/command/update-output.ts", import.meta.url).href)}, ${JSON.stringify(import.meta.url)}))
+    .then(({ runUpdateCli }) => runUpdateCli(process.argv.slice(3), { env: process.env, isTTY: false }))
+    .then((code) => { process.exitCode = code; }).catch((error) => { console.error(error); process.exitCode = 1; });
+}
+else if (action === "update") print({ runtime: { root, commit: ${JSON.stringify(revision)}, instanceId: randomUUID(), pid: process.pid } });
 else if (action === "harness") print({ ok: true });
 else if (action === "pair") print({ ok: true, localCompanion: true });
 else if (action === "restart" && ${JSON.stringify(restart)} === "fail") print({ ok: false, services: [{ id: target, label: target, ok: false, error: "fixture restart failed" }] }, 1);
@@ -100,10 +111,20 @@ async function fixture(
     readonly oldVersion?: string;
     /** Delay a real HTTP lookup while the body becomes busy or auto installs turn off. */
     readonly beforeCommitLookup?: () => Promise<void>;
+    /** Pause halfway through a real archive response while work or policy changes. */
+    readonly duringDownload?: () => Promise<void>;
+    readonly cutoverUnavailable?: boolean;
   } = {},
 ) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-release-update-")));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
+  const settings = new SettingsStore(join(home, "settings.json"));
+  const body = withBodyActivity({});
+  const idle = bodyIdleCheck({ activity: body.activity, voiceHeld: () => false, agentPanes: async () => 0 });
+  const enabled = async () => (await settings.load()).host.autoUpdate;
+  await settings.update((current) => ({ ...current, host: { ...current.host, autoUpdate: true } }));
+  let control: ReturnType<typeof createRuntimeUpdateRoutes> | undefined;
+  let archiveDownloads = 0;
   const install = join(home, "install");
   const oldVersion = input.oldVersion ?? "v1.0.0";
   const old = join(install, "releases", oldVersion);
@@ -131,6 +152,30 @@ async function fixture(
   let publishedVersion = "v1.1.0";
   let publishedCommit = "b".repeat(40);
   const server: Server = createServer(async (request, response) => {
+    if (request.url?.startsWith("/v1/runtime-update/cutover")) {
+      if (control && !input.cutoverUnavailable) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const result = await control.fetch(
+          new Request(`http://127.0.0.1${request.url}`, {
+            method: request.method ?? "POST",
+            headers: Object.fromEntries(
+              Object.entries(request.headers).map(([key, value]) => [
+                key,
+                Array.isArray(value) ? value.join(",") : (value ?? ""),
+              ]),
+            ),
+            body: Buffer.concat(chunks),
+          }),
+        );
+        response.writeHead(result.status, Object.fromEntries(result.headers));
+        response.end(Buffer.from(await result.arrayBuffer()));
+        return;
+      }
+      response.writeHead(503);
+      response.end();
+      return;
+    }
     const send = (status: number, body: string | Buffer) => {
       response.writeHead(status);
       response.end(body);
@@ -142,8 +187,16 @@ async function fixture(
       await input.beforeCommitLookup?.();
       return send(200, JSON.stringify({ sha: publishedCommit }));
     }
-    if (request.url === `/download/${publishedVersion}/${archiveName}`)
-      return send(200, readFileSync(archive));
+    if (request.url === `/download/${publishedVersion}/${archiveName}`) {
+      archiveDownloads++;
+      const bytes = readFileSync(archive);
+      response.writeHead(200);
+      const split = Math.floor(bytes.length / 2);
+      response.write(bytes.subarray(0, split));
+      await input.duringDownload?.();
+      response.end(bytes.subarray(split));
+      return;
+    }
     if (request.url === `/download/${publishedVersion}/${archiveName}.sha256`)
       return send(200, `${digest}  ${archiveName}\n`);
     send(404, "missing");
@@ -185,9 +238,12 @@ async function fixture(
     HOME: home,
     PATH: `${commands}:${process.env.PATH}`,
     RELEASE_CALLS: join(home, "calls.jsonl"),
+    CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${port}`,
+    CLANKIE_OPERATOR_TOKEN: "release-fixture-operator",
+    NODE_ENV: "test",
   };
-  const updater = (releaseRoot: string) =>
-    createReleaseUpdater({
+  const updater = (releaseRoot: string) => {
+    const updater = createReleaseUpdater({
       releaseRoot,
       env,
       helperPath,
@@ -195,6 +251,23 @@ async function fixture(
       ...(input.approved === undefined ? {} : { approvedRelease: async () => input.approved! }),
       source: { api: `http://127.0.0.1:${port}/api`, download: `http://127.0.0.1:${port}/download` },
     });
+    control = createRuntimeUpdateRoutes({
+      updater,
+      authorize: async (request) =>
+        request.headers.get("authorization") === `Bearer ${env.CLANKIE_OPERATOR_TOKEN}`
+          ? authority
+          : undefined,
+      scheduledCutover: async (guard) => {
+        await guard();
+        if (!(await idle())) return { outcome: "waiting", reason: "body-busy" };
+        await guard();
+        if (!(await enabled())) return { outcome: "waiting", reason: "disabled" };
+        if (!body.stopAdmissionWhenIdle()) return { outcome: "waiting", reason: "body-busy" };
+        return { outcome: "ready" };
+      },
+    });
+    return updater;
+  };
   const settled = async (id: string): Promise<RuntimeUpdateResult> => {
     const directory = join(home, ".clankie", "updates", id);
     for (let attempt = 0; attempt < 300; attempt += 1) {
@@ -219,7 +292,24 @@ async function fixture(
     execFileSync("tar", ["-czf", archive, "-C", published, "clankie"]);
     digest = createHash("sha256").update(readFileSync(archive)).digest("hex");
   };
-  return { home, install, old, updater, settled, calls, applications, publishNext };
+  return {
+    home,
+    install,
+    old,
+    updater,
+    settled,
+    calls,
+    applications,
+    publishNext,
+    idle,
+    enabled,
+    startTurn: () => body.provider.heartbeat.begin(undefined),
+    downloads: () => archiveDownloads,
+    setEnabled: (autoUpdate: boolean) =>
+      settings.update((current) => ({ ...current, host: { ...current.host, autoUpdate } })),
+    controlUrl: `http://127.0.0.1:${port}`,
+    controlToken: env.CLANKIE_OPERATOR_TOKEN,
+  };
 }
 
 it("updates a release install to the latest official release and then reports it current", async () => {
@@ -376,6 +466,19 @@ it.each(["busy", "disabled"] as const)(
   },
 );
 
+it("keeps the verified stage and never stops services when live cutover cannot be confirmed", async () => {
+  const f = await fixture({ target: "linux-arm64", cutoverUnavailable: true });
+  const updater = f.updater(f.old);
+  const accepted = await updater.request("latest", { ...authority, initiator: { kind: "schedule" } });
+  expect(await f.settled(accepted.pending!)).toMatchObject({
+    phase: "refused",
+    reason: "scheduled-install-cutover-unavailable",
+  });
+  expect(f.calls().filter((call) => call.action === "down")).toEqual([]);
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+  expect(existsSync(join(f.install, "releases", "v1.1.0", "release.json"))).toBe(true);
+});
+
 it("scheduled latest keeps a newer image seed while an explicit approved pin can roll back", async () => {
   const f = await fixture({ target: "linux-arm64", oldVersion: "v1.3.0", approved: "v1.1.0" });
   const updater = f.updater(f.old);
@@ -398,6 +501,94 @@ it("scheduled latest keeps a newer image seed while an explicit approved pin can
     versions: { old: "v1.3.0", new: "v1.1.0" },
   });
 });
+
+it.each(["busy", "disabled"] as const)(
+  "retains the staged release when the body becomes %s during a slow download, then retries idle without downloading again",
+  async (change) => {
+    let started!: () => void;
+    let resume!: () => void;
+    const downloading = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const continueDownload = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    let finish = () => {};
+    const f = await fixture({
+      target: "linux-arm64",
+      duringDownload: async () => {
+        if (change === "busy") finish = f.startTurn();
+        else await f.setEnabled(false);
+        started();
+        await continueDownload;
+      },
+    });
+    const updater = f.updater(f.old);
+    const scheduled = startScheduledUpdates({
+      updater,
+      enabled: f.enabled,
+      idle: f.idle,
+      logger: { info() {}, warn() {} },
+      initialDelayMs: 3600000,
+    });
+    cleanup.push(() => scheduled.close());
+    try {
+      expect(await scheduled.check()).toBe("accepted");
+      await downloading;
+      const pending = updater.status().pending!;
+      expect(f.calls().filter((call) => call.action === "down")).toEqual([]);
+      // The helper may act only for its exact accepted operation and boot.
+      for (const [token, operationId, instanceId, status] of [
+        ["wrong-token", pending, updater.runtime.instanceId, 403],
+        [f.controlToken, randomUUID(), updater.runtime.instanceId, 409],
+        [f.controlToken, pending, randomUUID(), 409],
+      ] as const) {
+        const response = await fetch(`${f.controlUrl}/v1/runtime-update/cutover`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ operationId, instanceId }),
+        });
+        expect(response.status).toBe(status);
+        await response.arrayBuffer();
+      }
+      resume();
+      const deferred = await f.settled(pending);
+      if (deferred.reason === "scheduled-install-cutover-unavailable")
+        console.log(readFileSync(join(f.home, ".clankie", "updates", pending, "helper.log"), "utf8"));
+      expect(deferred).toMatchObject({
+        phase: "refused",
+        reason: `scheduled-install-${change === "busy" ? "body-busy" : "disabled"}`,
+      });
+      expect(f.calls().filter((call) => call.action === "down")).toEqual([]);
+      expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+      expect(existsSync(join(f.install, "releases", "v1.1.0", "release.json"))).toBe(true);
+      expect(f.downloads()).toBe(1);
+      if (change === "busy") expect(await scheduled.check()).toBe("body-busy");
+      else expect(await scheduled.check()).toBe("disabled");
+      finish();
+      await f.setEnabled(true);
+      expect(await scheduled.check()).toBe("accepted");
+      const healthy = await f.settled(updater.status().pending!);
+      expect(healthy).toMatchObject({ phase: "healthy", versions: { old: "v1.0.0", new: "v1.1.0" } });
+      expect(f.downloads()).toBe(1);
+      expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.1.0"));
+      expect(() => f.startTurn()).toThrow("cutover is stopping the body");
+      console.log(
+        "Hosted staged retry proof:",
+        JSON.stringify({
+          change,
+          deferred: deferred.reason,
+          final: healthy.phase,
+          archiveDownloads: f.downloads(),
+          lateTurnRefused: true,
+        }),
+      );
+    } finally {
+      resume();
+      finish();
+    }
+  },
+);
 
 it("restores the previous release when the new one fails to come up", async () => {
   const f = await fixture({ restart: "fail" });

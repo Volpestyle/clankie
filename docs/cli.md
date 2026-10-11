@@ -460,9 +460,21 @@ approved" otherwise. The hosted image also checks hourly and installs while the
 body is idle; `clankie update auto [status|on|off]` (TUI `/update` → Automatic
 installs) switches that for a self-run body, and managed bodies keep scheduled
 checks enabled. Scheduling rechecks this setting and idle state after release
-lookup, before accepting the helper. Hourly checks keep a newer image seed when
+lookup, before accepting the helper, and again after download and staging just
+before stopping services. If work starts or automatic installs are disabled,
+the verified release stays staged for the next enabled idle check; it is reused
+without another archive download. Cutover closes turn admission before shutdown,
+so it cannot interrupt a turn. Hourly checks keep a newer image seed when
 the approved release is older; an explicit `--ref vX.Y.Z` can still roll back
 within the fleet's approval cap.
+
+The release helper uses `clankie update cutover --operation UUID --instance UUID`
+(`POST /v1/runtime-update/cutover`) for that final check. Operator authentication
+and the exact scheduled operation and running boot are required. It returns
+`outcome: "waiting"` with `disabled` or `body-busy`, or `outcome: "ready"` after
+closing admission and beginning idle shutdown. An unavailable or uncertain
+response leaves the release staged and does not authorize the helper to stop
+services or switch `current`.
 A release install moves to
 the latest official GitHub release, or `--ref vX.Y.Z`; it reports `upToDate` when
 already there, and otherwise stages that verified release beside the running one,

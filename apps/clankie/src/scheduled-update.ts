@@ -97,10 +97,13 @@ export function bodyIdleCheck(deps: {
   readonly voiceHeld: () => boolean;
   readonly agentPanes: () => Promise<number>;
 }): () => Promise<boolean> {
-  return async () => {
+  const inactive = () => {
     const { turns, sharing } = deps.activity();
-    if (turns > 0 || sharing || deps.voiceHeld()) return false;
-    return (await deps.agentPanes()) === 0;
+    return turns === 0 && !sharing && !deps.voiceHeld();
+  };
+  return async () => {
+    if (!inactive()) return false;
+    return (await deps.agentPanes()) === 0 && inactive();
   };
 }
 
@@ -116,12 +119,19 @@ export interface BodyActivity {
  */
 export function withBodyActivity<P extends { readonly heartbeat?: Heartbeat }>(
   provider: P,
-): { readonly provider: P & { readonly heartbeat: Heartbeat }; readonly activity: () => BodyActivity } {
+): {
+  readonly provider: P & { readonly heartbeat: Heartbeat };
+  readonly activity: () => BodyActivity;
+  /** Synchronous final turn/share check, immediately followed by service shutdown. */
+  readonly stopAdmissionWhenIdle: () => boolean;
+} {
   const inner = provider.heartbeat;
   let turns = 0;
   let sharing = false;
+  let stopping = false;
   const heartbeat: Heartbeat = {
     begin(origin) {
+      if (stopping) throw new Error("Scheduled release cutover is stopping the body");
       turns += 1;
       const finish = inner?.begin(origin);
       let done = false;
@@ -135,11 +145,20 @@ export function withBodyActivity<P extends { readonly heartbeat?: Heartbeat }>(
     interactive: () => inner?.interactive(),
     authenticatedWork: (isWork) => inner?.authenticatedWork(isWork),
     activitySharing: (active) => {
+      if (active && stopping) throw new Error("Scheduled release cutover is stopping the body");
       sharing = active;
       inner?.activitySharing(active);
     },
     start: () => inner?.start(),
     close: () => inner?.close(),
   };
-  return { provider: { ...provider, heartbeat }, activity: () => ({ turns, sharing }) };
+  return {
+    provider: { ...provider, heartbeat },
+    activity: () => ({ turns, sharing }),
+    stopAdmissionWhenIdle: () => {
+      if (turns > 0 || sharing) return false;
+      stopping = true;
+      return true;
+    },
+  };
 }

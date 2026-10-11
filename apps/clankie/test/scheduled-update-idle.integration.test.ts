@@ -44,3 +44,22 @@ it("a scheduled install waits out a turn, an activity share, a live call and a h
   agents = 1;
   expect(await idle()).toBe(false);
 });
+
+it("a turn starting during the native pane census prevents idle cutover and remains live", async () => {
+  const body = withBodyActivity({});
+  let finish = () => {};
+  const idle = bodyIdleCheck({
+    activity: body.activity,
+    voiceHeld: () => false,
+    agentPanes: async () => {
+      finish = body.provider.heartbeat.begin(undefined);
+      return 0;
+    },
+  });
+  expect(await idle()).toBe(false);
+  expect(body.stopAdmissionWhenIdle()).toBe(false);
+  expect(body.activity().turns).toBe(1);
+  finish();
+  expect(body.stopAdmissionWhenIdle()).toBe(true);
+  expect(() => body.provider.heartbeat.begin(undefined)).toThrow("cutover is stopping the body");
+});

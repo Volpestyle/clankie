@@ -14,3 +14,18 @@ export const BodyReleaseSchema = z
   })
   .strict();
 export type BodyRelease = z.infer<typeof BodyReleaseSchema>;
+
+/** Local release helper's final, exact-operation idle check (ADR 0237). */
+export const SCHEDULED_RELEASE_CUTOVER_PATH = "/v1/runtime-update/cutover";
+export const ScheduledReleaseCutoverRequestSchema = z.strictObject({
+  operationId: z.string().uuid(),
+  instanceId: z.string().uuid(),
+});
+export const ScheduledReleaseCutoverResultSchema = z.discriminatedUnion("outcome", [
+  ScheduledReleaseCutoverRequestSchema.extend({ outcome: z.literal("ready") }),
+  ScheduledReleaseCutoverRequestSchema.extend({
+    outcome: z.literal("waiting"),
+    reason: z.enum(["disabled", "body-busy"]),
+  }),
+]);
+export type ScheduledReleaseCutoverResult = z.infer<typeof ScheduledReleaseCutoverResultSchema>;

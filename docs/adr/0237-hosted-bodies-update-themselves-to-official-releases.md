@@ -20,8 +20,8 @@ following `origin/main`; this decision changes only release installs.
    its own target.
 2. **A writable release root.** The image's `/opt/clankie` becomes the seed, not
    the running install. On boot the entrypoint seeds
-   `/state/releases/<version>` from it when absent and points
-   `/state/releases/current` at the newer of the seed and the current release,
+   `/state/install/releases/<version>` from it when absent and points
+   `/state/install/current` at the newer of the seed and the current release,
    so a new image (base or OS update) is never shadowed by an older self-installed
    release. The launcher and service run from `current`.
 3. **Private provider compatibility.** A managed image installs its runtime
@@ -39,7 +39,10 @@ following `origin/main`; this decision changes only release installs.
    (`update_runtime`, `clankie update`). A scheduled install waits until the body
    is idle: no running captain turn, voice session or hired worker. Owners can
    turn scheduled installs off (`clankie update auto off`, `/update` in the TUI);
-   managed bodies keep them on.
+   managed bodies keep them on. Recheck enabled/idle state after staging for
+   the exact accepted operation and running boot, before stopping services.
+   Busy or disabled bodies retain the verified stage for a later idle check;
+   a ready cutover closes turn admission before shutdown.
 
 ## Why
 

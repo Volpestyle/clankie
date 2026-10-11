@@ -76,6 +76,12 @@ nothing newer than its fleet-approved release: "holding releases" or "not
 approved" is the fleet's decision, not a fault, so report it and wait. Self-run
 owners switch idle installs with `clankie update auto on|off`. Scheduling
 rechecks enabled/idle state after release lookup before accepting the helper.
+After staging it checks again before stopping services. Work beginning during
+download, or disabling automatic installs, leaves the verified release staged
+for the next enabled idle check without downloading it again. Cutover closes
+turn admission before idle shutdown; it cannot stop a running turn. The helper's
+`update cutover --operation UUID --instance UUID` requires the exact scheduled
+operation, current boot and operator authority; uncertainty keeps staging only.
 Hourly checks keep a newer image seed when the approved release is older;
 explicit `--ref vX.Y.Z` retains rollback within the approval cap. The rest of this
 section is a source checkout.

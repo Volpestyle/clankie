@@ -146,6 +146,9 @@ export interface ClankieAppDependencies {
   integration?: IntegrationQueue;
   deployHolds?: DeployHolds;
   runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
+  scheduledReleaseCutover?: Parameters<
+    typeof import("../runtime-update-routes.ts").createRuntimeUpdateRoutes
+  >[0]["scheduledCutover"];
   runtimeCanary?: import("../runtime-canary.ts").RuntimeCanary;
   refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;

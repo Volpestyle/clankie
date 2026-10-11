@@ -351,7 +351,11 @@ const loadedRuntimeProvider = await loadRuntimeProvider({
     : { onHeartbeatReport: (report) => bodyTelemetry.emit({ event: "body.heartbeat", ...report }) }),
 });
 // The same turn hooks feed managed policy and the idle check for scheduled installs.
-const { provider: runtimeProvider, activity: bodyActivity } = withBodyActivity(loadedRuntimeProvider);
+const {
+  provider: runtimeProvider,
+  activity: bodyActivity,
+  stopAdmissionWhenIdle,
+} = withBodyActivity(loadedRuntimeProvider);
 let runtimeProviderClosing: Promise<void> | undefined;
 function closeRuntimeProvider(): Promise<void> {
   return (runtimeProviderClosing ??= (async () => {
@@ -1235,6 +1239,20 @@ function releaseUpdaterOrNone() {
 // A managed body always takes them; a self-run owner can turn them off.
 // Worker harnesses sign in with their own logins, as this service's user.
 const harnessLogins = new HarnessSignIns({ env: process.env });
+const scheduledUpdateEnabled = async () =>
+  hostedBody !== undefined || (await settingsStore.load()).host.autoUpdate;
+const scheduledUpdateIdle = bodyIdleCheck({
+  activity: bodyActivity,
+  voiceHeld: () => bodyLeaseStore.status("voice") !== undefined,
+  agentPanes: async () => {
+    let agents = 0;
+    for (const fleet of await runtimes.fleets())
+      agents += parseHerdrPaneList(await runtimes.fleetRun(fleet)(["pane", "list"]), true).filter(
+        (pane) => pane.agent !== "unknown",
+      ).length;
+    return agents;
+  },
+});
 const scheduledUpdates =
   runtimeUpdater !== undefined && process.env.CLANKIE_SCHEDULED_UPDATES === "1"
     ? startScheduledUpdates({
@@ -1243,19 +1261,8 @@ const scheduledUpdates =
           request: (ref, authority) =>
             deployHolds.landing(`runtime-schedule:${ref}`, [], () => runtimeUpdater.request(ref, authority)),
         },
-        enabled: async () => hostedBody !== undefined || (await settingsStore.load()).host.autoUpdate,
-        idle: bodyIdleCheck({
-          activity: bodyActivity,
-          voiceHeld: () => bodyLeaseStore.status("voice") !== undefined,
-          agentPanes: async () => {
-            let agents = 0;
-            for (const fleet of await runtimes.fleets())
-              agents += parseHerdrPaneList(await runtimes.fleetRun(fleet)(["pane", "list"]), true).filter(
-                (pane) => pane.agent !== "unknown",
-              ).length;
-            return agents;
-          },
-        }),
+        enabled: scheduledUpdateEnabled,
+        idle: scheduledUpdateIdle,
         logger,
       })
     : undefined;
@@ -1963,6 +1970,18 @@ const clankie = await createClankieApp({
   fleetProjectMembership,
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
+  scheduledReleaseCutover: async (guard) => {
+    await guard();
+    if (!(await scheduledUpdateIdle())) return { outcome: "waiting", reason: "body-busy" };
+    await guard();
+    if (!(await scheduledUpdateEnabled())) return { outcome: "waiting", reason: "disabled" };
+    // No await between the final synchronous turn/voice check and closing all
+    // body entrances. A queued turn cannot slip in before the helper's `down`.
+    if (bodyLeaseStore.status("voice") !== undefined || !stopAdmissionWhenIdle())
+      return { outcome: "waiting", reason: "body-busy" };
+    requestShutdown("SIGTERM");
+    return { outcome: "ready" };
+  },
   ...(runtimeCanary === undefined ? {} : { runtimeCanary }),
   refreshHarnesses: async (authority) =>
     refreshLinkedHarnesses({

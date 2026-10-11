@@ -924,6 +924,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     "/",
     createRuntimeUpdateRoutes({
       updater: dependencies.runtimeUpdater,
+      scheduledCutover: dependencies.scheduledReleaseCutover,
       canary: dependencies.runtimeCanary,
       refreshHarnesses: dependencies.refreshHarnesses,
       settings: settingsSource,
