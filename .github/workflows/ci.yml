@@ -43,6 +43,9 @@ jobs:
       - name: Strict native MCP catalog contracts
         if: github.event_name != 'workflow_dispatch'
         run: pnpm mcp:check
+      - name: Controlled fleet admission fixtures
+        if: github.event_name != 'workflow_dispatch'
+        run: pnpm check:fleet-test-pressure
       - name: Real test dependencies (ffmpeg, pinned Herdr)
         if: github.event_name == 'workflow_dispatch'
         run: |

@@ -315,6 +315,32 @@ receipts, cancellation and native runner registration. It never hires agents or
 boots simulators. Run manually through the fleet heavy limiter; production native
 device behavior requires a separately authorized simulator check.
 
+### Fast Linux fixture check
+
+Push/PR CI runs `pnpm check:fleet-test-pressure`: a fixture-policy scan, seven
+filesystem-based regression checks, and two real-process full-lane refusal cases.
+The scan covers this package's tests, `.mjs` drivers and inline child scripts.
+Every governor must have an explicit pressure probe in inline or locally declared
+options. Ambient memory/load readers are refused outside the named native-observer
+cases; the probe's local dependencies are inspected too. Opaque options are
+refused rather than assumed controlled. This is a fixture convention, not a
+general JavaScript dataflow or security analyzer.
+
+The negative controls remove the real full-progress fixture's probe, introduce
+aliased `freemem`/`loadavg` reads, and regress standalone/inline subprocess drivers.
+Real native runners then prove low memory and load at the thrash cap retain one
+queued ticket, zero permits and no started child, using explicit observations.
+The disk-admission fixture controls unrelated memory/load while retaining real
+filesystem samples. Production limits and existing assertions are unchanged.
+
+Measured on Linux arm64 with two CPUs and a 4 GiB container limit, the exact script
+body took 2.71–2.79 seconds across three samples (9 passing checks; two longer progress cases omitted by the
+fast selector). This is local Linux evidence, not a GitHub-runner measurement.
+It does not verify Linux `MemAvailable`, Darwin native memory, or release timing
+under load. `darwin-pressure.integration.test.ts`, the native sampler/helper
+observer cases, the full real-process progress/cleanup tests and release load
+checks remain in manual macOS verification.
+
 `simulator verify` is an authenticated read-only preflight for device users: it
 checks the proven seat occupant, task holder, lease ID, exact UDID and booted
 state. It neither adopts nor renews a lease. Install, launch and drive clients

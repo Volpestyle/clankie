@@ -19,6 +19,7 @@
     "testing:view": "node docs/testing/serve-archive.mjs",
     "check": "pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test",
     "check:landing": "node scripts/check-landing.mjs",
+    "check:fleet-test-pressure": "node scripts/check-fleet-test-pressure.mjs && vitest run packages/fleet-resources/test/fixture-pressure-policy.integration.test.ts packages/fleet-resources/test/full-progress.integration.test.ts -t 'fleet pressure policy|empty-lane exception still refuses|empty full lane still refuses'",
     "check:resources": "pnpm --filter @clankie/clankie exec tsx scripts/fleet-resource-burst.ts",
     "check:load": "pnpm --filter @clankie/clankie exec tsx scripts/fleet-load.ts",
     "doctor": "node scripts/doctor.mjs",

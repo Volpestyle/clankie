@@ -8,7 +8,12 @@ import { FleetResourceSnapshotSchema } from "../../protocol/src/fleet-resources.
 
 it("real filesystem disk observations hold all heavy lanes and resume after the floor is lowered", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-disk-admission-"));
-  const governor = createResourceGovernor({ directory: join(root, "registry") });
+  const governor = createResourceGovernor({
+    directory: join(root, "registry"),
+    // Only disk is observed here; unrelated host memory/load cannot mask it.
+    // The sampler still reads real statfs when disk fields are omitted.
+    probe: async () => ({ loadRatio: 0, cpuRatio: 0, availableMemoryMb: 65_536 }),
+  });
   try {
     const policy = {
       ...defaultResourcePolicy(),
