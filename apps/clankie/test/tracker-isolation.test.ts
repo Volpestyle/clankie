@@ -7,6 +7,7 @@ import {
   codexTrackerOverrides,
   isTrackerServer,
 } from "../src/captain/tracker-isolation.ts";
+import { codexTrackerAppOverrides } from "../src/captain/codex-app-catalog.ts";
 
 const scratch = () => mkdtemp(join(tmpdir(), "clankie-tracker-"));
 
@@ -90,13 +91,45 @@ describe("inherited tracker connectors", () => {
     ];
     await writeFile(
       join(bin, "codex"),
-      `#!/bin/sh\n[ "$1 $2 $3" = "mcp list --json" ] || exit 2\ncat <<'JSON'\n${JSON.stringify(listing)}\nJSON\n`,
+      `#!${process.execPath}
+if (process.argv[2] === 'mcp') console.log(${JSON.stringify(JSON.stringify(listing))});
+else {
+  require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+    const input = JSON.parse(line);
+    if (!input.id) return;
+    const result = input.method === 'initialize' ? {} : {
+      apps: [
+        { id: 'alternate-linear-account', runtimeName: 'Linear', enabled: true, callable: true },
+        { id: 'github', runtimeName: 'GitHub', enabled: true, callable: true }
+      ]
+    };
+    console.log(JSON.stringify({ id: input.id, result }));
+  });
+}
+`,
     );
     await chmod(join(bin, "codex"), 0o755);
     expect(await codexTrackerOverrides(bin, { PATH: `${bin}:/usr/bin:/bin` })).toEqual([
+      "apps.alternate-linear-account.enabled=false",
       'mcp_servers."team.linear".enabled=false',
       "mcp_servers.linear.enabled=false",
     ]);
+  });
+
+  it("disables Codex's Linear app even when no standalone tracker server is listed", () => {
+    expect(
+      codexTrackerAppOverrides(
+        JSON.stringify([
+          { id: "different-linear-id", name: "Linear", isEnabled: true },
+          { id: "github", name: "GitHub", isEnabled: true },
+        ]),
+      ),
+    ).toEqual(["apps.different-linear-id.enabled=false"]);
+    expect(() => codexTrackerAppOverrides('{"apps":[]}')).toThrow("unexpected shape");
+    expect(() => codexTrackerAppOverrides('[{"name":"Linear"}]')).toThrow("invalid app");
+    expect(() =>
+      codexTrackerAppOverrides(JSON.stringify([{ id: "linear.unknown", name: "Linear", isEnabled: true }])),
+    ).toThrow("unsupported ID");
   });
 
   it("fails closed when Codex cannot list its servers", async () => {

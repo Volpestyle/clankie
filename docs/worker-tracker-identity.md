@@ -26,14 +26,24 @@ configured `.claude.json` (user and local scope) and `.mcp.json` (project scope)
 Codex sessions get an `mcp_servers.<name>.enabled=false` override per server,
 read from Codex's own effective listing (`codex mcp list --json`); a launch whose
 listing cannot be read does not start. The owner's configuration files are not
-edited. A worker that needs a tracker write hands it to the lead, who makes it
+edited. Codex launches also set
+`apps.<discovered-id>.enabled=false` for every Linear app connector found by
+runtime name in Codex's native `app/installed` catalog, which is absent from
+`codex mcp list`. Discovery runs a bounded read-only app-server without creating
+a thread or model turn; an unreadable catalog refuses the launch. This session-only
+override applies to local and remote hires and operator seats; other apps stay
+available. Existing running sessions retain their launch configuration.
+IDs are resolved on the selected machine/account rather than assumed universal;
+Codex supports
+[per-app enabled settings](https://learn.chatgpt.com/docs/config-file/config-reference).
+A worker that needs a tracker write hands it to the lead, who makes it
 through the connected account, or uses an explicit grant.
 
 | Path                       | Current behavior                                                                                                                            | Remaining gap                                                                                                                               |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Clankie's own Linear tools | Use the connected broker account.                                                                                                           | No inherited harness connector on this path.                                                                                                |
 | `clankie seat` (Claude)    | Denies every inherited Linear connector; instructions select Clankie's tools.                                                               | A tracker integration that is neither on Linear's host nor named for it is not recognized.                                                  |
-| `clankie seat` (Codex)     | Disables every enabled inherited Linear server in the seat's app-server.                                                                    | Same recognition limit.                                                                                                                     |
+| `clankie seat` (Codex)     | Disables every enabled inherited Linear server and every Linear-named app discovered on its selected account.                               | Same server recognition limit; an app renamed to omit Linear is not recognized.                                                             |
 | Native `hire_agent`        | Local Claude and Codex hires get the same deny rules and overrides. Local Claude gets the mailbox-only seat bridge; pi its Herdr extension. | No automatic tracker grant, so writes go through the lead. pi inherits extensions unfiltered. Remote launches read no remote configuration. |
 | Explicit worker grant      | `WorkerMcp` verifies account binding, principal, tool and arguments on every call. Account replacement invalidates access.                  | A grant protects the bridge; it does not remove credentials already available to the worker.                                                |
 

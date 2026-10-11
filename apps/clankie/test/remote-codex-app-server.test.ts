@@ -215,11 +215,14 @@ describe("a remote Codex app-server (VUH-1527)", () => {
   });
 
   it("reads tracker connectors from the remote machine's own Codex configuration", async () => {
-    const shell = vi.fn(
-      async (_command: string) =>
-        '[{"name":"linear","enabled":true,"transport":{"url":"https://mcp.linear.app/mcp"}},{"name":"other","enabled":true}]',
+    let read = 0;
+    const shell = vi.fn(async (_command: string) =>
+      ++read === 2
+        ? '[{"id":"remote-linear-id","name":"Linear","isEnabled":true},{"id":"other","name":"Other","isEnabled":true}]'
+        : '[{"name":"linear","enabled":true,"transport":{"url":"https://mcp.linear.app/mcp"}},{"name":"other","enabled":true}]',
     );
     expect(await remoteCodexTrackerOverrides(windows, shell)("C:\\src")).toEqual([
+      "apps.remote-linear-id.enabled=false",
       "mcp_servers.linear.enabled=false",
     ]);
     const script = decoded(shell.mock.calls[0]![0]);

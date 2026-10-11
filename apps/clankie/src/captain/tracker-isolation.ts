@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { LINEAR_MCP_RESOURCE } from "@clankie/credential-broker";
+import { CODEX_APP_CATALOG_PROGRAM, codexTrackerAppOverrides } from "./codex-app-catalog.ts";
 
 const TRACKER_HOST = new URL(LINEAR_MCP_RESOURCE).hostname.replace(/^mcp\./u, "");
 const CODEX_LIST_TIMEOUT_MS = 15_000;
@@ -142,7 +143,17 @@ export async function codexTrackerOverrides(
       `Could not read Codex's MCP servers to switch off inherited Linear connectors: ${error instanceof Error ? error.message : String(error)}`,
     );
   });
-  return codexTrackerOverridesFromList(stdout);
+  const apps = await new Promise<string>((resolveApps, reject) => {
+    execFile(
+      process.execPath,
+      ["-e", CODEX_APP_CATALOG_PROGRAM],
+      { cwd, env: { ...process.env, ...env }, timeout: 35_000, maxBuffer: 4 * 1024 * 1024 },
+      (error, out) => (error ? reject(error) : resolveApps(out)),
+    );
+  }).catch(() => {
+    throw new Error("Could not read Codex's apps to switch off inherited Linear connectors");
+  });
+  return [...codexTrackerAppOverrides(apps), ...codexTrackerOverridesFromList(stdout)];
 }
 
 /**

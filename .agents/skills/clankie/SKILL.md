@@ -184,6 +184,9 @@ Project roles, caps, hiring and tracker binding are separate. Tool access is not
 permission for every write. If tools are absent, report the machine/session,
 catalog and refusal so the lead can inspect admission, the setting and account.
 Never substitute a harness's independent Linear connector.
+Codex launches discover and disable Linear-named app connectors as well as inherited
+Linear MCP servers for that session. Existing running seats may still expose
+`codex_apps.linear`; always use `clankie_tools` and `clankie_call` for Linear.
 
 Worker connected-tool reads return or explain failure within thirty seconds,
 including initialization and response-body reads. The wrapper and enabled peer

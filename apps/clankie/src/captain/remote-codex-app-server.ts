@@ -37,6 +37,7 @@ import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import { openCodexSocket, type CodexServerLauncher } from "./codex-app-server.ts";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
 import { codexTrackerOverridesFromList } from "./tracker-isolation.ts";
+import { CODEX_APP_CATALOG_PROGRAM, codexTrackerAppOverrides } from "./codex-app-catalog.ts";
 
 /**
  * A Codex seat on another machine (VUH-1527, ADR 0213 phase 2) gets the same
@@ -412,7 +413,20 @@ export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShell
         `Could not read Codex's MCP servers on fleet ${fleet.id} to switch off inherited Linear connectors: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
-    return codexTrackerOverridesFromList(stdout);
+    const apps = await shell(
+      remoteProgramCommand(
+        fleet.ssh.shell,
+        "node",
+        ["-e", CODEX_APP_CATALOG_PROGRAM],
+        cwd,
+        env?.CODEX_HOME === undefined ? undefined : { CODEX_HOME: env.CODEX_HOME },
+      ),
+    ).catch(() => {
+      throw new Error(
+        `Could not read Codex's apps on fleet ${fleet.id} to switch off inherited Linear connectors`,
+      );
+    });
+    return [...codexTrackerAppOverrides(apps), ...codexTrackerOverridesFromList(stdout)];
   };
 }
 
