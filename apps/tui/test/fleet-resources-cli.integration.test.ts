@@ -784,8 +784,8 @@ it("native child heavy CLIs under the same pane keep separate holder labels and 
     expect(snapshot.queue[0]).toMatchObject({ seatId: "parent-seat", holderId: "codex:cards-thread" });
     expect(third.child.exitCode).toBeNull();
     await writeFile(release, "done");
-    expect(await first.done).toBe(0);
-    expect(await third.done).toBe(0);
+    expect(await first.done, first.output.join("")).toBe(0);
+    expect(await third.done, third.output.join("")).toBe(0);
   } finally {
     await f.close();
   }

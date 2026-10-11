@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "cli-exit-proof.json",
+      "size": 300973,
+      "sha256": "332b74956291fb1d6ee4218c2f6e64b6c497906784c3eddb014795bcb017d307",
+      "url": "clankie://evidence/sha256/332b74956291fb1d6ee4218c2f6e64b6c497906784c3eddb014795bcb017d307"
+    }
+  ]
+}
