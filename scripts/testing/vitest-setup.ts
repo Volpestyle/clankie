@@ -54,6 +54,7 @@ if (process.env.CLANKIE_TEST_LIVE_STORES !== "1") {
     CODEX_HOME: join(home, ".codex"),
     CLAUDE_CONFIG_DIR: join(home, ".claude"),
     PI_CODING_AGENT_DIR: join(home, ".pi", "agent"),
+    CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(root, "fleet-resources"),
     CLANKIE_SETTINGS_FILE: join(home, ".config", "clankie", "settings.json"),
     CLANKIE_CREDENTIALS_FILE: join(home, ".config", "clankie", "credentials.json"),
   });

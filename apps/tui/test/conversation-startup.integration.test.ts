@@ -199,6 +199,8 @@ it("opens the production console at the latest first frame, lazily anchors older
       TERM: "xterm-256color",
       NO_COLOR: "1",
       CLANKIE_STATE: state,
+      NODE_ENV: "test",
+      CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(dir, "fleet-resources"),
       CLANKIE_STATE_HOME: join(home, "state"),
       CLANKIE_INSTALL_ROOT: repo,
       CLANKIE_SETTINGS_FILE: settings,

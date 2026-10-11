@@ -58,7 +58,7 @@ import { BodyLeaseStore } from "./body-leases.ts";
 import { BodyLeaseRouter } from "./body-lease-router.ts";
 import { createPersonaImageSource } from "./persona-images.ts";
 import { createHostPowerMonitor } from "./host-power.ts";
-import { createFleetResourceRuntime } from "./fleet-resource-runtime.ts";
+import { createServiceFleetResourceRuntime } from "./service-fleet-resources.ts";
 import { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import { createHostedDiscordIngress, createHostedDiscordVoiceCallback } from "./discord-ingress.ts";
 import { OfficialDiscordControl, OfficialDiscordIngress } from "./official-discord.ts";
@@ -1262,7 +1262,7 @@ const minecraftHost = new MinecraftHostService({
   }),
 });
 let fleetProjectMembership: FleetProjectMembership | undefined;
-const fleetResources = await createFleetResourceRuntime({
+const fleetResources = await createServiceFleetResourceRuntime({
   policy: async () => (await settingsStore.load()).fleet.resources,
   onError: (error) =>
     logger.warn({ error, event: "fleet_resources.refresh_failed" }, "Fleet resource metadata is unavailable"),

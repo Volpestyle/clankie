@@ -119,7 +119,14 @@ async function fixture() {
             // its governor journal already belongs to this private fixture.
             detached: true,
             stdio: ["ignore", "pipe", "pipe"],
-            env: { ...process.env, HEAVY_SLOTS: "99", CLANKIE_STATE: join(directory, "worker-override") },
+            env: {
+              ...process.env,
+              HEAVY_SLOTS: "99",
+              CLANKIE_STATE: join(directory, "worker-override"),
+              NODE_ENV: "test",
+              VITEST: "true",
+              CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(directory, "service-only-override"),
+            },
           },
         ),
       );

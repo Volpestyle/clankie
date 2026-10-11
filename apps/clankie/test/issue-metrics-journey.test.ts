@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile, rm, appendFile, stat } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
 import { ownProcess } from "../../../scripts/testing/owned-process.ts";
+import { processIdentity } from "@clankie/fleet-resources";
+import type { ResourceState } from "@clankie/fleet-resources";
 import { IssueMetricsReportSchema } from "@clankie/protocol";
 import { expect, it } from "vitest";
 import { createSeatLedger } from "../src/captain/seat-ledger.ts";
@@ -58,6 +60,43 @@ it("serves the real VUH-1608 golden through the production service, client and C
     await writeFile(linkPath, '{"owner":"unchanged"}\n');
   }
   const before = await readFile(linkPath);
+  const nativeProcess = await processIdentity();
+  let enclosingHeavyLeaseId: string | undefined;
+  // Under clankie heavy, prove the real service leaves its live enclosing lease
+  // intact. Read only: never add synthetic leases or change the owner's policy.
+  const readLiveLease = async () => {
+    if (!nativeProcess) throw new Error("The guard's native process identity is unavailable");
+    let ownerPolicy: ResourceState["policy"] | undefined;
+    for (const lane of ["", "light"]) {
+      try {
+        const journal = JSON.parse(
+          await readFile(join(userInfo().homedir, ".clankie/fleet-resources", lane, "state.json"), "utf8"),
+        ) as ResourceState;
+        if (lane === "") ownerPolicy = journal.policy;
+        const lease = journal.leases.find((row) =>
+          enclosingHeavyLeaseId
+            ? row.id === enclosingHeavyLeaseId
+            : row.kind === "heavy" && row.runner?.pgid === nativeProcess.pgid,
+        );
+        if (lease?.kind === "heavy") {
+          enclosingHeavyLeaseId = lease.id;
+          return {
+            id: lease.id,
+            state: lease.state,
+            runner: lease.runner,
+            claimOwner: lease.claimOwner,
+            policy: ownerPolicy ?? journal.policy,
+          };
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    if (enclosingHeavyLeaseId) throw new Error("The enclosing live heavy lease disappeared");
+    return undefined;
+  };
+  const liveLeaseBefore = await readLiveLease();
+  if (process.env.VUH2038_REQUIRE_LIVE_LEASE === "1") expect(liveLeaseBefore).toBeDefined();
   let child: ChildProcess | undefined;
   let stop: (() => Promise<void>) | undefined;
   let output = "";
@@ -172,6 +211,15 @@ it("serves the real VUH-1608 golden through the production service, client and C
       settings,
       JSON.stringify({
         schemaVersion: 1,
+        fleet: {
+          resources: {
+            heavySlots: 1,
+            simulatorSlots: 0,
+            simulatorIdleMs: 600_000,
+            maxLoadRatio: 1.5,
+            minAvailableMemoryMb: 4096,
+          },
+        },
         herdr: { runtime: "disabled" },
         captain: { workingDirectory: dir },
       }),
@@ -189,6 +237,8 @@ it("serves the real VUH-1608 golden through the production service, client and C
       CLAUDE_CONFIG_DIR: join(home, "claude"),
       CI: "1",
       CLANKIE_STATE: state,
+      NODE_ENV: "test",
+      CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(dir, "fleet-resources"),
       CLANKIE_SETTINGS_FILE: settings,
       CLANKIE_CREDENTIALS_FILE: join(dir, "credentials.json"),
       CLANKIE_OPERATOR_TOKEN: "metrics-journey-private-operator",
@@ -675,6 +725,32 @@ it("serves the real VUH-1608 golden through the production service, client and C
     await stop?.();
     const after = await readFile(linkPath);
     expect(after).toEqual(before);
+    const liveLeaseAfter = await readLiveLease();
+    expect(liveLeaseAfter).toEqual(liveLeaseBefore);
+    if (process.env.VUH2038_EVIDENCE_DIRECTORY)
+      await writeFile(
+        join(process.env.VUH2038_EVIDENCE_DIRECTORY, "live-lease-guard.json"),
+        JSON.stringify(
+          {
+            exercised: liveLeaseBefore !== undefined,
+            before: liveLeaseBefore,
+            after: liveLeaseAfter,
+            unchanged: isDeepStrictEqual(liveLeaseBefore, liveLeaseAfter),
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+    const fixtureJournal = JSON.parse(
+      await readFile(join(dir, "fleet-resources/state.json"), "utf8"),
+    ) as ResourceState;
+    expect(fixtureJournal.leases).toEqual([]);
+    expect(fixtureJournal.policy.heavySlots).toBe(1);
+    if (liveLeaseBefore)
+      console.log(
+        "VUH-2038: spawned production service preserved its live enclosing heavy lease",
+        liveLeaseBefore.id,
+      );
     if (process.env.CLANKIE_METRICS_EVIDENCE !== undefined)
       await writeFile(
         join(process.env.CLANKIE_METRICS_EVIDENCE, "link-guard.json"),

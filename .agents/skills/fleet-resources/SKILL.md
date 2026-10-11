@@ -112,6 +112,14 @@ admits no new simulator within three minutes of the last one and answers
 The registry belongs to the OS account and is shared across worktrees. Worker
 `HOME`, state-path or `HEAVY_SLOTS` overrides cannot increase capacity.
 
+Test and eval service fixtures must carry `VITEST=true` or `NODE_ENV=test`.
+That service startup uses a private temporary registry and disables native
+simulators; `CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY` optionally retains its
+fixture journal outside the live registry. The markers and
+override do not affect `clankie heavy` or worker governors: run fixture work
+inside the same heavy wrapper. A scratch HOME or CLANKIE_STATE alone does not
+isolate a service from the live registry.
+
 Search with `rg`, or with `find` from a narrow directory and a `-maxdepth`.
 Never scan all worktrees, `node_modules` or `~/.clankie/integration` with an
 unbounded `find`, `bfs` or recursive listing. On 2026-10-10 one such scan held

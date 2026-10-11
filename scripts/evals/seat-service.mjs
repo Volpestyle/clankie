@@ -254,6 +254,8 @@ export async function startService(
         XDG_CONFIG_HOME: paths.config,
         XDG_STATE_HOME: paths.xdgState,
         XDG_DATA_HOME: paths.data,
+        NODE_ENV: "test",
+        CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(paths.state, "fleet-resources"),
         CLANKIE_STATE: paths.state,
         CLANKIE_SETTINGS_FILE: paths.settings,
         CLANKIE_CREDENTIALS_FILE: join(dirname(paths.settings), "credentials.json"),

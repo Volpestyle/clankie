@@ -111,6 +111,8 @@ try {
     XDG_CONFIG_HOME: join(temporary, "config"),
     XDG_STATE_HOME: join(temporary, "state"),
     XDG_DATA_HOME: join(temporary, "data"),
+    NODE_ENV: "test",
+    CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(temporary, "fleet-resources"),
     CLANKIE_STATE: join(temporary, "clankie-state"),
     CLANKIE_SETTINGS_FILE: join(temporary, "config", "clankie", "settings.json"),
     CLANKIE_OPERATOR_TOKEN: "release-smoke-operator",

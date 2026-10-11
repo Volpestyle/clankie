@@ -44,6 +44,15 @@ calls `configure`; command callers read that policy. `HOME`, `CLANKIE_STATE`,
 settings-path overrides and `HEAVY_SLOTS` do not select a separate registry or
 increase capacity. Directory and pressure-probe injection exist for isolated tests.
 
+Service fixtures marked `VITEST=true` or `NODE_ENV=test` use a private temporary
+registry by default and cannot access native simulators. The service-only
+`CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY` override selects a retained fixture
+registry, outside the live registry (including symlink aliases and parent directories).
+Vitest setup, allowlisted service journeys, the seat eval harness and release
+smoke harness select this isolation. Unmarked services ignore the override.
+The governor and `clankie heavy` never honor either test marker or the override;
+fixture workers still consume the shared machine budget.
+
 Heavy commands count only against `heavySlots`; simulator reservations and
 unmanaged active devices count only against `simulatorSlots`. Status reports
 `capacity.used` for heavy leases and `capacity.simulatorUsed` for simulator
