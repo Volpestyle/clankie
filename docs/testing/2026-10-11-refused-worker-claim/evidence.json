@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "refusal-proof.tar",
+      "size": 92160,
+      "sha256": "73cf0f783262912cf8436966cc729bf6d21fbc1bf6153b73b85e89ff433d494a",
+      "url": "clankie://evidence/sha256/73cf0f783262912cf8436966cc729bf6d21fbc1bf6153b73b85e89ff433d494a"
+    }
+  ]
+}

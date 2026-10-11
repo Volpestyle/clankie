@@ -8,6 +8,7 @@ import { once } from "node:events";
 import { mkdir, mkdtemp, writeFile, rm, readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
+import { connect } from "node:net";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -507,6 +508,7 @@ async function receiptService() {
   let store = new ConversationStore(join(root, "conversations"), runner);
   let receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
   let drop = true;
+  let port = 0;
   let beforeAcceptance = false;
   let denyLookup = false;
   let denyPostReply = false;
@@ -542,11 +544,30 @@ async function receiptService() {
       }
       if (request.method === "GET" && url.pathname.endsWith("/messages")) {
         if (refusePost) response.setHeader("connection", "close");
-        response.end(JSON.stringify({ schemaVersion: 1, binding: "a".repeat(64) }));
+        const reply = () => response.end(JSON.stringify({ schemaVersion: 1, binding: "a".repeat(64) }));
         if (refusePost) {
           refusePost = false;
           stopped = new Promise<void>((resolve) => server.close(() => resolve()));
-        }
+          // Sending the binding first races the POST against listener teardown:
+          // a reset is uncertain, while only ECONNREFUSED proves no dispatch.
+          // Keep the call's existing five-second deadline; release the binding
+          // only after the real listener refuses a fresh connection.
+          void expect
+            .poll(
+              () =>
+                new Promise<string>((resolve) => {
+                  const socket = connect(port, "127.0.0.1");
+                  socket.once("connect", () => {
+                    socket.destroy();
+                    resolve("connected");
+                  });
+                  socket.once("error", (error: NodeJS.ErrnoException) => resolve(error.code ?? "unknown"));
+                }),
+              { timeout: 5_000, interval: 25 },
+            )
+            .toBe("ECONNREFUSED")
+            .then(reply, () => response.destroy());
+        } else reply();
         return;
       }
       if (request.method === "GET") {
@@ -609,6 +630,7 @@ async function receiptService() {
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("no address");
+  port = address.port;
   return {
     url: `http://127.0.0.1:${address.port}`,
     seen,
