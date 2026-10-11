@@ -28,9 +28,10 @@ export interface GateRunner {
     step: "install" | "gate",
     base: string,
     out: Writable,
+    signal?: AbortSignal,
   ): Promise<{ exitCode: number | null; signal: string | null }>;
   /** Copy the gate's recorded selection into the local worktree. */
-  collect(directory: string): Promise<void>;
+  collect(directory: string, signal?: AbortSignal): Promise<void>;
   /** Remove the remote workspace. */
   dispose(signal?: AbortSignal): Promise<void>;
 }
@@ -225,12 +226,18 @@ export function wslGateRunner(options: {
       );
       if (staged.exitCode !== 0) throw new Error(`Could not stage ${repo.head} on ${options.machine}`);
     },
-    async run(step, base, out) {
-      const { exitCode, signal } = await call(step, step === "gate" ? [base] : [], out);
+    async run(step, base, out, abortSignal) {
+      const { exitCode, signal } = await call(
+        step,
+        step === "gate" ? [base] : [],
+        out,
+        undefined,
+        abortSignal,
+      );
       return { exitCode, signal };
     },
-    async collect(directory) {
-      const { exitCode, stdout } = await call("report");
+    async collect(directory, signal) {
+      const { exitCode, stdout } = await call("report", [], undefined, undefined, signal);
       if (exitCode !== 0) throw new Error(`Could not read the gate report from ${options.machine}`);
       for (const line of stdout.split("\n").filter(Boolean)) {
         const [name, body] = line.split(" ");

@@ -129,7 +129,11 @@ service observes every 30 seconds and alerts after three minutes without
 progress or a proven active install/gate job. Read `clankie integrate status
 UUID` and its evidence; an alert does not authorize cancellation or another
 submission. Opening and recovery notices survive restarts without replay, and
-an unavailable observation does not prove recovery.
+an unavailable observation does not prove recovery. Remote install/gate output
+is observed too: three minutes without output alerts, ten minutes triggers a
+fresh local gate, and a ninety-minute wall-clock limit holds even with output.
+The remote timeout cause and log remain evidence; fallback never attests a
+remote pass. These deadlines stop only that request's owned transport.
 
 Passed-canary retention runs once per operation per service boot. It shares the
 maintenance lock with update admission; `retentionMaintenance: held` with empty

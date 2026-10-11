@@ -19,6 +19,128 @@ const git = async (directory: string, ...args: string[]) =>
   (await execute("git", ["-c", "core.hooksPath=/dev/null", "-C", directory, ...args])).stdout.trim();
 const guard = async () => {};
 
+it("remote stdout and stderr reset the silence deadline without losing the exact gate report", async () => {
+  const f = await fixture();
+  const original = await readFile(join(f.source, "gate.mjs"), "utf8");
+  const change = await f.commit(
+    "gate.mjs",
+    `if (process.env.HOME.includes('.clankie-fleet')) {
+    const pulse = setInterval(() => { console.log('stdout pulse'); console.error('stderr pulse'); }, 200);
+    await new Promise(resolve => setTimeout(resolve, 3500)); clearInterval(pulse);
+  }\n${original}`,
+  );
+  const queue = new IntegrationQueue({
+    directory: join(f.root, "integration"),
+    core: f.source,
+    remoteExecutionTimeoutMs: 30_000,
+    remoteNoOutputTimeoutMs: 3_000,
+    placeGate: async (batch) =>
+      wslGateRunner({
+        machine: "pc",
+        shell: "posix",
+        batch: batch.id,
+        origin: batch.origin,
+        stream: f.stream,
+        bundle: gitBundle,
+      }),
+  });
+  const request = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [change] });
+  await queue.start(request, guard);
+  await queue.wait();
+  const batch = await queue.status(request.id);
+  expect(batch.state, batch.error).toBe("passed");
+  expect(batch.placement).toEqual({ machine: "pc" });
+  expect(batch.repos[0]!.gate).toMatchObject({ exitCode: 0, machine: "pc", head: batch.repos[0]!.head });
+  const log = await readFile(batch.repos[0]!.gate!.log, "utf8");
+  expect(log).toContain("stdout pulse");
+  expect(log).toContain("stderr pulse");
+  expect(log).toContain("gated-in");
+}, 120_000);
+
+it.each(["silent", "chatty", "report"] as const)(
+  "a %s remote gate times out, retains its cause, and freshly gates locally",
+  async (mode) => {
+    const f = await fixture();
+    const change = await f.commit("feature", mode);
+    let child: ReturnType<typeof spawn> | undefined;
+    let closed: Promise<unknown> | undefined;
+    let ready!: () => void;
+    const started = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const queue = new IntegrationQueue({
+      directory: join(f.root, "integration"),
+      core: f.source,
+      remoteExecutionTimeoutMs: 5_000,
+      remotePreparationTimeoutMs: 5_000,
+      remoteNoOutputTimeoutMs: mode === "silent" ? 1_000 : 2_000,
+      remoteNoOutputAlertMs: 500,
+      placeGate: async (batch) =>
+        wslGateRunner({
+          machine: "pc",
+          shell: "posix",
+          batch: batch.id,
+          origin: batch.origin,
+          bundle: gitBundle,
+          stream: (command) => {
+            const script = command.replaceAll("'\\''", "'");
+            const phase = mode === "report" ? "report" : "gate";
+            if (!new RegExp(`clankie-gate['"]?\\s+['"]?${phase}['"]?\\s`, "u").test(script))
+              return f.stream(command);
+            child = spawn(
+              process.execPath,
+              [
+                "-e",
+                `process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => { ${mode === "chatty" ? "console.error('still running')" : ""} }, 100)`,
+              ],
+              { stdio: ["pipe", "pipe", "pipe"] },
+            );
+            closed = new Promise((resolve) => child!.once("close", resolve));
+            child.stdout!.once("data", ready);
+            return child;
+          },
+        }),
+    });
+    try {
+      const request = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [change] });
+      await queue.start(request, guard);
+      await started;
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      if (mode !== "report") {
+        const observations = await queue.progress();
+        expect(observations).toHaveLength(1);
+        expect(observations[0]!.stalled).toBe(mode === "silent");
+        expect(observations[0]!.message).toContain("pc gate");
+      }
+      const next = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [change] });
+      await queue.start(next, guard);
+      await queue.wait();
+      const batch = await queue.status(request.id);
+      expect(batch.state, batch.error).toBe("passed");
+      const cause =
+        mode === "report"
+          ? "pc gate report timed out after 5000ms"
+          : mode === "silent"
+            ? "produced no output for 1000ms"
+            : "exceeded wall-clock deadline 5000ms";
+      expect(batch.placement).toMatchObject({ machine: "local", reason: expect.stringContaining(cause) });
+      const remoteLog = join(dirname(batch.evidence), "core-gate-pc.log");
+      expect(await readFile(remoteLog, "utf8")).toContain(cause);
+      expect(batch.repos[0]!.gate).toMatchObject({ exitCode: 0, head: batch.repos[0]!.head });
+      expect(batch.repos[0]!.gate!.machine).toBeUndefined();
+      expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toContain("gated-in");
+      expect((await queue.status(next.id)).state).toBe("passed");
+      await closed;
+      expect(child!.exitCode !== null || child!.signalCode !== null).toBe(true);
+      if (mode !== "chatty") expect(child!.signalCode).toBe("SIGKILL");
+    } finally {
+      if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await closed;
+    }
+  },
+  120_000,
+);
+
 /**
  * A core repository whose landing gate writes its recorded selection, plus a
  * second home standing in for the linked machine: the runner's real script runs

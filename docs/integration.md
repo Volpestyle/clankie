@@ -150,7 +150,18 @@ local placement reason and runs the normal gate here. Cleanup has a separate
 ten-second limit, so an unavailable remote workspace cannot hold the serial
 queue. Cancellation stops only the SSH child created by that request, with a
 one-second grace before SIGKILL; it does not stop another batch or steer remote
-owner processes. Remote install and gate execution keep their existing behavior.
+owner processes. Each remote install and gate has a ninety-minute wall-clock
+limit and a ten-minute limit without stdout or stderr. Output resets only the
+silence limit. Fetching the gate report has a separate two-minute limit. A
+timeout retains the machine, phase and cause in the remote log and placement
+reason, then freshly installs and gates the exact composed tree locally.
+Remote success is never inferred from a disconnected transport. The progress
+observer alerts after three minutes without remote output, before fallback.
+
+These conservative initial limits allow reported 20–40-minute full PC gates
+and several minutes of quiet cold Rust builds. Retained partial gate failures
+took 154 and 180 seconds; no successful full-run measurement was retained here.
+Revisit the bounds with a successful full-run measurement.
 
 The linked machine runs the gate in WSL under `~/.clankie-fleet`: its own Node,
 pnpm, Rust and ffmpeg, one clone of the public origin, and one directory per

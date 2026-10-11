@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "calibrated-checks.tar",
+      "size": 41472,
+      "sha256": "3893882d8d1dd6359040c9f0cfcb79dfbbf17f8055f6e9f27dca268cb80b5a79",
+      "url": "clankie://evidence/sha256/3893882d8d1dd6359040c9f0cfcb79dfbbf17f8055f6e9f27dca268cb80b5a79"
+    },
+    {
+      "path": "checks.tar",
+      "size": 52736,
+      "sha256": "e3eae2630e66d9e960289a373201f4fb8280a049b04c0710ef47e1e16f32f01b",
+      "url": "clankie://evidence/sha256/e3eae2630e66d9e960289a373201f4fb8280a049b04c0710ef47e1e16f32f01b"
+    },
+    {
+      "path": "final-recheck.tar",
+      "size": 30208,
+      "sha256": "890e483187385a7ac04178a893af421a649c126adcdbfce3e602f9e615a5cd9c",
+      "url": "clankie://evidence/sha256/890e483187385a7ac04178a893af421a649c126adcdbfce3e602f9e615a5cd9c"
+    },
+    {
+      "path": "fresh-main.tar",
+      "size": 43520,
+      "sha256": "c5fae2ba710d8346b7a02549356ed32ce01eb34b721c42d168190066100d4e3f",
+      "url": "clankie://evidence/sha256/c5fae2ba710d8346b7a02549356ed32ce01eb34b721c42d168190066100d4e3f"
+    },
+    {
+      "path": "lead-landing.tar",
+      "size": 687616,
+      "sha256": "c3fd6579e95fb5764b657a05b0590544fbfe50dbe44c37879858d04f7ef1fe1b",
+      "url": "clankie://evidence/sha256/c3fd6579e95fb5764b657a05b0590544fbfe50dbe44c37879858d04f7ef1fe1b"
+    }
+  ]
+}

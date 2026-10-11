@@ -5,6 +5,7 @@ import { createWriteStream } from "node:fs";
 import { mkdir, readFile, open, readdir, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { Writable } from "node:stream";
 import {
   IntegrationBatchSchema,
   INTEGRATE_MAX_BATCH_MEMBERS,
@@ -69,6 +70,17 @@ interface IntegrationOptions {
   /** Internal deadlines, overridable by real-process integration fixtures. */
   remotePreparationTimeoutMs?: number;
   remoteCleanupTimeoutMs?: number;
+  remoteExecutionTimeoutMs?: number;
+  remoteNoOutputTimeoutMs?: number;
+  remoteNoOutputAlertMs?: number;
+}
+/** Retain the failed command record before replacing it with a fresh local gate. */
+class RemoteCommandFailure extends Error {
+  readonly record: NonNullable<IntegrationRepo["gate"]>;
+  constructor(message: string, record: NonNullable<IntegrationRepo["gate"]>) {
+    super(message);
+    this.record = record;
+  }
 }
 /** Main moved after the gate and its recorded selection no longer covers the result. */
 class GateNotCovering extends Error {}
@@ -111,7 +123,14 @@ export class IntegrationQueue {
   private durations: number[] = [];
   private writes = new Map<string, Promise<void>>();
   private draining = false;
-  private readonly commands = new Map<string, { pid?: number; proof: ReturnType<typeof processIdentity> }>();
+  private readonly commands = new Map<
+    string,
+    {
+      pid?: number;
+      proof: ReturnType<typeof processIdentity>;
+      remote?: { machine: string; phase: string; startedAtMs: number; lastOutputAtMs: number };
+    }
+  >();
   readonly options: IntegrationOptions;
   constructor(options: IntegrationOptions) {
     this.options = options;
@@ -287,9 +306,19 @@ export class IntegrationQueue {
     const id = head.batchId ?? head.id;
     const command = this.commands.get(id);
     if (command) {
+      if (command.remote) {
+        const remote = command.remote;
+        const silence = Math.max(0, Date.now() - remote.lastOutputAtMs);
+        return [
+          {
+            id: `integration:${id}:remote:${remote.phase}:${remote.startedAtMs}`,
+            stalled: silence >= (this.options.remoteNoOutputAlertMs ?? 180_000),
+            message: `Integration head stalled: batch ${id}, ${remote.machine} ${remote.phase}, no output since ${new Date(remote.lastOutputAtMs).toISOString()}; ${this.pending.length} requests waiting. Remote success is unproven; execution deadlines retain the reason and run a fresh local gate. Inspect clankie integrate status ${id}.`,
+          },
+        ];
+      }
       const proof = await command.proof;
-      // Remote execution is an explicit active job; the runner owns its bounded deadline.
-      if (!command.pid) return [];
+      if (!command.pid) throw Error("Integration child identity observation unavailable");
       if (!proof) throw Error("Integration child identity observation unavailable");
       const status = await probeProcess(proof);
       if (status === "unknown") throw Error("Integration child liveness unavailable");
@@ -597,6 +626,62 @@ export class IntegrationQueue {
     if (await this.git(repo.directory, ["status", "--porcelain"]))
       throw Error(`${repo.name} worktree changed; gate cannot attest it`);
   }
+  private async remoteCommand(
+    batchId: string,
+    runner: GateRunner,
+    phase: "install" | "gate",
+    base: string,
+    out: Writable,
+  ): Promise<{ exitCode: number | null; signal: string | null }> {
+    const controller = new AbortController();
+    const wallMs = this.options.remoteExecutionTimeoutMs ?? 5_400_000;
+    const silenceMs = this.options.remoteNoOutputTimeoutMs ?? 600_000;
+    const remote = { machine: runner.machine, phase, startedAtMs: Date.now(), lastOutputAtMs: Date.now() };
+    this.commands.set(batchId, { proof: Promise.resolve(undefined), remote });
+    let wall: ReturnType<typeof setTimeout> | undefined;
+    let silence: ReturnType<typeof setTimeout> | undefined;
+    let fail!: (error: Error) => void;
+    const expired = new Promise<never>((_, reject) => {
+      fail = (error) => {
+        controller.abort(error);
+        reject(error);
+      };
+      wall = setTimeout(
+        () => fail(Error(`${runner.machine} ${phase} exceeded wall-clock deadline ${wallMs}ms`)),
+        wallMs,
+      );
+    });
+    const resetSilence = () => {
+      clearTimeout(silence);
+      silence = setTimeout(
+        () => fail(Error(`${runner.machine} ${phase} produced no output for ${silenceMs}ms`)),
+        silenceMs,
+      );
+    };
+    const relay = new Writable({
+      write(chunk, encoding, done) {
+        remote.lastOutputAtMs = Date.now();
+        resetSilence();
+        out.write(chunk, encoding, done);
+      },
+    });
+    relay.on("error", fail);
+    out.once("error", fail);
+    resetSilence();
+    try {
+      return await Promise.race([runner.run(phase, base, relay, controller.signal), expired]);
+    } finally {
+      clearTimeout(wall);
+      clearTimeout(silence);
+      out.off("error", fail);
+      // Drain bytes already accepted by the relay before the durable log closes.
+      await new Promise<void>((resolve) => relay.end(resolve));
+      // Buffered writes can reset silence while draining; leave no timer behind.
+      clearTimeout(silence);
+      relay.destroy();
+    }
+  }
+
   private async command(
     repo: IntegrationRepo,
     name: "install" | "gate" | "revalidate",
@@ -618,18 +703,18 @@ export class IntegrationQueue {
     const head = await this.head(repo);
     const gateScript = name === "install" ? "check" : await landingGateScript(repo.directory);
     const batchId = basename(evidence);
+    let remoteError: string | undefined;
     const result = await new Promise<{ exitCode: number | null; signal: string | null }>(
       (resolve, reject) => {
         const out = createWriteStream(log, { flags: "wx", mode: 0o600 });
         out.on("error", reject);
         // A linked machine streams the same output into the same log.
         if (runner && name !== "revalidate") {
-          this.commands.set(batchId, { proof: Promise.resolve(undefined) });
-          runner.run(name, base, out).then(
+          this.remoteCommand(batchId, runner, name, base, out).then(
             (result) => out.end(() => resolve(result)),
             (error: unknown) => {
-              out.end(String(error));
-              reject(error);
+              remoteError = error instanceof Error ? error.message : String(error);
+              out.end(`\n${remoteError}\n`, () => resolve({ exitCode: null, signal: null }));
             },
           );
           return;
@@ -671,7 +756,7 @@ export class IntegrationQueue {
     } finally {
       await file.close();
     }
-    return {
+    const record = {
       head,
       ...result,
       startedAt,
@@ -679,6 +764,8 @@ export class IntegrationQueue {
       log,
       ...(runner && name !== "revalidate" ? { machine: runner.machine } : {}),
     };
+    if (remoteError !== undefined) throw new RemoteCommandFailure(remoteError, record);
+    return record;
   }
 
   private async composeAndGate(batch: IntegrationBatch): Promise<void> {
@@ -879,7 +966,14 @@ export class IntegrationQueue {
     for (const repo of batch.repos) {
       const env = await integrationEnvironment(join(root, "isolation", repo.name));
       await this.clean(repo);
-      repo.install = await this.command(repo, "install", env, root, repo.base, runner);
+      try {
+        repo.install = await this.command(repo, "install", env, root, repo.base, runner);
+      } catch (error) {
+        if (!runner || !(error instanceof RemoteCommandFailure)) throw error;
+        repo.install = error.record;
+        await this.save(batch);
+        return this.regateHere(batch, root, runner, error.message);
+      }
       await this.save(batch);
       if (runner && repo.install.exitCode !== 0)
         return this.regateHere(batch, root, runner, `install exited ${repo.install.exitCode}`);
@@ -893,9 +987,30 @@ export class IntegrationQueue {
     await this.save(batch);
     for (const repo of batch.repos) {
       const env = await integrationEnvironment(join(root, "isolation", repo.name));
-      repo.gate = await this.command(repo, "gate", env, root, repo.base, runner);
-      // Its recorded selection comes home, so revalidation and push read it here.
-      if (runner) await runner.collect(repo.directory);
+      try {
+        repo.gate = await this.command(repo, "gate", env, root, repo.base, runner);
+        // A connected report transport must not strand a completed remote gate either.
+        if (runner)
+          await remoteGateDeadline(
+            `${runner.machine} gate report`,
+            this.options.remotePreparationTimeoutMs ?? 120_000,
+            (signal) => runner.collect(repo.directory, signal),
+          );
+      } catch (error) {
+        if (!runner) throw error;
+        if (error instanceof RemoteCommandFailure) repo.gate = error.record;
+        else if (repo.gate) {
+          const log = await open(repo.gate.log, "a");
+          try {
+            await log.write(`\n${error instanceof Error ? error.message : String(error)}\n`);
+            await log.sync();
+          } finally {
+            await log.close();
+          }
+        }
+        await this.save(batch);
+        return this.regateHere(batch, root, runner, error instanceof Error ? error.message : String(error));
+      }
       await this.save(batch);
     }
     if (runner) {
