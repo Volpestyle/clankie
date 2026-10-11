@@ -905,6 +905,34 @@ evidence paths, isolation limits, uncertain sends and crash recovery.
 
 Integration clones keep client hooks disabled.
 
+### Scratch service and relay proofs
+
+From a source checkout, generate one private preset for both processes:
+
+```bash
+node scripts/scratch-stack.mjs .local/my-proof
+# Start the two owned processes in separate panes:
+clankie heavy -- node scripts/scratch-stack.mjs run .local/my-proof clankie
+clankie heavy -- node scripts/scratch-stack.mjs run .local/my-proof relay
+```
+
+The preset chooses distinct free loopback service, relay and device-doorway ports,
+wires `CLANKIE_CAPTAIN_URL`, `CLANKIE_CONTROL_PLANE_URL`, `CLANKIE_RELAY_PORT`
+and `CLANKIE_RELAY_URL` together, and creates private state, settings, file-backed
+credentials and random test bearers. Browser and Herdr connections are disabled.
+The launcher uses a clean environment and the preset, so inherited live-stack
+variables cannot override it. Keep the preset local; it contains scratch credentials. Stop both owned processes
+after the proof. Port selection does not reserve ports across later launches:
+a collision fails startup; generate a new directory and preset rather than
+falling back to the installed ports.
+
+`CLANKIE_SCRATCH=1`, `NODE_ENV=development`, or a state directory different from the installed default
+enables the startup guard. Both entrypoints refuse bind or peer ports `4310`
+and `4321` with `scratch_live_port_refused`, including explicitly configured
+URLs. A verified owner sandbox retains its normal state directory. Manually
+configured scratch stacks must set the same peer variables as the preset;
+changing just `PORT` is insufficient.
+
 ### `restart [service]`
 
 Restart launcher-owned services in dependency order

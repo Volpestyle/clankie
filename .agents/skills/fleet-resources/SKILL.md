@@ -37,6 +37,11 @@ causes an automatic kill. Normal interruption and leftover cleanup still apply.
 queue separately. The owning lead hears a holder alert for a governed server or
 a build/check permit held over 15 minutes; `holderAlerts` identifies its lane,
 seat, holder, executable and start time without exposing arguments.
+For source-checkout scratch service/relay proofs, use
+`node scripts/scratch-stack.mjs .local/PROOF` and the same generated `stack.env`
+for both heavy-wrapped entrypoints (commands in `docs/cli.md`, "Scratch service
+and relay proofs"). Include this in worker proof briefs; never leave either
+peer URL or advertised relay at the installed `4310`/`4321` defaults.
 Each full permit passes `VITEST_MAX_WORKERS=4` and `TURBO_CONCURRENCY=4` to its
 children, including package scripts and nested commands, preserving lower
 positive integer environment limits.

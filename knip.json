@@ -17,6 +17,7 @@
         "integrations/remote-lead/claude-setup.d.mts",
         "integrations/herdr-plugin/claude-path-shim.d.mts",
         "scripts/profile-clankie.mjs",
+        "scripts/scratch-stack.mjs",
         "scripts/proof-linux-pi-process.mjs",
         ".agents/skills/shared-checkout/scripts/land.mjs",
         ".agents/skills/shared-checkout/scripts/land.test.mjs",
