@@ -31,7 +31,7 @@ function countInside(project: Project, directories: readonly (string | undefined
 }
 
 /** Projects on Auto with the live seats working in each; remote workspaces are their own lead's to count. */
-export function autoProjectStates(
+function autoProjectStates(
   projects: readonly Project[],
   seatDirectories: readonly string[],
 ): AutoProjectState[] {

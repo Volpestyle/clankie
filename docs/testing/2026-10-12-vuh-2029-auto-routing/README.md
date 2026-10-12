@@ -113,3 +113,30 @@ $ node ../../scripts/typecheck.mjs tsconfig.json
 clankie heavy: light lane waiting (1/4 held, 1 queued)
 $ node scripts/scoped-code-check.mjs lint apps/clankie/src/captain/auto-projects.ts apps/clankie/src/captain/captain.ts apps/clankie/test/runtime-provider.integration.test.ts --threads=2
 ```
+
+## Landing follow-up
+
+The first integrator gate (`beac8767-2889-4db0-94c8-cebee922a81a`, composed HEAD
+`497b96540a876e3b7868f04acca2c6d4b64d00df`) exited 1 on dead-code checking:
+`Unused exports (1): autoProjectStates`. Nothing was pushed. The helper is now
+private to its module; routing behavior is unchanged. The final source was
+rerun against the same six real-service checks before resubmission.
+
+```text
+clankie heavy: waiting for machine capacity (service; 0/4 held, 1 queued)
+  server: w4F:pB / codex:01a130d8-db9d-7c53-96ce-44ada4392fce / pnpm · server · held 3m
+$ vitest run --passWithNoTests test/runtime-provider.integration.test.ts test/auto-switch-authority.integration.test.ts
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-2029
+
+{"level":30,"time":"2026-10-12T16:12:50.170Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-9c3d2944-0ce","operatorId":"owner","expiresAt":"2026-10-12T16:17:50.166Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-12T16:12:50.172Z","service":"clankie","version":"0.2.0","deviceId":"device-7e385201-731","offerId":"pairing-offer-9c3d2944-0ce","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-12T16:12:50.173Z","service":"clankie","version":"0.2.0","deviceId":"device-7e385201-731","msg":"device activated"}
+{"level":30,"time":"2026-10-12T16:12:50.175Z","service":"clankie","version":"0.2.0","deviceId":"device-7e385201-731","operatorId":"owner","msg":"device revoked"}
+{"level":30,"time":"2026-10-12T16:12:50.194Z","service":"clankie","version":"0.2.0","deviceId":"revoked","operatorId":"auto-fixture-owner","msg":"device revoked"}
+
+ Test Files  2 passed (2)
+      Tests  6 passed (6)
+   Start at  11:12:47
+   Duration  5.07s (transform 3.01s, setup 31ms, import 5.44s, tests 2.41s, environment 0ms)
+```
