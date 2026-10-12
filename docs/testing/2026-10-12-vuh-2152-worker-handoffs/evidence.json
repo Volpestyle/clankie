@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "landing-gate.log",
+      "size": 432392,
+      "sha256": "5f552338edb42b4d15298dd5b6723acbce33205e314ab039172642a26e89ad35",
+      "url": "clankie://evidence/sha256/5f552338edb42b4d15298dd5b6723acbce33205e314ab039172642a26e89ad35"
+    }
+  ]
+}

@@ -23,8 +23,22 @@ All checks ran through `clankie heavy --`.
   remote coverage and durable receipt reload.
 - Queue integration case `a push request reads pushing`: passed. A live request
   covers its input; durable history loaded by another queue does not.
-- Touched TypeScript files: lint passed. Source typecheck passed; test partitions
-  and final integration landing gate are recorded by the landing request.
+- Queue active and waiting withdrawal case: passed; cancelled inputs immediately
+  stop covering commits.
+- Touched TypeScript files: lint passed. Service source and all 13 test typecheck
+  partitions passed (466.77 seconds); local record `.local/typechecks/run-sbJAnX/report.json`.
+- Integration request `8f5e19b1-dbf3-47aa-9a08-949895cad9d8` pushed
+  `72a9b94565eccce96b088454b5a4a59ded7f6622` on fetched base
+  `425bb6b9326c28ea9e847acb310c112dd398d25f`. Its exact-tree root
+  `check:landing` passed (exit 0; 750.07 seconds): 1,705 tests passed, 8 skipped.
+  [Raw gate log](clankie://evidence/sha256/5f552338edb42b4d15298dd5b6723acbce33205e314ab039172642a26e89ad35)
+  is retained by the evidence store and listed in `evidence.json`.
+  A fresh fetch confirmed the pushed HEAD on `origin/main`.
+
+Earlier request `39fc9efe-dc91-4982-9a97-6b5e7c61b231` was interrupted before
+this change's gate or push when the service owning the queue exited. Its record
+remains retained; the unchanged candidate `99e1af457` was resubmitted through
+integration, not directly pushed.
 
 Initial checks found missing checkout dependencies (fixed with governed
 `pnpm install --frozen-lockfile`) and an existing explicit remote override
@@ -32,7 +46,8 @@ regression (fixed; the full pane suite then passed).
 
 ## Live evidence pending deployment
 
-The lead deploys after the integration request lands. This worker does not
+The lead deploys after the current queue drains, preserving its five live
+requests. The code is landed; deployment and live receipts remain pending. This worker does not
 restart the service. Its connected tool catalog does not expose
 `close_worker_pane`, so the lead must run these closes and supply receipts.
 
