@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { REST } from "discord.js";
+import { readableMcpResult } from "@clankie/protocol/mcp-result";
 import { expect, it } from "vitest";
 import { updateGlobalConfig } from "../../../packages/model-provider/src/config.ts";
 import { SettingsStore } from "@clankie/settings";
@@ -51,6 +52,7 @@ it("recovers an outage once, delivers saved answers to their original room and a
     message_reference: { message_id: string };
     channel: string;
   }[] = [];
+  let audienceReads = 0;
   const model = createServer(async (request, response) => {
     for await (const _ of request) {
       /* consume the actual provider request */
@@ -88,6 +90,11 @@ it("recovers an outage once, delivers saved answers to their original room and a
       response.removeHeader("content-type");
       response.writeHead(204);
       response.end();
+      return;
+    }
+    if (/\/channels\/[^/]+$/.test(url.pathname)) {
+      audienceReads += 1;
+      response.end(JSON.stringify({ id: "50000", guild_id: "40000", permission_overwrites: [] }));
       return;
     }
     const channel = /\/channels\/([^/]+)\/messages/.exec(url.pathname)?.[1];
@@ -177,6 +184,18 @@ it("recovers an outage once, delivers saved answers to their original room and a
     {
       herdrAvailable: () => false,
       embodiment: {},
+      discordActions: {
+        serverAction: async (action: { path: string }) => ({
+          ok: true,
+          message: "Loopback Discord metadata",
+          data: await new REST({ version: "10", api: `http://127.0.0.1:${port(discord)}` })
+            .setToken("fixture")
+            .get(action.path as Parameters<REST["get"]>[0]),
+        }),
+        execute: async () => {
+          throw new Error("Refused room turn must not post");
+        },
+      },
       memory: {
         recallEpisodeCard: async () => "",
         searchEpisodeCard: async () => "",
@@ -193,6 +212,7 @@ it("recovers an outage once, delivers saved answers to their original room and a
       personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
     },
   );
+  const roomId = captain.bodyRoomConversation("discord_presence", "40000:50000");
   const observations = new DiscordRoomObservations(join(root, "rooms.json"));
   const inboxPath = join(root, "inbox.sqlite");
   let inbox = new DiscordTextInbox(inboxPath, "0");
@@ -203,6 +223,10 @@ it("recovers an outage once, delivers saved answers to their original room and a
     captain,
     settings,
     roomObservations: observations,
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer fixture-operator"
+        ? { operatorId: "fixture-owner" }
+        : undefined,
     discordEnvironment: {},
     discordTurnReceipts: receipts,
     eventLogPath: join(root, "events.jsonl"),
@@ -246,6 +270,14 @@ it("recovers an outage once, delivers saved answers to their original room and a
     baseUrl: `http://127.0.0.1:${port(http)}`,
     captainToken: "fixture-captain",
   });
+  const roomStatus = async () => {
+    const response = await fetch(`http://127.0.0.1:${port(http)}/v1/discord/rooms`, {
+      headers: { authorization: "Bearer fixture-operator" },
+    });
+    expect(response.status).toBe(200);
+    const snapshot = await response.json();
+    return snapshot.rooms.find((room: { conversationId: string }) => room.conversationId === roomId);
+  };
   const presence = new DiscordPresenceSession({
     sessionId: "fixture-body",
     characterId: "clankie",
@@ -271,12 +303,8 @@ it("recovers an outage once, delivers saved answers to their original room and a
         contextMessageLimit: 0,
         authenticatedSurfaceUrl: "http://fixture",
       },
-      (evidence) =>
-        observations.record("room", {
-          ...evidence,
-          id: `${evidence.deliveryId}:${evidence.outcome}`,
-          transportKind: "bot",
-        }),
+      // Deliberately lose bridge health reports. Durable service receipts
+      // must still supply the counters the rooms API and doctor consume.
     );
   const message = (id: string, channelId = "50000") => ({
     id,
@@ -302,7 +330,24 @@ it("recovers an outage once, delivers saved answers to their original room and a
     expect((await body.handle(message("100"))).state).toBe("failed");
     expect(posts).toHaveLength(0);
     expect(inbox.pending()).toHaveLength(1);
-    expect(observations.status("room").unrecoveredFailed).toBe(1);
+    expect(await roomStatus()).toMatchObject({ failed: 1, unrecoveredFailed: 1, pending: 0 });
+    const tool = (await captain.laneToolBank("operator", "global-default")).tools.find(
+      (entry) => entry.name === "room_turn",
+    )!;
+    const refused = await tool.call({ room: roomId, brief: "Test audience refusal." });
+    const projected = readableMcpResult({ ...refused, content: [...refused.content] }, "room_turn");
+    const callerCause = projected.content.find((block) => block.type === "text")?.text;
+    expect(callerCause).toContain("discord_owner_audience_required");
+    expect(audienceReads).toBeGreaterThan(0);
+    expect(posts).toHaveLength(0);
+    const reprojected = readableMcpResult(
+      {
+        ...projected,
+        content: [{ type: "text", text: "room turn: failed." }],
+      },
+      "room_turn",
+    );
+    expect(reprojected.content[0]?.text).toContain("discord_owner_audience_required");
     const before = modelCalls;
     modelUp = true;
     body = restart(true);
@@ -313,7 +358,8 @@ it("recovers an outage once, delivers saved answers to their original room and a
     expect(posts).toMatchObject([
       { channel: "50000", message_reference: { message_id: "100" }, content: "The saved room answer." },
     ]);
-    expect(observations.status("room").unrecoveredFailed).toBe(0);
+    expect(await roomStatus()).toMatchObject({ failed: 0, unrecoveredFailed: 0, pending: 0, answered: 1 });
+    expect(observations.status(roomId).lastReason).not.toBe("captain_session_failed");
     body = restart();
     await inbox.handle("100", async () => {
       await body.handle(message("100"));
@@ -402,6 +448,109 @@ it("recovers an outage once, delivers saved answers to their original room and a
     expect(modelCalls).toBe(lostAckCalls);
     expect(posts).toHaveLength(5);
     expect(inbox.pending()).toHaveLength(0);
+    const reconciledMouth = leases.status("discord_mouth")!;
+    expect(
+      (
+        await router.recoverIdle(
+          "discord_mouth",
+          () => true,
+          async (guard) => {
+            await guard();
+            return receipts.writesSettled(reconciledMouth.conversationId);
+          },
+          () => true,
+        )
+      ).outcome,
+    ).toBe("released");
+
+    // Legacy done row: its accepted request and result were lost. Receipt
+    // seeding must reopen it and ask for a resend without another model run.
+    modelUp = false;
+    await body.handle(message("105"));
+    await body.handle(message("107"));
+    inbox.close();
+    const legacy = new DatabaseSync(inboxPath);
+    legacy
+      .prepare(
+        "UPDATE deliveries SET done = 1, request = NULL, result = NULL, acknowledged = 0 WHERE id = '105'",
+      )
+      .run();
+    legacy
+      .prepare(
+        "UPDATE deliveries SET done = 1, request = '{}', result = NULL, acknowledged = 0 WHERE id = '107'",
+      )
+      .run();
+    legacy.prepare("INSERT OR REPLACE INTO metadata VALUES ('seeded_v2', '1')").run();
+    legacy.close();
+    const legacyLog = join(root, "legacy.jsonl");
+    await writeFile(
+      legacyLog,
+      ["105", "107"]
+        .flatMap((deliveryId) =>
+          ["accepted", "failed"].map((outcome) =>
+            JSON.stringify({
+              type: "discord.text.ingress",
+              data: { deliveryId, channelId: "50000", guildId: "40000", outcome },
+            }),
+          ),
+        )
+        .join("\n") + "\n",
+    );
+    inbox = new DiscordTextInbox(inboxPath, "0");
+    await inbox.seedReceipts(legacyLog);
+    expect(inbox.pending().map((row) => row.id)).toContain("105");
+    const legacyCalls = modelCalls;
+    modelUp = true;
+    body = ingress();
+    for (const id of ["105", "107"]) {
+      await inbox.handle(id, async () => {
+        await body.handle(message(id));
+      });
+      expect(posts.filter((post) => post.message_reference.message_id === id)).toMatchObject([
+        { content: DISCORD_TURN_FAILED_NOTICE },
+      ]);
+    }
+    expect(modelCalls).toBe(legacyCalls);
+    body = restart();
+    await inbox.seedReceipts(legacyLog);
+    for (const id of ["105", "107"]) {
+      await inbox.handle(id, async () => {
+        await body.handle(message(id));
+      });
+      expect(posts.filter((post) => post.message_reference.message_id === id)).toHaveLength(1);
+    }
+    expect(await roomStatus()).toMatchObject({ failed: 0, pending: 0, unrecoveredFailed: 0 });
+    // Restoration is exercised, not inferred: the next fresh message answers.
+    expect((await body.handle(message("106"))).state).toBe("settled");
+    expect(posts.at(-1)?.content).toBe("The saved room answer.");
+    const repaired = new DiscordRoomObservations(join(root, "repaired-rooms.json"));
+    for (const evidence of new DiscordTurnReceipts(join(root, "receipts.json")).roomEvidence())
+      repaired.record(
+        captain.bodyRoomConversation("discord_presence", `${evidence.guildId ?? "dm"}:${evidence.channelId}`),
+        evidence,
+      );
+    expect(repaired.status(roomId)).toMatchObject({
+      failed: 0,
+      pending: 0,
+      unrecoveredFailed: 0,
+      answered: observations.status(roomId).answered,
+    });
+    if (process.env.VUH_2142_PROOF_PATH)
+      await writeFile(
+        process.env.VUH_2142_PROOF_PATH,
+        JSON.stringify({
+          modelRestored: modelUp,
+          callerCause,
+          legacyNoticeCounts: ["105", "107"].map((id) => ({
+            id,
+            posts: posts.filter((post) => post.message_reference.message_id === id).length,
+          })),
+          counters: await roomStatus(),
+          inboxPending: inbox.pending().length,
+          repairedCounters: repaired.status(roomId),
+          posts,
+        }),
+      );
   } finally {
     inbox.close();
     await service.close();

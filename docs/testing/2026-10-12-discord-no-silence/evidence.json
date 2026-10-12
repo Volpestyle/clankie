@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "proof-bundle.json",
+      "size": 165487,
+      "sha256": "7edc356c10dc5ee013395616aba7edbf307ec9e2c6ad5de20203a9c924680920",
+      "url": "clankie://evidence/sha256/7edc356c10dc5ee013395616aba7edbf307ec9e2c6ad5de20203a9c924680920"
+    },
+    {
+      "path": "typecheck-service-report.json",
+      "size": 108536,
+      "sha256": "4a32a812c9c48ef42588a3fbdbddae492b503663718358250a70288e6b49f9ee",
+      "url": "clankie://evidence/sha256/4a32a812c9c48ef42588a3fbdbddae492b503663718358250a70288e6b49f9ee"
+    }
+  ]
+}

@@ -33,6 +33,12 @@ it("never calls accepted or buffered answered; deduplicates confirmed sends and 
   store.record("room", event("settled"));
   store.record("room", event("settled"));
   expect(store.status("room")).toMatchObject({ received: 2, answered: 2, pending: 0, absorbedUnknown: 0 });
+  store.record("room", { ...event("failed"), reason: "captain_session_failed" });
+  expect(store.status("room")).toMatchObject({
+    failed: 0,
+    unrecoveredFailed: 0,
+    lastReason: "reply_confirmed",
+  });
 });
 it("counts explicit missed and silent reasons without inventing missed messages for unknown coverage", () => {
   const { store } = fixture();

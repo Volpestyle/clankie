@@ -92,7 +92,9 @@ confirmation through `discord legacy-author ... --confirm`; display names and
 message claims never establish identity. Binding alone does not reopen a home.
 `clankie discord rooms` and doctor expose unrecovered failed text deliveries.
 The inbox reconciles existing replies, retries once after recovery and confirms
-its reply or failure notice before closing. Do not manually repost an uncertain
+its reply or once-only resend notice before closing, including legacy failures
+with no saved request. Room counters repair from durable service outcomes after
+lost bridge reports; failed means still unresolved. Do not manually repost an uncertain
 answer or clear a mouth lease by age. `room_turn` reports its concrete refusal;
 `discord_owner_audience_required` preserves the owner-only audience boundary.
 

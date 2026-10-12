@@ -44,7 +44,9 @@ export class DiscordRoomObservations {
       // reconstruct the original device bearer/local operator authentication.
       if (room.status.guidance.state === "pending")
         room.status.guidance = { ...room.status.guidance, state: "expired", text: undefined };
-      room.status.unrecoveredFailed = this.unrecovered(room);
+      this.recount(room);
+      if (room.status.failed === 0 && room.deliveries.some((entry) => entry.outcomes.includes("failed")))
+        room.status.lastReason = "reply_confirmed";
       this.rooms.set(room.status.conversationId, room);
     }
   }
@@ -78,6 +80,16 @@ export class DiscordRoomObservations {
     if (evidence.outcome === "declined") status.lastReason = evidence.reason ?? "volitional_silence";
     // A rolling bounded window is explicit: counters cover only retained deliveries.
     room.deliveries = room.deliveries.slice(-4096);
+    this.recount(room);
+    if (status.failed === 0 && (evidence.outcome === "settled" || evidence.outcome === "failed"))
+      status.lastReason =
+        evidence.outcome === "failed" ? "reply_confirmed" : (evidence.reason ?? "reply_confirmed");
+    this.commit(conversationId, room);
+    if (firstFailure && (evidence.outcome === "failed" || evidence.outcome === "escalated"))
+      for (const listener of this.listeners) listener(conversationId);
+  }
+  private recount(room: Room): void {
+    const status = room.status;
     const has = (entry: z.infer<typeof Delivery>, ...outcomes: string[]) =>
       outcomes.some((outcome) => entry.outcomes.includes(outcome));
     status.received = room.deliveries.length;
@@ -89,7 +101,7 @@ export class DiscordRoomObservations {
     ).length;
     status.silent = room.deliveries.filter((entry) => has(entry, "declined")).length;
     status.missed = room.deliveries.filter((entry) => has(entry, "missed")).length;
-    status.failed = room.deliveries.filter((entry) => has(entry, "failed")).length;
+    status.failed = this.unrecovered(room);
     status.unrecoveredFailed = this.unrecovered(room);
     status.pending = room.deliveries.filter(
       (entry) => !has(entry, "settled", "declined", "missed", "failed", "absorbed", "dropped", "escalated"),
@@ -102,9 +114,6 @@ export class DiscordRoomObservations {
           room.deliveries.some((reply) => reply.id === entry.replyDeliveryId && has(reply, "settled"))
         ),
     ).length;
-    this.commit(conversationId, room);
-    if (firstFailure && (evidence.outcome === "failed" || evidence.outcome === "escalated"))
-      for (const listener of this.listeners) listener(conversationId);
   }
   private unrecovered(room: Room): number {
     return room.deliveries.filter(

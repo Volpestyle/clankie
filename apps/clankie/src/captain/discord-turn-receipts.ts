@@ -6,6 +6,7 @@ import {
   DiscordPresenceWriteResultSchema,
   type DiscordPresenceWriteResult,
   type CaptainChannelTurnResult,
+  type DiscordRoomEvidence,
 } from "@clankie/protocol";
 import { z } from "zod";
 
@@ -59,6 +60,48 @@ export class DiscordTurnReceipts {
   public get(id: string): Receipt | undefined {
     if (this.unreadable) throw new Error("Discord delivery receipts unavailable");
     return this.records.get(id);
+  }
+
+  /** Repair the content-free room projection from durable service outcomes. */
+  public roomEvidence(receiptId?: string): DiscordRoomEvidence[] {
+    if (this.unreadable) return [];
+    const evidence: DiscordRoomEvidence[] = [];
+    const records = receiptId === undefined ? this.records : new Map([[receiptId, this.get(receiptId)]]);
+    for (const [id, receipt] of records) {
+      if (receipt === undefined) continue;
+      const origin = receipt.origin;
+      if (origin === undefined || receipt.lane !== "discord_text" || !/^\d+$/u.test(origin.messageId))
+        continue;
+      const result = receipt.settled;
+      const outcome =
+        id === `write:${origin.messageId}:reply` && receipt.writeResult?.messageId !== undefined
+          ? "settled"
+          : id.startsWith("write:")
+            ? undefined
+            : result?.state === "failed"
+              ? "failed"
+              : result?.state === "silent"
+                ? "declined"
+                : result?.state === "absorbed"
+                  ? "absorbed"
+                  : "accepted";
+      if (outcome === undefined) continue;
+      evidence.push({
+        id: `${origin.messageId}:${outcome}`,
+        deliveryId: origin.messageId,
+        presenceSessionId: origin.presenceSessionId,
+        transportKind: origin.transportKind,
+        ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
+        channelId: origin.channelId,
+        actorId: origin.actorId,
+        outcome,
+        ...(result?.state === "failed" ? { reason: result.code } : {}),
+        ...(result?.state === "absorbed" && result.replyDeliveryId !== undefined
+          ? { replyDeliveryId: result.replyDeliveryId.replace(/:recovery$/u, "") }
+          : {}),
+      });
+    }
+    return evidence;
   }
 
   public begin(id: string, receipt: Receipt): void {

@@ -91,7 +91,7 @@ export class DiscordTextInbox {
   }
 
   async seedReceipts(path: string): Promise<void> {
-    if (this.db.prepare("SELECT value FROM metadata WHERE key = 'seeded_v2'").get() !== undefined) return;
+    if (this.db.prepare("SELECT value FROM metadata WHERE key = 'seeded_v3'").get() !== undefined) return;
     try {
       for await (const line of createInterface({ input: createReadStream(path), crlfDelay: Infinity })) {
         if (!line.trim()) continue;
@@ -121,12 +121,18 @@ export class DiscordTextInbox {
               JSON.stringify({ state: "absorbed", captainSessionId: "legacy", turnId: "legacy" }),
               deliveryId,
             );
+        if (outcome === "failed")
+          this.db
+            .prepare(
+              "UPDATE deliveries SET done = 0, result = ?, retries = 1 WHERE id = ? AND (request IS NULL OR json_type(request, '$.trigger') IS NULL) AND reply IS NULL AND acknowledged = 0",
+            )
+            .run(JSON.stringify({ state: "failed", code: "discord_saved_request_missing" }), deliveryId);
         // Keep accepted failures pending: a returned failure is not a delivered notice.
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    this.db.prepare("INSERT INTO metadata VALUES ('seeded_v2', '1')").run();
+    this.db.prepare("INSERT INTO metadata VALUES ('seeded_v3', '1')").run();
   }
 
   readonly channelActivity = {
@@ -283,12 +289,25 @@ export class DiscordTextInbox {
       submitDiscordCaptainChannelTurn: async (incoming) => {
         this.enqueue(incoming.deliveryId, incoming.trigger.channelId, incoming.trigger.guildId);
         const row = this.row(incoming.deliveryId)!;
-        const original =
+        const parsedOriginal =
           row.request === null
-            ? incoming
-            : DiscordPresenceChannelTurnRequestSchema.parse(JSON.parse(row.request));
+            ? undefined
+            : DiscordPresenceChannelTurnRequestSchema.safeParse(JSON.parse(row.request));
+        const original = parsedOriginal?.success ? parsedOriginal.data : incoming;
         const saved =
           row.result === null ? undefined : CaptainChannelTurnResultSchema.parse(JSON.parse(row.result));
+        // A legacy accepted failure with no saved request cannot safely rerun
+        // tools from today's edited message. It still owes its original room
+        // a notice, using the same reconciled reply key as every other failure.
+        if (parsedOriginal?.success !== true && saved?.state === "failed") {
+          const missing = { state: "failed" as const, code: "discord_saved_request_missing" };
+          // Retain the observed address for history-confirmed reply evidence.
+          // The exhausted failure remains durable: this is never a model retry.
+          this.db
+            .prepare("UPDATE deliveries SET request = ?, result = ?, retries = 1 WHERE id = ?")
+            .run(JSON.stringify(incoming), JSON.stringify(missing), incoming.deliveryId);
+          return missing;
+        }
         if (saved !== undefined && saved.state !== "absorbed" && saved.state !== "failed") return saved;
         if (saved?.state === "failed" && row.retries > 0) return saved;
         if (saved?.state === "failed") {

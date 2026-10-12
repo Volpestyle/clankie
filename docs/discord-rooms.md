@@ -46,10 +46,13 @@ owner once per delivery through the existing content-free device push path.
 Failed accepted text requests remain in the durable Discord inbox. On the next
 healthy recovery round, Clankie checks for an existing bot reply before retrying
 the saved request once. If that retry fails, the accepted message gets
-one short failure notice. Neither a model result nor an attempted notice closes
+one short failure notice asking the sender to resend. Legacy failures with no
+saved request are reopened from the ingress receipts and get that notice without
+rerunning tools from a possibly edited message. Neither a model result nor an attempted notice closes
 the delivery; Discord confirmation does. `unrecoveredFailed` counts failed
-messages without a confirmed reply or notice, separately from the historical
-failure count. `clankie doctor` also reports these unresolved room deliveries.
+messages without a confirmed reply or notice, and `failed` reflects that current unresolved count. Durable service turn and
+confirmed reply receipts repair the projection after lost bridge observations;
+a recovery reply clears pending and failed instead of leaving old failures displayed. `clankie doctor` also reports these unresolved room deliveries.
 
 A completed handoff's saved answer is replayed to its original room without
 running its tools again. Before replaying an uncertain write, the authenticated

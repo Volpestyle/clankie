@@ -48,7 +48,7 @@ function summary(value, name, isError) {
   if (
     isError ||
     value?.isError === true ||
-    ["refused", "error", "unavailable", "unconfirmed", "waiting_user"].includes(state)
+    ["failed", "uncertain", "refused", "error", "unavailable", "unconfirmed", "waiting_user"].includes(state)
   )
     return `${label}: ${typeof state === "string" ? state : "failed"}${typeof (data?.reason ?? data?.code ?? data?.error) === "string" ? ` — ${(data.reason ?? data.code ?? data.error).slice(0, 256)}` : ""}.`;
   if (object(data)) {
@@ -66,7 +66,24 @@ function summary(value, name, isError) {
 
 /** MCP display projection only. Preserve errors, media, metadata and receipt identity. */
 export function readableMcpResult(result, name = "") {
-  if (object(result.structuredContent)) return result;
+  if (object(result.structuredContent)) {
+    const value = dataValue(result.structuredContent);
+    const data = value?.outcome === "ok" ? value.content : value;
+    // An upstream bridge may have already replaced the JSON with a summary.
+    // Refresh failed results from their retained data, including the cause.
+    if (result.isError || data?.state === "failed" || data?.state === "uncertain")
+      return {
+        ...result,
+        structuredContent: value,
+        content: [
+          { type: "text", text: summary(value, name, result.isError) },
+          ...result.content.filter(
+            (_part, index) => index !== result.content.findIndex((part) => part.type === "text"),
+          ),
+        ],
+      };
+    return result;
+  }
   const decoded = decodeMcpResult(result);
   if (decoded === undefined) return result;
   const value = dataValue(decoded);

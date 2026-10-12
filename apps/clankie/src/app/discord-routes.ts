@@ -137,6 +137,23 @@ function unanswered(request: DiscordPresenceChannelTurnRequest): UnansweredMessa
 }
 
 export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
+  const observeReceipt = (receiptId?: string) => {
+    if (!ctx.dependencies.roomObservations) return;
+    try {
+      for (const evidence of ctx.discordTurnReceipts.roomEvidence(receiptId)) {
+        const room = ctx.dependencies.captain.bodyRoomConversation(
+          "discord_presence",
+          `${evidence.guildId ?? "dm"}:${evidence.channelId}`,
+        );
+        ctx.dependencies.roomObservations.record(room, evidence);
+      }
+    } catch (error) {
+      logger.warn({ error, receiptId }, "Discord room outcome projection unavailable");
+    }
+  };
+  // Bridge reports can be interrupted by an outage. The service's confirmed
+  // writes repair those counters without another Discord post or model run.
+  observeReceipt();
   ctx.app.get("/v1/discord/readiness", async (context) => {
     const captain = await authenticateCaptain(context.req.raw, ctx.dependencies);
     if (captain === "unavailable") {
@@ -633,7 +650,10 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
           if (persistedWrite !== undefined && persistedWrite.writeAbsent !== true) {
             if (reply === null)
               ctx.discordTurnReceipts.confirmWriteAbsent(`write:${write.idempotencyKey}`, fingerprint);
-            else ctx.discordTurnReceipts.settleWrite(`write:${write.idempotencyKey}`, fingerprint, reply);
+            else {
+              ctx.discordTurnReceipts.settleWrite(`write:${write.idempotencyKey}`, fingerprint, reply);
+              observeReceipt(`write:${write.idempotencyKey}`);
+            }
           }
           return context.json({ reply });
         } catch (error) {
@@ -799,6 +819,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
               );
               const result = await discordPresenceRuntime.execute(write, session, effectGuard);
               ctx.discordTurnReceipts.settleWrite(`write:${write.idempotencyKey}`, fingerprint, result);
+              observeReceipt(`write:${write.idempotencyKey}`);
               return result;
             },
             { lifetime: publish === undefined ? "operation" : "session" },
@@ -863,6 +884,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     const result: CaptainChannelTurnResult = { state: "failed", deliveryStage: "uncertain", code };
     try {
       ctx.discordTurnReceipts.settle(deliveryKey, fingerprint, result);
+      observeReceipt(deliveryKey);
     } catch {
       return undefined;
     }
@@ -929,6 +951,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
             actorId: request.trigger.actorId,
           },
         });
+        observeReceipt(deliveryKey);
       } catch {
         return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
       }
@@ -952,6 +975,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
         }
         const staged = { ...result, deliveryStage: discordDeliveryStage(result) };
         ctx.discordTurnReceipts.settle(deliveryKey, fingerprint, staged);
+        observeReceipt(deliveryKey);
         if (staged.state === "failed") alertUnanswered(unanswered(request), staged.code);
         return staged;
       });
