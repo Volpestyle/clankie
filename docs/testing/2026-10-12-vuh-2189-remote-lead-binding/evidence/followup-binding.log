@@ -1,0 +1,20 @@
+clankie heavy: light lane waiting (1/4 held, 1 queued)
+  server: w4F:pB / codex:01a130d8-db9d-7c53-96ce-44ada4392fce / pnpm · server · held 11m
+  server: w48:pN / codex:01a130d8-a2c9-7d83-b534-39e2ffabf385 / env · server · held 2m
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-2189
+
+{"level":30,"time":"2026-10-12T19:55:16.478Z","service":"clankie","version":"0.2.0","event":"mcp.host.ready","server":"linear","msg":"mcp server ready"}
+{"level":30,"time":"2026-10-12T19:55:16.481Z","service":"clankie","version":"0.2.0","event":"mcp.host.ready","server":"owner_mail","msg":"mcp server ready"}
+{"level":30,"time":"2026-10-12T19:55:16.764Z","service":"clankie","version":"0.2.0","event":"mcp.host.call","server":"linear","tool":"get_issue","msg":"mcp tool called"}
+{"level":30,"time":"2026-10-12T19:55:16.778Z","service":"clankie","version":"0.2.0","event":"mcp.host.call","server":"linear","tool":"save_comment","msg":"mcp tool called"}
+{"level":30,"time":"2026-10-12T19:55:16.802Z","service":"clankie","version":"0.2.0","event":"mcp.host.call","server":"linear","tool":"save_issue","msg":"mcp tool called"}
+{"level":30,"time":"2026-10-12T19:55:16.862Z","service":"clankie","version":"0.2.0","event":"mcp.host.call","server":"linear","tool":"get_issue","msg":"mcp tool called"}
+{"level":30,"time":"2026-10-12T19:55:16.897Z","service":"clankie","version":"0.2.0","event":"mcp.host.call","server":"linear","tool":"get_issue","msg":"mcp tool called"}
+{"level":30,"time":"2026-10-12T19:55:16.926Z","service":"clankie","version":"0.2.0","event":"mcp.host.call","server":"linear","tool":"get_issue","msg":"mcp tool called"}
+
+ Test Files  2 passed (2)
+      Tests  5 passed (5)
+   Start at  14:55:09
+   Duration  7.75s (transform 4.40s, setup 83ms, import 7.85s, tests 836ms, environment 0ms)
+

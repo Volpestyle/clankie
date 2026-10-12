@@ -4728,14 +4728,19 @@ before service cutover, and releases include it. A missing bridge returns a
 503 with that build command rather than an opaque 500.
 
 Launch uses the PC's existing signed-in Claude.ai profile. Optional `account`
-selects exactly `~/.claude-<label>` on that machine, using the same labels as
+selects `~/.claude-<label>` on that machine, using the same labels as
 `hire_agent` and `worker_accounts --fleet`. For example, `"account": "work"`
 selects `~/.claude-work`, taking precedence over the SSH environment's
 `CLAUDE_CONFIG_DIR`. Labels start with a lowercase letter and contain only
 lowercase letters, digits, underscores or hyphens, up to 64 characters.
+`"account": "default"` prefers an existing `~/.claude-default` directory;
+when that directory is absent, it selects the bare `~/.claude` profile, matching
+the Mac's `default` label even when other profiles are signed in.
 The selected profile must already exist and pass native Claude.ai sign-in
 verification; missing, logged-out or unverifiable selections refuse without
-falling back. Sign in on the PC with `$env:CLAUDE_CONFIG_DIR = Join-Path $HOME
+falling back to another profile. An existing `~/.claude-default` that fails
+verification never falls back to `~/.claude`. Refusals name the selected directory
+and its sign-in command. Sign in on the PC with `$env:CLAUDE_CONFIG_DIR = Join-Path $HOME
 '.claude-work'; claude auth login` before launching with that label.
 
 Without `account`, launch honors `CLAUDE_CONFIG_DIR`; otherwise it inspects

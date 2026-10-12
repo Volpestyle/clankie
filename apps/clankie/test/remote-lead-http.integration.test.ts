@@ -178,6 +178,27 @@ else console.log('{}');
           env: { ...options.env, CLAUDE_CONFIG_DIR: "" },
         }),
       ).rejects.toThrow("Multiple signed-in Claude profiles");
+      // VUH-2189: "default" names the bare profile when the explicit directory
+      // is absent, even with another signed-in profile selected by SSH.
+      const bareDefault = join(root, ".claude");
+      const explicitDefault = join(root, ".claude-default");
+      await expect(prepareClaude(executable, plugin, { ...options, account: "default" })).rejects.toThrow(
+        "Claude account 'default' at ~/.claude does not exist",
+      );
+      await mkdir(bareDefault);
+      await writeFile(join(bareDefault, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true }));
+      expect(await prepareClaude(executable, plugin, { ...options, account: "default" })).toBe(bareDefault);
+      await mkdir(explicitDefault);
+      await expect(prepareClaude(executable, plugin, { ...options, account: "default" })).rejects.toThrow(
+        `Claude profile ${explicitDefault} has not finished its first run`,
+      );
+      await writeFile(
+        join(explicitDefault, ".claude.json"),
+        JSON.stringify({ hasCompletedOnboarding: true }),
+      );
+      expect(await prepareClaude(executable, plugin, { ...options, account: "default" })).toBe(
+        explicitDefault,
+      );
       const beforeDirectories = await readdir(root);
       for (const account of ["missing", "logged-out", "api", "broken", "failed"]) {
         await writeFile(callsPath, "");

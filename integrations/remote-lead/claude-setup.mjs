@@ -1,6 +1,6 @@
 // Prepare only Clankie's lead plugin in an existing signed-in native profile.
 import { execFile } from "node:child_process";
-import { readFile, readdir, realpath, mkdir, writeFile } from "node:fs/promises";
+import { readFile, readdir, realpath, stat, mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname, relative, isAbsolute } from "node:path";
 import { promisify } from "node:util";
@@ -56,9 +56,18 @@ export async function prepareClaude(executable, plugin, options = {}) {
       throw new Error(`Native Claude ${args.slice(0, 3).join(" ")} failed; inspect that profile on the PC`);
     }
   };
+  let accountDirectory = `.claude-${account}`;
+  if (account === "default") {
+    try {
+      if (!(await stat(join(home, accountDirectory))).isDirectory()) accountDirectory = ".claude";
+    } catch (error) {
+      if (error.code === "ENOENT") accountDirectory = ".claude";
+      // An inaccessible explicit profile stays selected and refuses below.
+    }
+  }
   const candidates =
     account !== undefined
-      ? [join(home, `.claude-${account}`)]
+      ? [join(home, accountDirectory)]
       : env.CLAUDE_CONFIG_DIR
         ? [env.CLAUDE_CONFIG_DIR]
         : [
@@ -83,7 +92,7 @@ export async function prepareClaude(executable, plugin, options = {}) {
   if (signed.size !== 1)
     throw new Error(
       account !== undefined
-        ? `Claude account '${account}' at ~/.claude-${account} ${accountFailure}; sign in to the intended profile on the PC with $env:CLAUDE_CONFIG_DIR = Join-Path $HOME '.claude-${account}'; claude auth login, then retry. Launch never creates a profile or copies credentials`
+        ? `Claude account '${account}' at ~/${accountDirectory} ${accountFailure}; sign in to the intended profile on the PC with $env:CLAUDE_CONFIG_DIR = Join-Path $HOME '${accountDirectory}'; claude auth login, then retry. Launch never creates a profile or copies credentials`
         : signed.size
           ? "Multiple signed-in Claude profiles; select an account label in the launch request or the PC profile with CLAUDE_CONFIG_DIR"
           : "No existing signed-in Claude.ai profile; James must sign in to the intended PC profile",

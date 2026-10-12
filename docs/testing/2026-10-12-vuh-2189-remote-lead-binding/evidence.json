@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "evidence/followup-typecheck.json",
+      "size": 101810,
+      "sha256": "2c1a15196e4f5afc23b30fefe1a9e42799c66865c6dcd2fc7e0d5905a9ceb541",
+      "url": "clankie://evidence/sha256/2c1a15196e4f5afc23b30fefe1a9e42799c66865c6dcd2fc7e0d5905a9ceb541"
+    }
+  ]
+}

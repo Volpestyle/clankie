@@ -40,3 +40,27 @@ the fix does not migrate them or relax native process identity.
 
 Landing uses `clankie integrate run SHA --push --no-wait`; its exact-tree root
 landing gate and push receipt are separate from these focused checks.
+
+## Default profile and compiler follow-up
+
+The first integration batch `808c11ec-9c6c-4fb2-886f-c2c65b7382c6` failed its
+root gate (exit 1): `remote-lead-delegations.ts(14,15): TS1294`, because the
+service enables `erasableSyntaxOnly` and the refusal constructor used a
+parameter property. The follow-up uses a plain declared field and assignment.
+This is a failed landing gate, not a green full gate.
+
+The existing profile-selection integration proof now selects bare `~/.claude`
+for `account: "default"` when `~/.claude-default` is absent, even with another
+signed-in profile selected by the environment. An existing explicit default
+directory is preferred; an unfinished explicit profile refuses instead of
+using the signed-in bare profile. Missing-profile errors name `~/.claude` and
+its actual sign-in command. These are temporary profiles and native CLI fixtures
+on the Mac; no live credentials, PC profiles or KH2 head were changed.
+
+- Profile/setup/bridge checks: 4 tests passed, exit 0.
+  [Captured summary](evidence/followup-profile.log).
+- Post-fix binding/delegation checks: 5 tests passed, exit 0.
+  [Capture](evidence/followup-binding.log).
+- `clankie heavy -- pnpm --filter @clankie/clankie typecheck`: exit 0;
+  source and all 13 test programs passed.
+  [Archived compiler report](clankie://evidence/sha256/2c1a15196e4f5afc23b30fefe1a9e42799c66865c6dcd2fc7e0d5905a9ceb541).

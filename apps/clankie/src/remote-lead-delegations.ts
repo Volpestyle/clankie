@@ -9,10 +9,12 @@ import type { ProjectProcessProof } from "./project-process-proof.ts";
 
 /** Safe diagnostics for a recognized delegation, never arbitrary provider errors. */
 export class RemoteLeadRefusal extends Error {
+  readonly reason: "remote_lead_binding_unavailable" | "remote_lead_workspace_revoked";
   readonly recovery =
     "Report this link failure to the Mac lead or owner for a fresh launch from the Mac. Never work around it with desktop control or credential rotation.";
-  constructor(readonly reason: "remote_lead_binding_unavailable" | "remote_lead_workspace_revoked") {
+  constructor(reason: RemoteLeadRefusal["reason"]) {
     super(reason);
+    this.reason = reason;
   }
 }
 
