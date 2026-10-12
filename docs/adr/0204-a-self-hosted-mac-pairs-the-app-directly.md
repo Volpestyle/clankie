@@ -120,3 +120,18 @@ direct route.
   often plain HTTP, which macOS App Transport Security refuses. The
   listener's socket decides this, never a header; the gateway connector
   marks what it forwards so gateway traffic keeps the configured route.
+
+- Amended 2026-10-11 (VUH-2140): the native Mac app obtains its first connection
+  automatically through the same user's private companion issuer, without a
+  code or `clankie pair --local-companion` preparation. A 0600 Unix socket in
+  the owner's 0700 companion directory admits
+  `POST /v1/pairing/local/handoff`; it uses the service's configured owner
+  identity to mint and atomically write a normal single-use offer. The app
+  validates private discovery and its kernel-reported peer UID and sends no
+  operator bearer. The private owner provenance is captured before request-body
+  middleware clones the HTTP request. TCP, LAN and gateway listeners expose no
+  such route or provenance. Same-user processes share this account boundary.
+  Lost or invalid private-local sessions can request fresh authorization once;
+  revocation asks once to reconnect and never revives the revoked identity.
+  Other-device pairing and remote saved sessions keep their existing flow.
+  The Mac consumer decision is amended in clankie-app ADR 0085.

@@ -161,6 +161,8 @@ export interface ClankieAppDependencies {
   harnessLogins?: import("../harness-logins.ts").HarnessSignIns;
   /** Proven by the primary listener socket, never a caller-supplied header. */
   isLocalCompanionRequest?: (request: Request) => boolean;
+  /** Owner identity proven only by the private same-user Unix mint listener. */
+  localCompanionOwner?: (request: Request) => TrustedOperatorIdentity | undefined;
   /** A native client on this Mac over loopback, not forwarded by the gateway; picks addresses only. */
   isSameMacRequest?: (request: Request) => boolean;
   modelDeviceSetup?: { platform: NodeJS.Platform; hosted: boolean };

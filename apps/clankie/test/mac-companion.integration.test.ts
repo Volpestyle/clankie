@@ -32,6 +32,7 @@ async function fixture() {
       deviceSessionKey: key,
       modelDeviceSetup: { platform: "darwin", hosted: false },
       isLocalCompanionRequest: (request) => boundary.has(request),
+      localCompanionOwner: (request) => boundary.privateOwner(request),
       isSameMacRequest: (request) => boundary.isSameMac(request),
       authenticateOperator: async (request) =>
         request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
@@ -56,6 +57,7 @@ async function fixture() {
     stateRoot: dir,
     controlPlaneUrl: origin,
     boundary,
+    owner: { operatorId: "owner" },
     fetch: (request) => app.app.fetch(request),
   });
   cleanups.push(() => issuer.close());
@@ -81,6 +83,7 @@ async function fixture() {
         stateRoot: dir,
         controlPlaneUrl: origin,
         boundary,
+        owner: { operatorId: "owner" },
         fetch: (request) => app.app.fetch(request),
       });
     },
@@ -88,6 +91,59 @@ async function fixture() {
 }
 
 describe("Mac companion local pairing boundary", () => {
+  it("creates a private handoff on app request without a CLI bearer, reuses the owner identity, and denies TCP impersonation", async () => {
+    const f = await fixture();
+    const handoffPath = join(f.dir, "companion", "companion-offer.json");
+    await expect(readFile(handoffPath)).rejects.toMatchObject({ code: "ENOENT" });
+    const requestHandoff = async () => {
+      const issuer = JSON.parse(await readFile(join(f.dir, "companion", "companion-issuer.json"), "utf8"));
+      expect((await stat(issuer.socketPath)).mode & 0o777).toBe(0o600);
+      return new Promise<{ status: number; body: unknown }>((resolve, reject) => {
+        const request = httpRequest(
+          {
+            socketPath: issuer.socketPath,
+            path: "/v1/pairing/local/handoff",
+            method: "POST",
+            headers: { "content-type": "application/json" },
+          },
+          (response) => {
+            let body = "";
+            response.setEncoding("utf8");
+            response.on("data", (chunk) => {
+              body += chunk;
+            });
+            response.on("end", () => resolve({ status: response.statusCode!, body: JSON.parse(body) }));
+            response.on("error", reject);
+          },
+        );
+        request.on("error", reject);
+        request.end("{}");
+      });
+    };
+    expect(await requestHandoff()).toEqual({ status: 200, body: { ready: true } });
+    expect((await stat(handoffPath)).mode & 0o777).toBe(0o600);
+    const first = LocalCompanionHandoffSchema.parse(JSON.parse(await readFile(handoffPath, "utf8")));
+    const firstResponse = await f.call("/v1/pairing/local/redeem", { offerSecret: first.offerSecret });
+    expect(firstResponse.status).toBe(200);
+    const session = LocalCompanionSessionSchema.parse(await firstResponse.json());
+    expect((await f.call("/v1/pairing/local/redeem", { offerSecret: first.offerSecret })).status).toBe(409);
+    // A lost app session requests fresh authorization; it never replays that offer.
+    await f.restart();
+    expect(await requestHandoff()).toEqual({ status: 200, body: { ready: true } });
+    const second = LocalCompanionHandoffSchema.parse(JSON.parse(await readFile(handoffPath, "utf8")));
+    expect(second.offerSecret).not.toBe(first.offerSecret);
+    const secondResponse = await f.call("/v1/pairing/local/redeem", { offerSecret: second.offerSecret });
+    expect(secondResponse.status).toBe(200);
+    expect(LocalCompanionSessionSchema.parse(await secondResponse.json())).toMatchObject({
+      deviceId: session.deviceId,
+      grants: session.grants,
+    });
+    expect((await f.call("/v1/pairing/local/handoff", {})).status).toBe(404);
+    expect((await f.call("/v1/pairing/local/offer", {}, { "x-clankie-private-owner": "owner" })).status).toBe(
+      401,
+    );
+  });
+
   it("hands off privately, redeems once, reuses its durable device after reinstall/restart, and preserves revocation", async () => {
     vi.stubEnv("CLANKIE_DIRECT_CONTROL_PLANE_URL", "http://other-device.example:4310");
     vi.stubEnv("CLANKIE_RELAY_URL", "http://other-device.example:4321");

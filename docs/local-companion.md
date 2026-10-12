@@ -3,22 +3,27 @@
 The service and CLI provide a private local pairing handoff for the Mac
 companion. Same-Mac route selection follows
 [ADR 0204](adr/0204-a-self-hosted-mac-pairs-the-app-directly.md).
-The signed app distribution, automatic first-launch consumer and installer
-integration are separate work; this API does not install or launch the app.
+The native Mac app requests its first connection automatically, without a code
+or CLI pre-step, through the service's owner-private Unix issuer. This API does
+not install or launch the app.
 
-Run `clankie pair --local-companion --json` as the Mac owner after the service
-starts. It starts or reuses the app relay, asks the service's owner-private Unix
-socket for an operator-authorized offer, and writes it atomically to
-`~/.clankie/companion/companion-offer.json` (`CLANKIE_STATE` overrides the root).
+The service publishes `companion-issuer.json` after its primary listener binds.
 The state root must be canonical, owned by the current UID and not writable
-by others; existing mode `0755` roots work. The companion directory is private
-(`0700`), and the file is mode `0600`. The service publishes
-`companion-issuer.json` in that same private directory after its primary
-listener binds, pointing at its own Unix socket and loopback URL. The CLI
-checks private discovery and same-UID socket ownership before sending its
-operator bearer over IPC. It never sends that credential to a TCP listener
-that another local user could impersonate. Output contains only `handoffPath`, never
-the offer. Do not run the owner handoff as root or place it in a shared folder.
+by others; existing mode `0755` roots work. The companion directory is `0700`,
+the descriptor and handoff files are `0600`, and the Unix socket is `0600`.
+`CLANKIE_STATE` overrides the default `~/.clankie` root. The native app rejects
+symlinks, foreign ownership, hard links and unsafe modes, validates the exact
+socket path beneath that private directory, and checks its connected peer UID.
+
+`POST /v1/pairing/local/handoff` exists only on this private Unix socket. It uses
+the service's configured owner identity to mint a single-use offer and atomically
+write `companion-offer.json`, replying only `{ "ready": true }`. No operator
+bearer crosses this request and no TCP route exposes it. The existing
+`clankie pair --local-companion --json` command remains available for older app
+versions: it sends its operator bearer only to the validated private Unix issuer
+and prints only `handoffPath`, never the offer. Do not run either owner handoff as
+root or place its state in a shared folder. Same-user processes share the macOS
+account boundary; loopback reachability or headers alone grant no authority.
 
 The companion reads the same-UID file with no symlink following, verifies its
 ownership, mode, size and expiry, then posts `{ "offerSecret": "…" }` to
@@ -27,7 +32,10 @@ ownership, mode, size and expiry, then posts `{ "offerSecret": "…" }` to
 Remove the file after redemption. Keep the returned device token in the app's
 credential store; restore and refresh through the existing device APIs.
 A lost response must be reconciled with the app's stored session; a consumed
-offer cannot be replayed. A fresh owner handoff can recover the same device.
+offer cannot be replayed. A newly requested private handoff can recover the same device. The Mac app
+automatically renews lost or invalid private-local sessions once per restoration.
+Explicit revocation asks once to connect again and creates a new identity;
+remote sessions, host outages and rejected encrypted routes do not switch local.
 
 `POST /v1/pairing/local/offer` requires the operator bearer; it returns
 `version`, `offerSecret`, and `expiresAt`. These offers expire after five

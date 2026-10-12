@@ -2016,6 +2016,7 @@ const clankie = await createClankieApp({
     apps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env),
   }),
   isLocalCompanionRequest: (request) => localCompanionBoundary.has(request),
+  localCompanionOwner: (request) => localCompanionBoundary.privateOwner(request),
   isSameMacRequest: (request) => localCompanionBoundary.isSameMac(request),
   modelDeviceSetup: { platform: process.platform, hosted: hostedBody !== undefined },
   harnessLogins,
@@ -2254,6 +2255,7 @@ const publishLocalCompanionIssuer = async () => {
       stateRoot,
       controlPlaneUrl: `http://127.0.0.1:${address.port}`,
       boundary: localCompanionBoundary,
+      owner: { operatorId: process.env.CLANKIE_OPERATOR_ID ?? "local-operator", steerSourceLane: "tui" },
       fetch: clankie.app.fetch,
     });
     if (shutdownStarted) await localCompanionIssuer.close();

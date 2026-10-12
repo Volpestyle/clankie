@@ -4,6 +4,8 @@ import { PairingCompleteResponseSchema } from "./devices.ts";
 /** Native loopback only; never carried by the public gateway or device doorway. */
 export const LOCAL_COMPANION_OFFER_PATH = "/v1/pairing/local/offer";
 export const LOCAL_COMPANION_REDEEM_PATH = "/v1/pairing/local/redeem";
+/** Only on the owner-private Unix listener; never registered on HTTP. */
+export const LOCAL_COMPANION_HANDOFF_PATH = "/v1/pairing/local/handoff";
 export const LOCAL_COMPANION_HANDOFF_FILE = "companion-offer.json";
 export const LOCAL_COMPANION_ISSUER_FILE = "companion-issuer.json";
 

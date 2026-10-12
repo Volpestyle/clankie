@@ -56,6 +56,7 @@ import {
   type DeviceAuthDenial,
   type PendingCompletion,
   type TrustedDeviceIdentity,
+  type TrustedOperatorIdentity,
 } from "./types.ts";
 export interface RegisterPairingRoutesContext {
   readonly dependencies: ClankieAppDependencies;
@@ -97,6 +98,9 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
   // Deliberately separate: these offers cannot redeem through the gateway or
   // ordinary pairing routes, even if a proxy forwards them from loopback.
   let localOffers = new PairingOfferStore();
+  // bodyLimit replaces req.raw; retain private IPC provenance on the context,
+  // not on a header that an HTTP caller could supply.
+  const localOwners = new WeakMap<Context, TrustedOperatorIdentity>();
   for (const path of [LOCAL_COMPANION_OFFER_PATH, LOCAL_COMPANION_REDEEM_PATH]) {
     ctx.app.use(path, async (context, next) => {
       context.header("cache-control", "no-store");
@@ -107,13 +111,16 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         return context.json({ error: "not_found" }, 404);
       if (!ctx.dependencies.isLocalCompanionRequest?.(context.req.raw))
         return context.json({ error: "native_loopback_required" }, 403);
+      const localOwner = ctx.dependencies.localCompanionOwner?.(context.req.raw);
+      if (localOwner) localOwners.set(context, localOwner);
       if (!ctx.deviceSessionSigner) return context.json({ error: "device_authentication_unavailable" }, 503);
       await next();
     });
     ctx.app.use(path, bodyLimit({ maxSize: 1024 }));
   }
   ctx.app.post(LOCAL_COMPANION_OFFER_PATH, async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    const operator =
+      localOwners.get(context) ?? (await authenticateOperator(context.req.raw, ctx.dependencies));
     if (!operator || operator === "unavailable")
       return context.json({ error: "operator_authentication_required" }, 401);
     const offer = mintPairingOffer({

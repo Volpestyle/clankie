@@ -1,9 +1,14 @@
 import type { HttpBindings, Http2Bindings } from "@hono/node-server";
+import type { TrustedOperatorIdentity } from "./app/types.ts";
 
 /** Socket provenance, scoped to the service's primary loopback listener. Headers confer no authority. */
 export class LocalCompanionBoundary {
   private readonly admitted = new WeakSet<Request>();
   private readonly sameMac = new WeakSet<Request>();
+  private readonly privateOwners = new WeakMap<Request, TrustedOperatorIdentity>();
+  privateOwner(request: Request): TrustedOperatorIdentity | undefined {
+    return this.privateOwners.get(request);
+  }
   has(request: Request): boolean {
     return this.admitted.has(request);
   }
@@ -18,15 +23,19 @@ export class LocalCompanionBoundary {
   }
 
   /** Called only by the service-owned Unix listener in a same-UID private directory. */
-  privateFetch(forward: (request: Request) => Response | Promise<Response>) {
+  privateFetch(forward: (request: Request) => Response | Promise<Response>, owner?: TrustedOperatorIdentity) {
     return async (request: Request): Promise<Response> => {
       if (new URL(request.url).pathname !== "/v1/pairing/local/offer" || request.method !== "POST")
         return Response.json({ error: "not_found" }, { status: 404 });
       this.admitted.add(request);
+      // The private directory/socket is the same-user authority. An explicitly
+      // supplied bearer still goes through ordinary authentication, never fallback.
+      if (owner && !request.headers.has("authorization")) this.privateOwners.set(request, owner);
       try {
         return await forward(request);
       } finally {
         this.admitted.delete(request);
+        this.privateOwners.delete(request);
       }
     };
   }
