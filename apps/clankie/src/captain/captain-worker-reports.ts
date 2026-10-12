@@ -122,7 +122,9 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
       if (context.signal.aborted || !(await ctx.validateConversationOwner(owner)))
         throw new Error("Worker report owner is unavailable");
       const outbox = ctx.seatOutboxes.get(conversationId);
-      const content = `Worker report ${deliveryId}\n${prompt}`;
+      const lead = ctx.conversations.inboundAcceptance(deliveryId)?.leadMessageFrom;
+      const content = lead ? prompt : `Worker report ${deliveryId}\n${prompt}`;
+      const source = lead ? "lead" : "worker-report";
       const receipt = outbox?.receipt(content);
       if (receipt?.outcome === "delivered") {
         context.deliveryReceipt?.("delivered");
@@ -137,7 +139,7 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
       const result = await outbox!.deliver({
         kind: "message",
         conversationId,
-        source: "worker-report",
+        source,
         content,
         wantsReply: false,
         signal: context.signal,

@@ -1,6 +1,8 @@
 import { CHANNEL_NOTIFICATION_METHOD } from "../../tui/src/command/mcp.ts";
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
+import { ConversationStore } from "../src/captain/conversations.ts";
+import { join } from "node:path";
 import type { LeadChat } from "../src/captain/lead-roster.ts";
 import { capabilities, leadChatFixture } from "./fixtures/lead-chats.ts";
 const cleanup: Array<() => Promise<void>> = [];
@@ -38,12 +40,6 @@ it.each([false, true])(
     expect(f.adoption).not.toHaveBeenCalled();
     expect(f.workerDelivery).not.toHaveBeenCalled();
 
-    // The global lead has no live channel yet: refused honestly, nothing queued.
-    const refused = await f.messageSeat(work, global, "18:00 works");
-    expect(refused).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
-    expect(refused.detail).toContain("nothing was sent or queued");
-    expect(await f.captain.pollSeatEvents(0, undefined, global, capabilities)).toEqual([]);
-
     const globalChannel = await f.bridge(global);
     expect(await f.messageSeat(work, global, "18:00 works")).toMatchObject({
       outcome: "delivered",
@@ -57,6 +53,25 @@ it.each([false, true])(
     expect(f.workerDelivery).not.toHaveBeenCalled();
   },
 );
+
+it("VUH-2174: a disconnected remote-only lead still refuses without a local queue", async () => {
+  const f = await fixture(true);
+  await f.captain.close();
+  const seeded = new ConversationStore(join(f.root, "conversations"), async () => {});
+  const recipient = seeded.createRemoteWorkspaceConversation({
+    workspaceId: "/remote/project",
+    machineId: "pc",
+    title: "Remote-only lead",
+  });
+  await seeded.close();
+  const restarted = f.open();
+  const bank = await restarted.laneToolBank("operator", f.leads[0]!);
+  const sent = await bank.tools
+    .find((tool) => tool.name === "message_seat")!
+    .call({ seat: recipient.conversationId, message: "Hold the deploy" });
+  const part = sent.content.find((item) => item.type === "text");
+  expect(JSON.parse(part!.text)).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+});
 
 it("a lead cannot message itself", async () => {
   const f = await fixture(false);
@@ -149,14 +164,14 @@ it.each([false, true])(
       holder: { kind: "native", seatId: f.head.terminalId, harness: "claude" },
       machine: remote ? "pc" : "local",
       state: "disconnected",
-      messageAvailable: false,
+      messageAvailable: true,
       messageSeat: work,
     });
     expect(before.find((chat) => chat.conversationId === service.conversation.conversationId)).toMatchObject({
       holder: { kind: "service", lane: "operator" },
       workspace: f.root,
       state: "service",
-      messageAvailable: false,
+      messageAvailable: true,
     });
     const receiver = await f.bridge(work);
     const current = await self();
@@ -222,7 +237,7 @@ it("a polled legacy lead channel is stale, not a live messaging target", async (
           (chat: LeadChat) => chat.conversationId === work,
         );
       })
-      .toMatchObject({ state: "stale", messageAvailable: false });
+      .toMatchObject({ state: "stale", messageAvailable: true });
   } finally {
     stop.abort();
     await parked;

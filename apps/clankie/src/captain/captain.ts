@@ -1360,7 +1360,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         lastActiveAt: conversation.updatedAt,
         ...(bridge?.lastSeenAt === undefined ? {} : { lastBridgeSeenAt: bridge.lastSeenAt }),
         messageSeat: id,
-        messageAvailable: bridge?.state === "current",
+        messageAvailable: bridge?.state === "current" || localServiceLead(id),
       });
     }
     return chats;
@@ -2897,11 +2897,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     join(options.stateDir, "delivery-receipts", "lead-messages.json"),
   );
 
-  /**
-   * One lead's message to another rides the receiving conversation's own seat
-   * channel, the one its owner turns and wakes use, as attributed agent
-   * context. It is never an owner turn, never adopts, and never touches a pane.
-   */
+  function localServiceLead(conversationId: string): boolean {
+    // Conversation scope determines where the mind may run. A remembered
+    // native attachment does not remove a local conversation's service lane.
+    return privateLeadConversation(conversationId) && conversations.runsCaptainTurns(conversationId);
+  }
+
+  /** Attributed agent context over the lead's native channel or durable service inbox.
+   * Never an owner turn, an adoption, or terminal input. */
   async function messageLead(
     to: string,
     seatId: string,
@@ -2954,6 +2957,39 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         messageId: result.messageId,
         detail: result.detail,
       };
+    }
+    if (result.outcome === "unbound" && localServiceLead(to)) {
+      await assertConversationAuthority(authority);
+      const messageId = randomUUID();
+      // Persist sender attribution before admission. The receiving conversation
+      // owns the durable payload and pending/attempted delivery state.
+      leadMessages.record(messageId, from, to, true);
+      const accepted = conversations.submitInbound(
+        content,
+        {
+          deliveryId: messageId,
+          binding: `lead:${from}`,
+          fingerprint: deliveryFingerprint(content),
+          paneId: from,
+          text: message,
+          leadMessageFrom: from,
+          recipient: { kind: "conversation", owner: { conversationId: to } },
+        },
+        to,
+        conversationReportRunner({ conversationId: to }, messageId),
+      );
+      if (accepted.status === "accepted")
+        return {
+          outcome: "delivered",
+          seatId,
+          messageId,
+          state: "queued",
+          deliveryStage: "stored",
+          status: "lead_service_queued",
+          leadConversationId: to,
+          detail:
+            "Durably queued in the lead's service conversation and scheduled to wake it. Not a native acknowledgment or proof it has read the message.",
+        };
     }
     return {
       outcome: "undelivered",
@@ -5951,6 +5987,35 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         throw new Error("Private operator conversation is required");
       const lead = leadMessages.get(id);
       if (lead?.from === binding.conversationId) {
+        if (lead.service) {
+          const accepted = conversations.inboundAcceptance(id);
+          if (!accepted || accepted.leadMessageFrom !== lead.from)
+            return {
+              outcome: "undelivered" as const,
+              deliveryStage: "unavailable" as const,
+              detail: "No durable service acceptance exists for this lead message.",
+            };
+          const stage =
+            accepted.reportDelivery?.state === "pending"
+              ? "stored"
+              : (accepted.reportDelivery?.stage ?? "stored");
+          return stage === "uncertain" || stage === "expired"
+            ? {
+                outcome: "unconfirmed" as const,
+                deliveryStage: "uncertain" as const,
+                messageId: id,
+                detail:
+                  "The service attempt has no confirmed completion; the original message remains retained and is never blindly resent.",
+              }
+            : {
+                outcome: "delivered" as const,
+                deliveryStage: stage,
+                messageId: id,
+                ...(accepted.reportDelivery?.state === "pending" ? { state: "queued" as const } : {}),
+                detail:
+                  "Accepted by the service inbox; this is not a native channel acknowledgment or proof of lead review.",
+              };
+        }
         let acknowledged = false;
         try {
           acknowledged = seatOutbox(lead.to).recoveryAcknowledged(id);

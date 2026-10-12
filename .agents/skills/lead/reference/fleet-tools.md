@@ -290,6 +290,15 @@ needed ignored evidence, then remove only a worktree you own whose result
 landed. Every tidy result lists the remaining candidates with path, branch and
 checked destination.
 
+## Lead messages without a native channel
+
+A local service lead receives attributed agent context in its own durable inbox
+and wakes there. `lead_service_queued` / `queued` / `stored` proves acceptance,
+not native acknowledgment or review. Reconcile the returned message ID with
+`reconcile_seat_call` from the sending conversation; queued messages survive
+restart. Remote-only leads need their bridge. An uncertain native send stays
+with its original receipt: never resend through the service as a fallback.
+
 ## Unresolved Claude channel deliveries
 
 A bridge ACK proves transport delivery, not model consumption. If

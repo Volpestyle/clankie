@@ -164,7 +164,11 @@ export function createLaneMcpEndpoint({
               } catch {
                 continue;
               }
-              if (body?.outcome !== "unconfirmed" || typeof body.messageId !== "string") continue;
+              if (
+                (body?.outcome !== "unconfirmed" && body?.status !== "lead_service_queued") ||
+                typeof body.messageId !== "string"
+              )
+                continue;
               const native = await captain.reconcileSeatDelivery?.(body.messageId, conversationId);
               if (native)
                 return { content: [{ type: "text", text: JSON.stringify(native) }], _meta: original._meta };

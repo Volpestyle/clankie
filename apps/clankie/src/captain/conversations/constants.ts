@@ -82,6 +82,7 @@ export const InboundAcceptanceSchema = z
     runId: z.string(),
     acceptedCursor: z.string(),
     workerReportRouting: WorkerReportRoutingSchema.optional(),
+    leadMessageFrom: z.string().min(1).optional(),
     recipient: InboundReportRecipientSchema.optional(),
     acceptedAt: z.string().datetime().optional(),
     reportDelivery: InboundReportDeliverySchema.optional(),

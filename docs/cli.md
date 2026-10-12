@@ -1587,16 +1587,20 @@ API is `GET /v1/linear/target` and `PUT /v1/linear/target` with
 Private operator leads see the global lead and configured project leads in the
 session card and `get_self_state.leadChats`. Each row names its project,
 conversation, workspace, machine, holder, receiver state, activity time and
-`messageSeat` target. `messageAvailable` reflects a current lead receiver;
+`messageSeat` target. `messageAvailable` reflects a current native receiver or an available local service lane;
 stale, reconnecting and disconnected native heads are shown explicitly.
 Activity timestamps describe recorded activity, not proof of a live receiver.
 Worker and room chats are excluded, and Discord never receives this roster.
 
 Use `message_seat` with the row's conversation ID to contact another lead.
 The existing lead channel carries attributed agent context and a delivery
-receipt; it never adopts that lead or types into its pane. Reconcile an uncertain
-receipt before retrying. A service-held lead without a connected receiver shows
-`messageAvailable: false` rather than promising delivery.
+receipt; it never adopts that lead or types into its pane. With no native channel,
+a local service lead durably queues the message and wakes in its own conversation.
+`status: lead_service_queued`, `state: queued`, and `deliveryStage: stored` mean inbox
+acceptance, not native acknowledgment or lead review. Use `reconcile_seat_call`
+with the returned message ID (or MCP dispatch ID) to read its progress, including
+after restart. Remote-only leads still require their native bridge; uncertain
+native sends retain their original receipt and never fall back to a second send.
 
 The owner's paired devices read the same projection with encrypted dispatch
 `POST /operator/v1/dispatch`, body `{ "op": "lead_chats", "schemaVersion": 1 }`.

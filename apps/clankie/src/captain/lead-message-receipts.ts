@@ -5,17 +5,16 @@ import { z } from "zod";
 const MAX_ENTRIES = 1000;
 const JournalSchema = z.record(
   z.string().min(1),
-  z.object({ from: z.string().min(1), to: z.string().min(1) }).strict(),
+  z.object({ from: z.string().min(1), to: z.string().min(1), service: z.literal(true).optional() }).strict(),
 );
 
 /**
- * Which conversation sent an unconfirmed lead message, and to which lead
- * (VUH-1950). The recipient's head fence holds the original and its ack but
- * only names the recipient; this binding lets the sender alone reconcile it
- * after a restart. An unreadable journal binds nothing, so nothing reconciles.
+ * Sender/recipient attribution for native and service-queued lead messages.
+ * The receiving channel or inbox owns progress; this binding protects sender-only
+ * reconciliation after restart. An unreadable journal binds nothing.
  */
 export class LeadMessageReceipts {
-  private entries: Record<string, { from: string; to: string }> = {};
+  private entries: Record<string, { from: string; to: string; service?: true | undefined }> = {};
   private readonly path: string;
   constructor(path: string) {
     this.path = path;
@@ -26,14 +25,14 @@ export class LeadMessageReceipts {
     }
   }
 
-  get(messageId: string): { from: string; to: string } | undefined {
+  get(messageId: string): { from: string; to: string; service?: true | undefined } | undefined {
     return Object.hasOwn(this.entries, messageId) ? this.entries[messageId] : undefined;
   }
 
   /** The first binding for an ID is permanent; a later sender never takes it over. */
-  record(messageId: string, from: string, to: string): void {
+  record(messageId: string, from: string, to: string, service?: true): void {
     if (this.get(messageId) !== undefined) return;
-    this.entries[messageId] = { from, to };
+    this.entries[messageId] = { from, to, ...(service ? { service } : {}) };
     const ids = Object.keys(this.entries);
     for (const id of ids.slice(0, Math.max(0, ids.length - MAX_ENTRIES))) delete this.entries[id];
     mkdirSync(dirname(this.path), { recursive: true });
