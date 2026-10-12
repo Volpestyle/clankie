@@ -50,6 +50,14 @@ reports `trust_required`; other pending startup reports `start_unconfirmed`.
 Inspect that pane; do not retry the hire or approve trust yourself. Closing the
 pane cancels pending startup.
 
+A private Codex hire that refuses before the turn RPC reports
+`briefDelivery: "not_sent"` and `deliveryStage: "unavailable"`. Its native
+view and launch receipt remain retained. Inspect the original pane and choose
+recovery; retrying the same hire never resends that brief or launches another
+worker. A lost native turn acknowledgment remains uncertain. Catalog reads
+must name the original thread and its pinned `worker` server; an unfiltered
+status read creates discovery runtimes and cannot prove the loaded catalog.
+
 Give every hire a short human name in `title`, in any language, and an assignment
 `role`. Do not use a routing ID, task slug or issue key as the name. Older API
 callers can still omit the role; the model-facing tool requires it. Rename later

@@ -123,6 +123,8 @@ export type SeatStartResult =
        */
       readonly reason: "harness_unavailable" | "not_ready";
       readonly detail: string;
+      /** The native view may exist, but this brief never crossed the turn boundary. */
+      readonly briefDelivery?: "not_sent";
     };
 
 /**

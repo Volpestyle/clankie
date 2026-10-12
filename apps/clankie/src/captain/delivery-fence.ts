@@ -41,6 +41,8 @@ export const ReceiptSchema = z
       .optional(),
     /** Irreversible service-owned barrier; a remote journal reset cannot erase launch intent. */
     remoteLaunchCommitted: z.literal(true).optional(),
+    /** Native hire may exist; its first brief provably never crossed the turn RPC. Retain launch guard. */
+    briefNotSent: z.literal(true).optional(),
     /** Operator recovery permanently excludes ordinary launch/adoption/reconciliation. */
     recoveryRequested: z.literal(true).optional(),
     settlement: RetainedHireEvidenceSchema.optional(),

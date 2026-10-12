@@ -1305,6 +1305,8 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
     .object({
       outcome: z.literal("failed"),
       deliveryStage: DeliveryStageSchema.optional(),
+      /** The native launch may exist; this original brief did not cross the turn boundary. */
+      briefDelivery: z.literal("not_sent").optional(),
       /** `at_capacity`: a hosted body already runs as many hired agents as its plan allows (VUH-1388). */
       reason: z.enum([
         "unknown_directory",

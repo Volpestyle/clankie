@@ -4463,6 +4463,11 @@ What crosses the link, and what cannot:
   typed into the pane. Its inherited Linear connectors are switched off from
   that machine's own Codex configuration. On Windows, launch arguments that
   `cmd.exe` would reinterpret are refused rather than altered.
+  Private catalog readiness reads the pinned `worker` server on the original
+  loaded thread. A pre-dispatch refusal returns `briefDelivery: "not_sent"`
+  with `deliveryStage: "unavailable"`; its native view and launch receipt remain
+  retained for inspection. Retrying that hire does not send its brief or create
+  another worker. Failures after the native turn RPC retain uncertainty.
 - A remote Claude hire uses the `clankie-worker` plugin there, as a local one
   does: its brief and messages arrive on the plugin's channel and its hooks
   report each settled turn. Both travel over the fleet's **link**, which the

@@ -9,6 +9,7 @@ const object = (value) => value !== null && typeof value === "object" && !Array.
 export async function codexToolCatalogReport({
   sessionId,
   bridge = "worker",
+  serverName,
   request,
   requireConnected = false,
   onServerStatus,
@@ -37,6 +38,7 @@ export async function codexToolCatalogReport({
       const status = await request("mcpServerStatus/list", {
         threadId: sessionId,
         detail: "toolsAndAuthOnly",
+        ...(serverName === undefined ? {} : { serverName }),
         ...(cursor === undefined ? {} : { cursor }),
       });
       if (!object(status) || !Array.isArray(status.data)) throw new Error("Malformed native MCP status");

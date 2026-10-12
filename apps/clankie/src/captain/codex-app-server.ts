@@ -76,6 +76,14 @@ export interface CodexNativePolicy {
 }
 
 /** One connection to one selected app-server; requests never select another server. */
+/** Proven by the controller before crossing the native turn RPC boundary. */
+export class CodexNotSentError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "CodexNotSentError";
+  }
+}
+
 export class CodexAppServerClient {
   private readonly socket: WebSocket;
   private readonly event: (event: CodexSeatEvent) => void;
@@ -1021,6 +1029,7 @@ export async function startCodexAppServerSeat(options: {
         report = await codexToolCatalogReport({
           sessionId: threadId!,
           bridge: options.catalogBridge ?? "worker",
+          ...(server.waitForClankieCatalog ? { serverName: "worker" } : {}),
           request: (method, params) =>
             client!.request(method, params, Math.max(1, Math.min(2_000, deadline - Date.now()))),
         });
@@ -1051,7 +1060,7 @@ export async function startCodexAppServerSeat(options: {
           const status = record(
             await client!.request(
               "mcpServerStatus/list",
-              { threadId, detail: "toolsAndAuthOnly" },
+              { threadId, serverName: "worker", detail: "toolsAndAuthOnly" },
               Math.min(2_000, deadline - Date.now()),
             ),
           );
@@ -1088,6 +1097,7 @@ export async function startCodexAppServerSeat(options: {
       guard?: () => Promise<void>,
       answer?: { requestId: string | number; clientUserMessageId: string },
     ) => {
+      let dispatched = false;
       const send = async () => {
         await waitForCatalog();
         // The owner may have started a native turn before the first delivery.
@@ -1149,6 +1159,7 @@ export async function startCodexAppServerSeat(options: {
           await failPolicy(error);
           throw policyFailure;
         }
+        dispatched = true;
         const response = record(
           await client!.request(steering ? "turn/steer" : "turn/start", {
             threadId,
@@ -1174,7 +1185,14 @@ export async function startCodexAppServerSeat(options: {
         await subscribe();
         return { turnId, state: steering ? ("steered" as const) : ("started" as const) };
       };
-      const next = sending.then(send);
+      const next = sending.then(async () => {
+        try {
+          return await send();
+        } catch (error) {
+          if (!dispatched) throw new CodexNotSentError(error);
+          throw error;
+        }
+      });
       sending = next.catch(() => undefined);
       return next;
     };

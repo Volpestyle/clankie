@@ -2419,6 +2419,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
           "This fresh intent already settled its admission. Its retained UUID cannot launch again; inspect its original seat.",
       };
     let pending = this.hireReceipts.pending(receiptKey);
+    if (pending?.briefNotSent)
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        briefDelivery: "not_sent",
+        deliveryStage: "unavailable",
+        detail: `Original hire ${pending.messageId}: the brief was not sent. Native launch remains retained; inspect ${pending.paneId ?? "its original pane"} before recovery. No hire or brief was replayed.`,
+      };
     if (pending?.recoveryRequested)
       return {
         outcome: "failed",
@@ -2620,11 +2628,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
         }
         adopt?.(result, this.projectContexts.get(input)?.projectId);
       }
-      if (result.outcome !== "spawned" && this.hireReceipts.pending(receiptKey)?.remoteLaunchCommitted)
+      const briefNotSent = result.outcome === "failed" && result.briefDelivery === "not_sent";
+      if (briefNotSent) this.hireReceipts.update(receiptKey, receipt.messageId, { briefNotSent: true });
+      if (
+        result.outcome !== "spawned" &&
+        !briefNotSent &&
+        this.hireReceipts.pending(receiptKey)?.remoteLaunchCommitted
+      )
         result = { ...result, reason: "start_unconfirmed", deliveryStage: "uncertain" };
       if (
         result.outcome === "spawned" ||
-        !["start_unconfirmed", "delivery_unconfirmed"].includes(result.reason)
+        (!briefNotSent && !["start_unconfirmed", "delivery_unconfirmed"].includes(result.reason))
       )
         this.hireReceipts.reconcile(receiptKey, receipt.messageId);
       if (result.outcome === "spawned") {
@@ -3731,12 +3745,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
           }
           return {
             ...failure,
+            ...(started.briefDelivery === "not_sent" ? { briefDelivery: "not_sent" as const } : {}),
             reason:
               failure.reason === "trust_required"
                 ? "trust_required"
-                : started.detail.includes("brief_delivery_unverified")
-                  ? "delivery_unconfirmed"
-                  : "start_unconfirmed",
+                : started.briefDelivery === "not_sent"
+                  ? "not_ready"
+                  : started.detail.includes("brief_delivery_unverified")
+                    ? "delivery_unconfirmed"
+                    : "start_unconfirmed",
             control,
             detail: `${failure.detail ?? started.detail}; inspect pane ${paneId}; no fallback was started`,
           };

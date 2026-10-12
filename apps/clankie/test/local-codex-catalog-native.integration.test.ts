@@ -42,7 +42,9 @@ function modelToolNames(value: unknown): string[] {
 }
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-async function nativeFixture(options: { omitModelTools?: boolean; launchOnlyBridge?: boolean } = {}) {
+async function nativeFixture(
+  options: { omitModelTools?: boolean; launchOnlyBridge?: boolean; availableAtStart?: boolean } = {},
+) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "native-catalog-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "worker-codex", "seat-native"),
@@ -58,7 +60,7 @@ async function nativeFixture(options: { omitModelTools?: boolean; launchOnlyBrid
   await writeFile(join(bin, "clankie"), `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(bridge)}\n`, {
     mode: 0o700,
   });
-  let available = false,
+  let available = options.availableAtStart === true,
     delayMs = 0,
     toolCalls = 0;
   const modelRequests: Record<string, unknown>[] = [];
@@ -297,6 +299,38 @@ async function nativeFixture(options: { omitModelTools?: boolean; launchOnlyBrid
     },
   };
 }
+
+nativeIt(
+  "reads a pinned server on the original runtime after discovery becomes unavailable",
+  async () => {
+    const f = await nativeFixture({ availableAtStart: true, launchOnlyBridge: true });
+    await expect
+      .poll(
+        async () => {
+          const report = await codexToolCatalogReport({
+            sessionId: f.threadId,
+            serverName: "worker",
+            request: f.request,
+            requireConnected: true,
+          });
+          return report.error ?? report.tools;
+        },
+        { timeout: 15_000 },
+      )
+      .toEqual(names);
+    f.available(false);
+    const report = await codexToolCatalogReport({
+      sessionId: f.threadId,
+      serverName: "worker",
+      request: f.request,
+      requireConnected: true,
+    });
+    expect(report.error).toBeUndefined();
+    expect(report.tools).toEqual(names);
+    expect(f.toolCalls()).toBe(0);
+  },
+  60_000,
+);
 
 nativeIt(
   "repairs a confirmed startup failure with a fresh generation on the original real Codex thread",

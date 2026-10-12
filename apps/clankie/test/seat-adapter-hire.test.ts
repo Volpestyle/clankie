@@ -166,6 +166,32 @@ it("an adapter blocked on the owner reports the fix and never launches a fallbac
   expect(runner.closePane).toHaveBeenCalledWith("w1:p1");
 });
 
+it("retains a proven unsent brief and native launch across hire retries", async () => {
+  const { root, runner, hire, adapter } = await fixture(async () => ({
+    outcome: "failed",
+    reason: "not_ready",
+    briefDelivery: "not_sent",
+    detail: "Private catalog not ready; no first turn was sent",
+  }));
+  expect(OperatorSeatSpawnResultSchema.parse(await hire("the brief"))).toMatchObject({
+    outcome: "failed",
+    reason: "not_ready",
+    briefDelivery: "not_sent",
+    deliveryStage: "unavailable",
+  });
+  expect(await hire("the brief")).toMatchObject({ briefDelivery: "not_sent", deliveryStage: "unavailable" });
+  const recovered = new HerdrWatchStore(join(root, "watches.json"), { runner, seatAdapters: [adapter] });
+  expect(
+    await recovered.spawnSeat(
+      { schemaVersion: 1, harness: "claude", title: "worker", workingDirectory: root },
+      undefined,
+      "the brief",
+    ),
+  ).toMatchObject({ briefDelivery: "not_sent", deliveryStage: "unavailable" });
+  expect(adapter.start).toHaveBeenCalledOnce();
+  expect(runner.closePane).not.toHaveBeenCalled();
+});
+
 it("an unconfirmed brief keeps its pane for inspection and never retries", async () => {
   const { runner, hire } = await fixture(async () => ({
     outcome: "failed",

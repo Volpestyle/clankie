@@ -12,6 +12,8 @@ export interface CodexToolCatalogReport {
 export function codexToolCatalogReport(input: {
   sessionId: string;
   bridge?: "worker" | "operator";
+  /** A controller-pinned server reads the loaded runtime without creating discovery runtimes. */
+  serverName?: "worker";
   /** Require a connected exact-thread server even when its expected projection is empty. */
   requireConnected?: boolean;
   /** Complete, unambiguous original-thread runtime observation, never worker input. */

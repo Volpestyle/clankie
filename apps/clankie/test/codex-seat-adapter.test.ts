@@ -1,7 +1,24 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
-import type { CodexAppServerSeat, CodexSeatEvent } from "../src/captain/codex-app-server.ts";
+import {
+  CodexNotSentError,
+  type CodexAppServerSeat,
+  type CodexSeatEvent,
+} from "../src/captain/codex-app-server.ts";
+
+it("retains the native view and proves an initial pre-dispatch refusal without replay", async () => {
+  const f = fixture();
+  f.send.mockRejectedValueOnce(new CodexNotSentError(new Error("Private catalog not ready")));
+  const result = await f.adapter.start({ harness: "codex", cwd: "/scratch", brief: "first" }, f.view);
+  expect(result).toMatchObject({ outcome: "failed", briefDelivery: "not_sent" });
+  expect(f.close).not.toHaveBeenCalled();
+  expect(f.send).toHaveBeenCalledOnce();
+  const control = await f.adapter.attach({ harness: "codex", paneId: "w1:p1", sessionId: "thread-1" });
+  expect(await control?.status()).toBe("idle");
+  await control?.close();
+  expect(f.close).toHaveBeenCalledOnce();
+});
 
 function fixture(nativePolicy?: NonNullable<Parameters<typeof createCodexSeatAdapter>[0]>["nativePolicy"]) {
   let event: (event: CodexSeatEvent) => void = () => undefined;

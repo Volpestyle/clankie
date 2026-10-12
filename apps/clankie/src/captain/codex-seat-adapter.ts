@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import {
   startCodexAppServerSeat,
+  CodexNotSentError,
   type CodexNativePolicy,
   type CodexAppServerSeat,
   type CodexSeatEvent,
@@ -495,12 +496,12 @@ export function createCodexSeatAdapter(
                   state: accepted.state,
                 };
               } catch (error) {
-                if (denied) {
+                if (denied || error instanceof CodexNotSentError) {
                   if (state === "working" && previousState === "idle") state = "idle";
                   return {
                     outcome: "offline",
                     deliveryStage: "unavailable",
-                    detail: `Codex authority changed before dispatch; nothing was sent: ${String(error)}`,
+                    detail: `Codex refused before dispatch; nothing was sent: ${String(error)}`,
                   };
                 }
                 return {
@@ -568,13 +569,20 @@ export function createCodexSeatAdapter(
             close,
           };
           startupSignal.throwIfAborted();
+          controls.set(ref.sessionId, control);
           if (launch.brief) {
             await view.guard?.();
             const delivered = await control.send(launch.brief);
+            if (delivered.outcome === "offline" && delivered.deliveryStage === "unavailable")
+              return {
+                outcome: "failed",
+                reason: "not_ready",
+                briefDelivery: "not_sent",
+                detail: `${delivered.detail}; native view retained in ${view.paneId}; inspect it before recovery`,
+              };
             if (delivered.outcome !== "accepted")
               throw new Error("brief_delivery_unverified: " + JSON.stringify(delivered));
           }
-          controls.set(ref.sessionId, control);
           return { outcome: "started", control };
         } catch (error) {
           await close();

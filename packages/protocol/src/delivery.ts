@@ -79,10 +79,15 @@ export function discordDeliveryStage(result: {
 }
 
 export function hireDeliveryStage(
-  result: { readonly outcome: "spawned" | "failed"; readonly reason?: string },
+  result: {
+    readonly outcome: "spawned" | "failed";
+    readonly reason?: string;
+    readonly briefDelivery?: "not_sent" | undefined;
+  },
   hasBrief: boolean,
 ): DeliveryStage | undefined {
   if (result.outcome === "spawned") return hasBrief ? "consumed" : undefined;
+  if (result.briefDelivery === "not_sent") return "unavailable";
   if (["start_unconfirmed", "delivery_unconfirmed"].includes(result.reason ?? "")) return "uncertain";
   return ["unknown_directory", "at_capacity", "trust_required"].includes(result.reason ?? "")
     ? "rejected"
