@@ -613,6 +613,27 @@ export class ClankieApiClient {
     return parseProtocolResponse(DiscordPresenceWriteResultSchema, result);
   }
 
+  public async reconcileDiscordPresenceAction(
+    input: DiscordPresenceWrite,
+    liveClaim: DiscordPresenceLiveClaim,
+  ): Promise<DiscordPresenceWriteResult | null> {
+    const write = DiscordPresenceWriteSchema.parse(input);
+    const claim = DiscordPresenceLiveClaimSchema.parse(liveClaim);
+    const response = await this.request<{ reply: unknown }>("/v1/discord/presence-actions?reconcile=1", {
+      method: "POST",
+      headers: {
+        ...this.captainHeaders(),
+        [DISCORD_PRESENCE_LIVE_SESSION_HEADER]: claim.sessionId,
+        [DISCORD_PRESENCE_LIVE_PHASE_HEADER]: claim.phase,
+        [DISCORD_PRESENCE_LIVE_REVISION_HEADER]: String(claim.revision),
+      },
+      body: JSON.stringify(write),
+    });
+    return response.reply === null
+      ? null
+      : parseProtocolResponse(DiscordPresenceWriteResultSchema, response.reply);
+  }
+
   /** Publishes a bridge-owned gateway/voice phase transition to the service. */
   public async voiceOutputGuard(input: {
     nonce: string;

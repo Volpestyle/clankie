@@ -256,7 +256,11 @@ describe("Discord channel turn routes", () => {
       const alerts: string[] = [];
       let calls = 0;
       // A real Discord snowflake from 2026-10-05, so the legacy rule can date it.
-      const request = { ...turnRequest(), deliveryId: "1556651594169323582" };
+      const request = {
+        ...turnRequest(),
+        deliveryId: "1556651594169323582",
+        trigger: { ...turnRequest().trigger, id: "1556651594169323582", messageId: "1556651594169323582" },
+      };
       const dependencies = {
         discordTurnReceiptPath: path,
         clock: () => new Date("2026-10-06T21:00:00Z"),

@@ -3887,8 +3887,16 @@ paths:
         `x-clankie-discord-presence-session`,
         `x-clankie-discord-presence-phase`,
         `x-clankie-discord-presence-revision`.
+        `reconcile=1` performs a read-only reply-history check for the original
+        admitted message. Returns `{reply: result}` when found, or `{reply: null}`
+        only after complete history proves absence. Unknown or stale authority
+        refuses; it never posts or clears an active predecessor's write.
       security: [{ discordTextBearer: [] }, { discordVoiceBearer: [] }]
       parameters:
+        - in: query
+          name: reconcile
+          schema: { type: integer, enum: [1] }
+          description: Read-only reconciliation instead of executing the action
         - in: header
           name: x-clankie-discord-presence-session
           required: true

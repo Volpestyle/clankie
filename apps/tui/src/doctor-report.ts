@@ -159,6 +159,13 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
             ? `  ✓ Linear GraphQL · runs as ${clean(report.linearGraphql.account)} (app) in ${clean(report.linearGraphql.workspace)} · ${report.linearGraphql.credential}`
             : `  ○ Linear GraphQL · unavailable · ${clean(report.linearGraphql.detail)}`,
         ]),
+    ...(report.discordRoomDelivery && "rooms" in report.discordRoomDelivery
+      ? [
+          `  Discord delivery · ${report.discordRoomDelivery.rooms.some((room) => room.coverage === "observed" && room.unrecoveredFailed === undefined) ? "unknown" : report.discordRoomDelivery.rooms.reduce((sum, room) => sum + (room.unrecoveredFailed ?? 0), 0)} unrecovered failures`,
+        ]
+      : report.discordRoomDelivery
+        ? [`  Discord delivery · unavailable: ${report.discordRoomDelivery.detail}`]
+        : []),
     `  Discord · ${report.discord.activeBody ?? "no body"}${report.discord.voiceEnabled ? " · voice" : ""}`,
     ...(report.mcpServers.length ? [`  MCP · ${report.mcpServers.join(", ")}`] : []),
     ...(report.autonomy?.drift === undefined ? [] : [`  ○ ${formatAutonomyDrift(report.autonomy.drift)}`]),

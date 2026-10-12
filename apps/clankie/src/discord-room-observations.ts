@@ -44,6 +44,7 @@ export class DiscordRoomObservations {
       // reconstruct the original device bearer/local operator authentication.
       if (room.status.guidance.state === "pending")
         room.status.guidance = { ...room.status.guidance, state: "expired", text: undefined };
+      room.status.unrecoveredFailed = this.unrecovered(room);
       this.rooms.set(room.status.conversationId, room);
     }
   }
@@ -89,6 +90,7 @@ export class DiscordRoomObservations {
     status.silent = room.deliveries.filter((entry) => has(entry, "declined")).length;
     status.missed = room.deliveries.filter((entry) => has(entry, "missed")).length;
     status.failed = room.deliveries.filter((entry) => has(entry, "failed")).length;
+    status.unrecoveredFailed = this.unrecovered(room);
     status.pending = room.deliveries.filter(
       (entry) => !has(entry, "settled", "declined", "missed", "failed", "absorbed", "dropped", "escalated"),
     ).length;
@@ -103,6 +105,19 @@ export class DiscordRoomObservations {
     this.commit(conversationId, room);
     if (firstFailure && (evidence.outcome === "failed" || evidence.outcome === "escalated"))
       for (const listener of this.listeners) listener(conversationId);
+  }
+  private unrecovered(room: Room): number {
+    return room.deliveries.filter(
+      (entry) =>
+        entry.outcomes.includes("failed") &&
+        !entry.outcomes.includes("settled") &&
+        !(
+          entry.replyDeliveryId &&
+          room.deliveries.some(
+            (reply) => reply.id === entry.replyDeliveryId && reply.outcomes.includes("settled"),
+          )
+        ),
+    ).length;
   }
   setGuidance(
     conversationId: string,

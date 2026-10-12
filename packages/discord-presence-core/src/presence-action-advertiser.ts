@@ -13,6 +13,10 @@ export interface DiscordPresenceActionDeliveryPort {
   submitDiscordCaptainChannelTurn(
     request: DiscordPresenceChannelTurnRequest,
   ): Promise<CaptainChannelTurnResult>;
+  reconcileDiscordPresenceAction?(
+    write: DiscordPresenceWrite,
+    liveClaim: DiscordPresenceLiveClaim,
+  ): Promise<DiscordPresenceWriteResult | null>;
   executeDiscordPresenceAction(
     write: DiscordPresenceWrite,
     liveClaim: DiscordPresenceLiveClaim,
@@ -42,6 +46,17 @@ export function createAdvertisedDiscordPresencePort(
   return {
     getHealth: () => delegate.getHealth(),
     submitDiscordCaptainChannelTurn: (request) => delegate.submitDiscordCaptainChannelTurn(request),
+    ...(delegate.reconcileDiscordPresenceAction === undefined
+      ? {}
+      : {
+          reconcileDiscordPresenceAction: (write: DiscordPresenceWrite) =>
+            delegate.reconcileDiscordPresenceAction!(write, {
+              schemaVersion: 1,
+              sessionId: session.liveRecord.sessionId,
+              phase: session.liveRecord.phase,
+              revision: session.liveRecord.revision,
+            }),
+        }),
     executeDiscordPresenceAction: async (write) => {
       const exposure = advertised.current;
       if (!exposure.presenceTools.includes("discord_presence_act")) {

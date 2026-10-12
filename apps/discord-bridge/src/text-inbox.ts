@@ -20,6 +20,7 @@ interface Delivery {
   reply: string | null;
   outgoing: string | null;
   done: number;
+  retries: number;
 }
 
 /** A completed model turn is not a delivered reply. Attention metadata survives restarts too. */
@@ -54,6 +55,24 @@ export class DiscordTextInbox {
     ) {
       this.db.exec("ALTER TABLE deliveries ADD COLUMN outgoing TEXT");
     }
+    if (
+      !this.db
+        .prepare("PRAGMA table_info(deliveries)")
+        .all()
+        .some((column) => column.name === "retries")
+    )
+      this.db.exec("ALTER TABLE deliveries ADD COLUMN retries INTEGER NOT NULL DEFAULT 0");
+    if (
+      !this.db
+        .prepare("PRAGMA table_info(deliveries)")
+        .all()
+        .some((column) => column.name === "acknowledged")
+    )
+      this.db.exec("ALTER TABLE deliveries ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 0");
+    // Repair legacy failures closed before the failure notice was confirmed.
+    this.db.exec(
+      "UPDATE deliveries SET done = 0 WHERE json_extract(result, '$.state') = 'failed' AND reply IS NULL AND acknowledged = 0",
+    );
     this.db.prepare("INSERT OR IGNORE INTO metadata VALUES ('initial_after', ?)").run(initialAfter);
     // If the combined answer was never saved, replay its absorbed messages
     // independently. A newly generated answer to the first message may not
@@ -62,7 +81,7 @@ export class DiscordTextInbox {
       if (row.result === null) continue;
       const result = CaptainChannelTurnResultSchema.parse(JSON.parse(row.result));
       if (result.state !== "absorbed" || result.replyDeliveryId === undefined) continue;
-      if (this.row(result.replyDeliveryId)?.result == null) {
+      if (this.row(result.replyDeliveryId)?.result == null || this.ownerFailed(result.replyDeliveryId)) {
         const { replyDeliveryId: _owner, ...independent } = result;
         this.db
           .prepare("UPDATE deliveries SET result = ? WHERE id = ?")
@@ -102,10 +121,7 @@ export class DiscordTextInbox {
               JSON.stringify({ state: "absorbed", captainSessionId: "legacy", turnId: "legacy" }),
               deliveryId,
             );
-        // Old ambient failures are not an inbox. The history scan re-admits
-        // directed messages; only interrupted deliveries migrate unconditionally.
-        if (outcome === "failed")
-          this.db.prepare("DELETE FROM deliveries WHERE id = ? AND done = 0").run(deliveryId);
+        // Keep accepted failures pending: a returned failure is not a delivered notice.
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -217,21 +233,28 @@ export class DiscordTextInbox {
   finish(id: string): void {
     this.db
       .prepare(
-        "UPDATE deliveries SET done = 1 WHERE id = ? OR json_extract(result, '$.replyDeliveryId') IN (?, (SELECT json_extract(request, '$.deliveryId') FROM deliveries WHERE id = ?))",
+        "UPDATE deliveries SET done = 1, acknowledged = 1 WHERE id = ? OR json_extract(result, '$.replyDeliveryId') IN (?, (SELECT json_extract(request, '$.deliveryId') FROM deliveries WHERE id = ?))",
       )
       .run(id, id, id);
   }
 
-  reconcile(id: string, content: string): void {
-    const outgoing = this.row(id)?.outgoing;
-    if (outgoing == null) return;
-    const write = JSON.parse(outgoing);
-    const expected = write.payload.content;
+  reconcile(
+    id: string,
+    content: string,
+  ): ReturnType<typeof DiscordPresenceChannelTurnRequestSchema.parse> | undefined {
+    const row = this.row(id);
+    const outgoing = row?.outgoing;
+    const write = outgoing == null ? undefined : JSON.parse(outgoing);
+    const expected = write?.payload.content;
     if (
+      (write === undefined && content.trim()) ||
       content === expected ||
-      (write.payload.kind === "reply_with_media" && content.startsWith(`${expected}\n\n`))
-    )
+      (write?.payload.kind === "reply_with_media" && content.startsWith(`${expected}\n\n`))
+    ) {
       this.finish(id);
+      if (row?.request != null) return DiscordPresenceChannelTurnRequestSchema.parse(JSON.parse(row.request));
+    }
+    return undefined;
   }
 
   pending(): readonly Delivery[] {
@@ -255,12 +278,61 @@ export class DiscordTextInbox {
   port(delegate: DiscordTextIngressPort): DiscordTextIngressPort {
     return {
       getHealth: () => delegate.getHealth(),
+      deferFailureNotice: (id) => this.row(id)?.reply == null && (this.row(id)?.retries ?? 0) === 0,
+
       submitDiscordCaptainChannelTurn: async (incoming) => {
         this.enqueue(incoming.deliveryId, incoming.trigger.channelId, incoming.trigger.guildId);
         const row = this.row(incoming.deliveryId)!;
+        const original =
+          row.request === null
+            ? incoming
+            : DiscordPresenceChannelTurnRequestSchema.parse(JSON.parse(row.request));
         const saved =
           row.result === null ? undefined : CaptainChannelTurnResultSchema.parse(JSON.parse(row.result));
-        if (saved !== undefined && saved.state !== "absorbed") return saved;
+        if (saved !== undefined && saved.state !== "absorbed" && saved.state !== "failed") return saved;
+        if (saved?.state === "failed" && row.retries > 0) return saved;
+        if (saved?.state === "failed") {
+          // Reachable service and reconciled Discord history precede a durable,
+          // single recovery claim. Unknown writes stay pending, never duplicated.
+          await delegate.getHealth();
+          {
+            if (delegate.reconcileDiscordPresenceAction === undefined)
+              throw new Error("discord_reply_reconciliation_unavailable");
+            const reply = await delegate.reconcileDiscordPresenceAction(
+              row.outgoing === null
+                ? {
+                    schemaVersion: 1,
+                    idempotencyKey: `${incoming.deliveryId}:reply`,
+                    sourceDeliveryId: incoming.deliveryId,
+                    action: "discord.presence.reply",
+                    identity: incoming.identity,
+                    content: "Reply reconciliation",
+                    payload: {
+                      kind: "reply",
+                      channelId: incoming.trigger.channelId,
+                      messageId: incoming.deliveryId,
+                      content: "Reply reconciliation",
+                    },
+                  }
+                : JSON.parse(row.outgoing),
+            );
+            if (reply !== null) {
+              this.db
+                .prepare("UPDATE deliveries SET reply = ?, done = 1 WHERE id = ?")
+                .run(JSON.stringify(reply), incoming.deliveryId);
+              this.finish(incoming.deliveryId);
+              return saved;
+            }
+          }
+          this.db
+            .prepare(
+              "UPDATE deliveries SET request = ?, retries = 1, result = NULL, outgoing = NULL WHERE id = ?",
+            )
+            .run(
+              JSON.stringify({ ...original, deliveryId: `${incoming.deliveryId}:recovery` }),
+              incoming.deliveryId,
+            );
+        }
         if (
           saved?.state === "absorbed" &&
           saved.replyDeliveryId !== undefined &&
@@ -274,26 +346,35 @@ export class DiscordTextInbox {
           // A saved combined answer will acknowledge this message when posted.
           if (owner?.result != null) return saved;
         }
-        const original =
-          row.request === null
-            ? incoming
-            : DiscordPresenceChannelTurnRequestSchema.parse(JSON.parse(row.request));
         const request =
-          saved?.state === "absorbed"
+          saved?.state === "absorbed" || saved?.state === "failed"
             ? { ...original, deliveryId: `${incoming.deliveryId}:recovery` }
             : original;
         this.db
           .prepare("UPDATE deliveries SET request = ? WHERE id = ?")
           .run(JSON.stringify(request), incoming.deliveryId);
         const result = await delegate.submitDiscordCaptainChannelTurn(request);
+        const retained =
+          result.state === "absorbed" &&
+          result.replyDeliveryId !== undefined &&
+          this.ownerFailed(result.replyDeliveryId)
+            ? (() => {
+                const { replyDeliveryId: _owner, ...independent } = result;
+                return independent;
+              })()
+            : result;
         this.db
           .prepare("UPDATE deliveries SET result = ? WHERE id = ?")
-          .run(JSON.stringify(result), incoming.deliveryId);
-        // A returned failure is the service's settled receipt, so asking again
-        // only replays it. Transport errors throw instead and stay pending.
-        // Messages folded into the failed run are still owed their own answer.
-        if (result.state === "failed")
-          this.db.prepare("UPDATE deliveries SET done = 1 WHERE id = ?").run(incoming.deliveryId);
+          .run(JSON.stringify(retained), incoming.deliveryId);
+        if (result.state === "failed") {
+          // Its retry may answer only the saved original request, not messages
+          // steered into the lost run. Those children need independent recovery.
+          this.db
+            .prepare(
+              "UPDATE deliveries SET result = json_remove(result, '$.replyDeliveryId'), done = 0, acknowledged = 0 WHERE json_extract(result, '$.state') = 'absorbed' AND json_extract(result, '$.replyDeliveryId') IN (?, ?)",
+            )
+            .run(incoming.deliveryId, request.deliveryId);
+        }
         if (
           result.state === "absorbed" &&
           result.replyDeliveryId !== undefined &&
@@ -307,8 +388,21 @@ export class DiscordTextInbox {
         if (write.payload.kind !== "reply" && write.payload.kind !== "reply_with_media")
           return delegate.executeDiscordPresenceAction(write);
         const id = write.payload.messageId;
-        const saved = this.row(id)?.reply;
+        const row = this.row(id);
+        const saved = row?.reply;
         if (saved != null) return DiscordPresenceWriteResultSchema.parse(JSON.parse(saved));
+        if (row?.outgoing != null) {
+          if (delegate.reconcileDiscordPresenceAction === undefined)
+            throw new Error("discord_reply_reconciliation_unavailable");
+          const confirmed = await delegate.reconcileDiscordPresenceAction(JSON.parse(row.outgoing));
+          if (confirmed !== null) {
+            this.db
+              .prepare("UPDATE deliveries SET reply = ?, done = 1 WHERE id = ?")
+              .run(JSON.stringify(confirmed), id);
+            this.finish(id);
+            return confirmed;
+          }
+        }
         this.db.prepare("UPDATE deliveries SET outgoing = ? WHERE id = ?").run(JSON.stringify(write), id);
         const reply = await delegate.executeDiscordPresenceAction(write);
         if (reply.messageId !== undefined)
@@ -370,7 +464,10 @@ export async function scanDiscordTextChannel(
         // Re-reading an already delivered reply must not reset today's live
         // attention counter or clear messages that arrived while scanning.
         if (!ingress.hasSpokenInChannel(channel.id)) ingress.observeChannelReply(channel.id);
-        if (message.reference?.messageId) inbox.reconcile(message.reference.messageId, message.content);
+        if (message.reference?.messageId) {
+          const confirmed = inbox.reconcile(message.reference.messageId, message.content);
+          if (confirmed !== undefined) ingress.confirmRecoveredReply(confirmed);
+        }
       }
       if (message.author.bot || message.author.id === botId) continue;
       const mentionsBot = await mentionsDiscordBot(message, botId);

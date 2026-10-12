@@ -167,7 +167,14 @@ Every other message posts to `POST /v1/captain/channel-turns`. The bridge asks f
 acknowledgment and polls `GET /v1/captain/channel-turns/{deliveryId}` until the turn settles, so a
 long model turn does not depend on one open HTTP request. A retry submits the same delivery ID;
 the service joins a surviving turn, and the bridge's inbox saves the final reply and permits only
-one progress post for that Discord message across restarts. Before dispatch, the service atomically
+one progress post for that Discord message across restarts. A failed accepted text request stays
+pending: recovery checks existing replies, then durably claims one retry of the saved request under
+its own recovery delivery ID. A second failure gets a confirmed short notice for its asker. A
+completed model result replays only its saved answer to the original room. Read-only reply
+reconciliation settles an abandoned write or proves absence before the existing mouth-lease
+recovery releases it; unavailable history never clears uncertainty. Room health and doctor count
+unrecovered failures separately from historical failures ([recovery contract](discord-rooms.md)).
+Before dispatch, the service atomically
 records the exact ID, request fingerprint and authorized lane in `discord-turn-receipts.json`
 under its state directory. Completed results remain deduplicated. An unresolved receipt after restart,
 a rejected promise, or unreadable receipts return `uncertain`; neither an HTTP retry nor time passing

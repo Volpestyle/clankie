@@ -34,6 +34,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
     input: DiscordServerAction,
     origin?: { source: "operator" | "discord"; sourceGuildId?: string | undefined },
   ): Promise<DiscordServerActionResult>;
+  reconcileReply(write: DiscordPresenceWrite): ReturnType<DiscordBotPresenceRuntime["reconcileReply"]>;
   execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
@@ -252,6 +253,15 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
         webhookId: webhook.id,
         webhookToken: webhook.token,
       };
+    },
+    async reconcileReply(write) {
+      const request = presenceActGrantRequest(write);
+      const grant = await provider.issueGrant(request);
+      const botToken = await provider.resolveBotToken({ grant, ...request });
+      return new DiscordBotPresenceRuntime({
+        botToken,
+        ...(options.rest === undefined ? {} : { rest: options.rest }),
+      }).reconcileReply(write);
     },
     async execute(write, session, guard) {
       const request = presenceActGrantRequest(write);

@@ -117,6 +117,9 @@ export interface InstallDoctorReport {
   readonly imageModel: string | null;
   readonly videoModel: string | null;
   readonly persona: { readonly displayName: string };
+  readonly discordRoomDelivery?:
+    | { rooms: import("@clankie/protocol").DiscordRoomStatus[] }
+    | { status: "unavailable"; detail: string };
   readonly discord: {
     readonly activeBody: ClankieSettings["discord"]["activeBody"];
     readonly textIngressEnabled: boolean;

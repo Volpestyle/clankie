@@ -18,6 +18,8 @@ import { SETTINGS_SCHEMA_VERSION, SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectInstall, inspectInstallKind, type ExecFileImpl } from "../src/install-doctor.ts";
 
+import { DiscordRoomObservations } from "../../clankie/src/discord-room-observations.ts";
+import { formatDiscordRoomStatus } from "../src/discord-room-view.ts";
 import { doctorCommand, formatDoctorSummary } from "../src/command/doctor.ts";
 
 const tempDirs: string[] = [];
@@ -533,6 +535,27 @@ describe("install doctor", () => {
       );
       expect(healthy.remediations).toEqual([]);
       expect(formatDoctorSummary(healthy)).toBe("ready");
+      const roomFile = join(await installRoot(), "rooms.json");
+      const rooms = new DiscordRoomObservations(roomFile);
+      const evidence = {
+        id: "message:failed",
+        deliveryId: "message",
+        presenceSessionId: "body",
+        transportKind: "bot" as const,
+        channelId: "room",
+        actorId: "person",
+        outcome: "failed" as const,
+      };
+      rooms.record("room", evidence);
+      const restarted = new DiscordRoomObservations(roomFile);
+      const pending = { ...healthy, discordRoomDelivery: { rooms: restarted.list() } };
+      expect(formatDoctorSummary(pending)).toContain("1 Discord messages still need a reply or notice");
+      expect(formatDoctorReport(pending)).toContain("1 unrecovered failures");
+      expect(formatDiscordRoomStatus(restarted.status("room"))).toContain("Unrecovered failures 1");
+      restarted.record("room", { ...evidence, id: "message:settled", outcome: "settled" });
+      expect(formatDoctorSummary({ ...healthy, discordRoomDelivery: { rooms: restarted.list() } })).toBe(
+        "ready",
+      );
 
       const probed: string[] = [];
       const builtin = await doctorWith(

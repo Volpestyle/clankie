@@ -1,4 +1,4 @@
-import { formatAutonomyDrift } from "@clankie/protocol";
+import { DiscordRoomsSnapshotSchema, DISCORD_ROOMS_PATH, formatAutonomyDrift } from "@clankie/protocol";
 import { z } from "zod";
 import { MachineAccessRefusalSchema } from "@clankie/protocol";
 import { runMachinesCommand } from "./machines.ts";
@@ -94,6 +94,19 @@ function doctorSummary(report: InstallDoctorReport): string {
       : undefined;
   if (unresolved)
     return `Seat delivery ${unresolved.receiptId} to ${unresolved.conversationId} has been unresolved for ${formatSeatDeliveryAge(unresolved.ageMs)} — confirm the seat never received it, then run \`clankie seat-delivery settle ${unresolved.receiptId} abandoned-unknown --conversation ${unresolved.conversationId}\`.`;
+  if (report.discordRoomDelivery && "rooms" in report.discordRoomDelivery) {
+    const failed = report.discordRoomDelivery.rooms.filter((room) => (room.unrecoveredFailed ?? 0) > 0);
+    if (failed.length > 0)
+      return `${failed.reduce((count, room) => count + room.unrecoveredFailed!, 0)} Discord messages still need a reply or notice — run \`clankie discord rooms\`.`;
+  }
+  if (
+    report.discordRoomDelivery &&
+    "rooms" in report.discordRoomDelivery &&
+    report.discordRoomDelivery.rooms.some(
+      (room) => room.coverage === "observed" && room.unrecoveredFailed === undefined,
+    )
+  )
+    return "Discord delivery recovery status unknown — run `clankie discord rooms`.";
   const remediation = report.remediations[0];
   const sourceSetup = report.harnessBridges.profiles.codex.sourceSetup;
   if (sourceSetup?.state === "source-manager-required") return `${sourceSetup.detail}. ${sourceSetup.fix}`;
@@ -206,6 +219,25 @@ export async function doctorCommand(
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     ...(options.credentialStore === undefined ? {} : { operatorCredentialStore: options.credentialStore }),
   });
+  let discordRoomDelivery: InstallDoctorReport["discordRoomDelivery"];
+  try {
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (!credential) throw new Error("Discord room health needs the operator credential");
+    const response = await (options.fetchImpl ?? fetch)(`${commandHost(options)}${DISCORD_ROOMS_PATH}`, {
+      headers: { authorization: `Bearer ${credential.token}` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) throw new Error(`Discord room health unavailable (HTTP ${response.status})`);
+    discordRoomDelivery = DiscordRoomsSnapshotSchema.parse(await response.json());
+  } catch (error) {
+    discordRoomDelivery = {
+      status: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
   let fleetHealthMetrics: InstallDoctorReport["fleetHealthMetrics"];
   try {
     const credential = await resolveOperatorCredential({
@@ -323,6 +355,7 @@ export async function doctorCommand(
       ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),
     }),
     remoteHarnesses,
+    discordRoomDelivery,
     toolCatalogHealth,
     workerTools,
     workerReports,

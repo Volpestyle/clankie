@@ -499,6 +499,8 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
       return context.json({ error: "captain_authentication_unavailable" }, 503);
     }
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (context.req.query("reconcile") !== undefined && context.req.query("reconcile") !== "1")
+      return context.json({ error: "invalid_discord_reply_reconciliation" }, 400);
     const revisionHeader = context.req.header(DISCORD_PRESENCE_LIVE_REVISION_HEADER);
     const liveClaim = DiscordPresenceLiveClaimSchema.safeParse({
       schemaVersion: 1,
@@ -539,14 +541,8 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
         ctx.dependencies.bodyLeases === undefined
           ? undefined
           : ctx.discordTurnReceipts.get(`write:${write.idempotencyKey}`);
-      if (persistedWrite !== undefined) {
-        if (persistedWrite.fingerprint !== fingerprint)
-          return context.json({ error: "discord_presence_idempotency_conflict" }, 409);
-        if (persistedWrite.writeResult !== undefined) return context.json(persistedWrite.writeResult);
-        return context.json({ error: "discord_presence_write_uncertain", deliveryStage: "uncertain" }, 409);
-      }
       const previous = ctx.discordPresenceResults.get(write.idempotencyKey);
-      if (previous !== undefined) {
+      if (previous !== undefined && context.req.query("reconcile") !== "1") {
         if (previous.fingerprint !== fingerprint) {
           return context.json({ error: "discord_presence_idempotency_conflict" }, 409);
         }
@@ -591,6 +587,59 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
           },
           409,
         );
+      }
+      const reconciling = context.req.query("reconcile") === "1";
+      if (persistedWrite !== undefined && persistedWrite.writeAbsent !== true) {
+        if (persistedWrite.fingerprint !== fingerprint)
+          return context.json({ error: "discord_presence_idempotency_conflict" }, 409);
+        if (persistedWrite.writeResult !== undefined)
+          return context.json(
+            reconciling ? { reply: persistedWrite.writeResult } : persistedWrite.writeResult,
+          );
+        if (!reconciling || !ctx.discordTurnReceipts.writeRecoverable(persistedWrite))
+          return context.json({ error: "discord_presence_write_uncertain", deliveryStage: "uncertain" }, 409);
+      }
+      if (reconciling) {
+        const sourceId =
+          write.sourceDeliveryId ?? ("messageId" in write.payload ? write.payload.messageId : undefined);
+        const origin =
+          sourceId === undefined ? undefined : ctx.discordTurnReceipts.get(`discord:${sourceId}`)?.origin;
+        if (
+          origin === undefined ||
+          origin.messageId !== sourceId ||
+          !("channelId" in write.payload) ||
+          origin.channelId !== write.payload.channelId ||
+          origin.characterId !== write.identity.characterId ||
+          origin.credentialRef !== write.identity.credentialRef ||
+          origin.presenceSessionId !== write.identity.presenceSessionId ||
+          origin.transportKind !== captainTransportKind(captain)
+        )
+          return context.json({ error: "discord_reply_reconciliation_origin_required" }, 403);
+        if (discordPresenceRuntime.reconcileReply === undefined)
+          return context.json({ error: "discord_reply_reconciliation_unavailable" }, 503);
+        try {
+          const reply = await discordPresenceRuntime.reconcileReply(write);
+          const current = ctx.discordPresenceLiveSessions.get(discordPresenceBindingKey(write.identity));
+          const currentCaptain = await authenticateCaptain(context.req.raw, ctx.dependencies);
+          if (
+            !currentCaptain ||
+            currentCaptain === "unavailable" ||
+            captainTransportKind(currentCaptain) !== origin.transportKind ||
+            current?.sessionId !== liveClaim.data.sessionId ||
+            current.phase !== liveClaim.data.phase ||
+            current.revision !== liveClaim.data.revision
+          )
+            return context.json({ error: "discord_presence_live_claim_stale" }, 409);
+          if (persistedWrite !== undefined && persistedWrite.writeAbsent !== true) {
+            if (reply === null)
+              ctx.discordTurnReceipts.confirmWriteAbsent(`write:${write.idempotencyKey}`, fingerprint);
+            else ctx.discordTurnReceipts.settleWrite(`write:${write.idempotencyKey}`, fingerprint, reply);
+          }
+          return context.json({ reply });
+        } catch (error) {
+          logger.error({ error, key: write.idempotencyKey }, "Discord reply reconciliation failed");
+          return context.json({ error: "discord_reply_reconciliation_failed" }, 503);
+        }
       }
       try {
         let result: DiscordPresenceWriteResult;
@@ -796,7 +845,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     void ctx.dependencies.captain
       .notifyRuntimeHealthAlert(
         `I couldn't answer a Discord message (${code}) in channel ${where.channelId}, ` +
-          `message ${where.deliveryId}. It will not be retried automatically.`,
+          `message ${where.deliveryId}. The Discord inbox will reconcile any existing reply, then retry once when healthy.`,
       )
       .catch(() => undefined);
   }
@@ -876,7 +925,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
             transportKind: request.identity.transportKind,
             ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
             channelId: request.trigger.channelId,
-            messageId: request.deliveryId,
+            messageId: request.trigger.messageId ?? request.trigger.id,
             actorId: request.trigger.actorId,
           },
         });

@@ -108,6 +108,7 @@ it("delivers a saved answer after a restart without running its tools again", as
     }));
   const delegate: DiscordTextIngressPort = {
     getHealth: async () => ({ profileHash: "profile" }),
+    reconcileDiscordPresenceAction: async () => null,
     submitDiscordCaptainChannelTurn: submit,
     // Typing is cosmetic; simulate a disconnect on the reply itself.
     executeDiscordPresenceAction: async (write) =>
@@ -148,6 +149,7 @@ it("retries an unreachable service in the same process using the original accept
   const ingress = new DiscordTextIngress(
     inbox.port({
       getHealth: async () => ({ profileHash: "profile" }),
+      reconcileDiscordPresenceAction: async () => null,
       submitDiscordCaptainChannelTurn: submit,
       executeDiscordPresenceAction: vi.fn(),
     }),
@@ -172,7 +174,7 @@ it("retries an unreachable service in the same process using the original accept
   }
 });
 
-it("stops on a settled failure, tells the asker once, and never resubmits", async () => {
+it("retries a settled failure once, confirms its notice, and never resubmits again", async () => {
   const directory = mkdtempSync(join(tmpdir(), "clankie-inbox-failed-"));
   const path = join(directory, "inbox.sqlite");
   const submit = vi.fn<DiscordTextIngressPort["submitDiscordCaptainChannelTurn"]>(async () => ({
@@ -184,6 +186,7 @@ it("stops on a settled failure, tells the asker once, and never resubmits", asyn
   const writes: string[] = [];
   const delegate: DiscordTextIngressPort = {
     getHealth: async () => ({ profileHash: "profile" }),
+    reconcileDiscordPresenceAction: async () => null,
     submitDiscordCaptainChannelTurn: submit,
     executeDiscordPresenceAction: async (write) => {
       if (write.payload.kind !== "typing_start") writes.push(write.content ?? "");
@@ -200,9 +203,9 @@ it("stops on a settled failure, tells the asker once, and never resubmits", asyn
   try {
     let ingress = new DiscordTextIngress(inbox.port(delegate), config);
     expect((await ingress.handle(message)).state).toBe("failed");
-    expect(inbox.pending()).toEqual([]);
-    expect(writes).toEqual([DISCORD_TURN_FAILED_NOTICE]);
-    // Recovery after a restart neither resubmits nor repeats the notice.
+    expect(inbox.pending()).toHaveLength(1);
+    expect(writes).toEqual([]);
+    // Recovery after a restart retries once before acknowledging the failure.
     inbox.close();
     inbox = new DiscordTextInbox(path, "0");
     ingress = new DiscordTextIngress(inbox.port(delegate), config);
@@ -210,7 +213,7 @@ it("stops on a settled failure, tells the asker once, and never resubmits", asyn
       await ingress.handle(message);
     });
     expect(inbox.pending()).toEqual([]);
-    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledTimes(2);
     expect(writes).toEqual([DISCORD_TURN_FAILED_NOTICE]);
   } finally {
     inbox.close();
@@ -224,6 +227,7 @@ it("keeps chatter quiet when its settled turn fails", async () => {
   const ingress = new DiscordTextIngress(
     inbox.port({
       getHealth: async () => ({ profileHash: "profile" }),
+      reconcileDiscordPresenceAction: async () => null,
       submitDiscordCaptainChannelTurn: async () => ({ state: "failed", code: "captain_turn_failed" }),
       executeDiscordPresenceAction: execute,
     }),
@@ -233,7 +237,7 @@ it("keeps chatter quiet when its settled turn fails", async () => {
     const outcome = await ingress.handle({ ...message, guildId: "guild", mentionsBot: false });
     expect(outcome.state).toBe("failed");
     expect(execute.mock.calls.filter(([write]) => write.payload.kind !== "typing_start")).toEqual([]);
-    expect(inbox.pending()).toEqual([]);
+    expect(inbox.pending()).toHaveLength(1);
   } finally {
     inbox.close();
   }
@@ -273,6 +277,7 @@ it("pages through offline history, queues directed messages, and reconciles exis
   await new DiscordTextIngress(
     inbox.port({
       getHealth: async () => ({ profileHash: "profile" }),
+      reconcileDiscordPresenceAction: async () => null,
       submitDiscordCaptainChannelTurn: async () => ({
         state: "settled",
         captainSessionId: "session",
@@ -348,6 +353,7 @@ it.each([true, false])(
       }));
     const delegate: DiscordTextIngressPort = {
       getHealth: async () => ({ profileHash: "profile" }),
+      reconcileDiscordPresenceAction: async () => null,
       submitDiscordCaptainChannelTurn: submit,
       // Typing is cosmetic; simulate a disconnect on the reply itself.
       executeDiscordPresenceAction: async (write) =>
@@ -359,8 +365,8 @@ it.each([true, false])(
       let ingress = new DiscordTextIngress(inbox.port(delegate), config);
       await ingress.handle(message);
       await ingress.handle({ ...message, id: "101", body: "and Bartlett?" });
-      // A settled failure is final for its own message, never for one folded into it.
-      expect(inbox.pending().map((row) => row.id)).toEqual(savedAnswer ? ["100", "101"] : ["101"]);
+      // Both the failed message and its absorbed child still need recovery.
+      expect(inbox.pending().map((row) => row.id)).toEqual(["100", "101"]);
       inbox.close();
       inbox = new DiscordTextInbox(path, "0");
       ingress = new DiscordTextIngress(inbox.port(delegate), config);
@@ -399,6 +405,7 @@ function historyMessage(id: string, authorId = "human", content = "a follow-up")
 function replyPort() {
   return {
     getHealth: async () => ({ profileHash: "profile" }),
+    reconcileDiscordPresenceAction: async () => null,
     submitDiscordCaptainChannelTurn: vi.fn<DiscordTextIngressPort["submitDiscordCaptainChannelTurn"]>(
       async () => ({
         state: "settled",

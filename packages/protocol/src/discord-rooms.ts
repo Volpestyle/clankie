@@ -68,6 +68,8 @@ export const DiscordRoomStatusSchema = z
     silent: Count,
     missed: Count,
     failed: Count,
+    /** Failed deliveries without a confirmed reply or room notice. */
+    unrecoveredFailed: Count.optional(),
     pending: Count,
     absorbedUnknown: Count,
     lastReason: Reason.optional(),

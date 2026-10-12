@@ -16,6 +16,8 @@ import type {
 export interface DiscordPresenceRuntimePort {
   /** Native server REST: configured role and server are enforced inside the body. */
   serverAction?(input: DiscordServerAction): Promise<DiscordServerActionResult>;
+  /** null proves no reply exists; errors preserve uncertainty. Read-only. */
+  reconcileReply?(write: DiscordPresenceWrite): Promise<DiscordPresenceWriteResult | null>;
   execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,

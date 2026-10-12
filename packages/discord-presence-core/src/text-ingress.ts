@@ -353,6 +353,8 @@ export interface DiscordTextIngressPort {
     request: DiscordPresenceChannelTurnRequest,
   ): Promise<CaptainChannelTurnResult>;
   executeDiscordPresenceAction(write: DiscordPresenceWrite): Promise<DiscordPresenceWriteResult>;
+  reconcileDiscordPresenceAction?(write: DiscordPresenceWrite): Promise<DiscordPresenceWriteResult | null>;
+  deferFailureNotice?(deliveryId: string): boolean;
 }
 
 interface RetainedDelivery {
@@ -363,7 +365,7 @@ interface RetainedDelivery {
 
 /** Said once, as the reply, when his turn for a message settled as failed. */
 export const DISCORD_TURN_FAILED_NOTICE =
-  "I hit a problem answering this one and couldn't finish it. I've flagged it so it gets looked at.";
+  "I missed this while I was having trouble answering. Please resend it so I can pick it up.";
 
 const DEFAULT_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RETAINED_DELIVERIES = 50_000;
@@ -445,6 +447,25 @@ export class DiscordTextIngress {
         `Discord contextMessageLimit must be between 0 and ${String(DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX)}`,
       );
     }
+  }
+
+  /** A history read confirmed the original message's bot reply. No new turn or post. */
+  public confirmRecoveredReply(request: DiscordPresenceChannelTurnRequest): void {
+    const observationSessionId = this.config.observationSessionId?.();
+    this.evidence({
+      service: "discord-text-ingress",
+      outcome: "settled",
+      deliveryId: request.trigger.messageId ?? request.trigger.id,
+      correlationId: request.identity.correlationId,
+      presenceSessionId:
+        request.identity.presenceSessionId ??
+        `discord:${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`,
+      ...(observationSessionId === undefined ? {} : { observationSessionId }),
+      ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
+      channelId: request.trigger.channelId,
+      actorId: request.trigger.actorId,
+      reason: "existing_reply_confirmed",
+    });
   }
 
   public async handle(message: DiscordInboundMessage): Promise<DiscordTextIngressOutcome> {
@@ -619,11 +640,16 @@ export class DiscordTextIngress {
         reason: result.code,
         ...(result.turnId === undefined ? {} : { turnId: result.turnId }),
       });
-      // A settled failure is final, and the owner was alerted when it settled.
-      // Someone who asked him directly hears that once, through the same
-      // per-message reply key, so a retry or restart cannot post it twice.
-      if (message.guildId === undefined || !this.unprompted(message))
-        await this.postFailureNotice(message, identity).catch(() => undefined);
+      // The durable inbox first retries after recovery. A second failure owes
+      // the room one confirmed notice, with the same per-message reply key.
+      if (
+        this.port.deferFailureNotice !== undefined
+          ? !this.port.deferFailureNotice(message.id)
+          : message.guildId === undefined || !this.unprompted(message)
+      ) {
+        await this.postFailureNotice(message, identity);
+        event("settled", { reason: "failure_acknowledged" });
+      }
       return { state: "failed", code: result.code };
     }
 
@@ -809,7 +835,8 @@ export class DiscordTextIngress {
         content: DISCORD_TURN_FAILED_NOTICE,
       },
     });
-    await this.port.executeDiscordPresenceAction(write);
+    const reply = await this.port.executeDiscordPresenceAction(write);
+    if (reply.messageId === undefined) throw new Error("discord_failure_notice_unconfirmed");
   }
 
   private unprompted(message: DiscordInboundMessage): boolean {

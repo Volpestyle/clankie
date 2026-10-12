@@ -66,6 +66,56 @@ export class DiscordBotPresenceRuntime {
     this.activityApplicationIds = options.activityApplicationIds ?? {};
   }
 
+  /** Read the complete reply history before an abandoned write can be replayed. */
+  public async reconcileReply(write: DiscordPresenceWrite): Promise<DiscordPresenceWriteResult | null> {
+    const payload = write.payload;
+    if (payload.kind !== "reply" && payload.kind !== "reply_with_media")
+      throw new Error("discord_reply_reconciliation_unsupported");
+    const self = (await this.rest.get(Routes.user("@me"))) as { id: string };
+    if (typeof self.id !== "string" || !self.id) throw new Error("discord_reply_identity_unavailable");
+    let after = payload.messageId;
+    // A bounded scan never treats a truncated history as proof of absence.
+    for (let page = 0; page < 100; page += 1) {
+      const messages = (await this.rest.get(Routes.channelMessages(payload.channelId), {
+        query: new URLSearchParams({ after, limit: "100" }),
+      })) as {
+        id: string;
+        author: { id: string };
+        content?: string;
+        attachments?: unknown[];
+        message_reference?: { message_id?: string };
+      }[];
+      if (
+        !Array.isArray(messages) ||
+        messages.some(
+          (message) =>
+            message == null ||
+            !/^[0-9]+$/u.test(message.id) ||
+            typeof message.author?.id !== "string" ||
+            typeof message.content !== "string" ||
+            (message.attachments !== undefined && !Array.isArray(message.attachments)),
+        )
+      )
+        throw new Error("discord_reply_history_invalid");
+      for (const message of messages) {
+        if (
+          message.author.id === self.id &&
+          message.message_reference?.message_id === payload.messageId &&
+          ((message.content?.length ?? 0) > 0 || (message.attachments?.length ?? 0) > 0)
+        )
+          return result(write, payload.channelId, message.id);
+      }
+      if (messages.length < 100) return null;
+      const next = messages.reduce(
+        (max, message) => (BigInt(message.id) > BigInt(max) ? message.id : max),
+        after,
+      );
+      if (next === after) throw new Error("discord_reply_history_incomplete");
+      after = next;
+    }
+    throw new Error("discord_reply_history_incomplete");
+  }
+
   public async execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,

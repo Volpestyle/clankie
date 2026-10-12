@@ -7,6 +7,7 @@ export function formatDiscordRoomStatus(room: DiscordRoomStatus): string {
     room.coverage === "unknown"
       ? "Delivery health unknown — no current observations"
       : `Received ${room.received} · answered ${room.answered} · silent ${room.silent} · missed ${room.missed} · failed ${room.failed}`,
+    `Unrecovered failures ${room.unrecoveredFailed ?? "unknown"}`,
     `Pending ${room.pending} · absorbed with unconfirmed answer ${room.absorbedUnknown}`,
     ...(room.lastReason === undefined ? [] : [`Reason: ${room.lastReason}`]),
     `Private guidance: ${room.guidance.state}`,

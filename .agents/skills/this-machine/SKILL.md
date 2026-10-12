@@ -84,6 +84,11 @@ skill never grants the machine; trusted guild/channel shell grants are retired.
 Legacy house-hunting author labels require the owner's explicit household/ID
 confirmation through `discord legacy-author ... --confirm`; display names and
 message claims never establish identity. Binding alone does not reopen a home.
+`clankie discord rooms` and doctor expose unrecovered failed text deliveries.
+The inbox reconciles existing replies, retries once after recovery and confirms
+its reply or failure notice before closing. Do not manually repost an uncertain
+answer or clear a mouth lease by age. `room_turn` reports its concrete refusal;
+`discord_owner_audience_required` preserves the owner-only audience boundary.
 
 Fleet, persona, voice, Discord fields, worker holds, Linear follow/wake, `awake`
 and `update auto` use the owner settings API. Read the current snapshot, then

@@ -43,6 +43,30 @@ unknown, not zero evidence of failure. Silence reports `volitional_silence`, not
 an invented explanation of the model's reasoning. Failures/escalations wake the
 owner once per delivery through the existing content-free device push path.
 
+Failed accepted text requests remain in the durable Discord inbox. On the next
+healthy recovery round, Clankie checks for an existing bot reply before retrying
+the saved request once. If that retry fails, the accepted message gets
+one short failure notice. Neither a model result nor an attempted notice closes
+the delivery; Discord confirmation does. `unrecoveredFailed` counts failed
+messages without a confirmed reply or notice, separately from the historical
+failure count. `clankie doctor` also reports these unresolved room deliveries.
+
+A completed handoff's saved answer is replayed to its original room without
+running its tools again. Before replaying an uncertain write, the authenticated
+body reads that channel's reply history. A found reply settles the write; a
+complete scan proving absence allows the existing body-lease recovery to release
+an abandoned mouth. Failed or truncated reads preserve uncertainty and queue
+the delivery. The native Discord nonce remains a second duplicate safeguard.
+`POST /v1/discord/presence-actions?reconcile=1` performs only this read, under the
+same current authenticated transport and live presence claim as writes. It
+returns `{reply: result}` or `{reply: null}`; errors prove neither delivery nor
+absence. A predecessor still running cannot have its write released this way.
+
+Owner-directed `room_turn` failures include their concrete code in worker MCP
+output and the service log. `discord_owner_audience_required` means the current
+Discord audience could not be proven owner-only; recovery does not widen that
+boundary. Inspect the room's audience instead of reposting private instructions.
+
 `clankie discord guide CONVERSATION_ID TEXT` or TUI `/discord guide` queues bounded
 private context for that room's next naturally admitted turn. `--clear` clears it.
 Nothing is posted as James and no new turn is started. Clankie decides how to use

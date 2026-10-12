@@ -19,6 +19,7 @@ const ReceiptSchema = z
     settled: CaptainChannelTurnResultSchema.optional(),
     bodyConversationId: z.string().optional(),
     writeResult: DiscordPresenceWriteResultSchema.optional(),
+    writeAbsent: z.boolean().optional(),
     origin: z
       .strictObject({
         baseSessionKey: z.string().optional(),
@@ -61,7 +62,8 @@ export class DiscordTurnReceipts {
   }
 
   public begin(id: string, receipt: Receipt): void {
-    if (this.get(id) !== undefined) throw new Error("Discord delivery already recorded");
+    if (this.get(id) !== undefined && this.get(id)?.writeAbsent !== true)
+      throw new Error("Discord delivery already recorded");
     this.records.set(
       id,
       ReceiptSchema.parse({ ...receipt, beganBy: { instanceId: this.instanceId, pid: process.pid } }),
@@ -102,6 +104,22 @@ export class DiscordTurnReceipts {
     this.save();
   }
 
+  /** Only a completed local dispatch or an exited predecessor can be reconciled. */
+  public writeRecoverable(receipt: Receipt): boolean {
+    return (
+      receipt.beganBy !== undefined &&
+      (receipt.beganBy.instanceId === this.instanceId || !processAlive(receipt.beganBy.pid))
+    );
+  }
+
+  public confirmWriteAbsent(id: string, fingerprint: string): void {
+    const receipt = this.get(id);
+    if (receipt?.fingerprint !== fingerprint || !this.writeRecoverable(receipt))
+      throw new Error("Discord write receipt mismatch");
+    this.records.set(id, { ...receipt, writeAbsent: true });
+    this.save();
+  }
+
   public requireGuard(key: string, fingerprint: string, guard: () => Promise<void>): void {
     const id = `guard:${key}`;
     const existing = this.get(id);
@@ -121,7 +139,10 @@ export class DiscordTurnReceipts {
   public writesSettled(conversationId: string): boolean {
     if (this.unreadable) return false;
     return [...this.records.values()].every(
-      (receipt) => receipt.bodyConversationId !== conversationId || receipt.writeResult !== undefined,
+      (receipt) =>
+        receipt.bodyConversationId !== conversationId ||
+        receipt.writeResult !== undefined ||
+        receipt.writeAbsent === true,
     );
   }
 
