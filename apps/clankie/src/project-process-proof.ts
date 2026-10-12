@@ -44,11 +44,12 @@ async function installedLauncher(harness: string): Promise<NativeLauncher | unde
   // The pane launcher execs real Claude; it is never the executable whose
   // identity we prove. Resolve past our PATH shims just as that launcher does,
   // retaining this proof's absolute, service-owned PATH boundary.
+  const absolutePath = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute).join(delimiter);
+  // An empty PATH makes the pane launcher search cwd; proof never trusts that fallback.
+  if (harness === "claude" && absolutePath === "") return undefined;
   const launcher =
     harness === "claude"
-      ? await realClaude({
-          PATH: (process.env.PATH ?? "").split(delimiter).filter(isAbsolute).join(delimiter),
-        })
+      ? await realClaude({ PATH: absolutePath })
           .then((path: string) => realpath(path))
           .catch(() => undefined)
       : await find(harness);

@@ -43,10 +43,57 @@ pane. All five fixed `localProjectProof` checks refused it as `not_member`, afte
 successful project observation. The sockets and helper owned by the proof were
 closed. No unit tests were added.
 
-## Remaining live acceptance
+## Initial deployment handoff
 
-The lead owns deployment. These paired observations do not claim that the
-unchanged installed service's alert became quiet. After deployment and seat
-readoption, retain one full hour of live fleet metrics with several Claude panes
-open, measure the refusal deltas and check the alert trail. Attach that evidence
-to VUH-2160 before closure.
+The lead owned deployment. The paired observations did not establish that the
+unchanged installed service's alert became quiet. At initial landing, the
+full-hour runtime acceptance was still pending; its later results follow.
+
+## Deployed hour
+
+Runtime `5e850e02e`, 2026-10-12T08:32:37.511Z–2026-10-12T09:32:38.462Z
+(60 minutes and 0.951 seconds), after the lead's confirmed readoption:
+
+- 16,606 checks; 40 aggregate refusals (0.24%), compared with
+  1,533/15,087 (10.16%) in the measured old-runtime hour.
+- Zero `observation_failed`, zero Claude refusals, and zero fleet proof alerts.
+  Five Claude panes were present in every recorded rolling five-minute sample.
+- All three lookup diagnostics occurred on every observed Claude pane.
+  Aggregate diagnostic deltas: 863 `process_unavailable`, 262 `socket_unavailable`,
+  and 279 `process_census_changed`. These counts describe diagnostics, not failed calls.
+- Other refusals were retained: 33 `native_initial_unavailable`, one
+  `native_final_unavailable`, two `pane_unavailable`, and four `not_member`.
+
+Overlapping reads of the lead's durable conversation journal cover the full
+hour; later retention trimmed its beginning. The uploaded evidence retains
+the earlier reads and all metrics samples, rather than treating one final
+journal read as complete coverage.
+
+The first deployment's 07:51:04.079–08:30:06.164Z window recorded 9,276 checks
+and 14 other refusals, with zero target refusals or proof alerts. The next
+lead deployment interrupted it, so it is not an hour pass. The second runtime's
+startup included one Codex fleet `observation_failed` at 08:32:04.755Z, before
+the saved settled baseline; it remains separately recorded in the evidence.
+
+An additional real TCP caller was reparented to launchd while remaining in its
+governed job's process group. Kernel ancestry contained only that caller, with
+parent PID 1 and no Herdr ancestor. All five project checks refused it as
+`not_member`; the sockets, caller and helper were cleaned up.
+
+[Full captured evidence, attached to VUH-2160](https://linear.app/vuhlp/issue/VUH-2160/claude-panes-fail-fleet-proof-checks-about-10percent-of-the-time-codex).
+Attachment: “VUH-2160 live hour and trust-boundary evidence”. Actual pane details
+stay on the private issue and in ignored `.local/vuh-2160/`.
+
+## Absolute PATH follow-up
+
+The reused pane lookup treats an empty PATH as the working directory. Filtering
+an all-relative service PATH to empty must therefore refuse before invoking it.
+A real open Claude pane and a cwd symlink to its actual installed binary proved
+the edge: the initial patch admitted both empty and all-relative PATH cases;
+the guard refuses both as `launcher_unavailable`. The actual service PATH still
+passes. No launcher, process or Herdr response was substituted.
+
+The hour's service PATH contains absolute entries, so its successful discovery
+uses the same lookup before and after this guard. The live hour is retained for
+that unchanged input; the guard has its own real boundary proof. No unit tests
+were added.

@@ -104,6 +104,8 @@ For `launcher_unavailable` on Claude, check the service's PATH: prepared panes
 put Clankie's shell shim before the actual Claude binary. Project proof resolves
 past those shims using the launcher's real-Claude lookup; the shim itself never
 proves membership. A launcher refusal is not evidence of a failed socket lookup.
+An empty or all-relative service PATH supplies no installed launcher; proof
+never falls back to an executable in the working directory.
 Do not infer the historic sender from today's connected processes. Retain actual
 PID/pane/socket details privately and publish sanitized counts and stages. See
 `docs/cli.md` under `metrics --fleet` for the bounded diagnostic sampling.
