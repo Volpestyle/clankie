@@ -114,6 +114,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0263 — One autonomy dial over the decision leaves](0263-one-autonomy-dial-over-the-decision-leaves.md)
 - [0264 — Projects on Auto replace goals](0264-projects-on-auto-replace-goals.md)
 - [0265 — Routines are recurring jobs with a run fence](0265-routines-are-recurring-jobs-with-a-run-fence.md)
+- [0266 — Landing gates keep isolation and load less](0266-landing-gates-keep-isolation-and-load-less.md)
 
 ## Archived decisions
 

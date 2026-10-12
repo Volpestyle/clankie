@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "collection.json.gz",
+      "size": 4156550,
+      "sha256": "45024a7cdad207cba0c758c65e1fec57e40ca1ecc949447079d94d0dcd658e3f",
+      "url": "clankie://evidence/sha256/45024a7cdad207cba0c758c65e1fec57e40ca1ecc949447079d94d0dcd658e3f"
+    },
+    {
+      "path": "historical-gate.log",
+      "size": 598081,
+      "sha256": "655d2d97ef6505a63805646ecf828b7d66ce641a7be1061f486fb82c32b74a32",
+      "url": "clankie://evidence/sha256/655d2d97ef6505a63805646ecf828b7d66ce641a7be1061f486fb82c32b74a32"
+    },
+    {
+      "path": "historical-landing.json.gz",
+      "size": 301452,
+      "sha256": "1a07083b55769f473b2e40e46da833897b20bba12a7bf840e6c339cc6555212e",
+      "url": "clankie://evidence/sha256/1a07083b55769f473b2e40e46da833897b20bba12a7bf840e6c339cc6555212e"
+    },
+    {
+      "path": "report-bundle.tar",
+      "size": 53248,
+      "sha256": "8a85c9da1ddd59950862b8c43afe1387ade0829a10564ef4fade7b2b8d66d38b",
+      "url": "clankie://evidence/sha256/8a85c9da1ddd59950862b8c43afe1387ade0829a10564ef4fade7b2b8d66d38b"
+    },
+    {
+      "path": "selection.json",
+      "size": 19753,
+      "sha256": "df620741e4a70673798a08ba96f0280e1a1df045a426a3e5fffdab93f8385383",
+      "url": "clankie://evidence/sha256/df620741e4a70673798a08ba96f0280e1a1df045a426a3e5fffdab93f8385383"
+    }
+  ]
+}

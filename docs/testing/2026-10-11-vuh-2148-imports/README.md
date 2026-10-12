@@ -59,9 +59,12 @@ provider typecheck found a missing type import after moving the family helper;
 the correction and successful recheck are retained. Explicit touched-file
 formatting and lint passed. Real esbuild checks proved the protocol index
 bundles for the browser and the bundled lazy catalog loads and memoizes.
+Settings and protocol route contracts also passed 61 tests in four files (1.03s).
 
 The merge queue still supplies the exact-tree landing check. Live gate timing
 after the priority update remains a separate acceptance measurement.
 Raw collection diagnostics, the exact selection, source patch and check logs
 are linked by the evidence manifest and attached to
 [VUH-2148](https://linear.app/vuhlp/issue/VUH-2148).
+The [baseline manifest](baseline-evidence.json) retains the original profiling
+and historical gate evidence.
