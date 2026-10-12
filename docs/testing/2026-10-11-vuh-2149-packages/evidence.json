@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "before-inventory.json",
+      "size": 227209,
+      "sha256": "c50e9382e80005f18821a59b42c0b80a037696cfd2c7869706436fc33086d9ab",
+      "url": "clankie://evidence/sha256/c50e9382e80005f18821a59b42c0b80a037696cfd2c7869706436fc33086d9ab"
+    },
+    {
+      "path": "slice1-after-final.json",
+      "size": 86537,
+      "sha256": "8426a2c53606ba3f44e32070fe26181a86c551a4d067ec54e08f6e4b1d81a717",
+      "url": "clankie://evidence/sha256/8426a2c53606ba3f44e32070fe26181a86c551a4d067ec54e08f6e4b1d81a717"
+    },
+    {
+      "path": "slice1-after-inventory.json",
+      "size": 225883,
+      "sha256": "b8eb9d690917d46944cc2279965042d13b2b365b073dfd80be8623dfc4fbe0f5",
+      "url": "clankie://evidence/sha256/b8eb9d690917d46944cc2279965042d13b2b365b073dfd80be8623dfc4fbe0f5"
+    },
+    {
+      "path": "slice1-before.json",
+      "size": 89328,
+      "sha256": "bf4413523a8678638768fcd549fa544f008331f61f624b224fb00dda8ce03c89",
+      "url": "clankie://evidence/sha256/bf4413523a8678638768fcd549fa544f008331f61f624b224fb00dda8ce03c89"
+    }
+  ]
+}

@@ -965,31 +965,20 @@ describe("lifecycle", () => {
     expect(harness.session.status()).toMatchObject({ active: true, daveProtocolVersion: 2 });
   });
 
-  it("clears the current session when the voice transport disconnects", async () => {
+  it.each([
+    { type: "transport_state", status: "disconnected" },
+    { type: "dave_state", status: "cleared" },
+  ] as const)("clears the current session on matching $type $status", async (event) => {
     const harness = await joinedHarness();
     harness.vox.emit({
-      type: "transport_state",
+      ...event,
       role: "voice",
       connectionId: at(harness.vox.joins, -1).connectionId,
-      status: "disconnected",
     });
     await flush();
     expect(harness.session.status().active).toBe(false);
     expect(harness.ofType("left")).toHaveLength(1);
     expect(harness.vox.closeCalls).toBe(0);
-  });
-
-  it("clears the current session when matching DAVE state is cleared", async () => {
-    const harness = await joinedHarness();
-    harness.vox.emit({
-      type: "dave_state",
-      role: "voice",
-      connectionId: at(harness.vox.joins, -1).connectionId,
-      status: "cleared",
-    });
-    await flush();
-    expect(harness.session.status().active).toBe(false);
-    expect(harness.ofType("left")).toHaveLength(1);
   });
 });
 

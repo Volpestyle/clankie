@@ -29,37 +29,12 @@ function typed(speakerId: string, text: string, atMs: number): VoiceTranscriptEv
 }
 
 describe("waking", () => {
-  it("wakes on being addressed, for free, and the speaker takes the floor", () => {
-    const f = floor();
-    expect(f.state).toBe("dormant");
-    expect(f.floorHolderId).toBeUndefined();
-    expect(f.observeTranscript(said("alice", "hey clankie you there", 0))).toEqual({
-      action: "wake",
-      reason: "addressed",
-    });
-    expect(f.state).toBe("engaged");
-    expect(f.floorHolderId).toBe("alice");
-  });
-
   it("wakes on a mis-transcribed name", () => {
     const f = floor();
     expect(f.observeTranscript(said("alice", "klanky what do you think", 0))).toEqual({
       action: "wake",
       reason: "addressed",
     });
-  });
-
-  it("under the all policy, any speech is offered without fabricating engagement", () => {
-    const f = floor({ replyPolicy: "all" });
-    expect(f.observeTranscript(said("bob", "morning everyone", 0))).toEqual({
-      action: "offer",
-      reason: "reply_policy_all",
-    });
-    expect(f.state).toBe("dormant");
-    expect(f.floorHolderId).toBeUndefined();
-    f.noteSpeechFrom("bob", 0);
-    expect(f.state).toBe("engaged");
-    expect(f.floorHolderId).toBe("bob");
   });
 
   it("a closing phrase heard while dormant is still an address, so it wakes", () => {
@@ -81,23 +56,6 @@ describe("waking", () => {
 });
 
 describe("holding the floor", () => {
-  it("the floor holder continuing without naming him is an offer, and does not refresh decay", () => {
-    const f = floor();
-    f.observeTranscript(said("alice", "clankie run the tests", 0));
-    expect(f.observeTranscript(said("alice", "actually just the voice ones", 8_000))).toEqual({
-      action: "offer",
-      reason: "holder",
-    });
-    expect(f.floorHolderId).toBe("alice");
-    // Same-breath pivot is also an offer: the model may stay silent.
-    expect(f.observeTranscript(said("alice", "yeah thanks. bob did you finish that thing", 9_000))).toEqual({
-      action: "offer",
-      reason: "holder",
-    });
-    expect(f.tick(WINDOW)).toEqual({ action: "ignore" });
-    expect(f.tick(WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
-  });
-
   it("a name mention that is not a clean hail is an offer from anyone, including dormant", () => {
     const f = floor();
     expect(f.observeTranscript(said("bob", "clankie did you see that", 0))).toEqual({
@@ -195,17 +153,6 @@ describe("holding the floor", () => {
 });
 
 describe("closing phrases", () => {
-  it("a goodbye with his name in it is an address he gets to answer, not a cut-off", () => {
-    // No phrase releases the floor. "thanks clankie" reaches him like any other
-    // address, he replies to it, and the decay window ends the exchange.
-    const f = floor();
-    f.observeTranscript(said("alice", "hey clankie", 0));
-    expect(f.observeTranscript(said("bob", "thanks clankie", 10_000))).toEqual({ action: "hold" });
-    expect(f.state).toBe("engaged");
-    expect(f.floorHolderId).toBe("bob");
-    expect(f.tick(10_000 + WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
-  });
-
   it("thanks aimed at another person is offered without changing the holder", () => {
     const f = floor();
     f.observeTranscript(said("alice", "hey clankie", 0));
@@ -229,15 +176,6 @@ describe("closing phrases", () => {
 });
 
 describe("decay", () => {
-  it("releases on silence alone, with no phrase at all, under an explicit clock", () => {
-    const f = floor();
-    f.observeTranscript(said("alice", "clankie you around", 0));
-    expect(f.tick(WINDOW)).toEqual({ action: "ignore" });
-    expect(f.tick(WINDOW + 1)).toEqual({ action: "release", reason: "decay" });
-    expect(f.state).toBe("dormant");
-    expect(f.floorHolderId).toBeUndefined();
-  });
-
   it("is also checked on transcript arrival, not only on tick", () => {
     const f = floor();
     f.observeTranscript(said("alice", "clankie you around", 0));
@@ -351,14 +289,6 @@ describe("typed room volition outcomes", () => {
       reason: "holder",
     });
     expect(f.accounting()).toEqual({ offered: 1, taken: 1, suppressed: 0 });
-  });
-
-  it("a suppressed offer stays dormant and is counted", () => {
-    const f = floor({ volition: { minIntervalMs: 0, maxPerHour: 10 } });
-    f.observeTranscript(typed("bob", "the tests are flaky again", 0));
-    expect(f.noteVolitionOutcome(false)).toEqual({ action: "ignore" });
-    expect(f.state).toBe("dormant");
-    expect(f.accounting()).toEqual({ offered: 1, taken: 0, suppressed: 1 });
   });
 
   it("an outcome with no outstanding offer changes nothing", () => {

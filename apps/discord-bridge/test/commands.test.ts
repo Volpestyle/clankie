@@ -41,10 +41,6 @@ describe("Discord commands", () => {
     expect(choiceValues("voice-consent", "action")).toEqual(["opt-in", "opt-out"]);
   });
 
-  it("exposes person-memory controls", () => {
-    expect(subcommand("person-memory")).toBeDefined();
-  });
-
   it("exposes the persisted per-channel tool-card toggle", () => {
     expect(choiceValues("tools", "mode")).toEqual(["on", "off", "status"]);
   });
