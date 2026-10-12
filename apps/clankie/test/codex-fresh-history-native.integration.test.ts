@@ -1,4 +1,5 @@
 // Manual native boundary proof; no model provider, credentials or owner stores are substituted.
+import { RemoteCodexSeats } from "../src/remote-codex-seats.ts";
 import { spawn } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,9 +21,9 @@ afterEach(async () => {
 const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
 
-async function nativeFixture() {
+async function nativeFixture(managedNaming = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "codex-history-")));
-  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  cleanups.push(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const home = join(root, "home");
   await mkdir(home, { mode: 0o700 });
   const socketPath = join(root, "rpc.sock");
@@ -66,7 +67,25 @@ async function nativeFixture() {
   await view.initialize(true);
   const account = object(await view.request("account/read", { refreshToken: false }));
   expect(account.account).toBeNull();
+  // Real registration bookkeeping, deliberately without remote authority:
+  // this fixture is a local Unix server, not an admitted Windows fleet.
+  const registration = new RemoteCodexSeats(async () => undefined).register(
+    {
+      fleet: { id: "fixture", session: "default", ssh: { host: "localhost", shell: "posix" } },
+      pane: "owned-history-proof",
+      binding: { session: "default", socketPath },
+      shell: { pid: process.pid, startTime: "fixture" },
+      server: {
+        pid: child.pid!,
+        startTime: "fixture",
+        executable: process.env.CODEX_HISTORY_NATIVE_BINARY ?? "codex",
+        port: 0,
+      },
+    },
+    () => child.exitCode === null,
+  );
   const server: CodexServerLauncher = async () => ({
+    ...(managedNaming ? { remoteRegistration: registration } : {}),
     endpoint: `unix://${socketPath}`,
     connect: () => openCodexSocket(`ws+unix://${socketPath}:/`),
     failure: () => spawnError,
@@ -86,7 +105,8 @@ async function nativeFixture() {
     );
     // Managed remote roots are named before the brief (VUH-2144). Naming
     // creates the native metadata row before a rollout has materialized.
-    await view.request("thread/name/set", { threadId: thread.id, name: "Owned history proof" });
+    if (!managedNaming)
+      await view.request("thread/name/set", { threadId: thread.id, name: "Owned history proof" });
     return thread;
   };
   const materialize = async (thread: Record<string, unknown>) => {
@@ -268,6 +288,69 @@ nativeIt(
       }),
     ).rejects.toThrow(/failed to read thread.*session metadata/u);
     expect(await readFile(String(root.path), "utf8")).not.toContain("Never dispatch");
+  },
+  60_000,
+);
+
+nativeIt(
+  "dispatches once after managed naming replaces a fresh root's synthesized creation time",
+  async () => {
+    const f = await nativeFixture(true);
+    let root: Record<string, unknown> = {};
+    let before: Record<string, unknown> = {};
+    const seat = await f.start(async () => {
+      root = await f.createRoot();
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      before = object(
+        object(await f.view.request("thread/read", { threadId: root.id, includeTurns: false })).thread,
+      );
+    });
+    cleanups.push(() => seat.close());
+    const named = object(
+      object(await f.view.request("thread/read", { threadId: root.id, includeTurns: false })).thread,
+    );
+    expect(named.name).toBe("Clankie worker");
+    // 0.160.1 synthesizes read time until name/set persists actual creation.
+    if (root.cliVersion === "0.160.1") {
+      expect(named.createdAt).toBe(root.createdAt);
+      expect(named.createdAt).not.toBe(before.createdAt);
+    }
+    console.info("managed naming metadata", {
+      version: root.cliVersion,
+      original: root.createdAt,
+      beforeNaming: before.createdAt,
+      afterNaming: named.createdAt,
+    });
+    const brief = "VUH-2167 managed naming regression. Reply READY.";
+    const sent = await seat.send(brief);
+    await expect
+      .poll(
+        async () =>
+          JSON.stringify(
+            await f.view.request("thread/turns/list", {
+              threadId: root.id,
+              limit: 10,
+              sortDirection: "desc",
+              itemsView: "full",
+            }),
+          ),
+        { timeout: 15_000 },
+      )
+      .toContain(brief);
+    await seat.stopTask!(async () => {});
+    const history = object(
+      await f.view.request("thread/turns/list", {
+        threadId: root.id,
+        limit: 10,
+        sortDirection: "desc",
+        itemsView: "full",
+      }),
+    );
+    const turns = history.data as Record<string, unknown>[];
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.id).toBe(sent.turnId);
+    expect(JSON.stringify(turns[0])).toContain(brief);
+    expect(await readFile(String(named.path), "utf8")).toContain(brief);
   },
   60_000,
 );

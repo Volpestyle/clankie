@@ -61,3 +61,12 @@ was closed or steered, no resume/turn RPC was sent there, and no hire was retrie
 A deployed PC first-brief proof remains with the KH2 lead after deployment.
 VUH-2144's catalog/settlement acceptance is independently complete; its original
 fresh intent retains authenticated abandonment. VUH-2153 tracks remote close.
+
+## Remote naming follow-up
+
+The deployed retry exposed a gap in this original fixture: it named roots
+before the controller's first read. Codex 0.160.1 replaces synthesized read-time
+creation metadata with actual creation metadata during naming. The controller
+must establish its freshness baseline after the confirmed naming step.
+[The remote follow-up](../2026-10-12-codex-remote-fresh-history/README.md)
+records the real delayed-native regression, read-only PC diagnosis and fix.

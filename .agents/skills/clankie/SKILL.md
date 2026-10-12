@@ -241,6 +241,10 @@ means no new message was sent; report the pane and inspect its native binding.
 Managed PC Codex hires set their assigned worker name on the fresh native thread
 before briefing it. A native naming refusal prevents the brief; inspect the
 original hire receipt and do not replay it. Resumed sessions keep their names.
+Fresh-root bootstrap uses the confirmed metadata after naming: Codex 0.160.1
+replaces its synthesized read-time creation timestamp with the actual creation
+time then. That time must still belong to the exact fresh view's startup window;
+saved/forked history errors and post-dispatch uncertainty never authorize replay.
 
 With authorized operator access, `clankie hire-receipt settle ORIGINAL_ID
 abandoned-unknown` records an explicit decision to abandon an unmapped fresh

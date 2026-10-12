@@ -4521,7 +4521,9 @@ What crosses the link, and what cannot:
   materializes. Observer subscription and history hydration stay distinct:
   only an exact fresh, idle, non-forked root created during this view's startup
   on an initially empty server may defer the exact missing-source-rollout read
-  before its first dispatch. After dispatch, history is required; a later read
+  before its first dispatch. Freshness uses confirmed post-name metadata:
+  Codex 0.160.1 synthesizes a read-time creation timestamp until naming persists
+  the root's actual creation time. After dispatch, history is required; a later read
   failure is uncertain and never replays input. Saved, forked or corrupt history
   remains refused. Unproven creation metadata or an out-of-window host clock
   cannot grant deferral. A pre-dispatch refusal returns `briefDelivery: "not_sent"`

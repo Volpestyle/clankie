@@ -902,7 +902,7 @@ export async function startCodexAppServerSeat(options: {
     }
     options.signal?.throwIfAborted();
     const result = record(await client.request("thread/read", { threadId, includeTurns: false }));
-    const thread = record(result.thread);
+    let thread = record(result.thread);
     if (typeof thread.id !== "string") throw new Error("Codex app-server returned no thread identity");
     if (thread.id !== threadId) throw new Error("Native thread/read identity changed");
     // Codex 0.160 generates titles by loading an ephemeral second thread when
@@ -920,8 +920,19 @@ export async function startCodexAppServerSeat(options: {
       const named = record(
         record(await client.request("thread/read", { threadId, includeTurns: false })).thread,
       );
-      if (named.id !== threadId || named.name !== name)
+      if (
+        named.id !== threadId ||
+        named.name !== name ||
+        named.path !== thread.path ||
+        named.ephemeral !== thread.ephemeral ||
+        named.forkedFromId !== thread.forkedFromId
+      )
         throw new Error("Native worker name was not confirmed; no brief was sent");
+      // Before naming an unpersisted 0.160 root, thread/read synthesizes
+      // createdAt from the read time. Naming persists the real creation time.
+      // Prove freshness and later continuity against that confirmed snapshot,
+      // still requiring its creation to belong to this exact view startup.
+      thread = named;
     }
     client.hydrateQuestions(threadId, result);
     server.remoteRegistration?.bindThread(threadId, async () => {

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "native-proof.tar",
+      "size": 61440,
+      "sha256": "f0ab1c0fedf4c9ee06202c47b93f5cb68cd7125004f3ff146549ecb09d4ddc71",
+      "url": "clankie://evidence/sha256/f0ab1c0fedf4c9ee06202c47b93f5cb68cd7125004f3ff146549ecb09d4ddc71"
+    }
+  ]
+}
