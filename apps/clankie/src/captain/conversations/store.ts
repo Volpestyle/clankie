@@ -8,6 +8,7 @@ import type {
   ConversationQuestionResult,
 } from "@clankie/protocol";
 import {
+  ConversationQuestionTargetSchema,
   fleetDeliveryStage,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   OPERATOR_CONVERSATION_LIST_MAX,
@@ -3361,6 +3362,44 @@ export class ConversationStore {
       },
       undefined,
       true,
+    );
+  }
+
+  /** Lead tools bind the source outside model input; owner CLI cancellation keeps its own authority path. */
+  public async cancelSurfaceQuestion(
+    conversationId: string,
+    target: Omit<import("@clankie/protocol").ConversationQuestionTarget, "conversationId">,
+    admission: { readonly current: () => boolean; readonly authorize?: () => Promise<boolean> },
+  ): Promise<ConversationQuestionResult> {
+    const request = ConversationQuestionTargetSchema.parse({ ...target, conversationId });
+    if (
+      !admission.current() ||
+      (admission.authorize && !(await admission.authorize())) ||
+      !admission.current()
+    )
+      throw new Error("question_turn_unavailable");
+    const meta = this.metas.get(conversationId);
+    if (!meta) return { status: "refused", conversationId, reason: "unknown_conversation" };
+    this.validQuestionState(meta);
+    const record = meta.questions?.records.find(({ question }) => question.requestId === request.requestId);
+    if (!record || request.incarnationId !== meta.questions?.incarnationId)
+      return this.questionResult(meta, undefined, "refused", "stale_request");
+    if (record.projectCreation?.claim)
+      return this.questionResult(meta, record, "refused", "project_confirmation_consumed");
+    if (record.question.status !== "pending") return this.questionResult(meta, record, "resolved");
+    this.assertQuestionContext(meta, record);
+    if (request.expectedRevision !== meta.revision)
+      return this.questionResult(meta, record, "revision_conflict");
+    this.cancelPendingQuestion(conversationId, "lead_cancelled", undefined, record.question.requestId);
+    return this.questionResult(meta, record, "resolved");
+  }
+
+  /** Current immutable targets for a lead's cleanup round; no answer or cancellation side effect. */
+  public pendingLeadQuestions(): ConversationQuestionResult[] {
+    return [...this.metas.values()].flatMap((meta) =>
+      (meta.questions?.records ?? [])
+        .filter(({ question }) => question.status === "pending")
+        .map((record) => this.questionResult(meta, record, "ready")),
     );
   }
 

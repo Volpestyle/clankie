@@ -1,4 +1,8 @@
-import { OwnerUpdateDraftSchema, type OwnerUpdateDraft } from "@clankie/protocol";
+import {
+  ConversationQuestionTargetSchema,
+  OwnerUpdateDraftSchema,
+  type OwnerUpdateDraft,
+} from "@clankie/protocol";
 import { z } from "zod";
 import { ProjectProposalDraftSchema, type ProjectProposalDraft } from "@clankie/protocol/projects";
 import { Type } from "typebox";
@@ -48,6 +52,26 @@ export function questionTools(turn: TurnContext, projects = true): ToolDefinitio
         const request = turn.requestQuestion;
         if (!request) throw new Error("Questions require a current source conversation");
         return toolJson(await request(draft));
+      },
+    }),
+    defineTool({
+      name: "cancel_question",
+      label: "Cancel an overtaken question",
+      description:
+        "Cancel your own source conversation’s pending owner question when it is overtaken or before asking its replacement. Supply the exact requestId, incarnationId and expectedRevision returned by the question or the fleet round. Another conversation cannot be targeted. A revision conflict requires reading the current question again; never guess a revision. Reconcile an uncertain original with the same target; cancellation never starts an answer turn.",
+      parameters: Type.Unsafe<Omit<import("@clankie/protocol").ConversationQuestionTarget, "conversationId">>(
+        withoutPatterns(
+          z.toJSONSchema(ConversationQuestionTargetSchema.omit({ conversationId: true }), { io: "input" }),
+        ),
+      ),
+      execute: async (_id, input) => {
+        if (!turn.cancelQuestion)
+          throw new Error("Question cancellation requires a current lead conversation");
+        return toolJson(
+          await turn.cancelQuestion(
+            ConversationQuestionTargetSchema.omit({ conversationId: true }).parse(input),
+          ),
+        );
       },
     }),
     defineTool({

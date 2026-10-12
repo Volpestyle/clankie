@@ -1217,3 +1217,36 @@ it("a periodic lead round warns from the real filesystem's low-disk observation"
   expect(events[0]?.content).toContain("Low disk:");
   expect(events[0]?.content).toContain("GiB free");
 });
+
+it("delivers an aged owner question to its own lead even without current workers", async () => {
+  let target: import("@clankie/protocol").ConversationQuestionResult | undefined;
+  const f = await fixture(500, undefined, false, true, async (root, rows) => {
+    rows.splice(0);
+    const store = new ConversationStore(join(root, "conversations"), async () => {});
+    target = await store.requestSurfaceQuestion(
+      "global-default",
+      {
+        purpose: "decision",
+        kind: "choice",
+        prompt: "PC2 is busy; wait?",
+        waitingOn: "The KH2 run",
+        options: [{ label: "Wait" }, { label: "Cancel" }],
+        recommendation: "Wait",
+        allowFreeform: true,
+      },
+      { current: () => true },
+    );
+    await store.close();
+    const path = join(root, "conversations", "global-default", "meta.json");
+    const { readFile } = await import("node:fs/promises");
+    const meta = JSON.parse(await readFile(path, "utf8"));
+    meta.questions.records[0].question.createdAt = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
+    await writeFile(path, JSON.stringify(meta));
+  });
+  const [event] = await f.captain.pollSeatEvents(3000, undefined, "global-default");
+  expect(event?.content).toContain("cancel_question");
+  expect(event?.content).toContain("PC2 is busy; wait?");
+  expect(event?.content).toContain(target!.question!.requestId);
+  expect(await f.captain.pollSeatEvents(0, undefined, f.other)).toEqual([]);
+  await f.finish(event!.id);
+});

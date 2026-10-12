@@ -5843,6 +5843,13 @@ clankie conversations answer CONVERSATION_ID REQUEST_UUID --incarnation INCARNAT
 clankie conversations cancel-question CONVERSATION_ID REQUEST_UUID --incarnation INCARNATION_UUID --revision REVISION
 ```
 
+The lead lane also has `cancel_question {requestId, incarnationId, expectedRevision}`.
+Its host binds the source conversation: it cannot cancel another lead’s ask.
+An overtaken question can be cancelled before asking its replacement. A repeated
+cancellation reconciles the original without starting an answer turn. Periodic
+fleet rounds surface pending questions older than 30 minutes to their source
+lead with current targets, including when that lead has no current workers.
+
 The global list defaults to pending asks. `--status submitted|cancelled` reads
 retained resolutions; an optional conversation ID filters the list. Every entry
 has the same immutable request/incarnation and current conversation revision

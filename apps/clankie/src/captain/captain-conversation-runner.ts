@@ -406,6 +406,13 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                 current: bodyIdentity.current,
                 authorize: bodyIdentity.authorize,
               });
+        lane.capture.cancelQuestion = socialContinuation
+          ? undefined
+          : (target) =>
+              ctx.conversations.cancelSurfaceQuestion(conversationId, target, {
+                current: bodyIdentity.current,
+                authorize: bodyIdentity.authorize,
+              });
         lane.capture.mailOwnerUpdate = (draft, publicationId) =>
           ctx.conversations.mailOwnerUpdate(conversationId, draft, `${context.runId}:${publicationId}`, {
             current: bodyIdentity.current,

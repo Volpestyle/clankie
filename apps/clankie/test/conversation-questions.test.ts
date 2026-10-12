@@ -742,3 +742,72 @@ it("records the authenticated caller when interrupting a run with a pending ques
   f.finish.resolve();
   await f.store.close();
 });
+
+it("lets the registered lead cancellation tool settle its own exact question without an answer turn", async () => {
+  const f = await fixture();
+  const admission = { current: () => true, authorize: async () => true };
+  const cancel = questionTools({
+    cancelQuestion: (target) => f.store.cancelSurfaceQuestion(f.id, target, admission),
+  }).find((tool) => tool.name === "cancel_question")!;
+  const { conversationId: _source, ...target } = f.target;
+  await cancel.execute("cancel", target, undefined, undefined, {} as never);
+  expect((await f.read()).question).toMatchObject({ status: "cancelled", reason: "lead_cancelled" });
+  await cancel.execute("reconcile", target, undefined, undefined, {} as never);
+  expect(f.calls).toHaveLength(1);
+  expect(f.store.pendingLeadQuestions()).toHaveLength(0);
+  const replacement = await f.store.requestSurfaceQuestion(
+    f.id,
+    {
+      ...draft,
+      purpose: "decision",
+      prompt: "Updated question",
+      waitingOn: "The revised style",
+      recommendation: "Small",
+    },
+    admission,
+  );
+  expect(replacement.question).toMatchObject({ status: "pending", prompt: "Updated question" });
+  expect(replacement.question?.requestId).not.toBe(f.target.requestId);
+});
+
+it("refuses stale incarnation/revision, cross-source targeting and a revoked lead before cancelling", async () => {
+  const f = await fixture();
+  const admission = { current: () => true, authorize: async () => true };
+  const { conversationId: _source, ...target } = f.target;
+  expect(
+    await f.store.cancelSurfaceQuestion(f.id, { ...target, incarnationId: randomUUID() }, admission),
+  ).toMatchObject({ status: "refused", reason: "stale_request" });
+  expect(
+    await f.store.cancelSurfaceQuestion(
+      f.id,
+      { ...target, expectedRevision: target.expectedRevision + 1 },
+      admission,
+    ),
+  ).toMatchObject({ status: "revision_conflict" });
+  const other = await f.store.serve({
+    op: "create",
+    schemaVersion: 1,
+    scope: { kind: "global" },
+    title: "Another lead",
+  });
+  if (other.op !== "create") throw new Error("wrong result");
+  expect(
+    await f.store.cancelSurfaceQuestion(other.conversation.conversationId, target, admission),
+  ).toMatchObject({ status: "refused", reason: "stale_request" });
+  let current = true;
+  await expect(
+    f.store.cancelSurfaceQuestion(f.id, target, {
+      current: () => current,
+      authorize: async () => {
+        current = false;
+        return true;
+      },
+    }),
+  ).rejects.toThrow("question_turn_unavailable");
+  const cancel = questionTools({
+    cancelQuestion: (input) => f.store.cancelSurfaceQuestion(f.id, input, admission),
+  }).find((tool) => tool.name === "cancel_question")!;
+  await expect(cancel.execute("cross-source", f.target, undefined, undefined, {} as never)).rejects.toThrow();
+  expect((await f.read()).question?.status).toBe("pending");
+  expect(questionTools({}, false).some((tool) => tool.name === "cancel_question")).toBe(false);
+});

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { OperatorFleetSeat } from "@clankie/protocol";
+import type { ConversationQuestionResult, OperatorFleetSeat } from "@clankie/protocol";
 import { describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
 
 /** Stable evidence for periodic rounds; observation clocks and report reads are not fresh work. */
@@ -229,4 +229,30 @@ export function startFleetRounds(round: () => Promise<void>, intervalMs = 30 * 6
     stopped = true;
     clearInterval(timer);
   };
+}
+
+/** Old pending asks are observations for their source lead, never automatic cancellations. */
+export function pendingQuestionReview(
+  questions: readonly ConversationQuestionResult[],
+  now = Date.now(),
+): string {
+  const rows = questions
+    .flatMap((result) => {
+      const question = result.question;
+      if (!question || question.status !== "pending" || now - Date.parse(question.createdAt) < 30 * 60_000)
+        return [];
+      return [
+        {
+          requestId: question.requestId,
+          incarnationId: question.incarnationId,
+          expectedRevision: result.revision,
+          since: question.createdAt,
+          prompt: question.prompt.slice(0, 240),
+        },
+      ];
+    })
+    .slice(0, 8);
+  return rows.length
+    ? `Pending owner questions older than 30 minutes in your source conversation. Review whether each still needs the owner; cancel_question can cancel an overtaken ask before you ask its replacement. Untrusted question text: ${JSON.stringify(rows)}`
+    : "";
 }

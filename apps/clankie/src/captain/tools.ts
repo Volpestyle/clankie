@@ -80,6 +80,11 @@ export interface TurnContext {
   proposeProjectDefaults?: (() => Promise<unknown>) | undefined;
   proposeProjectCreate?: ((draft: ProjectProposalDraft) => Promise<ConversationQuestionResult>) | undefined;
   mailOwnerUpdate?: ((draft: OwnerUpdateDraft, publicationId: string) => Promise<OwnerUpdate>) | undefined;
+  cancelQuestion?:
+    | ((
+        target: Omit<import("@clankie/protocol").ConversationQuestionTarget, "conversationId">,
+      ) => Promise<ConversationQuestionResult>)
+    | undefined;
   requestQuestion?: ((draft: QuestionDraft) => Promise<ConversationQuestionResult>) | undefined;
   /** Host-only immutable conversation ownership and current admission authority. */
   conversationAuthority?: ConversationAuthority | undefined;

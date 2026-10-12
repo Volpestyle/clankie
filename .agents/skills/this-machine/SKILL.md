@@ -235,6 +235,14 @@ credentials or changes room trust. Escalated worker answers keep the original
 native request and question IDs and return without terminal typing. Retain
 pending or uncertain asks rather than repeating them.
 
+Lead lanes can use `cancel_question` with the returned `requestId`, `incarnationId`
+and `expectedRevision` to cancel their own overtaken ask before asking its
+replacement. The host binds the source; another lead’s question is not reachable.
+Read again after a revision conflict, and reconcile an uncertain cancellation
+with its original target. Fleet rounds surface asks older than 30 minutes to
+their source lead, even when no workers remain. Cancellation never approves
+the requested action or starts an answer turn.
+
 Native seat takeover leaves unanswered owner asks pending in their source.
 Question reads expose `resolvedBy`, `resolvedAt` and cancellation `reason`;
 `cancelled` never means answered or approved. Historical missing attribution

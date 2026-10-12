@@ -50,6 +50,7 @@ import {
 import {
   fleetReviewContext,
   fleetRoundEvidence,
+  pendingQuestionReview,
   FleetReportFailureAlerts,
   startFleetRounds,
 } from "./fleet-review.ts";
@@ -3114,6 +3115,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             (delegation?.current() ?? true),
           ...(delegation ? { authorize: () => delegation.authorize() } : {}),
         });
+      capture.cancelQuestion = (target) =>
+        conversations.cancelSurfaceQuestion(sourceConversationId, target, {
+          current: () =>
+            !shutdown.signal.aborted &&
+            conversations.conversation(sourceConversationId) !== undefined &&
+            (delegation?.current() ?? true),
+          ...(delegation ? { authorize: () => delegation.authorize() } : {}),
+        });
       capture.mailOwnerUpdate = (draft, publicationId) =>
         conversations.mailOwnerUpdate(sourceConversationId, draft, publicationId, {
           current: () =>
@@ -4132,6 +4141,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const owner = seatLeadOwners.get(seat)?.owner;
       if (owner) owners.set(JSON.stringify(owner), owner);
     }
+    const pendingQuestions = conversations.pendingLeadQuestions();
+    for (const pending of pendingQuestions) {
+      if (!pendingQuestionReview([pending]) || !privateLeadConversation(pending.conversationId)) continue;
+      if (![...owners.values()].some((owner) => owner.conversationId === pending.conversationId)) {
+        const owner = { conversationId: pending.conversationId };
+        owners.set(JSON.stringify(owner), owner);
+      }
+    }
     for (const ownerKey of completedFleetRounds.keys()) {
       if (!owners.has(ownerKey)) completedFleetRounds.delete(ownerKey);
     }
@@ -4156,22 +4173,48 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       try {
         if (!(await validateConversationOwner(owner))) continue;
         const current = await ledSeats(owner);
-        if (!current.length || shutdown.signal.aborted) continue;
+        const questionNotice = pendingQuestionReview(
+          pendingQuestions.filter((pending) => pending.conversationId === owner.conversationId),
+        );
+        if ((!current.length && !questionNotice) || shutdown.signal.aborted) continue;
         const holds = (await deps.deployHolds?.().catch(() => undefined)) ?? [];
         const disk = options.fleetResources?.status()?.pressure;
         const diskNotice = disk?.diskWarning
           ? `Low disk: ${disk.freeDiskGb?.toFixed(1)} GiB free. Inspect clankie doctor and reclaim safe fleet caches before starting more work.\n`
           : "";
         const evidence = fleetRoundEvidence(current, holds);
-        if (!diskNotice && !evidence.flagged && completedFleetRounds.get(ownerKey) === evidence.fingerprint)
+        if (
+          !diskNotice &&
+          !questionNotice &&
+          !evidence.flagged &&
+          completedFleetRounds.get(ownerKey) === evidence.fingerprint
+        )
           continue;
         pendingFleetRounds.add(ownerKey);
         void wakeConversation(
           owner,
-          diskNotice + fleetReviewContext(current, undefined, holds),
+          [
+            diskNotice,
+            questionNotice,
+            fleetReviewContext(
+              current,
+              Math.max(0, 10_000 - diskNotice.length - questionNotice.length - 2),
+              holds,
+            ),
+          ]
+            .filter(Boolean)
+            .join("\n"),
           async () => {
-            if (shutdown.signal.aborted || !(await ledSeats(owner)).length)
-              throw new Error("Fleet review stopped or has no owned seats");
+            if (
+              shutdown.signal.aborted ||
+              (!(await ledSeats(owner)).length &&
+                !pendingQuestionReview(
+                  conversations
+                    .pendingLeadQuestions()
+                    .filter((pending) => pending.conversationId === owner.conversationId),
+                ))
+            )
+              throw new Error("Fleet review stopped or has no owned seats or pending questions");
             if (shutdown.signal.aborted) throw new Error("Fleet review stopped");
           },
           "machine",
