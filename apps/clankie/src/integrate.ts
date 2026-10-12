@@ -1215,6 +1215,7 @@ export class IntegrationQueue {
     }
     for (const repo of batch.repos) {
       if (repo.gateReuse) continue;
+      const script = await landingGateScript(repo.directory);
       phases.push({
         repo: repo.name,
         name: "gate",
@@ -1223,7 +1224,10 @@ export class IntegrationQueue {
           ...(await integrationEnvironment(join(root, "isolation", repo.name))),
           CLANKIE_LANDING_BASE: repo.base,
         },
-        args: [await landingGateScript(repo.directory)],
+        args: [
+          script,
+          ...(repo.name === "core" && script === "check:landing" ? ["--retry-failed-tests"] : []),
+        ],
         log: join(root, `${repo.name}-gate.log`),
       });
     }
@@ -1255,13 +1259,22 @@ export class IntegrationQueue {
               return;
             }
             if (event.type === "begin") batch.state = event.phase === "install" ? "installing" : "gating";
-            else batch.repos.find((repo) => repo.name === event.repo)![event.phase] = event.record;
+            else {
+              const repo = batch.repos.find((repo) => repo.name === event.repo)!;
+              if (event.phase === "gate") {
+                const recovery = await this.testRecovery(repo, event.record.head);
+                if (recovery) event.record.testRecovery = recovery;
+              }
+              repo[event.phase] = event.record;
+            }
             await this.save(batch);
           });
         }
         updates.then(() => done(), done);
       },
     });
+    // The queued receipt promise rejects the batch; stream errors must not exit the service.
+    output.on("error", () => {});
     try {
       const code = await governor.runHeavy(
         process.execPath,

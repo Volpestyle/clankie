@@ -35,6 +35,15 @@ to be measured after the updated service and workers enforce priority. The
 controlled-pressure proof above must not be described as that measurement.
 Older clients can read the version-1 journals, but cannot enforce new priority.
 
+After VUH-2163 landed, the supervised local driver was aligned with its core
+retry flag and durable recovery records. Real two-member batches through this
+driver recovered a failed file without isolation and blocked a repeated failure.
+The existing core/app flag contract passed; a mixed-isolation fixture first
+failed waiting for its initial barrier and then passed alone (28.75s), retaining
+the failed log. The earlier full priority gate failed its real CPU sampler
+assertion; that unchanged case passed alone (811ms). Neither isolated pass
+changes the earlier full-gate result. A fresh exact-tree gate remains required.
+
 Raw receipts, including the initial failed check, are in the accompanying
 evidence manifest. See [VUH-2148](https://linear.app/vuhlp/issue/VUH-2148).
 
