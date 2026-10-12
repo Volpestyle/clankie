@@ -254,6 +254,10 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
 - **Progress**: two hours with no commit, finding or report attempt on its own
   branch needs a result or an actionable blocker.
 - **Done or idle**: harvest once, then tidy or assign the next ready item.
+  Give a finished seat the next item only when its context helps (same issue
+  or the same code). Unrelated work goes to a fresh hire: old context costs
+  tokens on every turn and invites mix-ups, and avoiding a hire saves nothing
+  (owner steering, 2026-10-12).
   Harvest includes the worktree: before closing the worker, every commit is
   on main (by content, `git cherry origin/main`) or deliberately abandoned
   with a recorded reason, and nothing uncommitted is left behind. A worktree
