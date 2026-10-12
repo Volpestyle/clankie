@@ -4,13 +4,10 @@ import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createFleetResourceRuntime } from "./fleet-resource-runtime.ts";
 
-/** Only service fixtures honor this seam; worker/CLI governors always share the OS registry. */
-export async function createServiceFleetResourceRuntime(
-  input: Pick<Parameters<typeof createFleetResourceRuntime>[0], "policy" | "onError">,
-  env: NodeJS.ProcessEnv = process.env,
-) {
-  if (env.VITEST !== "true" && env.NODE_ENV !== "test") return createFleetResourceRuntime(input);
-
+/** The integration supervisor and service runtime use the same fixture-only boundary. */
+export async function serviceResourceDirectory(env: NodeJS.ProcessEnv = process.env) {
+  if (env.VITEST !== "true" && env.NODE_ENV !== "test")
+    return { directory: undefined, dispose: async () => {} };
   const override = env.CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY?.trim();
   const directory = override ? resolve(override) : await mkdtemp(join(tmpdir(), "clankie-test-resources-"));
   const liveRegistry = resolve(userInfo().homedir, ".clankie/fleet-resources");
@@ -41,10 +38,26 @@ export async function createServiceFleetResourceRuntime(
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (!outsideLiveRegistry(await realpath(directory)))
     throw new Error("Test fleet resources must not overlap the live registry");
+  return {
+    directory,
+    dispose: async () => {
+      if (!override) await rm(directory, { recursive: true, force: true });
+    },
+  };
+}
+
+/** Only service fixtures honor this seam; worker/CLI governors always share the OS registry. */
+export async function createServiceFleetResourceRuntime(
+  input: Pick<Parameters<typeof createFleetResourceRuntime>[0], "policy" | "onError">,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  if (env.VITEST !== "true" && env.NODE_ENV !== "test") return createFleetResourceRuntime(input);
+
+  const { directory, dispose } = await serviceResourceDirectory(env);
   const refuse = async (): Promise<never> => {
     throw new Error("Native simulators are unavailable in a test service");
   };
-  const governor = createResourceGovernor({ directory });
+  const governor = createResourceGovernor(directory ? { directory } : {});
   try {
     const runtime = await createFleetResourceRuntime({
       ...input,
@@ -63,12 +76,12 @@ export async function createServiceFleetResourceRuntime(
     const close = runtime.close.bind(runtime);
     runtime.close = async () => {
       await close();
-      if (!override) await rm(directory, { recursive: true, force: true });
+      await dispose();
     };
     return runtime;
   } catch (error) {
     await governor.close();
-    if (!override) await rm(directory, { recursive: true, force: true });
+    await dispose();
     throw error;
   }
 }

@@ -952,6 +952,13 @@ chain, scheduled batch position and a conditional completion ETA from recent
 completed gates (`null` until measurements exist). `/integrate` displays the chain
 and ETA in the TUI.
 
+Local batches hold one governed full permit across installation and landing
+gates. Gates precede queued ordinary builds. While a gate is queued or running,
+new full/light builds and simulator reservations or boot submissions wait;
+current holders finish, servers keep their separate lane, and resource guards
+still apply. `fleet resources` exposes the blocking batch as `mergeGate`, and
+`heavy` names it while waiting. This requires the updated service and workers.
+
 The service checks integration progress every 30 seconds. A running head without
 a checkpoint for three minutes alerts the owner through the existing runtime
 health route, unless its owned install/gate process is proven alive or its

@@ -38,6 +38,9 @@ const FleetSimulatorUsageSchema = z.strictObject({
 });
 export const FleetResourceSnapshotSchema = z
   .object({
+    mergeGate: z
+      .strictObject({ id: reference, batchId: reference, state: z.enum(["queued", "running"]) })
+      .optional(),
     schemaVersion: z.literal(1),
     policy: FleetResourcePolicySchema,
     capacity: z

@@ -44,11 +44,13 @@ export async function runHeavyCommand(
         if (!waiting) {
           waiting = true;
           (options.stderr ?? process.stderr).write(
-            lane === "server"
-              ? `clankie heavy: server lane waiting (${snapshot.capacity.serverUsed}/${snapshot.capacity.serverSlots} held, ${snapshot.serverQueue?.length ?? 0} queued, ${snapshot.capacity.serverCpuCores} CPU cores shared)\n`
-              : lane === "light"
-                ? `clankie heavy: light lane waiting (${snapshot.capacity.lightUsed}/${snapshot.capacity.lightSlots} held, ${snapshot.lightQueue.length} queued)\n`
-                : `clankie heavy: waiting for machine capacity (${waitReason(snapshot, detail?.arbiter === true)}; ${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
+            snapshot.mergeGate && lane !== "server"
+              ? `clankie heavy: waiting for merge gate ${snapshot.mergeGate.batchId} (${snapshot.mergeGate.state})\n`
+              : lane === "server"
+                ? `clankie heavy: server lane waiting (${snapshot.capacity.serverUsed}/${snapshot.capacity.serverSlots} held, ${snapshot.serverQueue?.length ?? 0} queued, ${snapshot.capacity.serverCpuCores} CPU cores shared)\n`
+                : lane === "light"
+                  ? `clankie heavy: light lane waiting (${snapshot.capacity.lightUsed}/${snapshot.capacity.lightSlots} held, ${snapshot.lightQueue.length} queued)\n`
+                  : `clankie heavy: waiting for machine capacity (${waitReason(snapshot, detail?.arbiter === true)}; ${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
           );
         }
         for (const alert of snapshot.holderAlerts ?? []) {

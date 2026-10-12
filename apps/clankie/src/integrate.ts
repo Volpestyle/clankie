@@ -18,7 +18,14 @@ import {
 import { durableJson, withDirectoryLock, type LockOwner } from "./deploy-holds.ts";
 import { integrationEnvironment } from "./integrate-environment.ts";
 import { darwinOnlySkips, remoteGateDeadline, type GateRunner } from "./integrate-remote.ts";
-import { processIdentity, probeProcess } from "@clankie/fleet-resources";
+import {
+  createResourceGovernor,
+  processIdentity,
+  probeProcess,
+  type FleetResourceGovernor,
+} from "@clankie/fleet-resources";
+import { fileURLToPath } from "node:url";
+import { serviceResourceDirectory } from "./service-fleet-resources.ts";
 import type { FleetProgressObservation } from "./fleet-progress.ts";
 
 import { processWorkingDirectories } from "./process-working-directories.ts";
@@ -59,6 +66,8 @@ function nextJob(pending: PendingIntegration[], retries: IntegrationJob[]) {
   return { members, fresh: false, regates: 0 };
 }
 interface IntegrationOptions {
+  /** The service owns admission; fixtures use the service-only isolated registry. */
+  governor?: () => FleetResourceGovernor;
   directory: string;
   core: string;
   app?: string;
@@ -1184,7 +1193,110 @@ export class IntegrationQueue {
     }
   }
 
+  private async localGate(batch: IntegrationBatch, root: string): Promise<void> {
+    const phases = [];
+    for (const repo of batch.repos) {
+      await this.clean(repo);
+      const env = await integrationEnvironment(join(root, "isolation", repo.name));
+      phases.push({
+        repo: repo.name,
+        name: "install",
+        directory: repo.directory,
+        env,
+        args: [
+          "install",
+          "--frozen-lockfile",
+          "--store-dir",
+          env.npm_config_store_dir!,
+          "--package-import-method=copy",
+        ],
+        log: join(root, `${repo.name}-install.log`),
+      });
+    }
+    for (const repo of batch.repos) {
+      if (repo.gateReuse) continue;
+      phases.push({
+        repo: repo.name,
+        name: "gate",
+        directory: repo.directory,
+        env: {
+          ...(await integrationEnvironment(join(root, "isolation", repo.name))),
+          CLANKIE_LANDING_BASE: repo.base,
+        },
+        args: [await landingGateScript(repo.directory)],
+        log: join(root, `${repo.name}-gate.log`),
+      });
+    }
+    const resourceDirectory = this.options.governor ? undefined : await serviceResourceDirectory();
+    const governor =
+      this.options.governor?.() ??
+      createResourceGovernor(resourceDirectory?.directory ? { directory: resourceDirectory.directory } : {});
+    const errors = createWriteStream(join(root, `gate-runner-${randomUUID()}.log`), { mode: 0o600 });
+    let pending = "";
+    let updates = Promise.resolve();
+    const output = new Writable({
+      write: (bytes, _encoding, done) => {
+        pending += bytes.toString();
+        for (let newline = pending.indexOf("\n"); newline >= 0; newline = pending.indexOf("\n")) {
+          const line = pending.slice(0, newline);
+          pending = pending.slice(newline + 1);
+          updates = updates.then(async () => {
+            const event = JSON.parse(line) as {
+              type: "ready" | "begin" | "end";
+              pid: number;
+              repo: "core" | "app";
+              phase: "install" | "gate";
+              record: NonNullable<IntegrationRepo["gate"]>;
+            };
+            if (event.type === "ready") {
+              const proof = processIdentity(event.pid);
+              void proof.catch(() => undefined);
+              this.commands.set(batch.id, { pid: event.pid, proof });
+              return;
+            }
+            if (event.type === "begin") batch.state = event.phase === "install" ? "installing" : "gating";
+            else batch.repos.find((repo) => repo.name === event.repo)![event.phase] = event.record;
+            await this.save(batch);
+          });
+        }
+        updates.then(() => done(), done);
+      },
+    });
+    try {
+      const code = await governor.runHeavy(
+        process.execPath,
+        [fileURLToPath(new URL("./integrate-gate-driver.mjs", import.meta.url))],
+        {
+          mergeGate: batch.id,
+          holderId: `integration:${batch.id}`,
+          input: JSON.stringify({ phases }),
+          stdout: output,
+          stderr: errors,
+        },
+      );
+      await updates;
+      if (pending.trim()) throw new Error("Incomplete integration phase receipt");
+      if (code !== 0 && batch.repos.some((repo) => repo.install?.exitCode !== 0)) {
+        batch.state = "failed";
+        await this.save(batch);
+      } else if (code !== 0 && batch.repos.every((repo) => repo.gateReuse || repo.gate?.exitCode === 0)) {
+        throw new Error(`Integration runner exited ${code} without a failed phase receipt`);
+      }
+    } finally {
+      this.commands.delete(batch.id);
+      errors.end();
+      output.destroy();
+      if (!this.options.governor) await governor.close();
+      await resourceDirectory?.dispose();
+    }
+  }
+
   private async installAndGate(batch: IntegrationBatch, root: string, runner?: GateRunner): Promise<void> {
+    if (!runner) {
+      await this.localGate(batch, root);
+      if (batch.state !== "failed") await this.verifyGates(batch);
+      return;
+    }
     // Install every sibling before either gate; both gates validate the exact composed pair.
     batch.state = "installing";
     await this.save(batch);
@@ -1251,6 +1363,10 @@ export class IntegrationQueue {
       if (skipped.length)
         return this.regateHere(batch, root, runner, `skipped darwin-only tests in ${skipped.join(", ")}`);
     }
+    await this.verifyGates(batch);
+  }
+
+  private async verifyGates(batch: IntegrationBatch): Promise<void> {
     for (const repo of batch.repos) {
       if (
         repo.gate?.exitCode !== 0 ||

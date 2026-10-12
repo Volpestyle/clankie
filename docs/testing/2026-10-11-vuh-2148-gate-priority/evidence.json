@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "implementation.patch",
+      "size": 38399,
+      "sha256": "8518614c3fbe15e217db9a3cf20ad7b9953ed7ad67d02ea12ba3571186daa0a2",
+      "url": "clankie://evidence/sha256/8518614c3fbe15e217db9a3cf20ad7b9953ed7ad67d02ea12ba3571186daa0a2"
+    },
+    {
+      "path": "proof.tar",
+      "size": 104960,
+      "sha256": "c524c9eb96a1f77fed9287733a20e1cd0ee2658fa9974be09ae084611ae122ab",
+      "url": "clankie://evidence/sha256/c524c9eb96a1f77fed9287733a20e1cd0ee2658fa9974be09ae084611ae122ab"
+    }
+  ]
+}

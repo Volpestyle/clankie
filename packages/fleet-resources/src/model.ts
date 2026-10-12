@@ -1,3 +1,4 @@
+import type { Writable } from "node:stream";
 import type { SimulatorUsage } from "./simulator-usage.ts";
 import { z } from "zod";
 
@@ -208,7 +209,20 @@ export const ResourceStateSchema = z
       ),
     "Simulator tickets require their selection and native holder",
   );
+export interface HeavyRunOptions extends ResourceWaitOptions {
+  seatId?: string;
+  holderId?: string;
+  server?: boolean;
+  /** Internal integration service purpose, never inferred from worker labels. */
+  mergeGate?: string;
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  input?: string;
+  stdout?: Writable;
+  stderr?: Writable;
+}
 export interface ResourceSnapshot {
+  mergeGate?: { id: string; batchId: string; state: "queued" | "running" };
   schemaVersion: 1;
   policy: FleetResourcePolicy;
   capacity: {
@@ -350,11 +364,7 @@ export interface FleetResourceGovernor {
     /** Load is above the heavy-permit limit, so the seat's heavy work will queue. */
     heavyQueued?: { maxLoadRatio: number };
   }>;
-  runHeavy(
-    command: string,
-    args: readonly string[],
-    options?: ResourceWaitOptions & { seatId?: string; holderId?: string; server?: boolean },
-  ): Promise<number>;
+  runHeavy(command: string, args: readonly string[], options?: HeavyRunOptions): Promise<number>;
   queueSimulator(
     options: Omit<SimulatorAcquireOptions, "externalActive"> & {
       selection: Omit<SimulatorTicketSelection, "occupantId" | "fleet" | "expiresAtMs">;

@@ -843,7 +843,12 @@ def heavy_runner(directory, lease_id, token):
             budget = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(budget)
             reader = budget.cpu_reader()
-        child = subprocess.Popen([request["command"], *request["args"]], env=environment)
+        child = subprocess.Popen([request["command"], *request["args"]], env=environment,
+                                 cwd=request.get("cwd"),
+                                 stdin=subprocess.PIPE if "input" in request else None)
+        if "input" in request:
+            child.stdin.write(request["input"].encode("utf-8"))
+            child.stdin.close()
         if budget is not None:
             code = budget.wait(child, mine, request["serverCpuCores"], identity, born_since, signal_bound, reader,
                                os.path.join(directory, "cpu", os.path.basename(lease_id) + ".json"))

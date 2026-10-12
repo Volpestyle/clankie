@@ -21,6 +21,7 @@ import {
   type FleetResourceGovernor,
   type FleetResourcePolicy,
   type HeavyLease,
+  type HeavyRunOptions,
   type HeavyArbitration,
   type ProcessIdentity,
   type ResourcePressure,
@@ -79,6 +80,7 @@ const ticketOwner = (
 const abort = () => new DOMException("Fleet resource wait cancelled", "AbortError");
 type SimulatorBlock = "simulator_capacity" | "shared_capacity" | "pressure";
 /** The owner's simulator limit is zero; distinct from an unavailable registry. */
+export class MergeGateWaitingError extends Error {}
 export class SimulatorsDisabledError extends Error {
   constructor() {
     super("Simulator leases are disabled by owner policy");
@@ -300,6 +302,7 @@ export function createResourceGovernor(
     return seen;
   }
   async function reconcile(state: ResourceState, seen: Seen, leaseDirectory = directory): Promise<void> {
+    if (leaseDirectory === directory) pruneGates(state);
     if (!state.leases.some((lease) => lease.kind === "heavy") && state.queue.length === 0) return;
     const previousIds = new Set(state.leases.map((lease) => lease.id));
     // This state and its exact recorded PIDs belong to the held OS lock; the
@@ -368,6 +371,7 @@ export function createResourceGovernor(
       }
     }
     state.leases = retained;
+    if (leaseDirectory === directory) pruneGates(state);
     pruneLeftoverMarkers(leaseDirectory, retained);
     for (const id of orphaned)
       if (previousIds.has(id) && !retained.some((lease) => lease.id === id)) orphaned.delete(id);
@@ -416,8 +420,13 @@ export function createResourceGovernor(
       ? await observeSimulatorUsage()
       : new Map();
     const sampledPressure = await pressure.sample(state.policy);
+    const priority = gates(state);
+    const gate =
+      priority.find((entry) => entry.state === "running") ??
+      priority.find((entry) => entry.id === heavyHead(state)?.id);
     return {
       schemaVersion: 1,
+      ...(gate ? { mergeGate: { id: gate.id, batchId: gate.batchId, state: gate.state } } : {}),
       policy: state.policy,
       capacity: {
         heavySlots: resourceCapacity(state.policy),
@@ -621,13 +630,80 @@ export function createResourceGovernor(
     );
     await rename(next, arbiterPath);
   }
+  // Sidecars keep the strict version-1 journal readable by older clients.
+  // A marker has authority only while its exact token is queued or leased.
+  const gatesDirectory = join(directory, "merge-gates");
+  function gateFiles() {
+    try {
+      return readdirSync(gatesDirectory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
+  function pruneGates(state: ResourceState) {
+    const live = new Set([...state.queue, ...state.leases].map((row) => row.id));
+    for (const name of gateFiles()) if (!live.has(name)) rmSync(join(gatesDirectory, name), { force: true });
+  }
+  function gates(state: ResourceState) {
+    return gateFiles().flatMap((name) => {
+      let bytes: string;
+      try {
+        bytes = readFileSync(join(gatesDirectory, name), "utf8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw error;
+      }
+      const marker = JSON.parse(bytes) as {
+        id: string;
+        token: string;
+        batchId: string;
+      };
+      const lease = state.leases.find(
+        (row) => row.kind === "heavy" && row.id === marker.id && row.token === marker.token,
+      );
+      const ticket = state.queue.find(
+        (row) => row.kind === "heavy" && row.id === marker.id && row.token === marker.token,
+      );
+      return lease || ticket
+        ? [{ ...marker, state: lease ? ("running" as const) : ("queued" as const) }]
+        : [];
+    });
+  }
+  function heavyHead(state: ResourceState) {
+    const priority = new Set(gates(state).map((gate) => gate.id));
+    return (
+      state.queue.find((entry) => entry.kind === "heavy" && priority.has(entry.id)) ??
+      state.queue.find((entry) => entry.kind === "heavy")
+    );
+  }
+  async function admissionTransaction<T>(
+    lane: HeavyJobLane,
+    apply: (state: ResourceState, main: ResourceState) => Promise<T>,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<T> {
+    const target = laneStore(lane);
+    if (lane !== "light") return target.transaction((state) => apply(state, state), options);
+    // Gate intent and light admission share the main lock. Always main -> light.
+    const seen = await look(mainStore);
+    return mainStore.transaction(async (main) => {
+      await reconcile(main, seen, mainStore.directory);
+      return target.transaction((state) => apply(state, main), options);
+    }, options);
+  }
   /** Whether the head of this lane's queue may start, under one sample. */
   function headAdmits(
     lane: HeavyJobLane,
     state: ResourceState,
     policy: FleetResourcePolicy,
     sampled: ResourcePressure,
+    main: ResourceState = state,
   ): boolean {
+    if (lane !== "server") {
+      const priority = gates(main);
+      if (lane === "light" && priority.length) return false;
+      if (lane === "full" && priority.some((gate) => gate.state === "running")) return false;
+    }
     const held = state.leases.filter((lease) => lease.kind === "heavy");
     if (lane === "server") return held.length < serverLaneCapacity().slots && sampled.healthy;
     if (held.length >= (lane === "light" ? baseHeavySlots(policy) : resourceCapacity(policy))) return false;
@@ -687,8 +763,8 @@ export function createResourceGovernor(
     const due = Date.now() - arbiterPassAt >= FULL_PASS_MS;
     let granted = 0;
     const heads: HeavyArbitration["heads"] = [];
-    const recordHead = (lane: HeavyJobLane, state: ResourceState) => {
-      const head = state.queue.find((entry) => entry.kind === "heavy");
+    const recordHead = (lane: HeavyJobLane, state: ResourceState, main: ResourceState = state) => {
+      const head = heavyHead(state);
       if (!head) return;
       heads.push({
         lane,
@@ -698,7 +774,7 @@ export function createResourceGovernor(
         pid: head.owner.pid,
         queuedAtMs: head.queuedAtMs,
         marked: grantable(head.id),
-        admits: headAdmits(lane, state, policy, sampled),
+        admits: headAdmits(lane, state, policy, sampled, main),
       });
     };
     for (const [index, { lane, from }] of lanes.entries()) {
@@ -709,14 +785,14 @@ export function createResourceGovernor(
         continue;
       }
       const seen = await look(from);
-      granted += await from.transaction(async (state) => {
+      granted += await admissionTransaction(lane, async (state, main) => {
         await reconcile(state, seen, from.directory);
         let count = 0;
         for (;;) {
-          const head = state.queue.find((entry) => entry.kind === "heavy");
+          const head = heavyHead(state);
           // An older waiter at the head judges for itself; FIFO waits on it.
-          if (!head || !grantable(head.id) || !headAdmits(lane, state, policy, sampled)) {
-            recordHead(lane, state);
+          if (!head || !grantable(head.id) || !headAdmits(lane, state, policy, sampled, main)) {
+            recordHead(lane, state, main);
             return count;
           }
           grant(state, head);
@@ -752,6 +828,7 @@ export function createResourceGovernor(
       holderId?: string;
       executable: string;
       lane: HeavyJobLane;
+      mergeGate?: string;
     },
   ): Promise<HeavyLease> {
     const store = laneStore(options.lane);
@@ -773,6 +850,14 @@ export function createResourceGovernor(
       async (state) => {
         await reconcile(state, seen, store.directory);
         if (state.queue.length >= 512) throw new Error("Fleet resource queue is full");
+        if (options.mergeGate) {
+          if (options.lane !== "full" || !/^[a-f0-9-]{36}$/u.test(options.mergeGate))
+            throw new Error("Invalid integration gate identity");
+          mkdirSync(gatesDirectory, { recursive: true, mode: 0o700 });
+          writeFileSync(join(gatesDirectory, id), JSON.stringify({ id, token, batchId: options.mergeGate }), {
+            mode: 0o600,
+          });
+        }
         state.queue.push({
           id,
           token,
@@ -790,10 +875,13 @@ export function createResourceGovernor(
     // The owner's policy lives in the main journal for both lanes.
     const policyFor = async (state: ResourceState) =>
       options.lane !== "full" ? (await mainStore.read()).policy : state.policy;
-    const admits = (state: ResourceState, policy: FleetResourcePolicy, sampled: ResourcePressure) =>
-      state.queue.find((entry) => entry.kind === "heavy")?.id === id &&
-      headAdmits(options.lane, state, policy, sampled);
-    const isHead = (state: ResourceState) => state.queue.find((entry) => entry.kind === "heavy")?.id === id;
+    const admits = (
+      state: ResourceState,
+      policy: FleetResourcePolicy,
+      sampled: ResourcePressure,
+      main: ResourceState = state,
+    ) => heavyHead(state)?.id === id && headAdmits(options.lane, state, policy, sampled, main);
+    const isHead = (state: ResourceState) => heavyHead(state)?.id === id;
     /** A lease granted to this request, by an arbiter or by this waiter. */
     const mine = (state: ResourceState) =>
       state.leases.find(
@@ -844,7 +932,7 @@ export function createResourceGovernor(
           }
           const policy = await policyFor(peek);
           sampled = await pressure.sample(policy);
-          if (!admits(peek, policy, sampled)) {
+          if (!admits(peek, policy, sampled, options.lane === "light" ? await mainStore.read() : peek)) {
             await report(peek);
             await wait(jittered(PEEK_MS), signal);
             continue;
@@ -854,8 +942,9 @@ export function createResourceGovernor(
         if (!sampled && peek) sampled = await pressure.sample(await policyFor(peek));
         const seen = await look(store);
         let advisory: ResourceState | undefined;
-        const lease = await store.transaction(
-          async (state) => {
+        const lease = await admissionTransaction(
+          options.lane,
+          async (state, main) => {
             await reconcile(state, seen, store.directory);
             const blocked = () => {
               advisory = structuredClone(state);
@@ -867,7 +956,7 @@ export function createResourceGovernor(
             const policy = await policyFor(state);
             // Sampled before the lock when the peek ran; the sampler caches a
             // fresh reading, so the full pass's sample forks nothing here.
-            if (!admits(state, policy, sampled ?? (await pressure.sample(policy)))) return blocked();
+            if (!admits(state, policy, sampled ?? (await pressure.sample(policy)), main)) return blocked();
             if (signal.aborted) throw abort();
             const head = state.queue.find((entry) => entry.id === id)!;
             return structuredClone(grant(state, head));
@@ -931,7 +1020,7 @@ export function createResourceGovernor(
   async function runHeavy(
     command: string,
     args: readonly string[],
-    options: ResourceWaitOptions & { seatId?: string; holderId?: string; server?: boolean } = {},
+    options: HeavyRunOptions = {},
   ): Promise<number> {
     if (!command || command.includes("\0") || args.some((arg) => arg.includes("\0")))
       throw new Error("Invalid heavy command");
@@ -948,25 +1037,35 @@ export function createResourceGovernor(
     let lease: HeavyLease | undefined;
     let child: ReturnType<typeof spawn> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
-    const lane = options.server ? "server" : heavyJobLane(command, args);
+    const lane = options.mergeGate ? "full" : options.server ? "server" : heavyJobLane(command, args);
     const store = laneStore(lane);
     try {
       const parentLease = await inherited(options.holderId);
       if (signal.aborted) throw abort();
       // A server must not borrow a bounded parent permit; it needs the CPU
       // supervisor and its own lifetime in the independent lane.
+      if (parentLease && options.mergeGate)
+        throw new Error("A nested worker cannot promote its permit to a merge gate");
       if (parentLease && (lane !== "server" || parentLease.lane === "server")) {
         child = spawn(
           command,
           heavyJobArgs(command, args, lane === "full" ? heavyJobParallelism : lightJobParallelism),
           {
-            stdio: "inherit",
-            env: heavyJobEnvironment(process.env),
+            stdio: [
+              options.input !== undefined ? "pipe" : "inherit",
+              options.stdout ? "pipe" : "inherit",
+              options.stderr ? "pipe" : "inherit",
+            ],
+            env: heavyJobEnvironment(options.env ?? process.env),
+            cwd: options.cwd,
           },
         );
+        if (options.input !== undefined) child.stdin!.end(options.input);
+        if (options.stdout) child.stdout!.pipe(options.stdout, { end: false });
+        if (options.stderr) child.stderr!.pipe(options.stderr, { end: false });
         const done = new Promise<number>((resolve, reject) => {
           child!.once("error", () => reject(new Error("Heavy command could not start")));
-          child!.once("exit", (code, sig) => resolve(code ?? (sig ? 128 + constants.signals[sig] : 1)));
+          child!.once("close", (code, sig) => resolve(code ?? (sig ? 128 + constants.signals[sig] : 1)));
         });
         const birth = child.pid ? await processIdentity(child.pid) : undefined;
         const cancel = () => {
@@ -998,9 +1097,15 @@ export function createResourceGovernor(
         ["-I", resourceNativeHelperPath(), "run", store.directory, lease.id, lease.token],
         {
           detached: true,
-          stdio: ["inherit", "inherit", "inherit", "pipe", "pipe"],
+          stdio: [
+            "inherit",
+            options.stdout ? "pipe" : "inherit",
+            options.stderr ? "pipe" : "inherit",
+            "pipe",
+            "pipe",
+          ],
           env: heavyJobEnvironment(
-            process.env,
+            options.env ?? process.env,
             lane === "server"
               ? serverJobParallelism
               : lane === "light"
@@ -1009,9 +1114,11 @@ export function createResourceGovernor(
           ),
         },
       );
+      if (options.stdout) child.stdout!.pipe(options.stdout, { end: false });
+      if (options.stderr) child.stderr!.pipe(options.stderr, { end: false });
       const done = new Promise<number>((resolve, reject) => {
         child!.once("error", () => reject(new Error("Fleet heavy runner requires Python 3")));
-        child!.once("exit", (code, sig) => resolve(code ?? (sig ? 128 + constants.signals[sig] : 1)));
+        child!.once("close", (code, sig) => resolve(code ?? (sig ? 128 + constants.signals[sig] : 1)));
       });
       void done.catch(() => undefined);
       const input = child.stdio[3] as Writable;
@@ -1020,6 +1127,8 @@ export function createResourceGovernor(
       input.write(
         `${JSON.stringify({
           command,
+          ...(options.cwd ? { cwd: options.cwd } : {}),
+          ...(options.input !== undefined ? { input: options.input } : {}),
           args: heavyJobArgs(command, args, lane === "full" ? heavyJobParallelism : lightJobParallelism),
           ...(lane === "server" ? { serverCpuCores: serverLaneCapacity().jobCpuCores } : {}),
         })}\n`,
@@ -1199,6 +1308,7 @@ export function createResourceGovernor(
           refusal = { reason, state: structuredClone(state) };
           return undefined;
         };
+        if (gates(state).length) return blocked("shared_capacity");
         if (options.ticketId) {
           const index = state.queue.findIndex(
             (entry) => entry.id === options.ticketId && ticketOwner(entry, options),
@@ -1304,6 +1414,8 @@ export function createResourceGovernor(
             entry.kind === "simulator" && entry.id === id && entry.token === token,
         );
         if (!lease) throw new Error("Simulator reservation changed");
+        if (update.phase === "boot-submitted" && lease.phase !== "boot-submitted" && gates(state).length)
+          throw new MergeGateWaitingError("New simulator boots wait for the merge gate");
         Object.assign(lease, update);
         return structuredClone(lease);
       });

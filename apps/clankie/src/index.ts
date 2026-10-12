@@ -898,6 +898,7 @@ const integration =
   hostedBody === undefined && existsSync(join(repoRoot, ".git"))
     ? new IntegrationQueue({
         directory: integrationDirectory,
+        governor: () => fleetResources.governor,
         ...(await integrationSources(repoRoot)),
         // A saturated Mac may gate on a linked machine's fleet workspace (VUH-2066).
         placeGate: async (batch, signal) =>

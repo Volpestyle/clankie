@@ -64,6 +64,8 @@ interface SeatResolver {
 type ObservedSeat = { seatId: string; status: string; paneId?: string };
 
 export interface FleetResourceRuntime {
+  /** Internal service-owned scheduling entrypoint for the integration queue. */
+  readonly governor: FleetResourceGovernor;
   readonly simulators: ReturnType<typeof createSimulatorManager>;
   bindSeats(resolver: SeatResolver): void;
   /** Cached metadata only. Neither health nor a roster read probes the host. */
@@ -374,6 +376,7 @@ export async function createFleetResourceRuntime(input: {
   };
 
   const runtime: FleetResourceRuntime = {
+    governor,
     simulators,
     bindSeats(value) {
       resolver = value;

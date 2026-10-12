@@ -69,6 +69,17 @@ it misses short-lived compilers and test workers, and on 2026-10-10 read 6–10
 busy cores while the kernel counted 13–14. Automatic `heavySlots` is
 `max(1, min(floor(cores/2), floor(RAM_GiB/12)))`: nine on the 18-core, 128 GiB Mac.
 
+Local merge-queue batches hold one service-owned full permit across all installs
+and landing gates. Gate tickets precede ordinary full jobs, with FIFO ordering
+between gates. While any gate is queued or running, new light jobs and simulator
+reservations or boot submissions wait; ordinary full jobs wait behind the gate.
+Current holders finish, server admission is unchanged, and every resource guard
+still applies. `mergeGate` in resource status identifies the blocking batch.
+Cancellation and native cleanup remove its priority with its ticket or lease.
+Token-bound `merge-gates/` sidecars leave the strict version-1 journals readable
+by older clients. Priority enforcement requires the updated service arbiter and
+clients; journal compatibility does not make older allocators enforce it.
+
 Admission is judged once, by the service (VUH-2080). Its runtime calls
 `arbitrate()` every second: under its one pressure sample it grants queue heads
 in FIFO order, carrying each waiter's own identity and token, and refreshes

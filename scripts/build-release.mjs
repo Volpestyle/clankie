@@ -239,6 +239,7 @@ function gitRevision() {
 async function copyRuntimeAssets(targetRoot) {
   await copySkillAssets(repoRoot, targetRoot);
   const files = [
+    ["apps/clankie/src/integrate-gate-driver.mjs", "apps/clankie/src/integrate-gate-driver.mjs"],
     ["integrations/remote-lead/bootstrap.mjs", "integrations/remote-lead/bootstrap.mjs"],
     ["integrations/remote-lead/claude-setup.mjs", "integrations/remote-lead/claude-setup.mjs"],
     [

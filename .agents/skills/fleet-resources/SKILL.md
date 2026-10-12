@@ -16,6 +16,13 @@ Windows interop containment and PC proof remain open; do not route WSL jobs
 through the staged helper. Its private protocol and local Linux proof are in
 [fleet-resources](../../../packages/fleet-resources/README.md).
 
+Local merge-queue install and landing gates share a service-owned full permit
+and precede queued ordinary builds. While a gate is queued or running, new
+full/light jobs and simulator reservations or boot submissions wait. Current
+holders finish and resource guards still apply; servers keep their separate
+lane. `mergeGate` in resource status and the heavy wait message name the batch.
+Do not bypass this wait with another registry or launch route.
+
 Run heavy work through the shipped command:
 
 ```sh
