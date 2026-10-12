@@ -35,6 +35,14 @@ request is applied. Its later inputs are blocked and its error and conflicting
 paths remain in the batch record. Healthy requests continue. Repair by approving
 new commits and composing a fresh batch.
 
+A request accepted while startup worktree reclamation or another live writer
+holds `queue.lock` stays queued until that writer releases it. It keeps its UUID
+and admission order; no manual resubmission or concurrent gate is needed. Only
+queue-drain admission waits: explicit reclamation and other lock users still
+refuse a busy lock. Missing/unreadable owner records and permission failures
+remain errors. A newly dead owner reports a retained stale lock; the existing
+recovery of a proven abandoned pre-boot lock still records its interrupted work.
+
 The service serializes gates and coalesces compatible waiting requests in batches
 of **at most three requests**. Push requests coalesce past gate-only ones;
 gate-only requests never land. Restores run alone and remain admission-order

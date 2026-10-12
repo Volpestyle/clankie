@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import {
@@ -107,14 +108,45 @@ export async function withDirectoryLock<T>(
   directory: string,
   work: () => Promise<T>,
   reclaimed?: (owner: LockOwner | undefined) => Promise<void>,
+  options: { waitForLiveOwner?: boolean } = {},
 ): Promise<T> {
   await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
   let previous: { owner: LockOwner | undefined } | undefined;
-  try {
-    await mkdir(directory, { mode: 0o700 });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    previous = { owner: await reclaim(directory) };
+  for (;;) {
+    try {
+      await mkdir(directory, { mode: 0o700 });
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        previous = { owner: await reclaim(directory) };
+        break;
+      } catch (error) {
+        if (!(error instanceof IntegrationLockBusy) || !options.waitForLiveOwner) throw error;
+        const owner = await lockOwner(directory);
+        // Wait only on a proven live writer. Unknown/permission observations do
+        // not authorize takeover, and dead owners retain the existing recovery rules.
+        if (!owner) {
+          try {
+            await stat(directory);
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code === "ENOENT") continue;
+            throw error;
+          }
+          throw error;
+        }
+        try {
+          process.kill(owner.pid, 0);
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code === "ESRCH")
+            throw Error(
+              `Integration queue owner exited; retained stale lock: ${directory} (pid ${owner.pid} since ${owner.at})`,
+            );
+          throw error;
+        }
+        await delay(250);
+      }
+    }
   }
   try {
     await durableJson(join(directory, "owner.json"), { pid: process.pid, at: new Date().toISOString() });

@@ -1498,7 +1498,7 @@ it("lands through the repository's change-scoped check:landing, told the batch b
   expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toContain(`landing-gate base=${f.core.base}`);
 });
 
-it("reclaims a queue lock its dead earlier owner left, records that owner's batches interrupted, and still refuses a live owner", async () => {
+it("reclaims a queue lock its dead earlier owner left, records that owner's batches interrupted, and queues behind a live owner", async () => {
   const f = await fixture();
   const lock = join(f.directory, "queue.lock");
   const owner = (pid: number, at: string) => durableJson(join(lock, "owner.json"), { pid, at });
@@ -1519,13 +1519,14 @@ it("reclaims a queue lock its dead earlier owner left, records that owner's batc
 
   // A live owner keeps its lock, however old.
   await owner(live.pid!, earlier);
-  const refused = await request("refused", false);
-  await f.queue.start(refused, guard);
+  const queued = await request("queued", false);
+  await f.queue.start(queued, guard);
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  expect(await f.queue.status(queued.id)).toMatchObject({ state: "queued" });
+  expect(await readFile(join(lock, "owner.json"), "utf8")).toContain(String(live.pid));
+  await rm(lock, { recursive: true });
   await f.queue.wait();
-  expect(await f.queue.status(refused.id)).toMatchObject({
-    state: "failed",
-    error: expect.stringContaining(`retained lock: ${lock} (pid ${live.pid} since ${earlier})`),
-  });
+  expect((await f.queue.status(queued.id)).state).toBe("passed");
 
   // The dead owner left a batch gating and a request waiting.
   const leftover = async (state: "gating" | "queued") => {
@@ -1562,7 +1563,7 @@ it("reclaims a queue lock its dead earlier owner left, records that owner's batc
   expect((await f.queue.snapshot()).interrupted.map((b) => b.id).sort()).toEqual(
     [gating.id, waiting.id].sort(),
   );
-  expect((await f.queue.status(refused.id)).state).toBe("failed");
+  expect((await f.queue.status(queued.id)).state).toBe("passed");
   await expect(readFile(join(lock, "owner.json"))).rejects.toThrow();
 
   // Of two takers that find the same stale lock, one runs; an earlier process with this pid is dead too.
@@ -1671,3 +1672,70 @@ it.runIf(process.platform === "darwin")(
   },
   30_000,
 );
+
+it("queues three CLI requests behind the fresh service's real maintenance lock and lands them without resubmission", async () => {
+  const f = await fixture();
+  const commits = [];
+  for (const name of ["after-deploy-one", "after-deploy-two", "after-deploy-three"])
+    commits.push(await commit(f.core.source, name, name));
+  const cli = await queueCli(f);
+  let acquired!: () => void, release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    acquired = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  cleanups.push(() => release());
+  // The startup sweep uses this exact lock API in the freshly booted service.
+  const maintenance = withDirectoryLock(join(f.directory, "queue.lock"), async () => {
+    acquired();
+    await released;
+  });
+  await ready;
+  const ids = commits.map(() => randomUUID());
+  for (const [i, sha] of commits.entries())
+    await runIntegrationCommand([sha, "--id", ids[i]!, "--push", "--no-wait"], cli);
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  const waiting = await Promise.all(ids.map((id) => f.queue.status(id)));
+  expect(waiting.every((batch) => batch.state === "queued" && !batch.error)).toBe(true);
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
+  release();
+  await maintenance;
+  await f.queue.wait();
+  const landed = await Promise.all(ids.map((id) => f.queue.status(id)));
+  expect(landed.every((batch) => batch.state === "pushed")).toBe(true);
+  for (const name of ["after-deploy-one", "after-deploy-two", "after-deploy-three"])
+    expect(await git(f.core.origin, "show", `refs/heads/main:${name}`)).toBe(name);
+  if (process.env.VUH2157_EVIDENCE_FILE)
+    await appendFile(
+      process.env.VUH2157_EVIDENCE_FILE,
+      JSON.stringify({ scenario: "fresh-service-live-lock", waiting, landed }) + "\n",
+    );
+});
+
+it("reports a newly dead queue owner as stale instead of waiting forever or stealing its lock", async () => {
+  const f = await fixture();
+  const lock = join(f.directory, "queue.lock");
+  const owner = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+  await new Promise((resolve) => owner.once("exit", resolve));
+  const at = new Date().toISOString();
+  await durableJson(join(lock, "owner.json"), { pid: owner.pid!, at });
+  const request = IntegrationRunSchema.parse({
+    action: "run",
+    id: randomUUID(),
+    core: [await commit(f.core.source, "stale-owner", "stale")],
+  });
+  await f.queue.start(request, guard);
+  await f.queue.wait();
+  const failed = await f.queue.status(request.id);
+  expect(failed.state).toBe("failed");
+  expect(failed.error).toContain(`retained stale lock: ${lock} (pid ${owner.pid} since ${at})`);
+  expect(await readFile(join(lock, "owner.json"), "utf8")).toContain(String(owner.pid));
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
+  if (process.env.VUH2157_EVIDENCE_FILE)
+    await appendFile(
+      process.env.VUH2157_EVIDENCE_FILE,
+      JSON.stringify({ scenario: "dead-current-owner", failed }) + "\n",
+    );
+});

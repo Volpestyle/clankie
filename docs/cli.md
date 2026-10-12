@@ -947,6 +947,11 @@ and reason.
 Requires a local source-checkout service. See [integration](integration.md) for
 evidence paths, isolation limits, uncertain sends and crash recovery.
 
+Requests admitted while the fresh service holds `queue.lock` for startup
+reclamation stay queued until its proven live writer releases the lock. Their
+UUID and queue order stay intact. Unknown owners and unrecoverable stale locks
+remain explicit failures; do not delete locks or resubmit an uncertain request.
+
 Integration clones keep client hooks disabled.
 
 `clankie integrate reclaim` runs the same retention-respecting sweep immediately

@@ -463,9 +463,10 @@ export class IntegrationQueue {
               }
             },
             (owner) => this.interruptAbandoned(owner),
+            { waitForLiveOwner: true },
           );
         } catch (error) {
-          // A retained cross-process lock is a refusal, never permission to run a second gate.
+          // Genuine lock/observation errors retain their cause; a live writer is waited on above.
           for (const member of [
             ...this.pending.splice(0),
             ...this.retries.splice(0).flatMap((job) => job.members),

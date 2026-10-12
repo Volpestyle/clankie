@@ -165,6 +165,11 @@ fresh local gate, and a ninety-minute wall-clock limit holds even with output.
 The remote timeout cause and log remain evidence; fallback never attests a
 remote pass. These deadlines stop only that request's owned transport.
 
+An accepted integration request waits behind a proven live queue-lock writer,
+including startup worktree reclamation. Read its existing UUID rather than
+resubmitting or removing the lock. An unproven owner or unrecoverable stale lock
+retains its actual error for review.
+
 Failed shared integration gates retry members at their original admission
 priority, before later arrivals. Read `progress.queuePosition` and the isolation
 chain together. A retained `gateReuse` pass covers only its unchanged exact tree,
