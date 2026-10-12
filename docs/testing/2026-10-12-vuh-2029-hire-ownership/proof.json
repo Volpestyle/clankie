@@ -1,0 +1,12 @@
+{
+  "observedAt": "2026-10-12T20:12:14.776Z",
+  "mode": "read-only production API capture and production resolver; no live hire",
+  "revision": "8fac6d0135d00a437d01b30ea4e13c9baf073ff1fd03c14d495b9279e48b38fe",
+  "conversationId": "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0",
+  "conversationFolder": "/Users/james/dev/clankie",
+  "requestedFolder": "/Users/james/dev/tracker-research-20261008",
+  "beforeSource": "clankie",
+  "configuredSource": "clankie-work",
+  "destination": "clankie-work",
+  "result": "passed"
+}

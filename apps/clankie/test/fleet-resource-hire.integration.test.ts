@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -34,7 +34,12 @@ import { LaneLog } from "../src/captain/lane-log.ts";
 import { autonomyLevelFleet } from "@clankie/protocol/autonomy";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { SettingsStore } from "@clankie/settings";
-import { localWorkspaceProject } from "../src/captain/project-hire-context.ts";
+import {
+  configuredLeadHireProject,
+  localWorkspaceProject,
+  nativeHireProject,
+  selectHireProject,
+} from "../src/captain/project-hire-context.ts";
 import type { ProjectHirePolicy } from "../src/captain/herdr-watch.ts";
 import { serve } from "@hono/node-server";
 import { createProjectRoutes } from "../src/project-routes.ts";
@@ -234,6 +239,7 @@ async function fixture(projectHirePolicy?: ProjectHirePolicy) {
     launches: () => launches,
     disposed: () => disposed,
     current,
+    proof,
     hire: (brief?: string, authority?: ConversationAuthority) =>
       store.spawnSeat(
         { schemaVersion: 1, harness: "opencode", title: "Resource fixture", workingDirectory: root },
@@ -248,20 +254,54 @@ async function fixture(projectHirePolicy?: ProjectHirePolicy) {
 // LOCAL-VUH-6: live 2026-10-12 refusal at conv-4c11af56 cursor 3628.
 // Policy fields match the attempted Iris/LOCAL-VUH-4 hire. Paths are disposable;
 // the existing executable helper proves native admission, not Codex/model behavior.
-async function autoFixture() {
+async function autoFixture(configuredOwner = false) {
   let settings: SettingsStore;
+  let sourceDirectory: string;
+  const resolve: ProjectHirePolicy["project"] = async (input, projects, authority) => {
+    const destination = await localWorkspaceProject(projects, input.workingDirectory);
+    if (!configuredOwner) return destination;
+    const current = await settings.load();
+    const source =
+      configuredLeadHireProject(
+        projects,
+        current.linearWebhook.projectChats,
+        authority?.owner.conversationId,
+        input.projectId,
+      ) ?? (await localWorkspaceProject(projects, sourceDirectory));
+    return selectHireProject(source, destination, input.projectId);
+  };
   const f = await fixture({
     settings: async () => (await settings.load()).projects,
-    project: (input, current) => localWorkspaceProject(current, input.workingDirectory),
+    project: resolve,
     tools: async () => [],
   });
   settings = new SettingsStore(join(f.root, "settings.json"));
+  sourceDirectory = join(f.root, "clankie");
+  const workingDirectory = configuredOwner ? join(f.root, "tracker-research-20261008") : f.root;
+  if (configuredOwner) {
+    await mkdir(sourceDirectory);
+    await mkdir(workingDirectory);
+  }
   const personas = new PersonaStore(join(f.root, "personas"));
   await personas.ready(settings);
   cleanups.push(() => personas.close());
   await settings.update((current) => ({
     ...current,
     autonomy: { fleet: { ...current.autonomy.fleet, ...autonomyLevelFleet("full") } },
+    ...(configuredOwner
+      ? {
+          linearWebhook: {
+            ...current.linearWebhook,
+            projectChats: [
+              {
+                projectId: "cbd205ab-cad4-48b8-9724-7109410fc921",
+                name: "Clankie Work",
+                conversationId: "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0",
+              },
+            ],
+          },
+        }
+      : {}),
     projects: ProjectsSettingsSchema.parse({
       projects: [
         {
@@ -270,9 +310,18 @@ async function autoFixture() {
           auto: true,
           workerCap: 1,
           trackerProjectId: "cbd205ab-cad4-48b8-9724-7109410fc921",
-          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: f.root }],
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: workingDirectory }],
           roles: [{ role: "builder" }],
         },
+        ...(configuredOwner
+          ? [
+              {
+                id: "clankie",
+                name: "Clankie",
+                workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: sourceDirectory }],
+              },
+            ]
+          : []),
       ],
     }),
   }));
@@ -325,7 +374,7 @@ async function autoFixture() {
       if (!source || autonomous !== true) throw new Error("Missing host-stamped autonomous hire context");
       const authority = autoHireAuthority(source, async () => {
         const current = await settings.load();
-        const id = await localWorkspaceProject(current.projects, request.workingDirectory);
+        const id = await resolve(request, current.projects, source);
         return {
           autonomy: current.autonomy,
           project: current.projects.projects.find((p) => p.id === id),
@@ -351,14 +400,14 @@ async function autoFixture() {
       return { ...result, seat: adopted };
     },
   ).find((candidate) => candidate.name === "hire_agent")!;
-  const hire = () =>
+  const hire = (directory = workingDirectory, projectId = "clankie-work") =>
     tool.execute(
       "LOCAL-VUH-4",
       {
         title: "Iris",
-        projectId: "clankie-work",
+        projectId,
         role: "builder",
-        workingDirectory: f.root,
+        workingDirectory: directory,
         harness: "opencode",
         deliverable: "LOCAL-VUH-4",
         brief: "Read LOCAL-VUH-4 without changing accounts or credentials.",
@@ -372,6 +421,7 @@ async function autoFixture() {
     settings,
     project,
     hire,
+    sourceDirectory,
     pause: () => {
       enabled = false;
     },
@@ -421,6 +471,60 @@ it("LOCAL-VUH-6: starts one Full Auto hire through native admission, then enforc
     detail: expect.stringContaining("allows 1 running agents"),
   });
   expect(f.launches()).toBe(1);
+});
+
+it("LOCAL-VUH-7: the configured Work lead hires into its primary folder despite its clankie conversation folder", async () => {
+  const f = await autoFixture(true);
+  const before = (await f.settings.load()).projects;
+  const oldSource = await localWorkspaceProject(before, f.sourceDirectory);
+  const destination = await localWorkspaceProject(before, join(f.root, "tracker-research-20261008"));
+  expect(oldSource).toBe("clankie");
+  expect(() => selectHireProject(oldSource, destination, "clankie-work")).toThrow(
+    "This conversation and the new agent's folder belong to different projects.",
+  );
+  expect((await f.hire()).details).toMatchObject({ outcome: "spawned" });
+  expect(f.launches()).toBe(1);
+  const proof = await f.proof();
+  const projects = (await f.settings.load()).projects;
+  const lookup = (current: typeof proof | undefined) =>
+    f.store.projectHireAssignment("default", "w1:p1", current);
+  expect(
+    await nativeHireProject(projects, proof.nativeOccupantId, proof, lookup, undefined, "clankie-work"),
+  ).toBe("clankie-work");
+  await expect(
+    nativeHireProject(projects, "replaced-agent", proof, lookup, undefined, "clankie-work"),
+  ).rejects.toThrow("original agent has changed");
+  expect((await f.hire()).details).toMatchObject({
+    outcome: "failed",
+    detail: expect.stringContaining("allows 1 running agents"),
+  });
+  expect(f.launches()).toBe(1);
+});
+
+it("LOCAL-VUH-7: explicit ownership cannot hire another project or override destination membership", async () => {
+  const f = await autoFixture(true);
+  await expect(f.hire(f.sourceDirectory, "clankie")).rejects.toThrow(
+    "not owned by this configured project lead",
+  );
+  await expect(f.hire(f.sourceDirectory)).rejects.toThrow("different projects");
+  expect(f.launches()).toBe(0);
+  expect(await f.journal()).toEqual([]);
+});
+
+it("LOCAL-VUH-7: rechecks saved lead ownership after preparation before launching", async () => {
+  const f = await autoFixture(true);
+  f.onPrepare(async () => {
+    await f.settings.update((current) => ({
+      ...current,
+      linearWebhook: { ...current.linearWebhook, projectChats: [] },
+    }));
+  });
+  expect((await f.hire()).details).toMatchObject({
+    outcome: "failed",
+    detail: expect.stringContaining("different projects"),
+  });
+  expect(f.launches()).toBe(0);
+  expect(await f.journal()).toEqual([]);
 });
 
 it.each(["project-off", "autonomy-down", "master-off", "route-revoked"] as const)(

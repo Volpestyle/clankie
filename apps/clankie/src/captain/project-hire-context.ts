@@ -111,6 +111,30 @@ export function selectHireProject(
   return project;
 }
 
+/** The owner's explicit lead binding takes precedence over the conversation's folder. */
+export function configuredLeadHireProject(
+  settings: ProjectsSettings,
+  routes: ClankieSettings["linearWebhook"]["projectChats"],
+  conversationId: string | undefined,
+  requested?: string,
+): string | undefined {
+  const bindings = routes.filter((route) => route.conversationId === conversationId);
+  if (bindings.length === 0) return undefined;
+  const owned = settings.projects.filter((project) =>
+    bindings.some(
+      (route) =>
+        route.projectId === project.trackerProjectId ||
+        route.projectId === project.linearProjectBinding?.projectId,
+    ),
+  );
+  if (requested !== undefined) {
+    if (owned.some((project) => project.id === requested)) return requested;
+    throw new Error("The selected project is not owned by this configured project lead.");
+  }
+  if (owned.length === 1) return owned[0]!.id;
+  throw new Error("Name a projectId owned by this configured project lead before hiring.");
+}
+
 /** Native source attribution shares the service's current-process workspace resolver. */
 export async function nativeHireProject(
   settings: ProjectsSettings,
@@ -122,6 +146,7 @@ export async function nativeHireProject(
   workspace:
     | ((proof: import("./project-hires.ts").ProjectHireProcessProof) => Promise<string | undefined>)
     | undefined,
+  configuredProject?: string,
 ): Promise<string | undefined> {
   const assignment = lookup(proof);
   if (assignment.state === "none" && settings.projects.length === 0) return undefined;
@@ -136,8 +161,9 @@ export async function nativeHireProject(
     });
     if (membership.outcome !== "member")
       throw new Error("This agent's project or role has changed. Check its project before hiring.");
-    return membership.projectId;
+    return configuredProject ?? membership.projectId;
   }
+  if (configuredProject !== undefined) return configuredProject;
   const project = await workspace?.(proof);
   if (project === undefined)
     throw new Error(

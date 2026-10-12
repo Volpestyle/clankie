@@ -105,3 +105,14 @@ snapshot omits it; the autonomy-aware view advertises `linearProjectBindings`.
 Bind/clear starts with the CLI and TUI, with app controls in the next slice.
 Auto wakes include both provider references and explicit routing recognizes
 either UUID. The saved repo tracker convention still decides its backend.
+
+### Configured ownership also governs hires, 2026-10-12
+
+`LOCAL-VUH-7` exposed a second workspace attribution error: the Work lead's
+conversation used the clankie folder, so its hire into the registered
+tracker-research folder was refused as cross-project. Hire source attribution
+now honors the same explicit built-in/Linear project lead binding as Auto
+routing. A configured lead cannot fall back to another project's folder, and
+multiple owned projects require an explicit `projectId`. Destination membership,
+native identity, role and cap checks, machine and account governors remain in
+force; saved ownership is re-read before native effects.

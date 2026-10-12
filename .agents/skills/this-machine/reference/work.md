@@ -47,6 +47,12 @@ admission retains the project and role caps, machine governor and account
 holds. Other autonomous turns may propose a hire but cannot execute it; read
 the refusal's reason rather than retrying or starting a pane by shell.
 
+Configured project lead ownership determines a hire's source project, even if
+the lead conversation runs from another project's folder. Its saved tracker
+UUID must match the project's built-in or Linear binding; name `projectId` when
+the lead owns several projects. The destination must still match, and native
+identity, project caps and governors remain checked at admission.
+
 ## Lead review rounds
 
 Every watch wake and periodic round (30 minutes by default) reviews all seats

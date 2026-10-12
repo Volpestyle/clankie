@@ -1485,6 +1485,12 @@ Each entry is `{ projectId: "full UUID", name: "Project name", conversationId: "
 Duplicate projects or missing/worker chats are refused. `/linear` → **Project lead chats**
 edits one entry. No live app registration changes are needed.
 
+This explicit project lead binding also supplies the conversation's project
+when it hires into that project's registered workspace, even if the conversation
+uses another folder. The UUID must match the project's built-in tracker or
+Linear binding. A lead owning several projects names `projectId`; its destination
+and existing native admission checks still apply.
+
 `GET/PUT /v1/linear/routes` reads/replaces `{ projectChats }` with operator
 authentication. `clankie linear deliveries` reads `GET /v1/linear/deliveries`:
 offered wake ID, conversation ID, included event IDs/projects/routes, native

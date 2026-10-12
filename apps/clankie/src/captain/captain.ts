@@ -245,6 +245,7 @@ import type { CaptainPort, FleetHealthAlertDelivery, HireSeat, MessageSeat } fro
 import {
   localWorkspaceProject,
   nativeHireProject,
+  configuredLeadHireProject,
   remoteHireMachine,
   remoteWorkspaceProject,
   selectHireProject,
@@ -602,6 +603,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ).projectId;
     let source: string | undefined;
     const origin = authority?.owner.conversationId;
+    const configuredProject = configuredLeadHireProject(
+      projects,
+      (await settings()).linearWebhook.projectChats,
+      origin,
+      input.projectId,
+    );
     const native = origin === undefined ? undefined : conversations.nativeSource(origin);
     if (!native && projects.projects.length === 0) return undefined;
     if (native) {
@@ -613,7 +620,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         proof,
         (current) => herdrWatches.projectHireAssignment(fleet, native.paneId, current),
         options.projectHireWorkspace,
+        configuredProject,
       );
+    } else if (configuredProject !== undefined) {
+      source = configuredProject;
     } else if (origin !== undefined) {
       const context = seatContext(origin);
       if (context !== undefined)
@@ -626,7 +636,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // pinned; without one, only an owner-registered workspace on the fleet's machine counts.
     let destination: string | undefined;
     if (input.fleet === undefined) destination = await localProject(input.workingDirectory);
-    else if (source === undefined && projects.projects.length > 0) {
+    else if ((source === undefined || configuredProject !== undefined) && projects.projects.length > 0) {
       const current = await settings();
       destination = remoteWorkspaceProject(
         current,
