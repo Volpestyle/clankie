@@ -29,10 +29,9 @@ priority. The surrounding check itself uses the live governed resource lane.
 - Fleet-resource and service typechecks passed; explicit touched-file formatting
   and lint passed.
 
-These are focused checks, not a green repository landing gate. The merge queue
-supplies the exact-tree landing check. Actual loaded-machine gate timing remains
-to be measured after the updated service and workers enforce priority. The
-controlled-pressure proof above must not be described as that measurement.
+These initial checks were focused. Subsequent exact-tree landing and live
+post-deployment timing are recorded below. The controlled-pressure proof
+above is distinct from that live measurement.
 Older clients can read the version-1 journals, but cannot enforce new priority.
 
 After VUH-2163 landed, the supervised local driver was aligned with its core
@@ -42,7 +41,17 @@ The existing core/app flag contract passed; a mixed-isolation fixture first
 failed waiting for its initial barrier and then passed alone (28.75s), retaining
 the failed log. The earlier full priority gate failed its real CPU sampler
 assertion; that unchanged case passed alone (811ms). Neither isolated pass
-changes the earlier full-gate result. A fresh exact-tree gate remains required.
+changes the earlier full-gate result. The subsequent exact-tree request `602268c1-5fa4-466f-b737-a30f26b9ea67`
+passed 6,468 tests (674.23s test wall, 1,014.39s root gate) and pushed
+confirmed exit 0 at `bd64bfb86`. The lead deployed it in `37e8a04bf`
+at 09:50:38Z on 2026-10-12.
+
+The [live capture](../2026-10-12-vuh-2148-live/README.md) records the next
+real batch: one permit across its 11.870s install and 446.746s gate.
+New full/light jobs waited despite spare capacity, then resumed after the
+gate. Its selection and host load differ from earlier gates; this proves
+admission and actual timing, not a controlled speedup. The separate native
+proof covers simulator reservation and boot-submission priority.
 
 Raw receipts, including the initial failed check, are in the accompanying
 evidence manifest. See [VUH-2148](https://linear.app/vuhlp/issue/VUH-2148).

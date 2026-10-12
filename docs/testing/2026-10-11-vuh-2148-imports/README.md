@@ -61,8 +61,9 @@ formatting and lint passed. Real esbuild checks proved the protocol index
 bundles for the browser and the bundled lazy catalog loads and memoizes.
 Settings and protocol route contracts also passed 61 tests in four files (1.03s).
 
-The merge queue still supplies the exact-tree landing check. Live gate timing
-after the priority update remains a separate acceptance measurement.
+The import commits landed as `303d4f2f4`, `f298b0115` and `6033b47f9`.
+The [live priority capture](../2026-10-12-vuh-2148-live/README.md) after
+deployment records its separate exact-tree gate timing and admission proof.
 The first import request stopped at dead-code checking: Knip did not infer the
 required CJS declaration edge. The correction explicitly registers
 `src/bundled-snapshot.d.cts`, following existing declaration entries. A full
