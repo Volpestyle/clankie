@@ -46,7 +46,7 @@ Read-only PC captures confirm Codex 0.160.1, a sole idle non-forked root with
 no turns, an absent rollout and the same native history error. A bounded clock
 capture agrees with Mac time. The original native server and TUI remain alive.
 No PC resume, turn, steer, pane close, setup write or hire retry was performed.
-A deployed PC first-brief proof and deployment remain with the owner.
+The deployed PC acceptance below completes the previously open first-brief proof.
 
 A diagnostic real TUI launch in a temporary local home did not create a root;
 its failed capture is retained as `tui-metadata.log` and is not used as proof.
@@ -71,3 +71,28 @@ are bundled in `native-proof.tar` (manifest: `evidence.json`). Extract the tar
 for the named logs and inspection scripts. Final native results are 5/5 on
 each installed version; service source/tests typecheck and touched-file
 format/lint passed. The landing gate remains the integrator's responsibility.
+
+## Deployed PC acceptance, 2026-10-12
+
+The exact-tree landing gate passed 342 suites / 3249 tests (43 optional skips)
+and pushed `e34669cb57dc93ec6954749bc4cf74da8661ccaf` at 10:35:26.959Z.
+The lead reports that deployment has been healthy since 10:36:33Z.
+
+The KH2 lead settled the earlier receipt, retired the orphan and retried once
+with fresh intent `f2318241-6fe9-4229-8df5-b992d69fea37`. Read-only inspection
+confirms `mira-cffa` in `pc/w15:p5`, terminal `pc/term_65da2498c979150`, native
+thread `01a12fb0-aa8f-74f0-accb-3d250cb70cde`, working and interactive ready.
+
+Native `thread/turns/list` ascending with full items succeeds without an error.
+Its first turn `01a12fb0-d4b4-7650-bb16-5edf79f9b4e2` contains the VUH-1515
+brief in user item `01a12fb0-e9aa-7e51-ac3d-8011c9fb8686`. The rollout exists;
+its first turn has exactly one copy of that brief with the same native item ID
+and SHA-256 `f5cbf72e9898e32fb750fb4773cc53a1720f984aeb318e8fe340eaccec4dd6b3`.
+The live pane has consumed it and is inspecting the assigned project.
+Hashing happened on the PC before console encoding, preserving Unicode exactly.
+
+[Deployed read-only acceptance archive](clankie://evidence/sha256/5a00bbc5d3b31f6a412db053295a32aa281a608f6121da54595bebdf1e5f5074)
+contains native history/hash output, rollout verification, pane/process identity,
+read scripts, the successful hire route and landing result. No turn, resume,
+steer, pane close or retry was performed by this verification seat. This proves
+first-brief delivery and persistence; VUH-1515's implementation is separate work.

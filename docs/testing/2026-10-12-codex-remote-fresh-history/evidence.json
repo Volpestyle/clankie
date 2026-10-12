@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "deployed-pc-proof.tar",
+      "size": 30720,
+      "sha256": "5a00bbc5d3b31f6a412db053295a32aa281a608f6121da54595bebdf1e5f5074",
+      "url": "clankie://evidence/sha256/5a00bbc5d3b31f6a412db053295a32aa281a608f6121da54595bebdf1e5f5074"
+    },
+    {
       "path": "native-proof.tar",
       "size": 61440,
       "sha256": "f0ab1c0fedf4c9ee06202c47b93f5cb68cd7125004f3ff146549ecb09d4ddc71",
