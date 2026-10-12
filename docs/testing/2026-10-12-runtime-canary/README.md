@@ -26,8 +26,9 @@ identity fail even under pressure. Definite notification non-delivery retries
 the same notice; uncertain delivery is never replayed.
 
 `scenarios-native-cpu.jsonl` contains snapshots of pressure/rerun, slow regression
-and bursty-load cases. `checks.json` records the final focused suite, lint, and formatting. Earlier logs retain the failed fixture
-edit and scheduler deadline failure; they are not claimed as passes.
+and bursty-load cases. `checks.json` records the final focused suite, lint, and
+formatting. The earlier log retains the scheduler deadline failure; it is not
+claimed as a pass.
 
 ## Machine pressure and pending gap
 

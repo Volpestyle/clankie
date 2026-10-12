@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "checks.json",
+      "size": 40203,
+      "sha256": "dd94f3f39fdb046807d17cadf6b974bb7ccac535c1f7bdaba7f26a9a5a1bffad",
+      "url": "clankie://evidence/sha256/dd94f3f39fdb046807d17cadf6b974bb7ccac535c1f7bdaba7f26a9a5a1bffad"
+    },
+    {
       "path": "scenarios-final.jsonl",
       "size": 21376,
       "sha256": "9e78f330a243bcb0d641b87733da260fd15c9ebef9b385e2079e582671bc06c5",
