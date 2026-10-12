@@ -1,12 +1,11 @@
 /**
- * Clankie's lead looks as terminal pixel art. Each sprite is a pixel grid
- * drawn two pixels per cell with half blocks, so pixels stay square.
- *
- * `pack` is his default leaf sprout, copied from the first idle frame of the
- * desktop pet (`branding/pet/src/pet/idle.txt`, palette in
- * `branding/pet/src/palette.txt`), trimmed to the figure. Redraw it there and
- * copy it here; never edit the figure here alone.
+ * `pack` is the first idle frame in `branding/pet/src/pet/idle.txt`, trimmed
+ * to the figure; its palette is in `branding/pet/src/palette.txt`. Redraw
+ * there and copy here, never edit this figure alone. The renderer reduces
+ * those pixels to a compact silhouette instead of keeping a second drawing.
  */
+import { paintClankieFaceText, type ClankieFaceThemeCapabilities } from "./clankie-face-theme.ts";
+
 type Rgb = readonly [number, number, number];
 
 export interface ClankieSprite {
@@ -75,40 +74,64 @@ export function leadSprite(leadSkin: string | undefined): ClankieSprite {
 /** Drawn when the terminal cannot show Unicode blocks. */
 export const ASCII_SPROUT: readonly string[] = [" \\\\ //", "  \\|/", " .----.", " |o  o|", " '----'"];
 
+/** Two pet pixels across become one terminal column. */
 export function spriteColumns(sprite: ClankieSprite): number {
-  return sprite.grid[0]?.length ?? 0;
+  return Math.ceil((sprite.grid[0]?.length ?? 0) / 2);
 }
 
 /**
- * Two pixel rows per terminal row. Color uses foreground/background half
- * blocks; without color the figure keeps its silhouette.
+ * Reduce the pet's pixels while preserving its screen frame and eyes. Leaves
+ * use the theme green; the frame, eyes, stem and body inherit the terminal
+ * foreground. Screen pixels are holes, never a painted background.
  */
-export function renderSprite(
-  sprite: ClankieSprite,
-  caps: { readonly color: boolean; readonly trueColor: boolean },
-): string[] {
-  const lines: string[] = [];
+export function renderSprite(sprite: ClankieSprite, caps: ClankieFaceThemeCapabilities): string[] {
+  const pixels: { filled: boolean; leaf: boolean }[][] = [];
+  const headTop = sprite.grid.findIndex((row) => row.includes("o"));
+  const bodyTop = sprite.grid.findIndex((row) => row.includes("b") || row.includes("B"));
   for (let y = 0; y < sprite.grid.length; y += 2) {
-    const top = sprite.grid[y] ?? "";
-    const bottom = sprite.grid[y + 1] ?? "";
-    let line = "";
-    for (let x = 0; x < top.length; x++) {
-      const upper = sprite.palette[top[x] ?? "."];
-      const lower = sprite.palette[bottom[x] ?? "."];
-      if (upper === undefined && lower === undefined) line += " ";
-      else if (!caps.color) line += upper === undefined ? "▄" : lower === undefined ? "▀" : "█";
-      else if (upper === undefined) line += `\x1b[${color(lower!, "38", caps)}m▄\x1b[0m`;
-      else if (lower === undefined) line += `\x1b[${color(upper, "38", caps)}m▀\x1b[0m`;
-      else line += `\x1b[${color(upper, "38", caps)};${color(lower, "48", caps)}m▀\x1b[0m`;
+    const row: { filled: boolean; leaf: boolean }[] = [];
+    const screenMiddle = [0, 1].every((dy) => {
+      const sourceRow = [...(sprite.grid[y + dy] ?? "")];
+      const framePixels = sourceRow.filter((key) => key === "f").length;
+      return framePixels <= 2 && sourceRow.filter((key) => key === "c").length > framePixels + 2;
+    });
+    for (let x = 0; x < (sprite.grid[0]?.length ?? 0); x += 2) {
+      const keys = [0, 1].flatMap((dy) => [0, 1].map((dx) => sprite.grid[y + dy]?.[x + dx] ?? "."));
+      const leaves = keys.filter((key) => key === "L" || key === "l").length;
+      const frame = keys.filter((key) => key === "o" || (!screenMiddle && key === "f")).length;
+      // An eye straddling a reduction cell still becomes one eye, at the
+      // start of its run, rather than widening into two adjacent blocks.
+      const eye = [0, 1].some((dy) =>
+        [0, 1].some(
+          (dx) => sprite.grid[y + dy]?.[x + dx] === "e" && sprite.grid[y + dy]?.[x + dx - 1] !== "e",
+        ),
+      );
+      // Above the head, don't merge the stem into the two leaf blobs. A
+      // majority keeps the thin stem one column wide after reduction.
+      const aboveHead = headTop >= 0 && y < headTop;
+      const filled = aboveHead
+        ? leaves >= 2 || keys.filter((key) => key === "s" || key === "f").length >= 3
+        : eye ||
+          frame >= 2 ||
+          (bodyTop >= 0 &&
+            y >= bodyTop - 1 &&
+            keys.filter((key) => sprite.palette[key] !== undefined).length >= 2);
+      row.push({ filled, leaf: aboveHead && leaves >= 2 });
     }
-    lines.push(line.replace(/ +$/u, ""));
+    pixels.push(row);
+  }
+  const lines: string[] = [];
+  for (let y = 0; y < pixels.length; y += 2) {
+    lines.push(
+      (pixels[y] ?? [])
+        .map((upper, x) => {
+          const lower = pixels[y + 1]?.[x];
+          const glyph = upper.filled ? (lower?.filled ? "█" : "▀") : lower?.filled ? "▄" : " ";
+          return upper.leaf || lower?.leaf ? paintClankieFaceText(glyph, { fg: "success" }, caps) : glyph;
+        })
+        .join("")
+        .trimEnd(),
+    );
   }
   return lines;
-}
-
-function color(rgb: Rgb, layer: "38" | "48", caps: { readonly trueColor: boolean }): string {
-  if (caps.trueColor) return `${layer};2;${rgb[0]};${rgb[1]};${rgb[2]}`;
-  // The xterm 6×6×6 cube.
-  const level = (value: number) => (value < 48 ? 0 : value < 115 ? 1 : Math.floor((value - 35) / 40));
-  return `${layer};5;${16 + 36 * level(rgb[0]) + 6 * level(rgb[1]) + level(rgb[2])}`;
 }

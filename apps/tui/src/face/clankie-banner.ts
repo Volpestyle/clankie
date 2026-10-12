@@ -1,6 +1,6 @@
 /**
  * Clankie's welcome screen, the first thing in every transcript: his lead look
- * drawn in terminal pixels beside his name and how to start.
+ * drawn in compact block art beside his name and how to start.
  *
  * Degrades on capability: truecolor -> 256-color -> no color, and a Unicode
  * support check. Narrow or short terminals get one condensed line instead,
@@ -101,13 +101,13 @@ export function renderClankieBanner(
     : Math.max(...ASCII_SPROUT.map((line) => line.length));
   const dim = (text: string) => paint(text, { fg: "dim" }, caps);
   const text = [
-    paint(fields.title.toLowerCase(), { fg: "accent", bold: true }, caps),
+    paint(fields.title.toLowerCase(), { bold: true }, caps),
     "",
     dim("Ask for anything, or type / for commands."),
     dim(`Click a tool row to open it ${caps.unicode ? "·" : "-"} ctrl+o opens them all.`),
   ];
-  // The words sit beside his face, not his sprout.
-  const textTop = Math.max(0, Math.floor((art.length - text.length) / 2) + (caps.unicode ? 1 : 0));
+  // Keep the words centered beside the compact figure.
+  const textTop = Math.max(0, Math.floor((art.length - text.length) / 2));
   return art.map((line, row) => {
     const words = text[row - textTop];
     if (words === undefined || words === "") return ` ${line}`;
@@ -130,7 +130,7 @@ function renderRule(caps: BannerCapabilities): string {
 
 function renderCondensed(fields: BannerFields, caps: BannerCapabilities): string[] {
   const mascot = paint(clankieMascot(caps), { fg: "accent", bold: true }, caps);
-  const head = paint(fields.title.toLowerCase(), { fg: "accent", bold: true }, caps);
+  const head = paint(fields.title.toLowerCase(), { bold: true }, caps);
   return [` ${mascot} ${head}`, renderRule(caps)];
 }
 

@@ -326,9 +326,11 @@ credential holder.
 
 ## Transcript rendering
 
-A conversation opens on Clankie's welcome: his lead look in terminal pixels
-(`face/clankie-sprout.ts`, copied from the desktop pet's idle frame) beside his
-name and how to start. The look follows the owner's `appearance.leadSkin`
+A conversation opens on Clankie's welcome: his lead look in seven rows of block art
+(`face/clankie-sprout.ts`, reduced from the desktop pet's idle frame) beside his
+name and how to start. The leaves use the theme green; the
+frame, eyes and body use the terminal's foreground, with a hollow screen and
+muted help text, readable on light and dark backgrounds. The look follows the owner's `appearance.leadSkin`
 setting; an id the console does not bundle draws his default sprout. Narrow
 or short terminals get one condensed line. The input line starts with a `❯`
 caret (`!` in shell mode).
