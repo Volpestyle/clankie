@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "worker-proof.tar",
+      "size": 102400,
+      "sha256": "7268126eef59ef2e284600d5d1d65fedaa5053ff8b34cad31b83dcfc983f15fa",
+      "url": "clankie://evidence/sha256/7268126eef59ef2e284600d5d1d65fedaa5053ff8b34cad31b83dcfc983f15fa"
+    }
+  ]
+}

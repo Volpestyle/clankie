@@ -1030,6 +1030,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       await assertLinear();
       return {
         identity,
+        backend: convention.backend,
         call: async (
           name: string,
           args: Record<string, unknown>,

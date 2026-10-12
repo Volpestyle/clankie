@@ -300,6 +300,86 @@ it("settles only the current verified hire scope across close, exit, collisions 
       { issueId: a.issue.id, type: "result", stage: "landed" },
       "interactive",
     );
+    trace.initialLandedRetirement = await keeper.closed({
+      seatId: keyReturns.seatId,
+      reason: "landed; remaining proof pending",
+      outcome: "verifying",
+    });
+    const preservedRetirements: Record<string, unknown>[] = [];
+    const retirePreservingDelivery = async (
+      stage: string,
+      outcome?: "verifying" | "done",
+      successor = false,
+      exit = false,
+    ) => {
+      const retiring = await a.seat(`${stage} retirement fixture`, String(a.issue.id));
+      const next = successor ? await a.seat("Remaining proof successor") : undefined;
+      await keeper.observe([retiring, ...(next ? [next] : [])]);
+      const before = (await a.store.call("get_issue", { id: a.issue.id })) as Record<string, unknown>;
+      const rawBefore = JSON.parse(await readFile(join(root, "a-store", "tracker.json"), "utf8"));
+      const result = exit
+        ? await (async () => {
+            await keeper.observe([]);
+            now += 2;
+            return (await keeper.observe([]))[0]!;
+          })()
+        : await keeper.closed({
+            seatId: retiring.seatId,
+            reason: "remaining device proof is pending",
+            ...(outcome ? { outcome } : {}),
+            evidence: "fixture evidence; no owner authority",
+            unlanded: true,
+          });
+      expect(result).toMatchObject({ outcome: "updated", status: before.status });
+      const after = (await a.store.call("get_issue", { id: a.issue.id })) as Record<string, unknown>;
+      expect(after).toMatchObject({ stage, status: before.status });
+      expect(after.bundle).toEqual(before.bundle);
+      expect(after.ownerAsks).toEqual(before.ownerAsks);
+      const rawAfter = JSON.parse(await readFile(join(root, "a-store", "tracker.json"), "utf8"));
+      const writes = rawAfter.audit.slice(rawBefore.audit.length);
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toMatchObject({ tool: "save_comment", outcome: "applied" });
+      expect(rawAfter.events.slice(0, rawBefore.events.length)).toEqual(rawBefore.events);
+      expect(rawAfter.events.slice(rawBefore.events.length)).toMatchObject([
+        { type: "comment", issueId: a.issue.id },
+      ]);
+      const comments = (await a.store.call("list_comments", { issueId: a.issue.id })) as {
+        comments: { id: string; body: string }[];
+      };
+      const commentId = rawAfter.events.at(-1).commentId;
+      const comment = comments.comments.find((entry) => entry.id === commentId)!.body;
+      expect(comment).toContain(`Delivery preserved: ${stage}`);
+      expect(comment).toContain(
+        `Retirement activity: ${successor ? "In Progress" : outcome ? (outcome === "done" ? "Done" : "Verifying") : "Paused"}`,
+      );
+      expect(comment).toContain(
+        exit ? "its seat exited without a close" : "remaining device proof is pending",
+      );
+      if (!exit) {
+        expect(comment).toContain("Evidence: fixture evidence");
+        expect(comment).toContain("Unlanded work was left behind");
+      }
+      expect(
+        rawAfter.issues.find((entry: { id: string }) => entry.id === a.issue.id).updatedByActor,
+      ).toMatchObject({
+        type: "agent-worker",
+        id: "clankie",
+      });
+      preservedRetirements.push({
+        stage,
+        successor,
+        exit,
+        result,
+        comment,
+        writes,
+        bundle: after.bundle,
+        ownerAsks: after.ownerAsks,
+      });
+      if (next) await keeper.closed({ seatId: next.seatId, reason: "successor fixture retired after proof" });
+    };
+    await retirePreservingDelivery("landed", "verifying");
+    await retirePreservingDelivery("landed", undefined, true);
+    await retirePreservingDelivery("landed", undefined, false, true);
     await expect(
       scope.call(
         "post_issue_event",
@@ -339,8 +419,10 @@ it("settles only the current verified hire scope across close, exit, collisions 
       evidence: reference.url,
     });
     expect(deliveredDone).toMatchObject({
-      outcome: "failed",
-      detail: expect.stringContaining("owner_verification_required"),
+      outcome: "updated",
+      intended: "Done",
+      status: "Delivered",
+      detail: expect.stringContaining("Delivery preserved"),
     });
     expect(await a.store.call("get_issue", { id: a.issue.id })).toMatchObject({
       stage: "delivered",
@@ -348,6 +430,33 @@ it("settles only the current verified hire scope across close, exit, collisions 
       updatedByActor: expect.objectContaining({ type: "agent-worker", id: "clankie" }),
     });
     trace.deliveredOwnerFence = deliveredDone;
+    // The production owner fence still refuses direct verification and rewind.
+    await expect(scope.call("save_issue", { id: a.issue.id, state: "Done" }, "interactive")).rejects.toThrow(
+      "owner_verification_required",
+    );
+    await expect(
+      scope.call("save_issue", { id: a.issue.id, state: "In Progress" }, "interactive"),
+    ).rejects.toThrow("owner_verification_required");
+    await retirePreservingDelivery("delivered");
+    await retirePreservingDelivery("delivered", undefined, false, true);
+    // Synthetic PRE-EXISTING owner-verified persisted state in this disposable
+    // store only. No owner actor, verification answer or owner API is invoked.
+    const verifiedFixture = JSON.parse(await readFile(join(root, "a-store", "tracker.json"), "utf8"));
+    const verifiedIssue = verifiedFixture.issues.find((entry: { id: string }) => entry.id === a.issue.id);
+    verifiedIssue.stage = "owner-verified";
+    verifiedIssue.statusId = verifiedFixture.issueStatuses.find(
+      (entry: { name: string }) => entry.name === "Done",
+    ).id;
+    await writeFile(join(root, "a-store", "tracker.json"), JSON.stringify(verifiedFixture));
+    expect(await a.store.call("get_issue", { id: a.issue.id })).toMatchObject({
+      stage: "owner-verified",
+      status: "Done",
+    });
+    await retirePreservingDelivery("owner-verified", "done");
+    await retirePreservingDelivery("owner-verified", undefined, false, true);
+    trace.preservedRetirements = preservedRetirements;
+    trace.ownerVerifiedFixtureLimit =
+      "Synthetic pre-existing persisted state, not proof of owner verification; all subsequent keeper reads/comments use real stores and production routes.";
 
     const c = await fixture("c");
     const current = await c.seat("Binding changed after observation");

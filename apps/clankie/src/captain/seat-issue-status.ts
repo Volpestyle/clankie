@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
-import type { OperatorFleetSeat } from "@clankie/protocol";
+import type { OperatorFleetSeat, WorkConvention } from "@clankie/protocol";
 import type { McpHost } from "../mcp-host.ts";
 import { resolveProjectMembership } from "@clankie/settings";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
@@ -42,6 +42,7 @@ export interface LiveSeatIssue {
 export interface SeatIssueTrackerScope {
   /** Includes the current saved tracker binding, never just a display key. */
   readonly identity: string;
+  readonly backend: WorkConvention["backend"];
   call(tool: string, args: Record<string, unknown>, priority: LinearRequestPriority): Promise<unknown>;
 }
 export interface SeatIssueAttribution {
@@ -190,6 +191,7 @@ export class SeatIssueKeeper {
     this.requireAttribution = options.requireAttribution ?? false;
     this.legacyScope = {
       identity: "legacy-linear",
+      backend: "linear",
       call: (tool, args, priority) => this.call(tool, args, priority),
     };
     this.humanOwners = options.humanOwners ?? (async () => ({ ownerUserIds: [], ownerUserEmails: [] }));
@@ -404,6 +406,29 @@ export class SeatIssueKeeper {
       if (!canonicalId || canonicalId !== targetId)
         throw new Error("Tracker returned a different canonical issue identity");
       const current = text(issue.status) ?? text(issue.state);
+      const retirement = [
+        `${successor ? `Handed from ${input.seat} to ${successor.title}` : `${input.seat} left`}: ${oneLine(input.why)}.`,
+        input.evidence ? ` Evidence: ${oneLine(input.evidence)}.` : "",
+        input.unlanded ? " Unlanded work was left behind." : "",
+      ].join("");
+      const stage = text(issue.stage);
+      if (scope.backend === "builtin" && ["landed", "delivered", "owner-verified"].includes(stage ?? "")) {
+        if (!current) throw new Error("Tracker returned no current delivery status");
+        // Retirement describes activity, not permission to rewind or verify delivery.
+        await call("save_comment", {
+          issueId: canonicalId,
+          body: `${retirement} Retirement activity: ${intended}. Delivery preserved: ${stage}. Status: ${current}.`,
+        });
+        delete this.state.paused[identity];
+        this.save();
+        return {
+          outcome: "updated",
+          issue: input.issue,
+          intended,
+          status: current,
+          detail: `Delivery preserved: ${stage}; retirement activity recorded in comment.`,
+        };
+      }
       if (CLOSED_TYPES.has(text(issue.statusType) ?? ""))
         return { outcome: "skipped", issue: input.issue, intended, detail: `Already ${current}.` };
       const team = text(issue.teamId) ?? text(issue.team);
@@ -421,9 +446,7 @@ export class SeatIssueKeeper {
       if (status !== current) await call("save_issue", { id: canonicalId, state: status });
       const missing = status.toLowerCase() !== intended.toLowerCase();
       const body = [
-        `${successor ? `Handed from ${input.seat} to ${successor.title}` : `${input.seat} left`}: ${oneLine(input.why)}.`,
-        input.evidence ? ` Evidence: ${oneLine(input.evidence)}.` : "",
-        input.unlanded ? " Unlanded work was left behind." : "",
+        retirement,
         ` Status: ${status}${missing ? ` (intended ${intended}; that status does not exist yet)` : ""}.`,
       ].join("");
       await call("save_comment", { issueId: canonicalId, body });
