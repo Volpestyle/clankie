@@ -88,6 +88,8 @@ export interface TurnContext {
   requestQuestion?: ((draft: QuestionDraft) => Promise<ConversationQuestionResult>) | undefined;
   /** Host-only immutable conversation ownership and current admission authority. */
   conversationAuthority?: ConversationAuthority | undefined;
+  /** Host-only private operator recovery; project delegation and room tools never receive it. */
+  hireReceiptOperator?: boolean | undefined;
   /** Immutable host binding for this turn; never populated from tool arguments. */
   bodyIdentity?: BodyConversationIdentity | undefined;
   media?: CaptainTurnMedia | undefined;
@@ -300,7 +302,12 @@ export function captainTools(
     ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
     herdrWatches !== undefined
       ? [
-          ...herdrWatchTools(herdrWatches, turn, deps.herdrAvailable),
+          ...herdrWatchTools(
+            herdrWatches,
+            turn,
+            deps.herdrAvailable,
+            lane === "operator" && turn.hireReceiptOperator === true,
+          ),
           ...(herdrWatches.readoptSeat === undefined ? [] : [readoptSeatTool(herdrWatches, turn)]),
           ...(herdrWatches.efficiency === undefined
             ? []
@@ -1292,6 +1299,7 @@ function herdrWatchTools(
   watches: HerdrWatchPort,
   turn: TurnContext,
   available?: () => boolean,
+  operator = false,
 ): ToolDefinition[] {
   const arm = async (agent: string, reason: string) => {
     const authority = captureConversationAuthority(turn.conversationAuthority);
@@ -1307,13 +1315,14 @@ function herdrWatchTools(
             name: "settle_hire_receipt",
             label: "Settle a fresh hire receipt",
             description:
-              "Settle your own uncertain fresh remote hire by its freshIntent UUID. Uses authenticated host evidence; abandoned does not claim delivery, abandoned-unknown requires an unmapped launch, and not-launched requires a complete reservation window. Retains the original brief and launch fences forever; never sends, replays or closes a pane. New work requires a separate fresh intent and new brief.",
+              "Settle an uncertain fresh remote hire by its native receipt or freshIntent UUID. The operator may settle any hire; other conversations may settle only their own fresh hires. Uses authenticated host evidence; abandoned does not claim delivery, abandoned-unknown requires an unmapped launch, and not-launched requires a complete reservation window. Operator release-allocation takes a project allocation UUID and complete pane-absent inventory. Retains original launch fences; never sends, replays or closes a pane. New work requires a separate fresh intent and new brief.",
             parameters: Type.Object({
               receiptId: Type.String({ format: "uuid" }),
               disposition: Type.Union([
                 Type.Literal("not-launched"),
                 Type.Literal("abandoned"),
                 Type.Literal("abandoned-unknown"),
+                ...(operator ? [Type.Literal("release-allocation")] : []),
               ]),
             }),
             executionMode: "sequential",
@@ -1324,7 +1333,7 @@ function herdrWatchTools(
                   input.receiptId,
                   () => assertConversationAuthority(authority),
                   input.disposition,
-                  authority.owner,
+                  operator ? undefined : authority.owner,
                 ),
               );
             },

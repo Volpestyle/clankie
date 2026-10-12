@@ -145,8 +145,14 @@ it("a restarted journal permits only exact same-ID inspection while any sibling 
 it("retains successful and proven failed fresh identities through reconciliation, restart and age pruning", async () => {
   const f = await fixture();
   const a = f.fence.freshHireAdmission(proof.receiptKey, f.input, f.owner, f.fingerprint);
-  const receipt = f.fence.begin(a.key, { fingerprint: f.fingerprint, freshHire: a.metadata });
+  const receipt = f.fence.begin(a.key, {
+    fingerprint: f.fingerprint,
+    freshHire: a.metadata,
+    paneId: originalPane,
+    remoteAdmission: { target: proof.target, nonce: "a".repeat(64) },
+  });
   expect(f.fence.reconcile(a.key, receipt.messageId)).toBe(true);
+  f.fence.retireCompleted(proof.target, new Set(), new Set());
   const disk = JSON.parse(await readFile(f.path, "utf8"));
   disk[a.key].completed.at = 0;
   await writeFile(f.path, JSON.stringify(disk));
@@ -157,14 +163,21 @@ it("retains successful and proven failed fresh identities through reconciliation
   expect(() =>
     restarted.freshHireAdmission(
       proof.receiptKey,
-      { ...f.input, freshIntent: { ...f.input.freshIntent!, id: randomUUID() } },
+      {
+        ...f.input,
+        freshIntent: { ...f.input.freshIntent!, id: randomUUID(), afterReceiptId: receipt.messageId },
+      },
       f.owner,
       f.fingerprint,
     ),
   ).toThrow(/replay/u);
   const b = restarted.freshHireAdmission(
     proof.receiptKey,
-    { ...f.input, title: "Bea", freshIntent: { ...f.input.freshIntent!, id: randomUUID() } },
+    {
+      ...f.input,
+      title: "Bea",
+      freshIntent: { ...f.input.freshIntent!, id: randomUUID(), afterReceiptId: receipt.messageId },
+    },
     f.owner,
     deliveryFingerprint("Second independent acceptance"),
   );

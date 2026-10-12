@@ -1439,7 +1439,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ? { privateContext: false, actorId: "", authorize: async () => false }
       : undefined;
     const capture: TurnContext = { shell: systemTools };
-    if (lane === "operator" && privateLeadConversation(_conversationId)) capture.leadChats = leadChats;
+    if (lane === "operator" && privateLeadConversation(_conversationId)) {
+      capture.leadChats = leadChats;
+      capture.hireReceiptOperator = true;
+    }
     if (systemTools && options.deliveredFiles !== undefined) {
       capture.publishFile = async (input) => {
         if (capture.room === undefined) throw new Error("Delivered files need an active room");
@@ -3176,6 +3179,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         capture.room = roomKey(scope.lane, scope.targetId);
         capture.targetId = scope.targetId;
       } else {
+        capture.hireReceiptOperator = delegation === undefined && privateLeadConversation(targetId);
         if (privateLeadConversation(targetId))
           capture.leadChats = async () => {
             await assertConversationAuthority(capture.conversationAuthority!);

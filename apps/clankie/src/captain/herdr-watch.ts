@@ -2375,6 +2375,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           );
         const projectId = this.projectContexts.get(input)?.projectId ?? input.projectId;
         const freshScope = { ...input, ...(projectId === undefined ? {} : { projectId }) };
+        await this.retireCompletedHires(input.fleet!, { baseKey: baseReceiptKey }, () =>
+          assertConversationAuthority(authority),
+        );
         fresh = this.hireReceipts.freshHireAdmission(
           baseReceiptKey,
           freshScope,
@@ -2563,7 +2566,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
             };
           }
           adopt?.(recovered, this.projectContexts.get(input)?.projectId);
-          this.hireReceipts.reconcile(receiptKey, pending.messageId);
+          this.hireReceipts.reconcile(receiptKey, pending.messageId, input.fleet !== undefined);
           // Adoption and the exact delivery receipt commit synchronously above.
           // Its own metadata flush must precede a watch's project policy probes.
           if (flushAdoption) await this.runProjectPolicy(flushAdoption).catch(() => {});
@@ -2656,7 +2659,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
         result.outcome === "spawned" ||
         (!briefNotSent && !["start_unconfirmed", "delivery_unconfirmed"].includes(result.reason))
       )
-        this.hireReceipts.reconcile(receiptKey, receipt.messageId);
+        this.hireReceipts.reconcile(
+          receiptKey,
+          receipt.messageId,
+          input.fleet !== undefined && result.outcome === "spawned",
+        );
       if (result.outcome === "spawned") {
         // A failed association write stays pending; the native seat already exists.
         if (flushAdoption) await this.runProjectPolicy(flushAdoption).catch(() => {});
@@ -2741,6 +2748,56 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.closed) throw new Error("Native hire service is closed");
   }
 
+  /** Retire completed receipts only against a complete census on their unchanged configured host. */
+  private async retireCompletedHires(
+    fleet: string,
+    scope: { baseKey?: string; paneId?: string },
+    guard?: () => Promise<void>,
+  ): Promise<void> {
+    const candidates = this.hireReceipts
+      .all()
+      .filter(
+        ([key, receipt]) =>
+          receipt.completed &&
+          receipt.paneId &&
+          !receipt.retired &&
+          receipt.remoteAdmission?.target.fleet === fleet &&
+          (scope.baseKey === undefined || (receipt.freshHire?.baseKey ?? key) === scope.baseKey) &&
+          (scope.paneId === undefined || receipt.paneId === scope.paneId),
+      );
+    if (!candidates.length) return;
+    if (!this.runner.list || !this.remoteHireReceipts)
+      throw new Error(
+        "Complete native inventory and original host target are required for completed hire retirement",
+      );
+    const observed = new Set<string>();
+    for (const [key, receipt] of candidates) {
+      const target = receipt.remoteAdmission!.target;
+      const identity = JSON.stringify(target);
+      if (observed.has(identity)) continue;
+      const lookup = () =>
+        this.remoteHireReceipts!.claim(fleet, {
+          receiptId: receipt.messageId,
+          receiptKey: key,
+          fingerprint: receipt.fingerprint,
+        });
+      const before = await lookup();
+      if (!before || !isDeepStrictEqual(before.target, target))
+        throw new Error("The completed original's remote host target changed or disconnected");
+      const inventory = await this.runner.list(fleet);
+      const after = await lookup();
+      await guard?.();
+      if (this.closed || !after || !isDeepStrictEqual(after.target, target))
+        throw new Error("Original host target changed during completed hire census");
+      this.hireReceipts.retireCompleted(
+        target,
+        new Set(inventory.map((agent) => agent.paneId)),
+        this.activeHires,
+      );
+      observed.add(identity);
+    }
+  }
+
   /** Resolve a fresh intent to its native fence; only its live owner or the operator may settle. */
   public async settleHireReceipt(
     receiptId: string,
@@ -2762,6 +2819,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
         .filter(([, record]) => record.messageId === receiptId || record.freshHire?.id === receiptId);
       if (matches.length > 1) return refused("Hire identity is ambiguous; nothing settled.");
       const record = matches[0]?.[1];
+      const projectAllocation = this.projectHires.recoveryCandidate(receiptId);
+      if (projectAllocation && disposition !== "release-allocation")
+        return refused(
+          `Project allocation ${receiptId} is not a native hire receipt. The operator may use release-allocation after settling any original native receipt and proving complete pane-absent inventory; abandoned-unknown cannot describe a project-only claim.`,
+        );
       if (owner && (!record?.freshHire || record.freshHire.owner.conversationId !== owner.conversationId))
         return refused("Only the fresh hire's owning conversation or the operator may settle it.");
       if (record?.freshHire && (disposition === "delivered" || disposition === "release-allocation"))
@@ -4094,8 +4156,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const candidates = this.projectHires.inventoryCandidates(fleet ?? "default");
       const confirmGone = async () => {
         // Existing nonproject close/move callers have no allocation to release.
-        if (candidates.size === 0) return true;
-        if (!this.runner.list) return false;
+        if (!this.runner.list) return candidates.size === 0;
         const inventory = await this.runner.list(fleet);
         if (
           inventory.some((pane) => pane.paneId === current.paneId || pane.terminalId === current.terminalId)
@@ -4107,6 +4168,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           this.activeProjectHires,
           candidates,
         );
+        if (fleet) await this.retireCompletedHires(fleet, { paneId: current.paneId }, guard);
         return true;
       };
       // pane.close has no lifetime condition. A prepared native TUI can exit

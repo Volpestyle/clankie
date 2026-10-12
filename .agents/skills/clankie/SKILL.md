@@ -253,6 +253,17 @@ authenticated launch journal and fresh census; allocation fate stays unknown.
 The original is never retried. It grants no pane ownership, close or adoption
 authority. Known allocations use the ordinary recovery disposition instead.
 
+The operator's `settle_hire_receipt` tool can settle any retained fresh hire;
+delegated project leads and room tools can settle only their owning conversation's
+fresh hires. Project allocation UUIDs use `release-allocation`, not
+`abandoned-unknown`: complete native inventory must prove the original pane and
+directory absent, with no unresolved native receipt. That release preserves launch
+history and sends nothing. A completed successful remote hire whose pane was
+closed or harvested permits separately new `freshIntent` work after a complete
+census on its original configured host. Use the latest native receipt or fresh
+intent UUID in `afterReceiptId`; refusals name the expected identity. Keep a new
+brief and intent UUID, never replay an uncertain dispatch or edit a live journal.
+
 The bridge observes schemas and authenticated runtime revisions every five
 seconds. Deploys schedule local managed Codex refresh through its original
 controller, private config version and loaded root/descendant inventory, at

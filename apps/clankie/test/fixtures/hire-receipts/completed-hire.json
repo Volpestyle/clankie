@@ -1,0 +1,29 @@
+{
+  "messageId": "7c81bd08-1d41-4cff-b4a3-01f81ab329ce",
+  "fingerprint": "f5cbf72e9898e32fb750fb4773cc53a1720f984aeb318e8fe340eaccec4dd6b3",
+  "freshHire": {
+    "id": "f2318241-6fe9-4229-8df5-b992d69fea37",
+    "afterReceiptId": "d711bea0-9bf4-4060-a2b9-781ce1058139",
+    "baseKey": "[\"pc\",\"codex\",\"C:\\\\Users\\\\volpe\\\\repos\\\\kh2-multiplayer-vuh1515\",\"new\"]",
+    "owner": {
+      "conversationId": "conv-7687818a-09c3-4f37-bf7b-9d201c2e1932"
+    },
+    "launch": {
+      "schemaVersion": 1,
+      "harness": "codex",
+      "title": "Mira",
+      "workingDirectory": "C:\\Users\\volpe\\repos\\kh2-multiplayer-vuh1515",
+      "fleet": "pc",
+      "projectId": "kh2-multiplayer",
+      "deliverable": "VUH-1515",
+      "role": "builder"
+    }
+  },
+  "completed": {
+    "at": 1791801482951
+  },
+  "paneId": "pc/w15:p5",
+  "sessionId": "01a12fb0-aa8f-74f0-accb-3d250cb70cde",
+  "occupantId": "session-70625acee51126498f36b4c3f651c7298c68c9ba85b3303c4c7b22dfde204ed0",
+  "remoteLaunchCommitted": true
+}

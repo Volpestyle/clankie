@@ -46,6 +46,11 @@ export const ReceiptSchema = z
     /** Operator recovery permanently excludes ordinary launch/adoption/reconciliation. */
     recoveryRequested: z.literal(true).optional(),
     settlement: RetainedHireEvidenceSchema.optional(),
+    /** Complete native inventory proved a completed hire's original pane absent. No launch history erased. */
+    retired: z
+      .object({ at: z.number().int().nonnegative(), censusSha256: z.string().regex(/^[a-f0-9]{64}$/u) })
+      .strict()
+      .optional(),
     /** When a seat mailbox began this delivery; absent before VUH-1779. */
     beganAt: z.number().int().nonnegative().optional(),
     /** Owner settled a seat delivery without receipt (VUH-1779). Never resent, never claimed. */
@@ -150,14 +155,28 @@ export class DeliveryFence {
       ([, record]) =>
         record.messageId === metadata.afterReceiptId || record.freshHire?.id === metadata.afterReceiptId,
     );
+    const key = JSON.stringify([...(JSON.parse(baseKey) as string[]), "fresh", metadata.id]);
+    const siblings = entries.filter(
+      ([id, record]) => id !== key && (record.freshHire?.baseKey ?? id) === baseKey,
+    );
+    const expected = siblings.at(-1)?.[1];
+    if (siblings.some(([, record]) => !record.settlement && !record.completed))
+      throw new Error(
+        `Another original hire at this location is unresolved; expected ${expected?.messageId}; no fresh dispatch may begin`,
+      );
     const original = originals[0];
+    const target = original?.[1].settlement?.target ?? original?.[1].remoteAdmission?.target;
     if (
       originals.length !== 1 ||
-      !original?.[1].settlement ||
+      !original ||
+      original[1] !== expected ||
+      !(original[1].settlement || (original[1].completed && original[1].retired)) ||
+      !target ||
       (original[1].freshHire?.baseKey ?? original[0]) !== baseKey
     )
-      throw new Error("freshIntent requires the exact settled native hire receipt at this location");
-    const key = JSON.stringify([...(JSON.parse(baseKey) as string[]), "fresh", metadata.id]);
+      throw new Error(
+        `freshIntent requires the exact settled native hire receipt at this location; expected ${expected?.messageId ?? "no retained receipt"}${expected?.freshHire ? ` (fresh intent ${expected.freshHire.id})` : ""}. Completed hires require complete pane-absent inventory.`,
+      );
     const known = entries.filter(([, record]) => record.freshHire?.id === metadata.id);
     const identity = (value: z.infer<typeof FreshHireReceiptSchema>) => {
       const { discord, ...route } = value.owner;
@@ -173,14 +192,43 @@ export class DeliveryFence {
           !isDeepStrictEqual(identity(known[0][1].freshHire!), identity(metadata))))
     )
       throw new Error("Fresh intent UUID already names a different owner, launch or brief");
-    const siblings = entries.filter(
-      ([id, record]) => id !== key && (record.freshHire?.baseKey ?? id) === baseKey,
-    );
-    if (siblings.some(([, record]) => !record.settlement && !record.completed))
-      throw new Error("Another original hire at this location is unresolved; no fresh dispatch may begin");
     if (siblings.some(([, record]) => record.fingerprint === fingerprint))
       throw new Error("A fresh intent cannot replay any retained original brief at this location");
-    return { key, metadata, target: original[1].settlement.target };
+    return { key, metadata, target };
+  }
+
+  /** A complete successful inventory may retire only already completed exact remote hires. */
+  public retireCompleted(
+    target: HireNoLaunchEvidence["target"],
+    panes: ReadonlySet<string>,
+    active: ReadonlySet<string>,
+  ): void {
+    const previous = new Map(this.records);
+    const censusSha256 = createHash("sha256")
+      .update(JSON.stringify([...panes].sort()))
+      .digest("hex");
+    let changed = false;
+    for (const [key, receipt] of this.all()) {
+      if (
+        receipt.completed &&
+        !receipt.retired &&
+        isDeepStrictEqual(receipt.remoteAdmission?.target, target) &&
+        receipt.paneId &&
+        !panes.has(receipt.paneId) &&
+        !active.has(key)
+      ) {
+        this.records.set(key, { ...receipt, retired: { at: Date.now(), censusSha256 } });
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    try {
+      this.save();
+    } catch (error) {
+      this.records.clear();
+      for (const [key, receipt] of previous) this.records.set(key, receipt);
+      throw error;
+    }
   }
 
   public settleRecovery(key: string, messageId: string, evidence: HireRecoveryEvidence): void {
@@ -219,7 +267,9 @@ export class DeliveryFence {
     const receipt = this.records.get(key);
     return !this.unreadable &&
       receipt?.completed &&
-      (receipt.freshHire !== undefined || receipt.completed.at > Date.now() - COMPLETED_RETENTION_MS)
+      (receipt.freshHire !== undefined ||
+        receipt.remoteAdmission !== undefined ||
+        receipt.completed.at > Date.now() - COMPLETED_RETENTION_MS)
       ? receipt
       : undefined;
   }
@@ -260,6 +310,7 @@ export class DeliveryFence {
     for (const [id, value] of this.records)
       if (
         !value.freshHire &&
+        !value.remoteAdmission &&
         !value.settlement &&
         !value.abandoned &&
         value.completed &&
@@ -399,7 +450,7 @@ export class DeliveryFence {
   }
 
   /** Only the mechanism calls this after matching an acknowledgment or proving no dispatch. */
-  public reconcile(key: string, messageId: string): boolean {
+  public reconcile(key: string, messageId: string, retainNativeHire = false): boolean {
     if (
       this.unreadable ||
       this.records.get(key)?.messageId !== messageId ||
@@ -409,7 +460,7 @@ export class DeliveryFence {
     )
       return false;
     const previous = this.records.get(key)!;
-    if (previous.freshHire)
+    if (previous.freshHire || retainNativeHire)
       this.records.set(key, { ...previous, completed: previous.completed ?? { at: Date.now() } });
     else this.records.delete(key);
     try {

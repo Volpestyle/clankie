@@ -778,7 +778,10 @@ Fresh-hire recovery also accepts the retained `freshIntent.id` instead of the na
 receipt UUID: `clankie hire-receipt settle FRESH_INTENT_UUID abandoned` (or
 `abandoned-unknown` / `not-launched`, subject to the same host evidence requirements).
 The lead tool `settle_hire_receipt({receiptId, disposition})` may settle only its
-own conversation's fresh hires; operator API/CLI recovery retains operator authority.
+own conversation's fresh hires. Private operator conversations, including the
+native operator seat, may settle any retained hire; project delegation and room
+tools retain their ownership boundary. Operator API/CLI recovery has the same
+operator authority.
 The result names the requested UUID; its evidence keeps the original native receipt
 UUID and key. No old brief is sent, and no pane is closed. A separately authorized
 new hire may name either settled UUID in `freshIntent.afterReceiptId`.
@@ -794,6 +797,9 @@ The command preserves launch history and records the release time and inventory
 digest. It closes no pane, replays no receipt and starts no replacement. Repeating
 it reads the retained disposition. Definite failures before native dispatch now
 release their project allocation automatically; uncertain launches stay held.
+The operator's `settle_hire_receipt` tool also accepts `release-allocation`.
+A project allocation UUID supplied with `abandoned-unknown` is refused with this
+recovery instruction: a project-only claim cannot assert an unknown native launch.
 See [the refusal and recovery evidence](testing/2026-10-07-project-hire-refusal/README.md)
 for the local VUH-1702 and PC Ada/Pell recovery commands.
 
@@ -905,7 +911,7 @@ brief and `seat.freshIntent` through the public `spawn_seat` request:
 
 Save the request before calling `clankie hire-receipt fresh --json-stdin < request.json`.
 Choose one new lowercase UUID for that intent and retain it. `afterReceiptId` is
-the exact **native hire** UUID of the settled original, including when delivery
+the exact **native hire** UUID or retained **fresh intent** UUID of the latest settled original, including when delivery
 recovery used a `seat-…` message ID. Use the original fleet, harness and exact
 working-directory value; its configured host/session must still match. Resume,
 an unresolved sibling, changed authority or replay of any retained brief refuses.
@@ -916,6 +922,15 @@ it never launches or sends again. A completed fresh UUID stays fenced permanentl
 use its existing seat for follow-up. Both original settlement evidence and fresh
 receipts remain retained, including across restart and age pruning. Older service
 versions may refuse this journal; upgrade forward rather than editing its records.
+
+A successfully delivered hire also counts as settled after a complete native
+inventory proves its original pane absent, including after `close_worker_pane`
+or harvest. The service checks the original configured host before and after
+that census and retains the completed receipt and retirement digest permanently.
+Fresh admission performs this census for older completed records too; no original
+launch or brief is resent. A live pane, unavailable inventory, changed host or
+unresolved sibling stays blocked. Refusals name the expected receipt and fresh
+intent UUID when known; use those exact identities for separately authorized work.
 
 The native `hire_agent` tool accepts the same optional `freshIntent`. This adds
 no account change, fleet alias or TUI setting. Exit 0 from the fresh CLI means
