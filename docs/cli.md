@@ -4789,6 +4789,16 @@ revocation survives restart. Temporary bridge, relay or native-observation loss
 is retried; a service restart re-arms only a previously proved launch with the
 same machine, pane, shell and harness process lifetimes, native session and chat.
 
+Workspace grant changes preserve a connected lead whose own working directory
+remains granted. Connection identity (machine, SSH, kind, session and enablement)
+stays pinned; each request separately checks the lead's own directory grant.
+An invalid binding returns `remote_lead_binding_unavailable`; a removed directory
+grant returns `remote_lead_workspace_revoked`, both with recovery instructions.
+Report link failures to the Mac lead or owner for a fresh launch from the Mac
+after approval is restored. Never work around them with Mac desktop control or
+credential rotation. Delegations issued before this identity-hash change also
+need a fresh launch; their old hashes are not migrated or relaxed.
+
 The head's transcript hooks retry a failed seat sync after 2 and 5 seconds and
 stay silent until three hook runs in a row fail; the lead's pane then shows one
 line naming the error. Every hook run is recorded on the PC in

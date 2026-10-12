@@ -95,6 +95,15 @@ const request: typeof fetch = async (resource, init) => {
       closing.abort();
       throw new Error("Remote lead delegation explicitly revoked");
     }
+    if (
+      typeof reason === "object" &&
+      reason !== null &&
+      "error" in reason &&
+      "recovery" in reason &&
+      typeof reason.error === "string" &&
+      typeof reason.recovery === "string"
+    )
+      throw new Error(`${reason.error}: ${reason.recovery}`);
     // A native observation or policy read can be temporarily unavailable.
     // Refusal still blocks this request; it does not end the native bridge.
   }

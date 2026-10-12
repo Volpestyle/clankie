@@ -7,6 +7,15 @@ import { isDeepStrictEqual } from "node:util";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 
+/** Safe diagnostics for a recognized delegation, never arbitrary provider errors. */
+export class RemoteLeadRefusal extends Error {
+  readonly recovery =
+    "Report this link failure to the Mac lead or owner for a fresh launch from the Mac. Never work around it with desktop control or credential rotation.";
+  constructor(readonly reason: "remote_lead_binding_unavailable" | "remote_lead_workspace_revoked") {
+    super(reason);
+  }
+}
+
 /** Host-authored launch identity. No request can select or change these fields. */
 export interface RemoteLeadBinding {
   readonly fleet: string;

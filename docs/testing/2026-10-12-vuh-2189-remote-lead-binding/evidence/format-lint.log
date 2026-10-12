@@ -1,0 +1,12 @@
+clankie heavy: light lane waiting (1/4 held, 1 queued)
+  server: w4F:pB / codex:01a130d8-db9d-7c53-96ce-44ada4392fce / pnpm · server · held 4m
+  server: w4F:pC / codex:01a13134-38bb-7b71-9ab3-71b0c56890a3 / python3 · server · held 2m
+$ node scripts/scoped-code-check.mjs fmt:check .agents/skills/lead/SKILL.md apps/clankie/src/remote-lead-bridge.ts apps/clankie/src/remote-lead-delegations.ts apps/clankie/src/remote-project-leads.ts apps/clankie/test/remote-project-leads.integration.test.ts apps/tui/bin/remote-lead-mcp.ts docs/cli.md docs/testing/2026-10-12-vuh-2189-remote-lead-binding/README.md --threads=2
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 745ms on 8 files using 2 threads.
+clankie heavy: light lane waiting (2/4 held, 1 queued)
+  server: w4F:pB / codex:01a130d8-db9d-7c53-96ce-44ada4392fce / pnpm · server · held 5m
+  server: w4F:pC / codex:01a13134-38bb-7b71-9ab3-71b0c56890a3 / python3 · server · held 2m
+$ node scripts/scoped-code-check.mjs lint apps/clankie/src/remote-lead-bridge.ts apps/clankie/src/remote-lead-delegations.ts apps/clankie/src/remote-project-leads.ts apps/clankie/test/remote-project-leads.integration.test.ts apps/tui/bin/remote-lead-mcp.ts --threads=2

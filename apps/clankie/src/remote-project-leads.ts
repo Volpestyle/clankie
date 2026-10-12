@@ -4,14 +4,19 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { ChildProcess } from "node:child_process";
 import type { RemoteLeadLaunch } from "@clankie/protocol/remote-leads";
-import type { SettingsStore } from "@clankie/settings";
+import type { SettingsStore, ExecutionConnectionSchema } from "@clankie/settings";
+import type { z } from "zod";
 import type { ExecutionConnections } from "./herdr-session.ts";
 import type { CaptainPort } from "./captain/port.ts";
 import { redactSensitiveText } from "@clankie/observability";
 import { logger } from "./app/log.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
 import { powershellScriptCommand, powershellLiteral } from "./herdr-fleet.ts";
-import { RemoteLeadDelegations, type RemoteLeadBinding } from "./remote-lead-delegations.ts";
+import {
+  RemoteLeadDelegations,
+  RemoteLeadRefusal,
+  type RemoteLeadBinding,
+} from "./remote-lead-delegations.ts";
 
 type Runtimes = Pick<ExecutionConnections, "fleets" | "fleetStream" | "remoteWorkspace" | "requireAccess">;
 interface RemoteProjectLeadOptions {
@@ -51,11 +56,12 @@ export class RemoteProjectLeads {
           connection.machine !== binding.machine ||
           !connection.ssh ||
           connectionKey(connection) !== binding.connectionKey ||
-          !(await options.runtimes.remoteWorkspace(binding.fleet, binding.workingDirectory)) ||
           options.captain.seatContext(binding.conversationId)?.machineId !== binding.machine ||
           options.captain.seatContext(binding.conversationId)?.cwd !== binding.workingDirectory
         )
-          throw new Error("remote_lead_binding_unavailable");
+          throw new RemoteLeadRefusal("remote_lead_binding_unavailable");
+        if (!(await options.runtimes.remoteWorkspace(binding.fleet, binding.workingDirectory)))
+          throw new RemoteLeadRefusal("remote_lead_workspace_revoked");
       },
       join(options.directory, "delegations"),
     );
@@ -488,6 +494,11 @@ function collect(child: ChildProcess, input: string): Promise<string> {
   });
 }
 
-function connectionKey(connection: unknown): string {
-  return createHash("sha256").update(JSON.stringify(connection)).digest("hex");
+function connectionKey(connection: z.infer<typeof ExecutionConnectionSchema>): string {
+  // Workspace grants are mutable authority, checked on every request. They
+  // must not change the identity of an otherwise connected lead.
+  const { id, machine, ssh, kind, session, enabled } = connection;
+  return createHash("sha256")
+    .update(JSON.stringify({ id, machine, ssh, kind, session, enabled }))
+    .digest("hex");
 }

@@ -11,6 +11,7 @@ import { ConversationStore } from "../src/captain/conversations/store.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import * as census from "../src/captain/herdr-census.ts";
 import { RemoteProjectLeads } from "../src/remote-project-leads.ts";
+import { ExecutionConnections } from "../src/herdr-session.ts";
 import { logger } from "../src/app/log.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { createRemoteLeadBridge } from "../src/remote-lead-bridge.ts";
@@ -166,7 +167,24 @@ it("launches an approved Windows workspace through the real conversation store w
   let approved = false;
   let transportCalls = 0;
   let malformedReply = false;
-  const remoteWorkspace = vi.fn(async (id: string, path: string) => approved && id === "pc" && path === cwd);
+  const connections = new ExecutionConnections({
+    settings,
+    primary: { binding: () => undefined, status: () => "disabled" },
+  });
+  const remoteWorkspace = async (id: string, path: string) =>
+    approved && connections.remoteWorkspace(id, path);
+  const grantWorkspaces = async (paths: string[]) => {
+    await settings.update((current) => ({
+      ...current,
+      execution: {
+        ...current.execution,
+        connections: current.execution.connections.map((entry) => ({
+          ...entry,
+          workspaces: paths.map((path) => ({ kind: "directory" as const, path })),
+        })),
+      },
+    }));
+  };
   const leads = new RemoteProjectLeads({
     repoRoot: root,
     directory: join(root, "launches"),
@@ -175,7 +193,7 @@ it("launches an approved Windows workspace through the real conversation store w
     runtimes: {
       fleets: async () => [fleet],
       remoteWorkspace,
-      requireAccess: async () => {},
+      requireAccess: connections.requireAccess.bind(connections),
       fleetStream: () => () => {
         const prepare = transportCalls++ % 2 === 0;
         const child = spawn(
@@ -253,6 +271,7 @@ it("launches an approved Windows workspace through the real conversation store w
     await expect(leads.launch(input, async () => {})).rejects.toThrow("owner-approved working directory");
     expect(transportCalls).toBe(0);
     approved = true;
+    await grantWorkspaces([cwd]);
     const response = await launchRequest(input);
     expect(response.status).toBe(200);
     const launched = await response.json();
@@ -415,6 +434,58 @@ it("launches an approved Windows workspace through the real conversation store w
       authorize: admitted!.authorize,
     });
     expect(bank.tools.some((tool) => tool.name === "hire_agent")).toBe(true);
+    // VUH-2189: edit real grants under the same connected MCP client. The
+    // settings, directory grant checker, delegation and HTTP bridge are real;
+    // native Windows observation and provider dispatch remain fixture seams.
+    const otherCwd = "C:\\Users\\volpe\\repos\\wt-backlog";
+    for (const paths of [[cwd, otherCwd], [cwd], [otherCwd, cwd]]) {
+      await grantWorkspaces(paths);
+      expect(await admitted!.authorize()).toBe(true);
+      expect((await client.listTools()).tools.some((tool) => tool.name === "linear_get_issue")).toBe(true);
+      expect(
+        (await client.callTool({ name: "linear_get_issue", arguments: { id: "VUH-2189" } })).isError,
+      ).not.toBe(true);
+    }
+    const leadRequest = () =>
+      bridge!.app.request("/v1/fleet/lead/prompt", {
+        headers: { authorization: `Bearer ${issued.token}` },
+      });
+    await grantWorkspaces([otherCwd]);
+    await expect(admitted!.authorize()).rejects.toThrow("remote_lead_workspace_revoked");
+    const revokedWorkspace = await leadRequest();
+    expect(revokedWorkspace.status).toBe(403);
+    expect(await revokedWorkspace.json()).toMatchObject({
+      error: "remote_lead_workspace_revoked",
+      recovery: expect.stringContaining("fresh launch from the Mac"),
+    });
+    await grantWorkspaces([cwd]);
+    expect(await admitted!.authorize()).toBe(true);
+    const originalConnection = (await settings.load()).execution.connections[0]!;
+    await settings.update((current) => ({
+      ...current,
+      machines: [...current.machines, { id: "other", ssh: "other", shell: "powershell", aliases: [] }],
+    }));
+    for (const change of [
+      { machine: "other", ssh: undefined },
+      { ssh: { host: "other", shell: "powershell" as const } },
+      { session: "other" },
+      { enabled: false },
+    ]) {
+      await settings.update((current) => ({
+        ...current,
+        execution: { ...current.execution, connections: [{ ...originalConnection, ...change }] },
+      }));
+      const refused = await leadRequest();
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({
+        error: "remote_lead_binding_unavailable",
+        recovery: expect.stringContaining("fresh launch from the Mac"),
+      });
+    }
+    await settings.update((current) => ({
+      ...current,
+      execution: { ...current.execution, connections: [originalConnection] },
+    }));
     await captain.serveOperatorConversation({
       op: "send",
       schemaVersion: 1,

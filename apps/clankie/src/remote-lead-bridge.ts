@@ -7,7 +7,7 @@ import { OperatorSeatCapabilitiesSchema, OperatorSeatReplySchema } from "@clanki
 import type { CaptainPort, LaneToolBank } from "./captain/port.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
-import type { RemoteLeadDelegations } from "./remote-lead-delegations.ts";
+import { RemoteLeadRefusal, type RemoteLeadDelegations } from "./remote-lead-delegations.ts";
 
 // Delegates project leadership and messaging, with conversation-attributed effects.
 // Owner configuration, accounts and unrelated conversations are not delegated.
@@ -56,6 +56,11 @@ export function createRemoteLeadBridge(input: {
   const calls = new AsyncLocalStorage<Authority>();
   const endpoints = new Map<string, ReturnType<typeof createLaneMcpEndpoint>>();
   const app = new Hono();
+  app.onError((error, context) => {
+    if (error instanceof RemoteLeadRefusal)
+      return context.json({ error: error.reason, recovery: error.recovery }, 403);
+    throw error;
+  });
   app.use("/v1/fleet/lead/*", bodyLimit({ maxSize: 1024 * 1024 }));
   const requireCurrent = async (authority: Authority) => {
     if (!authority.current() || !(await authority.authorize())) throw new Error("remote_lead_revoked");
@@ -74,7 +79,9 @@ export function createRemoteLeadBridge(input: {
     let authority: Authority | undefined;
     try {
       authority = await input.delegations.authorize(context.req.raw, input.identity(context.req.raw));
-    } catch {
+    } catch (error) {
+      if (error instanceof RemoteLeadRefusal)
+        return context.json({ error: error.reason, recovery: error.recovery }, 403);
       return context.json({ error: "remote_lead_authority_unavailable" }, 403);
     }
     if (!authority) return context.json({ error: "remote_lead_authority_required" }, 403);

@@ -23,6 +23,13 @@ ticket upkeep.
 
 ## Project leads are chats
 
+A remote lead reports any fleet-link or delegation failure to the Mac lead or
+owner, including the specific refusal and recovery instruction. A changed
+binding or revoked workspace needs a fresh launch from the Mac after approval
+is restored. Never work around a link failure by driving the Mac desktop or
+rotating credentials. Workspace grants can change while a lead stays connected;
+its own working directory must remain granted on every request.
+
 A project lead is Clankie in a named workspace conversation with its own native
 head, not a worker sub-lead. Its hires, reports and watches belong to that chat.
 Local heads use `clankie claude --conversation ID` or `clankie codex --conversation ID`.

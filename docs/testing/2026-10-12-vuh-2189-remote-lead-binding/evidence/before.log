@@ -1,0 +1,37 @@
+clankie heavy: light lane waiting (2/4 held, 1 queued)
+  server: w4F:pB / codex:01a130d8-db9d-7c53-96ce-44ada4392fce / pnpm · server · held 4m
+  server: w4F:pC / codex:01a13134-38bb-7b71-9ab3-71b0c56890a3 / python3 · server · held 1m
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-2189
+
+{"level":30,"time":"2026-10-12T19:48:19.623Z","service":"clankie","version":"0.2.0","event":"mcp.host.ready","server":"linear","msg":"mcp server ready"}
+{"level":30,"time":"2026-10-12T19:48:19.626Z","service":"clankie","version":"0.2.0","event":"mcp.host.ready","server":"owner_mail","msg":"mcp server ready"}
+{"level":30,"time":"2026-10-12T19:48:19.918Z","service":"clankie","version":"0.2.0","event":"mcp.host.call","server":"linear","tool":"get_issue","msg":"mcp tool called"}
+{"level":30,"time":"2026-10-12T19:48:19.926Z","service":"clankie","version":"0.2.0","event":"mcp.host.call","server":"linear","tool":"save_comment","msg":"mcp tool called"}
+{"level":30,"time":"2026-10-12T19:48:19.942Z","service":"clankie","version":"0.2.0","event":"mcp.host.call","server":"linear","tool":"save_issue","msg":"mcp tool called"}
+ ❯ |parallel| apps/clankie/test/remote-project-leads.integration.test.ts (1 test | 1 failed) 435ms
+   × launches an approved Windows workspace through the real conversation store without a local captain fallback 431ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |parallel| apps/clankie/test/remote-project-leads.integration.test.ts > launches an approved Windows workspace through the real conversation store without a local captain fallback
+Error: remote_lead_binding_unavailable
+ ❯ RemoteLeadDelegations.admit apps/clankie/src/remote-project-leads.ts:62:17
+     60|           options.captain.seatContext(binding.conversationId)?.cwd !==…
+     61|         )
+     62|           throw new RemoteLeadRefusal("remote_lead_binding_unavailable…
+       |                 ^
+     63|         if (!(await options.runtimes.remoteWorkspace(binding.fleet, bi…
+     64|           throw new RemoteLeadRefusal("remote_lead_workspace_revoked");
+ ❯ observe apps/clankie/src/remote-lead-delegations.ts:205:7
+ ❯ Object.authorize apps/clankie/src/remote-lead-delegations.ts:224:48
+ ❯ apps/clankie/test/remote-project-leads.integration.test.ts:443:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  14:48:13
+   Duration  6.89s (transform 3.66s, setup 40ms, import 6.23s, tests 435ms, environment 0ms)
+
