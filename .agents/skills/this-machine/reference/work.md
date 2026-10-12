@@ -53,6 +53,11 @@ UUID must match the project's built-in or Linear binding; name `projectId` when
 the lead owns several projects. The destination must still match, and native
 identity, project caps and governors remain checked at admission.
 
+In the app's Project settings, Linear project accepts the UUID supplied by
+Clankie; leaving it empty clears that separate binding through the owner project
+API. This preserves the built-in tracker and saved workspace convention. Older
+services omit the control.
+
 ## Lead review rounds
 
 Every watch wake and periodic round (30 minutes by default) reviews all seats

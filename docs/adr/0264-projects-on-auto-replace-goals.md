@@ -102,7 +102,9 @@ Ambiguous or absent ownership falls back to the global head.
 The owner project API validates it directly through the connected Linear app,
 with no local fallback. Failed validation leaves settings unchanged. A plain
 snapshot omits it; the autonomy-aware view advertises `linearProjectBindings`.
-Bind/clear starts with the CLI and TUI, with app controls in the next slice.
+Bind/clear uses the same API in the CLI, TUI and app project settings. The
+shared app editor exposes the Linear project field only when the service
+advertises support, across phone, tablet, web and desktop.
 Auto wakes include both provider references and explicit routing recognizes
 either UUID. The saved repo tracker convention still decides its backend.
 
