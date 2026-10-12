@@ -13,6 +13,12 @@ retained older runtimes remain readable; no service restart or deployment ran.
 Final focused run: **65 tests passed across five files**. Focused lint and
 format checks passed. The integrator supplies the exact-tree landing gate.
 
+The first shared landing gate (`53dd3586`) failed on TS2375 in the pressure
+sidecar reader: parsed optional properties admitted `undefined` under the
+strict optional-property contract. This blocks landing. The reader now omits
+absent fields after validation. The corrected focused run again passed all
+65 checks; the failed gate and correction checks remain in the evidence archive.
+
 The focused integration checks exercise real child processes, loopback HTTP,
 private durable journals, deploy holds, real authenticated HTTP/CLI reads, and
 Clankie's durable conversation notices. Controlled host observations isolate

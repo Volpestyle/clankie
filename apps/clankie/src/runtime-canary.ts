@@ -158,9 +158,30 @@ export class RuntimeCanary {
     const result = this.latest();
     if (!result?.canary) return undefined;
     const path = join(this.options.updatesDirectory, result.id, "canary-pressure.json");
+    const pressure = existsSync(path) ? PressureSchema.parse(readPrivateJson(path)) : undefined;
     return {
       ...result.canary,
-      ...(existsSync(path) ? { pressure: PressureSchema.parse(readPrivateJson(path)) } : {}),
+      ...(pressure
+        ? {
+            pressure: {
+              state: pressure.state,
+              observedAt: pressure.observedAt,
+              ...(pressure.load1 !== undefined ? { load1: pressure.load1 } : {}),
+              ...(pressure.load15 !== undefined ? { load15: pressure.load15 } : {}),
+              ...(pressure.cores !== undefined ? { cores: pressure.cores } : {}),
+              ...(pressure.externalLoadRatio !== undefined
+                ? { externalLoadRatio: pressure.externalLoadRatio }
+                : {}),
+              ...(pressure.externalCpuRatio !== undefined
+                ? { externalCpuRatio: pressure.externalCpuRatio }
+                : {}),
+              ...(pressure.cpuPercent !== undefined ? { cpuPercent: pressure.cpuPercent } : {}),
+              ...(pressure.healthLatencyMs !== undefined
+                ? { healthLatencyMs: pressure.healthLatencyMs }
+                : {}),
+            },
+          }
+        : {}),
     };
   }
 
