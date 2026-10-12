@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "live-proof-bundle.json",
+      "size": 179028,
+      "sha256": "655c7f3193fe392e43bf8dda6cb9df434eb723556641aabb466c5dc9566a48ed",
+      "url": "clankie://evidence/sha256/655c7f3193fe392e43bf8dda6cb9df434eb723556641aabb466c5dc9566a48ed"
+    }
+  ]
+}
