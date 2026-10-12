@@ -145,7 +145,9 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
 
   for await (const file of glob("**/*.html", { cwd: outputDir })) {
     const path = resolve(outputDir, file);
-    await fillMarker(path, "{{NAV}}", navHtml(`/${file.replace(/index\.html$/, "")}`));
+    const pagePath = `/${file.replace(/index\.html$/, "")}`;
+    await fillMarker(path, "{{NAV}}", navHtml(pagePath));
+    await fillMarker(path, "{{STRUCTURED_DATA}}", structuredData(pagePath));
   }
 
   await writeFile(resolve(outputDir, "sitemap.xml"), sitemap());
@@ -1326,6 +1328,49 @@ function navHtml(currentPath) {
     const current = href === currentPath ? ' aria-current="page"' : "";
     return `<a${classes.length ? ` class="${classes.join(" ")}"` : ""}${current} href="${href}">${label}</a>`;
   }).join("\n          ");
+}
+
+/** schema.org JSON-LD tying each page to the Clankie software and its official home, for search engines. */
+function structuredData(pagePath) {
+  const page = PAGES.find((candidate) => candidate.path === pagePath);
+  if (!page) throw new Error(`${pagePath} is not listed in PAGES`);
+  const graph = [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://clankie.bot/#software",
+      name: "Clankie",
+      alternateName: "Clankie AI assistant",
+      description:
+        "A personal AI assistant with a personality. He remembers you, plans your work, leads coding agents, chats and talks in Discord, and plays games on stream.",
+      url: "https://clankie.bot/",
+      applicationCategory: "ProductivityApplication",
+      operatingSystem: "macOS, iOS, iPadOS",
+      license: "https://www.apache.org/licenses/LICENSE-2.0",
+      sameAs: [REPO, SITE],
+    },
+    {
+      "@type": "WebSite",
+      "@id": `${SITE}/#website`,
+      name: "Clankie Docs",
+      url: `${SITE}/`,
+      about: { "@id": "https://clankie.bot/#software" },
+    },
+    {
+      "@type": pagePath === "/" ? "WebPage" : "TechArticle",
+      "@id": `${SITE}${pagePath}#page`,
+      url: `${SITE}${pagePath}`,
+      name: page.title,
+      description: page.description,
+      isPartOf: { "@id": `${SITE}/#website` },
+      about: { "@id": "https://clankie.bot/#software" },
+    },
+  ];
+  // `<` escaped so no JSON string can close the script element.
+  const json = JSON.stringify({ "@context": "https://schema.org", "@graph": graph }).replaceAll(
+    "<",
+    "\\u003c",
+  );
+  return `<script type="application/ld+json">${json}</script>`;
 }
 
 async function fillMarker(path, marker, value) {
