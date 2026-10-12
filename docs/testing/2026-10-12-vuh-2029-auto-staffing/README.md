@@ -3,7 +3,7 @@
 Fixes the unconditional `turn.autonomous` hire refusal observed in the
 [two-project window](../2026-10-12-vuh-2029-auto-window/README.md).
 The authoritative blocker is builtin
-[LOCAL-VUH-6](clankie-work://local/issue/24ef0c94-d2f4-4c8f-af63-595e5e2f0dcb),
+`LOCAL-VUH-6` (`clankie-work://local/issue/24ef0c94-d2f4-4c8f-af63-595e5e2f0dcb`),
 under `/Users/james/dev/tracker-research-20261008`.
 
 The host carries its autonomous-turn flag to the ordinary captain hire port;

@@ -14,7 +14,7 @@ commands or writes, bridge reconnects, lane restarts, cap changes or deploys.
 Clankie Work attempted Iris/LOCAL-VUH-4 at 17:20:24.649Z (cursor 3627).
 At 17:20:24.650Z, cursor 3628 records
 `Autonomous turns may propose a hire, not execute one`. **No worker started.**
-The lead filed builtin [LOCAL-VUH-6](clankie-work://local/issue/24ef0c94-d2f4-4c8f-af63-595e5e2f0dcb)
+The lead filed builtin `LOCAL-VUH-6` (`clankie-work://local/issue/24ef0c94-d2f4-4c8f-af63-595e5e2f0dcb`)
 in `/Users/james/dev/tracker-research-20261008`; this is a separate builtin
 tracker reference, not a Linear issue. Its 18:00 event was a scheduled self-wake
 checking that blocker, not another Auto round.
