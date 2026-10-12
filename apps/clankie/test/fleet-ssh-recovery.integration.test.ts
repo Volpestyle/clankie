@@ -32,6 +32,7 @@ afterEach(async () => {
 
 interface SshCall {
   kind: "forward" | "command";
+  command?: string;
   controlPath?: string;
   capturedPath?: string;
   fresh?: boolean;
