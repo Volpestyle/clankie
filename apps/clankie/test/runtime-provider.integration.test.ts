@@ -31,7 +31,7 @@ afterEach(async () => {
 
 // Real app, captain, native channel, HTTP and durable stores; no model calls.
 // Unconnected capabilities fail if this fixture ever falls through to Pi.
-async function fixture(provider?: RuntimeProvider, autoRounds = false) {
+async function fixture(provider?: RuntimeProvider, autoRounds: boolean | "captured-ownership" = false) {
   const root = await mkdtemp(join(tmpdir(), "clankie-runtime-provider-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const state = join(root, "state");
@@ -45,33 +45,67 @@ async function fixture(provider?: RuntimeProvider, autoRounds = false) {
     autonomy.command("global-default", { action: "set_enabled", enabled: false });
     autonomy.close();
     await mkdir(join(root, "project"));
+    await mkdir(join(root, "clankie"));
+    await mkdir(join(root, "tracker-research-20261008"));
+    const captured = autoRounds === "captured-ownership";
+    const leadWorkspace = join(root, captured ? "clankie" : "project");
     const created = await seeded.serve({
       schemaVersion: 1,
       op: "create",
       title: "Project lead",
-      scope: { kind: "workspace", workspaceId: join(root, "project") },
+      scope: { kind: "workspace", workspaceId: leadWorkspace },
     });
     if (created.op !== "create") throw new Error("Missing project lead");
     projectLead = created.conversation.conversationId;
     await settings.update((current) => ({
       ...current,
       projects: ProjectsSettingsSchema.parse({
-        projects: [
-          {
-            id: "led",
-            name: "Led project",
-            auto: true,
-            focus: "Lead backlog",
-            workspaces: [{ id: "repo", machineId: "local", platform: "posix", path: join(root, "project") }],
-          },
-          { id: "fallback", name: "Fallback project", auto: true, focus: "Head backlog" },
-        ],
+        projects: captured
+          ? [
+              {
+                id: "clankie",
+                name: "clankie",
+                auto: true,
+                workspaces: [
+                  { id: "primary", machineId: "local", platform: "posix", path: join(root, "clankie") },
+                ],
+              },
+              {
+                id: "clankie-work",
+                name: "Clankie Work",
+                auto: false,
+                trackerProjectId: "cbd205ab-cad4-48b8-9724-7109410fc921",
+                workspaces: [
+                  {
+                    id: "primary",
+                    machineId: "local",
+                    platform: "posix",
+                    path: join(root, "tracker-research-20261008"),
+                  },
+                ],
+              },
+            ]
+          : [
+              {
+                id: "led",
+                name: "Led project",
+                auto: true,
+                focus: "Lead backlog",
+                trackerProjectId: "11111111-1111-4111-8111-111111111111",
+                workspaces: [
+                  { id: "repo", machineId: "local", platform: "posix", path: join(root, "project") },
+                ],
+              },
+              { id: "fallback", name: "Fallback project", auto: true, focus: "Head backlog" },
+            ],
       }),
       linearWebhook: {
         ...current.linearWebhook,
         projectChats: [
           {
-            projectId: "11111111-1111-4111-8111-111111111111",
+            projectId: captured
+              ? "cbd205ab-cad4-48b8-9724-7109410fc921"
+              : "11111111-1111-4111-8111-111111111111",
             name: "Lead project",
             conversationId: projectLead!,
           },
@@ -421,4 +455,40 @@ it("routes Auto rounds to the configured project lead and independently wakes th
   await update("fallback", { focus: "Master off must not wake" });
   expect(await events("global-default", 350)).toEqual([]);
   expect(await events(lead, 350)).toEqual([]);
+});
+
+// Captured 2026-10-12 owner configuration: clankie-work's project route is
+// conv-4c11af56, whose chat workspace is clankie, not tracker-research-20261008.
+// Only the filesystem prefix and generated conversation ID are fixture-local.
+it("keeps clankie Auto at the global head when another project owns the matching workspace lead", async () => {
+  const f = await fixture(undefined, "captured-ownership");
+  const lead = f.projectLead!;
+  await f.command({
+    schemaVersion: 1,
+    op: "autonomy",
+    conversationId: "global-default",
+    command: { action: "set_enabled", enabled: true },
+  });
+  const head = (await f.captain.pollSeatEvents(5_000, undefined, "global-default")).find((event) =>
+    event.content.startsWith("Auto round."),
+  );
+  expect(head?.content).toContain("clankie (clankie)");
+  expect(head?.content).not.toContain("Clankie Work");
+  expect(await f.captain.acknowledgeSeatEvent(head!.id, "global-default")).toBe(true);
+  expect(await f.captain.pollSeatEvents(350, undefined, lead)).toEqual([]);
+  const before = await f.request("/v1/operator/projects?includeAutonomy=true", "fixture-owner");
+  const snapshot = ProjectsSnapshotSchema.parse(await before.json());
+  const enabled = await f.request("/v1/operator/projects/update?includeAutonomy=true", "fixture-owner", {
+    projectId: "clankie-work",
+    expectedRevision: snapshot.revision,
+    changes: { auto: true },
+  });
+  expect(enabled.status).toBe(200);
+  const round = (await f.captain.pollSeatEvents(5_000, undefined, lead)).find((event) =>
+    event.content.startsWith("Auto round."),
+  );
+  expect(round?.content).toContain("Clankie Work (clankie-work)");
+  expect(round?.content).not.toContain("clankie (clankie)");
+  expect(await f.captain.acknowledgeSeatEvent(round!.id, lead)).toBe(true);
+  expect(await f.captain.pollSeatEvents(350, undefined, "global-default")).toEqual([]);
 });

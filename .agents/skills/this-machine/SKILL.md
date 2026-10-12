@@ -300,8 +300,10 @@ receipt first, and never fall back to typing into a terminal.
 ## Long-horizon work
 
 Standing work comes from projects on Auto (ADR 0264). Auto rounds go to the
-existing configured lead chat whose workspace and machine uniquely match the
-project; otherwise they go to the global head. Leads hear only their own Auto
+existing configured lead chat owning the bound tracker project, even when that
+chat uses a different workspace. A lead assigned to another project never takes
+work by workspace matching; only unassigned leads may match that way. Absent or
+ambiguous ownership goes to the global head. Leads hear only their own Auto
 projects and wake independently when their evidence changes or after two hours
 idle. Use the same project API/CLI from every surface; no separate Auto routing
 setting exists. Carry standing work across turns on wakes:

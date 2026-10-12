@@ -73,3 +73,12 @@ harness's own and still show on fleet seats.)
   workspace's fetched origin branch since local midnight, and pending owner
   questions by workspace. Asks raised in the head have no workspace, so the
   view also counts every pending owner question.)
+
+### Routing correction, 2026-10-12
+
+The live VUH-2029 preflight found Clankie Work's configured project lead chat
+using the clankie workspace while its project workspace was tracker-research.
+Workspace matching reversed the two projects' leads. Explicit bound tracker
+project ownership now wins regardless of workspace. Workspace matching can
+select only a lead with no configured projects, never another project's owner.
+Ambiguous or absent ownership falls back to the global head.

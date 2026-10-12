@@ -3509,16 +3509,18 @@ work. Prints `{"auto":"on"|"off"}`. The console's `/auto on|off` is the same
 switch.
 
 Each fleet-round interval (30 minutes by default) the service checks the
-projects on Auto. Each project's round goes to its configured lead chat when
-exactly one lead chat has a workspace matching that project's workspace and
-machine. These are the existing `linear routes` destinations; no new
-routing setting is needed. Without an unambiguous match, it goes to the global
-head. Each lead hears only its projects' names, focus, bound tracker project and
-live workers in local workspaces and worktree roots. Each lead wakes independently
-when its evidence changes, or after two hours when it has not. Before round
-admission the service rechecks the master switch, project Auto settings and routing. The wake grants no tool or authority beyond an
-ordinary turn, and a native harness seat holding the head conversation receives it
-like any other wake.
+projects on Auto. An explicit bound tracker project matching a configured lead's
+project route wins, even when that lead's chat uses another workspace. A lead
+with configured project ownership never receives another project through a
+workspace match. Only an unassigned lead may match by exact workspace and
+machine; absent or ambiguous ownership goes to the global head. These are the
+existing `linear routes` destinations, with no new Auto routing setting.
+Each lead hears only its projects' names, focus, bound tracker project and live
+workers in local workspaces and worktree roots. Each lead wakes independently
+when its evidence changes, or after two hours when it has not. Before admission
+the service rechecks the master switch, project Auto settings and routing.
+The wake grants no tool or authority beyond an ordinary turn, and a native
+harness seat receives it like any other wake.
 
 New hired Claude workers launch in `auto` mode, preserving managed and tracker
 denies and the permission hook, with no blanket `ask` rules or Bash allow.

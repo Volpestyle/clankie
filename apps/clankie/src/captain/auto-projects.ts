@@ -46,23 +46,34 @@ function autoProjectStates(
     }));
 }
 
-/** Route only to an unambiguous, already configured lead in a project workspace. */
+/** Explicit tracker ownership wins; assigned leads never take another project by workspace. */
 export function autoProjectRounds(
   projects: readonly Project[],
   seatDirectories: readonly string[],
-  leads: readonly { conversationId: string; workspace: string; machine: string }[],
+  leads: readonly {
+    conversationId: string;
+    workspace: string;
+    machine: string;
+    projects: readonly { id: string }[];
+  }[],
   defaultConversationId: string,
 ): Map<string, AutoProjectState[]> {
   const rounds = new Map<string, AutoProjectState[]>();
   for (const state of autoProjectStates(projects, seatDirectories)) {
     const project = projects.find((candidate) => candidate.id === state.id)!;
-    const matches = leads.filter(
-      (lead) =>
-        lead.conversationId !== defaultConversationId &&
-        project.workspaces.some(
-          (workspace) => workspace.machineId === lead.machine && workspace.path === lead.workspace,
-        ),
+    const explicit = leads.filter((lead) =>
+      lead.projects.some((entry) => entry.id === project.trackerProjectId),
     );
+    const matches = explicit.length
+      ? explicit
+      : leads.filter(
+          (lead) =>
+            lead.conversationId !== defaultConversationId &&
+            lead.projects.length === 0 &&
+            project.workspaces.some(
+              (workspace) => workspace.machineId === lead.machine && workspace.path === lead.workspace,
+            ),
+        );
     const conversationId = matches.length === 1 ? matches[0]!.conversationId : defaultConversationId;
     const group = rounds.get(conversationId) ?? [];
     group.push(state);
