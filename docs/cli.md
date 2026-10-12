@@ -5733,8 +5733,18 @@ The small private matching record is separate from the exclusive claim in
 `~/.clankie/inbound-receipts`; never delete either to bypass uncertainty.
 
 Worker output remains in the owning conversation independently of a worker pane.
-`clankie agents reports --conversation ID [--limit N]` (or `worker_reports`)
-returns the oldest unread reports with their original delivery IDs and exact text.
+`clankie agents reports --conversation ID [--limit N] [--delivery-ids ID,ID]`
+(or `worker_reports`) returns unread reports with their original delivery IDs
+and exact text. Without a selector it returns the oldest first (20 by default).
+For a fresh wake, use `--delivery-ids DELIVERY_ID` or
+`worker_reports({ deliveryIds: ["DELIVERY_ID"] })` to read that report without
+draining the backlog. Select 1–100 UUIDs; targeted reads default to up to 100
+matching reports, ordered oldest first, and `limit` can lower that count.
+All reads retain the 128 KiB full-page compact JSON byte budget; native/MCP
+returns that bounded envelope directly, without a second clipping step. Only complete returned records are
+offered. Unknown, already acknowledged and foreign-conversation IDs are omitted
+without distinguishing them. `unreadCount` still counts the conversation’s entire
+unread backlog, and only returned `ackDeliveryIds` are eligible for acknowledgment.
 Reading does not mark them read. After reviewing every offered report, run
 `clankie agents reports ack DELIVERY_ID... --conversation ID` (or
 `acknowledge_worker_reports`). Only fully offered IDs can be acknowledged.

@@ -243,7 +243,8 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
 - **On task**: work matches the accepted assignment and owned paths.
 - **Reporting**: reports reach you through the proven route. A result left
   only in the pane is a delivery fault to repair, never to resend elsewhere.
-  Read retained output with `worker_reports`; acknowledge reviewed delivery IDs
+  Read retained output with `worker_reports`; select a fresh wake’s exact
+  `deliveryIds` to reach it behind an older backlog. Acknowledge reviewed delivery IDs
   with `acknowledge_worker_reports`. Include a short `receipt.summary` and any
   resulting chat or issue URLs in `receipt.links`. The original sender receives
   the acknowledgment automatically; channel receipt transport is not lead review.

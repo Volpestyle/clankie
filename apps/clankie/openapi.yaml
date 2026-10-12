@@ -4031,7 +4031,11 @@ paths:
         One route, discriminated `op`: `list`, `roster`, `get`, `create`,
         `fork`, `close`, `send`, `cancel`, `pending_messages`, `stop_task`, `replay`, `subagent_replay`, `tail`, `autonomy`,
         `terminal_tail`, `readopt_seat`, `worker_reports`, and
-        `acknowledge_worker_reports`. Worker ownership/report operations require
+        `acknowledge_worker_reports`. `worker_reports` optionally selects 1–100 exact
+        UUID `deliveryIds` within the requested conversation, with the existing
+        full-page byte budget and offered-only acknowledgment. Without that
+        selector it remains oldest-first. Unknown, read and foreign IDs are omitted.
+        Worker ownership/report operations require
         current operator authority and an exact conversationId. Re-adoption
         proves the original owner and same native thread. Worker reads return
         complete bounded unread payloads and ackDeliveryIds without acknowledging;

@@ -21,7 +21,11 @@ export const UNANSWERED_REPORTS_INSTRUCTION =
   "No message from you has reached these workers since they reported, so any question or blocker in those reports is still open. Answer with message_seat; an answer elsewhere, such as the owner's chat, does not reach them.";
 
 export interface WorkerReportActions {
-  read(authority: ConversationAuthority, limit?: number): Promise<WorkerReportPage>;
+  read(
+    authority: ConversationAuthority,
+    limit?: number,
+    deliveryIds?: readonly string[],
+  ): Promise<WorkerReportPage>;
   acknowledge(
     authority: ConversationAuthority,
     ids: readonly string[],
@@ -35,12 +39,20 @@ export function workerReportTools(actions: WorkerReportActions, turn: TurnContex
       name: "worker_reports",
       label: "Read retained worker reports",
       description:
-        "Read this conversation's oldest unread worker reports, including results retained during a service restart or a missing native receiver. Reading offers full bounded reports without marking them read. After reviewing every offered report, acknowledge its exact deliveryId with acknowledge_worker_reports. A transport receipt never proves the lead read it.",
-      parameters: Type.Object({ limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) }),
-      execute: async (_id, input: { limit?: number }) => {
+        "Read this conversation's oldest unread worker reports, or select exact deliveryIds from a fresh wake without draining older reports. Unknown IDs and reports in other conversations are omitted. Targeted reads default to up to 100 selected reports; all reads retain the output byte budget. Includes results retained during a service restart or a missing native receiver. Reading offers full bounded reports without marking them read. After reviewing every offered report, acknowledge its exact deliveryId with acknowledge_worker_reports. A transport receipt never proves the lead read it.",
+      parameters: Type.Object({
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+        deliveryIds: Type.Optional(
+          Type.Array(Type.String({ format: "uuid" }), { minItems: 1, maxItems: 100 }),
+        ),
+      }),
+      execute: async (_id, input: { limit?: number; deliveryIds?: string[] }) => {
         const authority = captureConversationAuthority(turn.conversationAuthority);
         await assertConversationAuthority(authority);
-        return toolJson(await actions.read(authority, input.limit));
+        const page = await actions.read(authority, input.limit, input.deliveryIds);
+        // The store bounds this exact compact envelope before persisting offeredAt.
+        // Pretty printing through toolJson can exceed that budget and clip offered text.
+        return { content: [{ type: "text", text: JSON.stringify(page) }], details: page };
       },
     },
     {

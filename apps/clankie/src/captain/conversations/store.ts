@@ -1831,7 +1831,7 @@ export class ConversationStore {
   /** Offering full, bounded payloads does not mark them read. */
   public readInboundReports(
     conversationId: string,
-    options: { limit?: number | undefined } = {},
+    options: { limit?: number | undefined; deliveryIds?: readonly string[] | undefined } = {},
   ): WorkerReportPage {
     return readInboundReports(this, conversationId, options);
   }

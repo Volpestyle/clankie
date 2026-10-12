@@ -257,10 +257,10 @@ export function createOperatorService(
         return {
           op: request.op,
           schemaVersion: 1,
-          page: ctx.conversations.readInboundReports(
-            request.conversationId,
-            request.limit === undefined ? {} : { limit: request.limit },
-          ),
+          page: ctx.conversations.readInboundReports(request.conversationId, {
+            ...(request.limit === undefined ? {} : { limit: request.limit }),
+            ...(request.deliveryIds === undefined ? {} : { deliveryIds: request.deliveryIds }),
+          }),
         };
       }
       if (request.op === "acknowledge_worker_report_history") {

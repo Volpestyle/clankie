@@ -1383,12 +1383,18 @@ it("reports applied IDs and every refusal reason in a mixed MCP acknowledgment",
     await callTool("worker_reports");
     await callTool("acknowledge_worker_reports", { deliveryIds: [already.id] });
 
+    const unoffered = await delivery(f.service);
+    await report(f.service, "Older report outside the targeted read", unoffered);
     const offered = await delivery(f.service);
     await report(f.service, "Offered report", offered);
-    await callTool("worker_reports");
-    const unoffered = await delivery(f.service);
-    await report(f.service, "Arrived after the last read", unoffered);
     const unknown = randomUUID();
+    const targeted = await callTool("worker_reports", { deliveryIds: [offered.id, unknown] });
+    expect(targeted.isError).not.toBe(true);
+    expect(JSON.parse(targeted.content[0].text)).toMatchObject({
+      items: [expect.objectContaining({ deliveryId: offered.id, text: "Offered report" })],
+      ackDeliveryIds: [offered.id],
+      unreadCount: 2,
+    });
     const result = await callTool("acknowledge_worker_reports", {
       deliveryIds: [offered.id, unoffered.id, unknown, already.id],
     });
@@ -1412,6 +1418,26 @@ it("reports applied IDs and every refusal reason in a mixed MCP acknowledgment",
     expect(accepted(f.root, unoffered.id)[0].inboundAcceptances[unoffered.id].reportDelivery.state).not.toBe(
       "read",
     );
+    // VUH-2188: the native page must fully return offered text even above the
+    // generic toolJson 50 KiB preview, while retaining the inbox's 128 KiB cap.
+    const largeReports: Array<{ id: string; text: string }> = [];
+    for (let index = 0; index < 5; index++) {
+      const receipt = await delivery(f.service);
+      const text = `${index}:` + "x".repeat(16_380);
+      await report(f.service, text, receipt);
+      largeReports.push({ id: receipt.id, text });
+    }
+    const large = await callTool("worker_reports", {
+      deliveryIds: largeReports.map((entry) => entry.id),
+    });
+    expect(large.isError).not.toBe(true);
+    const serialized = large.content[0].text;
+    expect(Buffer.byteLength(serialized)).toBeGreaterThan(50 * 1024);
+    expect(Buffer.byteLength(serialized)).toBeLessThanOrEqual(128 * 1024);
+    expect(JSON.parse(serialized)).toMatchObject({
+      items: largeReports.map((entry) => ({ deliveryId: entry.id, text: entry.text })),
+      ackDeliveryIds: largeReports.map((entry) => entry.id),
+    });
     console.log("VUH-1940 MCP result text:\n" + result.content[0].text);
   } finally {
     attached.stop.abort();

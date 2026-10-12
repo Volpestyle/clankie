@@ -79,13 +79,19 @@ export function inboundReports(
 export function readInboundReports(
   ctx: ConversationStore,
   conversationId: string,
-  options: { limit?: number | undefined } = {},
+  options: { limit?: number | undefined; deliveryIds?: readonly string[] | undefined } = {},
 ): WorkerReportPage {
   const meta = ctx["metas"].get(conversationId);
   if (!meta) throw new Error("Unknown worker-report conversation");
   const unread = ctx["inboundReports"](conversationId);
+  const selectedIds = options.deliveryIds === undefined ? undefined : new Set(options.deliveryIds);
+  const selected =
+    selectedIds === undefined ? unread : unread.filter((report) => selectedIds.has(report.deliveryId));
   const items: WorkerReportPage["items"] = [];
-  for (const report of unread.slice(0, Math.min(100, Math.max(1, options.limit ?? 20)))) {
+  for (const report of selected.slice(
+    0,
+    Math.min(100, Math.max(1, options.limit ?? (selectedIds === undefined ? 20 : 100))),
+  )) {
     const item = {
       deliveryId: report.deliveryId,
       conversationId,
@@ -110,7 +116,7 @@ export function readInboundReports(
     if (size > WORKER_REPORT_PAGE_BYTES) break;
     items.push(item);
   }
-  if (items.length === 0 && unread.length > 0)
+  if (items.length === 0 && selected.length > 0)
     throw new Error("Worker report exceeds the inbox output budget; it remains unread.");
   const now = new Date().toISOString();
   const before = new Map(

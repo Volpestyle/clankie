@@ -119,7 +119,12 @@ and reuse an existing one. An accepted Codex follow-up arms a harvest for its
 exact native turn, so add no explicit watch for it. Peer messages and
 reconciled receipts arm nothing.
 
-Read retained reports with `worker_reports({ limit: 20 })`, then acknowledge
+Read retained reports with `worker_reports({ limit: 20 })`. For a fresh wake
+behind an older backlog, use `worker_reports({ deliveryIds: ["DELIVERY_ID"] })`
+(or `clankie agents reports --conversation ID --delivery-ids DELIVERY_ID`).
+Select 1–100 exact UUIDs in this conversation; unknown, read and foreign IDs
+are omitted. The existing byte budget applies, and only complete returned
+records become offered. Then acknowledge
 each one you reviewed with `acknowledge_worker_reports({ deliveryIds: [...] })`.
 A native receipt does not clear unread state; never acknowledge truncated
 output. Acknowledgment adds no progress, and an unread report does not prove a

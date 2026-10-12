@@ -12,6 +12,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
+import { deliveryFingerprint } from "../src/captain/delivery-fence.ts";
 import { createWorkerReports, type WorkerReportsContext } from "../src/captain/captain-worker-reports.ts";
 import {
   createOperatorService,
@@ -24,7 +25,10 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture(count: number) {
+async function fixture(
+  count: number,
+  options: { reportText?: (index: number) => string; directAcceptance?: boolean } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "worker-report-cli-"));
   const path = join(root, "conversations");
   let store = new ConversationStore(path, async () => {
@@ -35,11 +39,34 @@ async function fixture(count: number) {
   for (let index = 0; index < count; index++) {
     const id = randomUUID();
     ids.push(id);
+    const reportText = options.reportText?.(index) ?? `Retained report ${index}`;
+    // The large inbox proof needs retained acceptance, not each sender's separate delivery fence.
+    if (options.directAcceptance) {
+      expect(
+        store.submitInbound(
+          `Worker output: ${index}`,
+          {
+            deliveryId: id,
+            binding: "a".repeat(64),
+            paneId: "w3Z:pCass",
+            text: reportText,
+            fingerprint: deliveryFingerprint(reportText),
+            workerReportRouting: { source: "adoption", conversationId: "global-default" },
+            recipient: { kind: "conversation", owner: { conversationId: "global-default" } },
+          },
+          "global-default",
+          async (_id, _message, _publish, context) => {
+            context.deliveryReceipt?.("unavailable");
+          },
+        ),
+      ).toMatchObject({ status: "accepted" });
+      continue;
+    }
     expect(
       receipts.accept(
         "w3Z:pCass",
         { id, binding: "a".repeat(64) },
-        `Retained report ${index}`,
+        reportText,
         `Worker output: ${index}`,
         "global-default",
         async (_id, _message, _publish, context) => {
@@ -130,6 +157,169 @@ it.each([20, 100])("acknowledges %i exact IDs returned by a real CLI HTTP page",
     instruction: expect.stringContaining("still open"),
   });
   expect(f.store.inboundReports()).toEqual([]);
+});
+
+it("reads and explicitly acknowledges the newest selected report behind 669 unread reports (VUH-2188)", async () => {
+  const f = await fixture(669, { directAcceptance: true });
+  const unread = f.store.inboundReports("global-default");
+  const newest = unread.at(-1)!;
+  const sibling = unread.at(-2)!;
+  const page = WorkerReportPageSchema.parse(
+    await runAgentsCommand(
+      ["reports", "--conversation", "global-default", "--delivery-ids", newest.deliveryId, "--limit", "1"],
+      { env: f.env },
+    ),
+  );
+  expect(page.unreadCount).toBe(669);
+  expect(page.items).toEqual([expect.objectContaining({ deliveryId: newest.deliveryId, text: newest.text })]);
+  expect(page.ackDeliveryIds).toEqual([newest.deliveryId]);
+  expect(f.store.inboundReports("global-default")).toHaveLength(669);
+  expect(f.store.inboundAcceptance(newest.deliveryId)?.reportDelivery?.offeredAt).toBeDefined();
+  expect(f.store.inboundAcceptance(sibling.deliveryId)?.reportDelivery?.offeredAt).toBeUndefined();
+  await expect(
+    runAgentsCommand(["reports", "ack", sibling.deliveryId, "--conversation", "global-default"], {
+      env: f.env,
+    }),
+  ).rejects.toThrow("Only fully offered worker reports may be acknowledged");
+  expect(f.store.inboundReports("global-default")).toHaveLength(669);
+
+  expect(
+    await runAgentsCommand(["reports", "ack", newest.deliveryId, "--conversation", "global-default"], {
+      env: f.env,
+    }),
+  ).toMatchObject({ conversationId: "global-default", acknowledged: 1 });
+  expect(f.store.inboundAcceptance(newest.deliveryId)?.reportDelivery?.state).toBe("read");
+  expect(f.store.inboundReports("global-default")).toHaveLength(668);
+  expect(
+    await runAgentsCommand(
+      ["reports", "--conversation", "global-default", "--delivery-ids", newest.deliveryId],
+      { env: f.env },
+    ),
+  ).toEqual({ conversationId: "global-default", unreadCount: 668, items: [], ackDeliveryIds: [] });
+
+  const oldestPage = WorkerReportPageSchema.parse(
+    await runAgentsCommand(["reports", "--conversation", "global-default"], { env: f.env }),
+  );
+  expect(oldestPage.items.map((item) => item.deliveryId)).toEqual(
+    unread.slice(0, 20).map((report) => report.deliveryId),
+  );
+  expect(oldestPage.unreadCount).toBe(668);
+  expect(f.store.inboundReports("global-default")).toHaveLength(668);
+});
+
+it("never offers foreign or unknown IDs selected through the CLI HTTP boundary (VUH-2188)", async () => {
+  const f = await fixture(2);
+  const created = await f.store.serve({
+    op: "create",
+    schemaVersion: 1,
+    scope: { kind: "global" },
+    title: "Other private lead",
+  });
+  if (created.op !== "create") throw new Error("Foreign conversation was not created");
+  const foreignConversation = created.conversation.conversationId;
+  const foreign = randomUUID();
+  const privateText = "Private report for the other lead only";
+  expect(
+    new InboundSeatReceipts(join(f.root, "foreign-receipts.json"), f.store).accept(
+      "w3Z:pForeign",
+      { id: foreign, binding: "c".repeat(64) },
+      privateText,
+      privateText,
+      foreignConversation,
+      async (_id, _message, _publish, context) => {
+        context.deliveryReceipt?.("unavailable");
+      },
+      { source: "adoption", conversationId: foreignConversation },
+      { kind: "conversation", owner: { conversationId: foreignConversation } },
+    ),
+  ).toMatchObject({ received: true });
+  const unknown = randomUUID();
+  const read = (deliveryIds: string[]) =>
+    runAgentsCommand(
+      ["reports", "--conversation", "global-default", "--delivery-ids", deliveryIds.join(",")],
+      { env: f.env },
+    );
+  expect(await read([foreign, unknown])).toEqual({
+    conversationId: "global-default",
+    unreadCount: 2,
+    items: [],
+    ackDeliveryIds: [],
+  });
+  expect(f.store.inboundAcceptance(foreign)?.reportDelivery?.offeredAt).toBeUndefined();
+  expect(f.store.inboundAcceptance(unknown)).toBeUndefined();
+  expect(f.ids.every((id) => !f.store.inboundAcceptance(id)?.reportDelivery?.offeredAt)).toBe(true);
+  for (const deliveryId of [foreign, unknown]) {
+    await expect(
+      runAgentsCommand(["reports", "ack", deliveryId, "--conversation", "global-default"], {
+        env: f.env,
+      }),
+    ).rejects.toThrow("Only fully offered worker reports may be acknowledged");
+  }
+
+  const own = f.store.inboundReports("global-default").at(-1)!;
+  const page = WorkerReportPageSchema.parse(await read([foreign, own.deliveryId, unknown]));
+  expect(page.items).toEqual([expect.objectContaining({ deliveryId: own.deliveryId, text: own.text })]);
+  expect(page.ackDeliveryIds).toEqual([own.deliveryId]);
+  expect(JSON.stringify(page)).not.toContain(privateText);
+  expect(JSON.stringify(page)).not.toContain(foreign);
+  expect(f.store.inboundAcceptance(foreign)?.reportDelivery?.offeredAt).toBeUndefined();
+  expect(f.store.inboundReports("global-default")).toHaveLength(2);
+  expect(f.store.inboundReports(foreignConversation).map((report) => report.deliveryId)).toEqual([foreign]);
+});
+
+it("rejects malformed or unbounded selectors before offering any report (VUH-2188)", async () => {
+  const f = await fixture(1);
+  for (const deliveryIds of [[], ["not-a-uuid"], Array.from({ length: 101 }, () => f.ids[0]!)]) {
+    const response = await f.service.app.request("/operator/v1/dispatch", {
+      method: "POST",
+      headers: { authorization: "Bearer owner", "content-type": "application/json" },
+      body: JSON.stringify({
+        op: "worker_reports",
+        schemaVersion: 1,
+        conversationId: "global-default",
+        deliveryIds,
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(f.store.inboundAcceptance(f.ids[0]!)?.reportDelivery?.offeredAt).toBeUndefined();
+    expect(f.store.inboundReports("global-default")).toHaveLength(1);
+  }
+});
+
+it("only offers complete selected reports that fit the HTTP page byte budget (VUH-2188)", async () => {
+  const fullText = "🦊".repeat(8192);
+  const f = await fixture(12, { reportText: () => fullText });
+  const unread = f.store.inboundReports("global-default");
+  const page = WorkerReportPageSchema.parse(
+    await runAgentsCommand(
+      ["reports", "--conversation", "global-default", "--delivery-ids", f.ids.join(","), "--limit", "100"],
+      { env: f.env },
+    ),
+  );
+  expect(page.unreadCount).toBe(12);
+  expect(page.items.length).toBeGreaterThan(0);
+  expect(page.items.length).toBeLessThan(12);
+  expect(Buffer.byteLength(JSON.stringify(page), "utf8")).toBeLessThanOrEqual(128 * 1024);
+  expect(page.items.every((item) => item.text === fullText)).toBe(true);
+  expect(page.ackDeliveryIds).toEqual(unread.slice(0, page.items.length).map((report) => report.deliveryId));
+  const omitted = unread.slice(page.items.length);
+  expect(
+    omitted.every((report) => !f.store.inboundAcceptance(report.deliveryId)?.reportDelivery?.offeredAt),
+  ).toBe(true);
+  await expect(
+    runAgentsCommand(["reports", "ack", omitted[0]!.deliveryId, "--conversation", "global-default"], {
+      env: f.env,
+    }),
+  ).rejects.toThrow("Only fully offered worker reports may be acknowledged");
+  expect(f.store.inboundReports("global-default")).toHaveLength(12);
+  expect(
+    await runAgentsCommand(["reports", "ack", ...page.ackDeliveryIds, "--conversation", "global-default"], {
+      env: f.env,
+    }),
+  ).toMatchObject({ acknowledged: page.items.length });
+  expect(f.store.inboundReports("global-default").map((report) => report.deliveryId)).toEqual(
+    omitted.map((report) => report.deliveryId),
+  );
 });
 
 it("never tells a worker its question was answered when no reply reached it (VUH-2065)", async () => {

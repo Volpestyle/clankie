@@ -30,12 +30,12 @@ export interface WorkerReportsContext {
 }
 export function createWorkerReports(ctx: WorkerReportsContext) {
   const workerReportActions = {
-    async read(authority: ConversationAuthority, limit?: number) {
+    async read(authority: ConversationAuthority, limit?: number, deliveryIds?: readonly string[]) {
       await assertConversationAuthority(authority);
-      return ctx.conversations.readInboundReports(
-        authority.owner.conversationId,
-        limit === undefined ? {} : { limit },
-      );
+      return ctx.conversations.readInboundReports(authority.owner.conversationId, {
+        ...(limit === undefined ? {} : { limit }),
+        ...(deliveryIds === undefined ? {} : { deliveryIds }),
+      });
     },
     async acknowledge(
       authority: ConversationAuthority,

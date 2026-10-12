@@ -583,6 +583,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
       limit: z.number().int().min(1).max(100).optional(),
+      deliveryIds: z.array(z.string().uuid()).min(1).max(100).optional(),
     })
     .strict(),
   z
@@ -1362,7 +1363,11 @@ export interface OperatorConversationServiceClient {
   leadChats?(): Promise<LeadChatsResult>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
   readoptSeat?(seatId: string, conversationId: string): Promise<boolean>;
-  workerReports?(conversationId: string, limit?: number): Promise<WorkerReportPage>;
+  workerReports?(
+    conversationId: string,
+    limit?: number,
+    deliveryIds?: readonly string[],
+  ): Promise<WorkerReportPage>;
   acknowledgeWorkerReports?(
     conversationId: string,
     deliveryIds: readonly string[],
@@ -1638,12 +1643,13 @@ export function createOperatorConversationServiceClient(
       if (result.op !== "readopt_seat") throw new Error(`Unexpected ${result.op} result for re-adoption`);
       return result.adopted;
     },
-    async workerReports(conversationId, limit) {
+    async workerReports(conversationId, limit, deliveryIds) {
       const result = await dispatch({
         op: "worker_reports",
         schemaVersion: 1,
         conversationId,
         ...(limit === undefined ? {} : { limit }),
+        ...(deliveryIds === undefined ? {} : { deliveryIds: [...deliveryIds] }),
       });
       if (result.op !== "worker_reports")
         throw new Error(`Unexpected ${result.op} result for worker reports`);
