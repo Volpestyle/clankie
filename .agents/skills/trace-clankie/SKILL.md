@@ -100,6 +100,11 @@ child. Only the exact installed launcher/command and kernel-proven child chain
 are supported; never exempt a mismatch just because the pane looks healthy.
 ESRCH/EBADF retry diagnostics from the global process/FD scan are not terminal
 refusals; join the final proof result before diagnosing an outage.
+Aggregate proof alerts appear as conversation service notices. Caller-specific
+alerts can go directly to the lead's native mailbox without a conversation
+journal entry. Before claiming a quiet interval, check the lead's matching native
+transcript and delivery receipts as well as retained aggregate notices; journal
+coverage alone does not establish that no caller alerts were delivered.
 For `launcher_unavailable` on Claude, check the service's PATH: prepared panes
 put Clankie's shell shim before the actual Claude binary. Project proof resolves
 past those shims using the launcher's real-Claude lookup; the shim itself never

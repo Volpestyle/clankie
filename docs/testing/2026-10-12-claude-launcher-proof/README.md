@@ -56,7 +56,7 @@ Runtime `5e850e02e`, 2026-10-12T08:32:37.511Z–2026-10-12T09:32:38.462Z
 
 - 16,606 checks; 40 aggregate refusals (0.24%), compared with
   1,533/15,087 (10.16%) in the measured old-runtime hour.
-- Zero `observation_failed`, zero Claude refusals, and zero fleet proof alerts.
+- Zero `observation_failed` counter delta and zero Claude refusals.
   Five Claude panes were present in every recorded rolling five-minute sample.
 - All three lookup diagnostics occurred on every observed Claude pane.
   Aggregate diagnostic deltas: 863 `process_unavailable`, 262 `socket_unavailable`,
@@ -64,10 +64,19 @@ Runtime `5e850e02e`, 2026-10-12T08:32:37.511Z–2026-10-12T09:32:38.462Z
 - Other refusals were retained: 33 `native_initial_unavailable`, one
   `native_final_unavailable`, two `pane_unavailable`, and four `not_member`.
 
-Overlapping reads of the lead's durable conversation journal cover the full
-hour; later retention trimmed its beginning. The uploaded evidence retains
-the earlier reads and all metrics samples, rather than treating one final
-journal read as complete coverage.
+The aggregate alert stayed quiet, but two caller-specific Codex alerts reached
+the lead at 08:36:40Z and 08:44:16Z. Their windows recorded 7/254 refusals
+(six `native_initial_unavailable` plus the pre-baseline startup refusal) and
+6/391 (all `native_initial_unavailable`). The hour therefore does not satisfy
+the issue's quiet-alert acceptance criterion. VUH-2160 remains Verifying;
+[VUH-2170](https://linear.app/vuhlp/issue/VUH-2170/idle-codex-seat-continues-native-initial-unavailable-proof-churn-after)
+tracks the continuing Codex churn separately.
+
+Overlapping conversation journal reads cover aggregate service notices only.
+Caller-specific alerts can be delivered directly to the lead's native mailbox
+without appearing there. The corrected evidence also retains the two delivered
+notices from the lead's native transcript. The initial evidence packet's claim
+of zero proof alerts was incomplete and is explicitly superseded.
 
 The first deployment's 07:51:04.079–08:30:06.164Z window recorded 9,276 checks
 and 14 other refusals, with zero target refusals or proof alerts. The next
@@ -81,7 +90,7 @@ parent PID 1 and no Herdr ancestor. All five project checks refused it as
 `not_member`; the sockets, caller and helper were cleaned up.
 
 [Full captured evidence, attached to VUH-2160](https://linear.app/vuhlp/issue/VUH-2160/claude-panes-fail-fleet-proof-checks-about-10percent-of-the-time-codex).
-Attachment: “VUH-2160 live hour and trust-boundary evidence”. Actual pane details
+Attachment: “Corrected VUH-2160 live hour and trust-boundary evidence”. Actual pane details
 stay on the private issue and in ignored `.local/vuh-2160/`.
 
 ## Absolute PATH follow-up
