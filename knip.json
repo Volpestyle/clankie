@@ -114,7 +114,7 @@
       "entry": ["test/fixtures/*.ts", "src/mcp-result.d.mts"]
     },
     "packages/model-registry": {
-      "entry": ["data/models-dev-snapshot.d.json.ts"]
+      "entry": ["data/models-dev-snapshot.d.json.ts", "src/bundled-snapshot.d.cts"]
     },
     "packages/fleet-resources": {
       "entry": ["test/fixtures/*.mjs"]

@@ -63,6 +63,10 @@ Settings and protocol route contracts also passed 61 tests in four files (1.03s)
 
 The merge queue still supplies the exact-tree landing check. Live gate timing
 after the priority update remains a separate acceptance measurement.
+The first import request stopped at dead-code checking: Knip did not infer the
+required CJS declaration edge. The correction explicitly registers
+`src/bundled-snapshot.d.cts`, following existing declaration entries. A full
+dead-code check passes; runtime behavior and schema validation are unchanged.
 Raw collection diagnostics, the exact selection, source patch and check logs
 are linked by the evidence manifest and attached to
 [VUH-2148](https://linear.app/vuhlp/issue/VUH-2148).
