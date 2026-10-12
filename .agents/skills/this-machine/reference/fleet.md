@@ -146,6 +146,14 @@ its model, harness or project to retry.
 
 ## Uncertain remote hires
 
+A freshly named Codex root may have native metadata before its rollout exists.
+Clankie can defer that exact history read only while proving a new, idle,
+non-forked root on its initially empty dedicated server, before first dispatch.
+He hydrates after persistence; saved, forked and corrupt history stays refused.
+Never create or repair a rollout file to bypass this boundary. A post-dispatch
+history failure is uncertain, so inspect the retained receipt and never replay
+the brief. A stopped pre-dispatch view needs explicit recovery, not a hire retry.
+
 For a fenced native remote hire, `clankie hire-receipt settle ORIGINAL_NATIVE_HIRE_UUID`
 can seal only a host-authenticated, recorded no-launch window. The native UUID is
 distinct from an MCP call ID or a `seat-…` message acknowledgement. Legacy missing

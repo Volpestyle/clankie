@@ -843,6 +843,10 @@ export async function startCodexAppServerSeat(options: {
     // cannot bootstrap it. Let the real TUI create its own thread. Only one
     // native root can exist before we send the first brief.
     options.signal?.throwIfAborted();
+    const initialLoaded = options.resumeThreadId
+      ? undefined
+      : record(await client.request("thread/loaded/list", {}, 2_000));
+    const viewStartedAt = Math.floor(Date.now() / 1000);
     try {
       await options.startView(viewArgs);
     } catch (error) {
@@ -940,49 +944,110 @@ export async function startCodexAppServerSeat(options: {
         throw policyFailure;
       }
     }
+    // A saved root reloaded into an empty server is not fresh. Its native
+    // creation must belong to this view startup; unknown host clocks fail closed.
+    const freshRoot =
+      !options.resumeThreadId &&
+      Array.isArray(initialLoaded?.data) &&
+      initialLoaded.data.length === 0 &&
+      initialLoaded.nextCursor === null &&
+      thread.ephemeral === false &&
+      thread.forkedFromId === null &&
+      typeof thread.path === "string" &&
+      thread.path.length > 0 &&
+      typeof thread.createdAt === "number" &&
+      thread.createdAt >= viewStartedAt &&
+      thread.createdAt <= Math.floor(Date.now() / 1000);
     let subscribed = false;
+    let historyHydrated = false;
+    let dispatchedOnce = false;
+    let subscription: RecordValue = {};
     let metadataOnly = true;
+    const mayDeferFreshHistory = async (error: unknown, waitForRollout: boolean) => {
+      if (
+        waitForRollout ||
+        options.resumeThreadId ||
+        !freshRoot ||
+        dispatchedOnce ||
+        turnObservation !== 0 ||
+        activeTurn !== undefined ||
+        terminalTurns.size !== 0 ||
+        !(error instanceof Error) ||
+        error.message !==
+          `Codex app-server: invalid paginated history lineage for ${threadId}: missing source rollout`
+      )
+        return false;
+      // A missing ancestor or a saved thread is corrupt history, never fresh startup.
+      const current = record(
+        record(await client!.request("thread/read", { threadId, includeTurns: false })).thread,
+      );
+      if (
+        current.id !== threadId ||
+        current.ephemeral !== false ||
+        current.forkedFromId !== null ||
+        current.createdAt !== thread.createdAt ||
+        current.path !== thread.path ||
+        record(current.status).type !== "idle"
+      )
+        return false;
+      const loaded = record(await client!.request("thread/loaded/list", {}, 2_000));
+      return (
+        Array.isArray(loaded.data) &&
+        loaded.data.length === 1 &&
+        loaded.data[0] === threadId &&
+        loaded.nextCursor === null &&
+        !dispatchedOnce &&
+        turnObservation === 0 &&
+        activeTurn === undefined &&
+        terminalTurns.size === 0 &&
+        !client!.hasPendingQuestion(threadId!)
+      );
+    };
     const historyUnsupported = (error: unknown) =>
       /unknown field.*excludeTurns|excludeTurns.*(?:experimentalApi|unsupported)|thread\/turns\/list.*(?:unknown|unsupported)|unknown (?:method|variant).*thread\/turns\/list|method not found/iu.test(
         String(error),
       );
     const subscribe = async (waitForRollout = true) => {
-      if (subscribed) return;
+      if (subscribed && historyHydrated) return;
       // The TUI owns the initial subscription. Its new thread becomes
       // resumable once the first turn persists; resume adds this client
       // as an observer without replaying input. Hydrate the last turn in
       // case it completed before the subscription was established.
-      const deadline = Date.now() + 5_000;
       const observedBefore = turnObservation;
-      let resumed: RecordValue;
-      for (;;) {
-        try {
-          resumed = record(
-            await client!.request(
-              "thread/resume",
-              { threadId, ...(metadataOnly ? { excludeTurns: true } : {}) },
-              options.resumeThreadId ? 120_000 : 30_000,
-            ),
-          );
-          break;
-        } catch (error) {
-          // A rejected subscription never replays model input.
-          if (metadataOnly && historyUnsupported(error)) {
-            metadataOnly = false;
-            continue;
+      if (!subscribed) {
+        const deadline = Date.now() + 5_000;
+        let resumed: RecordValue;
+        for (;;) {
+          try {
+            resumed = record(
+              await client!.request(
+                "thread/resume",
+                { threadId, ...(metadataOnly ? { excludeTurns: true } : {}) },
+                options.resumeThreadId ? 120_000 : 30_000,
+              ),
+            );
+            break;
+          } catch (error) {
+            if (await mayDeferFreshHistory(error, waitForRollout)) return;
+            // A rejected subscription never replays model input.
+            if (metadataOnly && historyUnsupported(error)) {
+              metadataOnly = false;
+              continue;
+            }
+            // Codex reports a not-yet-persisted rollout as either "no rollout
+            // found" or, since 0.159, a present-but-empty rollout file.
+            if (!/no rollout found|rollout at .* is empty/u.test(String(error))) throw error;
+            if (!waitForRollout) return;
+            if (Date.now() >= deadline) throw error;
+            await new Promise((resolve) => setTimeout(resolve, 50));
           }
-          // Codex reports a not-yet-persisted rollout as either "no rollout
-          // found" or, since 0.159, a present-but-empty rollout file.
-          if (!/no rollout found|rollout at .* is empty/u.test(String(error))) throw error;
-          if (!waitForRollout) return;
-          if (Date.now() >= deadline) throw error;
-          await new Promise((resolve) => setTimeout(resolve, 50));
         }
+        const resumedThread = record(resumed.thread);
+        if (resumedThread.id !== threadId) throw new Error("Native thread/resume identity changed");
+        client!.hydrateQuestions(threadId!, resumed);
+        subscribed = true;
+        subscription = resumed;
       }
-      const resumedThread = record(resumed.thread);
-      if (resumedThread.id !== threadId) throw new Error("Native thread/resume identity changed");
-      client!.hydrateQuestions(threadId!, resumed);
-      subscribed = true;
       let turn: RecordValue;
       if (metadataOnly) {
         try {
@@ -998,18 +1063,23 @@ export async function startCodexAppServerSeat(options: {
           );
           turn = Array.isArray(latest.data) ? record(latest.data[0]) : {};
         } catch (error) {
+          if (await mayDeferFreshHistory(error, waitForRollout)) return;
           if (!historyUnsupported(error)) throw error;
-          metadataOnly = false;
           const legacy = record(
             await client!.request("thread/resume", { threadId }, options.resumeThreadId ? 120_000 : 30_000),
           );
+          if (record(legacy.thread).id !== threadId) throw new Error("Native thread/resume identity changed");
+          client!.hydrateQuestions(threadId!, legacy);
+          metadataOnly = false;
+          subscription = legacy;
           const turns = record(legacy.thread).turns;
           turn = Array.isArray(turns) ? record(turns.at(-1)) : {};
         }
       } else {
-        const turns = record(resumed.thread).turns;
+        const turns = record(subscription.thread).turns;
         turn = Array.isArray(turns) ? record(turns.at(-1)) : {};
       }
+      historyHydrated = true;
       if (turnObservation === observedBefore && typeof turn.id === "string") {
         client!.hydrateQuestions(threadId!, { thread: { id: threadId, turns: [turn] } });
         observe({
@@ -1159,6 +1229,7 @@ export async function startCodexAppServerSeat(options: {
           await failPolicy(error);
           throw policyFailure;
         }
+        dispatchedOnce = true;
         dispatched = true;
         const response = record(
           await client!.request(steering ? "turn/steer" : "turn/start", {
