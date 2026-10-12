@@ -47,6 +47,7 @@ it.each([
     const env = {
       XDG_STATE_HOME: root,
       CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+      CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
       CLAUDE_CONFIG_DIR: root,
       HOME: root,
       CLANKIE_OPERATOR_TOKEN: token,

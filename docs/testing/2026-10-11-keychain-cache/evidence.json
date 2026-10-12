@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "broad-consumer-bundle.json",
+      "size": 100365,
+      "sha256": "a9a2816289604561152ff5d454635f202ff07cdd389b17a4851ec3c0c24cbec1",
+      "url": "clankie://evidence/sha256/a9a2816289604561152ff5d454635f202ff07cdd389b17a4851ec3c0c24cbec1"
+    },
+    {
       "path": "bundle.json",
       "size": 58620,
       "sha256": "c26fc7df88f0f4b5c271dedc28372d1f1031271507cecd5cd48c49b4d7dee260",

@@ -59,6 +59,7 @@ test("Codex launcher selects its conversation and presents native trust as an ow
       env: {
         XDG_STATE_HOME: root,
         CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+        CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
         CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
       },
       execFileImpl: async () => ({ stdout: "codex-cli 0.159.1", stderr: "" }),
@@ -106,6 +107,7 @@ test("closing native hook review aborts startup and preserves the previous resum
         env: {
           XDG_STATE_HOME: root,
           CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+          CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
           CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
         },
         fetchImpl: async () => Response.json({ conversationId: "fresh-codex-seat", cwd: root }),
@@ -227,6 +229,7 @@ test("the launcher waits for trusted hooks then routes the selected outbox throu
       env: {
         XDG_STATE_HOME: root,
         CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+        CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
         CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
         SWARM_SESSION: "worker-private",
         CLANKIE_CONVERSATION_ID: "global-default",

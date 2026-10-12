@@ -81,6 +81,7 @@ async function fixture() {
       env: {
         PATH: process.env.PATH,
         HOME: root,
+        CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
         CLAUDE_CONFIG_DIR: newHome,
         CLANKIE_STATE_HOME: join(root, "state"),
         CLANKIE_OPERATOR_TOKEN: token,

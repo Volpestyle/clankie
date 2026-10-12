@@ -31,6 +31,7 @@ async function stateEnv(extra: NodeJS.ProcessEnv = {}): Promise<NodeJS.ProcessEn
   return {
     XDG_STATE_HOME: root,
     CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+    CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
     // An empty Claude config: no inherited connectors beyond the account one.
     CLAUDE_CONFIG_DIR: root,
     HOME: root,

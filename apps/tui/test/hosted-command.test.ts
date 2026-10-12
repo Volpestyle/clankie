@@ -39,7 +39,10 @@ it.each([
     expect(
       await runHeadlessCaptainCommand([command], {
         repoRoot: root,
-        env: { CLANKIE_SETTINGS_FILE: settingsFile },
+        env: {
+          CLANKIE_SETTINGS_FILE: settingsFile,
+          CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
+        },
         spawnImpl,
         killImpl,
         stdout: { write() {} },

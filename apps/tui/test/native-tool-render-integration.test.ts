@@ -5,8 +5,12 @@
 import { readFileSync } from "node:fs";
 import { stripVTControlCharacters } from "node:util";
 import { parseHerdrSeatTranscript } from "@clankie/agent-transcript";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClankieFaceShell } from "../src/shell/shell.ts";
+
+// The retained evidence is from a Unicode terminal, independent of the runner.
+beforeEach(() => vi.stubEnv("CLANKIE_TUI_UNICODE", "1"));
+afterEach(() => vi.unstubAllEnvs());
 
 function renderNative(output: unknown, name = "exec_command", args: unknown = { cmd: "pnpm typecheck" }) {
   const jsonl = [

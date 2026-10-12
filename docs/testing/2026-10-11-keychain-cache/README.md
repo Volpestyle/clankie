@@ -80,3 +80,19 @@ The harness dry-run fixture now selects a temporary credential file explicitly.
 Its HOME alone never selected an isolated macOS keychain, and the new joined
 lookup exposed that host dependency. Production locked-keychain failures remain
 visible; they are not swallowed to make dry-run pass.
+
+## Broad seat consumer check
+
+After the seat-command gate failure, the full `apps/tui/test` directory and all
+45 Clankie joined/seat test files were run locally. The broader check exposed
+missing credential-file selection in the Codex, OpenCode, hosted, seat isolation
+and explicit-resume fixtures. Each now uses a temporary file. The retained tool
+render golden also selects its Unicode terminal capability explicitly instead of
+depending on the runner's TERM. Assertions and timeouts are unchanged.
+
+- Full TUI: 154 files passed, one existing file skipped; 1,240 tests passed,
+  three existing tests skipped, 71.34 seconds.
+- Clankie joined/seat: 45 files and 458 tests passed, 39.19 seconds.
+- Formatter and lint passed for all seven changed test files.
+- The cache and native lock helper are unchanged; their scratch-keychain proof
+  remains the evidence for native process counts and locked-keychain recovery.

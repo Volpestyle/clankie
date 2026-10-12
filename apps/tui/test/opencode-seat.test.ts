@@ -17,7 +17,11 @@ const execFileImpl = async (_command: string, args: readonly string[]) => ({
 
 test("OpenCode plan discovers capabilities and exact resume refuses conversation redirect", async () => {
   const root = await mkdtemp(join(tmpdir(), "opencode-plan-"));
-  const env = { XDG_STATE_HOME: root, CLANKIE_SETTINGS_FILE: join(root, "settings.json") };
+  const env = {
+    XDG_STATE_HOME: root,
+    CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+    CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
+  };
   try {
     const flags = parseSeatArgs(["--harness", "opencode", "--new", "--dry-run"]);
     const plan = await planSeat(flags, { repoRoot, env, execFileImpl });
@@ -41,6 +45,7 @@ test("legacy OpenCode resume retains the global chat and refuses service identit
     HOME: root,
     XDG_STATE_HOME: root,
     CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+    CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
     CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
   };
   const flags = parseSeatArgs(["--harness", "opencode", "--resume"]);
@@ -155,6 +160,7 @@ test("launcher bridge authenticates and binds one session without copying operat
   const env = {
     XDG_STATE_HOME: root,
     CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+    CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
     CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
     OPENCODE_CONFIG: ownerConfig,
   };
