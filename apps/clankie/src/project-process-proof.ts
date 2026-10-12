@@ -16,6 +16,7 @@ import {
 } from "./local-fleet-process.ts";
 import type { NativeTransportReason } from "./native-process-transport.ts";
 import { NativePaneNotFoundError, nativeRequest } from "./herdr-native-request.ts";
+import { realClaude } from "../../../integrations/herdr-plugin/claude-path-shim.mjs";
 
 type Run = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
 const exec = promisify(execFile);
@@ -40,7 +41,17 @@ async function installedLauncher(harness: string): Promise<NativeLauncher | unde
     }
     return undefined;
   };
-  const launcher = await find(harness);
+  // The pane launcher execs real Claude; it is never the executable whose
+  // identity we prove. Resolve past our PATH shims just as that launcher does,
+  // retaining this proof's absolute, service-owned PATH boundary.
+  const launcher =
+    harness === "claude"
+      ? await realClaude({
+          PATH: (process.env.PATH ?? "").split(delimiter).filter(isAbsolute).join(delimiter),
+        })
+          .then((path: string) => realpath(path))
+          .catch(() => undefined)
+      : await find(harness);
   if (!launcher) return undefined;
   const file = await open(launcher, "r");
   const header = Buffer.alloc(256);

@@ -23,7 +23,7 @@ const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 
 /** Skip every copy/symlink of our launcher, without removing PATH from Claude's children. */
-async function realClaude(env = process.env) {
+export async function realClaude(env = process.env) {
   const here = await realpath(modulePath);
   for (const directory of (env.PATH ?? "").split(":")) {
     const candidate = resolve(directory || ".", "claude");

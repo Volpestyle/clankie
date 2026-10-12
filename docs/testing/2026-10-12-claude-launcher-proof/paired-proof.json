@@ -1,0 +1,133 @@
+{
+  "startedAt": "2026-10-12T06:45:07.882Z",
+  "source": "5a189a93674a38aa7de87b6395934a8b9221fa51",
+  "scope": "Actual existing Herdr panes, installed launchers, and kernel process helper; unchanged running service PATH. No harness launcher or process observer substitutions.",
+  "panes": {
+    "claude-1": {
+      "original": {
+        "attempts": 20,
+        "refusals": 20,
+        "reasons": {
+          "launcher_unavailable": 20
+        }
+      },
+      "fixed": {
+        "attempts": 20,
+        "refusals": 0,
+        "reasons": {}
+      },
+      "nativeDiagnostics": {}
+    },
+    "claude-2": {
+      "original": {
+        "attempts": 20,
+        "refusals": 20,
+        "reasons": {
+          "launcher_unavailable": 20
+        }
+      },
+      "fixed": {
+        "attempts": 20,
+        "refusals": 0,
+        "reasons": {}
+      },
+      "nativeDiagnostics": {}
+    },
+    "claude-3": {
+      "original": {
+        "attempts": 20,
+        "refusals": 20,
+        "reasons": {
+          "launcher_unavailable": 20
+        }
+      },
+      "fixed": {
+        "attempts": 20,
+        "refusals": 0,
+        "reasons": {}
+      },
+      "nativeDiagnostics": {}
+    },
+    "claude-4": {
+      "original": {
+        "attempts": 20,
+        "refusals": 20,
+        "reasons": {
+          "launcher_unavailable": 20
+        }
+      },
+      "fixed": {
+        "attempts": 20,
+        "refusals": 0,
+        "reasons": {}
+      },
+      "nativeDiagnostics": {}
+    },
+    "codex": {
+      "original": {
+        "attempts": 20,
+        "refusals": 0,
+        "reasons": {}
+      },
+      "fixed": {
+        "attempts": 20,
+        "refusals": 0,
+        "reasons": {}
+      },
+      "nativeDiagnostics": {}
+    }
+  },
+  "negative": [
+    {
+      "admitted": false,
+      "terminal": [
+        {
+          "source": "proof",
+          "reason": "not_member"
+        }
+      ],
+      "project": []
+    },
+    {
+      "admitted": false,
+      "terminal": [
+        {
+          "source": "proof",
+          "reason": "not_member"
+        }
+      ],
+      "project": []
+    },
+    {
+      "admitted": false,
+      "terminal": [
+        {
+          "source": "proof",
+          "reason": "not_member"
+        }
+      ],
+      "project": []
+    },
+    {
+      "admitted": false,
+      "terminal": [
+        {
+          "source": "proof",
+          "reason": "not_member"
+        }
+      ],
+      "project": []
+    },
+    {
+      "admitted": false,
+      "terminal": [
+        {
+          "source": "proof",
+          "reason": "not_member"
+        }
+      ],
+      "project": []
+    }
+  ],
+  "finishedAt": "2026-10-12T06:45:38.362Z"
+}

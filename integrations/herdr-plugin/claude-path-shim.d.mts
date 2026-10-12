@@ -1,3 +1,4 @@
+export function realClaude(env?: NodeJS.ProcessEnv): Promise<string>;
 export function installPaneShell(options: {
   root: string;
   socketPath: string;

@@ -100,6 +100,10 @@ child. Only the exact installed launcher/command and kernel-proven child chain
 are supported; never exempt a mismatch just because the pane looks healthy.
 ESRCH/EBADF retry diagnostics from the global process/FD scan are not terminal
 refusals; join the final proof result before diagnosing an outage.
+For `launcher_unavailable` on Claude, check the service's PATH: prepared panes
+put Clankie's shell shim before the actual Claude binary. Project proof resolves
+past those shims using the launcher's real-Claude lookup; the shim itself never
+proves membership. A launcher refusal is not evidence of a failed socket lookup.
 Do not infer the historic sender from today's connected processes. Retain actual
 PID/pane/socket details privately and publish sanitized counts and stages. See
 `docs/cli.md` under `metrics --fleet` for the bounded diagnostic sampling.

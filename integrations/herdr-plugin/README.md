@@ -46,6 +46,9 @@ the selected `CLAUDE_CONFIG_DIR` at every launch and respects project/local
 plugin disabling. Outside the selected managed Herdr session it passes through.
 It skips every installed copy/symlink of itself when resolving real Claude,
 and replaces its process so Claude keeps normal TTY, signals and exit status.
+Project proof uses the same lookup on the service's absolute PATH entries,
+so an inherited pane shim does not hide the installed Claude executable.
+Admission still requires fresh kernel process identity and caller membership.
 
 `clankie doctor` reports `herdrPlugin.claudePathShim`: `active` describes this
 pane's PATH, `configured-for-new-panes` describes the saved shell selection,
