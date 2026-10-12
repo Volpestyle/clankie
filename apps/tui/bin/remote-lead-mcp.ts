@@ -37,8 +37,10 @@ if (!token || !pane || !fleet || !conversationId || !binding.success)
 const closing = new AbortController();
 const HOOK_LOG = join(homedir(), ".clankie", "remote-leads", "hooks.log");
 const SYNC_FAILURE_THRESHOLD = 3;
+const SYNC_BUDGET_MS = 2_000;
 const PROMPT_RETRY_BUDGET_MS = 50_000;
 const request: typeof fetch = async (resource, init) => {
+  const started = performance.now();
   const original = new Request(resource, init);
   const link = JSON.parse(await readFile(join(homedir(), ".clankie", "links", `${fleet}.json`), "utf8"));
   const target = new URL(original.url);
@@ -60,13 +62,25 @@ const request: typeof fetch = async (resource, init) => {
   const headers = new Headers(original.headers);
   headers.set("authorization", `Bearer ${token}`);
   headers.set("x-clankie-pane", pane);
-  const response = await fetch(target, {
-    method: original.method,
-    headers,
-    redirect: "error",
-    ...(original.body ? { body: await original.arrayBuffer() } : {}),
-    signal: AbortSignal.any([original.signal, closing.signal]),
-  });
+  let response: Response;
+  try {
+    response = await fetch(target, {
+      method: original.method,
+      headers,
+      redirect: "error",
+      ...(original.body ? { body: await original.arrayBuffer() } : {}),
+      signal: AbortSignal.any([original.signal, closing.signal]),
+    });
+  } finally {
+    if (target.pathname === "/v1/fleet/lead/transcript")
+      hookLog(`transcript request ms=${Math.round(performance.now() - started)}`);
+  }
+  if (target.pathname === "/v1/fleet/lead/transcript") {
+    const timing = response.headers.get("server-timing") ?? "";
+    const auth = /(?:^|,\s*)auth;dur=(\d+(?:\.\d+)?)/u.exec(timing)?.[1];
+    const store = /(?:^|,\s*)store;dur=(\d+(?:\.\d+)?)/u.exec(timing)?.[1];
+    if (auth && store) hookLog(`transcript service authMs=${auth} storeMs=${store}`);
+  }
   if (response.status === 403) {
     const reason: unknown = await response
       .clone()
@@ -162,16 +176,20 @@ if (process.argv.includes("--sync")) {
 
 /**
  * Hook entry (VUH-2036). A service stall must not read as a crash in the lead's
- * pane: the upload retries with backoff, every run is logged on this machine,
+ * pane: uploads share a short deadline, every run is logged on this machine,
  * and the pane hears one line only after repeated failures.
  */
 async function syncQuietly(): Promise<number> {
   const started = Date.now();
+  const signal = AbortSignal.timeout(SYNC_BUDGET_MS);
   let input = "";
   let event = "unknown";
   let failure: unknown;
   try {
-    for await (const chunk of process.stdin) input += chunk.toString();
+    for await (const chunk of process.stdin) {
+      input += chunk.toString();
+      if (Buffer.byteLength(input) > 65536) throw new Error("Seat hook input exceeds 64 KiB");
+    }
     event = String((JSON.parse(input) as { hook_event_name?: unknown }).hook_event_name ?? "unknown");
     await runSeatSyncCommand([], {
       env: { ...process.env, CLANKIE_OPERATOR_TOKEN: token },
@@ -180,8 +198,11 @@ async function syncQuietly(): Promise<number> {
       stdin: (async function* () {
         yield input;
       })(),
-      // A session's first sync rides out a service restart; later hooks stay brief.
-      retryDelaysMs: event === "SessionStart" ? [2_000, 5_000, 10_000] : [2_000, 5_000],
+      signal,
+      checkpointPath: join(
+        tmpdir(),
+        `clankie-remote-lead-transcript-${conversationId}-${process.env.CLANKIE_SEAT_SESSION_ID}.json`,
+      ),
     });
   } catch (error) {
     failure = error;

@@ -1,4 +1,4 @@
-import { statSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
@@ -23,6 +23,10 @@ export async function runSeatSyncCommand(
     stdin?: AsyncIterable<string | Buffer>;
     /** Waits before each retry of a failed upload; a retired seat is never retried. */
     retryDelaysMs?: readonly number[];
+    /** One caller budget across pages and retries. */
+    signal?: AbortSignal;
+    /** Remote hooks retain only IDs the service has acknowledged, never transcript text. */
+    checkpointPath?: string;
   } = {},
 ): Promise<number> {
   if (args.length) throw new Error("Usage: clankie seat-sync (native seat hook JSON on stdin)");
@@ -95,7 +99,31 @@ export async function runSeatSyncCommand(
   const url = new URL("/v1/seat/transcript", commandHost({ ...options, env }));
   if (env.CLANKIE_CONVERSATION_ID) url.searchParams.set("conversationId", env.CLANKIE_CONVERSATION_ID);
   // One upload budget for the whole transcript, not ten seconds per page.
-  let signal = AbortSignal.timeout(10_000);
+  const budget = () =>
+    options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(10_000)])
+      : AbortSignal.timeout(10_000);
+  let signal = budget();
+  const acknowledged = new Set<string>();
+  if (options.checkpointPath) {
+    try {
+      const checkpoint: unknown = JSON.parse(readFileSync(options.checkpointPath, "utf8"));
+      if (
+        typeof checkpoint === "object" &&
+        checkpoint !== null &&
+        "sessionId" in checkpoint &&
+        checkpoint.sessionId === sessionId &&
+        "target" in checkpoint &&
+        checkpoint.target === url.href &&
+        "entries" in checkpoint &&
+        Array.isArray(checkpoint.entries) &&
+        checkpoint.entries.every((id: unknown) => typeof id === "string")
+      )
+        for (const id of checkpoint.entries) acknowledged.add(id);
+    } catch {
+      /* Missing or invalid checkpoints replay safely. */
+    }
+  }
   const send = async (entries: SeatTranscriptUpload["entries"], final = false) => {
     signal.throwIfAborted();
     const body = SeatTranscriptUploadSchema.parse({
@@ -119,6 +147,28 @@ export async function runSeatSyncCommand(
       throw new Error(
         `Seat transcript sync failed (${response.status}); the next hook retries retained records`,
       );
+    if (options.checkpointPath) {
+      for (const entry of entries) acknowledged.add(entry.id);
+      const temporary = `${options.checkpointPath}.${process.pid}.tmp`;
+      try {
+        // Keep the checkpoint bounded to the native reader's retained history.
+        const ids = (transcript?.entries ?? []).flatMap((entry) =>
+          acknowledged.has(entry.id) ? [entry.id] : [],
+        );
+        writeFileSync(temporary, JSON.stringify({ sessionId, target: url.href, entries: ids }), {
+          mode: 0o600,
+        });
+        renameSync(temporary, options.checkpointPath);
+      } catch {
+        /* A failed checkpoint only causes an idempotent replay. */
+      } finally {
+        try {
+          rmSync(temporary, { force: true });
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
+    }
   };
   const upload = async () => {
     let page: SeatTranscriptUpload["entries"] = [],
@@ -129,6 +179,7 @@ export async function runSeatSyncCommand(
       // Channel envelopes are native delivery metadata, not operator chat.
       // Keep the display-only upload compatible with the service's strict schema.
       if (entry.type === "message" && entry.internal) continue;
+      if (acknowledged.has(entry.id)) continue;
       const size = Buffer.byteLength(JSON.stringify(entry));
       if (page.length && (page.length === 100 || bytes + size > 512 * 1024)) {
         await send(page);
@@ -140,7 +191,7 @@ export async function runSeatSyncCommand(
     }
     if (page.length || activity !== undefined) await send(page, true);
   };
-  // The service accepts a repeated page idempotently, so a retry resends the whole transcript.
+  // Acknowledged pages need no replay; failed pages stay in the native transcript.
   for (let attempt = 0; ; attempt += 1) {
     try {
       await upload();
@@ -148,8 +199,8 @@ export async function runSeatSyncCommand(
     } catch (error) {
       const wait = options.retryDelaysMs?.[attempt];
       if (wait === undefined || error instanceof SeatSessionRetiredError) throw error;
-      await delay(wait);
-      signal = AbortSignal.timeout(10_000);
+      await delay(wait, undefined, options.signal ? { signal: options.signal } : undefined);
+      signal = budget();
     }
   }
 }

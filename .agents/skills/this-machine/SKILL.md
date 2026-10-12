@@ -199,6 +199,14 @@ seat bridge status (`reconnecting`, then `current`) and verify a tool call/chann
 never allocate another pane to recover it. Explicit delegation revocation remains
 permanent. See [lead](../lead/SKILL.md) and the `conversations lead` CLI contract.
 
+Remote lead transcript hooks share a two-second upload budget and retain only
+acknowledged entry IDs locally; the next hook resumes remaining native records.
+Read `~/.clankie/remote-leads/hooks.log` on that machine for hook/request duration
+and the service's `authMs` (including fresh native proof) and `storeMs`. A short
+hook timeout does not retire or restart the lead. Missing checkpoints replay
+safely; they are not credentials or admission evidence. See
+[native seat transcript sync](../../../docs/cli.md#native-seat-transcript-sync).
+
 A pending canary belongs to the candidate commit. Old/foreign observers of the
 shared update journal leave it alone while its armed process is alive or its
 exit is unproven. A confirmed exit followed by a different-commit boot serving verified

@@ -62,6 +62,14 @@ export function createRemoteLeadBridge(input: {
   app.all("/v1/fleet/lead/*", async (context) => {
     if (input.delegations.isRevoked(context.req.raw))
       return context.json({ error: "remote_lead_revoked" }, 403);
+    const path = new URL(context.req.url).pathname;
+    const transcriptRequest = path === "/v1/fleet/lead/transcript" && context.req.method === "POST";
+    // Consume the body before the fresh proof, then commit synchronously. There
+    // is no asynchronous work between admission and the display-only store write.
+    const parsed = transcriptRequest
+      ? SeatTranscriptUploadSchema.safeParse(await context.req.json())
+      : undefined;
+    const authenticationStarted = performance.now();
     let authority: Authority | undefined;
     try {
       authority = await input.delegations.authorize(context.req.raw, input.identity(context.req.raw));
@@ -74,22 +82,26 @@ export function createRemoteLeadBridge(input: {
     const claimed = context.req.query("conversationId");
     if (claimed !== undefined && claimed !== conversationId)
       return context.json({ error: "remote_lead_conversation_mismatch" }, 403);
+    if (transcriptRequest) {
+      if (admitted.worker) return context.json({ error: "worker_transcript_refused" }, 403);
+      if (
+        !parsed?.success ||
+        occupantIdForHerdrSession({ source: "herdr:claude", kind: "id", value: parsed.data.sessionId }) !==
+          admitted.binding.nativeOccupantId
+      )
+        return context.json({ error: "remote_lead_session_mismatch" }, 403);
+      if (!admitted.current()) return context.json({ error: "remote_lead_revoked" }, 403);
+      const authenticationMs = performance.now() - authenticationStarted;
+      const storeStarted = performance.now();
+      const synced = input.captain.syncSeatTranscript(conversationId, parsed.data);
+      context.header(
+        "server-timing",
+        `auth;dur=${authenticationMs.toFixed(1)}, store;dur=${(performance.now() - storeStarted).toFixed(1)}`,
+      );
+      return context.json({ ok: synced }, synced ? 200 : 409);
+    }
     return calls.run(admitted, async () => {
       await requireCurrent(admitted);
-      const path = new URL(context.req.url).pathname;
-      if (path === "/v1/fleet/lead/transcript" && context.req.method === "POST") {
-        if (admitted.worker) return context.json({ error: "worker_transcript_refused" }, 403);
-        const parsed = SeatTranscriptUploadSchema.safeParse(await context.req.json());
-        if (
-          !parsed.success ||
-          occupantIdForHerdrSession({ source: "herdr:claude", kind: "id", value: parsed.data.sessionId }) !==
-            admitted.binding.nativeOccupantId
-        )
-          return context.json({ error: "remote_lead_session_mismatch" }, 403);
-        await requireCurrent(admitted);
-        const synced = input.captain.syncSeatTranscript(conversationId, parsed.data);
-        return context.json({ ok: synced }, synced ? 200 : 409);
-      }
       if (path === "/v1/fleet/lead/mcp") {
         let endpoint = endpoints.get(admitted.id);
         if (!endpoint) {

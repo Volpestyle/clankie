@@ -6609,6 +6609,19 @@ repopulate the cleared conversation. Sync failures never
 instruct the harness to continue or block a stop. The current 9,000-entry display tail
 is the replay bound. Image files use `clankie file publish` separately.
 
+Remote Claude lead hooks use `/v1/fleet/lead/transcript` over their authenticated
+fleet relay. They share a two-second upload deadline across every page, with no
+in-hook retry backoff. Only acknowledged display entry IDs are checkpointed on
+the native host, scoped to the session and destination; an interrupted upload
+resumes its remaining records on the next hook. Losing the checkpoint causes a
+safe replay. Each request consumes its body before one fresh native lifetime
+proof and a synchronous store write; tool calls retain their own authority checks.
+The PC's `~/.clankie/remote-leads/hooks.log` records hook and request durations,
+plus `authMs` and `storeMs` from the service's `Server-Timing` header when available.
+Authentication includes the fresh process proof. Compare those with request time
+to distinguish service work from transport; the remainder also includes client
+and body handling. Three consecutive failed hooks still report a warning.
+
 A service restart interrupts an unanswered seat run with `failed` and
 `reasonCode: service_restarted`; it does not prove that the independent native
 seat stopped. Escalation reply waiters do not survive restart. A later `reply`
