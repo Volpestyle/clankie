@@ -576,6 +576,10 @@ it("failed canary → owner override deploy → passing canary → next deploy s
       runtime: updater.runtime,
       holds,
       sample: createRuntimeHealthSampler({ healthUrl: `${host}/health` }),
+      // This scenario proves canary/hold lineage, not unrelated host contention.
+      // A busy shared Mac deliberately extends a canary's window indefinitely;
+      // pressure deferral has its own real HTTP/process integration scenarios.
+      pressure: () => ({ load1: 0, load15: 0, cores: 1, cpuRatio: 0 }),
     });
     await canary.recover();
     canary.start();
