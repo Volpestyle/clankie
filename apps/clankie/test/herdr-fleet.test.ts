@@ -7,6 +7,7 @@ import { SettingsStore } from "@clankie/settings";
 import {
   assertRemoteHerdrArgs,
   createHerdrFleetRun,
+  createFleetShellRun,
   remoteHerdrCommand,
   sshArgs,
   windowsArgument,
@@ -661,4 +662,23 @@ describe("registering an ssh fleet", () => {
     expect(herdrFleetRuntimeArgs(["agent", "list"])).toBeUndefined();
     expect(() => herdrFleetRuntimeArgs(["add", "pc"])).toThrow(/Usage/u);
   });
+});
+
+it("marks only a proven pre-channel mux rejection as not sent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-mux-negative-"));
+  try {
+    for (const [stdout, stderr, definitive] of [
+      ["", "mm_send_fd: sendmsg(2): Message too long\n", "not_sent"],
+      ["remote output", "mm_send_fd: sendmsg(2): Message too long\n", undefined],
+      ["", "Connection reset by peer", undefined],
+    ] as const) {
+      const fake = ((_file: string, _args: readonly string[], _options: unknown, callback: Function) => {
+        callback(Object.assign(new Error(stderr), { code: 255 }), stdout, stderr);
+      }) as unknown as typeof execFile;
+      const shell = createFleetShellRun(pc, { controlDirectory: root, execFile: fake });
+      await expect(shell(remoteHerdrCommand(pc, ["agent", "list"]))).rejects.toMatchObject({ definitive });
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -11,6 +11,8 @@ import {
   remoteProgramCommand,
   type HerdrFleet,
 } from "../src/herdr-fleet.ts";
+import { createFleetSeatControl } from "../src/captain/fleet-seat-control.ts";
+import type { HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import { FleetLinks } from "../src/fleet-link.ts";
 
 const fleet: HerdrFleet = {
@@ -306,4 +308,61 @@ it("fresh census commands reuse the resident relay and never replay a failed obs
   links.close();
   await expect(run(["api", "snapshot"])).rejects.toThrow("unavailable");
   expect((await f.ssh()).filter((call) => call.kind === "command")).toHaveLength(after);
+});
+
+it("streams a 32 KB finite POSIX command without expanding the SSH control request", async () => {
+  const f = await fixture();
+  const posixFleet: HerdrFleet = { ...fleet, ssh: { ...fleet.ssh, shell: "posix" } };
+  const shell = createFleetShellRun(posixFleet, { controlDirectory: f.controlDirectory });
+  const text = "x".repeat(32_768);
+  expect(await shell(remoteProgramCommand("posix", "fixtureprobe", [text]))).toContain('"accepted":true');
+  expect((await f.programs()).at(-1)?.args).toEqual([text]);
+  expect((await f.ssh()).at(-1)?.command).toBe("sh -s");
+});
+
+it("does not treat an application's mux-looking stderr as proof it was never dispatched", async () => {
+  const f = await fixture();
+  await f.login(f.oldBin, "native-mux-looking-error");
+  const shell = createFleetShellRun(fleet, { controlDirectory: f.controlDirectory });
+  await expect(shell(remoteProgramCommand("powershell", "fixtureprobe", []))).rejects.toMatchObject({
+    definitive: undefined,
+  });
+  expect(await f.programs()).toHaveLength(1);
+});
+
+it("releases a real remote-queue fence after pre-channel transport failure and permits a deliberate follow-up", async () => {
+  const f = await fixture();
+  const shell = createFleetShellRun(fleet, { controlDirectory: f.controlDirectory });
+  const agent: HerdrAgentSnapshot = {
+    paneId: "fixture-pc/w1:p1",
+    terminalId: "fixture-pc/seat1",
+    agent: "codex",
+    status: "idle",
+    title: "owned fixture",
+    session: { source: "herdr:codex", kind: "id", value: "fixture-session" },
+  };
+  const create = () =>
+    createFleetSeatControl(
+      { get: async () => agent, resolveTerminal: async () => agent, wait: async () => agent },
+      new Map(),
+      undefined,
+      async (_fleet, _session, text) => {
+        await shell(remoteProgramCommand("powershell", "fixtureprobe", [text]));
+        return true;
+      },
+      undefined,
+      join(f.root, "delivery.json"),
+    );
+  await f.login(f.oldBin, "mux-reject");
+  expect(await create().deliverToSeat(agent.terminalId, "first")).toMatchObject({
+    outcome: "undelivered",
+    deliveryStage: "unavailable",
+  });
+  expect(await f.programs()).toHaveLength(0);
+  await f.login(f.oldBin);
+  expect(await create().deliverToSeat(agent.terminalId, "deliberate-follow-up")).toMatchObject({
+    outcome: "delivered",
+    state: "queued",
+  });
+  expect((await f.programs()).map((program) => program.args)).toEqual([["deliberate-follow-up"]]);
 });

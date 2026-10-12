@@ -210,7 +210,11 @@ The same pane/session and home proof are repeated after preparation, then caller
 authority is rechecked with a 250 ms deadline immediately before sending. Timeout
 means undelivered; late approval cannot send. Private or unproved
 homes refuse the CLI fallback, and private native receipts never authorize a
-second send. An unavailable endpoint grants no tools or authority to another
+second send. Large finite SSH commands stream their quoted wrapper over stdin,
+keeping message bodies out of the multiplexing control request. A proven
+pre-launch transport failure returns undelivered and releases its exact delivery
+fence; a later deliberate follow-up may send. A reset, timeout or lost native
+acknowledgment remains uncertain and must not be replayed. An unavailable endpoint grants no tools or authority to another
 session. Other routes need a supported native channel or session API. Automated
 briefs and messages never fall back to terminal typing. An uncertain start or
 delivery retains its pane for inspection; reconcile it before retrying. A saved

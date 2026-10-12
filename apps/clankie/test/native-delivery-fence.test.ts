@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
+import { HerdrFleetError } from "../src/herdr-fleet.ts";
 import { createFleetSeatControl } from "../src/captain/fleet-seat-control.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import type { PeerDeliveryOptions } from "../src/captain/peer-seat-messages.ts";
@@ -469,4 +470,29 @@ it("reconciles a cleared native receipt only from the complete original UUID-bea
     }),
   ).toMatchObject({ deliveryStage: "uncertain" });
   expect(send).not.toHaveBeenCalled();
+});
+
+// VUH-2135: a transport-proven negative must release its exact dispatch fence.
+it("allows a deliberate follow-up after definite pre-dispatch transport failure across restart", async () => {
+  const { create, send } = fixture();
+  send.mockRejectedValueOnce(
+    new HerdrFleetError("fleet_command_failed", "mm_send_fd: sendmsg(2): Message too long", "not_sent"),
+  );
+  expect(await create().deliverToSeat("seat1", "not sent")).toMatchObject({
+    outcome: "undelivered",
+    deliveryStage: "unavailable",
+  });
+  send.mockResolvedValueOnce({ outcome: "accepted", messageId: "next", state: "queued" });
+  expect(await create().deliverToSeat("seat1", "deliberate next brief")).toMatchObject({
+    outcome: "delivered",
+    messageId: "next",
+  });
+  expect(send).toHaveBeenCalledTimes(2);
+});
+it("retains a dispatch fence for an ambiguous SSH disconnect", async () => {
+  const { create, send } = fixture();
+  send.mockRejectedValueOnce(new HerdrFleetError("fleet_command_failed", "Connection reset by peer"));
+  expect(await create().deliverToSeat("seat1", "possibly sent")).toMatchObject({ outcome: "unconfirmed" });
+  expect(await create().deliverToSeat("seat1", "follow-up")).toMatchObject({ outcome: "undelivered" });
+  expect(send).toHaveBeenCalledTimes(1);
 });

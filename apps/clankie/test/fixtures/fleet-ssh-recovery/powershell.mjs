@@ -7,7 +7,14 @@ const encoded = /^powershell\.exe -NoProfile -NonInteractive -EncodedCommand (\S
   process.argv[2],
 )?.[1];
 if (!root || !encoded) throw new Error("Fixture expects the real encoded PowerShell command boundary");
-const script = Buffer.from(encoded, "base64").toString("utf16le");
+let script = Buffer.from(encoded, "base64").toString("utf16le");
+if (script.includes("[Console]::In.ReadLine()")) {
+  let input = "";
+  for await (const chunk of process.stdin) input += chunk.toString();
+  script = Buffer.from(input, "base64").toString("utf8");
+}
+const entered = /clankie-entered-[a-f0-9]{16}/u.exec(script)?.[0];
+if (entered) process.stderr.write(entered + "\n");
 const program = /Get-Command ([a-z][a-z0-9-]*) -CommandType Application/u.exec(script)?.[1];
 const quiet = /\$ProgressPreference\s*=\s*'SilentlyContinue'/u.test(script);
 appendFileSync(join(root, "powershell.jsonl"), `${JSON.stringify({ script, program, quiet })}\n`);

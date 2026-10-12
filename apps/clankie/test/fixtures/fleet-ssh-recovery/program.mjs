@@ -8,7 +8,10 @@ appendFileSync(
   join(root, "program.jsonl"),
   `${JSON.stringify({ args, directory: dirname(process.argv[1]), cwd: process.cwd() })}\n`,
 );
-if (mode === "herdr-business-error") {
+if (mode === "native-mux-looking-error") {
+  process.stderr.write("mm_send_fd: sendmsg(2): Message too long\n");
+  process.exitCode = 255;
+} else if (mode === "herdr-business-error") {
   process.stdout.write(
     JSON.stringify({
       error: { code: "server_not_running", message: "The requested session is not running" },

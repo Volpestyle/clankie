@@ -25,3 +25,10 @@ port; there is no scheduled replacement. An isolated control file stops only
 that fixture relay to verify a real outage revokes its lifetime and the link
 recovers on a fresh port. Program lookup against a refreshed machine and user
 PATH happens inside the real Windows relay, which this fixture does not run.
+
+Large finite commands cross child stdin: the PowerShell-shaped fixture decodes
+the streamed base64 script, and POSIX uses a real `sh -s`. The opt-in
+`fleet-pc-payload.integration.test.ts` separately runs real OpenSSH and Windows
+PowerShell against `FLEET_PAYLOAD_PC_HOST`; its programs only hash text. It
+checks large Unicode payloads on the same
+owned master. It does not send to a worker or prove native queue acceptance.

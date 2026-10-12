@@ -10,7 +10,7 @@ import { channelBody } from "./claude-worker-seat.ts";
 import type { ExternalCodexControl } from "./external-codex-control.ts";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import { basename } from "node:path";
-import { splitFleetQualified } from "../herdr-fleet.ts";
+import { HerdrFleetError, splitFleetQualified } from "../herdr-fleet.ts";
 import { codexControlEndpoint, codexProcess, resolveCodexHome, resolveCodexSessionId } from "./codex-seat.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
@@ -189,7 +189,13 @@ export function createFleetSeatControl(
           detail: "Codex queue did not confirm delivery; inspect the seat before resending.",
         };
       } catch (error) {
-        return { outcome: "unconfirmed", detail: String(error) };
+        return error instanceof HerdrFleetError && error.definitive === "not_sent"
+          ? {
+              outcome: "undelivered",
+              deliveryStage: "unavailable",
+              detail: `Transport proved nothing was sent: ${String(error)}`,
+            }
+          : { outcome: "unconfirmed", detail: String(error) };
       }
     }
     const { paneProcesses, openFiles, codexQueue } = runner;
@@ -235,7 +241,13 @@ export function createFleetSeatControl(
         detail: "Codex queue did not confirm delivery; inspect the seat before resending.",
       };
     } catch (error) {
-      return { outcome: "unconfirmed", detail: String(error) };
+      return error instanceof HerdrFleetError && error.definitive === "not_sent"
+        ? {
+            outcome: "undelivered",
+            deliveryStage: "unavailable",
+            detail: `Transport proved nothing was sent: ${String(error)}`,
+          }
+        : { outcome: "unconfirmed", detail: String(error) };
     }
   };
 
@@ -304,7 +316,13 @@ export function createFleetSeatControl(
           detail: "The harness released its channel; no terminal input was sent.",
         };
       } catch (error) {
-        return { outcome: "unconfirmed", detail: String(error) };
+        return error instanceof HerdrFleetError && error.definitive === "not_sent"
+          ? {
+              outcome: "undelivered",
+              deliveryStage: "unavailable",
+              detail: `Transport proved nothing was sent: ${String(error)}`,
+            }
+          : { outcome: "unconfirmed", detail: String(error) };
       }
     }
     if (isMessageableSeat(current) && current.agent === "codex") {

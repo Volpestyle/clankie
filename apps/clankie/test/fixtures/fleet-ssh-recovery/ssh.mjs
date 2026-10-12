@@ -48,17 +48,25 @@ if (args.includes("-N")) {
   const key = createHash("sha256").update(controlPath).digest("hex");
   const master = join(root, `master-${key}.json`);
   const login = JSON.parse(readFileSync(join(root, "login.json"), "utf8"));
+  if (login.mode === "mux-reject") {
+    process.stderr.write("mm_send_fd: sendmsg(2): Message too long\n");
+    process.exit(255);
+  }
   const fresh = !existsSync(master);
   if (fresh) writeFileSync(master, JSON.stringify({ path: login.path }));
   const captured = JSON.parse(readFileSync(master, "utf8"));
   const command = args[hostIndex + 1];
   record({ kind: "command", controlPath, capturedPath: captured.path, fresh, command });
-  const posix = command.startsWith("exec sh -c ");
+  const posix = command.startsWith("exec sh -c ") || command === "sh -s";
   const child = spawn(
     posix ? "/bin/sh" : process.execPath,
-    posix ? ["-c", command] : [fileURLToPath(new URL("powershell.mjs", import.meta.url)), command],
+    posix
+      ? command === "sh -s"
+        ? ["-s"]
+        : ["-c", command]
+      : [fileURLToPath(new URL("powershell.mjs", import.meta.url)), command],
     {
-      stdio: ["ignore", "inherit", "inherit"],
+      stdio: ["pipe", "inherit", "inherit"],
       env: {
         ...process.env,
         ...(posix ? { PATH: `${captured.path}${delimiter}/bin` } : {}),
@@ -66,6 +74,7 @@ if (args.includes("-N")) {
       },
     },
   );
+  process.stdin.pipe(child.stdin);
   process.once("SIGTERM", () => child.kill());
   child.once("error", (error) => {
     process.stderr.write(error.message);

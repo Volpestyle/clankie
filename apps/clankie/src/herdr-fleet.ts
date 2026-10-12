@@ -305,12 +305,14 @@ export const SSH_BASE_OPTIONS: readonly string[] = [
   "ServerAliveCountMax=3",
 ];
 
-class HerdrFleetError extends Error {
+export class HerdrFleetError extends Error {
+  readonly definitive?: "not_sent";
   readonly code: string;
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, definitive?: "not_sent") {
     super(`${code}: ${message}`);
     this.name = "HerdrFleetError";
     this.code = code;
+    this.definitive = definitive;
   }
 }
 
@@ -355,6 +357,59 @@ function launchFailureMarker(command: string): string | undefined {
   return /clankie-launch-[a-f0-9]{16}: /u.exec(script)?.[0];
 }
 
+/** Keep payloads out of the mux control request and outer Windows command-line limits.
+ * These finite calls own stdin; streaming app-server sessions use their separate lane.
+ */
+function finiteCommandInput(command: string, entered: string): { command: string; input?: string } {
+  const encoded = /-EncodedCommand (\S+)$/u.exec(command)?.[1];
+  if (encoded) {
+    // An application can print SSH-looking errors. This nonce proves the remote
+    // wrapper ran, so its stderr cannot be mistaken for a local mux rejection.
+    const script = `[Console]::Error.WriteLine('${entered}'); ${Buffer.from(encoded, "base64").toString("utf16le")}`;
+    const guarded = powershellScriptCommand(script);
+    if (Buffer.byteLength(guarded) <= 4_096) return { command: guarded };
+    return {
+      command: powershellScriptCommand(
+        "& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadLine()))))",
+      ),
+      input: Buffer.from(script, "utf8").toString("base64") + "\n",
+    };
+  }
+  if (command.startsWith("exec sh -c ")) {
+    const script = `printf '%s\\n' '${entered}' >&2; ${command}`;
+    const guarded = posixScriptCommand(script);
+    return Buffer.byteLength(guarded) <= 4_096
+      ? { command: guarded }
+      : { command: "sh -s", input: script + "\n" };
+  }
+  return { command };
+}
+
+function commandNotSent(
+  result: { error: ExecFileException | null; stdout: string; stderr: string },
+  marker?: string,
+  entered = false,
+): "not_sent" | undefined {
+  if (!result.error || result.error.killed || result.stdout !== "") return undefined;
+  // OpenSSH fails sending the mux request's descriptors before the master can
+  // launch the channel. Other SSH exits, resets and timeouts remain uncertain.
+  if (
+    !entered &&
+    result.error.code === 255 &&
+    /^mm_send_fd: sendmsg\(\d+\): Message too long\s*$/u.test(result.stderr.trim())
+  )
+    return "not_sent";
+  if (
+    result.error.code === "ENOENT" ||
+    (typeof result.error.code === "number" &&
+      result.error.code !== 0 &&
+      marker &&
+      result.stderr.startsWith(marker))
+  )
+    return "not_sent";
+  return undefined;
+}
+
 /** Retry only launcher/environment failures that occurred before the program ran. */
 async function runFleetCommand(
   fleet: HerdrFleet,
@@ -366,14 +421,16 @@ async function runFleetCommand(
   mkdirSync(options.controlDirectory, { recursive: true, mode: 0o700 });
   const deadline = Date.now() + timeoutMs;
   const launchMarker = launchFailureMarker(command);
+  const entered = `clankie-entered-${randomBytes(8).toString("hex")}`;
+  const transported = finiteCommandInput(command, entered);
   for (let attempt = 0; ; attempt += 1) {
-    const args = sshArgs(fleet, options.controlDirectory, command, options.maxControlAgeMs);
+    const args = sshArgs(fleet, options.controlDirectory, transported.command, options.maxControlAgeMs);
     const result = await new Promise<{
       error: ExecFileException | null;
       stdout: string;
       stderr: string;
     }>((resolve) => {
-      (options.execFile ?? execFile)(
+      const child = (options.execFile ?? execFile)(
         "ssh",
         args,
         {
@@ -383,6 +440,10 @@ async function runFleetCommand(
         },
         (error, stdout, stderr) => resolve({ error, stdout: String(stdout), stderr: String(stderr) }),
       );
+      child?.stdin?.on("error", () => {
+        /* SSH exit supplies the transport verdict. */
+      });
+      child?.stdin?.end(transported.input);
     });
     if (
       attempt === 0 &&
@@ -398,17 +459,29 @@ async function runFleetCommand(
       retireControlConnection(fleet, options.controlDirectory, args);
       continue;
     }
-    return { ...result, stderr: decodeRemoteShellError(result.stderr) };
+    const reachedRemote = transported.command === command || result.stderr.split(/\r?\n/u).includes(entered);
+    const stderr = result.stderr.replaceAll(entered + "\r\n", "").replaceAll(entered + "\n", "");
+    return {
+      ...result,
+      definitive: commandNotSent({ ...result, stderr }, launchMarker, reachedRemote),
+      stderr: decodeRemoteShellError(stderr),
+    };
   }
 }
 
 export function createFleetShellRun(fleet: HerdrFleet, options: FleetCommandOptions): FleetShellRun {
   return async (remoteCommand, timeoutMs = REMOTE_HERDR_TIMEOUT_MS) => {
-    const { error, stdout, stderr } = await runFleetCommand(fleet, options, remoteCommand, timeoutMs);
+    const { error, stdout, stderr, definitive } = await runFleetCommand(
+      fleet,
+      options,
+      remoteCommand,
+      timeoutMs,
+    );
     if (error === null) return stdout;
     throw new HerdrFleetError(
       error.killed ? "timeout" : "fleet_command_failed",
       `fleet ${fleet.id}: ${stderr.slice(0, 2_000) || error.message}`,
+      definitive,
     );
   };
 }
@@ -438,7 +511,13 @@ export function createHerdrFleetRun(fleet: HerdrFleet, options: FleetCommandOpti
       if (reported !== undefined) throw reported;
       return stdout;
     }
-    const { error, stdout, stderr } = await runFleetCommand(fleet, options, command, timeoutMs, signal);
+    const { error, stdout, stderr, definitive } = await runFleetCommand(
+      fleet,
+      options,
+      command,
+      timeoutMs,
+      signal,
+    );
     const reported = herdrError(stdout);
     if (reported !== undefined) throw reported;
     if (error !== null) {
@@ -448,6 +527,7 @@ export function createHerdrFleetRun(fleet: HerdrFleet, options: FleetCommandOpti
         error.killed
           ? `fleet ${fleet.id}: herdr ${args.slice(0, 2).join(" ")} timed out after ${String(timeoutMs)} ms`
           : `fleet ${fleet.id}: ${stderr || error.message}`,
+        definitive,
       );
     }
     return stdout;
