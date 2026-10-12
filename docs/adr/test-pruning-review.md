@@ -449,3 +449,38 @@ provider configuration, protocol schemas and recorded regressions remain.
 
 Focused check evidence is recorded in
 [the slice evidence](../testing/2026-10-11-vuh-2149-packages/README.md).
+
+## VUH-2149: TUI slice 1 — incidental display cases
+
+Reviewed at `990a774a4`, applied to current main `586ccd31b`, against the existing TUI pruning above. This is a
+case-level cut, not permission to delete the remaining files. All four mixed
+files retain their behavioral cases. No integration, golden, credential,
+authority, lossless-output or documented bug regression is deleted.
+
+| File under `apps/tui/test/`   | Removed or merged case                                   | Reason and retained coverage                                                                                                                                                                                                                                                                                                 |
+| ----------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `activity-command.test.ts`    | `names Emerald from the runner-owned environment id`     | Pins the human game title and playing suffix. The same file retains authored-versus-observed separation, control-byte stripping, authenticated-client dispatch and real settings persistence. No game/session schema or runner evidence is removed.                                                                          |
+| `connect-commands.test.ts`    | `tells the owner how to finish each connection` (merged) | Merge its existing formatter assertion into the retained argument-routing case; it does not need a separate test registration. Argument routing, authenticated provider probes, real follow-settings integration, stale writes, secret entry and preserved owner state remain in this file.                                  |
+| `devices.test.ts`             | `reports an empty list clearly`                          | Checks only exit zero and the authored empty-list sentence. `devices-commands.test.ts` retains successful empty-list command handling and the actionable pairing path; this file retains device IDs/grants/review provenance, JSON output, revoke, required ID, operator refusal, malformed/401/503 responses and redaction. |
+| `herd-lead-companion.test.ts` | `says so when the console is not inside herdr`           | A formatter-only assertion for an error tone and the phrase `herdr pane`. The same file retains the actual outside-Herdr no-execution fence, missing binary, exact focus/split environment, self-pane-safe close and `/board` dispatch.                                                                                      |
+
+The formatter assertion remains after merging, so its existing export stays
+unchanged. No product code changes. The earlier queued variant
+`dcfe1725-bda3-4de6-b4a8-f02019cf059c` is cancelled under the owner's revised
+pruning rule: local package typecheck, deadcode and lint, then rebase and direct
+main push. Product edits still use the merge queue.
+
+Counts for `apps/tui/test/**/*.test.ts`: **155 → 155 files**, **36,694 → 36,663
+lines**, **1,000 → 996 test registrations** (four cases removed). Registrations
+count literal `it`/`test` call sites, with each parameterized registration counted
+once; this is not a claim that the entire suite ran. The four changed files'
+actual focused Vitest cases are **47 → 43**. The post-cut run additionally checks
+both retained `devices-commands` cases. Focused tests and TUI package typecheck, deadcode and lint run locally under
+`clankie heavy`; the owner-approved pruning path uses a direct main push. Raw focused reports and lint
+results remain in the worktree's `.local/pruning/`.
+
+Direct slice 1 checks passed: TUI source and all four test partitions, package
+lint, deadcode for TUI plus its actual service consumers, and 45 focused cases.
+The narrower TUI-only deadcode run reported `UpdateAuthority` as unused;
+`apps/clankie/src/runtime-update-routes.ts` consumes it. Including that consumer
+passes without any source edit or exemption. [Direct-slice evidence](../testing/2026-10-12-tui-test-pruning/README.md).

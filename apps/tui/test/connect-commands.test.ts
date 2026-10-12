@@ -28,18 +28,9 @@ describe("connect argument routing", () => {
     expect(normalizeConnectArgument("mcp auth linear")).toBe("linear");
     expect(normalizeConnectArgument("status")).toBe("status");
     expect(normalizeConnectArgument("")).toBe("");
-  });
-});
-
-describe("connect status", () => {
-  it("tells the owner how to finish each connection", () => {
-    expect(
-      formatConnectStatus({
-        discordBot: false,
-        linear: false,
-        email: false,
-      }),
-    ).toContain("/connect linear");
+    expect(formatConnectStatus({ discordBot: false, linear: false, email: false })).toContain(
+      "/connect linear",
+    );
   });
 });
 

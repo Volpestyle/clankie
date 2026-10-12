@@ -3,7 +3,6 @@ import {
   closeHerdLeadCompanion,
   ensureHerdLeadCompanion,
   focusHerdLeadCompanion,
-  formatHerdLeadCompanionResult,
 } from "../src/observation/herd-lead-companion.ts";
 import { buildConsoleCommands } from "../src/commands.ts";
 import type { ClankieFaceShell } from "../src/shell/shell.ts";
@@ -148,11 +147,5 @@ describe("/board", () => {
     results.length = 0;
     await command.run("close", shell);
     expect(results[0]?.text).toContain("closed");
-  });
-
-  it("says so when the console is not inside herdr", () => {
-    const formatted = formatHerdLeadCompanionResult({ outcome: "skipped", reason: "not_in_herdr" }, "open");
-    expect(formatted.tone).toBe("error");
-    expect(formatted.text).toContain("herdr pane");
   });
 });

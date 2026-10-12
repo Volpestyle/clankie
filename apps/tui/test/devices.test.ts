@@ -121,13 +121,6 @@ describe("clankie devices — list", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.devices[0].deviceId).toBe("device-abc123");
   });
-
-  it("reports an empty list clearly", async () => {
-    const stdout = outputBuffer();
-    const exit = await runDevices([], { fetchImpl: jsonFetch([]), stdout: stdout.stream });
-    expect(exit).toBe(0);
-    expect(stdout.text()).toContain("No paired devices");
-  });
 });
 
 describe("clankie devices revoke", () => {
