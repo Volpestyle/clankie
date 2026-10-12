@@ -608,3 +608,113 @@ checks. Whole-file review/doc/evidence formatting is now part of the focused gat
 [Final measurements and archived reports](../testing/2026-10-11-vuh-2149-packages/README.md)
 include both failed attempts and the passing scoped gates. The ordinary root
 landing/merge queue was skipped under James's explicit pruning assignment.
+
+## VUH-2149 TUI slice 1: remaining display snapshots
+
+Reviewed against `990a774a4cceaba7a5b3f6d2939d5529a70b8041`. The assigned
+area contains 155 test files. Existing VUH-1925 review decisions above remain
+in force; file names and mocked seams alone do not justify deletion. This slice
+removes only the following complete cases, with every retained assertion and
+timeout unchanged. No production source, fixture, integration or golden is changed.
+
+| File under `apps/tui/test/` | Deleted case                                                       | Reason and retained coverage                                                                                                                                                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `activity-command.test.ts`  | `names Emerald from the runner-owned environment id`               | Incidental game display copy. Keep authenticated activity dispatch, authored/observed separation, terminal-control stripping, actual persisted play toggles and budget writes.                                                                                                                 |
+| `provider-commands.test.ts` | `labels xAI as SuperGrok or API key instead of a bare connected`   | Incidental provider hint and confirmation wording. Keep SuperGrok OAuth broker storage/code redaction, signed-in readiness, API credentials, hosted refusal, provider allowlists and authoritative model writes.                                                                               |
+| `voice-transcripts.test.ts` | `reprints a dim room header only when the body or channel changes` | Incidental row layout: exact header placement, separator and repeated age strings. Keep overlay speaker/body/content rendering, missing-name attribution, distinct human/ack/answer identity, incomplete-speech disclosure, paging/schema/401 refusal, retention clearing and follow recovery. |
+| `next-step.test.ts`         | `asks to start Clankie when he is not answering`                   | Incidental `not answering` prose; it asserts no recovery command. Keep the restart, pairing, remote-access and direct-route command cases. Service/doctor tests retain honest unavailable-state behavior.                                                                                      |
+| `devices.test.ts`           | `reports an empty list clearly`                                    | Incidental `No paired devices` prose; successful list exit is already asserted by table and JSON list cases. Keep device identity, grants, review provenance, revocation, malformed/refused reads and credential/secret boundaries. The TUI empty-list next-step case also stays.              |
+
+Measurements count physical lines in tracked `*.test.ts` files and static
+`it`/`test` declarations (one declaration per `.each`, without expanding rows).
+Support files and fixtures are excluded and unchanged. No new tests or merges.
+
+| Scope                | Before files | After files | Before lines | After lines | Before declarations | After declarations |
+| -------------------- | -----------: | ----------: | -----------: | ----------: | ------------------: | -----------------: |
+| Five changed files   |            5 |           5 |        1,658 |       1,597 |                  66 |                 61 |
+| Entire TUI test area |          155 |         155 |       36,694 |      36,633 |                 992 |                987 |
+
+Validation is recorded with the landed slice report on
+[VUH-2149](https://linear.app/vuhlp/issue/VUH-2149). The initial focused test
+startup failed because this new worktree had no dependencies; it is not a
+test pass. A governed frozen-lockfile install precedes the actual checks.
+
+Slice 1 checks passed through `clankie heavy`: `pnpm --filter @clankie/tui
+typecheck`, `pnpm lint apps/tui`, `pnpm deadcode`, and the five changed files
+with `pnpm exec vitest run` (64/64 retained registered cases passed). Formatting
+ran on those five explicit files. Scoped Knip's `UpdateAuthority` warning was
+a cross-workspace false positive: `apps/clankie/src/runtime-update-routes.ts`
+and `apps/clankie/src/index.ts` consume it; the normal repository dead-code
+check includes those consumers and passed without exemptions or source changes.
+The assignment's typecheck/deadcode/lint gates replace the usual merge-queue
+landing gate for these test-only slices.
+
+## VUH-2149 TUI final slice: duplicate recovery helper check
+
+The first TUI push (`c0f7f7dd9`) was reverted immediately in `586ccd31b` when
+CI rejected review-document formatting. The reverted tree exactly matched
+Ivy's `b68e3d898` and also failed that same formatting check. This final slice
+restores the five reviewed cuts above, adds the duplicate cut below, and
+formats/checks the complete shared document while preserving Ivy's content.
+This uses this worker's third and final push; no product source changes.
+
+| File under `apps/tui/test/` | Deleted case                                                        | Reason and retained coverage                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `next-step.test.ts`         | `leads with signing the Mac back in when the doorway is signed out` | Duplicate of retained signed-out recovery through `status-connection.test.ts`, `install-doctor.test.ts` (`asks for a sign-in when the Mac is shut out of its own doorway`) and `pairing.test.ts` (`says a gatewayless code needs the sign-in when remote access is signed out`). These consume the real helper from their command/doctor flows. The remote-access CLI command string remains in the helper's bare-install case. |
+
+All other retained assertions and timeouts remain unchanged. Entire-area
+measurements use the same static declaration method above; registered counts
+for the focused runs are reported separately.
+
+Retain `model-cli.test.ts`'s headless-recognition assertion: command-handler and
+help tests do not exercise the launcher's recognition decision. Concurrent
+commit `efe108509` merges it into the endpoint/persistence case without deleting
+the assertion, preserving this published CLI contract. A real headless launcher proof against
+an isolated loopback models endpoint also passed, including persisted model
+selection; no owner configuration or live service was changed.
+
+Deferred incidental candidate: `voice-transcripts.test.ts`'s relative-age
+formatting case is the only outside consumer of the `formatVoiceTranscriptAge`
+export. Removing it needs a separate production visibility change through the
+merge queue. It stays here; no unused-export exemption is added. Mixed files
+with incidental copy beside boundary assertions stay intact. The prior protected
+review inventory remains in force, and no integration/E2E/golden file is removed.
+
+| Scope                                                          | Before files | After files | Before lines | After lines | Before declarations | After declarations |
+| -------------------------------------------------------------- | -----------: | ----------: | -----------: | ----------: | ------------------: | -----------------: |
+| Six reviewed cuts in five files, relative to `990a774a4`       |            5 |           5 |        1,658 |       1,588 |                  66 |                 60 |
+| This final push's three files, relative to `efe108509`         |            3 |           3 |        1,295 |       1,240 |                  50 |                 46 |
+| Whole area, relative to `efe108509`                            |          154 |         154 |       36,636 |      36,581 |                 985 |                981 |
+| Whole area, including concurrent cuts, relative to `990a774a4` |          155 |         154 |       36,694 |      36,581 |                 992 |                981 |
+
+Net reduction: six complete cases and 70 test lines. The final helper cut
+adds nine lines/one case to the first reviewed slice's reduction.
+Five support/fixture files (128 lines) remain unchanged. Registered parameter
+rows in unchanged `.each` declarations are preserved. The first focused
+selection had 69 registered cases before the cut (64 retained plus five removed).
+
+Concurrent TUI work landed as `2124e083b` during this worker's rebase. It
+already includes the activity-title and empty-device-copy cuts reviewed above,
+plus the separate connect-status merge and board-copy cut documented in its own
+section. Both sections and all its assertions are preserved. This final push
+therefore contributes four cases/55 lines in three test files; the whole area's
+combined change after `efe108509` is one fewer file, eleven fewer declarations
+and 113 fewer lines. That commit also consolidates the invite, model-recognition
+and Herdr jump coverage with their unique assertions preserved.
+The table uses this review's AST/line-start declaration method consistently;
+parameterized cases are counted once, and no full-suite pass is claimed.
+
+The final retained selection is the three changed files plus the real
+doctor/status/pairing consumers. A syntax-tree comparison confirms that all
+remaining case bodies in this review's changed files are byte-identical to
+`990a774a4`; no assertion or timeout was weakened. The first 64-case focused
+run and the later 71-case consumer run passed. `model-cli.test.ts` was restored
+unchanged after its recognition case was found to protect the launcher contract;
+all eight model cases passed separately. The real headless launcher proof also
+passed against an isolated loopback endpoint and isolated persisted config.
+
+Final rebased checks: the three changed files pass all 46 registered cases.
+TUI typecheck (source plus four test partitions), TUI package lint, repository
+deadcode and formatting of the three test files plus the complete shared
+review passed through `clankie heavy`. A normal Knip configuration hint about
+an unmatched entry glob remains informational; no unused-code exemption was added.
