@@ -3522,6 +3522,14 @@ the service rechecks the master switch, project Auto settings and routing.
 The wake grants no tool or authority beyond an ordinary turn, and a native
 harness seat receives it like any other wake.
 
+A service-lane autonomous turn may execute `hire_agent` when the master switch
+is on, the owner's saved global autonomy is Full and the resolved project is on
+Auto. Its project preferences must allow everyday and outward work and
+lead-owned machine setup. Otherwise it can propose a hire and receives a clear
+refusal. The ordinary project/role caps, machine governor, account holds,
+checkout and native delivery checks still apply. Switching Auto off or lowering
+permission during preparation prevents the pending native effect.
+
 New hired Claude workers launch in `auto` mode, preserving managed and tracker
 denies and the permission hook, with no blanket `ask` rules or Bash allow.
 [Maximum trust mode](#maximum-trust-mode) replaces that mode at launch while it

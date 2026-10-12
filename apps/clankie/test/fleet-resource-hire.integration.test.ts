@@ -26,6 +26,19 @@ import {
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
 import type { ConversationAuthority } from "../src/captain/conversation-owner.ts";
+import { assertConversationAuthority } from "../src/captain/conversation-owner.ts";
+import { autoHireAuthority } from "../src/captain/auto-hire-policy.ts";
+import { captainTools } from "../src/captain/tools.ts";
+import type { CaptainDeps } from "../src/captain/deps.ts";
+import { LaneLog } from "../src/captain/lane-log.ts";
+import { autonomyLevelFleet } from "@clankie/protocol/autonomy";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { SettingsStore } from "@clankie/settings";
+import { localWorkspaceProject } from "../src/captain/project-hire-context.ts";
+import type { ProjectHirePolicy } from "../src/captain/herdr-watch.ts";
+import { serve } from "@hono/node-server";
+import { createProjectRoutes } from "../src/project-routes.ts";
+import { PersonaStore } from "../src/captain/personas.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -33,7 +46,7 @@ afterEach(async () => {
 });
 
 /** Existing executable native-protocol fixture: ordinary Node, no model/provider/TUI hire. */
-async function fixture() {
+async function fixture(projectHirePolicy?: ProjectHirePolicy) {
   const root = await mkdtemp(join(tmpdir(), "fleet-resource-hire-"));
   const executable = join(root, "native-fixture.mjs");
   await writeFile(
@@ -176,6 +189,7 @@ async function fixture() {
     runner,
     seatAdapters: [adapter],
     fleetResources: resources,
+    ...(projectHirePolicy === undefined ? {} : { projectHirePolicy }),
     nativeLaunchPolicy: {
       admit: async ({ phase }) => {
         admissions.push(phase);
@@ -230,6 +244,204 @@ async function fixture() {
       ),
   };
 }
+
+// LOCAL-VUH-6: live 2026-10-12 refusal at conv-4c11af56 cursor 3628.
+// Policy fields match the attempted Iris/LOCAL-VUH-4 hire. Paths are disposable;
+// the existing executable helper proves native admission, not Codex/model behavior.
+async function autoFixture() {
+  let settings: SettingsStore;
+  const f = await fixture({
+    settings: async () => (await settings.load()).projects,
+    project: (input, current) => localWorkspaceProject(current, input.workingDirectory),
+    tools: async () => [],
+  });
+  settings = new SettingsStore(join(f.root, "settings.json"));
+  const personas = new PersonaStore(join(f.root, "personas"));
+  await personas.ready(settings);
+  cleanups.push(() => personas.close());
+  await settings.update((current) => ({
+    ...current,
+    autonomy: { fleet: { ...current.autonomy.fleet, ...autonomyLevelFleet("full") } },
+    projects: ProjectsSettingsSchema.parse({
+      projects: [
+        {
+          id: "clankie-work",
+          name: "Clankie Work",
+          auto: true,
+          workerCap: 1,
+          trackerProjectId: "cbd205ab-cad4-48b8-9724-7109410fc921",
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: f.root }],
+          roles: [{ role: "builder" }],
+        },
+      ],
+    }),
+  }));
+  const app = createProjectRoutes(
+    async (request) =>
+      request.headers.get("authorization") === "Bearer fixture-owner" ? true : "authentication_required",
+    settings,
+  );
+  const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  cleanups.push(async () => {
+    if ("closeAllConnections" in server) server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing project API");
+  const host = `http://127.0.0.1:${address.port}`;
+  const project = async (changes: Record<string, unknown>) => {
+    const headers = { authorization: "Bearer fixture-owner", "content-type": "application/json" };
+    const snapshot = await (
+      await fetch(`${host}/v1/operator/projects?includeAutonomy=true`, { headers })
+    ).json();
+    const response = await fetch(`${host}/v1/operator/projects/update?includeAutonomy=true`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ projectId: "clankie-work", expectedRevision: snapshot.revision, changes }),
+    });
+    expect(response.status).toBe(200);
+    return response.json();
+  };
+  let enabled = true;
+  let routeCurrent = true;
+  const tool = captainTools(
+    { embodiment: {} } as CaptainDeps,
+    {
+      targetId: "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0",
+      autonomous: true,
+      conversationAuthority: {
+        owner: { conversationId: "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0" },
+        current: () => routeCurrent,
+        authorize: async () => routeCurrent,
+      },
+    },
+    new LaneLog(f.root),
+    "operator",
+    undefined,
+    undefined,
+    undefined,
+    async (request, brief, source, autonomous) => {
+      if (!source || autonomous !== true) throw new Error("Missing host-stamped autonomous hire context");
+      const authority = autoHireAuthority(source, async () => {
+        const current = await settings.load();
+        const id = await localWorkspaceProject(current.projects, request.workingDirectory);
+        return {
+          autonomy: current.autonomy,
+          project: current.projects.projects.find((p) => p.id === id),
+          enabled,
+        };
+      });
+      await assertConversationAuthority(authority);
+      await personas.prepareRoleAdoption(request.role);
+      let adopted: ReturnType<typeof personas.adoptSpawn> | undefined;
+      const result = await f.store.spawnSeat(
+        request,
+        undefined,
+        brief,
+        undefined,
+        authority,
+        (spawned, projectId) => {
+          adopted = personas.adoptSpawn(spawned.seat, request.title, request.role, undefined, projectId);
+        },
+        () => personas.flushProjectRoles(),
+      );
+      if (result.outcome !== "spawned") return result;
+      if (!adopted) throw new Error("Missing adopted native seat");
+      return { ...result, seat: adopted };
+    },
+  ).find((candidate) => candidate.name === "hire_agent")!;
+  const hire = () =>
+    tool.execute(
+      "LOCAL-VUH-4",
+      {
+        title: "Iris",
+        projectId: "clankie-work",
+        role: "builder",
+        workingDirectory: f.root,
+        harness: "opencode",
+        deliverable: "LOCAL-VUH-4",
+        brief: "Read LOCAL-VUH-4 without changing accounts or credentials.",
+      },
+      undefined,
+      undefined,
+      {} as never,
+    );
+  return {
+    ...f,
+    settings,
+    project,
+    hire,
+    pause: () => {
+      enabled = false;
+    },
+    revoke: () => {
+      routeCurrent = false;
+    },
+  };
+}
+
+it("LOCAL-VUH-6: preserves owner policy, project cap and resource refusals", async () => {
+  const f = await autoFixture();
+  await f.settings.update((current) => ({
+    ...current,
+    autonomy: { fleet: { ...current.autonomy.fleet, ...autonomyLevelFleet("high") } },
+  }));
+  await expect(f.hire()).rejects.toThrow("saved autonomy must be Full");
+  await f.settings.update((current) => ({
+    ...current,
+    autonomy: { fleet: { ...current.autonomy.fleet, ...autonomyLevelFleet("full") } },
+  }));
+  await f.project({ auto: false });
+  await expect(f.hire()).rejects.toThrow("project must be on Auto");
+  await f.project({ auto: true, autonomy: { fleet: { machineSetup: "owner" } } });
+  await expect(f.hire()).rejects.toThrow("working preferences require approval");
+  await f.project({ workerCap: 0, autonomy: { fleet: { machineSetup: null } } });
+  expect((await f.hire()).details).toMatchObject({
+    outcome: "failed",
+    detail: expect.stringContaining("allows 0 running agents"),
+  });
+  await f.project({ workerCap: 1 });
+  f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
+  expect((await f.hire()).details).toMatchObject({
+    outcome: "failed",
+    detail: expect.stringContaining("Local hire refused"),
+  });
+  expect(f.launches()).toBe(0);
+});
+
+it("LOCAL-VUH-6: starts one Full Auto hire through native admission, then enforces the cap", async () => {
+  const f = await autoFixture();
+  const accepted = (await f.hire()).details;
+  expect(accepted, JSON.stringify(accepted)).toMatchObject({ outcome: "spawned" });
+  expect(f.launches()).toBe(1);
+  expect((await f.journal()).filter((row) => row.kind === "request")).toHaveLength(1);
+  expect((await f.hire()).details).toMatchObject({
+    outcome: "failed",
+    detail: expect.stringContaining("allows 1 running agents"),
+  });
+  expect(f.launches()).toBe(1);
+});
+
+it.each(["project-off", "autonomy-down", "master-off", "route-revoked"] as const)(
+  "rechecks %s after preparation before an autonomous native effect",
+  async (change) => {
+    const f = await autoFixture();
+    f.onPrepare(async () => {
+      if (change === "project-off") await f.project({ auto: false });
+      if (change === "autonomy-down")
+        await f.settings.update((current) => ({
+          ...current,
+          autonomy: { fleet: { ...current.autonomy.fleet, ...autonomyLevelFleet("high") } },
+        }));
+      if (change === "master-off") f.pause();
+      if (change === "route-revoked") f.revoke();
+    });
+    expect((await f.hire()).details).toMatchObject({ outcome: "failed" });
+    expect(f.launches()).toBe(0);
+    expect(await f.journal()).toEqual([]);
+  },
+);
 
 it.each(["pressure", "probe-unavailable"] as const)(
   "refuses %s before a real native launch",

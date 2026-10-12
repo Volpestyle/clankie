@@ -42,6 +42,18 @@ grants no tool or authority. Staffing stays inside each project's worker cap
 and role policy (ADR 0216) and the machine and account limits (ADR 0261). The
 dial decides which calls he makes alone.
 
+**Service-lane staffing (2026-10-12).** The live two-project window found that
+an offline native lead could execute its Auto round in the service lane, but
+`hire_agent` unconditionally refused autonomous turns (builtin LOCAL-VUH-6).
+An autonomous service turn may now hire through the ordinary native path only
+when the master switch is on, the owner's saved global autonomy is Full, and
+the resolved project is on Auto. Project overrides must still allow everyday
+and outward work and lead-owned machine setup. A project release override does
+not change this hiring permission. Policy and original conversation authority
+are reread at native admission boundaries; the existing project/role caps,
+machine admission, account holds, checkout and delivery fences still apply.
+Other autonomous turns retain the propose-only refusal with its reason.
+
 There is no token budget to set; account headroom already bounds hiring.
 
 **Goal code.** The goal store, `/goal`, `clankie conversations goal` and the

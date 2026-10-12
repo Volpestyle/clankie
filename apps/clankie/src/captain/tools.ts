@@ -1061,7 +1061,6 @@ function hireAgentTool(
     }),
     executionMode: "sequential",
     execute: async (_id, params) => {
-      if (turn.autonomous === true) throw new Error("Autonomous turns may propose a hire, not execute one");
       if (available?.() === false)
         return json({ outcome: "failed", reason: "herdr_unreachable", deliveryStage: "unavailable" });
       const authority = captureConversationAuthority(turn.conversationAuthority);
@@ -1072,6 +1071,7 @@ function hireAgentTool(
         SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }),
         brief,
         authority,
+        ...(turn.autonomous === true ? ([true] as const) : []),
       );
       if (result.outcome !== "spawned" || brief === undefined || message === undefined)
         return json({ ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) });

@@ -40,6 +40,13 @@ Separately, the owner's autonomy dial (`off`, `low`, `high` by default, or
 `full`; `clankie autonomy` reads it) sets which decisions you take without
 asking; the effective gates arrive in your fleet guidance.
 
+In the service lane, an autonomous `hire_agent` needs the master switch on,
+saved global Full autonomy, and a resolved project on Auto. Project preferences
+must still allow everyday/outward work and lead-owned machine setup. Native
+admission retains the project and role caps, machine governor and account
+holds. Other autonomous turns may propose a hire but cannot execute it; read
+the refusal's reason rather than retrying or starting a pane by shell.
+
 ## Lead review rounds
 
 Every watch wake and periodic round (30 minutes by default) reviews all seats

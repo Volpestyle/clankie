@@ -224,7 +224,7 @@ describe("captain hire_agent", () => {
     expect(hireSeat).not.toHaveBeenCalled();
   });
 
-  it("may be proposed in an autonomous turn, never executed", async () => {
+  it("cannot execute an autonomous hire without host conversation authority", async () => {
     const hireSeat = vi.fn();
     const tool = hireTool(
       captainTools(
@@ -246,7 +246,7 @@ describe("captain hire_agent", () => {
         undefined,
         {} as never,
       ),
-    ).rejects.toThrow(/may propose a hire, not execute one/u);
+    ).rejects.toThrow(/Turn conversation attribution is unavailable/u);
     expect(hireSeat).not.toHaveBeenCalled();
   });
 });

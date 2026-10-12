@@ -36,6 +36,7 @@ import { pruneTidyWorktree, type PruneWorktreeResult } from "./prune-worktree.ts
 import { managedWorktreePaths } from "./tidy-worktrees.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/protocol";
+import { autoHireAuthority } from "./auto-hire-policy.ts";
 import { effectiveFleetAutonomy } from "@clankie/settings";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import type { ProjectHirePolicy } from "./herdr-watch.ts";
@@ -2263,8 +2264,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     (await settings()).linearWebhook.following &&
     (options.linearFollowing === undefined || (await options.linearFollowing()));
   conversations.onLinearWakeReceived = options.linearWakeReceived;
-  const hireSeat: HireSeat = async (request, brief, source) => {
-    const authority = captureConversationAuthority(source);
+  const hireSeat: HireSeat = async (request, brief, source, autonomous) => {
+    const captured = captureConversationAuthority(source);
+    // Retain the original route proof and reread owner policy at every native
+    // admission boundary, including after asynchronous checkout preparation.
+    const authority =
+      autonomous === true
+        ? autoHireAuthority(captured, async () => {
+            const current = await settings();
+            const projectId = await resolveHireProject(request, current.projects, captured);
+            return {
+              autonomy: current.autonomy,
+              project: current.projects.projects.find((entry) => entry.id === projectId),
+              enabled: autonomy.enabled,
+            };
+          })
+        : captured;
     await assertConversationAuthority(authority);
     await refreshFleets();
     if (request.freshIntent && brief === undefined)

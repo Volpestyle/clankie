@@ -95,6 +95,8 @@ export type HireSeat = (
   seat: SpawnOperatorSeat,
   brief?: string,
   authority?: ConversationAuthority,
+  /** Host-stamped service turn; never taken from the model's hire arguments. */
+  autonomous?: boolean,
 ) => Promise<OperatorSeatSpawnResult>;
 
 /**
