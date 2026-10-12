@@ -59,7 +59,7 @@ describe("present tense", () => {
       signal,
     );
   });
-  it("projects precedence and counts waiting live seats", () => {
+  it("projects precedence using the observed working-seat count", () => {
     const sources = { ...idle, thinking: true, inVoice: true, playing: true, activeSeats: 3 };
     expect(projectPresence(sources).mood).toBe("thinking");
     expect(projectPresence({ ...sources, thinking: false }).mood).toBe("in_voice");

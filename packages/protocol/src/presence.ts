@@ -84,7 +84,7 @@ export const OperatorPresenceSnapshotSchema = z
     detail: z.string().max(200),
     /** Source timestamp; null when that source does not expose its start. */
     since: z.string().datetime().nullable(),
-    /** Live registered seats, including seats waiting between turns. */
+    /** Workers whose latest observed status is working; idle/done seats are excluded. */
     activeSeats: z.number().int().nonnegative(),
     /** Running native children of the local Clankie captain; absent when unknown. */
     nativeSubagents: z.number().int().nonnegative().optional(),

@@ -26,7 +26,7 @@ in `packages/protocol`, shaped like `fleet`. It returns:
 - `mood`: `thinking`, `in_voice`, `playing`, `leading`, `needs_you` or `idle`
 - a short `detail`
 - `since`
-- the active seat count
+- the observed working-worker count (the existing `activeSeats` wire field)
 - the pending owner item, if there is one
 
 The service derives it from the existing sources and adds no persisted presence state. It
@@ -88,6 +88,16 @@ The activity strip consumes these labels, falls back to `detail` on older
 services, and hides for idle or unreachable presence. Its pixels are excluded
 from the native mouse mask;
 visible hover controls retain their own interactive rectangles below it.
+
+**Working seats and error faces (VUH-2158).** `activeSeats` and "Leading N
+workers" count only workers whose observed status is `working`, across local
+and remote fleets. Idle, resting, done, blocked and unknown seats are excluded;
+an assignment or registered pane does not establish current work. All clients
+consume the same projection. The crossed-eye `face_error` (`x_x`) comes only
+from a recent failed turn in a private owner thread, lasts at most thirty
+seconds, and clears on a successful turn in that thread. It is independent of
+worker count. A pending owner question takes face precedence. The private app's
+pet art README carries the complete screen-state table.
 
 ## Alternatives
 

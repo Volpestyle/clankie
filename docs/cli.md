@@ -7264,8 +7264,9 @@ immediately before persistence; enrollment also re-observes the native root/repo
 when it answers. The operator `presence` read accepts a cursor and `waitMs` up
 to 30000 ms; callers with the current cursor wait for a projected change. Mood
 priority is needs_you, thinking, in_voice, playing, leading, idle. Thinking
-includes background Discord captain turns. `activeSeats` counts all live
-registered fleet seats, including those waiting between turns. Optional
+includes background Discord captain turns. `activeSeats` and "Leading N workers"
+count only workers with observed `working` status across local and remote fleets;
+idle, resting, done, blocked and unknown seats are excluded. Optional
 `nativeSubagents` counts only running native children of the live local Clankie
 captain session, never workers or their children. It is absent when the parent
 or transcript is unavailable, and zero when a readable parent has no running
@@ -7283,7 +7284,8 @@ body animation. Its priority is `needs_you`, `error`, `new_message`, then
 `working` (thinking or leading) or `voice` (in voice). An observed working
 native captain or running native child also selects `working` without changing
 the mood. Otherwise idle and play have no override. A newly committed captain reply in an owner conversation shows
-`new_message` for ten seconds; a failed owner turn shows `error` for thirty
+`new_message` for ten seconds; a failed owner turn shows `error` (crossed `x_x`
+eyes, independent of worker count) for thirty
 seconds, or until that conversation completes a successful turn. Replayed
 history, worker threads, Discord rooms and forks do not raise these faces.
 The face and its expiry participate in the presence cursor. Reduce Motion

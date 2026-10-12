@@ -316,7 +316,7 @@ export function createOperatorService(
         async () => {
           const currentSeatCursor = ctx.fleetChanges.current();
           if (seatCursor !== currentSeatCursor) {
-            activeSeats = (await ctx.refreshFleet()).length;
+            activeSeats = (await ctx.refreshFleet()).filter((seat) => seat.status === "working").length;
             seatCursor = currentSeatCursor;
           }
           const [voice, play] = await Promise.all([

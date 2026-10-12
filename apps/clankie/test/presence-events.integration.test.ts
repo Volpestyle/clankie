@@ -19,7 +19,7 @@ import type { CaptainDeps } from "../src/captain/deps.ts";
 import { readHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
 import type { HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import { DesktopExpressions } from "../src/captain/desktop.ts";
-import type { DeliveryStage } from "@clankie/protocol";
+import type { DeliveryStage, OperatorFleetSeat } from "@clankie/protocol";
 
 const roots: string[] = [];
 const stores: ConversationStore[] = [];
@@ -45,6 +45,7 @@ async function fixture() {
   const settings = new SettingsStore(join(root, "settings.json"));
   const desktop = new DesktopExpressions(async () => (await settings.load()).desktop);
   const clock = new FleetChangeClock();
+  let seats: OperatorFleetSeat[] = [];
   const runner: ConstructorParameters<typeof ConversationStore>[1] = async (
     id,
     _message,
@@ -89,7 +90,7 @@ async function fixture() {
       embodiment: { getLiveSession: async () => undefined },
     },
     fleetChanges: clock,
-    refreshFleet: async () => [],
+    refreshFleet: async () => seats,
     observeFleet: async () => ({}),
     sessions: new Map([
       [
@@ -118,6 +119,10 @@ async function fixture() {
     settings,
     reportSummaries,
     clock,
+    seats: (value: OperatorFleetSeat[]) => {
+      seats = value;
+      clock.touch();
+    },
     report: async (deliveryId: string, stage: DeliveryStage, conversationId = "global-default") => {
       const text = "Private worker report";
       const accepted = store.submitInbound(
@@ -157,7 +162,7 @@ async function fixture() {
     mode: (value: typeof mode) => {
       mode = value;
     },
-    presence: async (includeFace = true, includeBeats = false) =>
+    presence: async (includeFace = true, includeBeats = false, includeActivities = false) =>
       OperatorPresenceResultSchema.parse(
         JSON.parse(
           JSON.stringify(
@@ -166,6 +171,7 @@ async function fixture() {
               schemaVersion: 1,
               ...(includeFace ? { includeFace: true } : {}),
               ...(includeBeats ? { includeBeats: true } : {}),
+              ...(includeActivities ? { includeActivities: true } : {}),
             }),
           ),
         ),
@@ -193,6 +199,41 @@ async function fixture() {
     },
   };
 }
+
+it("counts only working workers across fleets, updates status transitions, and never selects an error face from load", async () => {
+  const f = await fixture();
+  const statuses = [
+    ...Array<string>(5).fill("working"),
+    "idle",
+    "resting",
+    "done",
+    "blocked",
+    "unknown",
+    ...Array<string>(8).fill("idle"),
+  ];
+  const seats = statuses.map(
+    (status, index): OperatorFleetSeat => ({
+      seatId: `worker-${index}`,
+      occupantId: `occupant-${index}`,
+      personaId: `persona-${index}`,
+      harness: "codex",
+      title: "Fixture worker",
+      status,
+      ...(index === 0 ? { fleet: "remote-fixture" } : {}),
+    }),
+  );
+  f.seats(seats);
+  expect(await f.presence(true, false, true)).toMatchObject({
+    mood: "leading",
+    face: "working",
+    activeSeats: 5,
+    activities: [{ kind: "leading", label: "Leading 5 workers", since: null }],
+  });
+  f.seats(seats.map((seat) => ({ ...seat, status: "done" })));
+  expect(await f.presence(true, false, true)).toMatchObject({ mood: "idle", activeSeats: 0, activities: [] });
+  f.seats(seats.map((seat) => ({ ...seat, status: "working" })));
+  expect(await f.presence()).toMatchObject({ mood: "leading", face: "working", activeSeats: 18 });
+});
 
 it("offers brief hire and confirmed report IDs only to opted-in clients, expires them, and honors quiet hours", async () => {
   const f = await fixture();
