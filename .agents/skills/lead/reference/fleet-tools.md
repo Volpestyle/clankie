@@ -255,11 +255,14 @@ is `clankie agents efficiency review SEAT --conversation ID --json-stdin`.
 last output and a report; `reportPath` is an absolute path to a nonempty report
 when no worker report was kept. It refuses unsent drafts, owner-interactive or
 hand-started panes, unkept results, and `unlanded_work`: the worker's start or
-foreground worktree has commits not on `origin/main` by content
-(`git cherry`) or uncommitted files, or is on a remote fleet and unreadable.
-Land the work or hand it to its owner; pass `unlandedReason` only when leaving
-it is deliberate, and it stays with the close record. The app's and TUI's
-close (`close_seat`) holds the same way. A refusal never authorizes a raw close.
+foreground worktree is dirty/unreadable, or its unlanded commits lack a handoff.
+Clean commits permit closing when every commit is in a live merge-queue request,
+reachable from a verified pushed remote ref, or covered by a current-HEAD
+`worth_landing`/`safe_to_drop` decision. The close receipt and lead history keep
+`handoffs` with covered commits and request/ref/decision references. An explicit
+`unlandedReason` may cover clean local commits; dirty files always refuse.
+The app's and TUI's operator close retains its explicit-reason worktree guard.
+A refusal never authorizes a raw close.
 After the close, the seat's `deliverable` issue moves to `issueStatus`
 (`done` needs `evidence`, else it becomes `verifying`; default `paused`), or stays
 In Progress when another live seat holds the same key, and gets `reason` as a

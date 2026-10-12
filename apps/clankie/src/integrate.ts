@@ -294,6 +294,45 @@ export class IntegrationQueue {
       interrupted: batches.filter((b) => b.state === "interrupted"),
     };
   }
+  /** Only admitted, still live requests hold commits; a historical record is not a handoff. */
+  async commitHandoffs(path: string, commits: readonly string[]) {
+    const common = async (directory: string) =>
+      (await this.git(directory, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim();
+    const identity = await common(path);
+    const name =
+      identity === (await common(this.options.core))
+        ? "core"
+        : this.options.app && identity === (await common(this.options.app))
+          ? "app"
+          : undefined;
+    if (!name) return [];
+    const requests = new Map<string, IntegrationRun>();
+    for (const member of [
+      ...this.pending,
+      ...this.retries.flatMap((job) => job.members),
+      ...(this.current?.job.members ?? []),
+    ]) {
+      if (!this.withdrawn.has(member.batch.id)) requests.set(member.batch.id, member.batch.request);
+    }
+    const result: { commit: string; requestId: string }[] = [];
+    for (const [requestId, request] of requests) {
+      for (const ref of request[name] ?? []) {
+        const commit = (
+          await this.git(path, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]).catch(
+            () => undefined,
+          )
+        )?.trim();
+        if (commit && commits.includes(commit)) result.push({ commit, requestId });
+      }
+    }
+    const live = new Set<string>();
+    for (const requestId of requests.keys()) {
+      const batch = await this.status(requestId);
+      if (this.running.has(requestId) && !this.withdrawn.has(requestId) && active.has(batch.state))
+        live.add(requestId);
+    }
+    return result.filter((item) => live.has(item.requestId));
+  }
   /** Bounded read of this queue's active heads; followers cannot page by waiting age. */
   async progress(): Promise<readonly FleetProgressObservation[]> {
     if (this.running.size > 256) throw Error("Integration progress inventory exceeds its bound");

@@ -1339,6 +1339,12 @@ const captain = createCaptain(
           },
         }),
     deployHolds: () => deployHolds.list(),
+    ...(integration
+      ? {
+          commitHandoffs: (path: string, commits: readonly string[]) =>
+            integration.commitHandoffs(path, commits),
+        }
+      : {}),
     roomObservations,
     conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
     workItems,

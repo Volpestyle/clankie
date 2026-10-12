@@ -700,6 +700,12 @@ it("a push request reads pushing from its pass until it lands, and one whose pus
   const parkedSha = await commit(f.core.source, "parked", "two");
   await runIntegrationCommand([parkedSha, "--id", parkedId, "--push", "--no-wait"], cli);
   await reachedPass;
+  expect(await f.queue.commitHandoffs(f.core.source, [parkedSha])).toContainEqual({
+    commit: parkedSha,
+    requestId: parkedId,
+  });
+  // Historical receipts in a fresh queue are not live ownership.
+  expect(await new IntegrationQueue(f.queue.options).commitHandoffs(f.core.source, [parkedSha])).toEqual([]);
   const waiting = runIntegrationCommand([parkedSha, "--id", parkedId, "--push"], cli);
   expect((await runIntegrationCommand(["status", parkedId], cli)).batch?.state).toBe("pushing");
   resume();
@@ -969,6 +975,10 @@ if (existsSync('broken')) process.exit(9);
   expect(isolated.progress!.estimatedCompletionAt).not.toBeNull();
   const queued = await status("broken");
   expect(queued.state).toBe("queued");
+  expect(await f.queue.commitHandoffs(f.core.source, [commits.get("broken")!])).toContainEqual({
+    commit: commits.get("broken")!,
+    requestId: byName("broken").id,
+  });
   expect(queued.progress!.queuePosition).toBeGreaterThan(0);
   for (const name of ["withdraw", "broken"]) {
     const result = await runIntegrationCommand(
@@ -979,6 +989,7 @@ if (existsSync('broken')) process.exit(9);
       state: "cancelled",
       cancelled: { actor: "Clankie", reason: "replace isolated input" },
     });
+    expect(await f.queue.commitHandoffs(f.core.source, [commits.get(name)!])).toEqual([]);
   }
   // The withdrawn active gate is deliberately green: its pass still cannot authorize a push.
   await release("withdraw");

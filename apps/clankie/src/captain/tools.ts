@@ -1372,7 +1372,7 @@ function herdrWatchTools(
             name: "close_worker_pane",
             label: "Close a finished worker pane",
             description:
-              "Close a worker pane you judge finished, with a one-line reason; its issue moves to issueStatus with that reason as a comment. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts (returning the typed text as draft), owner-interactive/hand-started panes, unkept results, another lead's hire (not_owner, naming its conversation), and unlanded_work: the worker's worktree has commits not on origin/main by content (git cherry) or uncommitted files, or is unreadable (remote). Land the work or hand it to its owner first; pass unlandedReason only when leaving it behind is a deliberate decision, and it is kept with the close record. Unknown styled input or native hire provenance fails closed. The record keeps the input line verbatim as input (typed: false is a faint native ghost such as Claude's suggested next prompt). Does not decide whether the work is done. Never bypass a refusal with a raw close.",
+              "Close a worker pane you judge finished, with a one-line reason; its issue moves to issueStatus with that reason as a comment. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts (returning the typed text as draft), owner-interactive/hand-started panes, unkept results, another lead's hire (not_owner, naming its conversation), and unlanded_work: dirty or unreadable worktrees, or commits not on origin/main by content without a handoff. Clean unlanded commits allow close when every commit is in a live merge-queue request, reachable from a verified pushed remote ref, or covered by a worth_landing/safe_to_drop decision at current HEAD. The close receipt records handoffs. Pass unlandedReason only for a deliberate decision about clean commits; dirty files always refuse. Unknown styled input or native hire provenance fails closed. The record keeps the input line verbatim as input (typed: false is a faint native ghost such as Claude's suggested next prompt). Does not decide whether the work is done. Never bypass a refusal with a raw close.",
             parameters: Type.Object({
               pane: Type.String({ minLength: 1, maxLength: 256 }),
               reason: Type.String({ minLength: 1, maxLength: 512 }),
@@ -1381,7 +1381,7 @@ function herdrWatchTools(
                   minLength: 1,
                   maxLength: 512,
                   description:
-                    "Only after an unlanded_work refusal: one line on why those commits or files may stay behind (e.g. superseded by a landed change, or handed to their owner).",
+                    "Only after an unlanded_work refusal: one line on why those clean commits may stay behind (e.g. superseded by a landed change, or handed to their owner).",
                 }),
               ),
               reportPath: Type.Optional(

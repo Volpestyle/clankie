@@ -27,13 +27,16 @@ infer a hire from its name, report route or re-adoption.
 
 The service protects unsent drafts, owner-interactive or hand-started panes you
 did not hire, results not kept, and unlanded work: `unlanded_work` names the
-worker's worktree with commits not on `origin/main` by content or uncommitted
-files. `git cherry` skips merge commits: a merge not reachable from main
-also holds close and prune, even if all its ordinary patches landed. Land it
-or inspect its resolution and record a deliberate decision. Land other work
-or hand it to its owner first. Pass `unlandedReason` only when
-leaving it is a deliberate decision (superseded, a spike); the reason stays
-with the close record and the worktree's decision. Unknown draft state or provenance is a
+worker's dirty or unreadable worktree, or commits without a handoff. Clean
+unlanded commits allow close when every commit is in a live merge-queue request,
+reachable from a verified pushed remote ref, or covered by a `worth_landing` or
+`safe_to_drop` decision at the current HEAD. The close receipt and lead history
+keep the handoff kind, commit IDs and request/ref/decision reference. Stale
+tracking refs and stale decisions do not count. `git cherry` skips merges, so
+unique merge resolutions require the same handoff. Dirty files always refuse,
+even with a decision or `unlandedReason`. Pass `unlandedReason` only for a
+deliberate decision about clean commits; it stays in the close record and ledger.
+Unknown draft state or provenance is a
 technical failure: leave that pane alone and explain the gap. A missing Herdr
 session on a reattached pane is not evidence that the worker is finished or that
 its results are lost. Never bypass a refusal with raw pane-close or keystrokes.

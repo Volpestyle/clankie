@@ -64,6 +64,10 @@ export interface CaptainDeps {
   readonly runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
   /** Current deploy holds, shown in the lead round with holder, age and time left. */
   readonly deployHolds?: () => Promise<import("@clankie/protocol/integrate").DeployHold[]>;
+  readonly commitHandoffs?: (
+    path: string,
+    commits: readonly string[],
+  ) => Promise<{ commit: string; requestId: string }[]>;
   readonly roomObservations?: import("../discord-room-observations.ts").DiscordRoomObservations;
   /** Host-proven original body account, presence, source receipt and opt-in. */
   readonly conversationRouteAuthorized?: (

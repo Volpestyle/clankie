@@ -647,7 +647,7 @@ async function workerWorktree() {
   return { repo, tree };
 }
 
-it("refuses to close a worker whose worktree holds unlanded commits or uncommitted files, until a reason is recorded", async () => {
+it("refuses dirty files even with a reason, and allows an explicit reason for clean local commits", async () => {
   const w = await workerWorktree();
   await writeFile(join(w.tree, "feature.txt"), "unlanded\n");
   await git(w.tree, "add", "feature.txt");
@@ -661,6 +661,16 @@ it("refuses to close a worker whose worktree holds unlanded commits or uncommitt
     worktrees: [{ state: "unreconciled", branch: "pip/vuh-1", unlandedCommits: 1, dirtyFiles: 1 }],
   });
   expect(f.closes()).toBe(0);
+  expect(
+    await f.tidy.close(
+      { pane: "w1:p1", reason: "Done", reportPath: f.reportPath, unlandedReason: "Superseded" },
+      authority,
+    ),
+  ).toMatchObject({ outcome: "refused", reason: "unlanded_work" });
+  await rm(join(w.tree, "notes.txt"));
+  expect(
+    await f.tidy.close({ pane: "w1:p1", reason: "Done", reportPath: f.reportPath }, authority),
+  ).toMatchObject({ outcome: "refused", reason: "unlanded_work" });
   const closed = await f.tidy.close(
     {
       pane: "w1:p1",
@@ -675,7 +685,7 @@ it("refuses to close a worker whose worktree holds unlanded commits or uncommitt
     entry: {
       unlanded: {
         reason: "Spike superseded by the landed design",
-        worktrees: [{ unlandedCommits: 1, dirtyFiles: 1 }],
+        worktrees: [{ unlandedCommits: 1, dirtyFiles: 0 }],
       },
     },
   });
@@ -689,6 +699,60 @@ it("refuses to close a worker whose worktree holds unlanded commits or uncommitt
     decision: "closed_unreconciled",
     reason: "Spike superseded by the landed design",
     by: "lead: Pip",
+  });
+  f.watch.close();
+});
+
+it.each(["worth_landing", "safe_to_drop"] as const)(
+  "closes clean commits covered by a current HEAD %s decision, retaining its receipt",
+  async (decision) => {
+    const w = await workerWorktree();
+    await writeFile(join(w.tree, "feature.txt"), "feature\n");
+    await git(w.tree, "add", "feature.txt");
+    await git(w.tree, "commit", "--quiet", "-m", "feature");
+    const f = await fixture({ cwd: w.tree, socket: true });
+    const recorded = await f.tidy.decideWorktree(
+      { repository: w.repo, path: w.tree, decision, reason: "Reviewed handoff" },
+      "lead",
+    );
+    const closed = await f.tidy.close({ pane: "w1:p1", reason: "Done", reportPath: f.reportPath }, authority);
+    expect(closed).toMatchObject({
+      outcome: "closed",
+      entry: { handoffs: [{ kind: decision, reference: recorded.id, head: recorded.head }] },
+    });
+    expect(new PaneTidy(f.path, f.ports).leadHistory()[0]?.handoffs?.[0]?.reference).toBe(recorded.id);
+    f.watch.close();
+  },
+);
+
+it("refuses stale decisions and partially pushed history, then closes only when every commit is pushed", async () => {
+  const w = await workerWorktree();
+  const origin = join(w.repo, "..", "remote.git");
+  await exec("git", ["init", "--quiet", "--bare", origin]);
+  await git(w.repo, "remote", "add", "origin", origin);
+  await git(w.repo, "push", "origin", "main");
+  await writeFile(join(w.tree, "feature.txt"), "first\n");
+  await git(w.tree, "add", "feature.txt");
+  await git(w.tree, "commit", "--quiet", "-m", "first");
+  const f = await fixture({ cwd: w.tree, socket: true });
+  await f.tidy.decideWorktree(
+    { repository: w.repo, path: w.tree, decision: "worth_landing", reason: "First only" },
+    "lead",
+  );
+  await git(w.tree, "push", "origin", "HEAD:refs/heads/park/first");
+  await writeFile(join(w.tree, "feature.txt"), "second\n");
+  await git(w.tree, "commit", "--quiet", "-am", "second");
+  // A fabricated tracking ref must not count as a pushed ref.
+  await git(w.tree, "update-ref", "refs/remotes/origin/park/fake", "HEAD");
+  expect(
+    await f.tidy.close({ pane: "w1:p1", reason: "Done", reportPath: f.reportPath }, authority),
+  ).toMatchObject({ outcome: "refused", reason: "unlanded_work" });
+  await git(w.tree, "push", "origin", "HEAD:refs/heads/park/all");
+  expect(
+    await f.tidy.close({ pane: "w1:p1", reason: "Done", reportPath: f.reportPath }, authority),
+  ).toMatchObject({
+    outcome: "closed",
+    entry: { handoffs: expect.arrayContaining([expect.objectContaining({ kind: "remote_ref" })]) },
   });
   f.watch.close();
 });

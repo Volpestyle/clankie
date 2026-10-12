@@ -147,6 +147,15 @@ the same checks. Select the last known good batch; the tool does not decide
 whether a production failure invalidates a previously passed tree. History
 remains intact; no force push is used.
 
+A finished worker can close before its commits land: `close_worker_pane` accepts
+clean unlanded commits when every commit is in a live request, reachable from a
+verified pushed remote head/tag, or covered by a `worth_landing`/`safe_to_drop`
+decision at its current HEAD. Its receipt and lead history record the handoff
+kind and request, remote ref or decision ID with covered commits. Queue history,
+cancelled/interrupted requests, stale remote-tracking refs and old-HEAD decisions
+do not count. Dirty or unreadable worktrees still refuse. Closing a pane keeps
+its worktree; it does not cancel the queue request or authorize pruning.
+
 ## Gates on a linked machine
 
 With `clankie fleet set --remote-gates on` (off by default), a core-only batch

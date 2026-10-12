@@ -2451,6 +2451,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const paneTidy: PaneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
     runner: herdrRunner,
     runtimeRoot: options.repoRoot,
+    ...(deps.commitHandoffs ? { commitHandoffs: deps.commitHandoffs } : {}),
     reclaimCaches,
     prune: (repository, path, guard) => pruneWorktree(repository, path, guard),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),

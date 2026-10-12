@@ -260,7 +260,9 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
   with merge commits outside main needs explicit review: `git cherry` omits
   merges and cannot prove that their conflict resolutions landed.
   A worktree holding unlanded work is never closed or forgotten silently; the close
-  refuses `unlanded_work` until it lands or you give `unlandedReason`.
+  accepts clean unlanded work with a live queue, verified pushed ref, or current-HEAD
+  worth_landing/safe_to_drop decision and records that handoff. Dirty files refuse;
+  local-only clean commits still need a decision or explicit `unlandedReason`.
   Doctor lists unreconciled worktrees by owner and age. Mail the owner
   (`mail_owner_update`) about one over a day old whose owner is gone and
   that you cannot land or decide yourself; nothing mails it automatically.

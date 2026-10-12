@@ -39,7 +39,18 @@ import { describeRetainedWorktrees, listTidyWorktrees, type TidyWorktreesResult 
 import { WorktreeDecisions, workerWorktreeHold } from "./worktree-decisions.ts";
 
 const UNDO_MS = 5 * 60_000;
+const HandoffSchema = z
+  .object({
+    path: z.string(),
+    head: z.string(),
+    commits: z.array(z.string()),
+    kind: z.enum(["merge_queue", "remote_ref", "worth_landing", "safe_to_drop"]),
+    reference: z.string(),
+  })
+  .strict();
+type Handoff = z.infer<typeof HandoffSchema>;
 const EntrySchema = ClosedWorkerPaneSchema.extend({
+  handoffs: z.array(HandoffSchema).optional(),
   sessionId: z.string().min(1),
   workingDirectory: z.string().min(1),
   owner: ConversationOwnerSchema,
@@ -134,17 +145,19 @@ function publicEntry(entry: Entry): ClosedWorkerPane {
     closedBy: _by,
     input: _input,
     undoFailure: _undo,
+    handoffs: _handoffs,
     ...visible
   } = entry;
   return ClosedWorkerPaneSchema.parse(visible);
 }
 /** The lead's view: the public record plus what was in the input line and why Undo failed. */
-export type ClosedWorkerPaneHistory = ClosedWorkerPane & Pick<Entry, "input" | "undoFailure">;
+export type ClosedWorkerPaneHistory = ClosedWorkerPane & Pick<Entry, "input" | "undoFailure" | "handoffs">;
 function leadEntry(entry: Entry): ClosedWorkerPaneHistory {
   return {
     ...publicEntry(entry),
     ...(entry.input ? { input: entry.input } : {}),
     ...(entry.undoFailure ? { undoFailure: entry.undoFailure } : {}),
+    ...(entry.handoffs ? { handoffs: entry.handoffs } : {}),
   };
 }
 
@@ -157,6 +170,10 @@ export class PaneTidy {
   readonly decisions: WorktreeDecisions;
   private readonly ports: {
     runner: HerdrWatchRunner;
+    commitHandoffs?(
+      path: string,
+      commits: readonly string[],
+    ): Promise<{ commit: string; requestId: string }[]>;
     reclaimCaches?(
       repository: string,
       path: string | undefined,
@@ -353,6 +370,104 @@ export class PaneTidy {
       fail("authority_unavailable");
     }
   }
+  /** Check every held commit, including merge resolutions, against an actual handoff. */
+  private async worktreeHandoffs(agent: HerdrAgentSnapshot) {
+    const held: WorktreeReconciliation[] = [];
+    const handoffs: Handoff[] = [];
+    for (const work of await workerWorktreeHold(agent)) {
+      if (work.state === "unknown" || work.dirtyFiles !== 0 || !work.head) {
+        held.push(work);
+        continue;
+      }
+      try {
+        const decision = this.decisions.latest(work.path, work.head);
+        const base = (
+          await checkoutGit(work.path, ["rev-parse", "--verify", "origin/main^{commit}"]).catch(() =>
+            checkoutGit(work.path, ["rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}"]),
+          )
+        ).trim();
+        const commits = [
+          ...new Set([
+            ...(await checkoutGit(work.path, ["cherry", base, work.head]))
+              .split("\n")
+              .filter((line) => line.startsWith("+ "))
+              .map((line) => line.slice(2).trim()),
+            ...(await checkoutGit(work.path, ["rev-list", "--merges", `${base}..${work.head}`]))
+              .trim()
+              .split("\n")
+              .filter(Boolean),
+          ]),
+        ];
+        const receipt = (kind: Handoff["kind"], reference: string, covered: string[]): Handoff => ({
+          path: work.path,
+          head: work.head!,
+          kind,
+          reference,
+          commits: covered,
+        });
+        const covered = new Set<string>();
+        const proof: Handoff[] = [];
+        for (const item of (await this.ports.commitHandoffs?.(work.path, commits).catch(() => [])) ?? []) {
+          if (!commits.includes(item.commit)) continue;
+          covered.add(item.commit);
+          proof.push(receipt("merge_queue", item.requestId, [item.commit]));
+        }
+        if (covered.size < commits.length) {
+          // Remote-tracking refs alone can be stale or locally manufactured. Verify the
+          // advertised pushed heads/tags without fetching or mutating the worker's refs.
+          for (const remote of (await checkoutGit(work.path, ["remote"]))
+            .trim()
+            .split("\n")
+            .filter(Boolean)) {
+            const refs = await checkoutGit(work.path, ["ls-remote", "--heads", "--tags", "--", remote]).catch(
+              () => "",
+            );
+            for (const line of refs.trim().split("\n")) {
+              const [sha, ref] = line.split(/\s+/u);
+              if (!sha || !ref || !/^[a-f0-9]{40,64}$/u.test(sha)) continue;
+              const reachable: string[] = [];
+              for (const commit of commits.filter((commit) => !covered.has(commit))) {
+                const yes = await checkoutGit(work.path, ["merge-base", "--is-ancestor", commit, sha]).then(
+                  () => true,
+                  () => false,
+                );
+                if (yes) {
+                  covered.add(commit);
+                  reachable.push(commit);
+                }
+              }
+              if (reachable.length) proof.push(receipt("remote_ref", `${remote}/${ref}@${sha}`, reachable));
+              if (covered.size === commits.length) break;
+            }
+            if (covered.size === commits.length) break;
+          }
+        }
+        if (
+          covered.size < commits.length &&
+          decision &&
+          ["worth_landing", "safe_to_drop"].includes(decision.decision)
+        ) {
+          const remaining = commits.filter((commit) => !covered.has(commit));
+          proof.push(receipt(decision.decision as "worth_landing" | "safe_to_drop", decision.id, remaining));
+          for (const commit of remaining) covered.add(commit);
+        }
+        // HEAD and cleanliness must still describe the proof we just read.
+        const latest = await reconcileWorktree(work.path);
+        if (
+          covered.size !== commits.length ||
+          !latest ||
+          latest.head !== work.head ||
+          latest.dirtyFiles !== 0 ||
+          latest.state === "unknown"
+        )
+          held.push(latest ?? work);
+        else handoffs.push(...proof);
+      } catch {
+        held.push(work);
+      }
+    }
+    return { held, handoffs };
+  }
   async close(
     input: {
       pane: string;
@@ -425,8 +540,9 @@ export class PaneTidy {
       reportPath = this.state.reports.find((report) => report.sessionKey === key)!.reportPath;
       // Restart resumes the same thread in the same directory, so nothing is left behind.
       const checkWorktrees = !input.nativeOnly;
-      const held = checkWorktrees ? await workerWorktreeHold(agent) : [];
-      if (held.length && !unlandedReason)
+      let checked = checkWorktrees ? await this.worktreeHandoffs(agent) : { held: [], handoffs: [] };
+      const held = checked.held;
+      if (held.length && (!unlandedReason || held.some((work) => (work.dirtyFiles ?? 0) > 0)))
         throw new Failure({ outcome: "refused", reason: "unlanded_work", worktrees: held });
       const raw = await this.ports.runner
         .readPane?.(agent.paneId, "recent-unwrapped", "text")
@@ -458,10 +574,19 @@ export class PaneTidy {
         // The final read just before the native close wins; an emptied line keeps the earlier text.
         if (entry && line) entry.input = line;
         // Work committed or written after the first look still holds the close.
-        if (checkWorktrees && !unlandedReason) {
-          const late = await workerWorktreeHold(latest);
-          if (late.length)
-            throw new Failure({ outcome: "refused", reason: "unlanded_work", worktrees: late });
+        if (checkWorktrees) {
+          checked = await this.worktreeHandoffs(latest);
+          if (
+            checked.held.length &&
+            (!unlandedReason || checked.held.some((work) => (work.dirtyFiles ?? 0) > 0))
+          )
+            throw new Failure({ outcome: "refused", reason: "unlanded_work", worktrees: checked.held });
+          if (entry) {
+            entry.handoffs = checked.handoffs;
+            if (checked.held.length && unlandedReason)
+              entry.unlanded = { reason: unlandedReason, worktrees: checked.held.slice(0, 8) };
+            else delete entry.unlanded;
+          }
         }
         await this.authority(authority);
       };
@@ -483,6 +608,7 @@ export class PaneTidy {
         closedAt: new Date(closedAt).toISOString(),
         undoUntil: new Date(closedAt + UNDO_MS).toISOString(),
         state: "closing",
+        ...(checked.handoffs.length ? { handoffs: checked.handoffs } : {}),
         ...(line ? { input: line } : {}),
         ...(held.length && unlandedReason
           ? { unlanded: { reason: unlandedReason, worktrees: held.slice(0, 8) } }
