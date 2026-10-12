@@ -42,8 +42,9 @@ HIRE_RECEIPT_NATIVE_TEST=1 clankie heavy -- pnpm exec vitest run apps/clankie/te
 
 Raw evidence includes `close/boundary-results.json`,
 `harvest/boundary-results.json` and the corresponding owned Herdr logs. The small
-completed golden lives with the test fixtures. Uploaded raw files are referenced
-by `evidence.json`; this README is the tracked account of their meaning.
+completed golden lives with the test fixtures. The small captures are bundled by their original filenames in the uploaded
+`receipt-proof.json` archive, referenced by `evidence.json`. The compiler report
+is uploaded separately; this README is the tracked account of their meaning.
 
 ## Failed full-hire capture: isolated Herdr 0.9.3 manifest gap
 

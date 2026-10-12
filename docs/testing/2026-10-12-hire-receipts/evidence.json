@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "receipt-proof.json",
+      "size": 27468,
+      "sha256": "552ba90da12736baf1c2739aa8f873e7954b65c1cf86f9ae1719efb68eafd890",
+      "url": "clankie://evidence/sha256/552ba90da12736baf1c2739aa8f873e7954b65c1cf86f9ae1719efb68eafd890"
+    },
+    {
+      "path": "typecheck-report.json",
+      "size": 102013,
+      "sha256": "51cf07d427d38efa03bb5d2c203f8a992e3bcf6975aa08e322b22bc6b181773f",
+      "url": "clankie://evidence/sha256/51cf07d427d38efa03bb5d2c203f8a992e3bcf6975aa08e322b22bc6b181773f"
+    }
+  ]
+}
