@@ -312,7 +312,7 @@ export class HerdrFleetError extends Error {
     super(`${code}: ${message}`);
     this.name = "HerdrFleetError";
     this.code = code;
-    this.definitive = definitive;
+    if (definitive !== undefined) this.definitive = definitive;
   }
 }
 
