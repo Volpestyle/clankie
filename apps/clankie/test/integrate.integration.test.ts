@@ -156,7 +156,12 @@ const guard = async () => {
 };
 
 it("composes in order on fresh origin, installs real siblings, gates privately and durably reloads exact HEAD", async () => {
-  const f = await fixture("assert.ok(existsSync('../clankie-app/package.json'));", true);
+  const f = await fixture(
+    "assert.ok(existsSync('../clankie-app/package.json')); assert.ok(process.argv.includes('--retry-failed-tests'));",
+    true,
+    "assert.equal(process.argv.includes('--retry-failed-tests'), false);",
+    true,
+  );
   const runtime = join(f.root, "nested-runtime");
   await git(f.core.source, "worktree", "add", "--detach", runtime, "HEAD");
   expect(await integrationSources(runtime)).toEqual({ core: f.core.source, app: f.app!.source });

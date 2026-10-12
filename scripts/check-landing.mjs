@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { landingTypechecks } from "./testing/landing-typechecks.mjs";
+import { randomUUID } from "node:crypto";
+import { retryFailedFiles } from "./check-release.mjs";
 import {
   changePatchId,
   recordLandingHistory,
@@ -13,7 +15,10 @@ import {
 const args = process.argv.slice(2);
 const separator = args.indexOf("--");
 const revalidate = (separator < 0 ? args : args.slice(0, separator)).includes("--revalidate");
-const options = (separator < 0 ? args : args.slice(0, separator)).filter((arg) => arg !== "--revalidate");
+const retryTests = (separator < 0 ? args : args.slice(0, separator)).includes("--retry-failed-tests");
+const options = (separator < 0 ? args : args.slice(0, separator)).filter(
+  (arg) => !["--revalidate", "--retry-failed-tests"].includes(arg),
+);
 const vitestArgs = separator < 0 ? [] : args.slice(separator + 1);
 for (let index = 0; index < options.length; index += 2)
   if (!["--root", "--base", "--report"].includes(options[index]))
@@ -166,7 +171,10 @@ if (!exit) {
   }
 }
 const graphPath = `${reportPath}.graph.json`;
+const firstReport = `${reportPath}.tests.json`;
+const testRunId = randomUUID();
 rmSync(graphPath, { force: true });
+rmSync(firstReport, { force: true });
 run(
   "tests",
   [
@@ -179,14 +187,45 @@ run(
     "--changed",
     base,
     "--bail",
-    "1",
+    retryTests ? "0" : "1",
     "--passWithNoTests",
     ...(vitestArgs.some((argument) => argument.startsWith("--reporter")) ? [] : ["--reporter=default"]),
     "--reporter=./scripts/testing/landing-graph-reporter.mjs",
+    ...(retryTests ? ["--reporter=./scripts/testing/release-test-reporter.mjs"] : []),
     ...vitestArgs,
   ],
-  { CLANKIE_LANDING_GRAPH: graphPath },
+  {
+    CLANKIE_LANDING_GRAPH: graphPath,
+    ...(retryTests
+      ? {
+          CLANKIE_RELEASE_TEST_REPORT: firstReport,
+          CLANKIE_RELEASE_TEST_RUN_ID: testRunId,
+          CLANKIE_RELEASE_RETRY_FILE: "",
+        }
+      : {}),
+  },
 );
+if (retryTests && exit && report.phases.at(-1)?.name === "tests" && !report.phases.at(-1).signal) {
+  report.testRecovery = { firstExitCode: exit, firstReport, flakyFiles: [], reruns: [] };
+  const stable = async () => {
+    if (git("rev-parse", "HEAD") !== head || (await fingerprint()) !== source)
+      throw new Error("Source changed before the isolated rerun; landing blocked.");
+  };
+  const recovered = await retryFailedFiles({
+    root,
+    firstReport,
+    runId: testRunId,
+    purpose: "landing",
+    maxFlakyFiles: Infinity,
+    beforeRetry: stable,
+    onRetry: (receipt) => {
+      report.testRecovery.reruns.push(receipt);
+      if (receipt.passed) report.testRecovery.flakyFiles.push(receipt.file);
+      save();
+    },
+  });
+  if (recovered) exit = 0;
+}
 if (!exit && existsSync(graphPath)) {
   report.tests = JSON.parse(readFileSync(graphPath, "utf8"));
   rmSync(graphPath, { force: true });

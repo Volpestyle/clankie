@@ -914,6 +914,14 @@ the service returned `spawned`; completion still needs the matching native event
 
 ### `integrate`
 
+Clankie's core queue landing gates rerun each failed Vitest file once in isolation on the same
+composed tree before isolating batch members. The first attempt completes its
+original selection; recovery requires complete accounted results and every
+rerun passing. Non-test failures, repeated failures, interruptions and changed
+sources still block. `status UUID` includes `repos[].gate.testRecovery` with
+the flaky files, first failure and rerun receipts. The direct root gate uses
+this policy only with `pnpm check:landing --retry-failed-tests`.
+
 ```bash
 clankie integrate CORE_SHA... [--app APP_SHA]... [--push] [--id UUID] [--no-wait]
 clankie integrate status [UUID]

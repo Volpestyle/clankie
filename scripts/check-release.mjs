@@ -67,7 +67,14 @@ function report(path, runId, root) {
   return data;
 }
 
-function summary(root, flaky, blocked, message, summaryFile = process.env.GITHUB_STEP_SUMMARY) {
+function summary(
+  root,
+  flaky,
+  blocked,
+  message,
+  summaryFile = process.env.GITHUB_STEP_SUMMARY,
+  purpose = "release",
+) {
   const text = [
     "## Flaky on first attempt",
     "",
@@ -79,7 +86,7 @@ function summary(root, flaky, blocked, message, summaryFile = process.env.GITHUB
     message,
     "",
   ].join("\n");
-  writeFileSync(join(root, ".data/qa/release-check-summary.md"), text);
+  writeFileSync(join(root, `.data/qa/${purpose}-check-summary.md`), text);
   if (summaryFile) appendFileSync(summaryFile, text);
   console.log(text);
 }
@@ -90,6 +97,10 @@ export async function retryFailedFiles({
   firstReport,
   runId,
   summaryFile = process.env.GITHUB_STEP_SUMMARY,
+  purpose = "release",
+  maxFlakyFiles = 2,
+  beforeRetry = async () => {},
+  onRetry = () => {},
 }) {
   mkdirSync(join(root, ".data/qa"), { recursive: true });
   const flaky = [],
@@ -100,8 +111,10 @@ export async function retryFailedFiles({
     if (first.reason !== "failed" || !failed.length)
       throw new Error("Failure is outside Vitest test files; release blocked.");
     for (const [index, file] of failed.entries()) {
+      await beforeRetry();
       const retryId = randomUUID();
-      const retryReport = join(root, `.data/qa/release-rerun-${index + 1}.json`);
+      const retryReport = join(root, `.data/qa/${purpose}-rerun-${index + 1}.json`);
+      const startedAt = new Date().toISOString();
       const outcome = await run(
         "pnpm",
         [
@@ -157,22 +170,32 @@ export async function retryFailedFiles({
         passed = false;
       }
       (passed ? flaky : blocked).push(file.path);
+      await onRetry({
+        file: file.path,
+        report: retryReport,
+        exitCode: outcome.code,
+        signal: outcome.signal,
+        passed,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      });
       if (outcome.signal || outcome.interrupted)
         throw new Error("Isolated rerun interrupted; release blocked.");
     }
-    const ok = blocked.length === 0 && flaky.length <= 2;
+    const ok = blocked.length === 0 && flaky.length <= maxFlakyFiles;
     summary(
       root,
       flaky,
       blocked,
       ok
         ? "Every failed file passed its one isolated rerun."
-        : "Release blocked: a rerun failed or more than 2 files flaked.",
+        : `${purpose} blocked: a rerun failed or the flaky-file limit was exceeded.`,
       summaryFile,
+      purpose,
     );
     return ok;
   } catch (error) {
-    summary(root, flaky, blocked, error.message, summaryFile);
+    summary(root, flaky, blocked, error.message, summaryFile, purpose);
     return false;
   }
 }

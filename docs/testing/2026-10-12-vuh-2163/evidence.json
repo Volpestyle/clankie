@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "batch-proof.tar",
+      "size": 393728,
+      "sha256": "8202bb6805753a62ad97b4234ac768563a745081b7d7b0c1b2a4147445b5db46",
+      "url": "clankie://evidence/sha256/8202bb6805753a62ad97b4234ac768563a745081b7d7b0c1b2a4147445b5db46"
+    },
+    {
+      "path": "final-source-and-contract.tar",
+      "size": 47616,
+      "sha256": "d12b135b8f472a494d8d0a88a39a57b103a04d15ee1a1cc21c6c6e5a3f1b8033",
+      "url": "clankie://evidence/sha256/d12b135b8f472a494d8d0a88a39a57b103a04d15ee1a1cc21c6c6e5a3f1b8033"
+    }
+  ]
+}

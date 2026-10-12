@@ -112,10 +112,13 @@ case "$op" in
     git -C "$REPO" worktree add -q --detach "$B/clankie" "$head" || exit 3
     [ "$(git -C "$B/clankie" rev-parse HEAD)" = "$head" ] || exit 3 ;;
   install) run pnpm install --frozen-lockfile --store-dir "$B/store" --package-import-method=copy ;;
-  gate) touch "$B/gating"; run env CLANKIE_LANDING_BASE="$3" pnpm check:landing; code=$?; rm -f "$B/gating"; exit $code ;;
+  gate) touch "$B/gating"; run env CLANKIE_LANDING_BASE="$3" pnpm check:landing --retry-failed-tests; code=$?; rm -f "$B/gating"; exit $code ;;
   report)
-    for name in landing-gate.json landing-gate.json.graph.json; do
+    for name in landing-gate.json landing-gate.json.graph.json landing-gate.json.tests.json; do
       if [ -f "$B/clankie/.local/$name" ]; then printf '%s %s\n' "$name" "$(base64 < "$B/clankie/.local/$name" | tr -d '\n')"; fi
+    done
+    for path in "$B/clankie/.data/qa"/landing-rerun-*.json; do
+      if [ -f "$path" ]; then printf '%s %s\n' "$(basename "$path")" "$(base64 < "$path" | tr -d '\n')"; fi
     done ;;
   dispose) git -C "$REPO" worktree remove --force "$B/clankie" 2>/dev/null; rm -rf "$B" ;;
   *) exit 2 ;;
@@ -241,10 +244,23 @@ export function wslGateRunner(options: {
       if (exitCode !== 0) throw new Error(`Could not read the gate report from ${options.machine}`);
       for (const line of stdout.split("\n").filter(Boolean)) {
         const [name, body] = line.split(" ");
-        if (!name || body === undefined || !/^landing-gate\.json(\.graph\.json)?$/u.test(name)) continue;
-        const target = join(directory, ".local", name);
+        if (
+          !name ||
+          body === undefined ||
+          !/^(?:landing-gate\.json(?:\.(?:graph|tests)\.json)?|landing-rerun-[1-9][0-9]*\.json)$/u.test(name)
+        )
+          continue;
+        const target = join(directory, name.startsWith("landing-rerun-") ? ".data/qa" : ".local", name);
         await mkdir(dirname(target), { recursive: true });
         await writeFile(target, Buffer.from(body, "base64"));
+      }
+      const reportPath = join(directory, ".local/landing-gate.json");
+      const report = JSON.parse(await readFile(reportPath, "utf8"));
+      if (report.testRecovery) {
+        report.testRecovery.firstReport = join(directory, ".local/landing-gate.json.tests.json");
+        for (const [index, receipt] of report.testRecovery.reruns.entries())
+          receipt.report = join(directory, `.data/qa/landing-rerun-${index + 1}.json`);
+        await writeFile(reportPath, JSON.stringify(report));
       }
     },
     async dispose(signal) {

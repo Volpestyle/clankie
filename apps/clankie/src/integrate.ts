@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { Writable } from "node:stream";
 import {
   IntegrationBatchSchema,
+  IntegrationTestRecoverySchema,
   INTEGRATE_MAX_BATCH_MEMBERS,
   type IntegrationBatch,
   type IntegrationRepo,
@@ -878,7 +879,10 @@ export class IntegrationQueue {
                 "--package-import-method=copy",
               ]
             : name === "gate"
-              ? [gateScript]
+              ? [
+                  gateScript,
+                  ...(repo.name === "core" && gateScript === "check:landing" ? ["--retry-failed-tests"] : []),
+                ]
               : [gateScript, "--revalidate"];
         const child = spawn("pnpm", args, {
           cwd: repo.directory,
@@ -913,8 +917,25 @@ export class IntegrationQueue {
       log,
       ...(runner && name !== "revalidate" ? { machine: runner.machine } : {}),
     };
+    if (name === "gate" && !runner) {
+      const recovery = await this.testRecovery(repo, head);
+      if (recovery) Object.assign(record, { testRecovery: recovery });
+    }
     if (remoteError !== undefined) throw new RemoteCommandFailure(remoteError, record);
     return record;
+  }
+
+  private async testRecovery(repo: IntegrationRepo, head: string) {
+    let report: { head?: string; testRecovery?: unknown } | undefined;
+    try {
+      report = JSON.parse(await readFile(join(repo.directory, ".local/landing-gate.json"), "utf8"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (report?.testRecovery !== undefined) {
+      if (report.head !== head) throw new Error("Test recovery report does not match the gated HEAD");
+      return IntegrationTestRecoverySchema.parse(report.testRecovery);
+    }
   }
 
   private async composeAndGate(batch: IntegrationBatch, reuse?: IntegrationBatch): Promise<void> {
@@ -1201,6 +1222,10 @@ export class IntegrationQueue {
             this.options.remotePreparationTimeoutMs ?? 120_000,
             (signal) => runner.collect(repo.directory, signal),
           );
+        if (runner) {
+          const recovery = await this.testRecovery(repo, repo.gate.head);
+          if (recovery) repo.gate.testRecovery = recovery;
+        }
       } catch (error) {
         if (!runner) throw error;
         if (error instanceof RemoteCommandFailure) repo.gate = error.record;

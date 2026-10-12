@@ -104,6 +104,22 @@ export function describeDeployHold(hold: DeployHold, now = Date.now()): string {
     expiry === undefined ? "until its canary ends or the owner releases it" : `${span(expiry - now)} left`;
   return `${hold.holder}: ${hold.reason} (held ${span(now - Date.parse(hold.createdAt))}, ${left})`;
 }
+export const IntegrationTestRecoverySchema = z.object({
+  firstExitCode: z.number().int().positive(),
+  firstReport: z.string(),
+  flakyFiles: z.array(z.string()),
+  reruns: z.array(
+    z.object({
+      file: z.string(),
+      report: z.string(),
+      exitCode: z.number().int().nullable(),
+      signal: z.string().nullable(),
+      passed: z.boolean(),
+      startedAt: z.iso.datetime(),
+      finishedAt: z.iso.datetime(),
+    }),
+  ),
+});
 const CommandRecordSchema = z.object({
   head: Sha,
   exitCode: z.number().int().nullable(),
@@ -113,6 +129,7 @@ const CommandRecordSchema = z.object({
   log: z.string(),
   /** The linked machine that ran it; absent when it ran here (VUH-2066). */
   machine: z.string().optional(),
+  testRecovery: IntegrationTestRecoverySchema.optional(),
 });
 const IntegrationRepoSchema = z.object({
   name: z.enum(["core", "app"]),
