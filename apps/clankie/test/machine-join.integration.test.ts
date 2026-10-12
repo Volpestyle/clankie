@@ -234,6 +234,13 @@ test("public CLI waits for owner consent, joins through the relay, and removal r
     expect(large.output).toMatch(/^bounded-prefix/u);
     await f.machines.remove(credential.lease.machineId);
     expect(await running).toBe(0);
+    expect(await f.store.get("clankie-joined-machine")).toBeUndefined();
+    await expect(
+      readJoinedMachineCredential(new FileCredentialStore(join(f.root, "credentials.json"))),
+    ).rejects.toThrow("revoked");
+    expect(
+      await runJoinCommand(["leave"], { joinCredentialStore: f.store, stdout: { write: () => {} } }),
+    ).toBe(0);
     expect(await readJoinedMachineCredential(f.store)).toBeUndefined();
     expect(
       (await f.post("/v1/joined-machines/challenge", { machineId: credential.lease.machineId })).status,

@@ -491,6 +491,7 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
     }));
     await expect(runSeatCommand(["--new"], cli)).rejects.toThrow("join_channel_unavailable");
     await joins.remove(credential.lease.machineId);
+    expect(await channel).toBe("revoked");
     await expect(runSeatCommand(["--new"], cli)).rejects.toThrow("revoked");
   } finally {
     channelAbort.abort();

@@ -56,7 +56,9 @@ UUID deliveryId per report, then reconcile with `message_clankie_status` after
 uncertainty. The lead uses `worker_reports`, `acknowledge_worker_reports` and
 `message_seat` to the returned seat. No SSH link is needed. Other harness seats,
 legacy SSH chat migration and Windows installer/live gateway proof remain follow-ups. Run service start/restart/recover
-at the home; a joined install refuses them locally.
+at the home; a joined install refuses them locally. If access is revoked, the
+lease is erased and local commands retain that specific refusal. Use `clankie join
+leave` to forget it, or join again with fresh owner approval.
 
 ## Configure through the CLI
 

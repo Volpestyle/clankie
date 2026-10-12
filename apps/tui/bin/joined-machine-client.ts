@@ -30,6 +30,7 @@ import {
 } from "@clankie/protocol/machine-join";
 
 const JOINED_MACHINE_CREDENTIAL = "clankie-joined-machine";
+const JOINED_MACHINE_REVOCATION = "clankie-joined-machine-revoked";
 const JoinedMachineCredentialSchema = z
   .object({
     origin: z.string().url(),
@@ -55,9 +56,16 @@ export function machineJoinOrigin(value: string): string {
 }
 export async function readJoinedMachineCredential(
   store: CredentialStore,
+  options: { allowRevoked?: boolean } = {},
 ): Promise<JoinedMachineCredential | undefined> {
   const value = await store.get(JOINED_MACHINE_CREDENTIAL);
-  if (!value) return undefined;
+  if (!value) {
+    if (!options.allowRevoked && (await store.get(JOINED_MACHINE_REVOCATION)))
+      throw new JoinedMachineRevoked(
+        "Joined machine access revoked; use clankie join leave before joining again.",
+      );
+    return undefined;
+  }
   if (value.type !== "api") throw Error("join_credential_invalid");
   const credential = JoinedMachineCredentialSchema.parse(JSON.parse(value.key));
   machineJoinOrigin(credential.origin);
@@ -69,7 +77,11 @@ export async function saveJoinedMachineCredential(
 ): Promise<void> {
   const credential = JoinedMachineCredentialSchema.parse(value);
   machineJoinOrigin(credential.origin);
-  await store.set(JOINED_MACHINE_CREDENTIAL, { type: "api", key: JSON.stringify(credential) });
+  if (!store.updateMany) throw Error("join_credential_atomic_update_unavailable");
+  await store.updateMany([JOINED_MACHINE_CREDENTIAL, JOINED_MACHINE_REVOCATION], async () => ({
+    [JOINED_MACHINE_CREDENTIAL]: { type: "api", key: JSON.stringify(credential) },
+    [JOINED_MACHINE_REVOCATION]: undefined,
+  }));
 }
 export interface JoinedMachinePorts {
   workers?: (request: string, directory: string, signal: AbortSignal) => Promise<string>;
@@ -266,7 +278,13 @@ export async function runJoinedMachineChannel(
         );
       } catch (error) {
         if (!(error instanceof JoinedMachineRevoked)) throw error;
-        await options.store.delete(JOINED_MACHINE_CREDENTIAL);
+        // Erase the lease, but retain a secret-free refusal until explicit leave
+        // or rejoin. An absent lease must not fall back to a local operator.
+        if (!options.store.updateMany) throw Error("join_credential_atomic_update_unavailable");
+        await options.store.updateMany([JOINED_MACHINE_REVOCATION, JOINED_MACHINE_CREDENTIAL], async () => ({
+          [JOINED_MACHINE_CREDENTIAL]: undefined,
+          [JOINED_MACHINE_REVOCATION]: { type: "api", key: "revoked" },
+        }));
         return "revoked";
       }
       if (batch.policy.machineId !== credential.lease.machineId) throw Error("join_identity_refused");
@@ -337,16 +355,21 @@ export async function runJoinedMachineChannel(
   return "left";
 }
 export async function leaveJoinedMachine(
-  credential: JoinedMachineCredential,
+  credential: JoinedMachineCredential | undefined,
   store: CredentialStore,
   fetcher: typeof fetch = fetch,
 ): Promise<void> {
   try {
-    z.object({ ok: z.literal(true) })
-      .strict()
-      .parse(await exchangeJoinedMachine(credential, { op: "leave", results: [] }, fetcher));
+    if (credential)
+      z.object({ ok: z.literal(true) })
+        .strict()
+        .parse(await exchangeJoinedMachine(credential, { op: "leave", results: [] }, fetcher));
   } catch (error) {
     if (!(error instanceof JoinedMachineRevoked)) throw error;
   }
-  await store.delete(JOINED_MACHINE_CREDENTIAL);
+  if (!store.updateMany) throw Error("join_credential_atomic_update_unavailable");
+  await store.updateMany([JOINED_MACHINE_CREDENTIAL, JOINED_MACHINE_REVOCATION], async () => ({
+    [JOINED_MACHINE_CREDENTIAL]: undefined,
+    [JOINED_MACHINE_REVOCATION]: undefined,
+  }));
 }

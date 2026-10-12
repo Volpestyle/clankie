@@ -7423,7 +7423,10 @@ Stdout is newline-delimited `MachineJoinEventSchema`: `approval` contains the
 secret approval `code` and `expiresAt`; `joined` contains `machineId`; `screen`
 contains a matching command `id` and status `result`; `finished` contains the
 channel state `left` or `revoked`. Keep the approval code out of logs and evidence.
-`left` means the process stopped, not that registration was revoked.
+`left` means the process stopped, not that registration was revoked. A revoked
+join deletes its lease and retains a secret-free refusal so later seat launches
+report `revoked` rather than falling back to a local operator. `clankie join leave`
+clears that refusal; approving a new join replaces it.
 
 Keep stdin open. It accepts only `MachineJoinLocalScreenCommandSchema`:
 `{"id":"UUID","action":"screen_status"}` or `screen_stop`. Status and Stop

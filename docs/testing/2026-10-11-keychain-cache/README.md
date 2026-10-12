@@ -67,3 +67,16 @@ The native proof is skipped in normal push/release checks. No evals, production 
 or search-list selection command was issued; create/delete managed only the scratch
 keychain. Integration's exact-tree gate and confirmed push are the landing
 requirements; local focused checks alone do not claim a landed result.
+
+## Consumer reconciliation
+
+Fresh main added joined-seat routing. The channel could delete a revoked join
+lease before the next launch observed the home refusal, causing a local operator
+fallback. Revocation now publishes a secret-free refusal marker before deleting the
+lease; a fresh broker instance reports `revoked`, and explicit leave clears it.
+The joined-seat check waits for channel revocation before attempting its launch.
+
+The harness dry-run fixture now selects a temporary credential file explicitly.
+Its HOME alone never selected an isolated macOS keychain, and the new joined
+lookup exposed that host dependency. Production locked-keychain failures remain
+visible; they are not swallowed to make dry-run pass.

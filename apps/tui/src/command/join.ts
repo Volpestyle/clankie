@@ -133,7 +133,9 @@ export async function runJoinCommand(
       throw Error(USAGE);
     if (action !== "start" && Object.keys(values).some((key) => key !== "json")) throw Error(USAGE);
     const store = options.joinCredentialStore ?? createDefaultCredentialStore({ env });
-    let credential = await readJoinedMachineCredential(store);
+    let credential = await readJoinedMachineCredential(store, {
+      allowRevoked: action === "start" || action === "leave",
+    });
     if (action === "status") {
       stdout.write(
         JSON.stringify(
@@ -145,7 +147,7 @@ export async function runJoinCommand(
       return 0;
     }
     if (action === "leave") {
-      if (credential) await leaveJoinedMachine(credential, store, fetcher);
+      await leaveJoinedMachine(credential, store, fetcher);
       stdout.write('{"ok":true,"left":true}\n');
       return 0;
     }

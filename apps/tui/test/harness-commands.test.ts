@@ -39,6 +39,7 @@ async function fixture() {
     CLAUDE_CONFIG_DIR: root,
     XDG_STATE_HOME: root,
     CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+    CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
     CLANKIE_OPERATOR_TOKEN: `clankie_op_${"a".repeat(43)}`,
   };
   let output = "",
