@@ -159,6 +159,15 @@ list uncertain ownership/activity/drafts for the lead. A new acceptance requires
 its own authorized intent, never an automatic retry. See `docs/cli.md` under
 `repoRoot` for the operator boundary.
 
+Fresh-hire recovery also accepts the retained `freshIntent.id` instead of the native
+receipt UUID: `clankie hire-receipt settle FRESH_INTENT_UUID abandoned` (or
+`abandoned-unknown` / `not-launched`, subject to the same host evidence requirements).
+The lead tool `settle_hire_receipt({receiptId, disposition})` may settle only its
+own conversation's fresh hires; operator API/CLI recovery retains operator authority.
+The result names the requested UUID; its evidence keeps the original native receipt
+UUID and key. No old brief is sent, and no pane is closed. A separately authorized
+new hire may name either settled UUID in `freshIntent.afterReceiptId`.
+
 For an inactive, unconfirmed project allocation left held after a refusal, use
 `clankie hire-receipt settle PROJECT_ALLOCATION_UUID release-allocation` through
 the operator boundary. This UUID is the project allocation, not its native

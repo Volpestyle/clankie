@@ -774,6 +774,15 @@ launches, incomplete census, changed connection or revoked authority are refused
 Current absence cannot reconstruct history. Receipts and evidence are retained;
 the original key stays blocked permanently and no request is resent.
 
+Fresh-hire recovery also accepts the retained `freshIntent.id` instead of the native
+receipt UUID: `clankie hire-receipt settle FRESH_INTENT_UUID abandoned` (or
+`abandoned-unknown` / `not-launched`, subject to the same host evidence requirements).
+The lead tool `settle_hire_receipt({receiptId, disposition})` may settle only its
+own conversation's fresh hires; operator API/CLI recovery retains operator authority.
+The result names the requested UUID; its evidence keeps the original native receipt
+UUID and key. No old brief is sent, and no pane is closed. A separately authorized
+new hire may name either settled UUID in `freshIntent.afterReceiptId`.
+
 `clankie hire-receipt settle PROJECT_ALLOCATION_UUID release-allocation` releases
 an inactive, unconfirmed project hire claim after a complete native inventory.
 Use the allocation UUID from the retained project-hire evidence, rather than a

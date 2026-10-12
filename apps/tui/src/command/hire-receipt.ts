@@ -45,7 +45,7 @@ export async function runHireReceiptCommand(
       )
     )
       throw new Error(
-        "Usage: clankie hire-receipt settle ORIGINAL_ID [not-launched|delivered|abandoned|abandoned-unknown|release-allocation] | fresh --json-stdin",
+        "Usage: clankie hire-receipt settle RECEIPT_OR_FRESH_INTENT_ID [not-launched|delivered|abandoned|abandoned-unknown|release-allocation] | fresh --json-stdin",
       );
     request = {
       op: "settle_hire_receipt",

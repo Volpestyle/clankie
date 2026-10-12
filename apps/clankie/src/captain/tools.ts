@@ -1301,6 +1301,36 @@ function herdrWatchTools(
     );
   };
   return [
+    ...(watches.settleHireReceipt
+      ? [
+          defineTool({
+            name: "settle_hire_receipt",
+            label: "Settle a fresh hire receipt",
+            description:
+              "Settle your own uncertain fresh remote hire by its freshIntent UUID. Uses authenticated host evidence; abandoned does not claim delivery, abandoned-unknown requires an unmapped launch, and not-launched requires a complete reservation window. Retains the original brief and launch fences forever; never sends, replays or closes a pane. New work requires a separate fresh intent and new brief.",
+            parameters: Type.Object({
+              receiptId: Type.String({ format: "uuid" }),
+              disposition: Type.Union([
+                Type.Literal("not-launched"),
+                Type.Literal("abandoned"),
+                Type.Literal("abandoned-unknown"),
+              ]),
+            }),
+            executionMode: "sequential",
+            execute: async (_id, input) => {
+              const authority = captureConversationAuthority(turn.conversationAuthority);
+              return json(
+                await watches.settleHireReceipt!(
+                  input.receiptId,
+                  () => assertConversationAuthority(authority),
+                  input.disposition,
+                  authority.owner,
+                ),
+              );
+            },
+          }),
+        ]
+      : []),
     ...(watches.tidy
       ? [
           defineTool({

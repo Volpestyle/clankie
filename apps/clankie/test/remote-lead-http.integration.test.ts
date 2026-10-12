@@ -816,7 +816,7 @@ else console.log('{}');
           expect(authority?.owner.conversationId).toBe(binding.conversationId);
           return {
             lane: _lane,
-            tools: ["hire_agent", "owner_settings"].map((name) => ({
+            tools: ["hire_agent", "settle_hire_receipt", "owner_settings"].map((name) => ({
               name,
               description: name,
               inputSchema: { type: "object", properties: {} },
@@ -877,6 +877,7 @@ else console.log('{}');
       );
       const catalog = await client.listTools();
       expect(catalog.tools.map((tool) => tool.name)).toContain("hire_agent");
+      expect(catalog.tools.map((tool) => tool.name)).toContain("settle_hire_receipt");
       expect(catalog.tools.map((tool) => tool.name)).not.toContain("owner_settings");
       expect((await client.callTool({ name: "hire_agent", arguments: {} })).isError).not.toBe(true);
       expect(effects).toBe(1);

@@ -278,6 +278,7 @@ export type HerdrWatchArmResult =
     };
 
 export interface HerdrWatchPort {
+  settleHireReceipt?: HerdrWatchStore["settleHireReceipt"];
   tidy?: import("./pane-tidy.ts").PaneTidy;
   /** Moves a leaving seat's issue to its next status (VUH-1990). */
   issueStatus?: import("./seat-issue-status.ts").SeatIssueKeeper;
@@ -2725,8 +2726,40 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.closed) throw new Error("Native hire service is closed");
   }
 
-  /** Operator recovery only. Takes identity, never caller-supplied evidence or a launch request. */
+  /** Resolve a fresh intent to its native fence; only its live owner or the operator may settle. */
   public async settleHireReceipt(
+    receiptId: string,
+    guard?: () => Promise<void>,
+    disposition:
+      | "not-launched"
+      | "delivered"
+      | "abandoned"
+      | "abandoned-unknown"
+      | "release-allocation" = "not-launched",
+    owner?: ConversationOwner,
+  ): Promise<HireReceiptSettlement> {
+    const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId, detail });
+    if (!guard) return refused("Settlement authority is required; nothing settled.");
+    try {
+      await guard();
+      const matches = this.hireReceipts
+        .all()
+        .filter(([, record]) => record.messageId === receiptId || record.freshHire?.id === receiptId);
+      if (matches.length > 1) return refused("Hire identity is ambiguous; nothing settled.");
+      const record = matches[0]?.[1];
+      if (owner && (!record?.freshHire || record.freshHire.owner.conversationId !== owner.conversationId))
+        return refused("Only the fresh hire's owning conversation or the operator may settle it.");
+      if (record?.freshHire && (disposition === "delivered" || disposition === "release-allocation"))
+        return refused("Fresh intent settlement requires not-launched, abandoned or abandoned-unknown.");
+      const result = await this.settleNativeHireReceipt(record?.messageId ?? receiptId, guard, disposition);
+      return { ...result, receiptId };
+    } catch (error) {
+      return refused(`Settlement unavailable: ${reasonDetail(error)}. Original remains fenced.`);
+    }
+  }
+
+  /** Operator recovery only. Takes identity, never caller-supplied evidence or a launch request. */
+  private async settleNativeHireReceipt(
     receiptId: string,
     guard?: () => Promise<void>,
     disposition:

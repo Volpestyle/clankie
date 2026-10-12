@@ -13,6 +13,7 @@ import type { RemoteLeadDelegations } from "./remote-lead-delegations.ts";
 // Owner configuration, accounts and unrelated conversations are not delegated.
 const PROJECT_TOOLS = new Set([
   "hire_agent",
+  "settle_hire_receipt",
   "message_seat",
   "worker_reports",
   "acknowledge_worker_reports",

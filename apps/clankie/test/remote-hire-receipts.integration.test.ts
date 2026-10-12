@@ -455,6 +455,63 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
       } finally {
         store.close();
       }
+      // Fresh intent aliases settle the same real host reservation and mapped
+      // allocation while preserving native evidence and denying another lead.
+      for (const disposition of ["not-launched", "abandoned"] as const) {
+        const intentId = randomUUID();
+        const baseKey = JSON.stringify(["pc", "codex", home, "new"]);
+        const freshClaim = {
+          ...claim(),
+          receiptKey: JSON.stringify(["pc", "codex", home, "new", "fresh", intentId]),
+        };
+        await native.reserve(freshClaim);
+        if (disposition === "abandoned") await native.launch(freshClaim);
+        const aliasPath = join(home, `alias-${intentId}.json`);
+        new DeliveryFence(`${aliasPath}.hire-receipts.json`).begin(freshClaim.receiptKey, {
+          messageId: freshClaim.receiptId,
+          fingerprint: freshClaim.fingerprint,
+          freshHire: {
+            id: intentId,
+            afterReceiptId: original.receiptId,
+            baseKey,
+            owner: { conversationId: "alias-owner" },
+            launch: {
+              schemaVersion: 1,
+              title: "Alias proof",
+              harness: "codex",
+              fleet: "pc",
+              workingDirectory: home,
+            },
+          },
+          remoteAdmission: { target: freshClaim.target, nonce: freshClaim.nonce },
+          ...(disposition === "abandoned"
+            ? { remoteLaunchCommitted: true as const, paneId: "pc/absent-fresh" }
+            : {}),
+        });
+        const aliasStore = new HerdrWatchStore(aliasPath, { remoteHireReceipts: native });
+        try {
+          expect(
+            await aliasStore.settleHireReceipt(intentId, async () => {}, disposition, {
+              conversationId: "other",
+            }),
+          ).toMatchObject({ state: "refused" });
+          const result = await aliasStore.settleHireReceipt(intentId, async () => {}, disposition, {
+            conversationId: "alias-owner",
+          });
+          expect(result).toMatchObject({
+            state: disposition === "not-launched" ? "settled-not-launched" : "abandoned",
+            receiptId: intentId,
+            evidence: { receiptId: freshClaim.receiptId, receiptKey: freshClaim.receiptKey },
+          });
+          expect(await aliasStore.settleHireReceipt(intentId, async () => {}, disposition)).toEqual(result);
+          const retained = new DeliveryFence(`${aliasPath}.hire-receipts.json`);
+          expect(retained.reconcile(freshClaim.receiptKey, freshClaim.receiptId)).toBe(false);
+          expect(() => retained.begin(freshClaim.receiptKey, { fingerprint: "replay" })).toThrow();
+          await expect(native.launch(freshClaim)).rejects.toThrow(/cannot launch again/u);
+        } finally {
+          aliasStore.close();
+        }
+      }
       // Fresh work uses a separate durable identity and the real host journal,
       // never releasing/replaying its settled predecessor. The controller's
       // policy denial leaves a genuinely uncertain fresh admission behind.
@@ -595,17 +652,33 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
         await expect(
           native.recover(unknownClaim, { ...unknownRecovery, paneId: "pc/guessed-root" }),
         ).rejects.toThrow(/unmapped/u);
+        expect(
+          await freshRestart.settleHireReceipt(
+            freshRequest.freshIntent.id,
+            async () => {},
+            "abandoned-unknown",
+            { conversationId: "another-lead" },
+          ),
+        ).toMatchObject({ state: "refused", detail: expect.stringContaining("owning conversation") });
+        expect(
+          await freshRestart.settleHireReceipt(
+            freshRequest.freshIntent.id,
+            async () => {},
+            "not-launched",
+            freshAuthority.owner,
+          ),
+        ).toMatchObject({ state: "refused", detail: expect.stringContaining("no-launch window") });
         let recoveryAuthorityChecks = 0;
         expect(
           await freshRestart.settleHireReceipt(
             unknownId,
             async () => {
-              if (++recoveryAuthorityChecks === 4) throw new Error("Operator revoked after host evidence");
+              if (++recoveryAuthorityChecks === 5) throw new Error("Operator revoked after host evidence");
             },
             "abandoned-unknown",
           ),
         ).toMatchObject({ state: "refused" });
-        expect(recoveryAuthorityChecks).toBe(4);
+        expect(recoveryAuthorityChecks).toBe(5);
         const interrupted = new DeliveryFence(`${freshPath}.hire-receipts.json`);
         expect(interrupted.pending(pending[0])).toMatchObject({
           recoveryRequested: true,
@@ -724,7 +797,7 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
           expect(freshPreparations).toBe(1);
           output = "";
           expect(
-            await runHireReceiptCommand(["settle", unknownId, "abandoned-unknown"], {
+            await runHireReceiptCommand(["settle", freshRequest.freshIntent.id, "abandoned-unknown"], {
               ...commandOptions,
               stdout: {
                 write: (chunk: string) => {
@@ -736,7 +809,7 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
           const unknownSettled = JSON.parse(output);
           expect(unknownSettled).toMatchObject({
             state: "abandoned",
-            receiptId: unknownId,
+            receiptId: freshRequest.freshIntent.id,
             evidence: {
               disposition: "abandoned-unknown",
               allocation: { outcome: "unknown", freshIntentAllowed: true },
@@ -759,7 +832,12 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
             }).success,
           ).toBe(false);
           expect(
-            await freshRestart.settleHireReceipt(unknownId, async () => {}, "abandoned-unknown"),
+            await freshRestart.settleHireReceipt(
+              freshRequest.freshIntent.id,
+              async () => {},
+              "abandoned-unknown",
+              freshAuthority.owner,
+            ),
           ).toEqual(unknownSettled);
           const retainedUnknown = new DeliveryFence(`${freshPath}.hire-receipts.json`);
           expect(retainedUnknown.settled(pending[0])).toMatchObject({
@@ -771,7 +849,7 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
           output = "";
           const separatelyNew = {
             ...freshRequest,
-            freshIntent: { id: randomUUID(), afterReceiptId: unknownId },
+            freshIntent: { id: randomUUID(), afterReceiptId: freshRequest.freshIntent.id },
           };
           expect(
             await runHireReceiptCommand(["fresh", "--json-stdin"], {

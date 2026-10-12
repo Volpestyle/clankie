@@ -146,7 +146,10 @@ export class DeliveryFence {
     const entries = this.all();
     if (entries.some(([, record]) => record.messageId === metadata.id))
       throw new Error("Fresh intent UUID already names a native receipt");
-    const originals = entries.filter(([, record]) => record.messageId === metadata.afterReceiptId);
+    const originals = entries.filter(
+      ([, record]) =>
+        record.messageId === metadata.afterReceiptId || record.freshHire?.id === metadata.afterReceiptId,
+    );
     const original = originals[0];
     if (
       originals.length !== 1 ||
