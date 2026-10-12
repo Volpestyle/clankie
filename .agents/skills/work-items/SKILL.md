@@ -44,6 +44,15 @@ repository convention; GitHub and Markdown are adapters to that same surface.
 backend and why it was selected. Follow `linear-orient` and `linear-issues` for
 the shared read/write shapes on either backend; a local identity is visibly local.
 
+Owner verification and owner ask answers belong to the owner. Do not use
+`clankie work owner` or answer as the owner. The current shared operator bearer
+still permits explicit owner calls and ask answers; this is a known boundary
+gap (LOCAL-VUH-4), not a secure distinction between James's terminal and a
+same-user agent shell. An environment/seat marker or another same-user secret
+does not close it. See [ADR 0253](../../../docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md)
+for the proposed isolated authority. Report missing isolation honestly and
+keep owner-verified acceptance open.
+
 Priority is `0` (none), `1` (Urgent), `2` (High), `3` (Medium), `4` (Low).
 Issue writes accept `priority`; `clankie work create` and `update` accept
 `--priority 0..4`. Open-work lists sort Urgent through Low, then unprioritized,

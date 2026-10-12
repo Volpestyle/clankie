@@ -2188,6 +2188,15 @@ the app on an enrolled device, and `clankie work owner TOOL`, the owner's
 explicit own call. Agents never use `work owner`. The owner's "It works" answer
 to a verify ask counts as the bundle check and verifies the item (LOCAL-VUH-1).
 
+These actor assignments do not isolate the owner's terminal from agent shells.
+The explicit `work owner` route and owner ask answers still accept the shared
+operator bearer (LOCAL-VUH-4). A same-user unrestricted shell can also reach
+device signing material and mutable service/state. Worker markers, a separate
+bearer stored under the same user, and file mode 0600 do not establish human
+authority. [ADR 0253](adr/0253-owner-confirmation-needs-an-isolated-authority.md)
+describes the proposed protected authority; it has not shipped. Agents must
+leave owner verification and owner ask answers to the owner.
+
 - `clankie work` (or `work status`, `work discover`) reports the repo's signals,
   its recorded convention if any, and a `question` when discovery found more
   than one tracker or only a single `TODO.md`. Answer it once with `work init`.
