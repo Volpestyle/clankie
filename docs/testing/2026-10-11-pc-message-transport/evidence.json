@@ -6,6 +6,12 @@
       "size": 104844,
       "sha256": "45211306072057e80435d9c1e45936cafe8210299a8ac28a8b7ac4fa5b6e17f3",
       "url": "clankie://evidence/sha256/45211306072057e80435d9c1e45936cafe8210299a8ac28a8b7ac4fa5b6e17f3"
+    },
+    {
+      "path": "typecheck-fix.json",
+      "size": 69851,
+      "sha256": "241071d195c2700fcbabb0040d3be8d2b8c162d851186711c049f696909cf7f6",
+      "url": "clankie://evidence/sha256/241071d195c2700fcbabb0040d3be8d2b8c162d851186711c049f696909cf7f6"
     }
   ]
 }
