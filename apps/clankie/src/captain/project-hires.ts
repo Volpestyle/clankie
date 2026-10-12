@@ -427,6 +427,54 @@ export class ProjectHires {
       generic: entry.proof.shell.pid !== entry.proof.processes[0]!.pid,
     };
   }
+  /**
+   * Capture a confirmed original hire for its later exit bookkeeping. This is
+   * not live membership: complete inventory may mark the hire gone before its
+   * issue is settled. Replacement, recovery release or changed provenance
+   * still invalidates the capture; the caller must recheck current project policy.
+   */
+  public bookkeepingAttribution(fleet: string, pane: string, occupantId: string) {
+    const candidates = () =>
+      this.read().allocations.filter(
+        (entry) => (entry.request.fleet ?? "default") === fleet && entry.pane === pane,
+      );
+    const latest = () => candidates().at(-1);
+    const entry = latest();
+    if (
+      !entry ||
+      candidates().filter((candidate) => !candidate.gone).length !== 1 ||
+      !entry.started ||
+      !entry.confirmed ||
+      entry.gone ||
+      entry.operatorRelease ||
+      !entry.proof ||
+      !entry.seat ||
+      entry.occupantId !== occupantId ||
+      entry.proof.nativeOccupantId !== occupantId ||
+      entry.proof.fleet !== fleet ||
+      entry.proof.pane !== pane
+    )
+      return undefined;
+    const retained = (allocation: Allocation) => {
+      const { gone: _gone, ...provenance } = allocation;
+      return provenance;
+    };
+    const saved = retained(entry);
+    return {
+      projectId: entry.projectId,
+      ...(entry.role === undefined ? {} : { role: entry.role }),
+      validate: () => {
+        const current = latest();
+        if (
+          !current ||
+          candidates().filter((candidate) => !candidate.gone).length > 1 ||
+          current.operatorRelease ||
+          !isDeepStrictEqual(retained(current), saved)
+        )
+          throw new Error("Original project hire bookkeeping attribution changed or was revoked");
+      },
+    };
+  }
   public confirmedAssignment(
     fleet: string,
     pane: string,

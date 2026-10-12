@@ -237,7 +237,7 @@ import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
 import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { PaneTidy } from "./pane-tidy.ts";
-import { SeatIssueKeeper, liveSeatIssue } from "./seat-issue-status.ts";
+import { SeatIssueKeeper, liveSeatIssue, prepareSeatIssueAttribution } from "./seat-issue-status.ts";
 import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { createHuddleService, HuddleStore, type HuddleSeatTarget } from "./huddles.ts";
 import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
@@ -2536,6 +2536,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   herdrWatches.tidy = paneTidy;
   const issueStatus = new SeatIssueKeeper(deps.mcp, join(options.stateDir, "seat-issue-status.json"), {
+    requireAttribution: true,
     humanOwners: async () => (await settings()).linearWebhook.wake,
   });
   herdrWatches.issueStatus = issueStatus;
@@ -3732,7 +3733,41 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     liveSeats = projected;
     lastProjectedSeats = projected;
     observeReportFailureAlerts(projected);
-    const liveIssues = projected.map(liveSeatIssue);
+    const liveIssues: import("./seat-issue-status.ts").LiveSeatIssue[] = await Promise.all(
+      projected.map(async (seat) => {
+        const issue = liveSeatIssue(seat);
+        try {
+          const observed = seatLeadOwners.get(seat)?.observed;
+          if (!observed || !deps.workItems?.prepareSeatIssueTracker)
+            throw new Error("No verified hire tracker route.");
+          const attribution = await prepareSeatIssueAttribution(
+            {
+              fleet: observed.fleet ?? "default",
+              pane: observed.paneId,
+              nativeOccupantId: observed.session ? occupantIdForHerdrSession(observed.session) : undefined,
+            },
+            {
+              proof: (fleet, pane) =>
+                options.projectHireIdentity?.(fleet, pane) ?? Promise.resolve(undefined),
+              watches: herdrWatches,
+              workItems: { prepareSeatIssueTracker: deps.workItems.prepareSeatIssueTracker },
+              projects: async () => (await settings()).projects,
+            },
+          );
+          return { ...issue, attribution };
+        } catch (error) {
+          // Keep a refusal with this observed seat; never reuse a default connector.
+          return {
+            ...issue,
+            attribution: {
+              resolve: async () => {
+                throw error;
+              },
+            },
+          };
+        }
+      }),
+    );
     // The operator head is intentionally outside the worker roster. Its native
     // children still hold work; do not mistake that presentation boundary for exit.
     if (fleet.head?.session && !options.nativeCensusRunner) {

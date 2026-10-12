@@ -172,6 +172,23 @@ owner or a physical device can close become linked follow-up issues and the
 original closes. Where Verifying or Paused does not exist yet, the issue falls
 back to In Progress or Todo and the comment names the intended status.
 
+Retirement and automatic exit bookkeeping retain the full issue key and its
+resolved UUID. They use the confirmed native hire's **current saved project
+tracker**, never a suffix from `LOCAL-*`, the lead's cwd, or an implicit default
+connector. Key and UUID assignments refer to the same item only within that
+tracker scope. Missing, revoked, ambiguous or changed attribution refuses the
+issue effect even if the pane itself closed successfully; inspect the returned
+`issue` settlement. A saved Linear scope needs its original connected account;
+disconnection does not select a local compatibility store.
+
+Built-in retirement cannot set Done or impersonate owner verification, and it
+cannot move delivery backwards. Existing evidence, independent-check and owner
+verification gates still apply. Report the actual refusal and leave the lead to
+settle the item's delivery state. Historical pause entries without a verified
+scope do not authorize restoration. Daily ownership checks include verified hire
+scopes; unscoped operator-head/native-child claims are not counted until their
+tracker can be attributed, and do not authorize automatic issue writes.
+
 ## Ownership and useful updates
 
 When work needs the user specifically (a decision, credentials, a physical or

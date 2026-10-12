@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "boundary-proof.tar",
+      "size": 102400,
+      "sha256": "87432bd668128ea2e739202b0ac60792bfdd6e9e9a93fbf3a8879c339c2dcc1a",
+      "url": "clankie://evidence/sha256/87432bd668128ea2e739202b0ac60792bfdd6e9e9a93fbf3a8879c339c2dcc1a"
+    }
+  ]
+}

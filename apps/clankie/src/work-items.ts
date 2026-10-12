@@ -895,6 +895,185 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       });
       return read.convention.backend === "linear" ? undefined : repo;
     },
+    /** Host-private retirement route: current saved scope, with delegated write fences. */
+    async prepareSeatIssueTracker(
+      projectId: string,
+      validateHire: () => Promise<void>,
+    ): Promise<import("./captain/seat-issue-status.ts").SeatIssueTrackerScope> {
+      await validateHire();
+      const project = (await options.projects?.())?.projects.find((entry) => entry.id === projectId);
+      if (!project) throw new WorkRequestError("unknown_repo", "The hire's project no longer exists.");
+      let path: string;
+      let convention: WorkConvention;
+      let validate: () => Promise<void>;
+      let repo: string | undefined;
+      if (project.trackerRef !== undefined && projectReader) {
+        repo = projectWorkRepoId(projectId);
+        const prepared = await projectReader.prepare(repo);
+        path = prepared.path;
+        convention = prepared.convention;
+        validate = prepared.validate;
+      } else {
+        // Only a single unambiguous saved Linear scope retains the legacy route.
+        // No lead cwd, inferred issue suffix, default convention or missing binding.
+        const saved = await Promise.all(
+          project.workspaces
+            .filter((workspace) => workspace.machineId === (options.localMachineId ?? "local"))
+            .map(async (workspace) => ({
+              path: workspace.path,
+              convention: await readConvention(workspace.path),
+            })),
+        );
+        if (
+          !saved.length ||
+          saved.some((entry) => entry.convention?.backend !== "linear") ||
+          new Set(saved.map((entry) => JSON.stringify(entry.convention))).size !== 1
+        )
+          throw new WorkRequestError("needs_decision", "No unambiguous saved hire tracker scope.");
+        path = saved[0]!.path;
+        convention = saved[0]!.convention!;
+        validate = async () => {
+          const current = (await options.projects?.())?.projects.find((entry) => entry.id === projectId);
+          if (
+            JSON.stringify(current) !== JSON.stringify(project) ||
+            (
+              await Promise.all(saved.map(async (entry) => JSON.stringify(await readConvention(entry.path))))
+            ).some((value) => value !== JSON.stringify(convention))
+          )
+            throw new Error("Saved hire tracker scope changed.");
+        };
+      }
+      const validateOverlap = async () => {
+        const overlapping =
+          (await options.projects?.())?.projects.filter(
+            (entry) =>
+              entry.trackerProjectId !== undefined &&
+              entry.workspaces.some(
+                (workspace) =>
+                  workspace.machineId === (options.localMachineId ?? "local") &&
+                  resolve(workspace.path) === resolve(path),
+              ),
+          ) ?? [];
+        if (
+          convention.backend === "builtin" &&
+          (overlapping.length !== 1 || overlapping[0]?.id !== projectId)
+        )
+          throw new WorkRequestError("needs_decision", "Ambiguous built-in tracker project attribution.");
+      };
+      const target =
+        repo !== undefined && options.projectsFence
+          ? await prepareWorkWriteTarget({
+              repoId: repo,
+              localMachineId: options.localMachineId ?? "local",
+              projectsFence: options.projectsFence,
+              locate: async () => {
+                throw new Error("A hire tracker must use its project binding");
+              },
+            })
+          : undefined;
+      const dependencies = await deps(path, false);
+      // Pin the actual connected resource once. A later disconnect must refuse,
+      // never cause the canonical adapter to select its local compatibility store.
+      const linearBinding =
+        convention.backend === "linear" && dependencies.linear && options.mcpHost
+          ? await (options.mcpHost.binding?.("linear", "operator") ??
+              options.mcpHost.account?.("linear", "operator"))
+          : undefined;
+      if (
+        convention.backend === "linear" &&
+        (!linearBinding || ("backend" in linearBinding && linearBinding.backend === "local"))
+      )
+        throw new WorkRequestError("backend_unavailable", "Saved Linear tracker is not connected.");
+      const assertLinear = async () => {
+        if (!linearBinding || !options.mcpHost) return;
+        const current = await (options.mcpHost.binding?.("linear", "operator") ??
+          options.mcpHost.account?.("linear", "operator"));
+        if (
+          !current ||
+          current.binding !== linearBinding.binding ||
+          ("backend" in current && current.backend === "local")
+        )
+          throw new WorkRequestError("backend_unavailable", "Saved Linear tracker connection changed.");
+      };
+      // Resolve the requested project's UUID explicitly, rather than the first
+      // project sharing its workspace in the compatibility dependency lookup.
+      const builtIn =
+        convention.backend === "builtin"
+          ? await (async () => {
+              if (!project.trackerProjectId)
+                throw new WorkRequestError("needs_decision", "No saved built-in tracker project.");
+              const view = (await openBuiltIn().call("get_project", { query: project.trackerProjectId })) as {
+                leadTeam?: { id?: string };
+              };
+              if (!view.leadTeam?.id)
+                throw new WorkRequestError(
+                  "backend_unavailable",
+                  "Saved built-in tracker project is unavailable.",
+                );
+              return { projectId: project.trackerProjectId, teamId: view.leadTeam.id, open: openBuiltIn };
+            })()
+          : dependencies.builtIn;
+      const identity = JSON.stringify([
+        projectId,
+        path,
+        convention,
+        project.trackerProjectId,
+        linearBinding?.binding,
+      ]);
+      const beforeWrite = async () => {
+        await validateHire();
+        await validate();
+        await validateOverlap();
+        target?.assertCurrent();
+      };
+      await beforeWrite();
+      await assertLinear();
+      return {
+        identity,
+        call: async (
+          name: string,
+          args: Record<string, unknown>,
+          requestPriority: import("./linear-request-budget.ts").LinearRequestPriority,
+        ) => {
+          await beforeWrite();
+          await assertLinear();
+          const tools = trackerToolsFor(path, convention, {
+            ...dependencies,
+            ...(builtIn ? { builtIn } : {}),
+            scopedWrites: true,
+            actor: CLANKIE_FOR_OWNER,
+            beforeWrite,
+            ...(convention.backend !== "linear"
+              ? {}
+              : {
+                  linear: async (tool: string, arguments_: Record<string, unknown>) => {
+                    const result = await options.mcpHost!.call({
+                      lane: "operator",
+                      server: "linear",
+                      tool,
+                      arguments: arguments_,
+                      resultMode: "data",
+                      requestPriority,
+                      fence: async () => {
+                        await beforeWrite();
+                        await assertLinear();
+                        return () => target?.assertCurrent();
+                      },
+                    });
+                    if (result.outcome !== "ok") throw new Error(`Tracker ${tool}: ${result.detail}`);
+                    if (result.isError) throw new Error(`Tracker ${tool}: ${result.content.slice(0, 500)}`);
+                    return JSON.parse(result.content) as unknown;
+                  },
+                }),
+          });
+          const result = await tools.call(name, args, { beforeWrite, actor: CLANKIE_FOR_OWNER });
+          await beforeWrite();
+          await assertLinear();
+          return result;
+        },
+      };
+    },
+
     /**
      * A repository's shipped versions and the item keys each one's commits name
      * (VUH-1930), for the built-in tracker's release sync. Read-only: git only.

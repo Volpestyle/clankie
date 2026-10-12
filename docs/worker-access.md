@@ -530,6 +530,30 @@ panes. Deterministic server and bridge regressions do not establish that live re
   private home or from a provided service bearer. Live activation remains owner-held;
   do not infer confinement from a lower access preference or launch marker.
 
+### Retirement issue bookkeeping
+
+Pane retirement and issue settlement have separate receipts. The keeper captures
+an exact confirmed native hire while its roster occupant is still proven. A normal
+complete-inventory exit can mark that hire gone before bookkeeping; replacement
+allocations and recovery release invalidate the captured attribution. Each effect
+resolves the project's current saved tracker, preserves the originally observed
+issue UUID, and applies the existing project and account fences. A display key
+such as `LOCAL-VUH-4` cannot become `VUH-4`, and identical keys in different stores
+cannot exchange successors, pause records or write targets.
+
+Unavailable, revoked or ambiguous project bindings refuse issue effects. Saved
+Linear routes retain their connected resource and scope, including legacy projects
+with one unambiguous saved Linear convention. Disconnection never chooses the
+adapter's local compatibility store. Built-in Done still requires the owner's
+verification; retirement evidence grants no human identity or delivery rollback.
+
+The daily check counts only attributable tracker ownership. Unscoped operator-head
+and native-child claims are excluded rather than assigned to the default connector.
+A historical pause ledger without scope cannot establish restoration authority.
+Source-checkout disposable-store proof is retained under
+[`docs/testing/2026-10-12-local-vuh-8`](testing/2026-10-12-local-vuh-8/README.md).
+Actual installed-pane behavior requires a separate check after deployment.
+
 ### Retiring and approving machine-specific workspaces
 
 A missing, inaccessible or noncanonical registered local workspace matches no

@@ -1906,6 +1906,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
       ? { state: "unconfirmed" as const }
       : candidate;
   }
+  /** Retained exit bookkeeping only; the caller first proves the original native assignment. */
+  public projectHireBookkeepingAttribution(fleet: string, pane: string, occupantId: string) {
+    const address = projectHirePane(fleet, pane);
+    return address === undefined
+      ? undefined
+      : this.projectHires.bookkeepingAttribution(fleet, address, occupantId);
+  }
   public confirmedProjectHireAssignment(
     fleet: string,
     pane: string,
