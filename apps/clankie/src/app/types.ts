@@ -183,6 +183,8 @@ export interface ClankieAppDependencies {
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;
   /** The built-in tracker, for the owner's own authenticated writes (VUH-1917). */
   builtInTracker?: import("@clankie/work-items").LocalTrackerBackend;
+  /** Owner project-binding validation through the connected Linear app, never a fallback. */
+  linearProjectExists?: (id: string) => Promise<boolean>;
   importLinear?: (projectId: string, scratch: string, assertCurrent: () => Promise<void>) => Promise<unknown>;
   /** Owner command for a scratch store's webhook mirror (VUH-1965). */
   linearMirrors?: Pick<import("../linear-mirror.ts").LinearMirrors, "configure">;

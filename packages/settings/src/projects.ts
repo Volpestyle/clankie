@@ -50,6 +50,18 @@ export function updateProjectSettings(
       throw new Error("Tracker project is already bound to another project");
     project.trackerProjectId = input.changes.trackerProjectId;
   }
+  if (input.changes.linearProjectBinding === null) delete project.linearProjectBinding;
+  else if (input.changes.linearProjectBinding !== undefined) {
+    if (
+      settings.projects.some(
+        (saved) =>
+          saved.id !== project.id &&
+          saved.linearProjectBinding?.projectId === input.changes.linearProjectBinding?.projectId,
+      )
+    )
+      throw new Error("Linear project is already bound to another project");
+    project.linearProjectBinding = input.changes.linearProjectBinding;
+  }
   if (input.changes.auto === false) delete project.auto;
   else if (input.changes.auto === true) project.auto = true;
   if (input.changes.focus === null) delete project.focus;

@@ -74,6 +74,20 @@ it("binds a settings project to a built-in tracker project UUID and returns it t
       );
     };
     expect(await workRepos()).not.toHaveProperty("trackerProjectId");
+    // A connected Linear binding never falls back to this real built-in store.
+    const beforeLinear = await settings.load();
+    const unavailable = await host.app.request("/v1/operator/projects/update?includeAutonomy=true", {
+      method: "POST",
+      headers: { authorization: "Bearer owner", "content-type": "application/json" },
+      body: JSON.stringify({
+        projectId: "clankie-work",
+        expectedRevision: (await client.projects()).revision,
+        changes: { linearProjectBinding: { provider: "linear", projectId: imported.id } },
+      }),
+    });
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toEqual({ error: "linear_project_unavailable" });
+    expect(await settings.load()).toEqual(beforeLinear);
     const update = async (trackerProjectId: unknown, projectId = "clankie-work") => {
       const revision = (await client.projects()).revision;
       return host.app.request("/v1/operator/projects/update", {

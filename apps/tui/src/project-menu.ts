@@ -189,6 +189,15 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
               { value: "focus", label: "Focus", hint: project.focus ?? "none" },
             ]
           : []),
+        ...(snapshot.linearProjectBindings
+          ? [
+              {
+                value: "linear-project",
+                label: "Linear project",
+                hint: project.linearProjectBinding?.projectId ?? "none",
+              },
+            ]
+          : []),
         { value: "name", label: "Name", hint: project.name },
         {
           value: "roles",
@@ -253,6 +262,25 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
         await update(
           { focus: focus.trim() === "" ? null : focus.trim() },
           focus.trim() === "" ? "Focus cleared." : "Focus saved.",
+        );
+    } else if (choice === "linear-project") {
+      const projectId = await flow.readText({
+        message: "Linear project UUID (empty clears it)",
+        ...(project.linearProjectBinding ? { defaultValue: project.linearProjectBinding.projectId } : {}),
+        allowBack: true,
+        validate: (value) =>
+          value.trim() === "" ||
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value.trim())
+            ? undefined
+            : "Enter the project's UUID.",
+      });
+      if (projectId !== undefined)
+        await update(
+          {
+            linearProjectBinding:
+              projectId.trim() === "" ? null : { provider: "linear", projectId: projectId.trim() },
+          },
+          projectId.trim() === "" ? "Linear project cleared." : "Linear project bound.",
         );
     } else if (choice === "tracker") {
       const workspace = project.workspaces[0]!;

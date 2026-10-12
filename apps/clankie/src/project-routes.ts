@@ -43,6 +43,7 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
             ({
               autonomy: _autonomy,
               trackerProjectId: _trackerProjectId,
+              linearProjectBinding: _linearProjectBinding,
               auto: _auto,
               focus: _focus,
               ...project
@@ -51,7 +52,9 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
         },
     ...(current.fleet.hire ? { hireDefaults: current.fleet.hire } : {}),
     ...(includeAutonomy ? { autonomyDefaults: current.autonomy } : {}),
-    ...(includeAutonomy ? { workingPreferences: true, fleetGates: true, projectsAuto: true } : {}),
+    ...(includeAutonomy
+      ? { workingPreferences: true, fleetGates: true, projectsAuto: true, linearProjectBindings: true }
+      : {}),
     revision: projectsRevision(current.projects),
   };
 }
@@ -64,6 +67,8 @@ export function createProjectRoutes(
     worktreeRoot?: ObserveProjectWorktreeRoot;
     /** True only when the built-in tracker holds a project with exactly this UUID. */
     trackerProjectExists?: (id: string) => Promise<boolean>;
+    /** Exact UUID in Clankie's connected Linear app; never the local tracker fallback. */
+    linearProjectExists?: (id: string) => Promise<boolean>;
     /** Live status lines for the autonomy-aware view; a failed read omits them, never the settings. */
     status?: (
       projects: readonly Project[],
@@ -155,6 +160,16 @@ export function createProjectRoutes(
       !(await options.trackerProjectExists?.(trackerProjectId).catch(() => false))
     )
       return context.json({ error: "tracker_project_not_found" }, 400);
+    const linearBinding = input.data.changes.linearProjectBinding;
+    if (linearBinding) {
+      if (!options.linearProjectExists) return context.json({ error: "linear_project_unavailable" }, 503);
+      try {
+        if (!(await options.linearProjectExists(linearBinding.projectId)))
+          return context.json({ error: "linear_project_not_found" }, 400);
+      } catch {
+        return context.json({ error: "linear_project_unavailable" }, 503);
+      }
+    }
     let before: string | undefined;
     try {
       const updated = await settings.update(

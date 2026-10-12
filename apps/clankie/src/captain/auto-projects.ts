@@ -12,6 +12,7 @@ export interface AutoProjectState {
   readonly name: string;
   readonly focus?: string;
   readonly trackerProjectId?: string;
+  readonly linearProjectBinding?: Project["linearProjectBinding"];
   /** Live seats working in one of the project's local workspaces or worktree roots. */
   readonly workers: number;
 }
@@ -42,6 +43,9 @@ function autoProjectStates(
       name: project.name,
       ...(project.focus === undefined ? {} : { focus: project.focus }),
       ...(project.trackerProjectId === undefined ? {} : { trackerProjectId: project.trackerProjectId }),
+      ...(project.linearProjectBinding === undefined
+        ? {}
+        : { linearProjectBinding: project.linearProjectBinding }),
       workers: countInside(project, seatDirectories),
     }));
 }
@@ -61,9 +65,8 @@ export function autoProjectRounds(
   const rounds = new Map<string, AutoProjectState[]>();
   for (const state of autoProjectStates(projects, seatDirectories)) {
     const project = projects.find((candidate) => candidate.id === state.id)!;
-    const explicit = leads.filter((lead) =>
-      lead.projects.some((entry) => entry.id === project.trackerProjectId),
-    );
+    const boundIds = [project.trackerProjectId, project.linearProjectBinding?.projectId];
+    const explicit = leads.filter((lead) => lead.projects.some((entry) => boundIds.includes(entry.id)));
     const matches = explicit.length
       ? explicit
       : leads.filter(
@@ -129,7 +132,15 @@ export async function projectStatuses(
 
 /** What changes the round's evidence; an unchanged round waits out the idle rewake. */
 export function autoRoundFingerprint(states: readonly AutoProjectState[]): string {
-  return JSON.stringify(states.map((state) => [state.id, state.focus ?? "", state.workers]));
+  return JSON.stringify(
+    states.map((state) => [
+      state.id,
+      state.focus ?? "",
+      state.workers,
+      state.trackerProjectId ?? "",
+      state.linearProjectBinding?.projectId ?? "",
+    ]),
+  );
 }
 
 export function autoRoundDue(
@@ -146,12 +157,13 @@ export function autoRoundPrompt(states: readonly AutoProjectState[]): string {
   return [
     "Auto round. The owner put these projects on Auto: work their backlogs without being asked.",
     "For each one, read its tracker with the linear_* tools, take the next ready work in priority order, plan it into issues where it needs planning, and staff it within the project's worker cap and the machine and account limits. Land finished work and close it with evidence, and file what you find along the way.",
+    "A Linear project reference names that exact project in the connected Linear app. Read its backlog by UUID; it does not switch a repository’s saved tracker backend or grant access to another account.",
     "Your autonomy settings decide which calls you make alone. Bring the owner only decisions that are truly his, one owner ask each. If a project is blocked or its backlog is empty, record that once and move on; do not message the owner just to say so.",
     "",
     "Projects on Auto (owner settings):",
     ...states.map(
       (state) =>
-        `- ${state.name} (${state.id}): ${state.focus === undefined ? "no focus set" : `focus: ${state.focus}`}; tracker project: ${state.trackerProjectId ?? "none bound"}; workers in its workspaces now: ${state.workers}`,
+        `- ${state.name} (${state.id}): ${state.focus === undefined ? "no focus set" : `focus: ${state.focus}`}; built-in tracker project: ${state.trackerProjectId ?? "none bound"}; Linear project: ${state.linearProjectBinding?.projectId ?? "none bound"}; workers in its workspaces now: ${state.workers}`,
     ),
   ].join("\n");
 }

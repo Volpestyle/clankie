@@ -6144,7 +6144,7 @@ reviewed changes for an existing project through the authenticated service API.
 The console exposes the same verbs through `/project`.
 
 The changes file may contain `name`, `roles`, `workerCap`, `trackerRef`,
-`trackerProjectId`, `autonomy`, `auto` and `focus`.
+`trackerProjectId`, `linearProjectBinding`, `autonomy`, `auto` and `focus`.
 Omitted fields remain unchanged; `null` removes a worker cap, tracker binding
 or focus. `auto: true` puts the project on Auto: Clankie works its backlog
 unprompted while [`auto`](#auto-switch) is on, and starts nothing new on it
@@ -6164,6 +6164,22 @@ to another project, and never matches by name. `clankie work repos` and the
 device `work_repos` read return it on that project's repo, so the app can mark the
 synced tracker project as bound. Snapshots for clients that do not opt into the
 current project shape (`?includeAutonomy=true`) omit it, like `autonomy`.
+`linearProjectBinding: {"provider":"linear","projectId":"UUID"}` separately
+names an exact project in Clankie's connected Linear app. The service reads that
+provider directly, never the local tracker fallback; names, another provider,
+an unknown UUID or a duplicate binding are refused. An unavailable connection
+returns `linear_project_unavailable` (503), without changing settings. `null`
+clears only the Linear reference; an existing built-in `trackerProjectId` remains
+unchanged. The binding is a reference, never a saved repository backend switch,
+account selection or authority grant. Auto wakes carry the provider and UUID,
+and explicit lead routing can use either binding. Its change resets the round's
+fingerprint. Autonomy-aware snapshots advertise `linearProjectBindings: true`;
+plain strict snapshots omit both the capability and binding.
+
+`clankie project settings PROJECT --linear-project UUID|clear` reads the current
+revision and writes through the same owner API. `/project` offers **Linear
+project** on supporting services. The app control follows on that same API.
+
 An empty roles list inherits the six built-in roles; an explicit list defines
 the available roles and may set their whole hire profile (harness, model, effort,
 subagents, delegation, account, placement), naming rule and concurrency cap. Zero

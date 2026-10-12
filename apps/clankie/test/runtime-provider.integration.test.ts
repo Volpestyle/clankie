@@ -91,7 +91,10 @@ async function fixture(provider?: RuntimeProvider, autoRounds: boolean | "captur
                 name: "Led project",
                 auto: true,
                 focus: "Lead backlog",
-                trackerProjectId: "11111111-1111-4111-8111-111111111111",
+                linearProjectBinding: {
+                  provider: "linear",
+                  projectId: "11111111-1111-4111-8111-111111111111",
+                },
                 workspaces: [
                   { id: "repo", machineId: "local", platform: "posix", path: join(root, "project") },
                 ],
@@ -416,6 +419,7 @@ it("routes Auto rounds to the configured project lead and independently wakes th
   });
   const [led, head] = await Promise.all([accept(lead), accept("global-default")]);
   expect(led.content).toContain("Lead backlog");
+  expect(led.content).toContain("Linear project: 11111111-1111-4111-8111-111111111111");
   expect(led.content).not.toContain("Head backlog");
   expect(head.content).toContain("Head backlog");
   expect(head.content).not.toContain("Lead backlog");

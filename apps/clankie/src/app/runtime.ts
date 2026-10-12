@@ -1097,6 +1097,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   app.route(
     "/",
     createProjectRoutes(authorizeOwnerSecrets, settingsSource, {
+      ...(dependencies.linearProjectExists ? { linearProjectExists: dependencies.linearProjectExists } : {}),
       ...(dependencies.projectWorktreeRoot ? { worktreeRoot: dependencies.projectWorktreeRoot } : {}),
       ...(dependencies.captain.projectStatus
         ? { status: (projects) => dependencies.captain.projectStatus!(projects) }

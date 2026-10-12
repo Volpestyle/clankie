@@ -180,6 +180,7 @@ import { retireLinearNotifications } from "./linear-notifications.ts";
 import { LinearWakeReadReceipts } from "./linear-wake-read.ts";
 import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
+import { linearProjectExists } from "./linear-project-binding.ts";
 import { createLinearApiTracker } from "./linear-api-tracker.ts";
 import { LinearRequestBudget } from "./linear-request-budget.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
@@ -702,12 +703,13 @@ const linearRequestBudget = new LinearRequestBudget({
     return linearBudgetWarningReady.then((notify) => notify(text));
   },
 });
+const linearApiTracker = createLinearApiTracker({
+  credentials: operatorCredentialStore,
+  requestBudget: linearRequestBudget,
+});
 const mcpHost = createMcpHost({
   googleApps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env).google ?? {},
-  linearApiTracker: createLinearApiTracker({
-    credentials: operatorCredentialStore,
-    requestBudget: linearRequestBudget,
-  }),
+  linearApiTracker,
   linearRequestBudget,
 
   localTracker: builtInTracker,
@@ -1973,6 +1975,7 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   evidenceStore,
   builtInTracker,
+  linearProjectExists: (id) => linearProjectExists(linearApiTracker, id),
   linearMirrors,
   linearCutover: new LinearCutover({
     trackerDirectory: join(stateRoot, "tracker"),

@@ -82,3 +82,14 @@ Workspace matching reversed the two projects' leads. Explicit bound tracker
 project ownership now wins regardless of workspace. Workspace matching can
 select only a lead with no configured projects, never another project's owner.
 Ambiguous or absent ownership falls back to the global head.
+
+### Separate Linear reference, 2026-10-12
+
+`trackerProjectId` keeps its built-in meaning and consumers. An optional
+`linearProjectBinding` holds `{provider: "linear", projectId: UUID}` separately.
+The owner project API validates it directly through the connected Linear app,
+with no local fallback. Failed validation leaves settings unchanged. A plain
+snapshot omits it; the autonomy-aware view advertises `linearProjectBindings`.
+Bind/clear starts with the CLI and TUI, with app controls in the next slice.
+Auto wakes include both provider references and explicit routing recognizes
+either UUID. The saved repo tracker convention still decides its backend.

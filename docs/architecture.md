@@ -474,7 +474,7 @@ The service keeps `autonomy.json`: the global Auto switch and one replaceable
 self-wake per operator conversation. An unreadable file fails closed and surfaces
 `state_unreadable` to operator clients instead of silently re-enabling unprompted
 work. While Auto is on, a fleet-cadence Auto round groups projects by their
-configured lead chats. An explicit bound tracker project selects its owner;
+configured lead chats. An explicit built-in tracker or connected Linear project binding selects its owner;
 a workspace match is eligible only for a lead with no configured projects.
 Unbound or ambiguous ownership falls back to the global head. Each lead hears only its projects,
 focus and live workers; unchanged evidence rewakes that lead after two hours.

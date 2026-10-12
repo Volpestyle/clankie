@@ -224,4 +224,11 @@ Use explicit settings-to-tracker UUID bindings; unmatched projects stay unbound.
 Bind one with `clankie project update PROJECT --changes-json
 '{"trackerProjectId":"UUID"}' --revision REVISION` (`null` unbinds); `work_repos`
 then returns `trackerProjectId` on that project's repo.
+A connected Linear reference is separate:
+`clankie project settings PROJECT --linear-project UUID` (or `clear`) writes
+`linearProjectBinding: {provider: "linear", projectId: UUID}` through the same
+owner API. The service validates that exact UUID against the connected Clankie
+app, without a local fallback. Auto rounds carry it and explicit lead routing
+uses it. It neither changes the repo's saved tracker backend nor removes its
+built-in binding. `/project` exposes the same control; plain snapshots hide it.
 Never infer bindings from names or poll for discovery.

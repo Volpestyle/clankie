@@ -68,6 +68,13 @@ export const ProjectGrantRuleSchema = z
       .max(64),
   })
   .strict();
+/** Explicit connected Linear reference; never a built-in tracker ID or a backend switch. */
+export const LinearProjectBindingSchema = z
+  .object({
+    provider: z.literal("linear"),
+    projectId: z.string().uuid(),
+  })
+  .strict();
 export const ProjectFocusSchema = z.string().trim().min(1).max(280);
 
 /** A project's status line in the projects view (ADR 0264), read live on each request. */
@@ -97,6 +104,7 @@ export const ProjectSchema = z
      * owner. Never inferred from names; the host checks it names a tracker project.
      */
     trackerProjectId: z.string().uuid().optional(),
+    linearProjectBinding: LinearProjectBindingSchema.optional(),
     roles: z.array(ProjectRoleSchema).max(256).default([]),
     workerCap: z.number().int().min(0).max(1000).optional(),
     autonomy: ProjectAutonomySchema.optional(),
@@ -220,6 +228,7 @@ export const ProjectsSnapshotSchema = z
     fleetGates: z.literal(true).optional(),
     /** Advertises project Auto and focus (ADR 0264); absent on an older service. */
     projectsAuto: z.literal(true).optional(),
+    linearProjectBindings: z.literal(true).optional(),
     /** Each project's status line by project ID, in the autonomy-aware view of a current service. */
     projectStatus: z.record(z.string(), ProjectStatusSchema).optional(),
     /** Every pending owner question, including those no project claims. */
@@ -392,6 +401,7 @@ export const UpdateProjectSettingsSchema = z
           .optional(),
         /** A built-in tracker project UUID; null unbinds. */
         trackerProjectId: z.string().uuid().nullable().optional(),
+        linearProjectBinding: LinearProjectBindingSchema.nullable().optional(),
         auto: z.boolean().optional(),
         /** null clears the focus. */
         focus: ProjectFocusSchema.nullable().optional(),

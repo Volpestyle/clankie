@@ -2928,7 +2928,7 @@ paths:
       tags: [Operator]
       operationId: updateProjectSettings
       summary: Update project policy while preserving independent inheritance
-      description: Each autonomy.fleet leaf overrides its global default independently; null clears only that override and omission retains it. Release mode and rule are one atomic leaf. Responses omit autonomy fields unless includeAutonomy=true; workingPreferences=true then advertises support for the new controls. The expectedRevision fences full project settings even for legacy projections.
+      description: Each autonomy.fleet leaf overrides its global default independently; null clears only that override and omission retains it. Release mode and rule are one atomic leaf. Responses omit autonomy fields unless includeAutonomy=true; workingPreferences=true then advertises support for the new controls. The expectedRevision fences full project settings even for legacy projections. linearProjectBinding names a connected Linear project by exact UUID, independently of the built-in trackerProjectId. It never changes a saved tracker backend; null clears only the Linear reference. The autonomy-aware view advertises linearProjectBindings=true.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {
@@ -2952,6 +2952,14 @@ paths:
                   type: object
                   description: Validated project fields, including independent autonomy.fleet overrides
                   properties:
+                    linearProjectBinding:
+                      type: object
+                      nullable: true
+                      additionalProperties: false
+                      required: [provider, projectId]
+                      properties:
+                        provider: { type: string, enum: [linear] }
+                        projectId: { type: string, format: uuid }
                     autonomy:
                       type: object
                       additionalProperties: false
@@ -2972,10 +2980,11 @@ paths:
                             reportingStyle: { type: string, minLength: 1, maxLength: 2000, nullable: true }
       responses:
         "200": { description: Updated project snapshot and revision }
-        "400": { description: Malformed request }
+        "400": { description: Malformed request or Linear project not found }
         "401": { description: Owner authentication required }
         "403": { description: Caller lacks owner authority }
         "409": { description: Project settings or owner authority changed }
+        "503": { description: Connected Linear project validation unavailable }
   /v1/operator/projects:
     get:
       tags: [Operator]
