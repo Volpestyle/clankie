@@ -185,6 +185,8 @@ export class PaneTidy {
       guard: () => Promise<void>,
     ): Promise<import("./prune-worktree.ts").PruneWorktreeResult>;
     provenance(agent: HerdrAgentSnapshot): ConversationOwner | "unknown" | "owner_interactive";
+    retirementGuard?(agent: HerdrAgentSnapshot): Promise<() => Promise<void>>;
+    worktreeHold?(agent: HerdrAgentSnapshot): Promise<WorktreeReconciliation[]>;
     ownerValid(owner: ConversationOwner): Promise<boolean>;
     close(seatId: string, guard: () => Promise<void>, nativeOnly?: boolean): Promise<boolean>;
     untrack(seatId: string): void;
@@ -374,7 +376,9 @@ export class PaneTidy {
   private async worktreeHandoffs(agent: HerdrAgentSnapshot) {
     const held: WorktreeReconciliation[] = [];
     const handoffs: Handoff[] = [];
-    for (const work of await workerWorktreeHold(agent)) {
+    const worktrees = await (this.ports.worktreeHold?.(agent) ?? workerWorktreeHold(agent));
+    if (splitFleetQualified(agent.paneId)) return { held: worktrees, handoffs };
+    for (const work of worktrees) {
       if (work.state === "unknown" || work.dirtyFiles !== 0 || !work.head) {
         held.push(work);
         continue;
@@ -521,6 +525,9 @@ export class PaneTidy {
           ownerConversationId: owner.conversationId,
         });
       if (!(await this.ports.ownerValid(owner))) return fail("provenance_unknown");
+      const retirementGuard = await this.ports
+        .retirementGuard?.(agent)
+        .catch((error: unknown) => fail("provenance_unknown", errorText(error)));
       let reportPath: string;
       let reportText: string;
       try {
@@ -542,7 +549,10 @@ export class PaneTidy {
       const checkWorktrees = !input.nativeOnly;
       let checked = checkWorktrees ? await this.worktreeHandoffs(agent) : { held: [], handoffs: [] };
       const held = checked.held;
-      if (held.length && (!unlandedReason || held.some((work) => (work.dirtyFiles ?? 0) > 0)))
+      if (
+        held.length &&
+        (!unlandedReason || held.some((work) => work.state === "unknown" || work.dirtyFiles !== 0))
+      )
         throw new Failure({ outcome: "refused", reason: "unlanded_work", worktrees: held });
       const raw = await this.ports.runner
         .readPane?.(agent.paneId, "recent-unwrapped", "text")
@@ -550,6 +560,7 @@ export class PaneTidy {
       if (raw === undefined) return fail("herdr_unavailable");
       const guard = async () => {
         await this.authority(authority);
+        await retirementGuard?.().catch((error: unknown) => fail("provenance_unknown", errorText(error)));
         const latest = await this.fresh(agent.paneId);
         if (input.idleOnly && !["idle", "waiting", "done"].includes(latest.status)) return fail("busy");
         if (
@@ -578,7 +589,8 @@ export class PaneTidy {
           checked = await this.worktreeHandoffs(latest);
           if (
             checked.held.length &&
-            (!unlandedReason || checked.held.some((work) => (work.dirtyFiles ?? 0) > 0))
+            (!unlandedReason ||
+              checked.held.some((work) => work.state === "unknown" || work.dirtyFiles !== 0))
           )
             throw new Failure({ outcome: "refused", reason: "unlanded_work", worktrees: checked.held });
           if (entry) {

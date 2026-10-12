@@ -20,6 +20,22 @@ reason and its saved report path when available. The service preserves its last
 output and report in `worker_pane_history`, and returns an undo ID with a short
 deadline. `undo_worker_pane` reopens and resumes that session.
 
+For an abandoned fresh hire, settlement retains any live project allocation.
+The `not_ready` refusal names its allocation, pane, original intent and native
+receipt. Keep an orphan report (including any startup failure), then use
+`close_worker_pane` from the hiring conversation. Launched but unconfirmed
+hires require a settled original receipt and matching original
+process birth, shell and connection. This retirement proof does not confer
+confirmed project membership. The service releases the allocation only after
+complete successful inventory proves its original pane absent; settlement alone
+never releases it or replays a brief.
+
+The CLI uses the same authenticated conversation tool/API:
+`clankie agents retire FLEET/PANE --conversation ID --reason "Abandoned hire; report kept" --report /absolute/report.md`.
+Bare pane IDs address the local fleet. Remote draft and work reads run on that
+host; missing or changed evidence refuses. An `unlandedReason` cannot override
+unknown work evidence or dirty files. Never raw-close after a refusal.
+
 Hire provenance survives service replacement and same-thread `readopt_seat`,
 including remote fleets. Messaging or re-adopting a hand-started pane does not
 make it a hire. A legacy record with lost provenance still fails closed; do not

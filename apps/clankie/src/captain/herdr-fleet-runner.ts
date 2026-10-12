@@ -223,10 +223,13 @@ export function routeHerdrFleets(
     ...(local.openFiles === undefined ? {} : { openFiles: local.openFiles }),
     ...(local.codexControl === undefined ? {} : { codexControl: local.codexControl }),
     ...(local.codexQueue === undefined ? {} : { codexQueue: local.codexQueue }),
-    closePane: async (target) => {
+    closePane: async (target, guard) => {
       const { runner, id } = await route(target);
       if (runner.closePane === undefined) throw new Error("Herdr close is unavailable");
-      await runner.closePane(id);
+      // Capture the runner before the final authority/process check. A changed
+      // fleet cannot substitute a new connection between the check and close.
+      await guard?.();
+      await runner.closePane(id, guard);
     },
     createTab: async (options) => {
       const runner = options.fleet === undefined ? local : (await current()).get(options.fleet);

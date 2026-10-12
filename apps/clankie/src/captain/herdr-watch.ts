@@ -218,7 +218,7 @@ export interface HerdrWatchRunner {
    */
   codexControl?: ExternalCodexControl;
   codexQueue?(sessionId: string, text: string, codexHome?: string): Promise<boolean>;
-  closePane?(target: string): Promise<void>;
+  closePane?(target: string, guard?: () => Promise<void>): Promise<void>;
   /** Open a tab in a working directory; resolves with its root pane id. */
   createTab?(options: {
     readonly cwd: string;
@@ -646,7 +646,10 @@ export function createHerdrWatchRunner(
       if (result.status !== 0) return false;
       return !/no active session/iu.test(`${result.stdout}\n${result.stderr}`);
     },
-    closePane: (target) => runHerdr(["pane", "close", target]).then(() => undefined),
+    closePane: async (target, guard) => {
+      await guard?.();
+      await runHerdr(["pane", "close", target]);
+    },
     runInPane: (paneId, argv) =>
       runHerdr(["pane", "run", paneId, argv.map(shellWord).join(" ")]).then(() => undefined),
     installPiIntegration: async () => {
@@ -988,7 +991,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.nativeLaunchPolicy = options.nativeLaunchPolicy;
     this.fleetResources = options.fleetResources;
     this.requireWorkerAccess = options.requireWorkerAccess;
-    this.projectHires = new ProjectHires(`${path}.project-hires.json`);
+    this.projectHires = new ProjectHires(`${path}.project-hires.json`, (intent) => {
+      const record = this.hireReceipts.all().find(([, receipt]) => receipt.freshHire?.id === intent)?.[1];
+      return record
+        ? `Native receipt ${record.messageId}: ${record.settlement ? `settled ${"disposition" in record.settlement ? record.settlement.disposition : "not-launched"}` : "unresolved"}.`
+        : "Native receipt not observed; no replay is authorized.";
+    });
     this.projectPolicy = options.projectHirePolicy;
     this.fleetHireTools = options.fleetHireTools;
     this.hireReceipts = new DeliveryFence(`${path}.hire-receipts.json`);
@@ -2752,7 +2760,22 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (record?.freshHire && (disposition === "delivered" || disposition === "release-allocation"))
         return refused("Fresh intent settlement requires not-launched, abandoned or abandoned-unknown.");
       const result = await this.settleNativeHireReceipt(record?.messageId ?? receiptId, guard, disposition);
-      return { ...result, receiptId };
+      const allocation = record?.freshHire
+        ? this.projectHires.retainedIntent(record.freshHire.id)
+        : undefined;
+      return {
+        ...result,
+        receiptId,
+        ...(allocation
+          ? {
+              detail:
+                `Allocation ${allocation.id} retains pane ${allocation.pane ?? "unobserved"}; delivery settlement does not release it. Owning lead: keep report and use close_worker_pane with reason; owner/process/draft/work checks apply. Complete pane-absent inventory releases it. ${"detail" in result ? (result.detail ?? "") : ""}`.slice(
+                  0,
+                  OPERATOR_CONVERSATION_SUMMARY_MAX,
+                ),
+            }
+          : {}),
+      };
     } catch (error) {
       return refused(`Settlement unavailable: ${reasonDetail(error)}. Original remains fenced.`);
     }
@@ -3977,9 +4000,59 @@ export class HerdrWatchStore implements HerdrWatchPort {
     );
     if (record === "unknown") return "unknown" as const;
     if (!record) return "owner_interactive" as const;
-    if (record.hired !== true && !this.projectHires.hiredOccupant(occupant))
-      return record.hired === false ? ("owner_interactive" as const) : ("unknown" as const);
+    if (record.hired === false) return "owner_interactive" as const;
+    const launch = this.projectHires.retirementCandidate(
+      splitFleetQualified(agent.paneId)?.fleet ?? "default",
+      agent.paneId,
+    );
+    const originalLaunch =
+      launch?.proof !== undefined && launch.seat === agent.terminalId && launch.occupantId === occupant;
+    if (record.hired !== true && !this.projectHires.hiredOccupant(occupant) && !originalLaunch)
+      return "unknown" as const;
     return record.owner;
+  }
+
+  /** Captured once before retirement. Unconfirmed launches retain their original process proof. */
+  public async retirementGuard(agent: HerdrAgentSnapshot): Promise<() => Promise<void>> {
+    const fleet = splitFleetQualified(agent.paneId)?.fleet ?? "default";
+    const candidate = this.projectHires.retirementCandidate(fleet, agent.paneId);
+    const check = async () => {
+      if (this.closed) throw new Error("Native hire service is closed");
+      if (!candidate) {
+        if (splitFleetQualified(agent.paneId))
+          throw new Error("Remote retirement requires original launch proof");
+        return;
+      }
+      if (this.activeProjectHires.has(candidate.id)) throw new Error("Original hire is still active");
+      if (
+        !candidate.proof ||
+        candidate.seat !== agent.terminalId ||
+        !agent.session ||
+        candidate.occupantId !== occupantIdForHerdrSession(agent.session)
+      )
+        throw new Error("Original hire identity is unavailable or changed");
+      if (
+        JSON.stringify(this.projectHires.retirementCandidate(fleet, agent.paneId)) !==
+        JSON.stringify(candidate)
+      )
+        throw new Error("Original project allocation changed");
+      const proof = await this.projectPolicy?.proof?.(fleet, agent.paneId);
+      if (this.projectHires.assignment(fleet, agent.paneId, proof).state !== "assigned")
+        throw new Error("Original native process or connection changed");
+      if (!candidate.confirmed) {
+        const original = this.hireReceipts
+          .all()
+          .filter(([, receipt]) =>
+            candidate.request.freshIntent
+              ? receipt.freshHire?.id === candidate.request.freshIntent.id
+              : receipt.paneId === agent.paneId && receipt.occupantId === candidate.occupantId,
+          );
+        if (original.length !== 1 || !original[0]![1].settlement)
+          throw new Error("Settle the original native hire receipt before retiring its unconfirmed pane");
+      }
+    };
+    await check();
+    return check;
   }
 
   /** Read-only capability preflight. Missing native exit cannot create a
@@ -4006,6 +4079,25 @@ export class HerdrWatchStore implements HerdrWatchPort {
         if (resourceOwner)
           void this.fleetResources?.observeVerifiedSeatExit(resourceOwner).catch(() => undefined);
       };
+      const fleet = splitFleetQualified(current.paneId)?.fleet;
+      const candidates = this.projectHires.inventoryCandidates(fleet ?? "default");
+      const confirmGone = async () => {
+        // Existing nonproject close/move callers have no allocation to release.
+        if (candidates.size === 0) return true;
+        if (!this.runner.list) return false;
+        const inventory = await this.runner.list(fleet);
+        if (
+          inventory.some((pane) => pane.paneId === current.paneId || pane.terminalId === current.terminalId)
+        )
+          return false;
+        this.projectHires.reconcile(
+          fleet ?? "default",
+          new Set(inventory.map((pane) => pane.paneId)),
+          this.activeProjectHires,
+          candidates,
+        );
+        return true;
+      };
       // pane.close has no lifetime condition. A prepared native TUI can exit
       // itself through its original process-bound controller; Herdr removes
       // its command pane on process exit. Never fall back to physical close.
@@ -4028,6 +4120,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         do {
           if ((await this.runner.resolveTerminal(seatId)) === undefined) {
             await control.close().catch(() => undefined);
+            if (!(await confirmGone())) return false;
             noteVerifiedExit();
             return true;
           }
@@ -4041,9 +4134,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
       await guard?.();
       await control?.close().catch(() => undefined);
       await guard?.();
-      await this.runner.closePane(current.paneId);
+      if (guard) await this.runner.closePane(current.paneId, guard);
+      else await this.runner.closePane(current.paneId);
       // The manager independently checks this original process tuple. A pane
       // close reply alone cannot reclaim a still-live or replaced occupant.
+      if (!(await confirmGone())) return false;
       noteVerifiedExit();
       return true;
     } catch {

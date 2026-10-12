@@ -5771,6 +5771,22 @@ service replacement and on remote fleets. A proven hire remains eligible for
 guards. Re-adoption or messaging alone cannot make a hand-started pane eligible;
 legacy records with unknown hire provenance remain refused.
 
+`clankie agents retire PANE --conversation ID --reason TEXT [--report PATH]
+[--unlanded-reason TEXT]` invokes `close_worker_pane` through the operator
+conversation MCP API (`/v1/mcp?conversationId=ID`). Use a bare local
+pane or a fleet-qualified remote address. Only the current owning lead can
+retire its hire; the native output and nonempty saved report are kept first.
+For a settled-abandoned fresh hire, `not_ready` names the retained allocation,
+pane, fresh intent and native receipt. Settlement ends delivery uncertainty,
+but retains the live allocation. Launched unconfirmed hires are eligible only
+with their original receipt settled and matching original native
+process birth, shell and connection proof. This does not create confirmed
+project membership. Remote work and styled draft reads occur on the linked
+host; unavailable or changed evidence refuses. Dirty or unknown work cannot be
+overridden by a reason. After guarded retirement, complete successful inventory
+must prove the original pane absent before the allocation releases. No brief is
+replayed and no allocation is freed merely because delivery was abandoned.
+
 Without persisted adoption, the host reads the actual census parent/launcher
 edge and routes to that exact native lead or its attached conversation. Explicit
 adoption wins; tabs, titles and report text establish no ownership. The parent

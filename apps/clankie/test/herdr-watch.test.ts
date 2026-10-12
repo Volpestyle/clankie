@@ -1556,7 +1556,7 @@ describe("hiring a seat", () => {
     });
 
     // The old chair goes first, so a hire that fails leaves one seat, not two.
-    expect(closePane).toHaveBeenCalledWith("w1C:p9");
+    expect(closePane).toHaveBeenCalledWith("w1C:p9", expect.any(Function));
     expect(createTab).toHaveBeenCalledWith({
       cwd: tmpdir(),
       label: "Release prep · reviewer",

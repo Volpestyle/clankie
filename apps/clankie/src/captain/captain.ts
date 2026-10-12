@@ -1,3 +1,5 @@
+import { remoteRetirementWork } from "./remote-retirement-work.ts";
+import { workerWorktreeHold } from "./worktree-decisions.ts";
 import { renderLeadChats, type LeadChat } from "./lead-roster.ts";
 import {
   prepareWorkHandoffIntent as prepareWorkIntent,
@@ -2457,6 +2459,39 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     prune: (repository, path, guard) => pruneWorktree(repository, path, guard),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     ownerValid: validateConversationOwner,
+    retirementGuard: async (agent) => {
+      await refreshFleets();
+      const fleet = splitFleetQualified(agent.paneId)?.fleet;
+      const revision = fleet === undefined ? undefined : fleetRevisions.get(fleet);
+      await requireAccess(fleet, "workers");
+      const original = await herdrWatches.retirementGuard(agent);
+      return async () => {
+        await refreshFleets();
+        if (fleet !== undefined && (fleetRevisions.get(fleet) !== revision || !fleetIdentities.has(fleet)))
+          throw new Error("Machine connection changed or disconnected");
+        await requireAccess(fleet, "workers");
+        await original();
+      };
+    },
+    worktreeHold: async (agent) => {
+      const qualified = splitFleetQualified(agent.paneId);
+      if (!qualified) return workerWorktreeHold(agent);
+      await refreshFleets();
+      const fleet = remoteFleets.find((entry) => entry.id === qualified.fleet);
+      if (!fleet || !deps.fleets?.shell) return workerWorktreeHold(agent);
+      const revision = fleetRevisions.get(fleet.id);
+      const result = await remoteRetirementWork(fleet, deps.fleets.shell(fleet), [
+        ...new Set(
+          [agent.workingDirectory, agent.foregroundWorkingDirectory].filter(
+            (path): path is string => path !== undefined,
+          ),
+        ),
+      ]);
+      await refreshFleets();
+      if (fleetRevisions.get(fleet.id) !== revision)
+        throw new Error("Machine connection changed or disconnected");
+      return result;
+    },
     close: async (seatId, guard, nativeOnly) => {
       const closed = await herdrWatches.closeSeat(seatId, guard, nativeOnly);
       if (closed) recordLeadVisit(seatId, "close");

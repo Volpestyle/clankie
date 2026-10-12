@@ -86,8 +86,10 @@ export type ProjectHireMembershipCandidate =
 /** Controller state: semantic persona assignments cannot create, finish or release these claims. */
 export class ProjectHires {
   private readonly path: string;
-  public constructor(path: string) {
+  private readonly receiptDetail: ((freshIntent: string) => string) | undefined;
+  public constructor(path: string, receiptDetail?: (freshIntent: string) => string) {
     this.path = path;
+    this.receiptDetail = receiptDetail;
   }
   /** Retained launch provenance, including a pane later reattached to that same native session. */
   public hiredOccupant(occupantId: string): boolean {
@@ -161,18 +163,14 @@ export class ProjectHires {
               { ...requested, projectId },
             )
           )
-            throw new Error(
-              "An unresolved fresh hire has a different intent or launch scope; inspect its original, never substitute it",
-            );
+            throw new Error(this.blockerDetail(pending));
         }
         if (
           pending.projectId !== projectId ||
           operatorAgentRoleKey(pending.role ?? "") !== operatorAgentRoleKey(input.role ?? "") ||
           pending.request.deliverable !== input.deliverable
         )
-          throw new Error(
-            "An earlier hire in this workspace is still being checked. Resolve it before hiring again.",
-          );
+          throw new Error(this.blockerDetail(pending));
         return { ...structuredClone(pending), reused: true };
       }
       const request = projectHireRequest(settings, projectId, input, defaults);
@@ -192,6 +190,21 @@ export class ProjectHires {
       state.allocations.push(allocation);
       return { ...structuredClone(allocation), reused: false };
     });
+  }
+  private blockerDetail(entry: Allocation): string {
+    const intent = entry.request.freshIntent?.id;
+    return `Allocation ${entry.id} retains pane ${entry.pane ?? "unobserved"} (seat ${entry.seat ?? "unobserved"}; intent ${intent ?? "legacy"}). ${intent ? (this.receiptDetail?.(intent) ?? "Inspect original receipt.") : "Inspect original receipt."} Blocks different intent or launch scope. Settlement leaves allocation held. Owning lead: keep report; close_worker_pane with reason (owner/process/draft/work guards). Complete pane-absent inventory releases it. Never replay or substitute intent.`;
+  }
+  /** Exact retained launch for retirement; this does not confer confirmed project membership. */
+  public retirementCandidate(fleet: string, pane: string) {
+    return this.read()
+      .allocations.filter(
+        (a) => !a.gone && a.started && (a.request.fleet ?? "default") === fleet && a.pane === pane,
+      )
+      .at(-1);
+  }
+  public retainedIntent(intent: string) {
+    return this.read().allocations.find((a) => !a.gone && a.request.freshIntent?.id === intent);
   }
   public reuse(
     settings: ProjectsSettings,

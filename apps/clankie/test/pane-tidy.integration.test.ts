@@ -287,6 +287,13 @@ it.each([false, true])("closes a proven hire after deploy/re-adoption (remote=%s
     },
     authority,
   );
+  if (remote) {
+    // A reason cannot replace unavailable host-side work evidence (VUH-2153/2169).
+    expect(closed).toMatchObject({ outcome: "refused", reason: "unlanded_work" });
+    expect(f.closes()).toBe(0);
+    f.watch.close();
+    return;
+  }
   expect(closed).toMatchObject({ outcome: "closed" });
   expect(f.closes()).toBe(1);
   expect(await f.ports.runner.resolveTerminal(seat)).toBeUndefined();
