@@ -353,6 +353,16 @@ export class ProjectHires {
       if (a && !a.started) a.gone = true;
     });
   }
+  /** Host allocator proof: the dispatch fence was crossed, but no pane effect was issued. */
+  public notStarted(id: string): void {
+    this.change((state) => {
+      const a = state.allocations.find((entry) => entry.id === id);
+      if (!a || a.pane !== undefined || a.occupantId !== undefined || a.confirmed)
+        throw new Error("An observed hire cannot be marked not started.");
+      a.started = false;
+      a.gone = true;
+    });
+  }
   /** Operator recovery snapshots retain the original allocation; they confer no launch authority. */
   public recoveryCandidate(id: string): Allocation | undefined {
     return this.read().allocations.find((a) => a.id === id && !a.confirmed && (!a.gone || a.operatorRelease));

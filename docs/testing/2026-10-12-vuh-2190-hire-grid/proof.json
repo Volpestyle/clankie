@@ -1,0 +1,504 @@
+{
+  "base": "ab8f90e854964f93e5454c09835c70eafa1169b3",
+  "regression": {
+    "closedCorners": [
+      {
+        "corner": 0,
+        "closed": "w4:pE",
+        "afterClose": {
+          "area": {
+            "height": 40,
+            "width": 120,
+            "x": 0,
+            "y": 0
+          },
+          "focused_pane_id": "w4:pG",
+          "panes": [
+            {
+              "focused": true,
+              "pane_id": "w4:pG",
+              "rect": {
+                "height": 40,
+                "width": 60,
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "focused": false,
+              "pane_id": "w4:pF",
+              "rect": {
+                "height": 20,
+                "width": 60,
+                "x": 60,
+                "y": 0
+              }
+            },
+            {
+              "focused": false,
+              "pane_id": "w4:pH",
+              "rect": {
+                "height": 20,
+                "width": 60,
+                "x": 60,
+                "y": 20
+              }
+            }
+          ],
+          "splits": [
+            {
+              "direction": "right",
+              "id": "split_0_root",
+              "ratio": 0.5,
+              "rect": {
+                "height": 40,
+                "width": 120,
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "direction": "down",
+              "id": "split_1_1",
+              "ratio": 0.5,
+              "rect": {
+                "height": 40,
+                "width": 60,
+                "x": 60,
+                "y": 0
+              }
+            }
+          ],
+          "tab_id": "w4:t9",
+          "workspace_id": "w4",
+          "zoomed": false
+        },
+        "subsequent": ["w4:pJ", "w4:pK"]
+      },
+      {
+        "corner": 1,
+        "closed": "w4:pN",
+        "afterClose": {
+          "area": {
+            "height": 40,
+            "width": 120,
+            "x": 0,
+            "y": 0
+          },
+          "focused_pane_id": "w4:pM",
+          "panes": [
+            {
+              "focused": true,
+              "pane_id": "w4:pM",
+              "rect": {
+                "height": 20,
+                "width": 60,
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "focused": false,
+              "pane_id": "w4:pP",
+              "rect": {
+                "height": 20,
+                "width": 60,
+                "x": 0,
+                "y": 20
+              }
+            },
+            {
+              "focused": false,
+              "pane_id": "w4:pQ",
+              "rect": {
+                "height": 40,
+                "width": 60,
+                "x": 60,
+                "y": 0
+              }
+            }
+          ],
+          "splits": [
+            {
+              "direction": "right",
+              "id": "split_0_root",
+              "ratio": 0.5,
+              "rect": {
+                "height": 40,
+                "width": 120,
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "direction": "down",
+              "id": "split_1_0",
+              "ratio": 0.5,
+              "rect": {
+                "height": 40,
+                "width": 60,
+                "x": 0,
+                "y": 0
+              }
+            }
+          ],
+          "tab_id": "w4:tB",
+          "workspace_id": "w4",
+          "zoomed": false
+        },
+        "subsequent": ["w4:pR", "w4:pS"]
+      },
+      {
+        "corner": 2,
+        "closed": "w4:pW",
+        "afterClose": {
+          "area": {
+            "height": 40,
+            "width": 120,
+            "x": 0,
+            "y": 0
+          },
+          "focused_pane_id": "w4:pT",
+          "panes": [
+            {
+              "focused": true,
+              "pane_id": "w4:pT",
+              "rect": {
+                "height": 40,
+                "width": 60,
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "focused": false,
+              "pane_id": "w4:pV",
+              "rect": {
+                "height": 20,
+                "width": 60,
+                "x": 60,
+                "y": 0
+              }
+            },
+            {
+              "focused": false,
+              "pane_id": "w4:pX",
+              "rect": {
+                "height": 20,
+                "width": 60,
+                "x": 60,
+                "y": 20
+              }
+            }
+          ],
+          "splits": [
+            {
+              "direction": "right",
+              "id": "split_0_root",
+              "ratio": 0.5,
+              "rect": {
+                "height": 40,
+                "width": 120,
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "direction": "down",
+              "id": "split_1_1",
+              "ratio": 0.5,
+              "rect": {
+                "height": 40,
+                "width": 60,
+                "x": 60,
+                "y": 0
+              }
+            }
+          ],
+          "tab_id": "w4:tD",
+          "workspace_id": "w4",
+          "zoomed": false
+        },
+        "subsequent": ["w4:pY", "w4:pZ"]
+      },
+      {
+        "corner": 3,
+        "closed": "w4:p13",
+        "afterClose": {
+          "area": {
+            "height": 40,
+            "width": 120,
+            "x": 0,
+            "y": 0
+          },
+          "focused_pane_id": "w4:p0",
+          "panes": [
+            {
+              "focused": true,
+              "pane_id": "w4:p0",
+              "rect": {
+                "height": 20,
+                "width": 60,
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "focused": false,
+              "pane_id": "w4:p12",
+              "rect": {
+                "height": 20,
+                "width": 60,
+                "x": 0,
+                "y": 20
+              }
+            },
+            {
+              "focused": false,
+              "pane_id": "w4:p11",
+              "rect": {
+                "height": 40,
+                "width": 60,
+                "x": 60,
+                "y": 0
+              }
+            }
+          ],
+          "splits": [
+            {
+              "direction": "right",
+              "id": "split_0_root",
+              "ratio": 0.5,
+              "rect": {
+                "height": 40,
+                "width": 120,
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "direction": "down",
+              "id": "split_1_0",
+              "ratio": 0.5,
+              "rect": {
+                "height": 40,
+                "width": 60,
+                "x": 0,
+                "y": 0
+              }
+            }
+          ],
+          "tab_id": "w4:tF",
+          "workspace_id": "w4",
+          "zoomed": false
+        },
+        "subsequent": ["w4:p14", "w4:p15"]
+      }
+    ],
+    "preallocationRefusals": [
+      {
+        "outcome": "failed",
+        "reason": "herdr_unreachable",
+        "detail": "The named tab is not a verified hire grid; existing panes were left untouched.",
+        "deliveryStage": "unavailable"
+      },
+      {
+        "outcome": "failed",
+        "reason": "herdr_unreachable",
+        "detail": "The named tab is not a verified hire grid; existing panes were left untouched.",
+        "deliveryStage": "unavailable"
+      }
+    ],
+    "lostReplyReasons": [
+      {
+        "fault": "tab-reply",
+        "first": "start_unconfirmed",
+        "retry": "delivery_unconfirmed"
+      },
+      {
+        "fault": "pane-label",
+        "first": "start_unconfirmed",
+        "retry": "delivery_unconfirmed"
+      },
+      {
+        "fault": "workspace-move",
+        "first": "start_unconfirmed",
+        "retry": "delivery_unconfirmed"
+      }
+    ]
+  },
+  "native": {
+    "startedAt": "2026-10-12T21:26:14.372Z",
+    "closed": "w2:p1",
+    "afterClose": {
+      "id": "cli:pane:layout",
+      "result": {
+        "layout": {
+          "area": {
+            "height": 40,
+            "width": 120,
+            "x": 0,
+            "y": 0
+          },
+          "focused_pane_id": "w2:p3",
+          "panes": [
+            {
+              "focused": true,
+              "pane_id": "w2:p3",
+              "rect": {
+                "height": 40,
+                "width": 60,
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "focused": false,
+              "pane_id": "w2:p2",
+              "rect": {
+                "height": 20,
+                "width": 60,
+                "x": 60,
+                "y": 0
+              }
+            },
+            {
+              "focused": false,
+              "pane_id": "w2:p4",
+              "rect": {
+                "height": 20,
+                "width": 60,
+                "x": 60,
+                "y": 20
+              }
+            }
+          ],
+          "splits": [
+            {
+              "direction": "right",
+              "id": "split_0_root",
+              "ratio": 0.5,
+              "rect": {
+                "height": 40,
+                "width": 120,
+                "x": 0,
+                "y": 0
+              }
+            },
+            {
+              "direction": "down",
+              "id": "split_1_1",
+              "ratio": 0.5,
+              "rect": {
+                "height": 40,
+                "width": 60,
+                "x": 60,
+                "y": 0
+              }
+            }
+          ],
+          "tab_id": "w2:t1",
+          "workspace_id": "w2",
+          "zoomed": false
+        },
+        "type": "pane_layout"
+      }
+    },
+    "hires": [
+      {
+        "paneId": "w2:p5"
+      },
+      {
+        "paneId": "w2:p6"
+      }
+    ],
+    "agents": [
+      {
+        "agent": "codex",
+        "agent_status": "unknown",
+        "cwd": "/Users/james/dev/clankie",
+        "focused": false,
+        "foreground_cwd": "/Users/james/dev/clankie",
+        "interactive_ready": true,
+        "name": "gridproof0",
+        "pane_id": "w2:p5",
+        "revision": 2,
+        "state_change_seq": 0,
+        "tab_id": "w2:t2",
+        "terminal_id": "term_65dab5911ce9a7",
+        "terminal_title": "clankie",
+        "terminal_title_stripped": "clankie",
+        "tokens": {
+          "clankie_grid": "2x2",
+          "clankie_pipeline": "edd3d69ff6c8dd3a50a7a7065170f83988e662531cc99cae382be77c55e50384",
+          "clankie_repo": "3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102"
+        },
+        "workspace_id": "w2"
+      },
+      {
+        "agent": "codex",
+        "agent_status": "unknown",
+        "cwd": "/Users/james/dev/clankie",
+        "focused": false,
+        "foreground_cwd": "/Users/james/dev/clankie",
+        "interactive_ready": true,
+        "name": "gridproof1",
+        "pane_id": "w2:p6",
+        "revision": 2,
+        "state_change_seq": 0,
+        "tab_id": "w2:t2",
+        "terminal_id": "term_65dab59510faa8",
+        "terminal_title": "clankie",
+        "terminal_title_stripped": "clankie",
+        "tokens": {
+          "clankie_grid": "2x2",
+          "clankie_pipeline": "edd3d69ff6c8dd3a50a7a7065170f83988e662531cc99cae382be77c55e50384",
+          "clankie_repo": "3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102"
+        },
+        "workspace_id": "w2"
+      }
+    ],
+    "processes": [
+      {
+        "foreground_process_group_id": 38929,
+        "foreground_processes": [
+          {
+            "argv": ["codex", "--no-daemon"],
+            "argv0": "codex",
+            "cmdline": "codex --no-daemon",
+            "cwd": "/Users/james/dev/clankie",
+            "name": "codex",
+            "pid": 38929
+          }
+        ],
+        "pane_id": "w2:p5",
+        "shell_pid": 38861
+      },
+      {
+        "foreground_process_group_id": 40301,
+        "foreground_processes": [
+          {
+            "argv": ["codex", "--no-daemon"],
+            "argv0": "codex",
+            "cmdline": "codex --no-daemon",
+            "cwd": "/Users/james/dev/clankie",
+            "name": "codex",
+            "pid": 40301
+          }
+        ],
+        "pane_id": "w2:p6",
+        "shell_pid": 40232
+      }
+    ],
+    "cleanedAt": "2026-10-12T21:26:24.074Z",
+    "modelTurns": 0,
+    "scope": "Production allocator and Herdr native agent startup; no durable hire/adoption/brief-delivery claim. Native TUIs use current worker profile."
+  },
+  "cleanup": {
+    "session": "hire-layout-L7PzSz",
+    "serverPid": 45368,
+    "exitCode": 0,
+    "signalCode": null,
+    "removedPrivateRoot": "/tmp/cl1550-L7PzSz"
+  }
+}

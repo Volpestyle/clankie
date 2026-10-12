@@ -38,6 +38,8 @@ const REPO = "clankie_repo";
 const PIPELINE = "clankie_pipeline";
 const GRID = "clankie_grid";
 const SOURCE = "clankie-hire-layout";
+/** The allocator proved it issued no pane/workspace creation command. */
+export class HireLayoutNotStarted extends Error {}
 export class HireLayoutUnconfirmed extends Error {
   readonly paneId: string | undefined;
   constructor(detail: string, paneId?: string) {
@@ -61,7 +63,7 @@ type Run = (args: readonly string[]) => Promise<string>;
 export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandTab) => Promise<string>) {
   let pending: Promise<unknown> = Promise.resolve();
   const snapshot = async () => Snapshot.parse(JSON.parse(await run(["api", "snapshot"]))).result.snapshot;
-  const allocate = async (input: HireLayoutInput): Promise<string> => {
+  const allocate = async (input: HireLayoutInput, workspaceEffect: () => void): Promise<string> => {
     if (input.placement === "split" && !input.pipeline)
       throw new Error(
         "Split placement requires a named pipeline; provide pipeline or choose new-tab. No pane was opened.",
@@ -141,6 +143,7 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
     const newWorkspace = candidates.length === 0 && workspace !== undefined;
     if (!workspace) {
       try {
+        workspaceEffect();
         const created = z
           .object({ result: z.object({ workspace: Workspace, tab: z.object({ tab_id: z.string() }) }) })
           .parse(
@@ -226,9 +229,13 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
               bottomLeft.rect.width === topLeft.rect.width &&
               Math.abs(topLeft.rect.height - bottomLeft.rect.height) <= 1 &&
               topRight.rect.height === topLeft.rect.height + bottomLeft.rect.height));
-      if (!valid) throw new Error("Hire grid is no longer 2x2; existing panes were left untouched.");
-      target = members.length === 3 ? topRight!.pane_id : topLeft.pane_id;
-      direction = members.length === 1 ? "right" : "down";
+      // Closing a pane can compact either column (or leave a horizontal pair).
+      // Start the next grid when the surviving geometry cannot be filled by
+      // our row-major split. Never rearrange existing workers to repair it.
+      if (valid) {
+        target = members.length === 3 ? topRight!.pane_id : topLeft.pane_id;
+        direction = members.length === 1 ? "right" : "down";
+      }
     }
     let tabLabel = input.pipeline ?? input.label;
     if (grouped) {
@@ -404,7 +411,22 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
     return paneId;
   };
   return (input: HireLayoutInput): Promise<string> => {
-    const next = pending.catch(() => undefined).then(() => allocate(input));
+    const next = pending
+      .catch(() => undefined)
+      .then(async () => {
+        let workspaceCreated = false;
+        try {
+          return await allocate(input, () => {
+            workspaceCreated = true;
+          });
+        } catch (error) {
+          // Every native creation/move and post-creation write above already
+          // retains uncertainty. Only read/validation failures reach this case.
+          if (error instanceof HireLayoutUnconfirmed) throw error;
+          if (workspaceCreated) throw new HireLayoutUnconfirmed(String(error));
+          throw new HireLayoutNotStarted(error instanceof Error ? error.message : String(error));
+        }
+      });
     pending = next;
     return next;
   };

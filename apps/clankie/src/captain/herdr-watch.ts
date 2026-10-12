@@ -4,7 +4,7 @@ import type {
   FleetSeatMessageReceiver,
 } from "@clankie/protocol";
 import { nativeHerdrRead } from "../herdr-native-read.ts";
-import { createHireLayout, HireLayoutUnconfirmed } from "./hire-layout.ts";
+import { createHireLayout, HireLayoutNotStarted, HireLayoutUnconfirmed } from "./hire-layout.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { ResourceAdmissionError, type FleetResourceRuntime } from "../fleet-resource-runtime.ts";
 import { realpath } from "node:fs/promises";
@@ -3598,6 +3598,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
       });
     } catch (caught) {
       await nativePrepared?.dispose();
+      if (remote === undefined && caught instanceof HireLayoutNotStarted) {
+        const allocation = this.projectAllocations.get(input);
+        if (allocation) this.projectHires.notStarted(allocation);
+      }
       if (caught instanceof HireLayoutUnconfirmed && caught.paneId) {
         const pane = remote === undefined ? caught.paneId : `${remote}/${caught.paneId}`;
         if (receiptKey !== undefined) {

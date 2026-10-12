@@ -1,5 +1,6 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
@@ -412,6 +413,80 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     expect(
       Math.max(...rects.map((r: any) => r.height)) - Math.min(...rects.map((r: any) => r.height)),
     ).toBeLessThanOrEqual(1);
+    // VUH-2190: Herdr compacts either column after any corner is closed.
+    // Two subsequent real allocator calls must succeed, preserving survivors.
+    const closedGridProof: unknown[] = [];
+    for (let corner = 0; corner < 4; corner++) {
+      const group = `VUH-2190 corner ${corner}`;
+      const create = () =>
+        createHerdrWatchRunner(undefined, run).createTab!({
+          cwd: repoA,
+          label: "Grid retry",
+          group,
+        });
+      const allocated: string[] = [];
+      for (let i = 0; i < 4; i++) allocated.push(await create());
+      await runner.closePane!(allocated[corner]!);
+      ownedClosedPanes.push(allocated[corner]!);
+      const survivors = (await snapshot()).panes.filter((p: any) => allocated.includes(p.pane_id));
+      const afterClose = JSON.parse(await run(["pane", "layout", "--pane", survivors[0].pane_id])).result
+        .layout;
+      const subsequent = [await create(), await create()];
+      const after = await snapshot();
+      expect(subsequent.every((id) => after.panes.some((p: any) => p.pane_id === id))).toBe(true);
+      for (const pane of survivors) {
+        const retained = after.panes.find((p: any) => p.pane_id === pane.pane_id);
+        expect({ tab: retained.tab_id, terminal: retained.terminal_id }).toEqual({
+          tab: pane.tab_id,
+          terminal: pane.terminal_id,
+        });
+      }
+      closedGridProof.push({ corner, closed: allocated[corner], afterClose, subsequent });
+    }
+    // A real foreign-tab validation refusal happens before any native effect,
+    // even though the project launch fence has already been marked dispatched.
+    const refusalPath = join(root, "not-started.json");
+    const refusalSettings = ProjectsSettingsSchema.parse({
+      projects: [{ id: "proof", name: "Proof", workerCap: 1 }],
+    });
+    const refusalRequest = SpawnOperatorSeatSchema.parse({
+      schemaVersion: 1,
+      harness: "claude",
+      title: "Preallocation refusal",
+      workingDirectory: repoA,
+      pipeline: "Foreign workflow",
+      placement: "split",
+      projectId: "proof",
+    });
+    const beforeRefusal = (await snapshot()).panes.length;
+    const refusals = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const store = new HerdrWatchStore(refusalPath, {
+        runner,
+        projectHirePolicy: {
+          settings: async () => refusalSettings,
+          tools: async () => [],
+          project: async () => "proof",
+        },
+      });
+      try {
+        const result = await store.spawnSeat(refusalRequest);
+        expect(result).toMatchObject({ outcome: "failed", reason: "herdr_unreachable" });
+        if (result.outcome !== "failed") throw new Error("Expected a pre-allocation refusal");
+        expect(result.detail).toContain("not a verified hire grid");
+        refusals.push(result);
+      } finally {
+        store.close();
+      }
+    }
+    expect((await snapshot()).panes.length).toBe(beforeRefusal);
+    const rejectedAllocations = JSON.parse(
+      await readFile(`${refusalPath}.project-hires.json`, "utf8"),
+    ).allocations;
+    expect(rejectedAllocations).toHaveLength(2);
+    expect(
+      rejectedAllocations.every((a: any) => a.started === false && a.gone === true && a.pane === undefined),
+    ).toBe(true);
     // Real transport fault after a successful mutation: preserve the uncertain
     // hire receipt across a new store instance, never start/retry a harness.
     const uncertainty: unknown[] = [];
@@ -518,6 +593,8 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
           {
             session,
             before,
+            closedGridProof,
+            refusals,
             firstHireSnapshot,
             afterSolo,
             pipelineSnapshot,

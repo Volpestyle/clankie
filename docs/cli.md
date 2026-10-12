@@ -4161,7 +4161,8 @@ directories belong to that repo. Mixed legacy workspaces stay untouched.
 Non-Git directories use their exact working directory instead.
 
 Omitted placement fills named 2x2 worker tabs, with at most four panes before
-opening the next numbered tab. Positions fill top-left, top-right, bottom-left,
+opening the next numbered tab. After a pane closes, a compacted layout that cannot be filled
+starts a fresh numbered grid; surviving workers stay in place. Positions fill top-left, top-right, bottom-left,
 bottom-right. The name defaults to the project's display name or deliverable (otherwise the
 repository, or `Workers` outside Git); a per-hire `pipeline`, such as `"VUH-1869 authors"`, overrides it.
 Explicit `new-tab` requests a solo `Name · role` tab. Explicit `split` requires
