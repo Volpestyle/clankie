@@ -3,7 +3,7 @@ import { isSkinDraftRoute } from "./skin-drafts.ts";
 import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
 import { hostedDiscordAllows } from "./hosted-discord.ts";
 export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
-import { OperatorConversationServiceRequestSchema } from "./index.ts";
+import { OperatorConversationServiceRequestSchema } from "./operator-service.ts";
 import { FLEET_HIRE_DEFAULTS_PATH, FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
 import {
   isWorkerAccountsRoute,

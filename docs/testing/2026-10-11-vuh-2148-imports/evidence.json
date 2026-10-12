@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "collection-import-seams.json.gz",
+      "size": 4292868,
+      "sha256": "1b97aee2bc1f5935e8c2ff917fbd52d0c399545f476e9705e45a9d89b68a3259",
+      "url": "clankie://evidence/sha256/1b97aee2bc1f5935e8c2ff917fbd52d0c399545f476e9705e45a9d89b68a3259"
+    },
+    {
+      "path": "collection-lazy-snapshot.json.gz",
+      "size": 4303155,
+      "sha256": "a27d7916962bf27537e759a3696d91b1684b0098f408a547beb21ca871e7979a",
+      "url": "clankie://evidence/sha256/a27d7916962bf27537e759a3696d91b1684b0098f408a547beb21ca871e7979a"
+    },
+    {
+      "path": "collection-protocol-seams.json.gz",
+      "size": 4292335,
+      "sha256": "14f35be5448aa06968d02b0c276dcee1f8a0b59002b5f2db3936715fd54ce9ea",
+      "url": "clankie://evidence/sha256/14f35be5448aa06968d02b0c276dcee1f8a0b59002b5f2db3936715fd54ce9ea"
+    },
+    {
+      "path": "receipts.tar",
+      "size": 93696,
+      "sha256": "141fba2b20e743b0d3831d7fc2ad889248aa10cdcdd85d3a698c24452e8b0724",
+      "url": "clankie://evidence/sha256/141fba2b20e743b0d3831d7fc2ad889248aa10cdcdd85d3a698c24452e8b0724"
+    }
+  ]
+}

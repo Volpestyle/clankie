@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { rename, writeFile } from "node:fs/promises";
-import { resizeImage } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
 
 export const PERSONA_IMAGE_LIMITS = {
@@ -51,6 +50,7 @@ export async function processImage(bytes: Buffer, contactSheet = false) {
         ? "image/webp"
         : undefined;
   if (!mime) throw new Error("unreadable_or_unsupported_image");
+  const { resizeImage } = await import("@earendil-works/pi-coding-agent");
   const resized = await resizeImage(bytes, mime, {
     maxWidth: contactSheet ? PERSONA_IMAGE_LIMITS.sheetEdge : PERSONA_IMAGE_LIMITS.edge,
     maxHeight: contactSheet

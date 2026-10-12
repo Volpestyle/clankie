@@ -15,6 +15,11 @@ Schemas are lenient by design: unknown keys pass through and malformed or missin
 
 The default cache dir is `${XDG_CACHE_HOME ?? ~/.cache}/clankie`.
 
+The snapshot is read only when `loadBundledCatalog()` first needs it, then
+validated and memoized. Importing registry schemas or merge helpers does not
+load the snapshot. The small CommonJS loader keeps that synchronous API and
+lets the release bundle defer the embedded JSON as well.
+
 The bundled JSON has an `unknown` declaration in
 [`data/models-dev-snapshot.d.json.ts`](data/models-dev-snapshot.d.json.ts).
 `CatalogSchema.parse` supplies its validated runtime type. Keep that declaration

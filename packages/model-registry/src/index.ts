@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import bundledSnapshot from "../data/models-dev-snapshot.json" with { type: "json" };
+import { loadBundledSnapshot } from "./bundled-snapshot.cjs";
 
 // ---------------------------------------------------------------------------
 // Schemas — deliberately lenient. models.dev evolves faster than this package
@@ -87,7 +87,7 @@ let bundledCatalog: Catalog | undefined;
 
 /** Parses the vendored models.dev snapshot shipped with this package. Memoized after first load. */
 export function loadBundledCatalog(): Catalog {
-  bundledCatalog ??= CatalogSchema.parse(bundledSnapshot);
+  bundledCatalog ??= CatalogSchema.parse(loadBundledSnapshot());
   return bundledCatalog;
 }
 

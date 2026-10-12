@@ -4,7 +4,7 @@ import {
   CaptainChannelTurnResultSchema,
   DiscordPresenceAttachmentSchema,
   DiscordPresenceChannelTurnRequestSchema,
-} from "./index.ts";
+} from "./discord-presence.ts";
 import { DiscordIdSchema } from "./discord-ids.ts";
 
 export {

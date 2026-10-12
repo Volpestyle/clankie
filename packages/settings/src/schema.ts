@@ -1,17 +1,13 @@
 import { LinearWakeSettingsSchema } from "@clankie/protocol/linear-settings";
-import { MachineAccessSettingsSchema } from "@clankie/protocol";
+import { MachineAccessSettingsSchema } from "@clankie/protocol/machine-access";
 import { DesktopSettingsSchema } from "./desktop.ts";
-import {
-  AutonomySettingsSchema,
-  EmbodimentBudgetSchema,
-  FLEET_WORKING_PREFERENCE_FIELDS,
-  HireProfileSchema,
-  FleetResourcePolicySchema,
-  FleetResourceMachineIdSchema,
-} from "@clankie/protocol";
+import { AutonomySettingsSchema, FLEET_WORKING_PREFERENCE_FIELDS } from "@clankie/protocol/autonomy";
+import { EmbodimentBudgetSchema } from "@clankie/protocol/embodiment";
+import { HireProfileSchema } from "@clankie/protocol/hire-profile";
+import { FleetResourcePolicySchema, FleetResourceMachineIdSchema } from "@clankie/protocol/fleet-resources";
 import { z } from "zod";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
-import { MinecraftPlaySettingsSchema, MinecraftServerProfileIdSchema } from "@clankie/protocol";
+import { MinecraftPlaySettingsSchema, MinecraftServerProfileIdSchema } from "@clankie/protocol/minecraft";
 import { isIP } from "node:net";
 
 /**
@@ -29,7 +25,7 @@ import { isIP } from "node:net";
 export const SETTINGS_SCHEMA_VERSION = 1 as const;
 
 import { DiscordSettingsSchema } from "@clankie/protocol/discord-settings";
-import { RuntimeHealthSettingsSchema } from "@clankie/protocol";
+import { RuntimeHealthSettingsSchema } from "@clankie/protocol/runtime-health";
 export { DiscordSettingsSchema, type DiscordSettings } from "@clankie/protocol/discord-settings";
 
 export {

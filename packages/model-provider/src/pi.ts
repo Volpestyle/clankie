@@ -1,16 +1,10 @@
 import type { Catalog, ModelEntry } from "@clankie/model-registry";
-import {
-  clampThinkingLevel,
-  getSupportedThinkingLevels,
-  type Api,
-  type Model,
-  type ModelThinkingLevel,
-  type ThinkingLevelMap,
-} from "@earendil-works/pi-ai";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
+import type { Api, Model, ModelThinkingLevel, ThinkingLevelMap } from "@earendil-works/pi-ai";
 import type { ModelRuntime, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { parseModelRef, type ClankieConfig } from "./config.ts";
-import { providerFamilyFor } from "./instantiate.ts";
+import { providerFamilyFor } from "./provider-family.ts";
 import { assertModelCredentialAllowed } from "./subscription-policy.ts";
 import { LOCAL_PLACEHOLDER_API_KEY } from "./local-endpoint.ts";
 import { mergedCatalog, subscriptionRefFor } from "./resolve.ts";

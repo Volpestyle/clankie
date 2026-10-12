@@ -14,8 +14,8 @@ import {
   OPERATOR_AGENT_ROLES,
   OperatorAgentRoleSchema,
   operatorAgentRoleKey,
-  applyFleetAutonomyPatch,
-} from "@clankie/protocol";
+} from "@clankie/protocol/agent-roles";
+import { applyFleetAutonomyPatch } from "@clankie/protocol/autonomy";
 
 export function projectsRevision(settings: ProjectsSettings): string {
   return createHash("sha256")

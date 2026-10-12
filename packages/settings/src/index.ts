@@ -60,7 +60,7 @@ export {
   type RelaySettings,
   type VoiceSettings,
 } from "./schema.ts";
-export { MinecraftPlaySettingsSchema, type MinecraftPlaySettings } from "@clankie/protocol";
+export { MinecraftPlaySettingsSchema, type MinecraftPlaySettings } from "@clankie/protocol/minecraft";
 export * from "@clankie/protocol/fleet-gates";
 export {
   FleetAutonomyModeSchema,

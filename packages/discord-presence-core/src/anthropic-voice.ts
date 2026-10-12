@@ -1,7 +1,7 @@
 /** Text-only voice brain. The existing external voice port owns ElevenLabs and the floor. */
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import { createLanguageModel } from "@clankie/model-provider";
+import { createLanguageModel } from "@clankie/model-provider/instantiate";
 import {
   jsonSchema,
   streamText,

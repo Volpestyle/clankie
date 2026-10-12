@@ -47,7 +47,8 @@ import {
 } from "./harness-logins.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { DISCORD_VOICE_TRANSCRIPTS_PATH, OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH } from "./index.ts";
+import { DISCORD_VOICE_TRANSCRIPTS_PATH } from "./discord-voice-evidence.ts";
+import { OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH } from "./operator-conversations.ts";
 import { BODY_LEASE_STATUS_PATH } from "./body-leases.ts";
 import { DISCORD_DIRECTORY_PATH } from "./discord-directory.ts";
 import { DISCORD_SETUP_TEST_POST_PATH } from "./discord-permissions.ts";
@@ -87,7 +88,7 @@ export const PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX = 2 * 1024 * 1024;
 export const PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX = 48 * 1024;
 export const PUBLIC_GATEWAY_IN_FLIGHT_MAX = 128;
 /** The gateway's route window; defined beside the review-offer cap it shares (ADR 0154). */
-export { PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS } from "./index.ts";
+export { PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS } from "./devices.ts";
 
 /** Linear's signed activity webhook (ADR 0165); the owner pastes this path into Linear. */
 export const LINEAR_WEBHOOK_PATH = "/v1/hooks/linear";

@@ -5,7 +5,7 @@ import { chmod, lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile }
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { z } from "zod";
-import { machineAccessAllows, type MachineAccessLevel } from "@clankie/protocol";
+import { machineAccessAllows, type MachineAccessLevel } from "@clankie/protocol/machine-access";
 import { defaultSettingsPath, SettingsStore } from "./store.ts";
 
 const path = z.string().refine(isAbsolute, "Expected an absolute path");
