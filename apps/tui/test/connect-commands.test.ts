@@ -18,7 +18,6 @@ import {
   probeLinearKey,
   probeLinearMcp,
 } from "../src/connect-commands.ts";
-import { DISCORD_BOT_INVITE_PERMISSIONS, discordBotInviteUrl } from "../src/discord-commands.ts";
 
 describe("connect argument routing", () => {
   it("treats leftover mcp/auth phrasing as /connect linear", () => {
@@ -95,20 +94,6 @@ describe("linear MCP probe", () => {
       ok: false,
       detail: "Missing or invalid access token",
     });
-  });
-});
-
-describe("discord invite URL", () => {
-  it("is a bot+commands install for the stored application id", () => {
-    const url = discordBotInviteUrl("123456789012345678");
-    expect(url).toContain("client_id=123456789012345678");
-    expect(url).toContain(`permissions=${String(DISCORD_BOT_INVITE_PERMISSIONS)}`);
-    expect(new URL(url).searchParams.get("scope")).toBe("bot applications.commands");
-    // Use Application Commands is 2^31; JS `1 << 31` is negative, so the
-    // constant must be written as a number, not a shift.
-    expect(DISCORD_BOT_INVITE_PERMISSIONS).toBeGreaterThan(0);
-    expect(DISCORD_BOT_INVITE_PERMISSIONS).toBe(311_421_946_944);
-    expect(BigInt(DISCORD_BOT_INVITE_PERMISSIONS) & 8n).toBe(0n);
   });
 });
 

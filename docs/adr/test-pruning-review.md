@@ -484,3 +484,36 @@ lint, deadcode for TUI plus its actual service consumers, and 45 focused cases.
 The narrower TUI-only deadcode run reported `UpdateAuthority` as unused;
 `apps/clankie/src/runtime-update-routes.ts` consumes it. Including that consumer
 passes without any source edit or exemption. [Direct-slice evidence](../testing/2026-10-12-tui-test-pruning/README.md).
+
+## VUH-2149: TUI slice 2 — duplicate helper coverage
+
+Builds on slice 1. The merges retain unique assertions and remove repeated
+fixture invocations. No product code or test default changes in this slice.
+
+| Original file/case under `apps/tui/test/`                                             | Decision and reason                                                                                                                                                                                        | Retained coverage                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model-cli.test.ts`: `is a headless command`                                          | Merge the isolated classification case into the endpoint/persistence case; remove the separate test registration, preserving its assertion.                                                                | The headless recognition assertion now precedes actual command execution in the same case; endpoint probing/persistence, unreachable fallback/refusal, authenticated set/status refusal, catalog refresh, argument validation and unknown-command refusal remain. |
+| `connect-commands.test.ts`: `is a bot+commands install for the stored application id` | Merge into `discord-commands.test.ts`: `builds a bot invite that does not use a signed 32-bit shift`. Both invoke the same invite writer.                                                                  | Every unique scope, permissions, positive-number and non-administrator assertion moves into the retained case. Client ID, exact permission value and explicit admin mode remain; no assertion is dropped.                                                         |
+| `herdr-jump.test.ts`: `focuses the target through the herdr CLI`                      | Merge into `herdr-connection.test.ts`: `routes viewer, board, and jump commands to the authenticated service's binding`. The broader case already invokes the same focus writer and checks its exact argv. | Move the complete success/target and formatted success-tone assertions into that binding case, which additionally proves selected socket, authenticated lookup and environment isolation.                                                                         |
+| `herdr-jump.test.ts`: `finds the id the click landed on`                              | Move unchanged to `herdr-connection.test.ts`; consolidate the transcript-to-pane consumer with its native dispatch coverage.                                                                               | Same exact click hit/miss and non-pane assertions.                                                                                                                                                                                                                |
+| `herdr-jump.test.ts`: `counts columns past styling and wide glyphs`                   | Move unchanged to the same file; no separate fixture or module is needed.                                                                                                                                  | Same ANSI and wide-glyph column assertions.                                                                                                                                                                                                                       |
+| `herdr-jump.test.ts`: `reports herdr's own refusal`                                   | Move unchanged to the same file.                                                                                                                                                                           | Same native refusal body and error result; no swallowed failure or success substitution.                                                                                                                                                                          |
+| `herdr-jump.test.ts`: `stays inert outside herdr`                                     | Move unchanged to the same file.                                                                                                                                                                           | Same no-dispatch fence and skipped reason.                                                                                                                                                                                                                        |
+
+Delete `herdr-jump.test.ts` only after those transfers. Counts for this slice:
+**155 → 154 files**, **36,663 → 36,636 lines**, **996 → 993 test registrations**.
+Actual focused Vitest cases: **62 → 59**, all passing; this includes unchanged
+next-step and status consumers. Registration counting follows slice 1's method.
+Cumulative TUI cut: **one file, 58 lines and seven cases**, with all unique
+trust-boundary and invite-contract assertions preserved. Formatter and lint
+pass on explicit touched files. The TUI source and all four test partitions
+pass the package typecheck on the final tree. The final merged model case also
+passes its focused seven-case rerun. The owner-approved pruning path runs local package typecheck, deadcode and lint,
+then rebases and pushes directly to main.
+Raw focused reports remain in `.local/pruning/`; no full suite runs locally.
+
+The 155-file inventory was screened for candidates. This bounded review does
+not establish that every remaining assertion earns its place. Files and cases
+without a specific removal/merge above stay unchanged, including evaluator
+inputs, native hooks and hire receipts, release/rollback, account consent,
+operator/worker authority, settings revisions and real HTTP/native integration.

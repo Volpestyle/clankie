@@ -92,6 +92,11 @@ describe("Discord server allowlist resolution", () => {
   });
 
   it("builds a bot invite that does not use a signed 32-bit shift", () => {
+    const url = new URL(discordBotInviteUrl("123456789012345678"));
+    expect(url.searchParams.get("scope")).toBe("bot applications.commands");
+    expect(url.searchParams.get("permissions")).toBe(String(DISCORD_BOT_INVITE_PERMISSIONS));
+    expect(DISCORD_BOT_INVITE_PERMISSIONS).toBeGreaterThan(0);
+    expect(BigInt(DISCORD_BOT_INVITE_PERMISSIONS) & 8n).toBe(0n);
     expect(DISCORD_BOT_INVITE_PERMISSIONS).toBe(311_421_946_944);
     expect(discordBotInviteUrl("123456789012345678")).toContain("client_id=123456789012345678");
     expect(new URL(discordBotInviteUrl("123456789012345678", "admin")).searchParams.get("permissions")).toBe(

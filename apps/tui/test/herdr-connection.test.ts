@@ -1,9 +1,15 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { HERDR_SOCKET_HEADER } from "@clankie/protocol";
 import { herdrConnection, readHerdrBinding, runFleetHerdr } from "../src/session/herdr-connection.ts";
 import { forwardsToFleetHerdr } from "../src/command/herdr.ts";
 import { clankieStateHome } from "../src/state-home.ts";
-import { herdrPaneIdFromEnv, jumpToHerdrAgent, sourceHerdrSocket } from "../src/session/herdr-report.ts";
+import {
+  formatHerdrJumpResult,
+  herdrPaneRefAtColumn,
+  herdrPaneIdFromEnv,
+  jumpToHerdrAgent,
+  sourceHerdrSocket,
+} from "../src/session/herdr-report.ts";
 import { ensureHerdLeadCompanion } from "../src/observation/herd-lead-companion.ts";
 import { createCaptainRouteClient } from "../src/session/operator-conversations.ts";
 
@@ -37,7 +43,9 @@ it("routes viewer, board, and jump commands to the authenticated service's bindi
     calls.push([command, ...args]);
     return { stdout: "w1:p2", stderr: "" };
   };
-  expect((await jumpToHerdrAgent("w1:p2", { env: connection.env, runCommand })).outcome).toBe("ok");
+  const jumped = await jumpToHerdrAgent("w1:p2", { env: connection.env, runCommand });
+  expect(jumped).toEqual({ outcome: "ok", target: "w1:p2" });
+  expect(formatHerdrJumpResult(jumped).tone).toBe("success");
   expect((await ensureHerdLeadCompanion({ env: connection.env, runCommand })).outcome).toBe("ok");
   expect(calls).toEqual([
     ["herdr", "agent", "focus", "w1:p2"],
@@ -305,4 +313,49 @@ it("refuses a same-ID, same-session connection replaced with another host or soc
     ),
   ).rejects.toThrow("connection changed");
   expect(calls).toBe(0);
+});
+
+const ESC = String.fromCharCode(27);
+const line = "- w18:p1J (VUH-1025) — idle is a question";
+
+describe("herdr pane refs in the transcript", () => {
+  it("finds the id the click landed on", () => {
+    expect(herdrPaneRefAtColumn(line, 2)).toBe("w18:p1J");
+    expect(herdrPaneRefAtColumn(line, 8)).toBe("w18:p1J");
+    expect(herdrPaneRefAtColumn(line, 1)).toBeUndefined();
+    expect(herdrPaneRefAtColumn(line, 9)).toBeUndefined();
+    expect(herdrPaneRefAtColumn("nothing to jump to", 4)).toBeUndefined();
+  });
+
+  it("counts columns past styling and wide glyphs", () => {
+    expect(herdrPaneRefAtColumn(`${ESC}[36m${line}${ESC}[0m`, 3)).toBe("w18:p1J");
+    expect(herdrPaneRefAtColumn("🐟 w19:p1", 3)).toBe("w19:p1");
+  });
+});
+
+describe("jumping to a herdr agent", () => {
+  const env = { HERDR_ENV: "1" } as NodeJS.ProcessEnv;
+
+  it("reports herdr's own refusal", async () => {
+    const failure = Object.assign(new Error("Command failed: herdr agent focus w18:p99"), {
+      stderr: '{"error":{"code":"agent_not_found","message":"agent target w18:p99 not found"},"id":"x"}\n',
+      stdout: "",
+    });
+    const result = await jumpToHerdrAgent("w18:p99", {
+      env,
+      runCommand: () => Promise.reject(failure),
+    });
+    expect(formatHerdrJumpResult(result)).toEqual({
+      text: "Cannot jump (agent target w18:p99 not found).",
+      tone: "error",
+    });
+  });
+
+  it("stays inert outside herdr", async () => {
+    const result = await jumpToHerdrAgent("w18:p1J", {
+      env: {} as NodeJS.ProcessEnv,
+      runCommand: () => Promise.reject(new Error("should not run")),
+    });
+    expect(result).toEqual({ outcome: "skipped", reason: "not_in_herdr" });
+  });
 });

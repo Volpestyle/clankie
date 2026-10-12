@@ -55,14 +55,9 @@ async function runModel(
   return { exit, stdout: stdout.text(), stderr: stderr.text(), env };
 }
 
-describe("clankie model — recognition", () => {
-  it("is a headless command", () => {
-    expect(isHeadlessCaptainCommand("model")).toBe(true);
-  });
-});
-
 describe("clankie model add-local / set / status", () => {
   it("probes the endpoint, writes the provider, and can select it as captain", async () => {
+    expect(isHeadlessCaptainCommand("model")).toBe(true);
     const env = await isolatedEnv();
     const listed = await runModel(
       ["add-local", "--id", "ds4", "--base-url", "http://127.0.0.1:8000", "--set"],
