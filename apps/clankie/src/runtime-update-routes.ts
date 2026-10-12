@@ -263,8 +263,19 @@ export function createRuntimeUpdateRoutes(options: {
         ref !== undefined && options.updater.preview ? await options.updater.preview(ref) : undefined;
       await authority.guard();
       if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+      const canary = options.canary?.status() ?? result.latest?.canary;
+      const phase =
+        result.latest?.phase === "healthy" && canary
+          ? canary.state === "failed"
+            ? "canary-failed"
+            : canary.state === "pending"
+              ? "canary-pending"
+              : "healthy"
+          : result.latest?.phase;
       return context.json({
         ...result,
+        ...(phase ? { phase } : {}),
+        ...(canary ? { canary } : {}),
         ...(holds === undefined ? {} : { holds: options.canary?.describeHolds(holds) ?? holds }),
         ...(target === undefined ? {} : { target }),
         ...(options.canary

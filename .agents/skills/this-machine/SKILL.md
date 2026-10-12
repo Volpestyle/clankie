@@ -154,6 +154,15 @@ means pending: finish the turn, then read `clankie update status` and report the
 old/new commit and actual health, canary or rollback. Never repeat an uncertain
 update; inspect its existing operation.
 
+A failed canary reports top-level `phase: canary-failed`; status exits 1 and
+names the measurements, budgets, hold UUID and explicit rollback target.
+Clankie receives the failure in the initiating lead conversation, or the default
+owner conversation for CLI/scheduled updates. Read its commands before acting.
+External machine pressure keeps `phase: canary-pending` and reruns a fresh full
+window when load clears. Inspect `canary.pressure` rather than treating a slow
+pressured window as a build regression. The hold remains during this visible
+wait; release only after reviewing runtime health. No automatic rollback occurs.
+
 An integration-head progress alert names the batch and last checkpoint. The
 service observes every 30 seconds and alerts after three minutes without
 progress or a proven active install/gate job. Read `clankie integrate status

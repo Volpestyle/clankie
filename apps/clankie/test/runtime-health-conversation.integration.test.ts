@@ -114,6 +114,33 @@ it("slow health records exactly one alarm and one recovery in the default conver
   expect(deliveries.every((delivery) => delivery.outcome === "unavailable")).toBe(true);
   expect(observations.filter((observation) => observation.state === "alarm").length).toBeGreaterThan(1);
 
+  // Deploy failures must follow their initiating lead rather than disappear in
+  // the unrelated default conversation. Only a machine-capable owner can receive it.
+  const created = await captain.serveOperatorConversation({
+    schemaVersion: 1,
+    op: "create",
+    scope: { kind: "workspace", workspaceId: root },
+    title: "Deploy lead",
+  });
+  if (created.op !== "create") throw Error("create expected");
+  const lead = created.conversation.conversationId;
+  const failure =
+    "Runtime canary held further deploys: health p95 2373ms (budget 250ms). Inspect: clankie update status.";
+  expect(await captain.notifyRuntimeHealthAlert(failure, lead)).toBe(false);
+  expect(await captain.notifyRuntimeHealthAlert(failure, lead)).toBe(false);
+  expect(await captain.notifyRuntimeHealthAlert(failure, "missing-lead-conversation")).toBe(false);
+  const leadReplay = await captain.serveOperatorConversation({
+    schemaVersion: 1,
+    op: "replay",
+    replay: { schemaVersion: 1, conversationId: lead, surfaceClientId: "test" },
+  });
+  if (leadReplay.op !== "replay" || leadReplay.result.status !== "page") throw Error("page expected");
+  expect(leadReplay.result.events.filter((e) => e.type === "message" && e.role === "external")).toHaveLength(
+    1,
+  );
+  expect(leadReplay.result.events.some((e) => e.type === "message" && e.text === failure)).toBe(true);
+  expect(modelTurns).toBe(0);
+
   // A retried notice with the same text is recorded once; the seat result stays honest.
   expect(await captain.notifyRuntimeHealthAlert(notices[0]!)).toBe(false);
   const again = await captain.serveOperatorConversation({

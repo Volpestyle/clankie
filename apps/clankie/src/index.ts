@@ -1716,9 +1716,9 @@ const runtimeCanary =
         holds: deployHolds,
         sample: createRuntimeHealthSampler({ healthUrl: `http://127.0.0.1:${port}/health` }),
         onPassed: inspectRuntimeRetention,
-        alert: async (text) => {
+        alert: async (text, conversationId) => {
           const alerts = captain as typeof captain & {
-            notifyRuntimeHealthAlert?: (text: string) => Promise<boolean>;
+            notifyRuntimeHealthAlert?: (text: string, conversationId?: string) => Promise<boolean>;
           };
           if (!alerts.notifyRuntimeHealthAlert) {
             logger.warn(
@@ -1727,7 +1727,7 @@ const runtimeCanary =
             );
             return false;
           }
-          return alerts.notifyRuntimeHealthAlert(text);
+          return alerts.notifyRuntimeHealthAlert(text, conversationId);
         },
         onError: (error) =>
           logger.warn(

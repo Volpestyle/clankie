@@ -32,7 +32,7 @@ export function runtimeUpdateTools(updater: RuntimeUpdater | undefined, turn: Tu
       name: "runtime_update_status",
       label: "Read update result",
       description:
-        "Read this service's immutable boot identity and the durable last update, including old/new commit, service health and any rollback or uncertainty.",
+        "Read this service's immutable boot identity and the durable last update, including old/new commit, service health and any rollback or uncertainty. Top-level canary-failed means deploys are held; the nested latest.phase is historical cutover health. Inspect the canary numbers and lead notice for release/rollback commands.",
       parameters: Type.Object({}, { additionalProperties: false }),
       execute: async () => {
         const source = authority();

@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { cpus, loadavg } from "node:os";
 import { performance } from "node:perf_hooks";
 import { join } from "node:path";
 import { z } from "zod";
 import {
   readRuntimeUpdate,
+  runtimeRollbackRef,
   type RuntimeBootIdentity,
   type RuntimeCanaryResult,
   type RuntimeUpdateResult,
@@ -49,6 +51,19 @@ export interface RuntimeCanaryCpu {
 export { RUNTIME_CANARY_HOLDER };
 const HOLDER = RUNTIME_CANARY_HOLDER;
 const CheckpointSchema = z.strictObject({ commit: z.string().regex(/^[a-f0-9]{40,64}$/u) });
+// Sidecar metadata keeps result.json readable by retained older runtimes during rollback.
+const PressureSchema = z.strictObject({
+  state: z.enum(["busy", "clear", "unavailable"]),
+  load1: z.number().finite().nonnegative().optional(),
+  load15: z.number().finite().nonnegative().optional(),
+  cores: z.number().int().positive().optional(),
+  externalLoadRatio: z.number().finite().nonnegative().optional(),
+  externalCpuRatio: z.number().finite().nonnegative().optional(),
+  cpuPercent: z.number().finite().nonnegative().optional(),
+  healthLatencyMs: z.number().finite().nonnegative().optional(),
+  observedAt: z.iso.datetime(),
+});
+const MAX_EXTERNAL_LOAD_RATIO = 0.5;
 const ArmSchema = z.strictObject({
   policy: RuntimeCanaryPolicySchema,
   previousHealthyCommit: CheckpointSchema.shape.commit,
@@ -57,10 +72,12 @@ const ArmSchema = z.strictObject({
 interface Session {
   readonly id: string;
   readonly policy: RuntimeCanaryPolicy;
-  readonly startedAt: number;
+  startedAt: number;
+  pressured?: boolean;
   readonly latencies: number[];
   cpuTotal: number;
   cpuDurationMs: number;
+  lastCpuPercent?: number;
   lastSampleAt?: number;
   unavailableSince?: number;
 }
@@ -100,13 +117,16 @@ export class RuntimeCanary {
     sample: (runtime: RuntimeBootIdentity) => Promise<RuntimeHealthSample>;
     /** Monotonic elapsed time; defaults to the process clock. */
     now?: () => number;
-    alert?: (text: string) => Promise<boolean>;
+    /** Host observations are independent of the candidate health endpoint. */
+    pressure?: () => { load1: number; load15: number; cores: number; cpuRatio?: number };
+    alert?: (text: string, conversationId?: string) => Promise<boolean>;
     onError?: (error: unknown) => void;
     /** Best-effort retention after the passed canary's hold release is durable. */
     onPassed?: () => Promise<void>;
   };
   private readonly now: () => number;
   private session: Session | undefined;
+  private cpuWindow: { at: number; busy: number; total: number; ratio?: number } | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running: Promise<void> | undefined;
   private closed = false;
@@ -135,7 +155,13 @@ export class RuntimeCanary {
   }
 
   status(): RuntimeCanaryResult | undefined {
-    return this.latest()?.canary;
+    const result = this.latest();
+    if (!result?.canary) return undefined;
+    const path = join(this.options.updatesDirectory, result.id, "canary-pressure.json");
+    return {
+      ...result.canary,
+      ...(existsSync(path) ? { pressure: PressureSchema.parse(readPrivateJson(path)) } : {}),
+    };
   }
 
   /** Read-time comparison; older readers never see new fields in the durable canary record. */
@@ -189,7 +215,11 @@ export class RuntimeCanary {
           !hold.pane &&
           !hold.seat
         )
-          return { ...hold, candidate: result.newCommit, canary: result.canary };
+          return {
+            ...hold,
+            candidate: result.newCommit,
+            canary: result.id === this.latest()?.id ? this.status() : result.canary,
+          };
       } catch {
         // Missing or unreadable provenance stays a blocking hold, with its original reason.
       }
@@ -390,6 +420,98 @@ export class RuntimeCanary {
     await this.running;
   }
 
+  private hostPressure(): { load1: number; load15: number; cores: number; cpuRatio?: number } {
+    const cores = cpus();
+    let busy = 0,
+      total = 0;
+    for (const { times } of cores) {
+      const used = times.user + times.nice + times.sys + times.irq;
+      busy += used;
+      total += used + times.idle;
+    }
+    const at = performance.now();
+    if (!this.cpuWindow) this.cpuWindow = { at, busy, total };
+    else if (at - this.cpuWindow.at >= 250) {
+      const elapsedTicks = total - this.cpuWindow.total;
+      if (!(elapsedTicks > 0)) throw Error("CPU ticks unavailable");
+      const ratio = Math.min(1, Math.max(0, (busy - this.cpuWindow.busy) / elapsedTicks));
+      this.cpuWindow = { at, busy, total, ratio };
+    }
+    return {
+      load1: loadavg()[0]!,
+      load15: loadavg()[2]!,
+      cores: cores.length,
+      ...(this.cpuWindow.ratio === undefined ? {} : { cpuRatio: this.cpuWindow.ratio }),
+    };
+  }
+
+  private pressure(cpuPercent = 0): z.infer<typeof PressureSchema> {
+    try {
+      const host = this.options.pressure?.() ?? this.hostPressure();
+      if (
+        ![host.load1, host.load15, host.cores].every(Number.isFinite) ||
+        host.load1 < 0 ||
+        host.load15 < 0 ||
+        (host.cpuRatio !== undefined &&
+          (!Number.isFinite(host.cpuRatio) || host.cpuRatio < 0 || host.cpuRatio > 1)) ||
+        !Number.isSafeInteger(host.cores) ||
+        host.cores < 1
+      )
+        throw Error("Invalid host load observation");
+      // Load is runnable cores, while service CPU is percent of ONE core. Remove
+      // the candidate's own contribution so its CPU regression cannot defer itself.
+      const externalLoadRatio =
+        Math.max(0, Math.max(host.load1, host.load15) - cpuPercent / 100) / host.cores;
+      const externalCpuRatio =
+        host.cpuRatio === undefined
+          ? undefined
+          : Math.max(0, host.cpuRatio - cpuPercent / (100 * host.cores));
+      return {
+        load1: host.load1,
+        load15: host.load15,
+        cores: host.cores,
+        externalLoadRatio,
+        ...(externalCpuRatio === undefined ? {} : { externalCpuRatio }),
+        state: (externalCpuRatio ?? externalLoadRatio) > MAX_EXTERNAL_LOAD_RATIO ? "busy" : "clear",
+        observedAt: new Date().toISOString(),
+      };
+    } catch {
+      return { state: "unavailable", observedAt: new Date().toISOString() };
+    }
+  }
+
+  private async defer(result: RuntimeUpdateResult, pressure: z.infer<typeof PressureSchema>): Promise<void> {
+    const session = this.session!;
+    session.pressured = true;
+    session.latencies.length = 0;
+    session.cpuTotal = 0;
+    session.cpuDurationMs = 0;
+    delete session.lastSampleAt;
+    delete session.unavailableSince;
+    const canary = {
+      ...result.canary!,
+      samples: 0,
+      error:
+        pressure.state === "busy" ? "runtime-canary-machine-pressure" : "runtime-canary-pressure-unavailable",
+    };
+    delete canary.cpuMeanPercent;
+    delete canary.healthP95Ms;
+    const pending = await this.save(result, canary);
+    const noticePath = join(this.options.updatesDirectory, result.id, "canary-pressure-alert.json");
+    // Retry the same text after definite non-delivery, so the conversation's
+    // durable notice deduplication does not append a new incident every tick.
+    if (!existsSync(noticePath))
+      await durableJson(
+        noticePath,
+        `Runtime canary is extending its window for ${result.newCommit}: ${pending.canary!.error}. Load 1m ${pressure.load1?.toFixed(2) ?? "unavailable"}, 15m ${pressure.load15?.toFixed(2) ?? "unavailable"} on ${pressure.cores ?? "unknown"} cores; external load ratio ${pressure.externalLoadRatio?.toFixed(2) ?? "unavailable"}, external CPU ratio ${pressure.externalCpuRatio?.toFixed(2) ?? "unavailable"} (quiet budget ${MAX_EXTERNAL_LOAD_RATIO}). CPU observation ${pressure.cpuPercent?.toFixed(2) ?? "unavailable"}%; health observation ${pressure.healthLatencyMs?.toFixed(2) ?? "unavailable"}ms. A fresh full window will run when pressure clears. ${this.commands(result)}`,
+      );
+    await this.notify(pending, z.string().min(1).max(4000).parse(readPrivateJson(noticePath)));
+  }
+
+  private commands(result: RuntimeUpdateResult): string {
+    return `No automatic rollback. Inspect: clankie update status. Release after review: clankie integrate release ${result.id} --actor Clankie --reason "reviewed runtime health". Roll back as owner: clankie update --ref ${runtimeRollbackRef(result)} --override-holds --reason "rollback failed canary ${result.id}".`;
+  }
+
   private async tick(): Promise<void> {
     let result = this.latest();
     if (result !== undefined && ["rolled-back", "failed", "stop-unconfirmed"].includes(result.phase)) {
@@ -417,6 +539,12 @@ export class RuntimeCanary {
     if (!session || !result?.canary || result.canary.state !== "pending") return;
     let sample: RuntimeHealthSample;
     const attemptStartedAt = this.now();
+    const before = this.pressure(session.lastCpuPercent ?? result.canary.cpuMeanPercent);
+    const pressurePath = join(this.options.updatesDirectory, result.id, "canary-pressure.json");
+    if (session.pressured && before.state === "clear") {
+      session.startedAt = attemptStartedAt;
+      session.pressured = false;
+    }
     try {
       sample = RuntimeHealthSampleSchema.parse(await this.options.sample(this.options.runtime));
       const mismatch = runtimeIdentityMismatch(
@@ -432,6 +560,19 @@ export class RuntimeCanary {
         throw Error("runtime-canary-sample-stale");
     } catch (error) {
       if (this.closed) return;
+      const pressure = this.pressure(session.lastCpuPercent ?? result.canary.cpuMeanPercent);
+      await durableJson(pressurePath, pressure);
+      // Wrong identity, invalid HTTP, and invalid metadata remain regressions under load.
+      // Only transport misses can be explained by a pressured scheduler.
+      const transportMiss =
+        error instanceof Error &&
+        !(error instanceof RuntimeIdentityMismatch) &&
+        !(error instanceof z.ZodError) &&
+        !error.message.startsWith("runtime-health-");
+      if (transportMiss && (before.state !== "clear" || pressure.state !== "clear")) {
+        await this.defer(result, before.state !== "clear" ? before : pressure);
+        return;
+      }
       session.unavailableSince ??= session.lastSampleAt ?? attemptStartedAt;
       const now = this.now();
       const diagnostic = `runtime-canary-health-unavailable: ${sampleFailure(error)}`;
@@ -447,6 +588,22 @@ export class RuntimeCanary {
     }
     if (this.closed) return;
     const now = this.now();
+    session.lastCpuPercent = sample.cpuPercent;
+    const after = this.pressure(sample.cpuPercent);
+    const pressure = {
+      ...(before.state !== "clear" ? before : after),
+      cpuPercent: sample.cpuPercent,
+      healthLatencyMs: sample.healthLatencyMs,
+    };
+    await durableJson(pressurePath, pressure);
+    if (pressure.state !== "clear") {
+      await this.defer(result, pressure);
+      return;
+    }
+    if (session.pressured) {
+      session.startedAt = now;
+      session.pressured = false;
+    }
     const lastVerifiedAt = session.lastSampleAt ?? session.unavailableSince;
     if (lastVerifiedAt !== undefined && now - lastVerifiedAt >= session.policy.sampleIntervalMs * 3) {
       await this.fail(
@@ -511,8 +668,12 @@ export class RuntimeCanary {
     await this.notify(failed);
   }
 
-  private async notify(result: RuntimeUpdateResult): Promise<void> {
-    if (!result.canary || (result.canary.alertState !== undefined && result.canary.alertState !== "pending"))
+  private async notify(result: RuntimeUpdateResult, text?: string): Promise<void> {
+    if (
+      !result.canary ||
+      (result.canary.alertState !== undefined &&
+        !["pending", "unavailable"].includes(result.canary.alertState))
+    )
       return;
     const claimed = { ...result.canary, alertState: "claimed" as const };
     // A crash after this claim leaves delivery unknown. It must never replay an uncertain notification.
@@ -521,10 +682,13 @@ export class RuntimeCanary {
     try {
       submitted =
         (await this.options.alert?.(
-          `Runtime canary held further deploys for ${result.newCommit}: ${claimed.error ?? "health unavailable"}. Previous healthy commit: ${claimed.previousHealthyCommit ?? result.oldCommit}. CPU mean ${claimed.cpuMeanPercent?.toFixed(2) ?? "unavailable"}% (one core); health p95 ${claimed.healthP95Ms?.toFixed(2) ?? "unavailable"}ms. No automatic rollback; inspect update status and the retained previous runtime.`,
+          text ??
+            `Runtime canary held further deploys for ${result.newCommit}: ${claimed.error ?? "health unavailable"}. Previous healthy commit: ${claimed.previousHealthyCommit ?? result.oldCommit}. CPU mean ${claimed.cpuMeanPercent?.toFixed(2) ?? "unavailable"}% (one core; advisory ${claimed.policy?.cpuPercent ?? "unavailable"}%); health p95 ${claimed.healthP95Ms?.toFixed(2) ?? "unavailable"}ms (budget ${claimed.policy?.healthLatencyMs ?? "unavailable"}ms). ${this.commands(result)}`,
+          result.initiator?.conversationId,
         )) === true;
     } catch {
-      // Alert transport failure does not remove a durable deployment hold.
+      // An exception is uncertain: retain the claim, never replay it.
+      return;
     }
     // Acceptance by the native notification path does not confirm receipt.
     await this.save(result, { ...claimed, alertState: submitted ? "submitted" : "unavailable" });

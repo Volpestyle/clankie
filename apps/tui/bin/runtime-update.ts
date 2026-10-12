@@ -180,6 +180,18 @@ export interface RuntimeCanaryResult {
   readonly healthP95Ms?: number;
   readonly error?: string;
   readonly alertState?: "pending" | "claimed" | "submitted" | "unavailable";
+  /** Read-time sidecar projection; never written to the cutover journal. */
+  readonly pressure?: {
+    readonly state: "busy" | "clear" | "unavailable";
+    readonly load1?: number;
+    readonly load15?: number;
+    readonly cores?: number;
+    readonly externalLoadRatio?: number;
+    readonly externalCpuRatio?: number;
+    readonly cpuPercent?: number;
+    readonly healthLatencyMs?: number;
+    readonly observedAt: string;
+  };
   readonly policy?: {
     readonly windowMs: number;
     readonly sampleIntervalMs: number;
@@ -360,6 +372,12 @@ function parseReconciliation(input: unknown): RuntimeUpdateReconciliation {
     commit: commitString(value.commit),
     instanceId: operationId(value.instanceId),
   };
+}
+
+/** Explicit rollback targets respect release installs' version-only update contract. */
+export function runtimeRollbackRef(result: RuntimeUpdateResult): string {
+  const commit = result.canary?.previousHealthyCommit ?? result.oldCommit;
+  return result.versions && commit === result.oldCommit ? result.versions.old : commit;
 }
 
 function parseRuntimeCanary(input: unknown): RuntimeCanaryResult {

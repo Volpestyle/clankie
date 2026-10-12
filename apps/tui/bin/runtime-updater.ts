@@ -57,6 +57,8 @@ export interface UpdateAuthority {
 }
 export interface RuntimeUpdateStatus {
   readonly runtime: RuntimeBootIdentity;
+  readonly phase?: RuntimeUpdateResult["phase"] | "canary-failed" | "canary-pending";
+  readonly canary?: RuntimeUpdateResult["canary"];
   readonly latest?: RuntimeUpdateResult;
   readonly retention?: RuntimeRetentionResult;
   /** Presence itself is a hold; unreadable metadata never becomes a negative observation. */
@@ -255,7 +257,20 @@ export function createUpdateJournal(home: string, boot: RuntimeBootIdentity, act
       const pending = id !== undefined && (!activeResult || !safeTerminal(activeResult));
       return {
         runtime: boot,
-        ...(result === undefined ? {} : { latest: result }),
+        ...(result === undefined
+          ? {}
+          : {
+              latest: result,
+              phase:
+                result.phase === "healthy" && result.canary
+                  ? result.canary.state === "failed"
+                    ? ("canary-failed" as const)
+                    : result.canary.state === "pending"
+                      ? ("canary-pending" as const)
+                      : ("healthy" as const)
+                  : result.phase,
+              ...(result.canary ? { canary: result.canary } : {}),
+            }),
         ...(pending ? { pending: id } : {}),
         ...(id !== undefined &&
         result?.id === id &&

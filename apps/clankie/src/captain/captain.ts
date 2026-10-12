@@ -3780,10 +3780,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * seat cannot take a delivery (VUH-1702). The same text is recorded once. The
    * result is the native seat delivery, which callers retry with that same text.
    */
-  async function notifyRuntimeHealthAlert(text: string): Promise<boolean> {
+  async function notifyRuntimeHealthAlert(text: string, targetConversationId?: string): Promise<boolean> {
     if (shutdown.signal.aborted || !text.trim() || text.length > 4000) return false;
-    const conversationId = conversations.defaultGlobalConversationId();
-    conversations.recordServiceNotice(conversationId, text);
+    const conversationId = targetConversationId ?? conversations.defaultGlobalConversationId();
+    if (!(await validateConversationOwner({ conversationId }))) return false;
+    if (!conversations.recordServiceNotice(conversationId, text)) return false;
     return deliverNativeHealthAlert({ conversationId }, text, async () => {
       if (shutdown.signal.aborted) throw new Error("Runtime health alert stopped");
     });

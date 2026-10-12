@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "scenarios-final.jsonl",
+      "size": 21376,
+      "sha256": "9e78f330a243bcb0d641b87733da260fd15c9ebef9b385e2079e582671bc06c5",
+      "url": "clankie://evidence/sha256/9e78f330a243bcb0d641b87733da260fd15c9ebef9b385e2079e582671bc06c5"
+    },
+    {
+      "path": "scenarios-native-cpu.jsonl",
+      "size": 23211,
+      "sha256": "754682181bc12f39a82b38d7a871b77778e533373751cde12592b6c0d7cc0b0c",
+      "url": "clankie://evidence/sha256/754682181bc12f39a82b38d7a871b77778e533373751cde12592b6c0d7cc0b0c"
+    },
+    {
+      "path": "scenarios.jsonl",
+      "size": 31083,
+      "sha256": "f3ca8cf9db59a796b77dc85c19e164ec26900ba7255aa796b01c2eae43f1d3ff",
+      "url": "clankie://evidence/sha256/f3ca8cf9db59a796b77dc85c19e164ec26900ba7255aa796b01c2eae43f1d3ff"
+    }
+  ]
+}

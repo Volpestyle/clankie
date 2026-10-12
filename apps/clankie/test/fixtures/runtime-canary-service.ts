@@ -39,7 +39,17 @@ const canary = new RuntimeCanary({
   updatesDirectory,
   runtime,
   holds,
-  now: () => canaryNow,
+  now: () => (mode.startsWith("native-") ? performance.now() : canaryNow),
+  ...(mode.startsWith("native-")
+    ? {}
+    : {
+        pressure: () => ({
+          load1: mode === "bursty-load" ? 96 : mode.startsWith("pressure") ? 10 : 0,
+          load15: mode === "bursty-load" ? 32 : mode.startsWith("pressure") ? 9.6 : 0,
+          cores: 18,
+          ...(mode === "bursty-load" ? { cpuRatio: 5 / 18 } : {}),
+        }),
+      }),
   sample: async (identity) => {
     const attempt = attempts++;
     if (attempt > 0) canaryNow += sampleIntervalMs * (mode === "sampling-gap" ? 4 : 1);
@@ -49,9 +59,11 @@ const canary = new RuntimeCanary({
     lastSampleWall = wall;
     return sample(identity);
   },
-  alert: async (text) => {
-    await appendFile(join(root, "alerts.jsonl"), `${JSON.stringify({ text })}\n`, { mode: 0o600 });
-    return mode !== "alert-unavailable";
+  alert: async (text, conversationId) => {
+    await appendFile(join(root, "alerts.jsonl"), `${JSON.stringify({ text, conversationId })}\n`, {
+      mode: 0o600,
+    });
+    return !mode.includes("alert-unavailable");
   },
   onError: () => errors.push("canary observation unavailable"),
   onPassed: async () => {
@@ -74,23 +86,27 @@ const server = createServer((request, response) => {
     return;
   }
   healthRequests++;
-  if (mode === "timeout" || (mode === "first-timeout" && healthRequests === 1)) return;
+  if (mode === "timeout" || mode === "pressure-timeout" || (mode === "first-timeout" && healthRequests === 1))
+    return;
   if (mode === "first-reset" && healthRequests === 1) {
     request.socket.destroy();
     return;
   }
-  const unhealthy = mode === "unhealthy" || (mode === "first-unhealthy" && healthRequests === 1);
+  const unhealthy =
+    mode === "unhealthy" ||
+    mode === "pressure-unhealthy" ||
+    (mode === "first-unhealthy" && healthRequests === 1);
   const answer = () => {
     response.writeHead(unhealthy ? 503 : 200, { "content-type": "application/json" });
     response.end(
       JSON.stringify({
         ok: !unhealthy,
         service: "clankie",
-        runtime: mode === "wrong-identity" ? { ...runtime, instanceId: randomUUID() } : runtime,
+        runtime: mode.endsWith("wrong-identity") ? { ...runtime, instanceId: randomUUID() } : runtime,
       }),
     );
   };
-  if (mode === "latency") setTimeout(answer, 60);
+  if (mode.endsWith("latency") || mode === "pressure") setTimeout(answer, 60);
   else answer();
 });
 if (mode !== "body-only") await canary.recover();
@@ -122,6 +138,7 @@ process.on("message", (message: unknown) => {
     try {
       if (input.action === "status") {
         value = {
+          canary: canary.status(),
           result: readRuntimeUpdate(join(updatesDirectory, id)),
           holds: await holds.list(),
           policy: canary.policy(),

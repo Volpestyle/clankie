@@ -804,6 +804,8 @@ paths:
           {
             description: Runtime boot identity,
             durable operation status (pending excludes completed operations),
+            top-level phase (canary-failed or canary-pending supersedes healthy),
+            canary measurements and host pressure (state/load1/load15/cores/externalLoadRatio/externalCpuRatio/observedAt),
             holds with canary causes and measurements,
             and optional target preview,
           }

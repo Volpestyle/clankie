@@ -494,11 +494,35 @@ further updates and integration landings during observation. A pass releases
 that canary's hold and verified older canary holds admitted by its override or
 superseded through the recorded installed-runtime chain. A health regression or missing health signal records a
 failed canary, retains the hold, names the
-previous healthy commit, and attempts the runtime-health alert path. The new
+previous healthy commit, and sends its numbers, budgets, hold-release command and explicit rollback command to the initiating lead conversation (or the default owner conversation for CLI/scheduled updates). The new
 pin keeps running; rollback requires an explicit owner decision. Alert status
 distinguishes submitted, unavailable, and an uncertain claimed attempt.
 Submitted means the native notification path accepted the attempt; it does not
 claim a confirmed recipient receipt.
+
+The canary samples host load before and after each health probe. It subtracts
+service CPU (converted to cores) from the busier of the 1-minute and 15-minute
+load averages. Kernel per-core tick deltas measure current busy CPU across each interval,
+including short-lived forks. Measured external CPU above half the cores keeps
+the canary pending and discards the affected window. Before a valid CPU interval
+is available, it conservatively uses the external load ratio instead; unavailable
+host observations stay pending. Historical load alone cannot defer a quiet CPU
+interval: fork bursts can inflate loadavg long after live CPU settles. When pressure clears it requires a fresh full window; budgets stay
+unchanged. Transport timeouts and scheduler gaps under pressure are retried;
+wrong identity, unhealthy HTTP and invalid metadata still fail. Load is a
+conservative pressure signal, not proof that the build has no regression.
+A continuing pressured machine keeps its hold until a quiet window or explicit
+owner review. The lead receives a pressure notice with recovery commands so
+this wait is visible. `update status` and `update canary` expose the pressure
+state and load observations. Pressure metadata lives beside the operation in
+`canary-pressure.json`, preserving older runtimes' cutover journal readers.
+
+`update status` reports top-level `phase: canary-failed` and `canary` for a
+failed observation, and exits 1 in both terminal and JSON modes. The nested
+`latest.phase` remains the historical cutover result. Pending observations
+report `phase: canary-pending`; terminal output does not call either healthy.
+Definitively unavailable alert delivery retries; a claimed uncertain delivery
+never replays. No canary automatically rolls back or restarts the service.
 
 After a passed canary releases its hold, source-worktree installs automatically
 release obsolete update worktrees. The current pin and that cutover's immediate
@@ -529,7 +553,7 @@ reconciliation, as a held `maintenance.lock` always does. A failed removal
 records its timeout or signal, exit code and stderr.
 
 An unavailable sample stays pending and is retried at the configured interval.
-No verified health for three sample intervals (30 seconds by default), or
+On a quiet machine, no verified health for three sample intervals (30 seconds by default), or
 unavailability at the window's end, fails the canary. A recovery before that
 deadline clears the temporary error; failed samples never count as healthy
 samples. Pending and failed records name the failed check and underlying local

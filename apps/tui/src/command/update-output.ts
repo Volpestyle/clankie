@@ -2,7 +2,11 @@ import { createInterface } from "node:readline/promises";
 import type { BrowserCommandOptions } from "./browser.ts";
 import { outputJson, type Writable } from "./io.ts";
 import { parseUpdateArgs, runUpdateCommand, UPDATE_USAGE } from "./update.ts";
-import type { RuntimeCanaryResult, RuntimeUpdateResult } from "../../bin/runtime-update.ts";
+import {
+  runtimeRollbackRef,
+  type RuntimeCanaryResult,
+  type RuntimeUpdateResult,
+} from "../../bin/runtime-update.ts";
 import { describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
 
 type Hold = DeployHold & { candidate?: string; canary?: RuntimeCanaryResult };
@@ -13,6 +17,7 @@ type CpuComparison = {
   ratioToPrevious?: number;
 };
 interface View {
+  phase?: string;
   runtime?: { commit: string };
   target?: { newCommit: string; ref: string; commitCount: number; summary: string[]; warning?: string };
   latest?: RuntimeUpdateResult;
@@ -42,6 +47,8 @@ const causes: Record<string, string> = {
   "runtime-canary-sampling-gap": "canary sampling was interrupted",
   "runtime-canary-samples-incomplete": "canary has too few samples",
   "canary-pending": "canary observation still running",
+  "runtime-canary-machine-pressure": "machine pressure; window will rerun",
+  "runtime-canary-pressure-unavailable": "host load unavailable; window will rerun",
 };
 const range = (values: Array<number | undefined>, unit: string) => {
   const numbers = values.filter((n): n is number => n !== undefined && Number.isFinite(n));
@@ -139,12 +146,13 @@ function updateNextStep(view: View): string[] {
   if (latest && ["refused", "rolled-back"].includes(latest.phase))
     return ["Review the cause, then run clankie update with a supported target to retry, subject to holds."];
   if (latest?.phase === "healthy") {
-    const canary = latest.canary;
-    if (
-      !canary ||
-      (canary.state === "passed" && canary.holdReleased === true) ||
-      (canary.state === "failed" && canary.holdEstablished === true)
-    )
+    const canary = view.canary ?? latest.canary;
+    if (canary?.state === "failed")
+      return [
+        `Canary failed; further deploys remain held until reviewed. Release: clankie integrate release ${latest.id} --actor Clankie --reason "reviewed runtime health"`,
+        `Rollback as owner: clankie update --ref ${runtimeRollbackRef(latest)} --override-holds --reason "rollback failed canary ${latest.id}"`,
+      ];
+    if (!canary || (canary.state === "passed" && canary.holdReleased === true))
       return ["Canary observation is complete. Another clankie update is allowed, subject to holds."];
     return [
       "Canary observation is still settling. Run clankie update status; do not submit another update yet.",
@@ -174,9 +182,14 @@ export function formatUpdateOutput(input: unknown): string {
   }
   if (view.latest) {
     const latest = view.latest;
-    lines.push(
-      `Last update: ${short(latest.newCommit)} — ${phases[latest.phase] ?? "Unrecognized saved update state"} (${clean(latest.id)})`,
-    );
+    const canary = view.canary ?? latest.canary;
+    const phase =
+      latest.phase === "healthy" && canary?.state === "failed"
+        ? "Canary failed; further deploys held"
+        : latest.phase === "healthy" && canary?.state === "pending"
+          ? "Canary pending; further deploys held"
+          : (phases[latest.phase] ?? "Unrecognized saved update state");
+    lines.push(`Last update: ${short(latest.newCommit)} — ${phase} (${clean(latest.id)})`);
     if (latest.reason) lines.push(`Cause: ${reasons[latest.reason] ?? clean(latest.reason)}`);
     if (latest.error) lines.push(`Failure detail: ${clean(latest.error)}`);
     if (latest.rollbackError) lines.push(`Rollback detail: ${clean(latest.rollbackError)}`);
@@ -184,6 +197,14 @@ export function formatUpdateOutput(input: unknown): string {
   const canary = view.canary ?? view.latest?.canary;
   if (canary) {
     lines.push(`Canary: ${canary.state}; ${measurements([canary])}`);
+    if (canary.pressure) {
+      const p = canary.pressure;
+      lines.push(
+        `Machine pressure: ${p.state}; load 1m ${p.load1?.toFixed(2) ?? "unavailable"}, 15m ${p.load15?.toFixed(2) ?? "unavailable"} on ${p.cores ?? "unknown"} cores; external load ratio ${p.externalLoadRatio?.toFixed(2) ?? "unavailable"}; external CPU ratio ${p.externalCpuRatio?.toFixed(2) ?? "unavailable"}`,
+      );
+      if (canary.state === "pending" && p.state !== "clear")
+        lines.push("Window will rerun in full when machine pressure clears; deploys remain held.");
+    }
     if (canary.error) lines.push(`Cause: ${causes[canary.error] ?? clean(canary.error)}`);
     if (canary.previousHealthyCommit) lines.push(`Previous healthy: ${short(canary.previousHealthyCommit)}`);
   }
@@ -267,12 +288,14 @@ export async function runUpdateCli(
     if (json) outputJson(stdout, result);
     else stdout.write(`${formatUpdateOutput(result)}\n`);
     const view = result as View;
-    return view.error || (view.accepted === false && !view.upToDate) ? 1 : 0;
+    return view.error || view.phase === "canary-failed" || (view.accepted === false && !view.upToDate)
+      ? 1
+      : 0;
   }
   const { status, ref } = parseUpdateArgs(rest);
   const preview = (await runUpdateCommand(["status"], { ...options, previewRef: ref })) as View;
   stdout.write(`${formatUpdateOutput(preview)}\n`);
-  if (status) return preview.error ? 1 : 0;
+  if (status) return preview.error || preview.phase === "canary-failed" ? 1 : 0;
   if (preview.error || preview.needsReconciliation) return 1;
   let updateArgs = rest;
   if (preview.holds?.length && !rest.includes("--override-holds") && !rest.includes("--override-hold")) {

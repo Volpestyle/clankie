@@ -608,3 +608,45 @@ it("reports an already-current real release through HTTP and terminal as success
   expect(updater.status().latest).toBeUndefined();
   expect(await readlink(join(install, "current"))).toBe(join("releases", "v1.0.0"));
 });
+
+it("reports canary failure at top level and fails CLI status while preserving cutover history", async () => {
+  const f = await fixture();
+  f.setResult({
+    phase: "healthy",
+    healthy: true,
+    canary: {
+      state: "failed",
+      holdEstablished: true,
+      previousHealthyCommit: f.old,
+      healthP95Ms: 2373,
+      cpuMeanPercent: 25,
+      error: "runtime-canary-latency-budget-exceeded",
+      policy: { windowMs: 300000, sampleIntervalMs: 10000, cpuPercent: 10, healthLatencyMs: 250 },
+    },
+  });
+  const result = await runUpdateCommand(["status"], f.options);
+  expect(result).toMatchObject({
+    phase: "canary-failed",
+    canary: { state: "failed" },
+    latest: { phase: "healthy" },
+  });
+  for (const isTTY of [true, false]) {
+    let text = "";
+    expect(
+      await runUpdateCli(["status"], {
+        ...f.options,
+        isTTY,
+        stdout: {
+          write: (value: string) => {
+            text += value;
+          },
+        },
+      }),
+    ).toBe(1);
+    if (isTTY) {
+      expect(text).toContain("Canary failed; further deploys held");
+      expect(text).not.toContain("Replacement is healthy");
+      expect(text).toContain(`clankie update --ref ${f.old}`);
+    } else expect(JSON.parse(text).phase).toBe("canary-failed");
+  }
+});

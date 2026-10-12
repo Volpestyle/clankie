@@ -24,6 +24,7 @@ async function recordEvidence(scenario: string, value: unknown) {
 }
 
 interface Snapshot {
+  canary?: RuntimeUpdateResult["canary"];
   result: RuntimeUpdateResult;
   holds: DeployHold[];
   policy: RuntimeCanaryPolicy;
@@ -167,7 +168,7 @@ async function waitFor(service: Awaited<ReturnType<typeof start>>, state: "passe
   throw Error(`Canary did not reach ${state}: ${JSON.stringify(await service.status())}`);
 }
 
-async function alerts(root: string): Promise<{ text: string }[]> {
+async function alerts(root: string): Promise<{ text: string; conversationId?: string }[]> {
   const content = await readFile(join(root, "alerts.jsonl"), "utf8").catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return "";
     throw error;
@@ -176,7 +177,7 @@ async function alerts(root: string): Promise<{ text: string }[]> {
     ? content
         .trim()
         .split("\n")
-        .map((line) => JSON.parse(line) as { text: string })
+        .map((line) => JSON.parse(line) as { text: string; conversationId?: string })
     : [];
 }
 
@@ -817,4 +818,97 @@ it("failed passed maintenance retries then leaves deploy admission available", a
   await service.call("recover");
   expect((await service.status()).maintenanceRuns).toBe(2);
   expect(await service.call("maintenance-admission")).toEqual({ accepted: true });
+});
+
+it("extends a pressured slow real HTTP window, retains its hold, then passes only a fresh quiet window", async () => {
+  const f = await fixture({ policy: { healthLatencyMs: 40 } });
+  const service = await start(f.root, "pressure");
+  await new Promise((resolve) => setTimeout(resolve, 1600));
+  const delayed = await service.status();
+  expect(delayed.result.canary).toMatchObject({
+    state: "pending",
+    samples: 0,
+    error: "runtime-canary-machine-pressure",
+  });
+  expect(delayed.holds.map((h) => h.id)).toContain(f.id);
+  await expect(service.call("landing")).rejects.toThrow("Deploy held");
+  expect(await alerts(f.root)).toHaveLength(1);
+  await service.call("mode", "idle");
+  const resumedAt = Date.now();
+  const passed = await waitFor(service, "passed");
+  expect(Date.now() - resumedAt).toBeGreaterThanOrEqual(policy.windowMs);
+  expect(passed.holds).toEqual([]);
+  expect(passed.result.canary?.error).toBeUndefined();
+  await recordEvidence("pressure-rerun", { delayed, passed, alerts: await alerts(f.root) });
+});
+
+it("keeps a real slow quiet candidate held and offers exact release and previous-healthy rollback commands to its initiator", async () => {
+  const f = await fixture({ policy: { healthLatencyMs: 40 } });
+  const initial = readRuntimeUpdate(join(f.updates, f.id));
+  writeRuntimeUpdate(join(f.updates, f.id), {
+    ...initial,
+    initiator: { kind: "conversation", conversationId: "lead-canary-proof" },
+  });
+  const service = await start(f.root, "latency");
+  const failed = await waitFor(service, "failed");
+  expect(failed.result.canary?.healthP95Ms).toBeGreaterThan(40);
+  await expect(service.call("landing")).rejects.toThrow("Deploy held");
+  const notices = await alerts(f.root);
+  expect(notices).toHaveLength(1);
+  expect(notices[0]).toMatchObject({ conversationId: "lead-canary-proof" });
+  expect(notices[0]!.text).toContain(`clankie integrate release ${f.id}`);
+  expect(notices[0]!.text).toContain(`clankie update --ref ${"a".repeat(40)} --override-holds --reason`);
+  expect(notices[0]!.text).toContain("budget 40ms");
+  await recordEvidence("quiet-slow-regression", { failed, alerts: notices });
+});
+
+it.each(["pressure-unhealthy", "pressure-wrong-identity"])(
+  "%s still fails despite external machine pressure",
+  async (mode) => {
+    const f = await fixture();
+    const service = await start(f.root, mode);
+    const failed = await waitFor(service, "failed");
+    expect(failed.holds.map((h) => h.id)).toContain(f.id);
+    expect(failed.canary?.pressure?.state).toBe("busy");
+    expect(failed.canary?.error).toContain(
+      mode.endsWith("unhealthy") ? "runtime-health-http-unhealthy" : "runtime-health-boot-identity-mismatch",
+    );
+  },
+);
+
+it("transport timeouts under pressure rerun rather than fail, then require the complete quiet window", async () => {
+  const f = await fixture();
+  const service = await start(f.root, "pressure-timeout");
+  await new Promise((resolve) => setTimeout(resolve, 1600));
+  const pending = await service.status();
+  expect(pending.canary).toMatchObject({ state: "pending", samples: 0, pressure: { state: "busy" } });
+  await service.call("mode", "idle");
+  const resumedAt = Date.now();
+  await waitFor(service, "passed");
+  expect(Date.now() - resumedAt).toBeGreaterThanOrEqual(policy.windowMs);
+});
+
+it("retries one stable pressure notice after definite unavailable delivery", async () => {
+  const f = await fixture();
+  const service = await start(f.root, "pressure-alert-unavailable");
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  const notices = await alerts(f.root);
+  expect(notices.length).toBeGreaterThan(1);
+  expect(new Set(notices.map((n) => n.text)).size).toBe(1);
+  await service.call("mode", "pressure");
+  await expect.poll(async () => (await service.status()).canary?.alertState).toBe("submitted");
+  const submitted = (await alerts(f.root)).length;
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(await alerts(f.root)).toHaveLength(submitted);
+});
+
+it("uses measured CPU to pass a quiet runtime despite inflated historical load averages", async () => {
+  const f = await fixture();
+  const service = await start(f.root, "bursty-load");
+  const passed = await waitFor(service, "passed");
+  expect(passed.canary?.pressure).toMatchObject({ state: "clear", load1: 96, load15: 32, cores: 18 });
+  expect(passed.canary?.pressure?.externalCpuRatio).toBeLessThan(0.5);
+  expect(passed.holds).toEqual([]);
+  expect(await alerts(f.root)).toEqual([]);
+  await recordEvidence("bursty-load-low-cpu", passed);
 });
