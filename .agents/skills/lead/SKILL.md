@@ -77,6 +77,15 @@ acknowledged it; `undelivered` means the head has no live channel, and nothing
 was queued. Answer a lead message the same way, naming the conversation it came
 from. Never type into a lead's pane.
 
+Unowned native panes in the owner's Herdr session, including ones the owner
+started by hand, belong to the fleet: `clankie herdr agent list` marks them
+`owner: unowned` with a `messageReceiver` state. When such a pane holds work
+you are routing, such as the owner's tracker comment on an issue it posts to,
+`message_seat` delivers over its channel and adopts it, so its reports return
+to you. Don't refuse to message it because you didn't hire it. Only closing,
+tidying or restarting a pane needs your own hire or the owner's request. A pane
+whose receiver is released stays unreachable, so tell the owner, not its terminal.
+
 ## Choose the work
 
 The tracker's priority is the owner's order. Read it each time you pick:
