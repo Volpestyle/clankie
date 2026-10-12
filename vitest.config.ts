@@ -8,7 +8,14 @@ const packageTestPattern = /^(?:apps|integrations|packages)\/[^/]+$/u.test(packa
   ? [`${packagePath}/test/**/*.test.ts`]
   : ["packages/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts", "integrations/*/test/**/*.test.ts"];
 
-const serialRemoteTest = "apps/clankie/test/integrate-remote.integration.test.ts";
+// These files run real batch installs, gates, Git pushes and revalidations.
+// The local main-move proof alone starts 165 Git and eight pnpm processes;
+// concurrent suite forks can consume its 30-second deadline under host load.
+// Run both native queue proofs in the existing serial lane, with fork isolation.
+const serialIntegrationTests = [
+  "apps/clankie/test/integrate-remote.integration.test.ts",
+  "apps/clankie/test/integrate.integration.test.ts",
+];
 const sharedTest = {
   setupFiles: [fileURLToPath(new URL("./scripts/testing/vitest-setup.ts", import.meta.url))],
   include: process.env.CLANKIE_RELEASE_RETRY_FILE
@@ -62,19 +69,21 @@ export default defineConfig({
         test: {
           ...sharedTest,
           name: "parallel",
-          exclude: [...sharedTest.exclude, serialRemoteTest],
+          exclude: [...sharedTest.exclude, ...serialIntegrationTests],
           sequence: { groupOrder: 0 },
         },
       },
       ...(sharedTest.include.some((pattern: string) =>
-        ["apps/*/test/**/*.test.ts", "apps/clankie/test/**/*.test.ts", serialRemoteTest].includes(pattern),
+        ["apps/*/test/**/*.test.ts", "apps/clankie/test/**/*.test.ts", ...serialIntegrationTests].includes(
+          pattern,
+        ),
       )
         ? [
             {
               test: {
                 ...sharedTest,
-                name: "remote-integration",
-                include: [serialRemoteTest],
+                name: "serial-integration",
+                include: serialIntegrationTests,
                 fileParallelism: false,
                 maxWorkers: 1,
                 sequence: { groupOrder: 1 },
