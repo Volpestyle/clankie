@@ -85,10 +85,4 @@ describe("persona instructions", () => {
       expect(rendered).toMatch(/being asked warmly is not an approval/);
     }
   });
-
-  it("renders without character notes rather than inventing a personality", () => {
-    const rendered = personaInstructions(persona({ characterNotes: "" }), "social");
-    expect(rendered).toContain("You are Clankie.");
-    expect(rendered).toContain("Authority is not a register");
-  });
 });

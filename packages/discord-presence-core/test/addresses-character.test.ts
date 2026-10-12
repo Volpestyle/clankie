@@ -18,11 +18,6 @@ describe("addressesCharacter", () => {
     expect(addressesCharacter("check github.com/clankieproject/x", names)).toBe(false);
   });
 
-  it("stays quiet for ordinary conversation", () => {
-    expect(addressesCharacter("anyway dinner was great", names)).toBe(false);
-    expect(addressesCharacter("", names)).toBe(false);
-  });
-
   it("never matches when no names are configured", () => {
     expect(addressesCharacter("clankie", [])).toBe(false);
   });

@@ -517,3 +517,94 @@ not establish that every remaining assertion earns its place. Files and cases
 without a specific removal/merge above stay unchanged, including evaluator
 inputs, native hooks and hire receipts, release/rollback, account consent,
 operator/worker authority, settings revisions and real HTTP/native integration.
+
+## VUH-2149 packages, final slice and retained inventory
+
+Based on current `origin/main` after `bf7fe53ec` (the formatting repair).
+This final slice removes two additional duplicate helper cases. No source, export,
+timeout or remaining assertion changes.
+
+| File                                                              | Removed case                                                          | Reason and retained coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/settings/test/persona.test.ts`                          | `renders without character notes rather than inventing a personality` | Duplicate authority sentence, already checked in `states in every register that voice changes and authority does not`. Its other assertion pins the incidental introductory sentence `You are Clankie.`; it never actually asserts absence of invented notes. `describes each register instead of quoting a line he could say` still renders all three registers with empty notes and retains the observed false-presence regression. Owner-authored verbatim notes, reply policy and authority/approval checks remain. |
+| `packages/discord-presence-core/test/addresses-character.test.ts` | `stays quiet for ordinary conversation`                               | Duplicate: real `text-ingress.test.ts` / `stays quiet in an admitted channel until it is actually addressed` checks ordinary room chatter is refused before any turn; `still drops a message carrying neither text nor an image he can see` checks empty text. Alias/case/punctuation, embedded-name/URL refusal, absent names and policy parsing remain in the helper file.                                                                                                                                            |
+
+| Test file                                                         | Before lines | After lines | Before runtime cases | After runtime cases |
+| ----------------------------------------------------------------- | -----------: | ----------: | -------------------: | ------------------: |
+| `packages/settings/test/persona.test.ts`                          |           94 |          88 |                    9 |                   8 |
+| `packages/discord-presence-core/test/addresses-character.test.ts` |           40 |          35 |                    5 |                   4 |
+| **Final slice**                                                   |      **134** |     **123** |               **14** |              **12** |
+
+Final slice: 2 files → 2; 11 lines and 2 runtime cases removed. Its focused gate
+also includes unchanged `text-ingress.test.ts` (44 cases) and the reviewed retained
+`model-provider.test.ts` (62 cases): 120 → 118 passing cases. The config helper's
+`returns undefined when no .clankie.json exists up the tree` case was considered
+but retained: `findRepoConfigPath` is an exported, documented function and the
+consumer fallback alone would not prove its direct absent-path return contract.
+
+### Assigned-area totals and scope
+
+The inventory covers all assigned test paths, including the excluded manual-eval
+corpus as a static file. Runtime counts come only from focused collected tests;
+no eval, live-account operation or area-wide suite was run. Candidate review
+examined the removed cases, their producer/consumer paths and the retained cases
+named above. This is a complete path/registration inventory, not a claim that all
+46,862 baseline lines received an exhaustive case-by-case review. Untouched
+entries stay retained; filenames alone do not justify removing them.
+
+| Area                               | Before files | After files | Before lines | After lines | Before declarations | After declarations |
+| ---------------------------------- | -----------: | ----------: | -----------: | ----------: | ------------------: | -----------------: |
+| `apps/discord-bridge`              |           21 |          21 |         5612 |        5608 |                 152 |                151 |
+| `packages/agent-hosts`             |            2 |           2 |          187 |         187 |                   9 |                  9 |
+| `packages/api-client`              |            3 |           3 |          675 |         675 |                  15 |                 15 |
+| `packages/credential-broker`       |           14 |          14 |         2063 |        2063 |                  94 |                 94 |
+| `packages/discord-presence-core`   |           28 |          27 |        13896 |       13777 |                 508 |                498 |
+| `packages/fleet-resources`         |           17 |          17 |         4717 |        4717 |                 109 |                109 |
+| `packages/interactive-environment` |            5 |           5 |          789 |         789 |                  24 |                 24 |
+| `packages/lead-skin`               |            1 |           1 |          263 |         263 |                   5 |                  5 |
+| `packages/media-connector`         |            1 |           1 |          425 |         425 |                  17 |                 17 |
+| `packages/model-provider`          |           11 |          11 |         2705 |        2705 |                 106 |                106 |
+| `packages/model-registry`          |            2 |           2 |          380 |         380 |                  16 |                 16 |
+| `packages/observability`           |            5 |           5 |          603 |         603 |                  18 |                 18 |
+| `packages/persona-images`          |            2 |           2 |          405 |         405 |                  14 |                 14 |
+| `packages/play`                    |           11 |          11 |         3636 |        3636 |                 146 |                146 |
+| `packages/play-voice`              |            2 |           2 |          549 |         549 |                  20 |                 20 |
+| `packages/protocol`                |           28 |          28 |         4061 |        4061 |                 146 |                146 |
+| `packages/rendered-surface-client` |            2 |           2 |          380 |         380 |                   9 |                  9 |
+| `packages/settings`                |           21 |          21 |         3101 |        3095 |                 133 |                132 |
+| `packages/vec3`                    |            1 |           1 |           66 |          66 |                   4 |                  4 |
+| `packages/vox-client`              |            1 |           1 |          653 |         653 |                  17 |                 17 |
+| `packages/work-items`              |            9 |           9 |         1696 |        1696 |                  48 |                 48 |
+| **Total**                          |      **187** |     **186** |   **46,862** |  **46,733** |           **1,610** |          **1,598** |
+
+Together the two source slices remove **129 test lines and 11 runtime cases**;
+6 changed test files become 5. Static declarations fall by 12, including the
+voice-session table merge, which keeps both runtime inputs and all assertions.
+
+Protocol stays intact: response compatibility and immutable old-client shapes,
+strict requests, delivery/refusal/uncertainty, public field secrecy, namespace
+routing, lifecycle transitions, byte limits and the Node-free mobile import
+boundary are published contracts. Reviewed settings cases retain credential-free
+configuration, native account/profile identity, missing/malformed/replaced-file
+fences, private modes, migrations, owner policy, shared skill roots and verbatim
+persona notes. Bridge source-wiring tests remain where equivalent startup/cleanup
+coverage was not demonstrated. Voice disclosures, native media lifecycle,
+consent, grant revocation and audience boundaries remain. Other package files,
+including fleet-resource integrations, credential/provider transports, play
+records/eval inputs, observability redaction, vector consumer contracts and media
+bounds remain unchanged. No speculative dead-code deletion or export edit.
+
+### Landing incident and recovery
+
+Slice 1 `b68e3d898` passed focused tests, package typechecks, Knip and lint, but its
+new review tables had not been formatted. The next CI run failed only this doc's
+formatting. A local revert was prepared, then withdrawn before any push after
+the lead directed a format-only repair. `bf7fe53ec` formats the complete shared
+doc; [its CI passed](https://github.com/Volpestyle/clankie/actions/runs/38202293532).
+The tested cuts remained on main. This used the second of three permitted pushes;
+the third groups the final source cuts, complete review counts and archived
+checks. Whole-file review/doc/evidence formatting is now part of the focused gate.
+
+[Final measurements and archived reports](../testing/2026-10-11-vuh-2149-packages/README.md)
+include both failed attempts and the passing scoped gates. The ordinary root
+landing/merge queue was skipped under James's explicit pruning assignment.

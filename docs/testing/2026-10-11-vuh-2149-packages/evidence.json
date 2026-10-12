@@ -8,6 +8,18 @@
       "url": "clankie://evidence/sha256/c50e9382e80005f18821a59b42c0b80a037696cfd2c7869706436fc33086d9ab"
     },
     {
+      "path": "checks.json",
+      "size": 209469,
+      "sha256": "92adb5ce9dbe450354fa40cc1b6872bd4fc61d230c86e5f4a80db7cd8801ffb9",
+      "url": "clankie://evidence/sha256/92adb5ce9dbe450354fa40cc1b6872bd4fc61d230c86e5f4a80db7cd8801ffb9"
+    },
+    {
+      "path": "final-inventory.json",
+      "size": 225665,
+      "sha256": "cffa4970ee3cace4dd3bd1e3f69b1690244897c6d73148bdcba846d5bbe3f3cf",
+      "url": "clankie://evidence/sha256/cffa4970ee3cace4dd3bd1e3f69b1690244897c6d73148bdcba846d5bbe3f3cf"
+    },
+    {
       "path": "slice1-after-final.json",
       "size": 86537,
       "sha256": "8426a2c53606ba3f44e32070fe26181a86c551a4d067ec54e08f6e4b1d81a717",
@@ -24,6 +36,18 @@
       "size": 89328,
       "sha256": "bf4413523a8678638768fcd549fa544f008331f61f624b224fb00dda8ce03c89",
       "url": "clankie://evidence/sha256/bf4413523a8678638768fcd549fa544f008331f61f624b224fb00dda8ce03c89"
+    },
+    {
+      "path": "slice2-after-final-retained-contract.json",
+      "size": 37522,
+      "sha256": "d16c9fc3493896557750516f89ef6dcf6b4d6a1d58dd60b896182b6a304b9b37",
+      "url": "clankie://evidence/sha256/d16c9fc3493896557750516f89ef6dcf6b4d6a1d58dd60b896182b6a304b9b37"
+    },
+    {
+      "path": "slice2-before.json",
+      "size": 38087,
+      "sha256": "49d9fc4ddd59b8c148e791a88f80b9c5cb6183d72ffeaf84b37227941e412f3a",
+      "url": "clankie://evidence/sha256/49d9fc4ddd59b8c148e791a88f80b9c5cb6183d72ffeaf84b37227941e412f3a"
     }
   ]
 }
