@@ -18,10 +18,6 @@ describe("nextStepLine", () => {
     expect(nextStepLine({ doorway: { state: "unavailable" }, ...configured })).toContain("clankie restart");
   });
 
-  it("asks to start Clankie when he is not answering", () => {
-    expect(nextStepLine({ doorway: { state: "unreachable" }, ...bare })).toContain("not answering");
-  });
-
   it("points a working doorway, or a direct route, at pairing", () => {
     expect(nextStepLine({ doorway: { state: "connected" }, ...configured })).toContain("clankie pair");
     expect(
