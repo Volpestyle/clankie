@@ -46,6 +46,31 @@ export function autoProjectStates(
     }));
 }
 
+/** Route only to an unambiguous, already configured lead in a project workspace. */
+export function autoProjectRounds(
+  projects: readonly Project[],
+  seatDirectories: readonly string[],
+  leads: readonly { conversationId: string; workspace: string; machine: string }[],
+  defaultConversationId: string,
+): Map<string, AutoProjectState[]> {
+  const rounds = new Map<string, AutoProjectState[]>();
+  for (const state of autoProjectStates(projects, seatDirectories)) {
+    const project = projects.find((candidate) => candidate.id === state.id)!;
+    const matches = leads.filter(
+      (lead) =>
+        lead.conversationId !== defaultConversationId &&
+        project.workspaces.some(
+          (workspace) => workspace.machineId === lead.machine && workspace.path === lead.workspace,
+        ),
+    );
+    const conversationId = matches.length === 1 ? matches[0]!.conversationId : defaultConversationId;
+    const group = rounds.get(conversationId) ?? [];
+    group.push(state);
+    rounds.set(conversationId, group);
+  }
+  return rounds;
+}
+
 /**
  * Commits that reached each local workspace's origin default branch since `since`,
  * as last fetched; shared history counts once. Undefined when no workspace has one.

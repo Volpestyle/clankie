@@ -61,6 +61,10 @@ harness's own and still show on fleet seats.)
 - The head conversation leads every Auto project. A project with its own lead
   chat or remote project lead (ADR 0259) is still woken through the head;
   routing the round straight to a project's lead is a later change.
+  (2026-10-12, VUH-2029: rounds now use the existing configured lead chats when
+  exactly one chat matches a project's workspace and machine. Otherwise they
+  fall back to the global head. Pending rounds and idle suppression are per
+  lead; round admission rechecks the master switch, group membership and evidence.)
 - Worker counts come from local seat directories. Remote workspaces count
   through their own lead.
 - The projects view status line (agents working, landed today, needs-you

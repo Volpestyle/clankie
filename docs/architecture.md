@@ -473,9 +473,12 @@ contracts. See [ADR 0245](adr/0245-one-owner-ask-across-surfaces.md) and the
 The service keeps `autonomy.json`: the global Auto switch and one replaceable
 self-wake per operator conversation. An unreadable file fails closed and surfaces
 `state_unreadable` to operator clients instead of silently re-enabling unprompted
-work. While Auto is on, a fleet-cadence Auto round wakes the head conversation
-with every project on Auto, its focus and its live workers; unchanged evidence
-rewakes it after two hours. A due self-wake queues one turn with Clankie's
+work. While Auto is on, a fleet-cadence Auto round groups projects by their
+configured lead chats (matched by exact workspace and machine), falling back to
+the global head when no unique lead matches. Each lead hears only its projects,
+focus and live workers; unchanged evidence rewakes that lead after two hours.
+Pending rounds and accepted fingerprints are tracked independently per lead;
+before admission the service rechecks the switches and the group's evidence. A due self-wake queues one turn with Clankie's
 recorded reason and may be replaced by another. Both are ordinary internal turns
 on the conversation chain, so a live native seat receives them as it receives
 any other wake. A human message that arrives while a Pi run is streaming steers

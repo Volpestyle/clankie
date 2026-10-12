@@ -110,7 +110,7 @@ import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import {
-  autoProjectStates,
+  autoProjectRounds,
   autoRoundDue,
   autoRoundFingerprint,
   autoRoundPrompt,
@@ -4271,48 +4271,55 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
     }
   }, options.fleetRoundIntervalMs);
-  // Projects on Auto (ADR 0264): the head hears every Auto project while the
-  // master switch is on, again when its evidence changes or after the idle rewake.
-  let autoRoundPending = false;
-  let lastAutoRound: { fingerprint: string; at: number } | undefined;
-  const stopAutoRounds = startFleetRounds(async () => {
-    if (shutdown.signal.aborted || autoRoundPending || !autonomy.enabled) return;
-    const states = autoProjectStates(
-      (await settings()).projects.projects,
+  // Projects on Auto (ADR 0264): each configured project lead hears its own
+  // projects; projects without an unambiguous lead go to the global head.
+  const pendingAutoRounds = new Set<string>();
+  const lastAutoRounds = new Map<string, { fingerprint: string; at: number }>();
+  const readAutoRounds = async () => {
+    const current = await settings();
+    return autoProjectRounds(
+      current.projects.projects,
       (await refreshFleet())
         .filter((seat) => seat.fleet === undefined && seat.workingDirectory !== undefined)
         .map((seat) => seat.workingDirectory!),
+      await leadChats(),
+      conversations.defaultGlobalConversationId(),
     );
-    if (!states.length) {
-      lastAutoRound = undefined;
-      return;
+  };
+  const stopAutoRounds = startFleetRounds(async () => {
+    if (shutdown.signal.aborted || !autonomy.enabled) return;
+    const rounds = await readAutoRounds();
+    for (const id of lastAutoRounds.keys()) if (!rounds.has(id)) lastAutoRounds.delete(id);
+    for (const [conversationId, states] of rounds) {
+      if (pendingAutoRounds.has(conversationId)) continue;
+      const fingerprint = autoRoundFingerprint(states);
+      if (
+        !autoRoundDue(fingerprint, lastAutoRounds.get(conversationId), Date.now(), options.autoIdleRewakeMs)
+      )
+        continue;
+      pendingAutoRounds.add(conversationId);
+      void wakeConversation(
+        { conversationId },
+        autoRoundPrompt(states),
+        async () => {
+          if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
+          const current = (await readAutoRounds()).get(conversationId);
+          if (!current || autoRoundFingerprint(current) !== fingerprint)
+            throw new Error("Projects on Auto changed before delivery");
+        },
+        "machine",
+        true,
+        false,
+      )
+        .then((accepted) => {
+          if (accepted) lastAutoRounds.set(conversationId, { fingerprint, at: Date.now() });
+          else console.warn("Auto round was not delivered", conversationId);
+        })
+        .catch((error: unknown) => {
+          if (!shutdown.signal.aborted) console.warn("Auto round unavailable", conversationId, String(error));
+        })
+        .finally(() => pendingAutoRounds.delete(conversationId));
     }
-    const fingerprint = autoRoundFingerprint(states);
-    if (!autoRoundDue(fingerprint, lastAutoRound, Date.now(), options.autoIdleRewakeMs)) return;
-    autoRoundPending = true;
-    const head = { conversationId: conversations.defaultGlobalConversationId() };
-    void wakeConversation(
-      head,
-      autoRoundPrompt(states),
-      async () => {
-        if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
-        if (!(await settings()).projects.projects.some((project) => project.auto === true))
-          throw new Error("No project is on Auto");
-      },
-      "machine",
-      true,
-      false,
-    )
-      .then((accepted) => {
-        if (accepted) lastAutoRound = { fingerprint, at: Date.now() };
-        else console.warn("Auto round was not delivered");
-      })
-      .catch((error: unknown) => {
-        if (!shutdown.signal.aborted) console.warn("Auto round unavailable", String(error));
-      })
-      .finally(() => {
-        autoRoundPending = false;
-      });
   }, options.autoRoundIntervalMs ?? options.fleetRoundIntervalMs);
   herdrWatches.start(
     async (conversationId, prompt, discord, guard, original) => {

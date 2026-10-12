@@ -299,7 +299,12 @@ receipt first, and never fall back to typing into a terminal.
 
 ## Long-horizon work
 
-Standing work comes from projects on Auto (ADR 0264). Carry it across turns on wakes:
+Standing work comes from projects on Auto (ADR 0264). Auto rounds go to the
+existing configured lead chat whose workspace and machine uniquely match the
+project; otherwise they go to the global head. Leads hear only their own Auto
+projects and wake independently when their evidence changes or after two hours
+idle. Use the same project API/CLI from every surface; no separate Auto routing
+setting exists. Carry standing work across turns on wakes:
 
 | Wakes you when                    | Source                                     | Limits                                                                                  |
 | --------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------- |

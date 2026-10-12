@@ -6,6 +6,8 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  ProjectsSettingsSchema,
+  ProjectsSnapshotSchema,
   OperatorConversationServiceResultSchema,
   OperatorSeatEventKindSchema,
   SUPERVISE_GRANTS,
@@ -15,6 +17,7 @@ import {
 import { SettingsStore } from "@clankie/settings";
 import { afterEach, expect, it } from "vitest";
 import { createBearerAuthenticator, createClankieApp } from "../src/app.ts";
+import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { ConversationStore, type ConversationTurnContext } from "../src/captain/conversations.ts";
@@ -28,15 +31,55 @@ afterEach(async () => {
 
 // Real app, captain, native channel, HTTP and durable stores; no model calls.
 // Unconnected capabilities fail if this fixture ever falls through to Pi.
-async function fixture(provider?: RuntimeProvider) {
+async function fixture(provider?: RuntimeProvider, autoRounds = false) {
   const root = await mkdtemp(join(tmpdir(), "clankie-runtime-provider-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const state = join(root, "state");
   await mkdir(state);
-  const roomId = new ConversationStore(join(state, "conversations"), async () => {}).roomConversation(
-    "discord_presence",
-    "12345:67890",
-  );
+  const seeded = new ConversationStore(join(state, "conversations"), async () => {});
+  const roomId = seeded.roomConversation("discord_presence", "12345:67890");
+  let projectLead: string | undefined;
+  const settings = new SettingsStore(join(state, "settings.json"));
+  if (autoRounds) {
+    const autonomy = new AutonomyStore(join(state, "autonomy.json"));
+    autonomy.command("global-default", { action: "set_enabled", enabled: false });
+    autonomy.close();
+    await mkdir(join(root, "project"));
+    const created = await seeded.serve({
+      schemaVersion: 1,
+      op: "create",
+      title: "Project lead",
+      scope: { kind: "workspace", workspaceId: join(root, "project") },
+    });
+    if (created.op !== "create") throw new Error("Missing project lead");
+    projectLead = created.conversation.conversationId;
+    await settings.update((current) => ({
+      ...current,
+      projects: ProjectsSettingsSchema.parse({
+        projects: [
+          {
+            id: "led",
+            name: "Led project",
+            auto: true,
+            focus: "Lead backlog",
+            workspaces: [{ id: "repo", machineId: "local", platform: "posix", path: join(root, "project") }],
+          },
+          { id: "fallback", name: "Fallback project", auto: true, focus: "Head backlog" },
+        ],
+      }),
+      linearWebhook: {
+        ...current.linearWebhook,
+        projectChats: [
+          {
+            projectId: "11111111-1111-4111-8111-111111111111",
+            name: "Lead project",
+            conversationId: projectLead!,
+          },
+        ],
+      },
+    }));
+  }
+  await seeded.close();
   const unavailable = (): never => {
     throw new Error("This native-channel fixture has no model or external capabilities");
   };
@@ -69,7 +112,8 @@ async function fixture(provider?: RuntimeProvider) {
     repoRoot: root,
     stateDir: state,
     workingDirectory: root,
-    settings: new SettingsStore(join(state, "settings.json")),
+    settings,
+    ...(autoRounds ? { autoRoundIntervalMs: 100 } : {}),
     ...(provider === undefined ? {} : { runtimeProvider: provider }),
   });
   cleanups.push(() => captain.close());
@@ -83,6 +127,7 @@ async function fixture(provider?: RuntimeProvider) {
   });
   const service = await createClankieApp({
     captain,
+    settings,
     deviceSessionKey: randomBytes(32),
     eventLogPath: join(root, "events.jsonl"),
     authenticateOperator: createBearerAuthenticator("fixture-owner", { operatorId: "owner" }),
@@ -122,8 +167,9 @@ async function fixture(provider?: RuntimeProvider) {
   };
   await attach("global-default");
   await attach(roomId);
+  if (projectLead) await attach(projectLead);
   const journal = new ConversationJournal(join(state, "conversations"));
-  return { captain, roomId, command, request, journal, attach };
+  return { captain, roomId, projectLead, command, request, journal, attach };
 }
 
 it("the default public app has no quota routes and native captain turns still complete", async () => {
@@ -314,4 +360,65 @@ it("injected quota routes keep paired-device authorization and heartbeat tracks 
   }
   expect(starts).toEqual([undefined, "wake", undefined, undefined]);
   expect(finishes).toBe(4);
+});
+
+// VUH-2029 acceptance: a real captain wakes each project's lead without an owner
+// prompt, independently deduplicates leads, and starts no work for an off project.
+it("routes Auto rounds to the configured project lead and independently wakes the fallback head", async () => {
+  const f = await fixture(undefined, true);
+  const lead = f.projectLead!;
+  const events = (id: string, wait = 5_000) => f.captain.pollSeatEvents(wait, undefined, id);
+  const accept = async (id: string) => {
+    const round = (await events(id)).find((event) => event.content.startsWith("Auto round."));
+    expect(round).toBeDefined();
+    expect(await f.captain.acknowledgeSeatEvent(round!.id, id)).toBe(true);
+    return round!;
+  };
+  await f.command({
+    schemaVersion: 1,
+    op: "autonomy",
+    conversationId: "global-default",
+    command: { action: "set_enabled", enabled: true },
+  });
+  const [led, head] = await Promise.all([accept(lead), accept("global-default")]);
+  expect(led.content).toContain("Lead backlog");
+  expect(led.content).not.toContain("Head backlog");
+  expect(head.content).toContain("Head backlog");
+  expect(head.content).not.toContain("Lead backlog");
+  console.info(
+    "Auto routing service capture",
+    JSON.stringify({
+      lead: { conversationId: lead, eventId: led.id, content: led.content },
+      head: { conversationId: "global-default", eventId: head.id, content: head.content },
+    }),
+  );
+  const update = async (projectId: string, changes: { focus?: string; auto?: boolean }) => {
+    const before = await f.request("/v1/operator/projects?includeAutonomy=true", "fixture-owner");
+    const snapshot = ProjectsSnapshotSchema.parse(await before.json());
+    const saved = await f.request("/v1/operator/projects/update?includeAutonomy=true", "fixture-owner", {
+      projectId,
+      expectedRevision: snapshot.revision,
+      changes,
+    });
+    expect(saved.status).toBe(200);
+  };
+  // Churn in the head's project must not wake the unchanged project lead.
+  await update("fallback", { focus: "Changed head backlog" });
+  expect((await accept("global-default")).content).toContain("Changed head backlog");
+  expect(await events(lead, 350)).toEqual([]);
+  await update("led", { auto: false });
+  await update("led", { focus: "Off project must not wake" });
+  expect(await events(lead, 350)).toEqual([]);
+  // Turning it back on clears that lead's previous idle suppression.
+  await update("led", { auto: true });
+  expect((await accept(lead)).content).toContain("Off project must not wake");
+  await f.command({
+    schemaVersion: 1,
+    op: "autonomy",
+    conversationId: "global-default",
+    command: { action: "set_enabled", enabled: false },
+  });
+  await update("fallback", { focus: "Master off must not wake" });
+  expect(await events("global-default", 350)).toEqual([]);
+  expect(await events(lead, 350)).toEqual([]);
 });

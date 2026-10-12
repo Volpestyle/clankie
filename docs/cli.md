@@ -3509,10 +3509,14 @@ work. Prints `{"auto":"on"|"off"}`. The console's `/auto on|off` is the same
 switch.
 
 Each fleet-round interval (30 minutes by default) the service checks the
-projects on Auto. When any are, it wakes Clankie's head conversation with each
-one's name, focus, bound tracker project and the live workers in its local
-workspaces and worktree roots. It wakes again when that evidence changes, or
-after two hours when it has not. The wake grants no tool or authority beyond an
+projects on Auto. Each project's round goes to its configured lead chat when
+exactly one lead chat has a workspace matching that project's workspace and
+machine. These are the existing `linear routes` destinations; no new
+routing setting is needed. Without an unambiguous match, it goes to the global
+head. Each lead hears only its projects' names, focus, bound tracker project and
+live workers in local workspaces and worktree roots. Each lead wakes independently
+when its evidence changes, or after two hours when it has not. Before round
+admission the service rechecks the master switch, project Auto settings and routing. The wake grants no tool or authority beyond an
 ordinary turn, and a native harness seat holding the head conversation receives it
 like any other wake.
 
