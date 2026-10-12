@@ -111,6 +111,33 @@ describe("discord voice transcript client", () => {
 });
 
 describe("voice transcript formatting", () => {
+  it("reprints a dim room header only when the body or channel changes", () => {
+    const lines = formatVoiceTranscriptLines(
+      [
+        entry({ deliveryId: "d1", text: "Thank you" }),
+        entry({ deliveryId: "d2", text: "Are you there?", occurredAt: "2026-08-29T16:16:27.957Z" }),
+        entry({
+          deliveryId: "d3",
+          text: "hello from lab",
+          body: "user_session",
+          displayName: "James",
+        }),
+      ],
+      { now: NOW },
+    );
+    expect(lines).toEqual([
+      "bot · 866430493889134672:866430493889134676",
+      "vuhlp · 3m",
+      "Thank you",
+      "vuhlp · 3m",
+      "Are you there?",
+      "",
+      "user_session · 866430493889134672:866430493889134676",
+      "James · 3m",
+      "hello from lab",
+    ]);
+  });
+
   it("falls back to the speaker id when no display name is present", () => {
     const lines = formatVoiceTranscriptLines(
       [entry({ deliveryId: "d1", text: "yo", displayName: undefined })],

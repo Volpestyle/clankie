@@ -667,6 +667,21 @@ describe("provider and model commands", () => {
     expect(changed).toEqual(["beta/beta-two"]);
   });
 
+  it("labels xAI as SuperGrok or API key instead of a bare connected", async () => {
+    const fixture = await testServices();
+    fixture.credentials.set("xai", oauthCredential);
+    const commands = buildProviderCommands(fixture.services);
+    const view = testShell(["xai"]);
+
+    await command(commands, "provider").run("", view.shell);
+
+    expect(view.selects[0]?.options.find((option) => option.value === "xai")?.hint).toMatch(
+      /^SuperGrok subscription/,
+    );
+    expect(view.results.at(-1)?.text).toContain("set to xai (SuperGrok subscription");
+    expect(view.results.at(-1)?.text).not.toContain("connected");
+  });
+
   it("derives provider context from the configured model after restart", async () => {
     const { env, services } = await testServices();
     await updateGlobalConfig(
