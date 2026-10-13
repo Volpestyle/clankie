@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { minecraftExtension } from "@clankie/minecraft";
+import { GameExtensionRegistry } from "@clankie/game-extension";
 import type { MinecraftStatus } from "@clankie/protocol";
 import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { MinecraftCapture } from "../src/minecraft-capture.ts";
@@ -65,7 +66,7 @@ describe("Minecraft capture", () => {
     const store = new BodyLeaseStore(join(root, "leases"));
     const port = new FakeMinecraftPort([{ id: "local", name: "Configured destination" }]);
     const status = vi.spyOn(port, "status");
-    const runtime = minecraftExtension.create({
+    const runtime = new GameExtensionRegistry().register(minecraftExtension, {
       port,
       store,
       path: join(root, "session.json"),
