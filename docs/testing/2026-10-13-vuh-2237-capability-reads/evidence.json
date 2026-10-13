@@ -6,6 +6,18 @@
       "size": 46943,
       "sha256": "afa5cc5378a16b0a30c49c57d70e3c1fdf5cc4547fe7c6e9fece20745f45de28",
       "url": "clankie://evidence/sha256/afa5cc5378a16b0a30c49c57d70e3c1fdf5cc4547fe7c6e9fece20745f45de28"
+    },
+    {
+      "path": "raw/landed-capability-gate.txt",
+      "size": 1231869,
+      "sha256": "819b25157886efdb3dfbd06d752ed734ab8c65674c5b7fba1e793b853f69bddc",
+      "url": "clankie://evidence/sha256/819b25157886efdb3dfbd06d752ed734ab8c65674c5b7fba1e793b853f69bddc"
+    },
+    {
+      "path": "raw/live-capability-comparison.txt",
+      "size": 249760,
+      "sha256": "a3728e7a3a9f1fb120cc8cd3277c19003488ae3b85d91ed0ae4ebbaa0db1f348",
+      "url": "clankie://evidence/sha256/a3728e7a3a9f1fb120cc8cd3277c19003488ae3b85d91ed0ae4ebbaa0db1f348"
     }
   ]
 }
