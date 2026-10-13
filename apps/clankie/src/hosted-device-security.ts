@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
+import type { HostedBrowserBinding } from "@clankie/protocol/hosted-browser-session";
 import { HostedBodyResourceError, type HostedBodyClient } from "./hosted-body.ts";
 
 const IdentitySchema = z
@@ -96,10 +97,14 @@ export class HostedDeviceSecurity {
     await this.client.revokeDevice(deviceId);
   }
 
-  async publishOwnerDevice(deviceId: string): Promise<void> {
+  async publishOwnerDevice(
+    deviceId: string,
+    browser?: Omit<HostedBrowserBinding, "deviceId">,
+    authorizedByBrowserSession?: string,
+  ): Promise<void> {
     if (this.client.declareOwnerDevice === undefined)
       throw new Error("Hosted owner device publication unavailable");
-    await this.client.declareOwnerDevice(deviceId);
+    await this.client.declareOwnerDevice(deviceId, browser, authorizedByBrowserSession);
   }
 
   async isRevoked(deviceId: string): Promise<boolean> {

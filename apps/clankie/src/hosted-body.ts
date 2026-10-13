@@ -9,6 +9,10 @@ import { readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import {
+  HostedBrowserBindingSchema,
+  type HostedBrowserBinding,
+} from "@clankie/protocol/hosted-browser-session";
+import {
   derivePublicGatewayHostId,
   PublicGatewayInstallationIdSchema,
   PublicGatewayHostIdSchema,
@@ -213,6 +217,8 @@ const PairClaimsSchema = z
     ...ClaimsBase,
     aud: z.literal("clankie-body"),
     purpose: z.literal("operator").optional(),
+    browser: HostedBrowserBindingSchema.optional(),
+    authorizedByBrowserSession: HostedBrowserBindingSchema.shape.sessionId.optional(),
     jti: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
     bkh: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
     non: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
@@ -226,7 +232,11 @@ const HostClaimsSchema = z
     inst: PublicGatewayInstallationIdSchema,
   })
   .strict();
-const SupportClaimsSchema = PairClaimsSchema.omit({ purpose: true })
+const SupportClaimsSchema = PairClaimsSchema.omit({
+  purpose: true,
+  browser: true,
+  authorizedByBrowserSession: true,
+})
   .extend({
     sub: genericBootstrapSchema.shape.accountId,
     cmd: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
@@ -279,6 +289,11 @@ export class HostedBodyResourceError extends Error {
     | "stale_auth_key"
     | "device_revoked"
     | "too_many_revocations"
+    | "browser_session_revoked"
+    | "browser_binding_denied"
+    | "browser_grant_escalation"
+    | "not_owner_device"
+    | "too_many_owner_devices"
     | "discord_grant_revoked"
     | "discord_scope_refused"
     | "wrong_guild";
@@ -520,6 +535,20 @@ export class HostedBodyClient {
         ) {
           await response.body?.cancel();
           throw new HostedBodyResourceError(code);
+        }
+        if (
+          path === "owner-device" &&
+          [
+            "browser_session_revoked",
+            "browser_binding_denied",
+            "browser_grant_escalation",
+            "device_revoked",
+            "not_owner_device",
+            "too_many_owner_devices",
+          ].includes(code ?? "")
+        ) {
+          await response.body?.cancel();
+          throw new HostedBodyResourceError(code as HostedBodyResourceError["code"]);
         }
         if (
           (path === "pairing-key" && code === "key_retired") ||
@@ -764,8 +793,17 @@ export class HostedBodyClient {
       .strict()
       .parse(await response.json());
   }
-  async declareOwnerDevice(deviceId: string): Promise<void> {
-    const input = HostedOwnerDeviceSchema.parse({ installationId: this.bootstrap.installationId, deviceId });
+  async declareOwnerDevice(
+    deviceId: string,
+    browser?: Omit<HostedBrowserBinding, "deviceId">,
+    authorizedByBrowserSession?: string,
+  ): Promise<void> {
+    const input = HostedOwnerDeviceSchema.parse({
+      installationId: this.bootstrap.installationId,
+      deviceId,
+      ...(browser === undefined ? {} : { browser }),
+      ...(authorizedByBrowserSession === undefined ? {} : { authorizedByBrowserSession }),
+    });
     const response = await this.post("owner-device", input);
     await response.body?.cancel();
   }

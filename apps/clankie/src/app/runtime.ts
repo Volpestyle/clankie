@@ -258,12 +258,20 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       : new DeviceSessionSigner(dependencies.deviceSessionKey);
   let securityClosed = false;
   let composerAuthKeyId: string | undefined;
-  const publishHostedSupportDevice = async (record: DeviceRecord) => {
+  const publishHostedSupportDevice = async (
+    record: DeviceRecord,
+    grants = record.grants,
+    authorizedByBrowserSession?: string,
+  ) => {
     if (dependencies.hostedBody === undefined) return;
     if (record.supportGrantId === undefined) {
       if (record.status === "revoked") return;
       if (dependencies.hostedDeviceSecurity?.publishOwnerDevice !== undefined)
-        await dependencies.hostedDeviceSecurity.publishOwnerDevice(record.deviceId);
+        await dependencies.hostedDeviceSecurity.publishOwnerDevice(
+          record.deviceId,
+          record.browserSessionId === undefined ? undefined : { sessionId: record.browserSessionId, grants },
+          authorizedByBrowserSession,
+        );
       return;
     }
     if (dependencies.hostedDeviceSecurity?.publishSupportDevice === undefined)
@@ -280,7 +288,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           .filter((record) => record.status === "revoked")
           .map((record) => record.deviceId),
       );
-      for (const record of devices.values()) await publishHostedSupportDevice(record);
       if (securityClosed) return;
       for (const tombstone of restored.revocations) {
         const record = devices.get(tombstone.dev);
@@ -299,6 +306,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         if (event.type === "device.revoked" && typeof event.data.deviceId === "string")
           dependencies.captain.invalidateQuestionPrincipal?.(event.data.deviceId);
       }
+      // Apply durable tombstones before republishing devices from an old disk.
+      for (const record of devices.values())
+        if (record.status === "active") await publishHostedSupportDevice(record);
       // Publish the signer last. Pairing, refresh and relay self-authorize
       // remain unavailable throughout reconciliation or any failed retry.
       deviceSessionSigner = new DeviceSessionSigner(restored.key);

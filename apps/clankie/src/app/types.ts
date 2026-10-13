@@ -74,6 +74,8 @@ export interface PendingCompletion {
   offeredGrants: DeviceGrantSet;
   expiresAtMs: number;
   consumed: boolean;
+  reissue?: true;
+  authorizedByBrowserSession?: string;
 }
 
 // ---------------------------------------------------------------------------

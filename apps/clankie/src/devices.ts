@@ -31,6 +31,7 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
         review,
         localCompanion,
         supportGrantId,
+        browserSessionId,
         pendingExpiresAt,
       } = parsed.data;
       if (devices.has(deviceId)) throw new Error(`device ${deviceId} already exists on redeemed replay`);
@@ -47,8 +48,24 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
           ...(review === undefined ? {} : { review }),
           ...(localCompanion === undefined ? {} : { localCompanion }),
           ...(supportGrantId === undefined ? {} : { supportGrantId }),
+          ...(browserSessionId === undefined ? {} : { browserSessionId }),
           createdAt: event.occurredAt,
           pendingExpiresAt,
+        }),
+      );
+      return;
+    }
+    case "device.pairing.restarted": {
+      const record = requireDevice(devices, parsed.data.deviceId);
+      if (record.status !== "pending" || record.browserSessionId === undefined)
+        throw new Error(`device ${record.deviceId} cannot restart browser pairing`);
+      devices.set(
+        record.deviceId,
+        DeviceRecordSchema.parse({
+          ...record,
+          offerId: parsed.data.offerId,
+          grants: parsed.data.offeredGrants,
+          pendingExpiresAt: parsed.data.pendingExpiresAt,
         }),
       );
       return;

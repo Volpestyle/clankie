@@ -16,12 +16,14 @@ export type DevicePlatform = z.infer<typeof DevicePlatformSchema>;
  * `terminalControl` additionally authorizes the input lease and raw-byte
  * writes (ADR 0144).
  */
-export const DeviceGrantSetSchema = z.object({
-  chat: z.boolean(),
-  steer: z.boolean(),
-  terminalObserve: z.boolean(),
-  terminalControl: z.boolean(),
-});
+export const DeviceGrantSetSchema = z
+  .object({
+    chat: z.boolean(),
+    steer: z.boolean(),
+    terminalObserve: z.boolean(),
+    terminalControl: z.boolean(),
+  })
+  .strict();
 export type DeviceGrantSet = z.infer<typeof DeviceGrantSetSchema>;
 
 /** The Supervise preset: chat + steer + observe, without terminal input. */
@@ -59,6 +61,10 @@ export const DeviceRecordSchema = z
     offerId: z.string().min(1),
     mintedBy: z.string().min(1),
     supportGrantId: z.string().uuid().optional(),
+    browserSessionId: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{43}$/u)
+      .optional(),
     /** Paired through a long-lived review offer (ADR 0154); revoke after the review. */
     review: z.literal(true).optional(),
     localCompanion: z.literal(true).optional(),
@@ -212,8 +218,9 @@ export const PairingRedeemRequestSchema = z
   .object({
     offerSecret: z.string().min(1).optional(),
     code: z.string().min(1).optional(),
-    device: z.object({ name: z.string().min(1).max(64), platform: DevicePlatformSchema }),
+    device: z.object({ name: z.string().min(1).max(64), platform: DevicePlatformSchema }).strict(),
   })
+  .strict()
   .superRefine((body, context) => {
     const provided = [body.offerSecret, body.code].filter((value) => value !== undefined);
     if (provided.length !== 1) {
@@ -237,10 +244,12 @@ export const PairingRedeemResponseSchema = z.object({
 export type PairingRedeemResponse = z.infer<typeof PairingRedeemResponseSchema>;
 
 /** Complete step: the device accepts a subset of the offered grants. */
-export const PairingCompleteRequestSchema = z.object({
-  completionToken: z.string().min(1),
-  acceptedGrants: DeviceGrantSetSchema,
-});
+export const PairingCompleteRequestSchema = z
+  .object({
+    completionToken: z.string().min(1),
+    acceptedGrants: DeviceGrantSetSchema,
+  })
+  .strict();
 export type PairingCompleteRequest = z.infer<typeof PairingCompleteRequestSchema>;
 
 const DeviceDirectOriginSchema = DeviceHostBaseUrlSchema.refine((value) => {
@@ -340,10 +349,26 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
       offeredGrants: DeviceGrantSetSchema,
       mintedBy: z.string().min(1),
       supportGrantId: z.string().uuid().optional(),
+      browserSessionId: z
+        .string()
+        .regex(/^[A-Za-z0-9_-]{43}$/u)
+        .optional(),
       review: z.literal(true).optional(),
       localCompanion: z.literal(true).optional(),
       pendingExpiresAt: z.string().datetime(),
     }),
+  }),
+  EventBaseSchema.extend({
+    type: z.literal("device.pairing.restarted"),
+    data: z
+      .object({
+        schemaVersion: z.literal(1),
+        deviceId: z.string().min(1),
+        offerId: z.string().min(1),
+        offeredGrants: DeviceGrantSetSchema,
+        pendingExpiresAt: z.string().datetime(),
+      })
+      .strict(),
   }),
   EventBaseSchema.extend({
     type: z.literal("device.activated"),

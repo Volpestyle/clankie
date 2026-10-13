@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HostedBrowserBindingSchema } from "./hosted-browser-session.ts";
 import { GatewayEncryptionCredentialSchema } from "./gateway-encryption.ts";
 
 /** Public, Node-free client contract; account/control-plane implementation lives in clankie-ops. */
@@ -25,6 +26,15 @@ export const HostedPairRequestSchema = z
     machineId: z.string().min(1),
     browserPublicKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/u),
     nonce: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
+    browser: z
+      .object({
+        deviceId: z
+          .string()
+          .regex(/^[A-Za-z0-9_-]{8,128}$/u)
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export const HostedPairResponseSchema = z.object({
@@ -32,6 +42,7 @@ export const HostedPairResponseSchema = z.object({
   ticketId: z.string(),
   bodyPairingKey: z.string(),
   answer: HostedPairAnswerSchema,
+  browser: HostedBrowserBindingSchema.optional(),
 });
 
 export function hostedOrigin(value: string): string {
@@ -134,9 +145,18 @@ export async function createWebHostedPairExchange(
     },
   };
 }
+export class HostedAccountError extends Error {
+  readonly code: string;
+  constructor(code: string) {
+    super(`Hosted account: ${code}`);
+    this.name = "HostedAccountError";
+    this.code = code;
+  }
+}
 export function createHostedAccountClient(input: {
   origin: string;
   accessToken: string;
+  browser?: { deviceId?: string };
   fetchImpl?: typeof fetch;
 }) {
   const origin = hostedOrigin(input.origin),
@@ -151,8 +171,8 @@ export function createHostedAccountClient(input: {
     });
     const result: unknown = await response.json();
     if (!response.ok)
-      throw new Error(
-        `Hosted account: ${z.object({ error: z.string() }).safeParse(result).data?.error ?? response.status}`,
+      throw new HostedAccountError(
+        z.object({ error: z.string() }).safeParse(result).data?.error ?? String(response.status),
       );
     return result;
   }
@@ -171,8 +191,13 @@ export function createHostedAccountClient(input: {
           machineId: machine.id,
           browserPublicKey: exchange.publicKey,
           nonce: exchange.nonce,
+          ...(input.browser === undefined ? {} : { browser: input.browser }),
         }),
       );
+      if (input.browser !== undefined && result.browser === undefined)
+        throw new HostedAccountError("browser_binding_unavailable");
+      if (input.browser?.deviceId !== undefined && result.browser?.deviceId !== input.browser.deviceId)
+        throw new HostedAccountError("browser_binding_denied");
       if (result.machine.id !== machine.id || result.machine.hostId !== machine.hostId || !machine.hostId)
         throw new Error("Hosted pairing machine mismatch");
       const domain = PAIR_DOMAIN;

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { PAIRING_DIRECT_PARAM, type DomainEvent, type PairingOfferWire } from "@clankie/protocol";
 import { z } from "zod";
+import type { HostedBrowserBinding } from "@clankie/protocol/hosted-browser-session";
 
 // Device pairing-offer minting and single-use redemption for the service.
 // An offer is short-lived display data an operator hands to a device; it is not
@@ -48,6 +49,8 @@ export interface PairingOfferRecord {
   /** Long-lived review offer (ADR 0154). */
   readonly review?: true;
   readonly supportGrantId?: string;
+  readonly browser?: HostedBrowserBinding;
+  readonly authorizedByBrowserSession?: string;
 }
 
 /**
@@ -80,6 +83,8 @@ export interface MintPairingOfferOptions {
   readonly mintedBy: string;
   readonly ttlMs?: number;
   readonly supportGrantId?: string;
+  readonly browser?: HostedBrowserBinding;
+  readonly authorizedByBrowserSession?: string;
   /** Review offer lifetime in days; the route validates the ceiling. */
   readonly review?: { readonly days: number };
   /** Non-secret id source only; code and offer secret always come from crypto randomness. */
@@ -106,6 +111,10 @@ export function mintPairingOffer(options: MintPairingOfferOptions): StoredPairin
     expiresAt: new Date(options.now.getTime() + ttlMs).toISOString(),
     ...(options.review === undefined ? {} : { review: true as const }),
     ...(options.supportGrantId === undefined ? {} : { supportGrantId: options.supportGrantId }),
+    ...(options.browser === undefined ? {} : { browser: options.browser }),
+    ...(options.authorizedByBrowserSession === undefined
+      ? {}
+      : { authorizedByBrowserSession: options.authorizedByBrowserSession }),
   };
 }
 

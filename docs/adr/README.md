@@ -163,3 +163,5 @@ scope is archived; readers should follow the successor for its implementation.
 
 - [0267 — Skins share one public animation spec](0267-skins-share-one-public-animation-spec.md)
 - [0268: Account-owned device revocation survives a sleeping body](0268-account-owned-device-revocation-survives-a-sleeping-body.md) — VUH-2121 / VUH-2215.
+
+- [0269: Browser pairing binds an account session to one device](0269-browser-pairing-binds-an-account-session-to-one-device.md) — VUH-2122.

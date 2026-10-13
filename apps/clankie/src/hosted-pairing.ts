@@ -11,6 +11,7 @@ import {
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import type { HostedBrowserBinding } from "@clankie/protocol/hosted-browser-session";
 import type { CredentialStore } from "@clankie/credential-broker";
 import {
   HostedSupportRequestSchema,
@@ -100,7 +101,11 @@ export class HostedPairing {
   }
   async offer(
     input: unknown,
-    mint: (purpose?: "operator") => Promise<{ link: string; expiresAtMs: number }>,
+    mint: (
+      purpose?: "operator",
+      browser?: HostedBrowserBinding,
+      authorizedByBrowserSession?: string,
+    ) => Promise<{ link: string; expiresAtMs: number }>,
   ): Promise<Response> {
     const parsed = RequestSchema.safeParse(input);
     if (!parsed.success) return Response.json({ error: "unauthorized" }, { status: 401 });
@@ -109,7 +114,7 @@ export class HostedPairing {
       request,
       PAIR_DOMAIN,
       () => this.client.verifyPairTicket(request.pairTicket, request.browserPublicKey, request.nonce),
-      (claims) => mint(claims.purpose),
+      (claims) => mint(claims.purpose, claims.browser, claims.authorizedByBrowserSession),
     );
   }
 
@@ -138,11 +143,29 @@ export class HostedPairing {
   private async exchange(
     request: { browserPublicKey: string; nonce: string },
     domain: string,
-    verifyTicket: () => { jti: string; exp: number; purpose?: "operator" | undefined },
-    execute: (claims: { jti: string; exp: number; purpose?: "operator" | undefined }) => Promise<unknown>,
+    verifyTicket: () => {
+      jti: string;
+      exp: number;
+      purpose?: "operator" | undefined;
+      browser?: HostedBrowserBinding | undefined;
+      authorizedByBrowserSession?: string | undefined;
+    },
+    execute: (claims: {
+      jti: string;
+      exp: number;
+      purpose?: "operator" | undefined;
+      browser?: HostedBrowserBinding | undefined;
+      authorizedByBrowserSession?: string | undefined;
+    }) => Promise<unknown>,
   ): Promise<Response> {
     const now = this.clock();
-    let claims: { jti: string; exp: number; purpose?: "operator" | undefined };
+    let claims: {
+      jti: string;
+      exp: number;
+      purpose?: "operator" | undefined;
+      browser?: HostedBrowserBinding | undefined;
+      authorizedByBrowserSession?: string | undefined;
+    };
     let jti: string, exp: number, secret: Buffer, ephemeralPublicKey: string;
     try {
       for (const text of [request.browserPublicKey, request.nonce])
