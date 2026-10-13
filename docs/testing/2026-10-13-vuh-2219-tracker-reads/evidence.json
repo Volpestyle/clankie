@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "raw/deployed-health-roster.txt",
+      "size": 888900,
+      "sha256": "b503ac5bdf2b88ffa664c920e99a014b888455d57a9f63ea04afd209138b60cd",
+      "url": "clankie://evidence/sha256/b503ac5bdf2b88ffa664c920e99a014b888455d57a9f63ea04afd209138b60cd"
+    },
+    {
       "path": "raw/final-byte-cache-proof.json",
       "size": 32941,
       "sha256": "1748c97735e94fbe951d530a17db370884f978a86fef4e55bf2273ac2bb54b22",
