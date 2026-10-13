@@ -1282,7 +1282,7 @@ export class IntegrationQueue {
       const env = await integrationEnvironment(join(root, "isolation", repo.name));
       phases.push({
         repo: repo.name,
-        name: "install",
+        name: "install" as const,
         directory: repo.directory,
         env,
         args: [
@@ -1300,7 +1300,7 @@ export class IntegrationQueue {
       const script = await landingGateScript(repo.directory);
       phases.push({
         repo: repo.name,
-        name: "gate",
+        name: "gate" as const,
         directory: repo.directory,
         env: {
           ...(await integrationEnvironment(join(root, "isolation", repo.name))),
