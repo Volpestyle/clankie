@@ -392,7 +392,7 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId, onMembershipRe
       if (!active?.session || active.authority !== JSON.stringify(current())) return;
       // Observation only: never initialize, recover, or retire a session to
       // report health, and never let a lost report affect the native result.
-      void post(
+      return post(
         active,
         { method: "notifications/clankie/bridge_status", params },
         AbortSignal.timeout(2_000),
@@ -573,14 +573,19 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       : [];
   let reportObservation;
   let toolObservation = { status: "missing", reason: "Catalog not observed" };
-  const report = (status, reason = "", tools = publishedCatalog ?? []) => {
+  const report = (
+    status,
+    reason = "",
+    tools = publishedCatalog ?? [],
+    revision = publishedRuntimeRevision,
+  ) => {
     toolObservation = { status, reason };
-    granted.report({
+    return granted.report({
       ...(reportObservation === undefined ? {} : { report: reportObservation }),
       status,
       reason: reason.slice(0, 500),
       tools: tools.map((tool) => tool.name).slice(0, 128),
-      ...(publishedRuntimeRevision === undefined ? {} : { runtimeRevision: publishedRuntimeRevision }),
+      ...(revision === undefined ? {} : { runtimeRevision: revision }),
       pluginVersion: PLUGIN_VERSION,
     });
   };
@@ -1098,6 +1103,10 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         }
         while (activeToolCalls) await new Promise((resolve) => idleWaiters.add(resolve));
         result = await listAdvertisedTools();
+        // Codex status discovery uses a temporary MCP client and can terminate
+        // this process as soon as tools/list returns. Finish the bounded health
+        // observation while its socket caller still exists; failures stay advisory.
+        await report("ready", result.reason, result.tools, result.runtimeRevision);
         // A call can start while the HTTP/native-status lookup is pending.
         // Re-enter the barrier before publishing its new definitions.
         if (!activeToolCalls) break;
@@ -1108,7 +1117,6 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       publishedCatalog = result.tools;
       publishedRuntimeRevision = result.runtimeRevision;
       startPolling();
-      report("ready", result.reason, result.tools);
       return;
     }
     if (method === "tools/call") {

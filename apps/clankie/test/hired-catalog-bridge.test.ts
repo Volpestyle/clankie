@@ -135,6 +135,54 @@ async function bridge(
 }
 const tool = (name: string) => ({ name, inputSchema: { type: "object" } });
 
+it("finishes bridge health proof before a temporary catalog client can terminate its caller", async () => {
+  let observed!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    observed = resolve;
+  });
+  let complete!: () => void;
+  let healthFinished = false;
+  const f = await bridge(
+    undefined,
+    () => ({ tools: [tool("clankie_tools"), tool("clankie_call")] }),
+    true,
+    undefined,
+    false,
+    (request, response, bytes) => {
+      if (request.url !== "/v1/fleet/mcp") return false;
+      const rpc = JSON.parse(bytes);
+      if (rpc.method !== "notifications/clankie/bridge_status") return false;
+      // Real HTTP/stdio subprocess boundary: retain the health request while
+      // the native client's last discovery response could end the MCP process.
+      complete = () => {
+        healthFinished = true;
+        if (!response.writableEnded) response.writeHead(202).end();
+      };
+      observed();
+      return true;
+    },
+  );
+  let listed = false;
+  try {
+    const discovery = f.client.listTools().then((result) => {
+      listed = true;
+      expect(healthFinished).toBe(true);
+      return result;
+    });
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(listed).toBe(false);
+    complete();
+    expect((await discovery).tools.length).toBeGreaterThan(0);
+    // Snapshot clients close immediately after the final tools/list response.
+    await f.client.close();
+    expect(healthFinished).toBe(true);
+  } finally {
+    complete?.();
+    await f.close();
+  }
+});
+
 it("refreshes unchanged schemas after a runtime revision and retains both peer tools", async () => {
   let revision = "before-deploy";
   const f = await bridge(

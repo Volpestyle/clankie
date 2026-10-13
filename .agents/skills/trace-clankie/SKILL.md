@@ -114,6 +114,11 @@ never falls back to an executable in the working directory.
 Do not infer the historic sender from today's connected processes. Retain actual
 PID/pane/socket details privately and publish sanitized counts and stages. See
 `docs/cli.md` under `metrics --fleet` for the bounded diagnostic sampling.
+For idle Codex panes, distinguish persistent worker discovery from temporary
+`mcpServerStatus/list` snapshot clients. A snapshot may end its bridge immediately
+after `tools/list`; bridge health must finish before that response, or its
+fire-and-forget notification can fail proof after the caller exits. This is a
+caller-lifetime defect, not authority granted by an idle pane or reason to mute alerts.
 
 For remote Windows `remote_pane_required`, compare the kernel's loaded image
 with the independently installed launcher before blaming workspace grants.

@@ -282,6 +282,11 @@ report a specific missing-tool blocker to that lead. It does not require a new
 hire, and routine startup hooks stay silent, including owner interactive panes.
 Switching to the shared daemon can break worker bridge pane identity. Native introspection for embedded Codex remains a follow-up.
 Plugin hook/mod trust is required; an absent probe remains unverified.
+Codex catalog snapshots may use temporary MCP clients. The worker bridge finishes
+its bounded health notification before returning `tools/list`, keeping its caller
+alive through native proof even if the snapshot immediately closes the bridge.
+Notification failure remains advisory; it does not fail catalog discovery or
+change proof-refusal alert thresholds.
 
 Claude's pane check reports HTTP refusal codes separately from a link connection
 refusal or a timeout, including `remote_observation_timeout` when Windows pane
