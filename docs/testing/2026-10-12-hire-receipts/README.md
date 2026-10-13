@@ -83,3 +83,32 @@ hand-edited. After the lead deploys, the next fresh admission must retire it
 through a complete census. The next real Mac hire → close → fresh cycle and
 KH2 receipt retirement remain post-deployment live proof, to attach on VUH-2180.
 The original remote PC cycle criterion is not claimed as tested by this work.
+
+## Root-gate regression and correction
+
+Integration batch `28341610-d12f-47ad-91ef-214272403a64` failed the root gate
+on two OpenCode consumers, each failing again on the gate's rerun.
+`failed-root-gate.log` retains that nonzero full-gate result. It is not a flaky
+pass or a green landing gate.
+
+The product correction archives completed ordinary remote receipts with their
+original location, freeing the reusable recipient key while retaining host
+admission and launch history. Fresh-hire identity retention remains mandatory.
+Any uncertain sibling at that location blocks both ordinary and fresh dispatch;
+a completed archive cannot bypass the uncertain fence. Locations with retained
+fresh-hire history require a distinct fresh intent for later work, even after
+explicit settlement. Fence refusals return the structured hire result before
+any host reservation or dispatch. Post-close inventory is required when a project allocation or an
+authenticated completed receipt on the original pane needs retirement; unmanaged
+closes keep their existing behavior. Neither consumer test was changed.
+
+The first attempted correction fixed unmanaged close but still failed the
+prepare-drop case (67/68); `first-correction-failed.txt` retains that result.
+Post-correction checks passed 68/68 across both OpenCode consumer files and the
+three receipt proof files. The real Herdr proof additionally exercises ordinary
+requests after uncertainty and after explicit settlement; neither bypass can
+prepare or dispatch. `bypass-api-refusal-failed.txt` retains the intermediate
+missing structured refusal found by that proof. Formatting and lint passed.
+The original compiler report predates this correction; the replacement
+integrator runs a new compiler/landing gate. The replacement batch is reported
+on VUH-2180.

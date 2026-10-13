@@ -218,8 +218,41 @@ it
         reason: "not_ready",
         detail: expect.stringContaining("unresolved"),
       });
+      expect(
+        await store.spawnSeat(
+          { ...request, freshIntent: undefined },
+          undefined,
+          "Ordinary request must not bypass uncertain fresh dispatch",
+          undefined,
+          authority,
+        ),
+      ).toMatchObject({
+        outcome: "failed",
+        reason: "not_ready",
+        detail: expect.stringContaining("remains uncertain"),
+      });
       expect(preparations).toBe(1);
-      evidence.push({ phase: "restart-no-replay", preparations, retained });
+      const settledFresh = await store.settleHireReceipt(
+        request.freshIntent.id,
+        async () => {},
+        "abandoned-unknown",
+      );
+      expect(settledFresh).toMatchObject({ state: "abandoned" });
+      expect(
+        await store.spawnSeat(
+          { ...request, freshIntent: undefined },
+          undefined,
+          "Ordinary request must retain explicit fresh history",
+          undefined,
+          authority,
+        ),
+      ).toMatchObject({
+        outcome: "failed",
+        reason: "not_ready",
+        detail: expect.stringContaining("distinct freshIntent"),
+      });
+      expect(preparations).toBe(1);
+      evidence.push({ phase: "restart-no-replay", preparations, retained, settledFresh });
     } finally {
       store?.close();
       await writeFile(join(logs, "boundary-results.json"), JSON.stringify(evidence, null, 2));

@@ -2589,12 +2589,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
         reason: "start_unconfirmed",
         detail: "The earlier hire still needs checking. No new agent was started.",
       };
-    const receipt = this.hireReceipts.begin(receiptKey, {
-      fingerprint: deliveryFingerprint(brief ?? ""),
-      ...(fresh ? { freshHire: fresh.metadata } : {}),
-      ...(resume === undefined ? {} : { sessionId: resume.sessionId }),
-      ...(resume === undefined ? { beforeIds: [] } : {}),
-    });
+    let receipt: UncertainReceipt;
+    try {
+      receipt = this.hireReceipts.begin(receiptKey, {
+        fingerprint: deliveryFingerprint(brief ?? ""),
+        ...(fresh ? { freshHire: fresh.metadata } : {}),
+        ...(resume === undefined ? {} : { sessionId: resume.sessionId }),
+        ...(resume === undefined ? { beforeIds: [] } : {}),
+      });
+    } catch (error) {
+      return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
+    }
     this.activeHires.add(receiptKey);
     let result: HerdrSeatSpawnResult;
     let watch: HerdrWatchRecord | undefined;
@@ -2762,7 +2767,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
           receipt.paneId &&
           !receipt.retired &&
           receipt.remoteAdmission?.target.fleet === fleet &&
-          (scope.baseKey === undefined || (receipt.freshHire?.baseKey ?? key) === scope.baseKey) &&
+          (scope.baseKey === undefined ||
+            (receipt.freshHire?.baseKey ?? receipt.hireBaseKey ?? key) === scope.baseKey) &&
           (scope.paneId === undefined || receipt.paneId === scope.paneId),
       );
     if (!candidates.length) return;
@@ -4155,8 +4161,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const fleet = splitFleetQualified(current.paneId)?.fleet;
       const candidates = this.projectHires.inventoryCandidates(fleet ?? "default");
       const confirmGone = async () => {
-        // Existing nonproject close/move callers have no allocation to release.
-        if (!this.runner.list) return candidates.size === 0;
+        const completedHire =
+          fleet !== undefined &&
+          this.hireReceipts
+            .all()
+            .some(
+              ([, receipt]) =>
+                receipt.completed &&
+                !receipt.retired &&
+                receipt.paneId === current.paneId &&
+                receipt.remoteAdmission?.target.fleet === fleet,
+            );
+        // Unmanaged closes have neither project allocations nor authenticated hire receipts to retire.
+        if (candidates.size === 0 && !completedHire) return true;
+        if (!this.runner.list) return false;
         const inventory = await this.runner.list(fleet);
         if (
           inventory.some((pane) => pane.paneId === current.paneId || pane.terminalId === current.terminalId)

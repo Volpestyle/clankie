@@ -31,6 +31,8 @@ export const ReceiptSchema = z
     fingerprint: z.string(),
     /** Explicit fresh admission keeps its UUID, original location and host-authored owner forever. */
     freshHire: FreshHireReceiptSchema.optional(),
+    /** Original location of a completed ordinary hire archived outside its reusable recipient key. */
+    hireBaseKey: z.string().optional(),
     /** Host reservation begins before any remote hire effect. Legacy records have no window. */
     remoteAdmission: z
       .object({
@@ -157,7 +159,7 @@ export class DeliveryFence {
     );
     const key = JSON.stringify([...(JSON.parse(baseKey) as string[]), "fresh", metadata.id]);
     const siblings = entries.filter(
-      ([id, record]) => id !== key && (record.freshHire?.baseKey ?? id) === baseKey,
+      ([id, record]) => id !== key && (record.freshHire?.baseKey ?? record.hireBaseKey ?? id) === baseKey,
     );
     const expected = siblings.at(-1)?.[1];
     if (siblings.some(([, record]) => !record.settlement && !record.completed))
@@ -172,7 +174,7 @@ export class DeliveryFence {
       original[1] !== expected ||
       !(original[1].settlement || (original[1].completed && original[1].retired)) ||
       !target ||
-      (original[1].freshHire?.baseKey ?? original[0]) !== baseKey
+      (original[1].freshHire?.baseKey ?? original[1].hireBaseKey ?? original[0]) !== baseKey
     )
       throw new Error(
         `freshIntent requires the exact settled native hire receipt at this location; expected ${expected?.messageId ?? "no retained receipt"}${expected?.freshHire ? ` (fresh intent ${expected.freshHire.id})` : ""}. Completed hires require complete pane-absent inventory.`,
@@ -307,6 +309,20 @@ export class DeliveryFence {
   ): UncertainReceipt {
     if (this.pending(key) || this.completed(key) || this.settled(key) || this.records.get(key)?.abandoned)
       throw new Error("Delivery is uncertain; reconcile its original receipt before any retry");
+    const baseKey = receipt.freshHire?.baseKey ?? key;
+    if (
+      this.all().some(
+        ([id, record]) =>
+          id !== key &&
+          (record.freshHire?.baseKey ?? record.hireBaseKey ?? id) === baseKey &&
+          !record.completed &&
+          !record.settlement &&
+          !record.abandoned,
+      )
+    )
+      throw new Error("Another hire at this location remains uncertain; no dispatch may begin");
+    if (!receipt.freshHire && this.all().some(([, record]) => record.freshHire?.baseKey === baseKey))
+      throw new Error("This location retains fresh hire history; use a distinct freshIntent and new brief");
     for (const [id, value] of this.records)
       if (
         !value.freshHire &&
@@ -460,12 +476,23 @@ export class DeliveryFence {
     )
       return false;
     const previous = this.records.get(key)!;
-    if (previous.freshHire || retainNativeHire)
-      this.records.set(key, { ...previous, completed: previous.completed ?? { at: Date.now() } });
-    else this.records.delete(key);
+    const archiveKey =
+      retainNativeHire && previous.remoteAdmission && !previous.freshHire
+        ? `completed-hire:${messageId}`
+        : key;
+    if (archiveKey !== key && this.records.has(archiveKey)) return false;
+    if (previous.freshHire || (retainNativeHire && previous.remoteAdmission)) {
+      this.records.set(archiveKey, {
+        ...previous,
+        completed: previous.completed ?? { at: Date.now() },
+        ...(archiveKey === key ? {} : { hireBaseKey: key }),
+      });
+      if (archiveKey !== key) this.records.delete(key);
+    } else this.records.delete(key);
     try {
       this.save();
     } catch (error) {
+      if (archiveKey !== key) this.records.delete(archiveKey);
       this.records.set(key, previous);
       throw error;
     }
