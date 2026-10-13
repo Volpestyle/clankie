@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "original-native-reads.json",
+      "size": 34426,
+      "sha256": "ea5b9c543b4756b282f8646bf49cea86527bdc7758bc0d2c56cad5134ab675fa",
+      "url": "clankie://evidence/sha256/ea5b9c543b4756b282f8646bf49cea86527bdc7758bc0d2c56cad5134ab675fa"
+    },
+    {
+      "path": "packet.json",
+      "size": 256901,
+      "sha256": "1d2111c88912cb87b7065f1249e849ba3ab1a2aae91117cee42c75797ed11469",
+      "url": "clankie://evidence/sha256/1d2111c88912cb87b7065f1249e849ba3ab1a2aae91117cee42c75797ed11469"
+    },
+    {
+      "path": "production-probe-attempt3.json",
+      "size": 20833,
+      "sha256": "d12ed2a40873484cff8f83a7a5c1f83f79e6856153a2860375f3895f77c89d19",
+      "url": "clankie://evidence/sha256/d12ed2a40873484cff8f83a7a5c1f83f79e6856153a2860375f3895f77c89d19"
+    },
+    {
+      "path": "production-results.json",
+      "size": 24146,
+      "sha256": "54618d46b5be228fc9e6700d37a83777e6ae761928bafba821f62107659ae92b",
+      "url": "clankie://evidence/sha256/54618d46b5be228fc9e6700d37a83777e6ae761928bafba821f62107659ae92b"
+    },
+    {
+      "path": "typechecks.json",
+      "size": 109256,
+      "sha256": "fd4aafaabc7b95808af7b0be7a7d479c6027e14a9c460d3dca963464ddb0f5d6",
+      "url": "clankie://evidence/sha256/fd4aafaabc7b95808af7b0be7a7d479c6027e14a9c460d3dca963464ddb0f5d6"
+    }
+  ]
+}

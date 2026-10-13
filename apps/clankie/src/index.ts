@@ -716,8 +716,27 @@ const mcpHost = createMcpHost({
   localTracker: builtInTracker,
   trackerIdentity: join(stateRoot, "tracker"),
   trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
-  trackerForRepo: ({ name, args, repo, local, actor, beforeWrite, onDispatch, effectConfirmed }) =>
-    workItems.callTracker(name, args, { repo, local, actor, beforeWrite, onDispatch, effectConfirmed }),
+  prepareTrackerLeadClosure: (source, projectId) => captain.prepareTrackerLeadClosure!(source, projectId),
+  trackerForRepo: ({
+    name,
+    args,
+    repo,
+    local,
+    actor,
+    beforeWrite,
+    onDispatch,
+    effectConfirmed,
+    authorizeLeadClosure,
+  }) =>
+    workItems.callTracker(name, args, {
+      repo,
+      local,
+      actor,
+      beforeWrite,
+      onDispatch,
+      effectConfirmed,
+      ...(authorizeLeadClosure === undefined ? {} : { authorizeLeadClosure }),
+    }),
   // A hired worker's tracker calls follow its project's saved convention (VUH-2014).
   trackerRepoForWorker: (principalId) =>
     trackerRepoForPrincipal(
@@ -1595,7 +1614,7 @@ const linearWakeReads = new LinearWakeReadReceipts({
   ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
 });
 retireLinearNotifications(join(stateRoot, "linear-notifications.json"), (message) => logger.info(message));
-// Built-in tracker owner loop: landed items ask the owner to check them, the answer
+// Built-in tracker owner loop: owner-closure items ask the owner to check them, the answer
 // verifies or sends back, and owner activity wakes the routed chat. In-process only.
 void startTrackerOwnerLoop({
   tracker: builtInTracker,

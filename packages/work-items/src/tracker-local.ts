@@ -130,6 +130,8 @@ interface Issue extends Entity {
   links: Link[];
   /** Derived from the event stream; absent on items written before VUH-1917 (reported). */
   stage?: DeliveryStage;
+  /** Lead closure is separate from the owner's delivery verification. */
+  leadCompletion?: { actor: TrackerActor; at: string; bundleId: string };
   /** The project cycle it is in (VUH-1931); set by the owner or lead, moved by rollover. */
   cycleId?: string | null;
   /** Who is working on it until when (VUH-1918). Kept after expiry until released or taken. */
@@ -312,6 +314,8 @@ const MIRROR_EVENTS_RETAINED = 5_000;
 interface WriteContext {
   readonly actor: TrackerActor;
   readonly via?: string;
+  readonly authorizeLeadClosure?: TrackerToolCallOptions["authorizeLeadClosure"];
+  readonly closureFences?: (() => void)[];
 }
 
 /** Live delivery of newly committed item events, after their write is durable. */
@@ -729,7 +733,6 @@ function moveStage(
   body?: string,
 ): void {
   const current = stageOf(issue);
-  if (target === current) return;
   const back = DELIVERY_STAGES.indexOf(target) < DELIVERY_STAGES.indexOf(current);
   if ((target === "owner-verified" || back) && !isOwner(context.actor))
     throw new TrackerWriteRefused(
@@ -738,6 +741,7 @@ function moveStage(
         ? "only the owner verifies an item; report landed or delivered and the owner checks it"
         : `only the owner moves an item back (from ${current} to ${target})`,
     );
+  if (target === current) return;
   if (DELIVERY_STAGES.indexOf(target) > DELIVERY_STAGES.indexOf("landed")) {
     const bundle = currentBundle(store, issue.id);
     if (bundle === undefined)
@@ -754,7 +758,8 @@ function moveStage(
       );
   }
   issue.stage = target;
-  issue.statusId = statusForStage(store, target).id;
+  if (back || target === "owner-verified") delete issue.leadCompletion;
+  if (issue.leadCompletion === undefined) issue.statusId = statusForStage(store, target).id;
   appendEvent(store, context, now, issue, {
     type: target === "owner-verified" ? "verified" : back ? "reopened" : "stage",
     from: current,
@@ -795,16 +800,16 @@ const categoryOf = (store: Store, statusId: string) =>
   store.issueStatuses.find((status) => status.id === statusId)?.type;
 
 /**
- * Hand-set changes become events too. Completing an item is owner verification,
- * and reopening a completed one sends it back; both are the owner's alone.
+ * Hand-set changes become events too. A scoped lead can close landed work under
+ * the owner's lead policy; verification and reopening remain the owner's alone.
  */
-function recordIssueChanges(
+async function recordIssueChanges(
   before: Store,
   store: Store,
   name: string,
   context: WriteContext,
   now: string,
-): void {
+): Promise<void> {
   // These record their own stage events.
   if (
     name === "post_issue_event" ||
@@ -844,14 +849,50 @@ function recordIssueChanges(
       const from = before.issueStatuses.find((status) => status.id === previous.statusId)?.name;
       const to = store.issueStatuses.find((status) => status.id === issue.statusId)!.name;
       if (is === "completed" || was === "completed") {
-        if (!isOwner(context.actor))
-          throw new TrackerWriteRefused(
-            "owner_verification_required",
-            is === "completed"
-              ? `only the owner completes an item; report it with post_issue_event (stage landed or delivered) and the owner verifies it`
-              : "only the owner reopens a completed item",
-          );
-        moveStage(store, issue, is === "completed" ? "owner-verified" : "accepted", context, now);
+        if (is === "completed" && !isOwner(context.actor)) {
+          if (issue.projectId !== previous.projectId)
+            throw new TrackerWriteRefused(
+              "lead_closure_required",
+              "an item cannot change project in the same write as lead closure",
+            );
+          if (!context.authorizeLeadClosure)
+            throw new TrackerWriteRefused(
+              "owner_verification_required",
+              "completion requires the current scoped lead and owner-authored lead closure policy",
+            );
+          const fence = await context.authorizeLeadClosure(issue.projectId);
+          fence();
+          context.closureFences?.push(fence);
+          if (DELIVERY_STAGES.indexOf(stageOf(previous)) < DELIVERY_STAGES.indexOf("landed"))
+            throw new TrackerWriteRefused("landed_required", "lead closure requires landed implementation");
+          const bundle = currentBundle(store, issue.id);
+          if (!bundle)
+            throw new TrackerWriteRefused(
+              "evidence_bundle_required",
+              "lead closure requires an evidence bundle",
+            );
+          if (!bundle.checked)
+            throw new TrackerWriteRefused(
+              "bundle_check_required",
+              "lead closure requires an independent bundle check of acceptance evidence",
+            );
+          issue.leadCompletion = { actor: context.actor, at: now, bundleId: bundle.id };
+          appendEvent(store, context, now, issue, {
+            type: "state",
+            ...(from === undefined ? {} : { from }),
+            to,
+            bundleId: bundle.id,
+          });
+        } else {
+          if (!isOwner(context.actor))
+            throw new TrackerWriteRefused(
+              "owner_verification_required",
+              is === "completed"
+                ? `only the owner completes an item; report it with post_issue_event (stage landed or delivered) and the owner verifies it`
+                : "only the owner reopens a completed item",
+            );
+          moveStage(store, issue, is === "completed" ? "owner-verified" : "accepted", context, now);
+        }
       } else {
         const bound = store.issueStatuses.find((status) => status.id === issue.statusId)?.stage;
         if (bound !== undefined) moveStage(store, issue, bound, context, now);
@@ -1317,7 +1358,11 @@ async function saveBundle(
   const issue = findIssue(store, args.issueId as string);
   options.assertIssueWrite?.(issueView(store, issue));
   const runId = (args.runId as string | undefined) ?? null;
-  if (runId === null && DELIVERY_STAGES.indexOf(stageOf(issue)) > DELIVERY_STAGES.indexOf("landed"))
+  if (
+    runId === null &&
+    (issue.leadCompletion !== undefined ||
+      DELIVERY_STAGES.indexOf(stageOf(issue)) > DELIVERY_STAGES.indexOf("landed"))
+  )
     throw new TrackerWriteRefused(
       "bundle_locked",
       "the owner must reopen an item to landed or earlier before replacing its completion bundle",
@@ -2944,6 +2989,10 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     const context: WriteContext = {
       actor,
       ...(callOptions?.via === undefined ? {} : { via: callOptions.via }),
+      ...(callOptions?.authorizeLeadClosure === undefined
+        ? {}
+        : { authorizeLeadClosure: callOptions.authorizeLeadClosure }),
+      closureFences: [],
     };
     const firstEvent = (store.events?.length ?? 0) + 1;
     try {
@@ -2954,7 +3003,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           "This store mirrors Linear; make the change in Linear until cutover",
         );
       result = await apply(store, now, context);
-      recordIssueChanges(before, store, name, context, now);
+      await recordIssueChanges(before, store, name, context, now);
     } catch (error) {
       // Nothing the write changed survives. The refusal itself is recorded,
       // so a keyed retry answers the same and the audit log shows the attempt.
@@ -3013,6 +3062,8 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       if (derived !== undefined) {
         view.stage = stageOf(derived);
         view.state = view.status = store.issueStatuses.find((status) => status.id === derived.statusId)!.name;
+        if (derived.leadCompletion !== undefined) view.leadCompletion = derived.leadCompletion;
+        else delete view.leadCompletion;
       }
     }
     const settled = structuredClone(result);
@@ -3036,7 +3087,14 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         result: settled,
       });
     appendSync(before, store, actor, name, now, key);
-    await persist(path, store, assertHeld, callOptions);
+    await persist(path, store, assertHeld, {
+      ...callOptions,
+      onDispatch: () => {
+        for (const fence of context.closureFences ?? []) fence();
+        callOptions?.onDispatch?.();
+        for (const fence of context.closureFences ?? []) fence();
+      },
+    });
     for (const listener of syncListeners.get(path) ?? []) listener();
     publish(store.events?.slice(firstEvent - 1) ?? []);
     return settled;
@@ -3142,7 +3200,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
                   context,
                 );
                 // Preserve every tool's stage, completion and evidence fences, including intermediate effects.
-                recordIssueChanges(beforeOperation, target, operation.name, context, operationNow);
+                await recordIssueChanges(beforeOperation, target, operation.name, context, operationNow);
                 results.push(result);
               }
               return { results };

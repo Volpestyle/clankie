@@ -84,6 +84,7 @@ import {
   TRACKER_TOOLS,
   type TrackerActor,
   type TrackerToolBackend,
+  type TrackerToolCallOptions,
 } from "@clankie/work-items";
 import { createPrioritySortedLinearIssueReader, callCachedLinearCollection } from "./tracker-tool-router.ts";
 import {
@@ -330,6 +331,11 @@ export interface McpHostOptions {
    * undefined when it has no project or tracks in Linear. Throws to refuse.
    */
   readonly trackerRepoForWorker?: (principalId: string) => Promise<string | undefined>;
+  /** Host-only authority: caller roles and inherited worker attribution grant no closure. */
+  readonly prepareTrackerLeadClosure?: (
+    source: ConversationAuthority,
+    projectId: string | null,
+  ) => Promise<() => void>;
   /** Repository conventions are backends of the same public tracker vocabulary. */
   readonly trackerForRepo?: (input: {
     name: string;
@@ -340,6 +346,7 @@ export interface McpHostOptions {
     local: boolean;
     /** Host-authenticated writer the built-in tracker records. */
     actor: TrackerActor;
+    authorizeLeadClosure?: NonNullable<TrackerToolCallOptions["authorizeLeadClosure"]>;
     beforeWrite(): Promise<void>;
     onDispatch(): void;
     effectConfirmed(): void;
@@ -1393,6 +1400,15 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           };
           const publication = {
             actor: trackerActor,
+            ...(input.lane === "operator" &&
+            input.delegation === undefined &&
+            providedSource &&
+            options.prepareTrackerLeadClosure
+              ? {
+                  authorizeLeadClosure: (projectId: string | null) =>
+                    options.prepareTrackerLeadClosure!(providedSource, projectId),
+                }
+              : {}),
             beforeWrite: async () => {
               try {
                 await refreshAttribution();

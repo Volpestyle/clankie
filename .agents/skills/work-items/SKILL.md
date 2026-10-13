@@ -282,9 +282,16 @@ On the built-in tracker, report progress with `linear_post_issue_event`
 (`ack`, `plan`, `action`, `blocked`, `ask`, `result`, `error`) instead of setting
 state by hand; the item's state is derived from it. Advance delivery with
 `stage`: `ack` accepts, then `landed` when merged and `delivered` when released.
-Never mark an item Done or owner-verified: only the owner verifies. Landing
-raises a "check it works" ask in the owner's mailbox, and the answer verifies
-the item or sends it back to accepted. Read `linear_list_issue_events` (resume
+Under the owner's effective `closure: lead` policy, the host-authorized lead
+may set Done after landing, relevant acceptance checks, and a checked evidence
+bundle. Lead completion records its actor and bundle separately; it never sets
+`owner-verified`. Workers report to the lead. Actor names, titles, project IDs,
+and the ordinary CLI's operator credential do not establish lead scope.
+Only the owner verifies or reopens work. Under `closure: owner`, landing raises
+a "check it works" ask; its answer verifies the item or sends it back to accepted.
+Lead closure creates no automatic verification ask. Existing pending and
+resolved asks and genuine owner-only gates retain their identities and authority.
+Read `linear_list_issue_events` (resume
 with its cursor) for the item's history; `selfEcho` marks Clankie's and workers'
 own events.
 
@@ -297,7 +304,7 @@ evidence bundle has an independent check. Imported items without a recorded
 delivery stage retain release membership without a stage move. An item refusal
 does not abort the sync; read `skipped` for each unchanged built-in item's version,
 reason and detail. A delivery move raises
-the owner's "check it works" ask if landing has not already raised one. Linear keys
+the owner's "check it works" ask under owner closure if landing has not already raised one. Linear keys
 are listed by key only. Nobody types a release's items, so name the item key in
 the commit message. Read releases with `linear_list_releases` (`query` also
 matches an item key), `linear_get_release` and

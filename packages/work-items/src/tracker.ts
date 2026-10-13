@@ -39,6 +39,9 @@ export interface TrackerDeps extends WorkWriteCallbacks {
   readonly trackerDirectory?: string;
   /** Host-authenticated writer, recorded by the built-in tracker; never from tool arguments. */
   readonly actor?: TrackerActor;
+  readonly authorizeLeadClosure?: NonNullable<
+    import("./tracker-tools.ts").TrackerToolCallOptions["authorizeLeadClosure"]
+  >;
   /**
    * Clankie's built-in tracker for a `builtin` convention (VUH-1987): the tracker
    * project the host bound this repo's project to, its team, and the shared store

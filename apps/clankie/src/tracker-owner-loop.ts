@@ -32,6 +32,7 @@ export interface TrackerOwnerLoopOptions {
     | "observeQuestionResolutions"
     | "wakeConversation"
     | "linearWakeTargetAllowed"
+    | "trackerClosurePolicy"
   >;
   readonly settings: Pick<SettingsStore, "load">;
   /** Durable cursor and the asks this loop raised. */
@@ -168,34 +169,36 @@ export async function startTrackerOwnerLoop(options: TrackerOwnerLoopOptions): P
       )
     ) {
       const { conversationId, issue } = await route(event.issueId);
-      const result = await options.captain.requestOwnerAsk(
-        conversationId,
-        {
-          kind: "choice",
-          purpose: "verify",
-          prompt: `${issue.identifier} ${event.to === "landed" ? "landed" : `was ${event.to ?? "delivered"}${event.body === undefined ? "" : ` (${event.body})`}`}: "${issue.title}". Check that it works.`,
-          options: [
-            { label: VERIFY_WORKS, description: "Mark it owner-verified." },
-            { label: VERIFY_SEND_BACK, description: "Reopen it for the worker; say what is wrong." },
-          ],
-          allowFreeform: true,
-          waitingOn: `${issue.identifier} owner verification`,
-          issue: { tracker: "clankie-work", key: issue.identifier, url: issue.url },
-        },
-        `tracker-ask:${event.id}`,
-      );
-      const requestId = result.question?.requestId;
-      if (requestId !== undefined) {
-        state.asks[requestId] = {
-          issueId: event.issueId,
-          identifier: issue.identifier,
-          eventId: event.id,
-          purpose: "verify",
-        };
-        save();
-        await options.tracker.linkOwnerAsk(event.id, requestId);
-        if (result.question?.status !== "pending" && result.question) await answered(result.question);
-      } else throw new Error(`Check-it-works ask refused: ${result.reason}`);
+      if ((await options.captain.trackerClosurePolicy?.(issue.projectId)) !== "lead") {
+        const result = await options.captain.requestOwnerAsk(
+          conversationId,
+          {
+            kind: "choice",
+            purpose: "verify",
+            prompt: `${issue.identifier} ${event.to === "landed" ? "landed" : `was ${event.to ?? "delivered"}${event.body === undefined ? "" : ` (${event.body})`}`}: "${issue.title}". Check that it works.`,
+            options: [
+              { label: VERIFY_WORKS, description: "Mark it owner-verified." },
+              { label: VERIFY_SEND_BACK, description: "Reopen it for the worker; say what is wrong." },
+            ],
+            allowFreeform: true,
+            waitingOn: `${issue.identifier} owner verification`,
+            issue: { tracker: "clankie-work", key: issue.identifier, url: issue.url },
+          },
+          `tracker-ask:${event.id}`,
+        );
+        const requestId = result.question?.requestId;
+        if (requestId !== undefined) {
+          state.asks[requestId] = {
+            issueId: event.issueId,
+            identifier: issue.identifier,
+            eventId: event.id,
+            purpose: "verify",
+          };
+          save();
+          await options.tracker.linkOwnerAsk(event.id, requestId);
+          if (result.question?.status !== "pending" && result.question) await answered(result.question);
+        } else throw new Error(`Check-it-works ask refused: ${result.reason}`);
+      }
     }
     // Owner answers already wake their source chat through ADR 0245; never twice.
     if (!event.selfEcho && event.via !== "owner_ask" && WAKING.has(event.type)) {

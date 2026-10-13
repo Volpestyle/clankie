@@ -1316,6 +1316,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
   }
 
+  const trackerClosureScope = async (trackerProjectId: string | null) => {
+    if (trackerProjectId === null) throw new Error("Tracker lead project scope is missing");
+    const snapshot = await settingsStore.loadFenced();
+    const projects = snapshot.settings.projects.projects.filter(
+      (project) => project.trackerProjectId?.toLowerCase() === trackerProjectId.toLowerCase(),
+    );
+    if (projects.length !== 1) throw new Error("Tracker lead project scope is missing or ambiguous");
+    if (effectiveFleetAutonomy(snapshot.settings.autonomy, projects[0]!.autonomy).closure !== "lead")
+      throw new Error("The owner's effective closure policy requires owner verification");
+    const routes = snapshot.settings.linearWebhook.projectChats.filter(
+      (route) => route.projectId.toLowerCase() === trackerProjectId.toLowerCase(),
+    );
+    if (routes.length > 1) throw new Error("Tracker lead route is ambiguous");
+    const expected = routes[0]?.conversationId ?? conversations.defaultGlobalConversationId();
+    const assertCurrent = () => {
+      snapshot.assertCurrent();
+      if (!privateLeadConversation(expected))
+        throw new Error("Tracker lead conversation scope is unavailable");
+      if (routes.length === 0 && conversations.defaultGlobalConversationId() !== expected)
+        throw new Error("Tracker default lead conversation changed");
+    };
+    assertCurrent();
+    return { expected, assertCurrent };
+  };
+
   async function leadChats(): Promise<readonly LeadChat[]> {
     const current = await settings();
     const ids = new Set([
@@ -6760,6 +6785,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     fleetWriteAuthority,
     linearWakeTargetAllowed: (id) => conversations.linearWakeTargetAllowed(id),
+    prepareTrackerLeadClosure: async (original, trackerProjectId) => {
+      const source = captureConversationAuthority(original);
+      await assertConversationAuthority(source);
+      const scope = await trackerClosureScope(trackerProjectId);
+      if (source.owner.discord !== undefined || source.owner.conversationId !== scope.expected)
+        throw new Error("The caller is not this tracker's current private lead");
+      await assertConversationAuthority(source);
+      const assertCurrent = () => {
+        scope.assertCurrent();
+        if (!source.current()) throw new Error("Tracker lead authority expired or was revoked");
+      };
+      assertCurrent();
+      return assertCurrent;
+    },
+    trackerClosurePolicy: async (trackerProjectId) => {
+      try {
+        const scope = await trackerClosureScope(trackerProjectId);
+        scope.assertCurrent();
+        return "lead";
+      } catch {
+        return "owner";
+      }
+    },
     linearWakeDeliveries: () => conversations.linearWakeDeliveries(),
     receiveLinearActivity: (activity, following, conversationId) =>
       conversations.receiveLinearActivity(activity, following, conversationId),

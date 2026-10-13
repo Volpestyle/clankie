@@ -501,6 +501,13 @@ export interface CaptainPort {
   ): Promise<WorkerWriteAuthority | undefined>;
   /** True for an existing ordinary global or workspace chat that may receive Linear wakes. */
   linearWakeTargetAllowed(conversationId: string): boolean;
+  /** Host-only current scoped lead and effective owner-authored closure policy. */
+  prepareTrackerLeadClosure?(
+    source: ConversationAuthority,
+    trackerProjectId: string | null,
+  ): Promise<() => void>;
+  /** Missing or ambiguous policy/scope retains the ordinary owner verification ask. */
+  trackerClosurePolicy?(trackerProjectId: string | null): Promise<"lead" | "owner">;
   linearWakeDeliveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeDeliveries"]>;
   /** Append verified external context to the selected ordinary chat and optionally wake it. */
   receiveLinearActivity(

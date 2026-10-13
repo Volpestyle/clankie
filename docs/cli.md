@@ -2219,7 +2219,9 @@ hold it. So on the built-in tracker every `clankie work` write (create, update,
 close, write, bundles, asks, cycles, leases, run controls and `work sync`) is
 recorded as Clankie, the `agent-worker` `clankie`, on behalf of the owner. It is
 self-echo: it never wakes Clankie as owner activity, and it cannot verify,
-complete, reopen or self-check work Clankie did. Two surfaces speak as the owner:
+reopen or self-check work Clankie did. The ordinary CLI also lacks the private
+lead conversation authority required to close built-in work under `closure: lead`.
+Two surfaces speak as the owner:
 the app on an enrolled device, and `clankie work owner TOOL`, the owner's
 explicit own call. Agents never use `work owner`. The owner's "It works" answer
 to a verify ask counts as the bundle check and verifies the item (LOCAL-VUH-1).
@@ -2232,6 +2234,16 @@ bearer stored under the same user, and file mode 0600 do not establish human
 authority. [ADR 0253](adr/0253-owner-confirmation-needs-an-isolated-authority.md)
 describes the proposed protected authority; it has not shipped. Agents must
 leave owner verification and owner ask answers to the owner.
+
+Built-in Done and owner verification are separate under the owner's effective
+lead-closure policy. The current host-authorized lead may close an item after
+it has landed and its acceptance evidence bundle has an independent check.
+The item retains its `landed` or `delivered` stage and records `leadCompletion`
+with the lead actor, time and checked bundle ID; it does not claim James checked
+it. Missing, revoked or ambiguous lead scope refuses closure. The owner alone
+may verify or reopen it. Lead closure suppresses new automatic verification asks;
+existing asks and explicit decision, money, account and other owner gates remain.
+Under owner closure, work stays In Review for the owner's ordinary verification.
 
 - `clankie work` (or `work status`, `work discover`) reports the repo's signals,
   its recorded convention if any, and a `question` when discovery found more

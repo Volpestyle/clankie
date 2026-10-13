@@ -21,6 +21,13 @@ export interface TrackerToolCallOptions {
    * write; other backends ignore it (ADR 0226 amendment, VUH-1916).
    */
   readonly actor?: TrackerActor;
+  /**
+   * Host-only capability for the item's current scoped lead and owner-authored
+   * lead-closure policy. Returns a publication fence; absent authority refuses.
+   * Actor labels, tool arguments and a worker's inherited lead attribution do
+   * not supply this capability.
+   */
+  readonly authorizeLeadClosure?: (projectId: string | null) => Promise<() => void>;
   /** Host-stamped origin recorded on resulting item events (e.g. owner_ask); never a tool argument. */
   readonly via?: string;
 }
@@ -474,7 +481,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   ),
   tool(
     "post_issue_event",
-    'Built-in tracker only. Report progress on an issue as a typed event; its state is derived from these rather than set by hand. ack accepts the work; blocked, ask and error flag it until the next ack/plan/action/result. stage advances delivery: accepted, landed (merged), delivered (released). Only the owner verifies (owner-verified) or sends an item back; landing raises a "check it works" ask for the owner.',
+    'Built-in tracker only. Report progress on an issue as a typed event; its state is derived from these rather than set by hand. ack accepts the work; blocked, ask and error flag it until the next ack/plan/action/result. stage advances delivery: accepted, landed (merged), delivered (released). Only the owner verifies (owner-verified) or sends an item back. Under effective lead closure, the host-authorized scoped lead may set Done after landing and an independent acceptance bundle check; this preserves delivery stage and records leadCompletion separately. Owner closure raises a "check it works" ask on landing; lead closure does not create automatic verification asks.',
     {
       issueId: { ...string, minLength: 1 },
       type: { type: "string", enum: [...ISSUE_EVENT_TYPES] },
