@@ -9,3 +9,9 @@ The batch JSON includes only fields used by non-stream display validation; fresh
 The lead-required independent native Codex subagent review found no blocking findings and made no edits. It reviewed the six source/test files against398efe735, including freshness, per-pane isolation, grouping and preservation of original guards. Windows execution, mixed-harness emitter behavior and actual relay output-limit handling remain unverified until lead deployment and a fresh five-minute window. No PC update/restart or live relay steering was performed. The exact landing gate is pending.
 
 [Checks, initial refusals, source hashes and independent review](clankie://evidence/sha256/7d3d4206f70b6f1b4e937caf432b385951964c0de45f30d092ddddacb6fb4d99).
+
+## Fixture type correction
+
+The first exact gate failed at TypeScript TS2353: the new test's occupantIdForHerdrSession input literal included an unused agent property. Production types and code are unchanged. Removing that test-only field preserves the identity hash, which uses source/kind/value. The independent reviewer confirmed the correction and applicability of the original production review.
+
+The lead-requested full service typecheck passed through heavy: source and all13 test programs,1041 total roots,133.44 seconds,exit0. The corrected proof test file passed all96 cases. The failed gate and corrected receipts are retained; the retry exact gate is pending.

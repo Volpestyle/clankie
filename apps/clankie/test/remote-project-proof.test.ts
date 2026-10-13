@@ -838,7 +838,6 @@ describe("fresh remote projection proof batches", () => {
     return {
       pane,
       nativeOccupantId: occupantIdForHerdrSession({
-        agent: "claude",
         kind: "id",
         source: "herdr:claude",
         value: `native-session-${pane}`,
