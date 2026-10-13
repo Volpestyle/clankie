@@ -20,6 +20,20 @@ This reference owns credential identities and trust boundaries. The
 [broker implementation](../packages/credential-broker/README.md) owns storage
 and locking; [worker access](worker-access.md) owns restricted delegation.
 
+The partial S3 evidence adapter foundation uses the standard AWS SDK credential
+provider chain, including its renewable temporary-credential providers. No
+supported API/CLI selector exists yet; configuration is not yet usable through
+supported controls. The JSON in the CLI reference describes the schema, not
+instructions to edit settings files. Local remains the default. Startup
+selection has source inspection only; its executed proof and API/CLI controls
+remain VUH-1913 gaps. The schema contains only backend, bucket, region and object
+prefix; no access key, session token or secret is a setting. This adapter does
+not yet route hosted tenant credentials through Clankie's broker. Hosted credential
+issuance, refresh and tenant isolation must be completed in the private hosted
+plumbing before that acceptance criterion is met. Do not copy an owner's AWS
+tokens into the service, shell presets, logs or evidence. Local evidence proof
+does not authorize a real AWS destination or replace hosted roundtrip evidence.
+
 Clankie caches Keychain credentials in each process. Broker changes and rotations
 invalidate the affected entry in running clients and the service. When the keychain
 is locked, new credential reads fail promptly with **Keychain locked**, back off

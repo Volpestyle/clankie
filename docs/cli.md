@@ -2516,6 +2516,49 @@ and the records that describe them. Paths resolve from the current directory
 inside any git repository, with no per-repository configuration. Each command
 prints one JSON document; push and fetch also print a plain summary on stderr.
 
+The service defaults to local disk blobs and SQLite records. The S3 adapter is
+a partial foundation; its configuration is not yet usable through supported
+controls. No API/CLI selector exists yet. The non-secret `evidence` schema has
+this format:
+
+```json
+{
+  "evidence": {
+    "backend": "s3",
+    "bucket": "example-evidence-bucket",
+    "region": "us-east-1",
+    "prefix": "tenant-evidence"
+  }
+}
+```
+
+This JSON describes the schema, not instructions to edit settings files. Local
+remains the default. Startup code branches on the loaded schema, but startup
+selection has only source inspection, not an executed startup proof. Supported
+API/CLI controls and startup-selection proof remain VUH-1913 gaps.
+
+The S3 foundation uses the standard AWS SDK credential provider chain; never
+put credentials in settings. Broker-backed renewable tenant credentials and
+owner-approved bucket/IAM/lifecycle/backup configuration still belong to hosted
+plumbing. Records and upload receipts remain in the existing SQLite store.
+Switching blob backends does not migrate existing blobs; migration and the
+required real-hosted push/fetch proof remain open.
+
+The manual `apps/clankie/test/evidence-s3.integration.test.ts` check uses the
+production SDK against a real, already-running loopback MinIO server. Start
+that owned server through `clankie heavy --server`, with private disposable
+HOME/config/credentials. Supply `EVIDENCE_S3_MINIO_CONFIG` as the path to its
+private JSON binding (`endpoint`, `accessKeyId`, `secretAccessKey`), then run the
+named test through `clankie heavy -- pnpm exec vitest run`. Without the binding
+the check is skipped; it never starts infrastructure during ordinary CI. Stop
+the owned server and remove its credentials/data afterward. This local check
+does not establish hosted acceptance or exercise AWS credential renewal.
+
+Uploads still use the service's signed PUT and JSON receipt API. The service
+checks the full size and SHA256 before uploading to S3. Fetch resolves recorded
+objects to fresh S3 GET URLs valid for at most 15 minutes (temporary credentials
+may expire sooner); manifests keep only stable `clankie://evidence` links.
+
 - `clankie evidence push [PATH] [--issue KEY] [--caption TEXT]` (default `.`)
   works only inside a declared evidence root (by default `docs/testing/<folder>`).
   Repositories may declare relative roots in `.clankie/evidence.json`, for example

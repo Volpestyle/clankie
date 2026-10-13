@@ -1,4 +1,6 @@
 export {
+  EvidenceSettingsSchema,
+  type EvidenceSettings,
   AgentHostConnectionSchema,
   type AgentHostConnection,
   CaptainSettingsSchema,

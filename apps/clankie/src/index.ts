@@ -675,7 +675,13 @@ const boundApp = (): ClankieApp => {
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
 // The built-in tracker; its event stream drives the in-process owner loop (VUH-1917).
 // A run's seat, pane and hire are read live from the hire records (VUH-1918).
-const evidenceStore = EvidenceStore.local(join(stateRoot, "evidence"));
+const evidenceStore =
+  startupSettings.evidence.backend === "local"
+    ? EvidenceStore.local(join(stateRoot, "evidence"))
+    : EvidenceStore.withLocalMetadata(
+        join(stateRoot, "evidence"),
+        new (await import("./evidence-s3.ts")).S3EvidenceBlobs(startupSettings.evidence),
+      );
 const builtInTrackerOptions = {
   directory: join(stateRoot, "tracker"),
   validateEvidence: async (_issueKey: string, references: readonly EvidenceReference[]) => {

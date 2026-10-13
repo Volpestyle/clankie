@@ -612,6 +612,39 @@ export const AgentHostConnectionSchema = z
   .strict();
 export type AgentHostConnection = z.infer<typeof AgentHostConnectionSchema>;
 
+/** Blob storage only; credentials are never settings. Local remains the default. */
+export const EvidenceSettingsSchema = z.discriminatedUnion("backend", [
+  z.object({ backend: z.literal("local") }).strict(),
+  z
+    .object({
+      backend: z.literal("s3"),
+      bucket: z
+        .string()
+        .min(3)
+        .max(63)
+        .regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/),
+      region: z
+        .string()
+        .min(1)
+        .max(64)
+        .regex(/^[a-z0-9-]+$/),
+      prefix: z
+        .string()
+        .max(512)
+        .refine(
+          (value) =>
+            value === "" ||
+            value
+              .split("/")
+              .every((part) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part) && part !== "." && part !== ".."),
+          "Expected a relative object prefix without empty or traversal segments",
+        )
+        .default(""),
+    })
+    .strict(),
+]);
+export type EvidenceSettings = z.infer<typeof EvidenceSettingsSchema>;
+
 export const ClankieSettingsSchema = z
   .object({
     schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
@@ -638,6 +671,7 @@ export const ClankieSettingsSchema = z
     host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),
     runtimeHealth: RuntimeHealthSettingsSchema.default(() => RuntimeHealthSettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
+    evidence: EvidenceSettingsSchema.default(() => ({ backend: "local" as const })),
     /**
      * Where the owner sees account usage meters (VUH-1961), and when Clankie's
      * lead hears that an account is on pace to run out before its weekly reset

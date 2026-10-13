@@ -44,6 +44,11 @@ import {
 export interface EvidenceBlobStore {
   readonly backend: string;
   readonly location: string;
+  /** Optional storage-signed GET; never an upload URL or a long-lived credential. */
+  signedFetch?(
+    sha256: string,
+    expiresInSeconds: number,
+  ): Promise<{ size: number; url: string; expiresAt: string } | undefined>;
   has(sha256: string): Promise<boolean>;
   /** Accepts the bytes only when both their sha256 and size match; otherwise stores nothing. */
   write(
@@ -449,7 +454,7 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
 // Service
 // ---------------------------------------------------------------------------
 
-class EvidenceRefusal extends Error {
+export class EvidenceRefusal extends Error {
   readonly status: 400 | 401 | 403 | 404 | 409 | 422 | 503;
   readonly code: string;
   constructor(status: EvidenceRefusal["status"], code: string) {
@@ -502,11 +507,13 @@ export class EvidenceStore {
   }
 
   static local(root: string): EvidenceStore {
+    return EvidenceStore.withLocalMetadata(root, new LocalDiskEvidenceBlobs(join(root, "blobs")));
+  }
+
+  /** Hosted blob storage can reuse the existing local records and receipt contract. */
+  static withLocalMetadata(root: string, blobs: EvidenceBlobStore): EvidenceStore {
     mkdirSync(root, { recursive: true, mode: 0o700 });
-    return new EvidenceStore(
-      new LocalDiskEvidenceBlobs(join(root, "blobs")),
-      new SqliteEvidenceMetadata(join(root, "evidence.sqlite")),
-    );
+    return new EvidenceStore(blobs, new SqliteEvidenceMetadata(join(root, "evidence.sqlite")));
   }
 
   status(): EvidenceStoreStatus {
@@ -642,6 +649,13 @@ export class EvidenceStore {
     const parsed = EvidenceFetchRequestSchema.safeParse(input);
     if (!parsed.success) throw new EvidenceRefusal(400, "invalid_request");
     const { sha256 } = parsed.data;
+    // Only settled, recorded blobs may receive a storage-signed link.
+    if (this.blobs.signedFetch) {
+      if (!(await this.metadata.hasRecordForBlob(sha256))) throw new EvidenceRefusal(404, "unknown_object");
+      const signed = await this.blobs.signedFetch(sha256, SIGNED_URL_MS / 1000);
+      if (!signed) throw new EvidenceRefusal(404, "unknown_object");
+      return { sha256, ...signed };
+    }
     const blob = await this.blobs.open(sha256);
     // Bytes nobody recorded are not evidence; a half-settled upload stays invisible.
     if (blob === undefined || !(await this.metadata.hasRecordForBlob(sha256))) {

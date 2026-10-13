@@ -20,6 +20,8 @@
     "persona-images:eval": "tsx scripts/persona-images-eval.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1138.0",
+    "@aws-sdk/s3-request-presigner": "3.1138.0",
     "@browser_use/pi": "0.1.0",
     "@clankie/agent-hosts": "workspace:*",
     "@clankie/agent-transcript": "workspace:*",

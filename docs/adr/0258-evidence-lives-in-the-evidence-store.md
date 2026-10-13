@@ -147,6 +147,19 @@ everything in git is the cost above.
 
 ## Consequences
 
+Implementation note (VUH-1913, partial): the public S3 blob adapter keeps the
+existing authenticated service upload and JSON receipt contract, checks size
+and SHA256 on private temporary disk before PUT, and resolves recorded blobs
+to S3-signed GETs capped at 15 minutes. Local remains the default. No supported
+API/CLI selector exists yet, so configuration is not yet usable through supported
+controls. JSON examples describe the non-secret backend/bucket/region/prefix
+schema, not instructions to edit settings files. Startup selection is inspected
+source only; executed startup proof and API/CLI controls remain VUH-1913 gaps.
+This foundation uses the standard AWS provider chain and SQLite metadata. It does not complete the
+broker-backed renewable tenant credentials, private hosted infrastructure,
+backup policy, migration, or required real-hosted push/fetch proof. The hosted
+metadata decision above remains unchanged; Postgres is not added by this slice.
+
 Paired owner devices may read recorded media in bounded byte ranges through their authenticated device/relay path (`evidence_fetch`), with the record’s content type; they never receive service URLs or store-signed links (VUH-1967, also enabling large-image reads for VUH-1954).
 
 - Workers publish evidence by writing the folder's `README.md`, running
