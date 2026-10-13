@@ -2,6 +2,18 @@
   "version": 1,
   "objects": [
     {
+      "path": "live-raw/attribution-live.json",
+      "size": 89026,
+      "sha256": "db0da6dfc38a383961fe0f82950e92c950753d217e0c83b1fb87d21249c66caf",
+      "url": "clankie://evidence/sha256/db0da6dfc38a383961fe0f82950e92c950753d217e0c83b1fb87d21249c66caf"
+    },
+    {
+      "path": "live-raw/live-spans.json",
+      "size": 120132,
+      "sha256": "1b1b91946917d7e488cbd8ee34529169ab08cf867483c5e16d7a0a4a2f91c477",
+      "url": "clankie://evidence/sha256/1b1b91946917d7e488cbd8ee34529169ab08cf867483c5e16d7a0a4a2f91c477"
+    },
+    {
       "path": "raw/readonly-attribution-replay.txt",
       "size": 217471,
       "sha256": "69dc60bf69f79a05bbc65b3dc8de842fec09ac791cabec90fc014f27b9b448b2",
