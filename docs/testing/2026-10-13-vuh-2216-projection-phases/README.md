@@ -12,19 +12,19 @@ The deployed five-minute window ran through `clankie heavy --server` from 15:55:
 
 The 44 completed projection spans name issue enrichment and capability reads as the dominant phases:
 
-| Phase | p50 ms | p95 ms | max ms |
-| --- | ---: | ---: | ---: |
-| Issue enrichment | 2145 | 2340 | 5800 |
-| Capability | 1239 | 2172 | 2453 |
-| Census (parent) | 112 | 784 | 801 |
-| Local census | 111 | 784 | 801 |
-| PC fleet | 57 | 128 | 371 |
-| Goal/status (parent) | 228 | 765 | 2385 |
-| Remote goals | 0.044 | 540 | 613 |
-| Native status | 209 | 221 | 1849 |
-| Activity | 6 | 32 | 71 |
-| Git enrichment | 18 | 20 | 24 |
-| Settings/binding | 1 | 3 | 5 |
+| Phase                | p50 ms | p95 ms | max ms |
+| -------------------- | -----: | -----: | -----: |
+| Issue enrichment     |   2145 |   2340 |   5800 |
+| Capability           |   1239 |   2172 |   2453 |
+| Census (parent)      |    112 |    784 |    801 |
+| Local census         |    111 |    784 |    801 |
+| PC fleet             |     57 |    128 |    371 |
+| Goal/status (parent) |    228 |    765 |   2385 |
+| Remote goals         |  0.044 |    540 |    613 |
+| Native status        |    209 |    221 |   1849 |
+| Activity             |      6 |     32 |     71 |
+| Git enrichment       |     18 |     20 |     24 |
+| Settings/binding     |      1 |      3 |      5 |
 
 Total projection p50/p95/max was 4198/5853/7955 ms. Parent and child spans overlap; do not add them. These are completions in the window, not request correlation. The unnamed other-fleet transport rejected in all 44 records (p95 112 ms); rejection is transport outcome, not authority proof.
 

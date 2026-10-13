@@ -1,0 +1,9 @@
+# VUH-2237: bounded fresh capability reads
+
+The deployed VUH-2216 trace found sequential capability observations taking p50/p95 1239/2172 ms across 44 completed projections. The baseline fresh-native five-minute roster window had p50/p95 3914/4846 ms; issue enrichment separately took 2145/2340 ms. See the [phase evidence](../2026-10-13-vuh-2216-projection-phases/README.md).
+
+The display projection now reads capabilities with four workers, placing each result at its original seat index. Missing observations stay missing. A rejected read stops scheduling new reads, drains those already started and propagates the original error. There is no cache, shared authority proof or new native observation. Waiting-notice writes stay in the existing ordered loop; delivery checks, admission and deadlines are unchanged. The lead cleared the captain import and capability sites.
+
+The real HTTP integration releases responses in reverse batches and parses every payload through the published capability schema. It proves the observed concurrency reaches four and never exceeds four, and that completion order cannot swap seat results. Existing native capability and delivery-boundary checks cover their consumers. Governed focused checks passed: 17 cases across four files. After replacing a lint-refused `new Array` with `Array.from`, the affected HTTP regression passed again (one case); scoped lint and formatting passed. The exact landing gate is pending.
+
+The same change adds cheap, content-free `issue_attribution` and `issue_keeper` child spans under `issue_enrichment`, as requested by the lead. Attribution includes the existing operator-head child assignments before keeper observation. It changes neither path. These spans will distinguish fresh hire-attribution costs from issue-keeper observation after deployment. Live improvement remains unverified until the lead deploys and the next five-minute window completes.

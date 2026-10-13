@@ -1,3 +1,4 @@
+import { readFleetSeatCapabilities } from "./fleet-seat-capabilities.ts";
 import {
   fleetProjectionDiagnostics,
   type FleetProjectionDiagnostics,
@@ -3571,8 +3572,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // Live proof is refreshed asynchronously. Missing census or an untracked
     // head never establishes that an original process exited.
     void options.fleetResources?.observeSeats(fleet.seats).catch(() => undefined);
-    for (const seat of seats) {
-      const observed = fleet.seats.find((entry) => entry.seatId === seat.seatId);
+    const capabilitySeats = seats.map((seat) => fleet.seats.find((entry) => entry.seatId === seat.seatId));
+    const capabilities = await readFleetSeatCapabilities(
+      capabilitySeats.map((observed) => (observed ? observedAgent(observed) : undefined)),
+      (native) => diagnostics.measure("capability", () => herdrWatches.inputCapabilities(native)),
+    );
+    for (const [index, seat] of seats.entries()) {
+      const observed = capabilitySeats[index];
       if (!observed) continue;
       const qualified = splitFleetQualified(observed.paneId);
       const fleetId = qualified?.fleet ?? "default";
@@ -3582,9 +3588,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (seat.harness === "claude") {
         seat.messageReceiver = seatMessageReceiver(native);
       }
-      seat.inputCapabilities = await diagnostics.measure("capability", () =>
-        herdrWatches.inputCapabilities(native),
-      );
+      seat.inputCapabilities = capabilities[index]!;
       seat.waitingMessages = nextTurnMailboxes.waiting(
         observed.seatId,
         inboundBinding(observedAgent(observed)),
@@ -3846,6 +3850,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lastProjectedSeats = projected;
     observeReportFailureAlerts(projected);
     const stopIssues = diagnostics.start("issue_enrichment");
+    const stopAttribution = diagnostics.start("issue_attribution");
     const liveIssues: import("./seat-issue-status.ts").LiveSeatIssue[] = await Promise.all(
       projected.map(async (seat) => {
         const issue = liveSeatIssue(seat);
@@ -3903,11 +3908,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ],
       });
     }
-    await issueStatus.observe(liveIssues).then((results) => {
-      for (const result of results)
-        if (result.outcome === "failed")
-          console.warn("Seat issue status unavailable", result.issue, result.detail);
-    });
+    stopAttribution();
+    await diagnostics
+      .measure("issue_keeper", () => issueStatus.observe(liveIssues))
+      .then((results) => {
+        for (const result of results)
+          if (result.outcome === "failed")
+            console.warn("Seat issue status unavailable", result.issue, result.detail);
+      });
     stopIssues();
     return projected;
   }

@@ -15,7 +15,9 @@ export type FleetProjectionPhase =
   | "activity"
   | "routing_catalog"
   | "git_enrichment"
-  | "issue_enrichment";
+  | "issue_enrichment"
+  | "issue_attribution"
+  | "issue_keeper";
 
 type Outcome = "ok" | "error";
 type Interval = { start: number; end: number; outcome: Outcome };

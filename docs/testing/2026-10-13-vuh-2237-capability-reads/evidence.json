@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "raw/focused-capability-boundaries.txt",
+      "size": 46943,
+      "sha256": "afa5cc5378a16b0a30c49c57d70e3c1fdf5cc4547fe7c6e9fece20745f45de28",
+      "url": "clankie://evidence/sha256/afa5cc5378a16b0a30c49c57d70e3c1fdf5cc4547fe7c6e9fece20745f45de28"
+    }
+  ]
+}

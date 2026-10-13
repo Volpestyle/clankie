@@ -29,6 +29,8 @@ it("writes content-free phase diagnostics across real file reads without changin
     diagnostics.census("herdr:default", false, "ok");
     diagnostics.census("herdr:pc", false, "error");
     stopCensus();
+    await diagnostics.measure("issue_attribution", () => readFile(path, "utf8"));
+    await diagnostics.measure("issue_keeper", () => readFile(path, "utf8"));
     let original: unknown;
     const failure = await diagnostics
       .measure("activity", async () => {
@@ -53,6 +55,8 @@ it("writes content-free phase diagnostics across real file reads without changin
         expect.objectContaining({ phase: "census", outcome: "ok" }),
         expect.objectContaining({ phase: "pc_fleet", outcome: "error" }),
         expect.objectContaining({ phase: "activity", outcome: "error" }),
+        expect.objectContaining({ phase: "issue_attribution", outcome: "ok" }),
+        expect.objectContaining({ phase: "issue_keeper", outcome: "ok" }),
       ]),
     );
     for (const phase of record.phases) {
