@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { lstat, opendir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
+import { lstat, opendir, readFile, realpath, rename, stat } from "node:fs/promises";
 import { basename, dirname, join, relative as relativePath, resolve } from "node:path";
 import { promisify } from "node:util";
 import { projectPathContains } from "@clankie/settings";
 import { withDirectoryLock } from "../deploy-holds.ts";
 import { processWorkingDirectories } from "../process-working-directories.ts";
+import { removeDirectory } from "../remove-directory.ts";
 import {
   inspectTidyRepository,
   managedWorktreePaths,
@@ -377,7 +378,7 @@ export async function reclaimWorktreeCaches(
                   )
                 )
                   throw Error("live_cwd");
-                await rm(aside, { recursive: true });
+                await removeDirectory(aside);
                 result.reclaimed.push(cache);
               } catch (error) {
                 // A new install can occupy the original name; never overwrite it to roll back.

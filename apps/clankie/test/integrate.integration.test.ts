@@ -13,6 +13,7 @@ import {
   readlink,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1867,6 +1868,9 @@ it.runIf(process.platform === "darwin")(
     const f = await fixture();
     const reclaimable: string[] = [];
     const protectedTrees: string[] = [];
+    const outside = join(f.directory, "outside cleanup ; $HOME");
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, "keep"), "external target");
     for (let round = 0; round < 40; round++) {
       const id = randomUUID();
       const root = join(f.directory, "batches", id);
@@ -1884,6 +1888,11 @@ it.runIf(process.platform === "darwin")(
       const isolation = join(root, "isolation");
       await mkdir(isolation);
       await writeFile(join(isolation, "cache"), "private install cache".repeat(1024));
+      if (round === 0) {
+        await symlink(outside, join(isolation, "external"));
+        await mkdir(join(isolation, "literal ; $HOME"));
+        await writeFile(join(isolation, "literal ; $HOME", "cache"), "literal path");
+      }
       if (round < 34) reclaimable.push(isolation);
       else protectedTrees.push(isolation);
       const record = join(root, "record.json");
@@ -1919,6 +1928,7 @@ it.runIf(process.platform === "darwin")(
     expect(result.freedBytes).toBeGreaterThan(0);
     for (const tree of reclaimable) expect(existsSync(tree)).toBe(false);
     for (const tree of protectedTrees) expect(existsSync(tree)).toBe(true);
+    expect(await readFile(join(outside, "keep"), "utf8")).toBe("external target");
     expect(await git(f.core.source, "rev-parse", "HEAD")).toBe(f.core.base);
     expect((await f.queue.reclaimWorktrees()).freedBytes).toBe(0);
   },

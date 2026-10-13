@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { syncOwnerCheckout } from "@clankie/settings";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, open, readdir, rm, rmdir, realpath, lstat } from "node:fs/promises";
+import { mkdir, readFile, open, readdir, rmdir, realpath, lstat } from "node:fs/promises";
 import { basename, dirname, join, resolve, relative, isAbsolute, sep } from "node:path";
 import { promisify } from "node:util";
 import { Writable } from "node:stream";
@@ -29,6 +29,7 @@ import { serviceResourceDirectory } from "./service-fleet-resources.ts";
 import type { FleetProgressObservation } from "./fleet-progress.ts";
 
 import { processWorkingDirectories } from "./process-working-directories.ts";
+import { removeDirectory } from "./remove-directory.ts";
 
 const execute = promisify(execFile);
 const now = () => new Date().toISOString();
@@ -604,7 +605,7 @@ export class IntegrationQueue {
             if (marker) await this.git(repository, ["worktree", "remove", "--force", tree]);
             else {
               // Finish an interrupted Git removal, only with its exact private registration above.
-              await rm(tree, { recursive: true, force: true });
+              await removeDirectory(tree, { force: true });
             }
             await this.git(repository, ["worktree", "prune"]);
             result.reclaimed.push(tree);
@@ -643,7 +644,7 @@ export class IntegrationQueue {
         if (!Number.isSafeInteger(bytes) || bytes < 0) throw Error("isolation_size_unknown");
         await guard();
         // rm removes the private tmp symlink itself, never its external target.
-        await rm(isolation, { recursive: true, force: true });
+        await removeDirectory(isolation, { force: true });
         result.reclaimed.push(isolation);
         result.freedBytes += bytes;
         batch.isolationReclamation = { path: isolation, freedBytes: bytes, at: new Date(at).toISOString() };
@@ -1520,7 +1521,7 @@ export class IntegrationQueue {
     };
     delete repo.install;
     delete repo.gate;
-    await rm(join(repo.directory, ".local"), { recursive: true, force: true });
+    await removeDirectory(join(repo.directory, ".local"), { force: true });
     await this.save(batch);
     await this.installAndGate(batch, root);
   }

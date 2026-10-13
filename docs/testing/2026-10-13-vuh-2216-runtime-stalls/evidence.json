@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "raw/baseline-and-cleanup.json",
+      "size": 10800502,
+      "sha256": "aee7f4ab8e8343d9af7f188c2df28abaaee245621f7b38969d67e9bc2539108b",
+      "url": "clankie://evidence/sha256/aee7f4ab8e8343d9af7f188c2df28abaaee245621f7b38969d67e9bc2539108b"
+    }
+  ]
+}

@@ -1043,6 +1043,9 @@ batch record agree. Passed, held and partial batches remain available for push.
 Aliased, locked, unverified or live-process directories stay retained; incomplete
 cwd observations defer cleanup. A five-minute sweep retries deferred removals.
 Restore reads a reclaimed pushed batch's retained commit store.
+Recursive scratch and cache deletion runs in an awaited child process, so large
+installs do not occupy the live service's filesystem threadpool. The same
+ownership, retry and live-process checks still authorize each removal.
 
 ### Scratch service and relay proofs
 
