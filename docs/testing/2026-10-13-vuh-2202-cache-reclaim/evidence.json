@@ -9,9 +9,9 @@
     },
     {
       "path": "raw/interrupted-driver-proof.json",
-      "size": 352346,
-      "sha256": "fa24c048314040c1b1f6dbd55f488ad84acfe5871beda3125d91a93b8ca91527",
-      "url": "clankie://evidence/sha256/fa24c048314040c1b1f6dbd55f488ad84acfe5871beda3125d91a93b8ca91527"
+      "size": 564889,
+      "sha256": "73854ac81f7f3196379d48f446fb081bc0a4711a0c2f87a00196f6ae5e6275c7",
+      "url": "clankie://evidence/sha256/73854ac81f7f3196379d48f446fb081bc0a4711a0c2f87a00196f6ae5e6275c7"
     }
   ]
 }

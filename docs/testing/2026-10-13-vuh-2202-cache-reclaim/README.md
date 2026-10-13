@@ -20,4 +20,6 @@ The original gate was stopped by a deployment restart, confirmed by the lead. It
 
 A separate small follow-up records missing completion receipts or signaled commands as interrupted, naming the phase and retained logs. Complete nonzero installs and tests stay failed. Five focused real integration cases passed, including killing the fixture's exact gate-driver ancestor, preserving its logs and preventing a push, plus a genuine frozen-lockfile failure before sibling phases started. Formatting and lint passed. No service was restarted for the proof and no admission or timeout changed.
 
-Follow-up evidence: `clankie://evidence/sha256/fa24c048314040c1b1f6dbd55f488ad84acfe5871beda3125d91a93b8ca91527`. It contains the original interrupted batch/log, the successful primary landing record, focused real-process results and changed source.
+Follow-up evidence: `clankie://evidence/sha256/73854ac81f7f3196379d48f446fb081bc0a4711a0c2f87a00196f6ae5e6275c7`. It contains the original interrupted batch/log, the successful primary landing record, focused real-process results and changed source.
+
+The first follow-up gate caught TS7053 from inferred string phase names. The correction narrows both names with `as const`; runtime behavior stays identical. The governed service typecheck then passed its source and all 13 test groups (174.95 seconds), and explicit source formatting passed before resubmission.
