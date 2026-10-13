@@ -1129,6 +1129,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         : {}),
       ...(dependencies.builtInTracker
         ? {
+            trackerStoreId: () => dependencies.builtInTracker!.storeId(),
             // Exact UUID only: get_project also matches names, which never bind.
             trackerProjectExists: async (id: string) => {
               const project = (await dependencies.builtInTracker!.call("get_project", { query: id })) as {

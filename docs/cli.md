@@ -6395,6 +6395,13 @@ to another project, and never matches by name. `clankie work repos` and the
 device `work_repos` read return it on that project's repo, so the app can mark the
 synced tracker project as bound. Snapshots for clients that do not opt into the
 current project shape (`?includeAutonomy=true`) omit it, like `autonomy`.
+`clankie project settings PROJECT --tracker-project UUID|clear` and the
+**Built-in tracker project** field in `/project` edit this same reference through
+the revision-bearing owner API. Unknown projects, revoked owner authority and a
+tracker store replaced before commit refuse the edit; a duplicate binding
+returns a conflict. Unavailable tracker reads preserve the saved reference and
+withhold it from work-repo projections until it can be verified again. Clearing
+the reference leaves the project and its workspace tracker choice in place.
 `linearProjectBinding: {"provider":"linear","projectId":"UUID"}` separately
 names an exact project in Clankie's connected Linear app. The service reads that
 provider directly, never the local tracker fallback; names, another provider,

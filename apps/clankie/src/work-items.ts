@@ -250,7 +250,26 @@ function repoId(path: string): string {
 export function createWorkItemsService(options: WorkItemsServiceOptions) {
   const projectReader =
     options.projects && options.localMachineId
-      ? createProjectWorkReader({ projects: options.projects, localMachineId: options.localMachineId })
+      ? createProjectWorkReader({
+          projects: options.projects,
+          localMachineId: options.localMachineId,
+          trackerProject: async (id) => {
+            const tracker = openBuiltIn();
+            if (!("storeId" in tracker) || typeof tracker.storeId !== "function")
+              throw new Error("Built-in tracker store cannot be verified");
+            const readStoreId = tracker.storeId.bind(tracker);
+            const storeId: unknown = await readStoreId();
+            if (typeof storeId !== "string" || !storeId)
+              throw new Error("Built-in tracker store is unavailable");
+            const validate = async () => {
+              const project = (await tracker.call("get_project", { query: id })) as { id?: unknown };
+              if (project.id !== id || (await readStoreId()) !== storeId)
+                throw new Error("Built-in tracker project or store changed");
+            };
+            await validate();
+            return validate;
+          },
+        })
       : undefined;
   const registryPath = join(options.stateDirectory, "work-repos.json");
   const writeReceipts = new WorkWriteReceipts(join(options.stateDirectory, "work-write-receipts.json"));
@@ -396,9 +415,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     if (project?.trackerProjectId === undefined) return undefined;
     const view = (await openBuiltIn()
       .call("get_project", { query: project.trackerProjectId })
-      .catch(() => undefined)) as { leadTeam?: { id?: unknown } } | undefined;
+      .catch(() => undefined)) as { id?: unknown; leadTeam?: { id?: unknown } } | undefined;
     const teamId = view?.leadTeam?.id;
-    if (typeof teamId !== "string") return undefined;
+    if (view?.id !== project.trackerProjectId || typeof teamId !== "string") return undefined;
     return { projectId: project.trackerProjectId, teamId, open: openBuiltIn };
   };
 

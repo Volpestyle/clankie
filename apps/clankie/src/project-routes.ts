@@ -67,6 +67,8 @@ export function createProjectRoutes(
     worktreeRoot?: ObserveProjectWorktreeRoot;
     /** True only when the built-in tracker holds a project with exactly this UUID. */
     trackerProjectExists?: (id: string) => Promise<boolean>;
+    /** Captures the current built-in store identity; a replacement invalidates the reviewed binding. */
+    trackerStoreId?: () => Promise<string>;
     /** Exact UUID in Clankie's connected Linear app; never the local tracker fallback. */
     linearProjectExists?: (id: string) => Promise<boolean>;
     /** Live status lines for the autonomy-aware view; a failed read omits them, never the settings. */
@@ -155,9 +157,14 @@ export function createProjectRoutes(
       return context.json({ error: "invalid_hire_model", detail: String(error) }, 400);
     }
     const trackerProjectId = input.data.changes.trackerProjectId;
+    const trackerStoreId =
+      typeof trackerProjectId === "string"
+        ? await options.trackerStoreId?.().catch(() => undefined)
+        : undefined;
     if (
       typeof trackerProjectId === "string" &&
-      !(await options.trackerProjectExists?.(trackerProjectId).catch(() => false))
+      (trackerStoreId === undefined ||
+        !(await options.trackerProjectExists?.(trackerProjectId).catch(() => false)))
     )
       return context.json({ error: "tracker_project_not_found" }, 400);
     const linearBinding = input.data.changes.linearProjectBinding;
@@ -178,8 +185,14 @@ export function createProjectRoutes(
           return { ...current, projects: updateProjectSettings(current.projects, input.data) };
         },
         async () => {
-          if ((await authorize(context.req.raw)) !== true) throw new Error("Owner authority changed");
+          if (
+            typeof trackerProjectId === "string" &&
+            (!(await options.trackerProjectExists?.(trackerProjectId)) ||
+              (await options.trackerStoreId?.()) !== trackerStoreId)
+          )
+            throw new Error("Built-in tracker project or store changed");
           if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
+          if ((await authorize(context.req.raw)) !== true) throw new Error("Owner authority changed");
         },
       );
       return context.json(projectSnapshot(updated, context.req.query("includeAutonomy") === "true"));

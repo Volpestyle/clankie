@@ -12,6 +12,8 @@ export const projectWorkRepoId = (projectId: string): string =>
 export function createProjectWorkReader(options: {
   projects: () => Promise<ProjectsSettings>;
   localMachineId: string;
+  /** Resolve only the existing exact UUID and retain its read fence through projection. */
+  trackerProject?: (id: string) => Promise<() => Promise<void>>;
 }) {
   const bound = async () =>
     (await options.projects()).projects.filter((project) => project.trackerRef !== undefined);
@@ -39,13 +41,21 @@ export function createProjectWorkReader(options: {
     const initial = await observe().catch(() => {
       throw new Error("This project workspace or its saved work tracker isn’t available.");
     });
+    const trackerFence =
+      project.trackerProjectId !== undefined && options.trackerProject
+        ? await options.trackerProject(project.trackerProjectId)
+        : undefined;
     const validate = async () => {
-      const current = (await options.projects()).projects.find((entry) => entry.id === project.id);
+      const projects = (await options.projects()).projects;
+      const current = projects.find((entry) => entry.id === project.id);
       if (
         JSON.stringify(current) !== JSON.stringify(project) ||
+        (project.trackerProjectId !== undefined &&
+          projects.filter((entry) => entry.trackerProjectId === project.trackerProjectId).length !== 1) ||
         JSON.stringify(await observe()) !== JSON.stringify(initial)
       )
         throw new Error("Project work settings changed. Read the work again.");
+      await trackerFence?.();
     };
     await validate();
     return { path, convention: initial.convention, validate };
@@ -58,12 +68,18 @@ export function createProjectWorkReader(options: {
             id: projectWorkRepoId(project.id),
             projectId: project.id,
             name: project.name,
-            ...(project.trackerProjectId === undefined ? {} : { trackerProjectId: project.trackerProjectId }),
             needsDecision: false,
           };
           try {
             const read = await prepare(project);
-            return { ...base, root: read.path, backend: read.convention.backend };
+            return {
+              ...base,
+              ...(project.trackerProjectId !== undefined && options.trackerProject
+                ? { trackerProjectId: project.trackerProjectId }
+                : {}),
+              root: read.path,
+              backend: read.convention.backend,
+            };
           } catch {
             // Fixed wording: filesystem and adapter errors may contain local details.
             return {
@@ -84,7 +100,9 @@ export function createProjectWorkReader(options: {
           id: ref,
           projectId: project.id,
           name: project.name,
-          ...(project.trackerProjectId === undefined ? {} : { trackerProjectId: project.trackerProjectId }),
+          ...(project.trackerProjectId !== undefined && options.trackerProject
+            ? { trackerProjectId: project.trackerProjectId }
+            : {}),
           root: read.path,
           backend: read.convention.backend,
           needsDecision: false,
