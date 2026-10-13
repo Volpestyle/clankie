@@ -41,12 +41,22 @@ catalog probes for at least 15 minutes; raw results are retained under
 `.local/vuh-2214/`. This isolates the caller-lifetime boundary, not a full native
 Codex/Herdr or live-service after-deployment proof.
 
+Fixed **after**, 903,037 ms (15.05 minutes), 07:59:06–08:14:06 UTC:
+**1,200 requests, 120 health notifications, 116 temporary catalog probes,
+zero refusals — 0/minute**. The four persistent bridges stayed idle throughout.
+
+[Raw proof packet](clankie://evidence/sha256/451b91a854bbaabdee48b48f715f021b777b5817ed9a1bddf31f61caffd01eef):
+scratch results, sanitized live baseline, runtime log, exact producer and both
+check logs. The archive receipt is applied and associated with VUH-2214.
+
 Focused checks: `clankie heavy -- pnpm exec vitest run
 apps/clankie/test/hired-catalog-bridge.test.ts
 apps/clankie/test/worker-bridge-concurrency.integration.test.ts` passed,
 **2 files / 26 tests**. The new regression retains the HTTP health request and
 proves that native discovery cannot return until it finishes, then immediately
 closes the real bridge subprocess. Existing publication/concurrency checks pass.
+The unchanged `fleet-health-metrics.integration.test.ts` also passed, **8 tests**,
+including real-refusal alerting and retained original alert delivery semantics.
 
 The owner deploys. Post-deployment live refusal rates remain a separate check;
 the original work lead's seats and unsettled receipts remain untouched.
