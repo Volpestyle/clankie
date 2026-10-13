@@ -90,7 +90,7 @@ it.runIf(
     process.platform === "darwin" &&
     existsSync(join(userInfo().homedir, ".config", "herdr", "herdr.sock")),
 )(
-  "large real offline installs retain actionable limits and allow safe sibling progress",
+  "large real offline installs reclaim completely while preserving repository boundaries and explicit continuation",
   async () => {
     const started = Date.now();
     const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-large-cache-proof-")));
@@ -260,21 +260,23 @@ it.runIf(
       evidence.originalInventory = await originalInventory(join(large, "node_modules"));
       expect(evidence.originalInventory).toMatchObject({ reason: "cache_inventory_too_large" });
       console.log("LOCAL-VUH-10 original recursive limit:", JSON.stringify(evidence.originalInventory));
+      const nestedInstallRepo = join(installedPayload, "bucket-100", "keep-repository");
+      await mkdir(nestedInstallRepo);
+      await git(nestedInstallRepo, ["init", "--initial-branch=main"]);
+      const nestedInstallResult = await sweep(large);
+      expect(
+        nestedInstallResult.kept.some(
+          (entry) => entry.path === join(large, "node_modules") && entry.reason.includes("nested_repository"),
+        ),
+      ).toBe(true);
+      expect(existsSync(join(nestedInstallRepo, ".git"))).toBe(true);
+      await rm(nestedInstallRepo, { recursive: true });
+      evidence.largeNestedRepository = nestedInstallResult;
       const largeResult = await sweep(large);
       expect(largeResult.outcome, JSON.stringify(largeResult)).toBe("reclaimed");
-      expect(largeResult.reclaimed).toContain(sibling);
-      expect(
-        largeResult.kept.some(
-          (entry) =>
-            entry.path === join(large, "node_modules") &&
-            entry.reason.includes("cache_inventory_entry_limit") &&
-            entry.reason.includes("phase=before-rename") &&
-            entry.reason.includes("limit_entries=100000") &&
-            entry.reason.includes(`cache=${join(large, "node_modules")}`),
-        ),
-        JSON.stringify(largeResult),
-      ).toBe(true);
-      expect(existsSync(join(large, "node_modules"))).toBe(true);
+      expect(nestedInstallResult.reclaimed).toContain(sibling);
+      expect(largeResult.reclaimed, JSON.stringify(largeResult)).toContain(join(large, "node_modules"));
+      expect(existsSync(join(large, "node_modules"))).toBe(false);
       expect(await git(large, ["rev-parse", "HEAD"])).toBe(head);
       expect(await git(large, ["show", "HEAD:source.txt"])).toBe("retained committed source");
       expect(await readFile(join(large, ".local", "evidence.log"), "utf8")).toBe("preserve owned evidence\n");
@@ -391,12 +393,7 @@ it.runIf(
       }
       const boundedResult = await sweep(bounded);
       expect(boundedResult.reclaimed).toEqual([]);
-      expect(boundedResult.kept.filter((entry) => entry.reason === "install_unverified")).toHaveLength(32);
-      expect(
-        boundedResult.kept.some(
-          (entry) => entry.reason.includes("cache_candidate_limit") && entry.reason.includes("limit=32"),
-        ),
-      ).toBe(true);
+      expect(boundedResult.kept.filter((entry) => entry.reason === "install_unverified")).toHaveLength(33);
       for (let index = 0; index < 33; index++)
         expect(
           existsSync(
@@ -444,6 +441,34 @@ it.runIf(
         sourceAndUnlandedHeadRetained: true,
         evidenceRetained: true,
       };
+      const capRoot = join(root, "cap-worktrees");
+      await mkdir(capRoot);
+      const capTrees: string[] = [];
+      for (let index = 0; index < 34; index++) {
+        const tree = join(capRoot, `worker-${index.toString().padStart(2, "0")}`);
+        await git(repo, ["worktree", "add", "--detach", tree, "HEAD"]);
+        await cache(tree);
+        capTrees.push(tree);
+      }
+      const capped = await reclaimWorktreeCaches(repo, runner, {
+        roots: [capRoot],
+        retentionMs: 0,
+        protection: { home, runtimeRoot: repo },
+      });
+      expect(capped.reclaimed, JSON.stringify(capped)).toHaveLength(32);
+      const deferred = capped.kept.filter((entry) => entry.reason.startsWith("cache_worktree_limit:"));
+      expect(deferred.map((entry) => entry.path)).toEqual(capTrees.slice(32));
+      for (const entry of deferred) {
+        expect(entry.reason).toContain("--path");
+        const continued = await reclaimWorktreeCaches(repo, runner, {
+          roots: [capRoot],
+          path: entry.path,
+          retentionMs: 0,
+          protection: { home, runtimeRoot: repo },
+        });
+        expect(continued.reclaimed, JSON.stringify(continued)).toEqual([join(entry.path, "target")]);
+      }
+      evidence.worktreeCap = capped;
       evidence.elapsedMs = Date.now() - started;
       const receipt = process.env.LARGE_CACHE_PROOF_RECEIPT;
       if (receipt) await writeFile(receipt, JSON.stringify(evidence, null, 2) + "\n", { flag: "wx" });

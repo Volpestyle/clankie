@@ -49,7 +49,8 @@ async function cacheGit(path: string, args: readonly string[], phase: string, li
 }
 
 // Declared caches can still contain a nested checkout or bare repository.
-// Refuse oversized or changing inventories instead of risking its commits.
+// Complete streaming scans keep depth, handles and elapsed time bounded; visited
+// entries are never accumulated. Large installs need not fit a total-entry quota.
 async function verifyCacheHasNoRepository(cache: string, phase: string) {
   let seen = 0;
   let directories = 0;
@@ -62,7 +63,7 @@ async function verifyCacheHasNoRepository(cache: string, phase: string) {
   const visit = async (path: string, depth: number): Promise<void> => {
     if (depth > 40) fail("cache_inventory_depth_limit", path, "limit_depth=40");
     // At most 41 directory handles, each reading a small batch. Never materialize
-    // a whole large directory before enforcing the existing entry budget.
+    // a whole large directory. The time budget is checked for every entry.
     const directory = await opendir(path, { bufferSize: 32 });
     directories++;
     let head = false;
@@ -70,7 +71,6 @@ async function verifyCacheHasNoRepository(cache: string, phase: string) {
     let refs = false;
     for await (const entry of directory) {
       seen++;
-      if (seen > 100_000) fail("cache_inventory_entry_limit", path, "limit_entries=100000");
       if (Date.now() - started > 60_000) fail("cache_inventory_time_limit", path, "limit_ms=60000");
       if (entry.name === ".git") throw Error("nested_repository");
       head ||= entry.name === "HEAD";
@@ -81,6 +81,81 @@ async function verifyCacheHasNoRepository(cache: string, phase: string) {
     }
   };
   await visit(cache, 0);
+}
+
+/** pnpm records one workspace install at its root, not a marker in every importer. */
+async function pnpmWorkspaceInstall(tree: string) {
+  const modules = join(tree, "node_modules");
+  const marker = join(modules, ".modules.yaml");
+  const lock = join(modules, ".pnpm", "lock.yaml");
+  const workspace = join(tree, "pnpm-workspace.yaml");
+  const markerStat = await lstat(marker).catch(() => undefined);
+  const lockStat = await lstat(lock).catch(() => undefined);
+  const workspaceStat = await lstat(workspace).catch(() => undefined);
+  if (
+    !markerStat?.isFile() ||
+    markerStat.isSymbolicLink() ||
+    markerStat.size > ignoredOutputLimit ||
+    !lockStat?.isFile() ||
+    lockStat.isSymbolicLink() ||
+    lockStat.size > gitOutputLimit ||
+    !workspaceStat?.isFile() ||
+    workspaceStat.isSymbolicLink() ||
+    (await realpath(modules).catch(() => "")) !== modules ||
+    (await realpath(lock).catch(() => "")) !== lock
+  )
+    return undefined;
+  const manifest = await readFile(marker, "utf8");
+  let pnpm = false;
+  try {
+    pnpm = (JSON.parse(manifest).packageManager ?? "").startsWith("pnpm@");
+  } catch {
+    pnpm = /^packageManager:[ \t]*['"]?pnpm@/mu.test(manifest);
+  }
+  if (!pnpm) return undefined;
+  // Accept only generated plain importer keys or JSON. Unknown YAML encodings
+  // never establish ownership. These are the installed importers, not a fresh
+  // workspace discovery that could include projects never installed by pnpm.
+  const installed = new Set<string>();
+  const contents = await readFile(lock, "utf8");
+  try {
+    const parsed = JSON.parse(contents);
+    if (parsed.importers && typeof parsed.importers === "object" && !Array.isArray(parsed.importers))
+      for (const key of Object.keys(parsed.importers)) installed.add(resolve(tree, key));
+  } catch {
+    let importers = false;
+    for (const line of contents.split(/\r?\n/u)) {
+      if (line === "importers:") {
+        importers = true;
+        continue;
+      }
+      if (!importers) continue;
+      if (line && !line.startsWith(" ")) break;
+      const key = /^  ([A-Za-z0-9_./@+-]+):(?:[ \t]*\{\})?[ \t]*$/u.exec(line)?.[1];
+      if (key) installed.add(resolve(tree, key));
+    }
+  }
+  const projects = new Set<string>();
+  for (const project of installed)
+    if (contains(tree, project) && (await realpath(project).catch(() => "")) === project)
+      projects.add(project);
+  const check = async () => {
+    for (const [path, original] of [
+      [marker, markerStat],
+      [lock, lockStat],
+    ] as const) {
+      const fresh = await lstat(path);
+      if (
+        fresh.ino !== original.ino ||
+        fresh.dev !== original.dev ||
+        fresh.mtimeMs !== original.mtimeMs ||
+        (await realpath(path)) !== path
+      )
+        throw Error("workspace_install_changed");
+    }
+  };
+  await check();
+  return { projects, markerAt: Math.max(markerStat.mtimeMs, lockStat.mtimeMs), check };
 }
 
 /** Remove only ignored package-manager installs and tagged Rust caches in enrolled linked trees. */
@@ -108,7 +183,7 @@ export async function reclaimWorktreeCaches(
       const managed = await managedWorktreePaths(options.protection ?? {});
       const cwds = await processWorkingDirectories();
       const panes = await tidyPaneDirectories(runner);
-      let attempted = 0;
+      let examined = 0;
       for (const entry of entries) {
         if (options.path && entry.path !== options.path) continue;
         if (
@@ -120,14 +195,15 @@ export async function reclaimWorktreeCaches(
           managed.some((root) => contains(root, entry.path) || contains(entry.path, root))
         )
           continue;
-        if (attempted >= 32) {
+        if (!options.path && examined >= 32) {
           result.kept.push({
             path: entry.path,
             reason:
-              "cache_candidate_limit: limit=32; remaining worktrees deferred; rerun with --path for an unexamined worktree",
+              "cache_worktree_limit: limit=32; deferred this worktree; continue with --path for this exact worktree",
           });
-          break;
+          continue;
         }
+        examined++;
         const keep = (reason: string) => result.kept.push({ path: entry.path, reason });
         try {
           const candidate = await inspectTidyRepository(entry.path);
@@ -172,7 +248,15 @@ export async function reclaimWorktreeCaches(
           );
           const caches = ignored
             .split("\0")
-            .filter((path) => path.endsWith("/") && ["node_modules", "target"].includes(basename(path)));
+            .filter((path) => path.endsWith("/") && ["node_modules", "target"].includes(basename(path)))
+            // Keep the shared pnpm marker available while verifying and deleting importers.
+            .sort(
+              (a, b) =>
+                Number(resolve(entry.path, a) === join(entry.path, "node_modules")) -
+                Number(resolve(entry.path, b) === join(entry.path, "node_modules")),
+            );
+          let workspaceInstall: Awaited<ReturnType<typeof pnpmWorkspaceInstall>>;
+          let workspaceChecked = false;
           const registration = await stat(gitFile);
           const index = await stat(join(candidate.directory, "index"));
           const root = await stat(entry.path);
@@ -183,15 +267,6 @@ export async function reclaimWorktreeCaches(
             root.mtimeMs,
           );
           for (const relative of caches) {
-            if (attempted >= 32) {
-              result.kept.push({
-                path: entry.path,
-                reason:
-                  "cache_candidate_limit: limit=32; remaining caches deferred; rerun with --path for an unexamined worktree",
-              });
-              break;
-            }
-            attempted++;
             const cache = resolve(entry.path, relative);
             try {
               if (
@@ -200,6 +275,11 @@ export async function reclaimWorktreeCaches(
                 entries.some((tree) => contains(cache, tree.path))
               )
                 throw Error("nested_worktree");
+              if (
+                (await cacheGit(dirname(cache), ["rev-parse", "--show-toplevel"], "cache-owner")) !==
+                entry.path + "\n"
+              )
+                throw Error("nested_repository");
               const metadata = await lstat(cache);
               if (!metadata.isDirectory() || metadata.isSymbolicLink() || (await realpath(cache)) !== cache) {
                 result.kept.push({ path: cache, reason: "cache_alias" });
@@ -216,6 +296,7 @@ export async function reclaimWorktreeCaches(
                 continue;
               }
               let markerAt = 0;
+              let workspaceEvidence: typeof workspaceInstall;
               if (basename(cache) === "target") {
                 const tag = join(cache, "CACHEDIR.TAG");
                 const tagStat = await lstat(tag).catch(() => undefined);
@@ -238,11 +319,21 @@ export async function reclaimWorktreeCaches(
                     return value?.isFile() && !value.isSymbolicLink() ? value.mtimeMs : undefined;
                   }),
                 );
-                if (!markers.some((at) => at !== undefined)) {
-                  result.kept.push({ path: cache, reason: "install_unverified" });
-                  continue;
+                if (markers.some((at) => at !== undefined)) {
+                  markerAt = Math.max(...markers.filter((at): at is number => at !== undefined));
+                } else {
+                  if (!workspaceChecked) {
+                    workspaceInstall = await pnpmWorkspaceInstall(entry.path);
+                    workspaceChecked = true;
+                  }
+                  if (!workspaceInstall?.projects.has(dirname(cache))) {
+                    result.kept.push({ path: cache, reason: "install_unverified" });
+                    continue;
+                  }
+                  await workspaceInstall.check();
+                  markerAt = workspaceInstall.markerAt;
+                  workspaceEvidence = workspaceInstall;
                 }
-                markerAt = Math.max(...markers.filter((at): at is number => at !== undefined));
               }
               if (Date.now() - Math.max(registrationAt, metadata.mtimeMs, markerAt) < retention) {
                 result.kept.push({ path: cache, reason: "recent" });
@@ -250,6 +341,7 @@ export async function reclaimWorktreeCaches(
               }
               await verifyCacheHasNoRepository(cache, "before-rename");
               await guard();
+              await workspaceEvidence?.check();
               await idle();
               if (
                 (await cacheGit(
@@ -278,6 +370,7 @@ export async function reclaimWorktreeCaches(
                 await guard();
                 await idle(aside);
                 await verifyCacheHasNoRepository(aside, "after-rename");
+                await workspaceEvidence?.check();
                 if (
                   [...(await processWorkingDirectories()), ...(await tidyPaneDirectories(runner))].some(
                     (path) => contains(entry.path, path),

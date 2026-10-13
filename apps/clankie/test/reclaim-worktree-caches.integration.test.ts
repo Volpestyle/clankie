@@ -44,6 +44,16 @@ it.runIf(
           dependencies: { fixture: "file:./fixture" },
         }),
       );
+      await writeFile(join(repo, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n");
+      await mkdir(join(repo, "apps", "installed"), { recursive: true });
+      await writeFile(
+        join(repo, "apps", "installed", "package.json"),
+        JSON.stringify({
+          name: "installed-importer",
+          version: "1.0.0",
+          dependencies: { fixture: "file:../../fixture" },
+        }),
+      );
       await mkdir(join(repo, "fixture"));
       await writeFile(
         join(repo, "fixture", "package.json"),
@@ -71,6 +81,11 @@ it.runIf(
       await git(tree, ["add", "."]);
       await git(tree, ["commit", "-m", "unlanded lockfiles"]);
       const head = await git(tree, ["rev-parse", "HEAD"]);
+      const importerCache = join(tree, "apps", "installed", "node_modules");
+      expect(existsSync(importerCache)).toBe(true);
+      const unverified = join(tree, "apps", "never-installed", "node_modules");
+      await mkdir(unverified, { recursive: true });
+      await writeFile(join(unverified, "keep.txt"), "unverified cache\n");
       await mkdir(join(tree, ".local"));
       await writeFile(join(tree, ".local", "evidence.log"), "keep evidence\n");
       const runner = createHerdrWatchRunner(undefined, undefined, undefined, {
@@ -161,9 +176,11 @@ it.runIf(
         });
       }
       expect(cleared.reclaimed, JSON.stringify(cleared)).toEqual(
-        expect.arrayContaining([join(tree, "node_modules"), join(tree, "target")]),
+        expect.arrayContaining([join(tree, "node_modules"), importerCache, join(tree, "target")]),
       );
       expect(existsSync(join(tree, "node_modules"))).toBe(false);
+      expect(existsSync(importerCache)).toBe(false);
+      expect(await readFile(join(unverified, "keep.txt"), "utf8")).toBe("unverified cache\n");
       expect(existsSync(join(tree, "target"))).toBe(false);
       expect(await git(tree, ["rev-parse", "HEAD"])).toBe(head);
       expect(await git(tree, ["show", `${head}:src/lib.rs`])).toContain("retained");

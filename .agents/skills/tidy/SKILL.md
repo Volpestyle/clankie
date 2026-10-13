@@ -136,14 +136,12 @@ Unknown, recent, dirty, live or managed trees stay. Report the returned paths an
 refusals. Cache deletion is manual; reinstall or rebuild before resuming that tree.
 
 Large-install receipts distinguish bounded ignored-Git output (`git_output_limit`,
-phase and byte limit) from the nested-repository check (`cache_inventory_entry_limit`,
-`cache_inventory_depth_limit`, `cache_inventory_time_limit`, cache/phase/directory
-and observed counts). The check retains the 100,000-entry and depth-40 guards,
-reads small batches with at most 41 directory handles, and checks a 60-second
-scan budget between entries; filesystem I/O can take longer.
-An incomplete check keeps the cache intact; preserve it for review, never raise
-limits or replace the check with an unbounded scan. `install_unverified` remains
-a guard exclusion, including nested pnpm paths lacking their own install metadata.
-Each sweep examines at most 32 candidates, including retained ones. Report
-`cache_candidate_limit` deferred work and use `path` to select an unexamined tree.
-An oversized cache can be retained while an eligible sibling is reclaimed.
+phase and byte limit) from nested-repository checks (`cache_inventory_depth_limit`,
+`cache_inventory_time_limit`, cache/phase/directory and observed counts). Complete
+streaming checks run before and after renaming, with depth 40, at most 41 directory
+handles and a 60-second budget checked between entries; filesystem I/O can take longer.
+An incomplete check keeps the cache intact. Workspace importer caches use their own
+install metadata or the root pnpm marker plus installed lockfile snapshot naming the
+canonical project; changing or unknown evidence is refused. Root caches go last.
+Each sweep examines at most 32 worktrees and every cache within them. Report all
+`cache_worktree_limit` deferred paths and continue with each exact `path`.

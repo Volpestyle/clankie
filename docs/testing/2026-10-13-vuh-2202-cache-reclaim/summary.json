@@ -1,0 +1,21 @@
+{
+  "issue": "VUH-2202",
+  "baselineReclaimed": 0,
+  "firstSweepReclaimed": 36,
+  "explicitlyDeferredWorktrees": 57,
+  "continuedWorktrees": 57,
+  "enrollmentInterruptedRetries": 8,
+  "reclaimedCaches": 166,
+  "reclaimedWorktrees": 14,
+  "availableKiBBeforeFixedSweep": 710643176,
+  "availableKiBAfter": 717102456,
+  "netAvailableGiBIncrease": 6.1600494384765625,
+  "sourceObservations": 89,
+  "allHeadsAndStatusesUnchanged": true,
+  "defaultRetentionHours": 6,
+  "nativeProcessAndPaneCensus": true,
+  "concurrentFilesystemActivity": true,
+  "deployment": "lead-owned",
+  "landing": "integrator exact-tree gate pending",
+  "artifactSha256": "79a093075fd3aa1ac1c9aff530c864979668a5c2fb0122213ad453503a821fca"
+}

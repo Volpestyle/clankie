@@ -7601,8 +7601,8 @@ bearing a valid `CACHEDIR.TAG` in registered local agent worktrees. Trees must
 be clean and inactive for six hours; complete native process cwd and pane
 inventories must show no live use. Main, managed runtime, locked and alias trees
 are protected. Missing or changing observations refuse cleanup. A sweep examines
-at most 32 cache candidates, including retained candidates; a `cache_candidate_limit`
-receipt identifies deferred work. Select an unexamined tree with `--path` to continue.
+at most 32 worktrees, checking every cache in each; a `cache_worktree_limit`
+receipt names every deferred tree. Select each exact tree with `--path` to continue.
 Commits, source files, `.local` evidence and logs stay.
 The owner-authenticated `POST /v1/checkouts/reclaim-caches` accepts `repository`
 and optional `path`; tidy uses `reclaim_tidy_worktree_caches`. This is manual;
@@ -7612,16 +7612,14 @@ before using a reclaimed tree again.
 Ignored-path output is bounded to 1 MiB before capture can overflow. A
 `git_output_limit` receipt identifies the Git phase, tree and byte limit; truncated
 output is never accepted as a complete inventory. The nested-repository check
-reads small directory batches, follows no symlinks, and retains its 100,000-entry
-and depth-40 limits, with at most 41 open directory handles and a cooperative
-60-second scan budget checked between entries (filesystem I/O can take longer).
-`cache_inventory_entry_limit`, `cache_inventory_depth_limit` and
-`cache_inventory_time_limit` receipts name the cache, phase, last directory,
-observed counts and bound. A retained cache does not prevent examining an eligible
-sibling within the sweep budget. Oversized installs stay intact when this check
-cannot complete; preserve them for review. Repeating the same limit refusal does
-not establish safety. `install_unverified` is an intentional exclusion for paths
-without package-manager metadata, including many nested pnpm links.
+reads small directory batches, follows no symlinks, and streams the complete inventory
+without a total-entry quota. Depth stays limited to 40, with at most 41 open directory
+handles and a cooperative 60-second scan budget checked between entries (filesystem
+I/O can take longer). Depth and time refusals retain the cache intact. The complete
+scan runs before and after renaming; incomplete observations never authorize deletion.
+Workspace importer caches can use the root pnpm install marker and installed lockfile
+snapshot when that snapshot names their canonical project. Root caches are removed
+last. Unknown or changing install evidence stays `install_unverified` or is refused.
 
 `clankie checkouts prune --repository OWNER_CHECKOUT --path WORKTREE` removes
 one landed, clean, inactive linked worktree in an enrolled worktree root:
