@@ -2194,6 +2194,23 @@ Linear or durable local storage. `clankie doctor` reports the active backend and
 selection reason. An explicit `repo` tool argument selects the repo's recorded
 GitHub or Markdown adapter.
 
+#### Built-in item identifiers after cutover
+
+The built-in tracker deliberately keeps its own namespace. A default new store
+uses `LOCAL-n`; after cutover of an imported `VUH` team, new items use
+`LOCAL-VUH-n`, starting
+at `LOCAL-VUH-1`. Imported items retain their exact `VUH-n` identifiers and UUIDs.
+The native sequence is independent of Linear's sequence: `LOCAL-VUH-2` and
+`VUH-2` are different items, even when their numeric suffixes match.
+
+Keep the entire identifier in lookups, links, evidence keys and commit messages.
+Never shorten `LOCAL-VUH-2` to `VUH-2`. Native identifiers remain stable across
+restarts; the persisted store counter advances when a new item commits, and a
+keyed retry returns the original item without allocating another number.
+Cutover preserves imported identifiers and the native counter; it does not
+renumber or migrate either namespace. See the
+[identifier decision](adr/0226-one-tracker-tool-surface.md#amendment-evidence-keys-are-the-trackers-own-identifiers-2026-10-09-vuh-1991-vuh-1997).
+
 #### Who a `clankie work` write is from
 
 The operator credential proves a caller on this machine, not the person at the

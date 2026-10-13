@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "store-api-proof.json",
+      "size": 948313,
+      "sha256": "b2934bd45982cbf0c6ad17fea9a558672d7d654d1dc63b1eae2b4916ec0c1c45",
+      "url": "clankie://evidence/sha256/b2934bd45982cbf0c6ad17fea9a558672d7d654d1dc63b1eae2b4916ec0c1c45"
+    }
+  ]
+}

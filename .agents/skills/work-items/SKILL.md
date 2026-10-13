@@ -58,6 +58,15 @@ Issue writes accept `priority`; `clankie work create` and `update` accept
 `--priority 0..4`. Open-work lists sort Urgent through Low, then unprioritized,
 before limiting or paginating. Local identifiers remain stable across restart.
 
+The built-in namespace is deliberate: default new stores allocate `LOCAL-n`;
+a writable store holding an imported `VUH` team allocates `LOCAL-VUH-n` from its own counter,
+starting at 1. Imported items keep their `VUH-n` identifiers and UUIDs. The
+numeric suffixes belong to separate sequences. Use the entire identifier for
+reads, links, evidence and commits: `LOCAL-VUH-2` must never become `VUH-2`.
+Do not renumber items or alter the counter to continue Linear's sequence.
+Keyed create retries return the original item without allocating another number.
+The supported scheme is in [docs/cli.md](../../../docs/cli.md#built-in-item-identifiers-after-cutover).
+
 When the owner's Linear convention uses an existing repo label, record it with
 `clankie work init --backend linear --linear-team KEY --linear-project NAME
 --linear-label LABEL` (the project is optional), or `linearLabel` on
