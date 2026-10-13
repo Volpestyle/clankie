@@ -3866,10 +3866,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             },
             {
               proof: (fleet, pane) =>
-                options.projectHireIdentity?.(fleet, pane) ?? Promise.resolve(undefined),
+                diagnostics.measure(
+                  fleet === "default" ? "issue_proof_local" : "issue_proof_remote",
+                  () => options.projectHireIdentity?.(fleet, pane) ?? Promise.resolve(undefined),
+                ),
               watches: herdrWatches,
               workItems: { prepareSeatIssueTracker: deps.workItems.prepareSeatIssueTracker },
-              projects: async () => (await settings()).projects,
+              projects: () =>
+                diagnostics.measure("issue_project_membership", async () => (await settings()).projects),
             },
           );
           return { ...issue, attribution };
@@ -3890,12 +3894,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // children still hold work; do not mistake that presentation boundary for exit.
     if (fleet.head?.session && !options.nativeCensusRunner) {
       const head = fleet.head;
-      const children = await (async () =>
-        head.harness === "codex"
-          ? readCodexSubagents(head.session!)
-          : head.harness === "claude"
-            ? readClaudeSubagents(head.session!)
-            : undefined)().catch(() => undefined);
+      const children = await diagnostics
+        .measure("issue_head_assignments", async () =>
+          head.harness === "codex"
+            ? readCodexSubagents(head.session!)
+            : head.harness === "claude"
+              ? readClaudeSubagents(head.session!)
+              : undefined,
+        )
+        .catch(() => undefined);
       liveIssues.push({
         seatId: fleet.head.seatId,
         title: "Clankie",

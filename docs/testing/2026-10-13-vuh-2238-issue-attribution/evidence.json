@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "raw/readonly-attribution-replay.txt",
+      "size": 217471,
+      "sha256": "69dc60bf69f79a05bbc65b3dc8de842fec09ac791cabec90fc014f27b9b448b2",
+      "url": "clankie://evidence/sha256/69dc60bf69f79a05bbc65b3dc8de842fec09ac791cabec90fc014f27b9b448b2"
+    }
+  ]
+}

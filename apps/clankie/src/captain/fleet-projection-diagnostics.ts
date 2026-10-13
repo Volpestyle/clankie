@@ -17,7 +17,11 @@ export type FleetProjectionPhase =
   | "git_enrichment"
   | "issue_enrichment"
   | "issue_attribution"
-  | "issue_keeper";
+  | "issue_keeper"
+  | "issue_proof_local"
+  | "issue_proof_remote"
+  | "issue_project_membership"
+  | "issue_head_assignments";
 
 type Outcome = "ok" | "error";
 type Interval = { start: number; end: number; outcome: Outcome };
@@ -25,10 +29,12 @@ type Interval = { start: number; end: number; outcome: Outcome };
 /** One content-free log per projection, including overlapping native observations. */
 export function fleetProjectionDiagnostics(log: Pick<typeof logger, "info"> = logger) {
   const started = performance.now();
+  let completed = false;
   const phases = new Map<FleetProjectionPhase, Interval[]>();
   const active = new Set<(outcome?: Outcome) => void>();
   const census = new Map<string, (outcome?: Outcome) => void>();
   function start(phase: FleetProjectionPhase) {
+    if (completed) return () => {};
     const before = performance.now();
     let ended = false;
     const stop = (outcome: Outcome = "ok") => {
@@ -45,6 +51,7 @@ export function fleetProjectionDiagnostics(log: Pick<typeof logger, "info"> = lo
   return {
     start,
     async measure<T>(phase: FleetProjectionPhase, read: () => Promise<T>): Promise<T> {
+      if (completed) return read();
       const stop = start(phase);
       try {
         const value = await read();
@@ -66,7 +73,9 @@ export function fleetProjectionDiagnostics(log: Pick<typeof logger, "info"> = lo
       }
     },
     complete(outcome: Outcome) {
+      if (completed) return;
       for (const stop of active) stop(outcome);
+      completed = true;
       const round = (value: number) => Math.round(value * 1000) / 1000;
       const spans = [...phases].map(([phase, intervals]) => {
         // Union wall time, rather than summing parallel seats/fleets. Max call

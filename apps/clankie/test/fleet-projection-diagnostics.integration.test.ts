@@ -31,6 +31,13 @@ it("writes content-free phase diagnostics across real file reads without changin
     stopCensus();
     await diagnostics.measure("issue_attribution", () => readFile(path, "utf8"));
     await diagnostics.measure("issue_keeper", () => readFile(path, "utf8"));
+    for (const phase of [
+      "issue_proof_local",
+      "issue_proof_remote",
+      "issue_project_membership",
+      "issue_head_assignments",
+    ] as const)
+      await diagnostics.measure(phase, () => readFile(path, "utf8"));
     let original: unknown;
     const failure = await diagnostics
       .measure("activity", async () => {
@@ -44,6 +51,24 @@ it("writes content-free phase diagnostics across real file reads without changin
       .catch((error) => error);
     expect(failure).toBe(original);
     diagnostics.complete("error");
+    const laterContent = "later-private-value";
+    await writeFile(path, laterContent);
+    expect(await diagnostics.measure("issue_project_membership", () => readFile(path, "utf8"))).toBe(
+      laterContent,
+    );
+    let laterOriginal: unknown;
+    const laterFailure = await diagnostics
+      .measure("issue_project_membership", async () => {
+        try {
+          return await readFile(join(root, "later-missing-private-path"));
+        } catch (error) {
+          laterOriginal = error;
+          throw error;
+        }
+      })
+      .catch((error) => error);
+    expect(laterFailure).toBe(laterOriginal);
+    diagnostics.complete("ok");
     await new Promise<void>((resolve) => destination.end(resolve));
     const raw = await readFile(join(root, "diagnostic.jsonl"), "utf8");
     const record = JSON.parse(raw);
@@ -57,6 +82,12 @@ it("writes content-free phase diagnostics across real file reads without changin
         expect.objectContaining({ phase: "activity", outcome: "error" }),
         expect.objectContaining({ phase: "issue_attribution", outcome: "ok" }),
         expect.objectContaining({ phase: "issue_keeper", outcome: "ok" }),
+        ...[
+          "issue_proof_local",
+          "issue_proof_remote",
+          "issue_project_membership",
+          "issue_head_assignments",
+        ].map((phase) => expect.objectContaining({ phase, outcome: "ok" })),
       ]),
     );
     for (const phase of record.phases) {
@@ -66,6 +97,7 @@ it("writes content-free phase diagnostics across real file reads without changin
       expect(phase.durationMs).toBeLessThanOrEqual(record.durationMs + 0.001);
     }
     expect(raw).not.toContain(content);
+    expect(raw).not.toContain(laterContent);
     expect(raw).not.toContain(root);
     expect(raw).not.toContain("missing-private-path");
     expect(raw).not.toContain("ENOENT");

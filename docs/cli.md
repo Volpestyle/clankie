@@ -5244,7 +5244,8 @@ one completion/error record, with total `durationMs` and `phases` containing
 settings/binding, census (including parent-edge reconciliation), local/PC/other
 fleet reads, goals/status and their subagent/remote-goal/native-status awaits,
 capabilities, waiting notices, activity, routing/catalog, Git and issue enrichment
-(with separate issue-attribution and issue-keeper spans). Capability display reads
+(with separate issue-attribution and issue-keeper spans, plus local/remote process
+proof, project membership and operator-head assignment spans). Capability display reads
 use at most four concurrent fresh observations; returned seat order and waiting-notice
 writes remain ordered. Delivery still revalidates its native proof.
 Nested and parallel phases overlap; do not add their durations. Outcomes describe
