@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "report.txt",
+      "size": 22695,
+      "sha256": "5cc4f084563d95a137beaf3217340b83082da98335eb4932c0fee5d28dbc2118",
+      "url": "clankie://evidence/sha256/5cc4f084563d95a137beaf3217340b83082da98335eb4932c0fee5d28dbc2118"
+    }
+  ]
+}

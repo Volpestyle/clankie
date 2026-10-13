@@ -18,6 +18,12 @@ its printed `stack.env` through `clankie heavy`. The commands are in
 `docs/cli.md` under "Scratch service and relay proofs". Include that preset in
 proof briefs: changing only `PORT` leaves peer addresses unsafe. Never use the
 installed ports `4310`/`4321` for scratch listeners or targets.
+For guarded project/settings reads, generate a **new** preset with
+`--broker-operator`: normal service startup mints into its private file broker.
+Run source commands with `scratch-stack.mjs run DIRECTORY cli ARGS...` under
+`clankie heavy`. Preserve the original env-only refusal; never persist its test
+bearer or copy owner credentials. Stop the owned stack, then remove its whole
+scratch root, including the broker. See the LOCAL-VUH-14 section in `docs/cli.md`.
 Boot simulators only through `clankie simulator acquire`, never `simctl boot` directly.
 Native hire briefs include its command contract. `clankie heavy -- COMMAND` shares
 machine capacity across worktrees; `clankie fleet resources` names current holders

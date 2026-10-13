@@ -1,5 +1,5 @@
 import { createServer } from "node:net";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -8,15 +8,17 @@ import { fileURLToPath } from "node:url";
 
 if (process.argv[2] === "run") {
   const service = process.argv[4];
-  if (service !== "clankie" && service !== "relay") throw new Error("Expected run DIRECTORY clankie|relay");
+  if (!["clankie", "relay", "cli"].includes(service))
+    throw new Error("Expected run DIRECTORY clankie|relay|cli [CLI arguments]");
   const env = parseEnv(await readFile(join(resolve(process.argv[3]), "stack.env"), "utf8"));
   const root = fileURLToPath(new URL("../", import.meta.url));
   const child = spawn(
     process.execPath,
     [
       "--import",
-      join(root, `apps/${service}/node_modules/tsx/dist/loader.mjs`),
-      join(root, `apps/${service}/src/index.ts`),
+      join(root, `apps/${service === "cli" ? "tui" : service}/node_modules/tsx/dist/loader.mjs`),
+      join(root, service === "cli" ? "apps/tui/bin/clankie.ts" : `apps/${service}/src/index.ts`),
+      ...(service === "cli" ? process.argv.slice(5) : []),
     ],
     { cwd: root, env: { PATH: process.env.PATH, LANG: process.env.LANG, ...env }, stdio: "inherit" },
   );
@@ -29,6 +31,9 @@ if (process.argv[2] === "run") {
     process.exitCode = code ?? 1;
   });
 } else {
+  const brokerOperator = process.argv[3] === "--broker-operator";
+  if (process.argv.length > (brokerOperator ? 4 : 3))
+    throw new Error("Expected DIRECTORY [--broker-operator]");
   // Produce one preset for both processes. Hold selections until all are chosen;
   // a subsequent bind race must fail, never fall back to a live port.
   const directory = resolve(process.argv[2] ?? `.local/scratch-${Date.now()}`);
@@ -55,6 +60,8 @@ if (process.argv[2] === "run") {
     const relay = await freePort();
     const device = await freePort();
     await mkdir(directory, { recursive: true, mode: 0o700 });
+    if (brokerOperator && (!(await lstat(directory)).isDirectory() || (await readdir(directory)).length))
+      throw new Error("Broker-operator scratch root must be a new or empty directory, not a symlink");
     const home = join(directory, "home");
     await mkdir(home, { recursive: true, mode: 0o700 });
     await writeFile(
@@ -81,7 +88,15 @@ if (process.argv[2] === "run") {
       CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${captain}`,
       CLANKIE_RELAY_URL: `http://127.0.0.1:${relay}`,
       CLANKIE_CAPTAIN_TOKEN: randomBytes(32).toString("hex"),
-      CLANKIE_OPERATOR_TOKEN: randomBytes(32).toString("hex"),
+      // A separate opt-in preset uses the service's ordinary first-run broker
+      // bootstrap. Never persist the legacy test override or mint here.
+      ...(brokerOperator ? {} : { CLANKIE_OPERATOR_TOKEN: randomBytes(32).toString("hex") }),
+      ...(brokerOperator
+        ? {
+            NODE_ENV: "test",
+            CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(directory, "fleet-resources"),
+          }
+        : {}),
     };
     // Node's --env-file accepts quoted values. Never source generated paths as shell code.
     await writeFile(

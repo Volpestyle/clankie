@@ -1076,6 +1076,49 @@ URLs. Production stacks may use custom state directories and canonical ports. Ma
 configured scratch stacks must set the same peer variables as the preset;
 changing just `PORT` is insufficient.
 
+#### Guarded project/settings proofs (LOCAL-VUH-14)
+
+The original preset uses an environment-only operator test bearer. Guarded
+commands such as `project list` deliberately refuse it. Keep that preset and
+its refusal evidence intact. For a new disposable proof that needs those commands:
+
+```bash
+node scripts/scratch-stack.mjs .local/project-proof --broker-operator
+clankie heavy --server -- node scripts/scratch-stack.mjs run .local/project-proof clankie
+# Wait for the private service /health, then start its matching relay:
+clankie heavy --server -- node scripts/scratch-stack.mjs run .local/project-proof relay
+clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli auto off
+clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli project list
+clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli model status
+clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli auto status
+clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli devices --json
+clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli body status
+clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli work status
+```
+
+This separate option omits `CLANKIE_OPERATOR_TOKEN`.
+The new scratch root must be empty and must not be a symlink; an existing
+broker or preset is refused without overwriting it.
+The service's normal
+first-run bootstrap mints a fresh credential into `project-proof/credentials.json`,
+inside the private scratch root, with the broker's file permissions and locking.
+It never imports an existing bearer or fabricates an owner. Both services and the
+source CLI consume the same clean preset; inherited operator overrides and live
+targets are discarded. `NODE_ENV=test` and a private fleet-resource directory
+isolate the service's resource registry and disable simulator control. All
+processes still run under the real machine's `clankie heavy` governor.
+
+Use the ordinary `auto off` setup command; a fresh service can default Auto to
+on. Before seeding or pairing, retain the actual API-backed command outputs: Auto
+off, selected/effective model null, no providers, projects or devices, and the
+tracker/body boundary. Local files alone do not establish a protected read.
+The canonical guard, normal pairing grants and revocation still apply;
+environment-only and mismatched credentials remain refused. This route grants
+authority over this disposable stack only, never the installed service, real
+accounts, credential broker or owner identity. Stop both owned processes before
+removing the entire new scratch directory, including its broker file. Never
+reuse or delete another proof's original directory.
+
 ### `restart [service]`
 
 Restart launcher-owned services in dependency order
