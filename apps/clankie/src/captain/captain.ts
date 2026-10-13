@@ -1,4 +1,4 @@
-import { harnessAccountIdentities } from "./harness-account-identities.ts";
+import { harnessAccountIdentities, harnessAccountIdentityPath } from "./harness-account-identities.ts";
 import { remoteRetirementWork } from "./remote-retirement-work.ts";
 import { workerWorktreeHold } from "./worktree-decisions.ts";
 import { renderLeadChats, type LeadChat } from "./lead-roster.ts";
@@ -396,7 +396,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let fleetIdentities = new Map(remoteFleets.map((fleet) => [fleet.id, JSON.stringify(fleet)]));
   const fleetRevisions = new Map<string, number>();
   const readWorkerAccounts = createWorkerAccountsReader({
-    identityPath: join(options.stateDir, "harness-account-identities.json"),
+    identityPath: harnessAccountIdentityPath(options.stateDir),
     notifyIdentityChange: (text) =>
       conversations.recordServiceNotice(conversations.defaultGlobalConversationId(), text),
     settings: () => settings(),
@@ -5594,11 +5594,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     leadChats,
     readWorkerAccounts,
     resolveWorkerAccountLabel: (machine, harness, label) =>
-      harnessAccountIdentities(join(options.stateDir, "harness-account-identities.json")).resolve(
-        machine,
-        harness,
-        label,
-      ),
+      harnessAccountIdentities(harnessAccountIdentityPath(options.stateDir)).resolve(machine, harness, label),
     serveOperatorConversation: createOperatorService({
       prepareFreeAgentIntent,
       get personas() {

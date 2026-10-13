@@ -4310,6 +4310,11 @@ home and optional registered overrides. Existing profile aliases remain bound
 to their original identity after a folder re-signs; an absent identity prompts
 the owner to sign into that account and never tries another account. Usage and
 holds follow the identity. Account selection confers no grants.
+The identity registry owns a private `harness-account-identities/registry.json`
+subdirectory of the captain state directory; existing readable state directories
+need no manual permission change. An existing owned private registry file at the
+old `harness-account-identities.json` path is copied once, retaining the original
+as a backup and keeping file ownership and symlink checks.
 
 The selected home reaches the pane and native harness as `CLAUDE_CONFIG_DIR` /
 `CODEX_HOME`. Its identity is checked again before a new pane starts. Without an

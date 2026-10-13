@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { z } from "zod";
-import { readPrivateJson, writePrivateJson } from "../../../tui/bin/update-files.ts";
+import { privateDirectory, readPrivateJson, writePrivateJson } from "../../../tui/bin/update-files.ts";
 import type { WorkerAccountStatus, WorkerAccountHold } from "./harness-accounts.ts";
 import type { AccountIdentityNotice } from "@clankie/protocol/worker-accounts";
 
@@ -50,6 +50,23 @@ export function harnessAccountKey(account: WorkerAccountStatus): string | undefi
     .update(JSON.stringify([account.harness, identity, account.organizationId ?? ""]))
     .digest("hex")
     .slice(0, 32)}`;
+}
+
+/** Own a private registry directory without changing the existing captain directory's mode. */
+export function harnessAccountIdentityPath(stateDir: string): string {
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  privateDirectory(stateDir, { allowReadable: true });
+  const directory = join(stateDir, "harness-account-identities");
+  mkdirSync(directory, { mode: 0o700, recursive: true });
+  privateDirectory(directory);
+  const path = join(directory, "registry.json");
+  const legacy = join(stateDir, "harness-account-identities.json");
+  if (!existsSync(path) && existsSync(legacy)) {
+    // The legacy parent may be readable, but the file still must be private,
+    // owned, bounded and opened without following a symlink. Keep it as a backup.
+    writePrivateJson(path, State.parse(readPrivateJson(legacy, { allowReadable: true })));
+  }
+  return path;
 }
 
 export class HarnessAccountIdentities {

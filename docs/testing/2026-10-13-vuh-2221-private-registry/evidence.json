@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "raw/focused-proof.txt",
+      "size": 46424,
+      "sha256": "b09248c2a9bfb23c3c544f4e639644abeeda5d476c803fa7623a47514876e597",
+      "url": "clankie://evidence/sha256/b09248c2a9bfb23c3c544f4e639644abeeda5d476c803fa7623a47514876e597"
+    }
+  ]
+}

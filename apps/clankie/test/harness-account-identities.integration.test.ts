@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -16,10 +16,14 @@ import { createWorkerAccountsReader, chooseWorkerAccount } from "../src/captain/
 import {
   HarnessAccountIdentities,
   harnessAccountIdentities,
+  harnessAccountIdentityPath,
 } from "../src/captain/harness-account-identities.ts";
 import { runClaudeAccountsCommand } from "../../tui/src/command/claude-accounts.ts";
 import { runCodexAccountsCommand } from "../../tui/src/command/codex-accounts.ts";
 import { runUsageCommand } from "../../tui/src/command/usage.ts";
+import { captainTools } from "../src/captain/tools.ts";
+import type { CaptainDeps } from "../src/captain/deps.ts";
+import { LaneLog } from "../src/captain/lane-log.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 
 let root: string | undefined;
@@ -31,7 +35,7 @@ afterEach(async () => {
 /** Native identity transports are fixture executables, not credentials or a model turn.
  * Everything above that boundary is real: discovery, persistence, HTTP schemas, CLI and hire refusal.
  */
-it("discovers identities once per home, merges duplicates, and keeps preferences and history with the identity after a re-sign", async () => {
+it("discovers identities from a 0755 state directory once per home, merges duplicates, and keeps preferences and history with the identity after a re-sign", async () => {
   root = await mkdtemp(join(tmpdir(), "clankie-identity-"));
   const home = join(root, "home");
   const bin = join(root, "bin");
@@ -122,7 +126,12 @@ if (harness === "claude") {
     workerAccountHolds: [{ machine: "local", harness: "claude", label: "work", reason: "saved for lead" }],
   }));
   const notices: string[] = [];
-  const identityPath = join(root, "identity-state.json");
+  const stateDir = join(root, "captain");
+  await mkdir(stateDir, { mode: 0o755 });
+  await chmod(stateDir, 0o755);
+  const identityPath = harnessAccountIdentityPath(stateDir);
+  expect((await stat(stateDir)).mode & 0o777).toBe(0o755);
+  expect((await stat(join(stateDir, "harness-account-identities"))).mode & 0o777).toBe(0o700);
   const read = createWorkerAccountsReader({
     identityPath,
     settings: () => settings.load(),
@@ -134,6 +143,7 @@ if (harness === "claude") {
   });
   const first = await read(undefined, ["claude", "codex"]);
   expect(first.unavailable).toBeUndefined();
+  expect((await stat(identityPath)).mode & 0o777).toBe(0o600);
   expect(first.accounts).toHaveLength(4); // six homes, four signed-in accounts
   const a = first.accounts.find(
     (account) => account.harness === "claude" && account.identity === "a@example.com",
@@ -148,6 +158,9 @@ if (harness === "claude") {
   expect(a.held).toEqual({ reason: "saved for lead" });
   expect(a.aliases).toEqual(expect.arrayContaining(["default", "duplicate", "work"]));
   expect(b.homes).toHaveLength(1);
+  expect(chooseWorkerAccount("local", "claude", first, b.label)).toMatchObject({
+    account: { label: b.label, home: join(home, ".claude-second") },
+  });
   expect(first.accounts.every((account) => /^account-[a-f0-9]{32}$/u.test(account.label))).toBe(true);
   const queries = (await readFile(nativeLog, "utf8"))
     .trim()
@@ -358,7 +371,20 @@ if (harness === "claude") {
       startAgent: async () => undefined,
     },
   });
+  store.workerAccountsReport = read;
   try {
+    const accountsTool = captainTools(
+      { embodiment: {} } as CaptainDeps,
+      {},
+      new LaneLog(root),
+      "operator",
+      undefined,
+      undefined,
+      store,
+    ).find((tool) => tool.name === "worker_accounts")!;
+    const toolResult = await accountsTool.execute("accounts-0755", {});
+    expect(MachineWorkerAccountsSchema.parse(toolResult.details).accounts.length).toBeGreaterThan(0);
+    expect((await stat(stateDir)).mode & 0o777).toBe(0o755);
     expect(
       await store.spawnSeat({
         schemaVersion: 1,
@@ -377,3 +403,43 @@ if (harness === "claude") {
     store.close();
   }
 }, 60_000);
+
+it("migrates an owned private legacy registry once and refuses unsafe registry paths", async () => {
+  root = await mkdtemp(join(tmpdir(), "clankie-identity-migration-"));
+  const legacy = join(root, "harness-account-identities.json");
+  const original = JSON.stringify({
+    version: 1,
+    machines: {},
+    aliases: { '["local","claude","work"]': "account-retained" },
+    identities: { "account-retained": "retained@example.com" },
+    homes: {},
+    notices: [],
+  });
+  await writeFile(legacy, original, { mode: 0o600 });
+  await chmod(root, 0o755);
+  const path = harnessAccountIdentityPath(root);
+  expect(new HarnessAccountIdentities(path).resolve("local", "claude", "work")).toBe("account-retained");
+  expect(await readFile(legacy, "utf8")).toBe(original);
+  await writeFile(legacy, "invalid legacy after migration");
+  expect(harnessAccountIdentityPath(root)).toBe(path);
+  expect(new HarnessAccountIdentities(path).resolve("local", "claude", "work")).toBe("account-retained");
+  await rm(path);
+  await rm(legacy);
+  const target = join(root, "outside.json");
+  await writeFile(target, original, { mode: 0o600 });
+  await symlink(target, legacy);
+  expect(() => harnessAccountIdentityPath(root!)).toThrow();
+  await rm(legacy);
+  await link(target, legacy);
+  expect(() => harnessAccountIdentityPath(root!)).toThrow();
+  await rm(legacy);
+  const foreign = join(root, "foreign");
+  await symlink("/", foreign);
+  if (process.getuid && process.getuid() !== 0)
+    expect(() => harnessAccountIdentityPath(foreign)).toThrow(/owned and private/u);
+  await symlink(target, path);
+  expect(() => new HarnessAccountIdentities(path)).toThrow();
+  await rm(path);
+  await chmod(join(root, "harness-account-identities"), 0o755);
+  expect(() => harnessAccountIdentityPath(root!)).toThrow(/owned and private/u);
+});

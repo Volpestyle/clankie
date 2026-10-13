@@ -65,8 +65,8 @@ export function privateDirectory(path: string, options: { allowReadable?: boolea
   )
     fail();
 }
-export function readPrivateJson(path: string): unknown {
-  privateDirectory(dirname(path));
+export function readPrivateJson(path: string, directoryOptions: { allowReadable?: boolean } = {}): unknown {
+  privateDirectory(dirname(path), directoryOptions);
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = fstatSync(fd);
