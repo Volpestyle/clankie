@@ -189,6 +189,11 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
               { value: "focus", label: "Focus", hint: project.focus ?? "none" },
             ]
           : []),
+        {
+          value: "tracker-project",
+          label: "Built-in tracker project",
+          hint: project.trackerProjectId ?? "none",
+        },
         ...(snapshot.linearProjectBindings
           ? [
               {
@@ -209,7 +214,7 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
           ? [
               {
                 value: "tracker",
-                label: "Tracker",
+                label: "Workspace tracker",
                 hint: project.trackerRef ? `on · ${project.trackerRef.path}` : "off",
               },
             ]
@@ -262,6 +267,22 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
         await update(
           { focus: focus.trim() === "" ? null : focus.trim() },
           focus.trim() === "" ? "Focus cleared." : "Focus saved.",
+        );
+    } else if (choice === "tracker-project") {
+      const projectId = await flow.readText({
+        message: "Built-in tracker project UUID (empty clears it)",
+        ...(project.trackerProjectId ? { defaultValue: project.trackerProjectId } : {}),
+        allowBack: true,
+        validate: (value) =>
+          value.trim() === "" ||
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value.trim())
+            ? undefined
+            : "Enter the project’s UUID.",
+      });
+      if (projectId !== undefined && projectId.trim() !== (project.trackerProjectId ?? ""))
+        await update(
+          { trackerProjectId: projectId.trim() === "" ? null : projectId.trim() },
+          projectId.trim() === "" ? "Built-in tracker project cleared." : "Built-in tracker project bound.",
         );
     } else if (choice === "linear-project") {
       const projectId = await flow.readText({

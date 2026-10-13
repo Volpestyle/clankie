@@ -62,7 +62,7 @@ export async function runProjectSettingsCommand(
     )
   )
     throw new Error(
-      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--auto on|off] [--focus TEXT|clear] [--linear-project UUID|clear] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
+      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--auto on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
     );
   let command: unknown;
   if (!list && !membership) {
@@ -165,6 +165,7 @@ interface ProjectFleetSettingsResult extends ProjectsSnapshot {
   /** Present when the service supports project Auto (ADR 0264). */
   auto?: boolean;
   focus?: string;
+  trackerProjectId?: string;
   fleet: {
     closure: FleetAutonomyMode | "inherit";
     machineSetup: FleetAutonomyMode | "inherit";
@@ -188,10 +189,13 @@ async function runProjectFleetSettings(
 ): Promise<ProjectFleetSettingsResult> {
   if (!args[1] || args.length % 2 !== 0)
     throw new Error(
-      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--auto on|off] [--focus TEXT|clear] [--linear-project UUID|clear]",
+      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--auto on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear]",
     );
   const changes: FleetAutonomyPatch = {};
-  const work: Pick<UpdateProjectSettings["changes"], "auto" | "focus" | "linearProjectBinding"> = {};
+  const work: Pick<
+    UpdateProjectSettings["changes"],
+    "auto" | "focus" | "trackerProjectId" | "linearProjectBinding"
+  > = {};
   let releaseMode: string | undefined;
   let releaseRule: string | undefined;
   for (let index = 2; index < args.length; index += 2) {
@@ -212,6 +216,11 @@ async function runProjectFleetSettings(
       work.auto = value === "on";
     else if (args[index] === "--focus" && work.focus === undefined)
       work.focus = value === "clear" ? null : ProjectFocusSchema.parse(value);
+    else if (args[index] === "--tracker-project" && work.trackerProjectId === undefined)
+      work.trackerProjectId =
+        value === "clear"
+          ? null
+          : UpdateProjectSettingsSchema.shape.changes.shape.trackerProjectId.parse(value);
     else if (args[index] === "--linear-project" && work.linearProjectBinding === undefined)
       work.linearProjectBinding =
         value === "clear" ? null : LinearProjectBindingSchema.parse({ provider: "linear", projectId: value });
@@ -308,6 +317,7 @@ async function runProjectFleetSettings(
   return {
     ...snapshot,
     projectId: project.id,
+    ...(project.trackerProjectId === undefined ? {} : { trackerProjectId: project.trackerProjectId }),
     ...(snapshot.projectsAuto === true
       ? { auto: project.auto === true, ...(project.focus === undefined ? {} : { focus: project.focus }) }
       : {}),
