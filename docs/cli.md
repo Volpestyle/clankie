@@ -4830,7 +4830,9 @@ verification never falls back to `~/.claude`. Refusals name the selected directo
 and its sign-in command. Sign in on the PC with `$env:CLAUDE_CONFIG_DIR = Join-Path $HOME
 '.claude-work'; claude auth login` before launching with that label.
 
-Without `account`, launch honors `CLAUDE_CONFIG_DIR`; otherwise it inspects
+Without `account`, a relaunch into the same conversation reuses the last completed
+launch’s recorded label for that fleet and workspace. An explicit label overrides
+that choice. Fresh launches honor `CLAUDE_CONFIG_DIR`; otherwise they inspect
 existing `.claude`, `.claude-*` and numbered profiles and requires exactly one
 signed-in profile. It never creates a profile or copies credentials. An
 ambiguous choice requires an explicit account or a profile selected on the PC.
@@ -4880,6 +4882,9 @@ channel access fail; an already dispatched effect cannot be undone. Explicit
 revocation survives restart. Temporary bridge, relay or native-observation loss
 is retried; a service restart re-arms only a previously proved launch with the
 same machine, pane, shell and harness process lifetimes, native session and chat.
+A launch that had not proved its native process before shutdown returns
+`remote_lead_launch_unproved`. Its bridge stops retrying and names the required
+fresh launch; it leaves the original pane open.
 
 Workspace grant changes preserve a connected lead whose own working directory
 remains granted. Connection identity (machine, SSH, kind, session and enablement)
@@ -4899,6 +4904,9 @@ secret) with its event, exit code, duration and full error. A running head picks
 up new hooks only when it is launched again on the updated plugin.
 An exited or replaced head is never re-armed. The bridge keeps the native MCP
 connection open and refreshes its idle upstream without replaying tool effects.
+`clankie doctor` lists each known seat bridge by the lead chat’s name, including
+reconnecting and disconnected channels. The fleet round’s lead roster shows the
+same receiver state and whether `message_seat` is available.
 Private service records store only token hashes and host proof. The bearer token
 is delivered in memory, never in plugin files, arguments or receipts; OS paging and administrator memory access
 are outside this guarantee. The bridge delegates project lead tools and messaging

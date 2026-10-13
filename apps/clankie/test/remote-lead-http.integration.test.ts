@@ -21,6 +21,7 @@ import { mkdtemp, mkdir, readFile, readdir, writeFile, rm } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { once } from "node:events";
 import { prepareClaude, leadPlugin } from "../../../integrations/remote-lead/claude-setup.mjs";
 
 const execute = promisify(execFile);
@@ -561,18 +562,20 @@ else console.log('{}');
     const makeBridge = () =>
       createRemoteLeadBridge({ delegations: grants, identity: () => nativeIdentity, captain });
     let bridge = makeBridge();
-    const host = serve({
-      fetch: (request) => {
-        if (!channelAvailable && new URL(request.url).pathname === "/v1/fleet/lead/events")
-          return new Response(JSON.stringify({ error: "remote_lead_authority_unavailable" }), {
-            status: 403,
-            headers: { "content-type": "application/json" },
-          });
-        return bridge.app.fetch(request);
-      },
-      hostname: "127.0.0.1",
-      port: 0,
-    });
+    const startHost = () =>
+      serve({
+        fetch: (request) => {
+          if (!channelAvailable && new URL(request.url).pathname === "/v1/fleet/lead/events")
+            return new Response(JSON.stringify({ error: "remote_lead_authority_unavailable" }), {
+              status: 403,
+              headers: { "content-type": "application/json" },
+            });
+          return bridge.app.fetch(request);
+        },
+        hostname: "127.0.0.1",
+        port: 0,
+      });
+    let host = startHost();
     const client = new Client({ name: "reconnect-proof", version: "1" });
     let catalogChanges = 0;
     const channelMessages: string[] = [];
@@ -594,15 +597,20 @@ else console.log('{}');
       const address = host.address();
       if (!address || typeof address === "string") throw Error("Missing HTTP address");
       await mkdir(join(root, ".clankie/links"), { recursive: true });
-      await writeFile(
-        join(root, ".clankie/links/pc.json"),
-        JSON.stringify({
-          schemaVersion: 2,
-          authentication: "local-process",
-          fleet: "pc",
-          url: `http://127.0.0.1:${address.port}`,
-        }),
-      );
+      const publishAddress = async () => {
+        const address = host.address();
+        if (!address || typeof address === "string") throw Error("Missing HTTP address");
+        await writeFile(
+          join(root, ".clankie/links/pc.json"),
+          JSON.stringify({
+            schemaVersion: 2,
+            authentication: "local-process",
+            fleet: "pc",
+            url: `http://127.0.0.1:${address.port}`,
+          }),
+        );
+      };
+      await publishAddress();
       const nativeEnv = {
         PATH: process.env.PATH!,
         HOME: root,
@@ -709,28 +717,43 @@ else console.log('{}');
       expect(await runSync()).toEqual({ code: 0, stderr: "" });
       expect((await hookLog()).trim().split("\n").at(-1)).toMatch(/ Stop exit=0 ms=\d+$/u);
       const beforeRestart = catalogChanges;
+      const restartStarted = performance.now();
       await bridge.close();
       outbox.close();
+      host.closeAllConnections();
+      await new Promise<void>((r) => host.close(() => r()));
+      // The service's listener really disappears. No client catalog reads,
+      // relaunch, token refresh, or other manual recovery runs during this gap.
+      await new Promise((r) => setTimeout(r, 6_000));
       outbox = new SeatOutbox({ presencePath, onBridgeState });
       expect(outbox.bridgeStatus(binding.conversationId).state).toBe("reconnecting");
       grants = new RemoteLeadDelegations(async () => {}, directory);
       bridge = makeBridge();
-      await expect.poll(() => catalogChanges > beforeRestart, { timeout: 15000 }).toBe(true);
-      await expect
-        .poll(
-          async () => {
-            try {
-              return (await client.listTools()).tools.some((t) => t.name === "worker_reports");
-            } catch {
-              return false;
-            }
-          },
-          { timeout: 15000 },
-        )
-        .toBe(true);
-      await expect
-        .poll(() => outbox.bridgeStatus(binding.conversationId).state, { timeout: 15000 })
-        .toBe("current");
+      host = startHost();
+      if (!host.listening) await once(host, "listening");
+      await publishAddress();
+      const serviceReady = performance.now();
+      const [catalogReady, channelReady] = await Promise.all([
+        (async () => {
+          await expect.poll(() => catalogChanges > beforeRestart, { timeout: 15000 }).toBe(true);
+          return performance.now();
+        })(),
+        (async () => {
+          await expect
+            .poll(() => outbox.bridgeStatus(binding.conversationId).state, { timeout: 15000 })
+            .toBe("current");
+          return performance.now();
+        })(),
+      ]);
+      const restarted = host.address();
+      if (!restarted || typeof restarted === "string") throw Error("Missing HTTP address");
+      expect(restarted.port).not.toBe(address.port);
+      console.info("VUH-2141 scratch restart timings", {
+        downtimeMs: Math.round(serviceReady - restartStarted),
+        catalogRecoveryMs: Math.round(catalogReady - serviceReady),
+        channelRecoveryMs: Math.round(channelReady - serviceReady),
+        relayAddressChanged: true,
+      });
       // One line per change, each continuing from the last, with its cause.
       expect(
         stateChanges.every(
@@ -763,10 +786,12 @@ else console.log('{}');
         { type: "text", text: "reconnected" },
       ]);
       expect(effects).toBe(1);
+      const restartedAddress = host.address();
+      if (!restartedAddress || typeof restartedAddress === "string") throw Error("Missing HTTP address");
       const authHeaders = { authorization: `Bearer ${issued.token}` };
       expect(
         (
-          await fetch(`http://127.0.0.1:${address.port}/v1/fleet/lead/prompt?conversationId=other`, {
+          await fetch(`http://127.0.0.1:${restartedAddress.port}/v1/fleet/lead/prompt?conversationId=other`, {
             headers: authHeaders,
           })
         ).status,
@@ -778,8 +803,11 @@ else console.log('{}');
       ]) {
         observed = changed;
         expect(
-          (await fetch(`http://127.0.0.1:${address.port}/v1/fleet/lead/prompt`, { headers: authHeaders }))
-            .status,
+          (
+            await fetch(`http://127.0.0.1:${restartedAddress.port}/v1/fleet/lead/prompt`, {
+              headers: authHeaders,
+            })
+          ).status,
         ).toBe(403);
         observed = await fixtureProof();
       }
@@ -810,6 +838,72 @@ else console.log('{}');
       await rm(root, { recursive: true, force: true });
     }
   }, 90_000);
+  test("an unproved launch after restart refuses with a clear reason instead of an endless reconnect", async () => {
+    const root = await mkdtemp(join(tmpdir(), "remote-lead-unproved-"));
+    const directory = join(root, "delegations");
+    let grants = new RemoteLeadDelegations(async () => {}, directory);
+    const issued = await grants.issue(binding);
+    grants.close();
+    grants = new RemoteLeadDelegations(async () => {}, directory);
+    const bridge = createRemoteLeadBridge({
+      delegations: grants,
+      identity: () => identity,
+      captain: createStubCaptain(),
+    });
+    const host = serve({ fetch: bridge.app.fetch, hostname: "127.0.0.1", port: 0 });
+    try {
+      if (!host.listening) await once(host, "listening");
+      const address = host.address();
+      if (!address || typeof address === "string") throw Error("Missing HTTP address");
+      const response = await fetch(`http://127.0.0.1:${address.port}/v1/fleet/lead/prompt`, {
+        headers: { authorization: `Bearer ${issued.token}` },
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        error: "remote_lead_launch_unproved",
+        recovery: expect.stringContaining("fresh launch"),
+      });
+      await mkdir(join(root, ".clankie/links"), { recursive: true });
+      await writeFile(
+        join(root, ".clankie/links/pc.json"),
+        JSON.stringify({
+          schemaVersion: 2,
+          authentication: "local-process",
+          fleet: "pc",
+          url: `http://127.0.0.1:${address.port}`,
+        }),
+      );
+      const repo = resolve(import.meta.dirname, "../../..");
+      await execute(process.execPath, [join(repo, "scripts/build-remote-lead.mjs")], { cwd: repo });
+      let failure: unknown;
+      try {
+        await execute(process.execPath, [join(repo, ".local/remote-lead/remote-lead-mcp.mjs")], {
+          env: {
+            PATH: process.env.PATH,
+            HOME: root,
+            CLANKIE_REMOTE_LEAD_TOKEN: issued.token,
+            HERDR_PANE_ID: binding.pane,
+            CLANKIE_REMOTE_LEAD_FLEET: binding.fleet,
+            CLANKIE_CONVERSATION_ID: binding.conversationId,
+          },
+          timeout: 5_000,
+        });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toMatchObject({ code: 1, killed: false });
+      const stderr = (failure as Error & { stderr: string }).stderr;
+      expect(stderr.trim().split("\n")).toHaveLength(1);
+      expect(stderr).toContain("Remote lead never proved its native launch");
+      expect(stderr).not.toContain("Remote lead bridge reconnecting");
+      expect(stderr).not.toContain(issued.token);
+    } finally {
+      await bridge.close();
+      if ("closeAllConnections" in host) host.closeAllConnections();
+      await new Promise<void>((r) => host.close(() => r()));
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 15_000);
   test("binds chat/session, excludes owner routes and refuses revoked calls on an existing MCP session", async () => {
     const grants = new RemoteLeadDelegations(async () => {});
     const issued = await grants.issue(binding);

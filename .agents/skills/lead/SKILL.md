@@ -49,12 +49,17 @@ when that directory exists, otherwise selects `~/.claude`.
 The explicit selection wins over the SSH `CLAUDE_CONFIG_DIR` and other signed-in
 profiles, and refuses unless native Claude.ai sign-in is
 verified; never create a profile, copy credentials or substitute another account.
-The refusal explains how the owner can sign in on the PC. Omit `account` to
-retain environment selection or the exactly-one-signed-in-profile behavior.
+The refusal explains how the owner can sign in on the PC. A deliberate relaunch
+into the same conversation, fleet and workspace reuses the recorded account
+label when `account` is omitted; an explicit label overrides it. A fresh launch
+uses environment selection or the exactly-one-signed-in-profile behavior.
 
 Remote bridges retry temporary transport and native-proof loss. Restart recovery
 requires the original pane, shell/harness lifetime, native session and chat;
-explicit revocation is permanent. Never relaunch or choose another pane as
+explicit revocation is permanent. A launch that never proved its native process
+before shutdown stops with one clear fresh-launch reason. Doctor lists known
+bridges by lead chat name, including disconnected and reconnecting channels.
+Never relaunch or choose another pane as
 reconnection. `clankie status` shows `reconnecting` then `current` when polling
 resumes. Verify live tool/channel recovery after a deploy; fixture proof alone
 cannot establish the PC outcome.

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { afterEach, expect, it } from "vitest";
-import { doctorCommand, machineDoctorCommand } from "../src/command/doctor.ts";
+import { doctorCommand, machineDoctorCommand, formatDoctorSummary } from "../src/command/doctor.ts";
 import { formatDoctorReport } from "../src/doctor-report.ts";
 
 const roots: string[] = [];
@@ -36,6 +36,29 @@ it.each(["healthy", "unavailable"] as const)(
       if (path === "/v1/mcp") return json(401, { error: "authentication_required" });
       if (request.headers.authorization !== "Bearer doctor-owner")
         return json(401, { error: "operator_authentication_required" });
+      if (path === "/operator/v1/dispatch") {
+        let body = "";
+        request.on("data", (chunk) => (body += chunk));
+        request.on("end", () => {
+          const { op } = JSON.parse(body);
+          if (op === "seat_bridges")
+            return json(200, {
+              op,
+              schemaVersion: 1,
+              bridges: [
+                {
+                  conversationId: "conv-kh2",
+                  state: "disconnected",
+                  eventKinds: ["wake"],
+                  ownerOrigin: false,
+                  detail: "KH2: Seat bridge is disconnected; the native channel has not returned.",
+                },
+              ],
+            });
+          json(404, { error: "not_found" });
+        });
+        return;
+      }
       if (path === "/v1/runtime-connections")
         return json(200, {
           connections: [
@@ -72,6 +95,7 @@ it.each(["healthy", "unavailable"] as const)(
       CLANKIE_STATE: join(root, "state"),
       PATH: "",
       CLANKIE_OPERATOR_TOKEN: "doctor-owner",
+      CLANKIE_CAPTAIN_TOKEN: "doctor-owner",
       CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
     };
     const report = await doctorCommand({
@@ -80,6 +104,8 @@ it.each(["healthy", "unavailable"] as const)(
       credentialStore: new FileCredentialStore(join(root, "credentials.json")),
     });
     expect(report.remoteHarnesses).toHaveLength(1);
+    expect(formatDoctorReport(report)).toContain("✗ Seat bridge conv-kh2 · disconnected · KH2:");
+    expect(formatDoctorSummary(report)).toContain("Seat bridge disconnected for conv-kh2. KH2:");
     expect(report.remoteHarnesses?.[0]).toMatchObject({ machine: "pc", linkState });
     expect(formatDoctorReport(report)).toContain(`✗ Fleet pc · unreachable · ${reason}`);
     const machine = await machineDoctorCommand("pc", { env });

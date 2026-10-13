@@ -9,7 +9,10 @@ import type { ProjectProcessProof } from "./project-process-proof.ts";
 
 /** Safe diagnostics for a recognized delegation, never arbitrary provider errors. */
 export class RemoteLeadRefusal extends Error {
-  readonly reason: "remote_lead_binding_unavailable" | "remote_lead_workspace_revoked";
+  readonly reason:
+    | "remote_lead_binding_unavailable"
+    | "remote_lead_workspace_revoked"
+    | "remote_lead_launch_unproved";
   readonly recovery =
     "Report this link failure to the Mac lead or owner for a fresh launch from the Mac. Never work around it with desktop control or credential rotation.";
   constructor(reason: RemoteLeadRefusal["reason"]) {
@@ -83,6 +86,7 @@ const digest = (token: string) => createHash("sha256").update(token).digest("hex
 export class RemoteLeadDelegations {
   private readonly grants = new Map<string, Delegation>();
   private readonly revoked = new Set<string>();
+  private readonly unproved = new Set<string>();
   private readonly directory: string | undefined;
   private readonly admit: (binding: RemoteLeadBinding) => Promise<void>;
   constructor(admit: (binding: RemoteLeadBinding) => Promise<void>, directory?: string) {
@@ -118,7 +122,7 @@ export class RemoteLeadDelegations {
               },
               abort: new AbortController(),
             });
-          }
+          } else this.unproved.add(key);
         } catch {
           // Unreadable or incompatible private records carry no authority.
         }
@@ -188,6 +192,7 @@ export class RemoteLeadDelegations {
     if (!/^[A-Za-z0-9_-]{43}$/u.test(token)) return undefined;
     const key = digest(token);
     const grant = this.grants.get(key);
+    if (!grant && this.unproved.has(key)) throw new RemoteLeadRefusal("remote_lead_launch_unproved");
     if (!grant) return undefined;
     const { binding } = grant;
     const current = () =>

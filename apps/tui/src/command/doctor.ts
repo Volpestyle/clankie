@@ -59,11 +59,14 @@ function doctorSummary(report: InstallDoctorReport): string {
       : undefined;
   if (refusal)
     return `Machine ${refusal.machine} refused ${refusal.required} access (${refusal.accessLevel}). ${refusal.fix}`;
-  const staleBridge =
+  const unavailableBridge =
     report.seatBridges && "bridges" in report.seatBridges
-      ? report.seatBridges.bridges.find((bridge) => bridge.state === "stale")
+      ? report.seatBridges.bridges.find((bridge) => bridge.state !== "current")
       : undefined;
-  if (staleBridge) return `Stale seat bridge for ${staleBridge.conversationId}. ${staleBridge.detail}`;
+  if (unavailableBridge?.state === "stale")
+    return `Stale seat bridge for ${unavailableBridge.conversationId}. ${unavailableBridge.detail}`;
+  if (unavailableBridge)
+    return `Seat bridge ${unavailableBridge.state} for ${unavailableBridge.conversationId}. ${unavailableBridge.detail}`;
   if (!report.captain.ready) {
     return report.captain.reason === "no_model"
       ? "Choose a model — run `clankie`, then `/setup`."

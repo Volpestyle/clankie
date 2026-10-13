@@ -105,6 +105,14 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     ...fleetLinks,
     ...workerTools,
     ...workerReports,
+    ...(report.seatBridges === undefined
+      ? []
+      : "bridges" in report.seatBridges
+        ? report.seatBridges.bridges.map(
+            (bridge) =>
+              `  ${mark(bridge.state === "current")} Seat bridge ${clean(bridge.conversationId)} · ${bridge.state} · ${clean(bridge.detail)}`,
+          )
+        : [`  ○ Seat bridges · unavailable · ${clean(report.seatBridges.detail)}`]),
     ...(report.seatDeliveries === undefined
       ? []
       : "unresolved" in report.seatDeliveries

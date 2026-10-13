@@ -35,6 +35,12 @@ const binding = z
 if (!token || !pane || !fleet || !conversationId || !binding.success)
   throw new Error("Remote lead launch binding missing");
 const closing = new AbortController();
+let terminalFailure: string | undefined;
+function stopBridge(reason: string): never {
+  terminalFailure ??= reason;
+  closing.abort();
+  throw new Error(reason);
+}
 const HOOK_LOG = join(homedir(), ".clankie", "remote-leads", "hooks.log");
 const SYNC_FAILURE_THRESHOLD = 3;
 const SYNC_BUDGET_MS = 2_000;
@@ -92,8 +98,17 @@ const request: typeof fetch = async (resource, init) => {
       "error" in reason &&
       reason.error === "remote_lead_revoked"
     ) {
-      closing.abort();
-      throw new Error("Remote lead delegation explicitly revoked");
+      stopBridge("Remote lead delegation explicitly revoked");
+    }
+    if (
+      typeof reason === "object" &&
+      reason !== null &&
+      "error" in reason &&
+      reason.error === "remote_lead_launch_unproved"
+    ) {
+      stopBridge(
+        "Remote lead never proved its native launch before the home service stopped; ask the home lead for a fresh launch. The original pane is left open.",
+      );
     }
     if (
       typeof reason === "object" &&
@@ -109,78 +124,87 @@ const request: typeof fetch = async (resource, init) => {
   }
   return response;
 };
-if (process.argv.includes("--sync")) {
-  process.exitCode = await syncQuietly();
-} else if (process.argv.includes("--prompt")) {
-  // SessionStart may land while the service restarts or the lead's proof
-  // settles: keep asking inside the hook's 60-second budget (VUH-2075).
-  const deadline = Date.now() + PROMPT_RETRY_BUDGET_MS;
-  for (let attempt = 0; ; attempt += 1) {
-    const response = await request("http://127.0.0.1/v1/fleet/lead/prompt", {
-      signal: AbortSignal.timeout(10_000),
-    }).catch((error: unknown) => {
-      if (closing.signal.aborted) throw error;
-      return undefined;
-    });
-    if (response?.ok) {
-      process.stdout.write(await response.text());
-      break;
+try {
+  if (process.argv.includes("--sync")) {
+    process.exitCode = await syncQuietly();
+  } else if (process.argv.includes("--prompt")) {
+    // SessionStart may land while the service restarts or the lead's proof
+    // settles: keep asking inside the hook's 60-second budget (VUH-2075).
+    const deadline = Date.now() + PROMPT_RETRY_BUDGET_MS;
+    for (let attempt = 0; ; attempt += 1) {
+      const response = await request("http://127.0.0.1/v1/fleet/lead/prompt", {
+        signal: AbortSignal.timeout(10_000),
+      }).catch((error: unknown) => {
+        if (closing.signal.aborted) throw error;
+        return undefined;
+      });
+      if (response?.ok) {
+        process.stdout.write(await response.text());
+        break;
+      }
+      await response?.body?.cancel();
+      const wait = Math.min(2_000 * 2 ** attempt, 10_000);
+      if (Date.now() + wait >= deadline) throw new Error("Remote lead prompt unavailable");
+      await delay(wait);
     }
-    await response?.body?.cancel();
-    const wait = Math.min(2_000 * 2 ** attempt, 10_000);
-    if (Date.now() + wait >= deadline) throw new Error("Remote lead prompt unavailable");
-    await delay(wait);
-  }
-} else {
-  let reconnectNeeded = false;
-  const connect = () =>
-    connectLaneUpstream({
-      host: "http://127.0.0.1",
-      bearer: token,
-      conversationId,
-      fetchImpl: request,
-      onTransportEvent: ({ event }) => {
-        if (event === "upstream_closed" || event === "upstream_error") reconnectNeeded = true;
+  } else {
+    let reconnectNeeded = false;
+    const connect = () =>
+      connectLaneUpstream({
+        host: "http://127.0.0.1",
+        bearer: token,
+        conversationId,
+        fetchImpl: request,
+        onTransportEvent: ({ event }) => {
+          if (event === "upstream_closed" || event === "upstream_error") reconnectNeeded = true;
+        },
+      });
+    let upstream: Awaited<ReturnType<typeof connectLaneUpstream>>;
+    for (;;) {
+      try {
+        upstream = await connect();
+        break;
+      } catch (error) {
+        if (closing.signal.aborted) throw error;
+        process.stderr.write("Remote lead bridge reconnecting\n");
+        await delay(5000, undefined, { signal: closing.signal });
+      }
+    }
+    const server = createSeatBridge(upstream, "operator");
+    server.onclose = () => closing.abort();
+    await server.connect(new StdioServerTransport());
+    // Idle heads must recover tools too. Catalog reads reconnect the existing
+    // upstream generation without replaying any potentially admitted tool call.
+    const health = (async () => {
+      while (!closing.signal.aborted) {
+        try {
+          if (reconnectNeeded) {
+            await upstream.listTools();
+            reconnectNeeded = false;
+          }
+        } catch {
+          if (!closing.signal.aborted) process.stderr.write("Remote lead bridge reconnecting\n");
+        }
+        await delay(5000, undefined, { signal: closing.signal }).catch(() => undefined);
+      }
+    })();
+    await pumpSeatEvents(server, upstream, closing.signal, {
+      onError: () => {
+        reconnectNeeded = true;
       },
     });
-  let upstream: Awaited<ReturnType<typeof connectLaneUpstream>>;
-  for (;;) {
-    try {
-      upstream = await connect();
-      break;
-    } catch (error) {
-      if (closing.signal.aborted) throw error;
-      process.stderr.write("Remote lead bridge reconnecting\n");
-      await delay(5000, undefined, { signal: closing.signal });
-    }
+    closing.abort();
+    await health;
+    await upstream.close();
+    await server.close();
   }
-  const server = createSeatBridge(upstream, "operator");
-  server.onclose = () => closing.abort();
-  await server.connect(new StdioServerTransport());
-  // Idle heads must recover tools too. Catalog reads reconnect the existing
-  // upstream generation without replaying any potentially admitted tool call.
-  const health = (async () => {
-    while (!closing.signal.aborted) {
-      try {
-        if (reconnectNeeded) {
-          await upstream.listTools();
-          reconnectNeeded = false;
-        }
-      } catch {
-        if (!closing.signal.aborted) process.stderr.write("Remote lead bridge reconnecting\n");
-      }
-      await delay(5000, undefined, { signal: closing.signal }).catch(() => undefined);
-    }
-  })();
-  await pumpSeatEvents(server, upstream, closing.signal, {
-    onError: () => {
-      reconnectNeeded = true;
-    },
-  });
-  closing.abort();
-  await health;
-  await upstream.close();
-  await server.close();
+} catch (error) {
+  if (terminalFailure === undefined) throw error;
+} finally {
+  if (terminalFailure !== undefined) {
+    process.stderr.write(`${terminalFailure}\n`);
+    process.exitCode = 1;
+  }
 }
 
 /**

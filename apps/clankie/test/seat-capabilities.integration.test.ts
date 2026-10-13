@@ -119,6 +119,7 @@ it.each(["legacy", "modern"])(
         conversationId: "global-default",
       });
       if (get.op !== "get" || !get.conversation) throw new Error("Missing owned conversation");
+      expect(bridges[0]?.detail).toContain(get.conversation.title);
       const text = `owner request ${randomUUID()}`;
       const response = await fetch(`${host}/operator/v1/dispatch`, {
         method: "POST",

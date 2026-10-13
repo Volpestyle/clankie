@@ -1,0 +1,25 @@
+{
+  "issue": "VUH-2141",
+  "base": "f28be6925c57d91b70a250deb87cce3f89573b8b",
+  "date": "2026-10-13",
+  "runtime": "Node v26.7.0",
+  "transport": "real loopback HTTP and bundled stdio MCP; native Windows identity and captain tools are fixture boundaries",
+  "timings": {
+    "downtimeMs": 6006,
+    "catalogRecoveryMs": 1744,
+    "channelRecoveryMs": 1794,
+    "relayAddressChanged": true
+  },
+  "focused": {
+    "filesPassed": 7,
+    "testsPassed": 41,
+    "exitCode": 0
+  },
+  "timingProbe": {
+    "testsPassed": 1,
+    "exitCode": 0
+  },
+  "liveServiceRestarted": false,
+  "remoteMachinesTouched": false,
+  "realMacRebootProven": false
+}

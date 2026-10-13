@@ -159,3 +159,13 @@ For a Discord room, start with `clankie discord rooms` and its `/conversation` h
 
 When the trail ends in a defect in Clankie's own code, the fix, runtime update
 and restart loop is in `this-machine` under "Changing yourself".
+
+For a no-install remote lead, the home service persists the launch delegation’s
+hash and original native proof. Its bridge rereads the fleet link file on each
+request, so a restarted SSH relay may publish a new loopback address without a
+head relaunch. `clankie doctor` names disconnected or reconnecting lead chats;
+the fleet round’s `leadChats` includes their receiver state. Inspect the remote
+hooks log only with authority for that machine. A missing proof, replaced native
+process, changed connection identity or revoked grant must never be repaired by
+rotating credentials. A deliberate relaunch into the same conversation reuses
+its recorded account label unless an explicit label overrides it.

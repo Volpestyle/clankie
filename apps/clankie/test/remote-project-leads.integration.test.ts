@@ -276,7 +276,12 @@ it("launches an approved Windows workspace through the real conversation store w
     expect(response.status).toBe(200);
     const launched = await response.json();
     if (launched.stage !== "dispatched") console.info("Launch acceptance receipt", launched);
-    expect(launched).toMatchObject({ stage: "dispatched", pane: "pc/w1:p1", maximumTrust: true });
+    expect(launched).toMatchObject({
+      stage: "dispatched",
+      pane: "pc/w1:p1",
+      maximumTrust: true,
+      account: "volpestyle",
+    });
     await expect(
       captain.serveOperatorConversation({
         op: "create",
@@ -504,11 +509,13 @@ it("launches an approved Windows workspace through the real conversation store w
     });
     malformedReply = true;
     // A relaunch into the same conversation, whose first head never attached.
-    const malformedInput = { ...input, requestId: randomUUID(), conversationId };
+    const { account: _account, ...relaunchInput } = input;
+    const malformedInput = { ...relaunchInput, requestId: randomUUID(), conversationId };
     const malformed = await leads.launch(malformedInput, async () => {});
     expect(malformed).toMatchObject({
       stage: "unconfirmed",
       failedStage: "dispatching",
+      account: "volpestyle",
       error: "Remote lead reply is not valid JSON",
       // VUH-2075: the lead hears which panes were left behind, this one included.
       leftBehind: [{ requestId: input.requestId, pane: "pc/w1:p1", stage: "dispatched" }],

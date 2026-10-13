@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareClaude, leadPlugin } from "./claude-setup.mjs";
 const execute = promisify(execFile);
@@ -138,7 +139,13 @@ if (process.argv[2] === "--head") {
       `(Get-Process -Id ${Number(info.shell_pid)}).StartTime.ToUniversalTime().ToString('O')`,
     ),
   };
-  process.stdout.write(JSON.stringify({ stage: "allocated", pane, shell }) + "\n");
+  // Record the selected label, never a profile path or credential. An explicit
+  // owner label wins when a profile resolves through a symlink.
+  const profileName = basename(profile);
+  const account =
+    spec.account ??
+    (profileName === ".claude" ? "default" : /^\.claude-([a-z][a-z0-9_-]{0,63})$/u.exec(profileName)?.[1]);
+  process.stdout.write(JSON.stringify({ stage: "allocated", pane, shell, account }) + "\n");
   const second = await input.next();
   const { token, conversationId } = JSON.parse(second.value);
   const ticket = randomUUID();

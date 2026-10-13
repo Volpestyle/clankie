@@ -627,7 +627,11 @@ export function createOperatorService(
       return {
         op: "seat_bridges",
         schemaVersion: 1,
-        bridges: ctx.headSeatConversations().map((id) => ctx.seatOutbox(id).bridgeStatus(id)),
+        bridges: ctx.headSeatConversations().map((id) => {
+          const title = ctx.conversations.conversation(id)?.title;
+          const bridge = ctx.seatOutbox(id).bridgeStatus(id);
+          return { ...bridge, detail: title === undefined ? bridge.detail : `${title}: ${bridge.detail}` };
+        }),
       };
     }
     if (request.op === "seat_deliveries") {

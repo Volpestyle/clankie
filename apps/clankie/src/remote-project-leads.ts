@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { ChildProcess } from "node:child_process";
-import type { RemoteLeadLaunch } from "@clankie/protocol/remote-leads";
+import { RemoteLeadLaunchSchema, type RemoteLeadLaunch } from "@clankie/protocol/remote-leads";
 import type { SettingsStore, ExecutionConnectionSchema } from "@clankie/settings";
 import type { z } from "zod";
 import type { ExecutionConnections } from "./herdr-session.ts";
@@ -239,6 +239,31 @@ process.stdin.on('end', () => {
     return panes;
   }
 
+  /** Reuse only a completed launch for this exact conversation and machine/workspace. */
+  private async recordedAccount(conversationId: string, input: RemoteLeadLaunch) {
+    const candidates: Array<{ account: string; time: number }> = [];
+    for (const name of await readdir(this.options.directory).catch(() => [])) {
+      if (!/^[a-f0-9-]{36}\.json$/u.test(name)) continue;
+      const path = join(this.options.directory, name);
+      try {
+        const record = JSON.parse(await readFile(path, "utf8"));
+        const account = RemoteLeadLaunchSchema.shape.account.safeParse(record.account);
+        if (
+          record.stage === "dispatched" &&
+          record.conversationId === conversationId &&
+          record.fleet === input.fleet &&
+          record.workingDirectory === input.workingDirectory &&
+          account.success &&
+          account.data !== undefined
+        )
+          candidates.push({ account: account.data, time: (await stat(path)).mtimeMs });
+      } catch {
+        // Incomplete or incompatible receipts cannot choose an account.
+      }
+    }
+    return candidates.sort((a, b) => b.time - a.time)[0]?.account;
+  }
+
   async launch(input: RemoteLeadLaunch, ownerGuard: () => Promise<void>) {
     await ownerGuard();
     const fleet = await this.fleet(input.fleet);
@@ -265,7 +290,13 @@ process.stdin.on('end', () => {
     await mkdir(this.options.directory, { recursive: true });
     const path = join(this.options.directory, `${input.requestId}.json`);
     const fingerprint = createHash("sha256").update(JSON.stringify(input)).digest("hex");
-    const record: Record<string, unknown> = { requestId: input.requestId, fingerprint, stage: "reserved" };
+    const record: Record<string, unknown> = {
+      requestId: input.requestId,
+      fingerprint,
+      fleet: input.fleet,
+      workingDirectory: input.workingDirectory,
+      stage: "reserved",
+    };
     try {
       await writeFile(path, JSON.stringify(record), { flag: "wx", mode: 0o600 });
     } catch (error) {
@@ -321,6 +352,7 @@ process.stdin.on('end', () => {
       // Current Windows native proof names the registered fleet as its machine.
       if (connection?.machine !== input.fleet)
         throw new Error("Remote lead requires an exact fleet/machine binding");
+      const account = input.account ?? (await this.recordedAccount(conversationId, input));
       const nativeSession = randomUUID();
       // The owner's switch at launch (VUH-2048); a running lead keeps its mode.
       const maximumTrust = settings.maximumTrustMode;
@@ -328,6 +360,7 @@ process.stdin.on('end', () => {
       Object.assign(record, {
         conversationId,
         nativeSession,
+        ...(account === undefined ? {} : { account }),
         plugin: prepared.directory,
         maximumTrust,
         ...(leftBehind.length ? { leftBehind } : {}),
@@ -350,7 +383,7 @@ process.stdin.on('end', () => {
           cwd: input.workingDirectory,
           title: input.title,
           fleet: input.fleet,
-          account: input.account,
+          account,
           nativeSession,
           plugin: prepared.directory,
           maximumTrust,
@@ -366,6 +399,9 @@ process.stdin.on('end', () => {
         typeof allocated.shell?.startTime !== "string"
       )
         throw new Error("Remote lead allocation unconfirmed");
+      const selectedAccount = RemoteLeadLaunchSchema.shape.account.safeParse(allocated.account);
+      if (selectedAccount.success && selectedAccount.data !== undefined)
+        record.account = selectedAccount.data;
       const binding: RemoteLeadBinding = {
         fleet: input.fleet,
         machine: connection.machine,
