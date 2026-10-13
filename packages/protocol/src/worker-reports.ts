@@ -6,6 +6,8 @@ export const WorkerReportSummarySchema = z
     deliveryId: z.string().uuid(),
     conversationId: z.string().min(1).max(256),
     paneId: z.string().min(1).max(256),
+    /** Current observed pane-to-seat join; absent when the pane is outside the census. */
+    seatId: z.string().min(1).max(256).optional(),
     acceptedAt: z.string(),
     state: z.enum(["pending", "attempting", "delivered", "uncertain", "read"]),
     stage: z.string().optional(),

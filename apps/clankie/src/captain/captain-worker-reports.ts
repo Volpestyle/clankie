@@ -16,6 +16,7 @@ export interface WorkerReportsContext {
   readonly seatOutboxes: Map<string, SeatOutbox>;
   readonly shutdown: AbortController;
   readonly onChange: () => void;
+  readonly observedSeats?: () => readonly { readonly paneId: string; readonly seatId: string }[];
   readonly validateConversationOwner: (owner: ConversationOwner) => Promise<boolean>;
   readonly herdrRunner: HerdrWatchRunner;
   readonly herdrWatches: HerdrWatchStore;
@@ -96,6 +97,7 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
     includeRead = false,
     acceptedAfterMs?: number,
   ) {
+    const seatIds = new Map((ctx.observedSeats?.() ?? []).map((seat) => [seat.paneId, seat.seatId]));
     return ctx.conversations
       .inboundReportSummaries(conversationId, {
         includeRead,
@@ -104,7 +106,11 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
           ? {}
           : { sender: { paneId: native.paneId, binding: ctx.inboundBinding(native) } }),
       })
-      .slice(-1000);
+      .slice(-1000)
+      .map((report) => {
+        const seatId = seatIds.get(report.paneId);
+        return seatId === undefined ? report : { ...report, seatId };
+      });
   }
 
   function conversationReportRunner(owner: ConversationOwner, deliveryId: string): ConversationRunner {

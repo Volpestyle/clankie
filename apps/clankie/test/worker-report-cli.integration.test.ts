@@ -6,7 +6,12 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { text } from "node:stream/consumers";
 import { afterEach, expect, it } from "vitest";
-import { WorkerReportPageSchema, WorkerReportSummarySchema } from "@clankie/protocol";
+import {
+  WorkerReportPageSchema,
+  WorkerReportSummarySchema,
+  OPERATOR_CONVERSATION_DISPATCH_PATH,
+  OperatorConversationServiceResultSchema,
+} from "@clankie/protocol";
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -27,7 +32,11 @@ afterEach(async () => {
 
 async function fixture(
   count: number,
-  options: { reportText?: (index: number) => string; directAcceptance?: boolean } = {},
+  options: {
+    reportText?: (index: number) => string;
+    directAcceptance?: boolean;
+    observedSeats?: WorkerReportsContext["observedSeats"];
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "worker-report-cli-"));
   const path = join(root, "conversations");
@@ -91,6 +100,7 @@ async function fixture(
   const reports = createWorkerReports({
     conversations: store,
     onChange: () => undefined,
+    observedSeats: options.observedSeats,
   } as unknown as WorkerReportsContext);
   const serve = createOperatorService({
     conversations: store,
@@ -137,6 +147,32 @@ async function fixture(
   });
   return { store, service, ids, env, root, serve };
 }
+
+it("joins report metadata to the already observed census and drops seat IDs when the pane leaves it", async () => {
+  let observed = [{ paneId: "w3Z:pCass", seatId: "term_65db244fd1e1847" }];
+  const f = await fixture(1, { observedSeats: () => observed });
+  const roster = async () => {
+    const response = await fetch(`${f.env.CLANKIE_CONTROL_PLANE_URL}${OPERATOR_CONVERSATION_DISPATCH_PATH}`, {
+      method: "POST",
+      headers: { authorization: "Bearer captain", "content-type": "application/json" },
+      body: JSON.stringify({ op: "roster", schemaVersion: 1 }),
+    });
+    expect(response.status).toBe(200);
+    const result = OperatorConversationServiceResultSchema.parse(await response.json());
+    if (result.op !== "roster") throw new Error("Expected roster response");
+    return result.workerReports!;
+  };
+  const joined = await roster();
+  expect(joined).toHaveLength(1);
+  expect(joined[0]).toMatchObject({ deliveryId: f.ids[0], paneId: "w3Z:pCass", seatId: observed[0]!.seatId });
+  observed = [{ paneId: "another-pane", seatId: "another-seat" }];
+  const missing = await roster();
+  expect(missing[0]).not.toHaveProperty("seatId");
+  expect(missing).toEqual(joined.map(({ seatId: _seatId, ...report }) => report));
+  observed = [];
+  expect(await roster()).toEqual(missing);
+  expect(WorkerReportSummarySchema.safeParse({ ...missing[0], seatId: 42 }).success).toBe(false);
+});
 
 it("projects a large restored inbox without offering or changing retained payloads, preserving admission and acknowledgment fences", async () => {
   const f = await fixture(585, {

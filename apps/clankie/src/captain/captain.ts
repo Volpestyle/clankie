@@ -4544,6 +4544,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     recoverWorkerReports,
     recoverAllWorkerReports,
   } = createWorkerReports({
+    observedSeats: () => liveEdgeSeats,
     get conversations() {
       return conversations;
     },
