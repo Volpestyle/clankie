@@ -4341,7 +4341,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const holds = (await deps.deployHolds?.().catch(() => undefined)) ?? [];
         const disk = options.fleetResources?.status()?.pressure;
         const diskNotice = disk?.diskWarning
-          ? `Low disk: ${disk.freeDiskGb?.toFixed(1)} GiB free. Inspect clankie doctor and reclaim safe fleet caches before starting more work.\n`
+          ? `Low disk: ${disk.freeDiskGb?.toFixed(1)} GiB free. Inspect clankie doctor before starting more work.\n`
           : "";
         const evidence = fleetRoundEvidence(current, holds);
         if (
