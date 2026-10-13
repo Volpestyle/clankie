@@ -247,3 +247,10 @@ full roster and preserve freshness independently for each batch.
 Linear project UUID validation uses a direct project read. Collection searches
 use fifty-project pages because the nested project projection at 250 entries
 exceeds Linear's query-complexity limit, including a UUID-filtered collection.
+
+Linear binding validation follows the selected verified MCP connection, including
+the existing remote OAuth connection and the registered API connection. Calling
+the API adapter directly can reject a connected host that has only the remote
+`linear` credential. Validation checks the connection binding before and after
+the read, rejects local tracker fallback, and compares the returned UUID (`uuid`
+on remote MCP, `id` on the API adapter) with the requested UUID.

@@ -1,15 +1,22 @@
-import type { TrackerToolBackend } from "@clankie/work-items";
+import type { McpHost } from "./mcp-host.ts";
 
-/** Validate only through the connected Linear adapter; callers never pass the local fallback. */
+/** Validate through the selected verified Linear connection, never the local fallback. */
 export async function linearProjectExists(
-  tracker: Pick<TrackerToolBackend, "call">,
+  host: Pick<McpHost, "account" | "call">,
   id: string,
 ): Promise<boolean> {
-  try {
-    const project = (await tracker.call("get_project", { query: id })) as { id?: unknown };
-    return project.id === id;
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "not_found") return false;
-    throw error;
-  }
+  const before = await host.account("linear", "operator");
+  const result = await host.call({
+    lane: "operator",
+    server: "linear",
+    tool: "get_project",
+    arguments: { query: id },
+    resultMode: "data",
+  });
+  const after = await host.account("linear", "operator");
+  if (before.binding !== after.binding) throw new Error("Linear connection changed");
+  if (result.outcome !== "ok" || result.isError) throw new Error("Bound Linear project unavailable");
+  const project = JSON.parse(result.content) as { id?: unknown; uuid?: unknown };
+  // Remote MCP exposes a display identifier in id; the API adapter exposes the UUID.
+  return (project.uuid ?? project.id) === id;
 }

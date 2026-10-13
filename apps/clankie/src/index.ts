@@ -1977,7 +1977,7 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   evidenceStore,
   builtInTracker,
-  linearProjectExists: (id) => linearProjectExists(linearApiTracker, id),
+  linearProjectExists: (id) => linearProjectExists(mcpHost, id),
   linearMirrors,
   linearCutover: new LinearCutover({
     trackerDirectory: join(stateRoot, "tracker"),
