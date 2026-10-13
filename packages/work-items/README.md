@@ -39,6 +39,12 @@ audit log in the same atomic replacement as the effect, and refuses stale
 `ifUpdatedAt` updates. `get_write_receipt` and `list_audit_events` read them.
 Other backends refuse these inputs explicitly (ADR 0226 amendment, VUH-1916).
 
+Every local read rereads the file, including changes from other processes. Each
+backend reuses its last validated snapshot only when the content is identical;
+changed content receives full schema and hash-chain validation. Reads return
+isolated results, and writes (including cycle rollover on a read) use an isolated
+store under the existing lock. Corruption remains a hard error.
+
 Evidence bundles hold validated store references and gaps on items and runs.
 Completion past landed requires the current item bundle and a `bundle_checked`
 event from an actor who did not do the work; the owner's verification counts.

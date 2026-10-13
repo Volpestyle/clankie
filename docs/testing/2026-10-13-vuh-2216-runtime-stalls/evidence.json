@@ -14,6 +14,12 @@
       "url": "clankie://evidence/sha256/b4f7545c891ecd4ed6b273a5ade998ca99accd1fd99f77c1671b8823dc50a2a6"
     },
     {
+      "path": "raw/metadata-live-window-and-native-phases.json",
+      "size": 1358116,
+      "sha256": "e826032d751e26a941d14b85d77bb6269e68651b44783e286cfd9258c9a33418",
+      "url": "clankie://evidence/sha256/e826032d751e26a941d14b85d77bb6269e68651b44783e286cfd9258c9a33418"
+    },
+    {
       "path": "raw/metadata-validation.json",
       "size": 109330,
       "sha256": "b9f38d9b3d75d0b213ab1b9dbffbbb044dfce50ca6dbb2e648169839436045b6",

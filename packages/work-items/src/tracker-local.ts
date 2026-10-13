@@ -2957,6 +2957,16 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
   const path = join(directory, "tracker.json");
   const listeners = eventListeners.get(path) ?? new Set<TrackerEventListener>();
   eventListeners.set(path, listeners);
+  let validated: { bytes: Buffer; store: Store } | undefined;
+  const readStore = async (mutable = true): Promise<Store> => {
+    // Read every time: a different process can replace or edit the store.
+    // Only byte-identical, already validated content may skip parsing/auditing.
+    const bytes = await readFile(path);
+    if (validated === undefined || !validated.bytes.equals(bytes))
+      validated = { bytes, store: parseStore(bytes.toString("utf8")) };
+    // Writes and returned views must never mutate the validated snapshot.
+    return mutable ? structuredClone(validated.store) : validated.store;
+  };
   const publish = (events: readonly TrackerItemEvent[]) => {
     for (const event of events)
       for (const listener of listeners) {
@@ -3099,10 +3109,10 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     publish(store.events?.slice(firstEvent - 1) ?? []);
     return settled;
   };
-  const load = async () => {
+  const load = async ({ mutable = true }: { mutable?: boolean } = {}) => {
     const clock = (options.clock ?? (() => new Date()))().toISOString();
     try {
-      return { store: parseStore(await readFile(path, "utf8")), clock, initialized: false };
+      return { store: await readStore(mutable), clock, initialized: false };
     } catch (error) {
       if (codeOf(error) !== "ENOENT") throw error;
       return { store: seed(options, clock), clock, initialized: true };
@@ -3691,7 +3701,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       });
     },
     async storeId() {
-      const { store } = await load();
+      const { store } = await load({ mutable: false });
       return store.storeId ?? store.team.id;
     },
     async linearMirrorView(projectId) {
@@ -3800,7 +3810,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       await withTrackerStoreLock(path, async () => {
         let events: TrackerItemEvent[] = [];
         try {
-          events = parseStore(await readFile(path, "utf8")).events ?? [];
+          events = (await readStore(false)).events ?? [];
         } catch (error) {
           if (codeOf(error) !== "ENOENT") throw error;
         }
@@ -3833,9 +3843,11 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     async call(name, args, callOptions) {
       validateTrackerToolArgs(name, args);
       return withTrackerStoreLock(path, async (assertHeld) => {
-        const { store, clock, initialized } = await load();
+        const writing = /^(?:save|create|post)_/u.test(name);
+        let { store, clock, initialized } = await load({ mutable: writing });
         // Cycles roll over on the first access after one ends, as Clankie's own write.
-        if (cyclesDue(store, clock))
+        if (cyclesDue(store, clock)) {
+          if (!writing) store = structuredClone(store);
           await write(
             store,
             clock,
@@ -3847,8 +3859,8 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             assertHeld,
             (target, now, context) => rolloverCycles(target, clock, context, now),
           );
+        }
         const actor = callOptions?.actor ?? localActor(store);
-        const writing = /^(?:save|create|post)_/u.test(name);
         if (!writing) {
           const result = await read(store, name, args, options, actor, clock);
           if (initialized) await persist(path, store, assertHeld);
