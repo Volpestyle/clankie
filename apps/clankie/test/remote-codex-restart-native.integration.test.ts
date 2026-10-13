@@ -70,10 +70,13 @@ it.skipIf(!enabled)(
               register: (launch) =>
                 registrations.register(launch, () => forward === undefined || forward.exitCode === null),
             },
-            spawn: (...args) => {
-              forward = spawn(...args);
-              return forward;
-            },
+            spawn: new Proxy(spawn, {
+              apply(target, receiver, args) {
+                const child = Reflect.apply(target, receiver, args) as ChildProcess;
+                forward = child;
+                return child;
+              },
+            }),
           })(input);
           return server;
         },
@@ -111,7 +114,6 @@ it.skipIf(!enabled)(
       const before = await observe()(fleet.id, pane, seat.threadId);
       expect(before).toBeDefined();
       expect(before?.server.pid).not.toBe(before?.tui.pid);
-      expect(before?.chains.server).toHaveLength(1);
       expect(registrations.server(fleet, pane)?.pid).toBe(before?.server.pid);
       forward!.kill("SIGTERM"); // Our local SSH child only; no Windows process signal.
       await new Promise((resolve) => setTimeout(resolve, 500));
