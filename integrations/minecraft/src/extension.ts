@@ -69,9 +69,9 @@ export const minecraftExtension: GameExtension<
             ...host.capture,
             source: {
               status: async () =>
-                !service.ownsPlay() && (await service.profiles()).length === 0
-                  ? { session: null, actions: [] }
-                  : service.status(),
+                // Configured profiles are destinations, not evidence of a joined stay.
+                // Keep idle capture local; active/recovery ownership still checks the motor.
+                service.ownsPlay() ? service.status() : { session: null, actions: [] },
               viewerStatus: (session) => service.viewerStatus(session),
             },
           });

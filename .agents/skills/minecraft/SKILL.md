@@ -218,3 +218,5 @@ For Discord viewing, select `surface: minecraft` on `watch_start` in the active
 admitted voice room. The Activity uses frames from this bot's loopback browser
 viewer. Ask the operator to configure missing Activity credentials/Chrome;
 do not substitute periodic attachments for a live viewing claim.
+Capture polls the motor only during an owned stay (including unresolved recovery),
+never just because profiles are configured. A new join resumes capture within 500 ms.

@@ -129,6 +129,8 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
     const action = z.strictObject({session:MinecraftSessionRefSchema,actionId:z.string().min(1).max(128)});
     server.registerTool("join",{inputSchema:z.strictObject({session:MinecraftSessionRefSchema,profileId:z.string(),endpoint:EndpointSchema})},args=>reply(motor.join(args)));
     server.registerTool("status",{inputSchema:z.strictObject({})},()=>reply(motor.status()));
+    server.registerTool("viewer_status",{inputSchema:session},args=>reply(motor.viewerStatus(args.session)));
+    server.registerTool("poll_events",{inputSchema:z.strictObject({session:MinecraftSessionRefSchema,afterSequence:z.number(),limit:z.number()})},args=>reply(motor.pollEvents(args.session,args.afterSequence,args.limit)));
     server.registerTool("observe",{inputSchema:session},args=>reply(motor.observe(args.session)));
     server.registerTool("act",{inputSchema:MinecraftActionRequestSchema},args=>reply(motor.act(args)));
     server.registerTool("action_status",{inputSchema:action},args=>reply(motor.actionStatus(args.session,args.actionId)));
@@ -137,11 +139,18 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
     await server.connect(new StdioServerTransport());
     process.on("SIGTERM",async()=>{await motor.close();await server.close();process.exit(0)});
   `;
+  let motorStatusCalls = 0;
   const host = createMcpHost({
     settings,
     credentials,
     curated: [],
-    logger: { info() {}, warn() {} },
+    logger: {
+      info(fields) {
+        if (fields.event === "mcp.host.call" && fields.server === "minecraft" && fields.tool === "status")
+          motorStatusCalls++;
+      },
+      warn() {},
+    },
     minecraftMotor: {
       command: process.execPath,
       args: ["--input-type=module", "--eval", motorServer],
@@ -159,6 +168,7 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
   const registry = new GameExtensionRegistry();
   const runtime = registry.register(minecraftExtension, {
     automaticPlay: true,
+    capture: { createSink: async () => undefined },
     onPollError: () => {
       stopFailures++;
     },
@@ -263,12 +273,19 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
     return blocked;
   };
   try {
+    runtime.activate();
+    await sleep(1_100);
+    expect(motorStatusCalls).toBe(0); // A configured destination must not dial the real MCP motor.
     const joinReply = await command({ action: "join", profileId: "isolated" });
     expect(joinReply.status).toBe(200);
     const joined = (await joinReply.json()) as {
       session: { sessionId: string; connectionGeneration: number };
     };
     await expect.poll(async () => (await service.status(owner)).session?.phase).toBe("active");
+    const beforeCapture = motorStatusCalls;
+    await sleep(1_100);
+    expect(motorStatusCalls - beforeCapture).toBeGreaterThanOrEqual(2);
+    await runtime.deactivate(); // The remaining handoff checks drive the same real stay explicitly.
     expect((await registry.catalog()).extensions[0]?.status).toMatchObject({
       state: "running",
       sessionId: joined.session.sessionId,
@@ -499,6 +516,7 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
     await expect(service.join("isolated", owner)).rejects.toThrow("game_extension_not_registered");
     expect(connections).toBe(3);
   } finally {
+    await runtime.deactivate();
     blocked?.release();
     await Promise.allSettled(clients.map((client) => client.close()));
     await workers.close();

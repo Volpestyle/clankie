@@ -329,6 +329,9 @@ executable path when Chrome is installed elsewhere. Frames are PNGs at 320×180,
 256 KiB. The service publishes them through the existing brokered Activity
 producer, with session checks and no overlapping capture requests. Disconnect
 closes the producer so the viewer cannot retain a stale live frame.
+Capture checks the motor every 500 ms only while the service owns a Minecraft
+stay, including unresolved recovery. Configured destinations alone never cause
+periodic MCP status calls; a new join resumes capture within the next 500 ms tick.
 
 In an admitted Discord voice channel, `/clankie watch surface:Minecraft` selects
 the Minecraft Activity. It uses `DISCORD_ACTIVITY_APPLICATION_ID_MINECRAFT` when

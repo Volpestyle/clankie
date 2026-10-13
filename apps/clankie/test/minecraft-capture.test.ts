@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { minecraftExtension } from "@clankie/minecraft";
 import type { MinecraftStatus } from "@clankie/protocol";
 import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { MinecraftCapture } from "../src/minecraft-capture.ts";
+import { BodyLeaseStore } from "../src/body-leases.ts";
+import { FakeMinecraftPort } from "./minecraft-fake.ts";
 
 const session = { sessionId: "capture-test", connectionGeneration: 1 };
 function fixture() {
@@ -54,6 +60,47 @@ function fixture() {
 }
 
 describe("Minecraft capture", () => {
+  it("does not poll configured idle destinations and resumes capture polling within 500 ms of joining", async () => {
+    const root = mkdtempSync(join(tmpdir(), "minecraft-capture-polling-"));
+    const store = new BodyLeaseStore(join(root, "leases"));
+    const port = new FakeMinecraftPort([{ id: "local", name: "Configured destination" }]);
+    const status = vi.spyOn(port, "status");
+    const runtime = minecraftExtension.create({
+      port,
+      store,
+      path: join(root, "session.json"),
+      capture: { createSink: async () => undefined },
+    });
+    vi.useFakeTimers();
+    try {
+      runtime.activate();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(status).not.toHaveBeenCalled();
+      const joined = await runtime.service.join("local", {
+        conversationId: "capture-owner",
+        current: () => true,
+        authorize: async () => true,
+      });
+      port.confirmJoined(joined.session);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(status).toHaveBeenCalled();
+      const activeCalls = status.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(500);
+      expect(status.mock.calls.length).toBeGreaterThan(activeCalls);
+      port.confirmDisconnected(joined.session);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(runtime.service.ownsPlay()).toBe(false);
+      status.mockClear();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(status).not.toHaveBeenCalled();
+    } finally {
+      await runtime.deactivate();
+      vi.useRealTimers();
+      status.mockRestore();
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   it("retries a broker sink that becomes available during the same stay", async () => {
     const f = fixture();
     f.createSink.mockResolvedValueOnce(undefined);
