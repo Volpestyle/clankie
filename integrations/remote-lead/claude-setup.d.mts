@@ -7,6 +7,8 @@ export function prepareClaude(
     home?: string;
     policyPath?: string;
     account?: string;
+    profileHome?: string;
+    expectedIdentity?: { email?: string; accountId?: string; organizationId?: string };
     herdr?: string;
   },
 ): Promise<string>;

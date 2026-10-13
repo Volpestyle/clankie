@@ -1799,19 +1799,31 @@ The remaining automatic worker-isolation work is specified in
 
 ### `accounts codex [list | add HOME --label LABEL | remove LABEL]`
 
-Register the owner's extra Codex homes, without copying or inspecting credentials:
+`accounts codex list` and `accounts claude list` read the same discovered identity
+list as `accounts workers`, `usage` and app Settings. Standard `~/.claude`,
+`~/.claude-*`, `~/.codex-*` homes (Codex needs `config.toml`), the harness's
+selected environment home, and registered extra homes are discovered together.
+Each canonical home is queried once. Native `claude auth status` and Codex
+`account/read` (`refreshToken:false`) supply non-secret identity and plan fields.
+No credential file is read, copied or moved by Clankie's account discovery.
+
+Homes signed into the same account/org ID (email when no native ID is available)
+share one stable `accountKey` and `label`, one usage card and one hold. Cards
+show the signed-in name or email. `homes` lists that account's current homes;
+`profiles` in the CLI response lists manual discovery overrides separately.
 
 ```sh
-clankie accounts codex add ~/.codex-second --label second
 clankie accounts codex list
-clankie accounts codex remove second
+clankie accounts claude list
+clankie accounts codex add /existing/custom-home --label work
+clankie accounts codex remove work
 ```
 
-The TUI accepts the same arguments under `/accounts codex`. The owner signs in
-and approves hooks in each home through Codex itself. Registration stores only a
-canonical home path and label; `authPresent` checks file existence, not whether
-the login is valid. `default` is implicit (`CODEX_HOME`, otherwise `~/.codex`).
-Removing a registration never deletes its home or credentials.
+Registration is an optional path override; removing it never deletes a home or
+changes sign-in. Existing profile aliases bind to the first discovered identity,
+so re-signing a folder cannot redirect saved hire preferences or usage history.
+Clankie records one clear notice for each observed re-sign. Use the identity key
+from the account list to choose a different account deliberately.
 
 ### `accounts workers [--machine ID]` / `accounts hold|release claude|codex|pi LABEL [--machine ID] [--reason TEXT]`
 
@@ -4290,25 +4302,19 @@ same repo/tab rule. An explicitly requested move re-hires in a solo tab at the d
 carrying its human name and known role; there is no automatic migration, rename or cleanup of older
 workspaces, tabs or panes. The protocol `spawn_seat` request and `hire_agent`
 accept the same optional `pipeline` field alongside `placement`.
-Local Codex accounts use the registered account labels and homes; local Claude
-accounts use `claudeAccounts` entries (`{label, home}`) plus the implicit
-`default` profile. The owner registers their existing alternate directory with
-`clankie accounts claude add /absolute/config/home --label second` (also
-`/accounts claude` in the console); no login or profile path is guessed.
-Profile selection confers no grants.
+Local and linked-machine hires choose the signed-in identity listed by
+`worker_accounts` (its stable `label`/`accountKey`), then an existing home signed
+into that identity. Discovery includes standard homes, the environment-selected
+home and optional registered overrides. Existing profile aliases remain bound
+to their original identity after a folder re-signs; an absent identity prompts
+the owner to sign into that account and never tries another account. Usage and
+holds follow the identity. Account selection confers no grants.
 
-A hire on a linked machine (`fleet`) resolves `account` against that machine's
-own profiles, which it reports through the fleet link: its default Claude
-profile and Codex home plus every `~/.claude-<label>` and `~/.codex-<label>`
-directory (a Codex one needs `config.toml` or `auth.json`). The chosen home
-reaches the pane and, for Codex, the remote app-server and its tracker read as
-`CLAUDE_CONFIG_DIR` / `CODEX_HOME`; the default profile keeps the machine's own
-environment. An explicit label that is missing, signed out, refused by its
-vendor or out of usage fails `harness_unavailable` naming the machine, profile
-and the sign-in command to run there; no other account is tried. Without a
-label (or with `auto`), Clankie takes a usable account the owner has not held,
-Codex by headroom; if the machine cannot be asked at all, the hire keeps its
-default home as before. A resumed remote session keeps its saved home.
+The selected home reaches the pane and native harness as `CLAUDE_CONFIG_DIR` /
+`CODEX_HOME`. Its identity is checked again before a new pane starts. Without an
+account (or with `auto`), Clankie selects a usable, unheld identity by allocation;
+an unavailable discovery refuses instead of silently using a default sign-in.
+A resumed remote session keeps its saved home.
 
 `clankie fleet set --hire-profile FILE.json` replaces all fleet hire defaults with the
 same profile keys (`subagents` is `{model, effort}`); `fleet status` includes the
@@ -4860,28 +4866,18 @@ The owner-authenticated API is `POST /v1/remote-leads/{prepare,launch,revoke}`.
 before service cutover, and releases include it. A missing bridge returns a
 503 with that build command rather than an opaque 500.
 
-Launch uses the PC's existing signed-in Claude.ai profile. Optional `account`
-selects `~/.claude-<label>` on that machine, using the same labels as
-`hire_agent` and `worker_accounts --fleet`. For example, `"account": "work"`
-selects `~/.claude-work`, taking precedence over the SSH environment's
-`CLAUDE_CONFIG_DIR`. Labels start with a lowercase letter and contain only
-lowercase letters, digits, underscores or hyphens, up to 64 characters.
-`"account": "default"` prefers an existing `~/.claude-default` directory;
-when that directory is absent, it selects the bare `~/.claude` profile, matching
-the Mac's `default` label even when other profiles are signed in.
-The selected profile must already exist and pass native Claude.ai sign-in
-verification; missing, logged-out or unverifiable selections refuse without
-falling back to another profile. An existing `~/.claude-default` that fails
-verification never falls back to `~/.claude`. Refusals name the selected directory
-and its sign-in command. Sign in on the PC with `$env:CLAUDE_CONFIG_DIR = Join-Path $HOME
-'.claude-work'; claude auth login` before launching with that label.
+Launch uses an existing signed-in Claude.ai identity on the PC. Optional
+`account` is the stable identity key (`label`) from `worker_accounts --fleet`;
+legacy profile aliases stay bound to their originally discovered identity.
+The service selects a current home for that identity and the bootstrap verifies
+its native non-secret identity before preparing the lead plugin or making a pane.
+Missing, logged-out, changed or unverifiable identities refuse with a sign-in
+prompt; no other account is tried and no credentials are copied.
 
-Without `account`, a relaunch into the same conversation reuses the last completed
-launch’s recorded label for that fleet and workspace. An explicit label overrides
-that choice. Fresh launches honor `CLAUDE_CONFIG_DIR`; otherwise they inspect
-existing `.claude`, `.claude-*` and numbered profiles and requires exactly one
-signed-in profile. It never creates a profile or copies credentials. An
-ambiguous choice requires an explicit account or a profile selected on the PC.
+A relaunch into the same conversation, fleet and workspace reuses the last
+completed launch's recorded identity when `account` is omitted. An explicit
+identity overrides that choice. A fresh launch chooses a usable, unheld identity
+from the same account discovery and allocation as worker hires.
 
 Before allocating a pane, launch installs the content-addressed plugin through
 the native `clankie-remote-leads` marketplace and additively approves its channel

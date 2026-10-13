@@ -42,17 +42,16 @@ machine's current `workers` ceiling and approved working directory.
 Launch allows the session's delegated lead MCP tools, including `message_seat`,
 in auto mode independently of maximum trust; other harness permissions remain
 subject to the selected profile and mode.
-Launch may name `account` to select the target machine's existing
-`~/.claude-<label>` profile (the labels from `worker_accounts --fleet`).
-The `default` label prefers `~/.claude-default`
-when that directory exists, otherwise selects `~/.claude`.
-The explicit selection wins over the SSH `CLAUDE_CONFIG_DIR` and other signed-in
-profiles, and refuses unless native Claude.ai sign-in is
-verified; never create a profile, copy credentials or substitute another account.
-The refusal explains how the owner can sign in on the PC. A deliberate relaunch
-into the same conversation, fleet and workspace reuses the recorded account
-label when `account` is omitted; an explicit label overrides it. A fresh launch
-uses environment selection or the exactly-one-signed-in-profile behavior.
+Launch may name `account` using the stable identity key (`label`/`accountKey`)
+from `worker_accounts --fleet`. Discovery groups homes signed into the same
+account; cards show the signed-in name or email. Existing profile aliases stay
+bound to their original identity after a home re-signs. Saved preferences, holds
+and usage follow the identity. A hire or remote lead picks a current home signed
+into that identity and verifies it before launch; an absent or changed identity
+refuses with a sign-in prompt. Never create a profile, copy credentials or
+substitute another account. A deliberate relaunch into the same conversation,
+fleet and workspace reuses its recorded identity when `account` is omitted;
+a fresh launch chooses a usable, unheld identity from the account list.
 
 Remote bridges retry temporary transport and native-proof loss. Restart recovery
 requires the original pane, shell/harness lifetime, native session and chat;

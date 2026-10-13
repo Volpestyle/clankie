@@ -107,7 +107,7 @@ it("registers an existing alternate Claude profile without reading or modifying 
   try {
     const settings = new SettingsStore(join(dir, "settings.json"));
     const result = await runClaudeAccountsCommand(["add", dir, "--label", "second"], { settings, env: {} });
-    expect(result.accounts).toEqual(expect.arrayContaining([expect.objectContaining({ label: "second" })]));
+    expect(result.profiles).toEqual(expect.arrayContaining([expect.objectContaining({ label: "second" })]));
     await expect(runClaudeAccountsCommand(["add", dir, "--label", "default"], { settings })).rejects.toThrow(
       "implicit",
     );

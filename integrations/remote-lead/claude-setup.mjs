@@ -56,6 +56,15 @@ export async function prepareClaude(executable, plugin, options = {}) {
       throw new Error(`Native Claude ${args.slice(0, 3).join(" ")} failed; inspect that profile on the PC`);
     }
   };
+  const matchesIdentity = (status) => {
+    const expected = options.expectedIdentity;
+    return (
+      !expected ||
+      ((expected.accountId === undefined || expected.accountId === status.accountId) &&
+        (expected.organizationId === undefined || expected.organizationId === status.orgId) &&
+        (expected.email === undefined || expected.email.toLowerCase() === status.email?.toLowerCase()))
+    );
+  };
   let accountDirectory = `.claude-${account}`;
   if (account === "default") {
     try {
@@ -66,16 +75,18 @@ export async function prepareClaude(executable, plugin, options = {}) {
     }
   }
   const candidates =
-    account !== undefined
-      ? [join(home, accountDirectory)]
-      : env.CLAUDE_CONFIG_DIR
-        ? [env.CLAUDE_CONFIG_DIR]
-        : [
-            join(home, ".claude"),
-            ...(await readdir(home, { withFileTypes: true }))
-              .filter((entry) => entry.isDirectory() && /^\.claude(?:-.*|\d+)$/u.test(entry.name))
-              .map((entry) => join(home, entry.name)),
-          ];
+    options.profileHome !== undefined
+      ? [options.profileHome]
+      : account !== undefined
+        ? [join(home, accountDirectory)]
+        : env.CLAUDE_CONFIG_DIR
+          ? [env.CLAUDE_CONFIG_DIR]
+          : [
+              join(home, ".claude"),
+              ...(await readdir(home, { withFileTypes: true }))
+                .filter((entry) => entry.isDirectory() && /^\.claude(?:-.*|\d+)$/u.test(entry.name))
+                .map((entry) => join(home, entry.name)),
+            ];
   const signed = new Set();
   let accountFailure = "does not exist or cannot be accessed";
   for (const profile of candidates) {
@@ -83,7 +94,9 @@ export async function prepareClaude(executable, plugin, options = {}) {
       const existing = await realpath(profile); // Never manufacture a profile or copy credentials.
       accountFailure = "could not verify native Claude sign-in";
       const status = JSON.parse(await invoke(["auth", "status"], existing));
-      if (status.loggedIn === true && status.authMethod === "claude.ai") signed.add(existing);
+      const matches = matchesIdentity(status);
+      if (status.loggedIn === true && status.authMethod === "claude.ai" && matches) signed.add(existing);
+      else if (!matches) accountFailure = "changed sign-in; select the intended account again";
       else accountFailure = "is not signed in to Claude.ai";
     } catch {
       /* An absent or logged-out profile is not a launch target. */
@@ -92,7 +105,7 @@ export async function prepareClaude(executable, plugin, options = {}) {
   if (signed.size !== 1)
     throw new Error(
       account !== undefined
-        ? `Claude account '${account}' at ~/${accountDirectory} ${accountFailure}; sign in to the intended profile on the PC with $env:CLAUDE_CONFIG_DIR = Join-Path $HOME '${accountDirectory}'; claude auth login, then retry. Launch never creates a profile or copies credentials`
+        ? `Claude account '${account}' at ${options.profileHome ?? `~/${accountDirectory}`} ${accountFailure}; sign in to the intended profile on the PC with $env:CLAUDE_CONFIG_DIR = Join-Path $HOME '${accountDirectory}'; claude auth login, then retry. Launch never creates a profile or copies credentials`
         : signed.size
           ? "Multiple signed-in Claude profiles; select an account label in the launch request or the PC profile with CLAUDE_CONFIG_DIR"
           : "No existing signed-in Claude.ai profile; James must sign in to the intended PC profile",
@@ -217,6 +230,16 @@ export async function prepareClaude(executable, plugin, options = {}) {
       delete authCache[leadServer];
       await writeFile(authCachePath, JSON.stringify(authCache));
     }
+  }
+  if (options.expectedIdentity) {
+    const current = parse(
+      await invoke(["auth", "status"], profile),
+      "Could not verify the selected Claude identity before launch",
+    );
+    if (current.loggedIn !== true || current.authMethod !== "claude.ai" || !matchesIdentity(current))
+      throw new Error(
+        "The selected Claude home changed sign-in during preparation; sign in to the intended account and retry. No other account was tried",
+      );
   }
   return profile;
 }

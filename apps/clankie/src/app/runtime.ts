@@ -1085,7 +1085,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     ),
   );
   app.route("/", createMachineJoinRoutes(dependencies.machineJoins, authorizeOwnerSecrets));
-  app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
+  app.route(
+    "/",
+    createAccountRoutes(
+      dependencies.accounts,
+      authorizeOwnerSecrets,
+      settingsSource,
+      dependencies.workerAccounts,
+    ),
+  );
   app.route(
     "/",
     createFleetResourceRoutes(
@@ -1360,7 +1368,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  app.route("/", createWorkerAccountHoldsRoutes(authorizeOwnerSecrets, settingsSource));
+  app.route(
+    "/",
+    createWorkerAccountHoldsRoutes(
+      authorizeOwnerSecrets,
+      settingsSource,
+      dependencies.captain.resolveWorkerAccountLabel,
+    ),
+  );
   const workerAccounts = dependencies.workerAccounts;
   app.route(
     "/",

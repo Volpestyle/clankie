@@ -234,9 +234,11 @@ credential holder.
   the loopback watch URL without controlling the body.
 - `/skills` lists the skills shipped with Clankie. Every shipped skill is always
   on for sessions and local hires.
-- `/accounts codex list` shows local Codex homes and observed quota headroom.
-  `/accounts codex add HOME --label LABEL` registers an owner-signed-in home;
-  `/accounts codex remove LABEL` forgets it without deleting credentials.
+- `/accounts codex list` and `/accounts claude list` show discovered signed-in
+  identities and their homes, matching usage and app Settings. Multiple homes
+  with one identity produce one account. `add HOME --label LABEL` is an optional
+  discovery override; `remove LABEL` forgets the override without changing sign-in.
+  Re-signs produce one notice; saved choices stay with the original identity.
 - `/share [list | request JSON]` controls owner-only local Activity artifact shares; see [the CLI](../../docs/cli.md#activity-shares). Hosted launch/admission remains pending.
 - `/games` opens a toggle dialog for PokeAgent play; press Enter to enable or
   disable it. `/games on|off` remains available for direct use. Restart Clankie

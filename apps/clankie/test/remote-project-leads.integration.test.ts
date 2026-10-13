@@ -1,3 +1,4 @@
+import { harnessAccountKey } from "../src/captain/harness-account-identities.ts";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -88,6 +89,19 @@ it("launches an approved Windows workspace through the real conversation store w
   const resume = new Promise<void>((r) => {
     release = r;
   });
+  const nativeAccount = {
+    harness: "claude" as const,
+    label: "volpestyle",
+    home: "C:\\fixture-profile",
+    signedIn: true,
+    identity: "owner@example.test",
+    plan: "max",
+    headroom: null,
+    usable: true,
+    workerPlugin: true,
+    onboarded: true,
+  };
+  const identityKey = harnessAccountKey(nativeAccount)!;
   const providerCalls: string[] = [];
   const observed: { tool: string; owner?: { conversationId: string }; recipient?: unknown }[] = [];
   const mcp = createMcpHost({
@@ -157,6 +171,12 @@ it("launches an approved Windows workspace through the real conversation store w
   const captain = createCaptain(
     {
       herdrAvailable: () => false,
+      fleets: {
+        list: [fleet],
+        run: () => async () => "{}",
+        remoteWorkspace: async () => true,
+        shell: () => async () => JSON.stringify({ schemaVersion: 1, accounts: [nativeAccount] }),
+      },
       presence: { listSessions: async () => [] },
       embodiment: { getLiveSession: async () => undefined },
       browser: { catalog: async () => ({ available: false, tools: [] }) },
@@ -212,7 +232,7 @@ it("launches an approved Windows workspace through the real conversation store w
             const input=JSON.parse(line);
             if(frame++===0) {
               if(input.cwd!==${JSON.stringify(cwd)}) process.exit(2);
-              if(input.account!=='volpestyle') process.exit(4);
+              if(input.account!==${JSON.stringify(identityKey)} || input.profileHome!==${JSON.stringify(nativeAccount.home)} || input.expectedIdentity.email!==${JSON.stringify(nativeAccount.identity)}) process.exit(4);
               if(input.maximumTrust!==true) process.exit(5);
               console.log(JSON.stringify({stage:'allocated',pane:'w1:p1',shell:{pid:123,startTime:'2026-10-09T00:00:00Z'}}));
             } else {
@@ -280,7 +300,7 @@ it("launches an approved Windows workspace through the real conversation store w
       stage: "dispatched",
       pane: "pc/w1:p1",
       maximumTrust: true,
-      account: "volpestyle",
+      account: identityKey,
     });
     await expect(
       captain.serveOperatorConversation({
@@ -515,7 +535,7 @@ it("launches an approved Windows workspace through the real conversation store w
     expect(malformed).toMatchObject({
       stage: "unconfirmed",
       failedStage: "dispatching",
-      account: "volpestyle",
+      account: identityKey,
       error: "Remote lead reply is not valid JSON",
       // VUH-2075: the lead hears which panes were left behind, this one included.
       leftBehind: [{ requestId: input.requestId, pane: "pc/w1:p1", stage: "dispatched" }],

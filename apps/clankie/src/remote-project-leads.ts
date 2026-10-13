@@ -1,3 +1,4 @@
+import { chooseWorkerAccount } from "./captain/harness-accounts.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -352,7 +353,23 @@ process.stdin.on('end', () => {
       // Current Windows native proof names the registered fleet as its machine.
       if (connection?.machine !== input.fleet)
         throw new Error("Remote lead requires an exact fleet/machine binding");
-      const account = input.account ?? (await this.recordedAccount(conversationId, input));
+      let account = input.account ?? (await this.recordedAccount(conversationId, input));
+      let profileHome: string | undefined;
+      let expectedIdentity: { email?: string; accountId?: string; organizationId?: string } | undefined;
+      if (this.options.captain.readWorkerAccounts) {
+        const report = await this.options.captain.readWorkerAccounts(input.fleet, ["claude"]);
+        const choice = chooseWorkerAccount(input.fleet, "claude", report, account);
+        if ("refused" in choice) throw new Error(choice.refused);
+        account = choice.account.label;
+        profileHome = choice.account.home;
+        expectedIdentity = {
+          ...(choice.account.identity === undefined ? {} : { email: choice.account.identity }),
+          ...(choice.account.identityId === undefined ? {} : { accountId: choice.account.identityId }),
+          ...(choice.account.organizationId === undefined
+            ? {}
+            : { organizationId: choice.account.organizationId }),
+        };
+      }
       const nativeSession = randomUUID();
       // The owner's switch at launch (VUH-2048); a running lead keeps its mode.
       const maximumTrust = settings.maximumTrustMode;
@@ -384,6 +401,8 @@ process.stdin.on('end', () => {
           title: input.title,
           fleet: input.fleet,
           account,
+          profileHome,
+          expectedIdentity,
           nativeSession,
           plugin: prepared.directory,
           maximumTrust,

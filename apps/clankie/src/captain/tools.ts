@@ -985,7 +985,7 @@ function hireAgentTool(
         Type.String({
           pattern: "^[a-z][a-z0-9_-]{0,63}$",
           description:
-            "Codex or Claude account label on the hire's machine (worker_accounts lists them with sign-in and usage). Explicit labels are used exactly or refused with the reason and fix, never swapped. Omitted inherits role/fleet, else Clankie picks a usable, unheld account by headroom. Locally labels come from codexAccounts/claudeAccounts; on a linked machine from its ~/.claude-<label> and ~/.codex-<label> homes. 'auto' means no preference.",
+            "Codex or Claude account identity key from worker_accounts (its label field), on the hire's machine. The key stays with the signed-in identity across homes and re-signs. Existing profile aliases remain bound to their original identity. An explicit identity is used exactly or refused with a sign-in prompt, never swapped. Omitted inherits role/fleet, else Clankie picks a usable, unheld account by headroom. 'auto' means no preference.",
         }),
       ),
       title: Type.String({

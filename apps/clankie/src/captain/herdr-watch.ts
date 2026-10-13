@@ -3317,21 +3317,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   /**
-   * This Mac's best-ranked account on a harness for an automatic hire
-   * (VUH-1974), or nothing when its accounts cannot be read or none can take
-   * the hire; the caller then keeps its previous choice.
-   */
-  private async allocatedLocalAccount(
-    harness: "claude" | "codex",
-  ): Promise<{ readonly label: string; readonly why: string } | undefined> {
-    if (this.workerAccounts === undefined) return undefined;
-    const report = await this.workerAccounts(undefined, harness).catch(() => undefined);
-    if (report === undefined) return undefined;
-    const choice = chooseWorkerAccount("this Mac", harness, report);
-    return "refused" in choice ? undefined : { label: choice.account.label, why: choice.why };
-  }
-
-  /**
    * Starts the seat, and states on its receipt which harness and account
    * Clankie chose for it and why, when the request left either open.
    */
@@ -3442,6 +3427,33 @@ export class HerdrWatchStore implements HerdrWatchPort {
         control: { mode: "unavailable", reason: unavailableReason, detail },
       };
     }
+    // Resolve a preference to an identity before preparing any native launch.
+    // The chosen home is replaceable; the requested identity is not.
+    let identityAccount: import("./harness-accounts.ts").WorkerAccountStatus | undefined;
+    const identityHarness =
+      input.harness === "claude" || input.harness === "codex" ? input.harness : undefined;
+    if (
+      resume === undefined &&
+      identityHarness &&
+      this.workerAccounts &&
+      this.nativeLaunchPolicy?.prepare === undefined
+    ) {
+      const report = await this.workerAccounts(remote, identityHarness).catch(() => undefined);
+      if (!report)
+        return {
+          outcome: "failed",
+          reason: "harness_unavailable",
+          detail: "Could not verify the requested sign-in; no account was tried.",
+        };
+      const choice = chooseWorkerAccount(remote ?? "this Mac", identityHarness, report, input.account);
+      if ("refused" in choice)
+        return { outcome: "failed", reason: "harness_unavailable", detail: choice.refused };
+      identityAccount = choice.account;
+      if (input.account === undefined) {
+        chosen.account = choice.account.label;
+        chosen.reason = `${choice.account.identity ?? choice.account.displayName ?? choice.account.harness}: ${choice.why}`;
+      }
+    }
     if (this.nativeLaunchPolicy?.prepare) {
       await this.admitProjectLaunch(input, true);
       await this.commitRemoteLaunch(receiptKey, input);
@@ -3451,7 +3463,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
       seat: structuredClone(input),
       resumed: resume !== undefined,
     });
-    let account: CodexAccount | undefined = prepared?.account;
+    let account: CodexAccount | undefined =
+      identityAccount && identityHarness === "codex"
+        ? { label: identityAccount.label, home: identityAccount.home }
+        : prepared?.account;
     const accountHarness =
       input.harness === "codex" || input.harness === "claude" ? input.harness : undefined;
     if (input.account !== undefined && accountHarness === undefined) {
@@ -3461,103 +3476,69 @@ export class HerdrWatchStore implements HerdrWatchPort {
         detail: "Account overrides apply to Codex and Claude hires only.",
       };
     }
-    // A linked machine answers for its own profiles; an explicit choice is
-    // used exactly or refused, never swapped for another account.
+    if (
+      prepared === undefined &&
+      remote !== undefined &&
+      accountHarness &&
+      input.account !== undefined &&
+      !identityAccount
+    )
+      return {
+        outcome: "failed",
+        reason: "harness_unavailable",
+        detail:
+          resume !== undefined
+            ? "A resumed remote session keeps its saved home; omit account."
+            : `Account discovery on ${remote} is unavailable; no account was tried.`,
+      };
     let remoteAccountEnv: Record<string, string> | undefined;
-    if (prepared === undefined && remote !== undefined && accountHarness !== undefined) {
-      if (input.account !== undefined && (resume !== undefined || this.workerAccounts === undefined))
-        return {
-          outcome: "failed",
-          reason: "harness_unavailable",
-          detail:
-            resume !== undefined
-              ? "A resumed remote session keeps the home it was saved in; omit account."
-              : `Account choice on ${remote} is unavailable in this service; no account was tried.`,
+    let claudeHome: string | undefined;
+    let claudeLabel = input.account;
+    if (identityAccount) {
+      if (remote !== undefined)
+        remoteAccountEnv = {
+          [identityHarness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"]: identityAccount.home,
         };
-      if (resume === undefined && this.workerAccounts !== undefined) {
-        const report = await this.workerAccounts(remote, accountHarness).catch(() => undefined);
-        const accounts = report?.accounts.filter((entry) => entry.harness === accountHarness) ?? [];
-        const choice =
-          report === undefined
-            ? ({ refused: `${remote} did not answer the account probe.` } as const)
-            : chooseWorkerAccount(remote, accountHarness, report, input.account);
-        if ("refused" in choice) {
-          // An unobservable machine keeps its default home for an automatic
-          // choice, as before account choice existed; an explicit one stops.
-          const unobservable = accounts.every((entry) => entry.signedIn === null);
-          if (input.account !== undefined || !unobservable)
-            return { outcome: "failed", reason: "harness_unavailable", detail: choice.refused };
-        } else {
-          account = { label: choice.account.label, home: choice.account.home };
-          if (input.account === undefined) {
-            chosen.account = choice.account.label;
-            chosen.reason = `account ${choice.account.label} on ${remote}: ${choice.why}`;
-          }
-          if (choice.account.label !== "default")
-            remoteAccountEnv = {
-              [accountHarness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"]: choice.account.home,
-            };
-        }
+      else if (identityHarness === "claude") {
+        claudeHome = await realpath(identityAccount.home).catch(() => undefined);
+        claudeLabel = identityAccount.label;
+        if (!claudeHome)
+          return {
+            outcome: "failed",
+            reason: "harness_unavailable",
+            detail:
+              "The selected identity's home is unavailable; sign in to that account again. No other account was tried.",
+          };
       }
-    }
-    if (prepared === undefined && remote === undefined && input.harness === "codex") {
+    } else if (prepared === undefined && remote === undefined && input.harness === "codex") {
+      // Legacy adapters without account discovery still support saved sessions.
       try {
         const accounts = await this.accounts();
         const held = ((await this.accountHolds?.().catch(() => [])) ?? [])
           .filter((hold) => hold.machine === "local" && hold.harness === "codex")
           .map((hold) => hold.label);
-        const ranked =
-          resume === undefined && input.account === undefined
-            ? await this.allocatedLocalAccount("codex")
-            : undefined;
-        const registered = ranked && accounts.find((entry) => entry.label === ranked.label);
         const selected =
-          registered ??
-          (resume === undefined
+          resume === undefined
             ? await selectLiveCodexAccount(accounts, input.account, held)
-            : await savedCodexAccount(resume, accounts, input.account));
+            : await savedCodexAccount(resume, accounts, input.account);
         account = { label: selected.label, home: selected.home };
-        if (registered) {
-          chosen.account = registered.label;
-          chosen.reason = `account ${registered.label}: ${ranked!.why}`;
-        }
       } catch (error) {
         return { outcome: "failed", reason: "harness_unavailable", detail: reasonDetail(error) };
       }
-    }
-    let claudeHome: string | undefined;
-    let claudeLabel = input.account;
-    // No layer named a Claude profile: the allocation ranking picks one of
-    // this Mac's registered profiles. `default` keeps the service's own
-    // profile; an unreadable ranking keeps it too, as before account choice.
-    if (
-      input.harness === "claude" &&
-      claudeLabel === undefined &&
-      remote === undefined &&
-      prepared === undefined &&
-      resume === undefined
-    ) {
-      const ranked = await this.allocatedLocalAccount("claude");
-      if (ranked !== undefined) {
-        chosen.account = ranked.label;
-        chosen.reason = `account ${ranked.label}: ${ranked.why}`;
-        if (ranked.label !== "default") claudeLabel = ranked.label;
-      }
-    }
-    if (input.harness === "claude" && claudeLabel && remote === undefined) {
+    } else if (input.harness === "claude" && claudeLabel && remote === undefined) {
       const selected = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === claudeLabel);
       if (!selected)
         return {
           outcome: "failed",
           reason: "harness_unavailable",
-          detail: `Claude account ${claudeLabel} is not registered. Configure its profile home in claudeAccounts; no login or account fallback was attempted.`,
+          detail: `No home is signed into Claude account ${claudeLabel}; sign in to the intended account. No other account was tried.`,
         };
       claudeHome = await realpath(selected.home).catch(() => undefined);
       if (!claudeHome)
         return {
           outcome: "failed",
           reason: "harness_unavailable",
-          detail: `Claude account ${claudeLabel} profile home is unavailable. Register its existing directory again; no account fallback was attempted.`,
+          detail: "Claude profile home is unavailable; no account fallback was attempted.",
         };
     }
     let paneId: string;
@@ -3574,6 +3555,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ? { env: { CODEX_HOME: account.home } }
           : {}),
     };
+    if (identityAccount && identityHarness)
+      skillLaunch = {
+        ...skillLaunch,
+        env: {
+          ...skillLaunch.env,
+          [identityHarness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"]: identityAccount.home,
+        },
+      };
     try {
       if (prepared === undefined && remote === undefined && this.skillBundle !== undefined) {
         skillLaunch = await workerSkills(
@@ -3649,7 +3638,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         if (authority !== undefined) await assertConversationAuthority(authority);
         await this.admitProjectLaunch(input);
       }
-      if (claudeHome) {
+      if (claudeHome && !identityAccount) {
         const current = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === claudeLabel);
         if (!current || (await realpath(current.home).catch(() => undefined)) !== claudeHome)
           throw new Error("Claude account profile changed during startup");
@@ -3660,6 +3649,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // command can create its native process.
       if (this.fleetResources) await this.admitResourceMutation(input, authority);
       await this.admitProjectLaunch(input, true);
+      if (identityAccount && identityHarness && this.workerAccounts) {
+        const current = await this.workerAccounts(remote, identityHarness);
+        const stillSigned = current.accounts.some(
+          (entry) =>
+            entry.accountKey === identityAccount!.accountKey &&
+            entry.label === identityAccount!.label &&
+            (entry.homes ?? [{ home: entry.home }]).some((home) => home.home === identityAccount!.home),
+        );
+        if (!stillSigned)
+          throw new Error(
+            "The selected home changed sign-in during startup; no agent was started. Select the intended account again.",
+          );
+      }
+      if (authority !== undefined) await assertConversationAuthority(authority);
       const group = this.projectContexts.get(input)?.projectName ?? input.deliverable;
       paneId = await createTab({
         ...(group === undefined ? {} : { group }),

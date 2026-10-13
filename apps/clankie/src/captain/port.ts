@@ -307,6 +307,11 @@ export interface CaptainPort {
   ): Promise<DiscordChannelProjectionMessageResult>;
   /** Callable operator service; read cancellation stops conversation tails without interrupting turns. */
   /** Host-only roster, exposed to paired owners at the authenticated app boundary. */
+  resolveWorkerAccountLabel?(machine: string, harness: string, label: string): string;
+  readWorkerAccounts?(
+    fleet?: string,
+    harnesses?: readonly import("./harness-accounts.ts").WorkerAccountHarness[],
+  ): Promise<import("./harness-accounts.ts").MachineWorkerAccounts>;
   leadChats?(): Promise<readonly import("@clankie/protocol").LeadChat[]>;
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,

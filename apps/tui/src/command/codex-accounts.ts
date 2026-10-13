@@ -1,15 +1,15 @@
+import { readHarnessAccountList } from "./harness-account-list.ts";
+import type { OwnerSettingsApiOptions } from "./owner-settings-api.ts";
 import {
   registerCodexAccount,
   removeCodexAccount,
-  codexAccounts,
-  readCodexAccountStatus,
   defaultSettingsPath,
   SettingsStore,
 } from "@clankie/settings";
 
 export async function runCodexAccountsCommand(
   args: readonly string[],
-  options: { env?: NodeJS.ProcessEnv; settings?: SettingsStore } = {},
+  options: OwnerSettingsApiOptions & { settings?: SettingsStore } = {},
 ) {
   const env = options.env ?? process.env;
   const store = options.settings ?? new SettingsStore(defaultSettingsPath(env));
@@ -22,8 +22,14 @@ export async function runCodexAccountsCommand(
     throw new Error("Usage: clankie accounts codex [list | add HOME --label LABEL | remove LABEL]");
   }
   return {
-    ok: true,
-    accounts: await Promise.all(codexAccounts(await store.load(), env).map(readCodexAccountStatus)),
+    ...(verb === "add" || verb === "remove"
+      ? {
+          ok: true as const,
+          accounts: [] as Awaited<ReturnType<typeof readHarnessAccountList>>["accounts"],
+          notices: [],
+        }
+      : await readHarnessAccountList("codex", options)),
+    profiles: (await store.load()).codexAccounts,
     settingsFile: store.path,
   };
 }

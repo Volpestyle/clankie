@@ -3,6 +3,7 @@
  * its headroom, add or remove one. Writes go through the same commands as
  * `clankie accounts codex|claude`, which never read credentials.
  */
+import { harnessAccountName } from "@clankie/protocol/worker-accounts";
 import type { runClaudeAccountsCommand } from "./command/claude-accounts.ts";
 import type { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import type { ClankieFaceShell } from "./shell/shell.ts";
@@ -42,17 +43,8 @@ function workerAccountHint(account: WorkerAccountRow): string {
     .join(" · ");
 }
 type Harness = "claude" | "codex";
-type CodexAccount = Awaited<ReturnType<typeof runCodexAccountsCommand>>["accounts"][number];
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const home = (path: string) => path.replace(/^\/(?:Users|home)\/[^/]+/u, "~");
-
-/** `signed in · 42% headroom` for Codex; Claude profiles carry no readable status. */
-function codexAccountHint(account: CodexAccount): string {
-  return [
-    account.authPresent ? "signed in" : "not signed in",
-    account.headroom === null ? "headroom unknown" : `${Math.round(account.headroom * 100)}% headroom`,
-  ].join(" · ");
-}
 
 export async function runAccountsMenu(
   shell: ClankieFaceShell,
@@ -103,24 +95,25 @@ export async function runAccountsMenu(
 async function harnessAccounts(shell: ClankieFaceShell, services: AccountsMenuServices, harness: Harness) {
   const flow = shell.setupFlow;
   const run = services[harness];
-  const title = harness === "claude" ? "Claude profiles" : "Codex accounts";
+  const title = harness === "claude" ? "Claude accounts" : "Codex accounts";
   for (;;) {
-    const rows =
-      harness === "claude"
-        ? (await services.claude([])).accounts.map((account) => ({
-            value: account.label,
-            label: account.label,
-            hint: home(account.home),
-          }))
-        : (await services.codex([])).accounts.map((account) => ({
-            value: account.label,
-            label: account.label,
-            hint: codexAccountHint(account),
-            description: home(account.home),
-          }));
+    const report = await run([]);
+    const rows = report.accounts.map((account) => ({
+      value: account.label,
+      label: harnessAccountName(account),
+      hint: `${account.signedIn ? "signed in" : "sign in required"} · ${home(account.home)}`,
+    }));
     const choice = await flow.readSelect({
       message: title,
-      options: [...rows, { value: "\0add", label: "Add an account…", hint: "an existing profile home" }],
+      options: [
+        ...rows,
+        { value: "\0add", label: "Add a profile override…", hint: "an existing profile home" },
+        ...report.profiles.map((profile) => ({
+          value: `\0remove:${profile.label}`,
+          label: `Remove profile override: ${profile.label}`,
+          hint: home(profile.home),
+        })),
+      ],
       allowBack: true,
     });
     if (choice === undefined) return;
@@ -145,12 +138,18 @@ async function harnessAccounts(shell: ClankieFaceShell, services: AccountsMenuSe
         flow.renderLine(`Added ${label.trim()}.`, "success");
         continue;
       }
-      if (harness === "claude" && choice === "default") {
-        flow.renderLine("The default Claude profile is implicit and stays.", "info");
+      if (!choice.startsWith("\0remove:")) {
+        const account = report.accounts.find((entry) => entry.label === choice);
+        if (account)
+          flow.renderLine(
+            `${harnessAccountName(account)} · ${account.label} · ${(account.homes ?? [{ home: account.home }]).map((entry) => home(entry.home)).join(", ")}`,
+            "info",
+          );
         continue;
       }
+      const profileLabel = choice.slice("\0remove:".length);
       const confirm = await flow.readSelect({
-        message: `Remove ${choice}?`,
+        message: `Remove profile override ${profileLabel}?`,
         options: [
           { value: "no", label: "Keep it" },
           { value: "yes", label: "Remove", hint: "the profile home and its login stay on disk" },
@@ -158,8 +157,8 @@ async function harnessAccounts(shell: ClankieFaceShell, services: AccountsMenuSe
         allowBack: true,
       });
       if (confirm !== "yes") continue;
-      await run(["remove", choice]);
-      flow.renderLine(`Removed ${choice}.`, "success");
+      await run(["remove", profileLabel]);
+      flow.renderLine(`Removed profile override ${profileLabel}.`, "success");
     } catch (error) {
       flow.renderLine(message(error), "error");
     }
@@ -195,7 +194,7 @@ async function machineAccounts(
       message: `Worker accounts on ${machine.trim() || "this Mac"} — pick one to hold or release`,
       options: report.accounts.map((account) => ({
         value: `${account.harness}:${account.label}`,
-        label: `${account.harness} ${account.label}`,
+        label: harnessAccountName(account),
         hint: workerAccountHint(account),
         description: account.home,
       })),
@@ -207,10 +206,10 @@ async function machineAccounts(
     try {
       if (account.held) {
         await workers(["release", account.harness, account.label, ...target]);
-        flow.renderLine(`${account.label} is back in automatic choice.`, "success");
+        flow.renderLine(`${harnessAccountName(account)} is back in automatic choice.`, "success");
       } else {
         const reason = await flow.readText({
-          message: `Hold ${account.harness} ${account.label} from automatic choice — why? (optional)`,
+          message: `Hold ${harnessAccountName(account)} from automatic choice — why? (optional)`,
           placeholder: "e.g. plan not renewed; usage saved for Clankie",
           allowBack: true,
           validate: (value) => (value.length > 200 ? "Keep it under 200 characters." : undefined),
@@ -223,7 +222,10 @@ async function machineAccounts(
           ...target,
           ...(reason.trim() ? ["--reason", reason.trim()] : []),
         ]);
-        flow.renderLine(`Held ${account.label}; an explicit hire may still name it.`, "success");
+        flow.renderLine(
+          `Held ${harnessAccountName(account)}; an explicit hire may still name it.`,
+          "success",
+        );
       }
     } catch (error) {
       flow.renderLine(message(error), "error");

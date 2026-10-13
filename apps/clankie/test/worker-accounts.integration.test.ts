@@ -405,7 +405,7 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
       "default",
     );
     expect(explicit.result).toMatchObject({ outcome: "spawned" });
-    expect(explicit.env.some((entry) => entry.startsWith("CODEX_HOME="))).toBe(false);
+    expect(explicit.env).toContain("CODEX_HOME=C:\\Users\\volpe\\.codex");
   });
 
   it("explains why nothing is usable when every account is out", () => {
@@ -658,13 +658,19 @@ describe("a Claude profile that has not finished first-run setup", () => {
       (command, timeout) => shell(`PATH='${bin}':"$PATH"; ${command}`, timeout),
       { harnesses: ["claude"] },
     );
-    const byLabel = Object.fromEntries(report.accounts.map((account) => [account.label, account]));
-    expect(byLabel["work"]).toMatchObject({ signedIn: true, usable: false });
-    expect(byLabel["work"]!.reason).toContain("first-run setup");
-    expect(byLabel["work"]!.reason).toContain(`CLAUDE_CONFIG_DIR='${join(home, ".claude-work")}' claude`);
+    const byLabel = Object.fromEntries(
+      report.accounts.flatMap((account) =>
+        (account.homes ?? [{ label: account.label, home: account.home }]).map((profile) => [
+          profile.label,
+          account,
+        ]),
+      ),
+    );
+    // All three native homes report the same identity: offer it once and
+    // select the prepared home, rather than a separate unusable duplicate.
+    expect(report.accounts).toHaveLength(1);
+    expect(byLabel["work"]!.homes).toHaveLength(3);
     expect(byLabel["ready"]).toMatchObject({ tier: "default_claude_max_20x" });
     expect(byLabel["ready"]!.reason ?? "").not.toContain("first-run setup");
-    expect(byLabel["default"]).not.toHaveProperty("tier");
-    expect(byLabel["default"]!.reason ?? "").not.toContain("first-run setup");
   }, 60_000);
 });

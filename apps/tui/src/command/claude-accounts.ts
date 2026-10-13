@@ -1,12 +1,12 @@
+import { readHarnessAccountList } from "./harness-account-list.ts";
+import type { OwnerSettingsApiOptions } from "./owner-settings-api.ts";
 import { realpath, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { defaultSettingsPath, SettingsStore } from "@clankie/settings";
 
 /** Register existing owner profiles only; never reads credentials or changes login. */
 export async function runClaudeAccountsCommand(
   args: readonly string[],
-  options: { env?: NodeJS.ProcessEnv; settings?: SettingsStore } = {},
+  options: OwnerSettingsApiOptions & { settings?: SettingsStore } = {},
 ) {
   const env = options.env ?? process.env;
   const store = options.settings ?? new SettingsStore(defaultSettingsPath(env));
@@ -29,11 +29,14 @@ export async function runClaudeAccountsCommand(
   } else if (args.length && !(args.length === 1 && verb === "list"))
     throw new Error("Usage: clankie accounts claude [list | add HOME --label LABEL | remove LABEL]");
   return {
-    ok: true,
-    accounts: [
-      { label: "default", home: env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude") },
-      ...(await store.load()).claudeAccounts,
-    ],
+    ...(verb === "add" || verb === "remove"
+      ? {
+          ok: true as const,
+          accounts: [] as Awaited<ReturnType<typeof readHarnessAccountList>>["accounts"],
+          notices: [],
+        }
+      : await readHarnessAccountList("claude", options)),
+    profiles: (await store.load()).claudeAccounts,
     settingsFile: store.path,
   };
 }

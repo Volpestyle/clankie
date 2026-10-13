@@ -171,8 +171,6 @@ import { closeNativeProcessObservers } from "./native-process-transport.ts";
 import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
 import { prepareLocalClaudeShim } from "./herdr-claude-shim.ts";
-import { createWorkerAccountsReader } from "./captain/harness-accounts.ts";
-import { createPiWorkerStatusReader } from "./captain/pi-worker-account.ts";
 import { refreshLinkedHarnesses } from "../../tui/src/harness-refresh.ts";
 import { WorkerPluginNotices } from "./worker-plugin-notices.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
@@ -2115,16 +2113,13 @@ const clankie = await createClankieApp({
       gitWorktree: projectGitWorktree,
     });
   },
-  workerAccounts: createWorkerAccountsReader({
-    piStatus: createPiWorkerStatusReader({
-      enabled: () => process.env.CLANKIE_PI_NATIVE_ENABLED?.trim() === "1",
-      cwd: startupSettings.captain.workingDirectory ?? homedir(),
-      seatModel: runtimeProvider.model?.piSeatModel,
-    }),
-    settings: () => settingsStore.load(),
-    fleet: async (id) => (await runtimes.fleets()).find((entry) => entry.id === id),
-    shell: (fleet) => runtimes.fleetShell(fleet),
-  }),
+  // Keep HTTP discovery on its Claude/Codex/Pi surface; share identity
+  // observation with hires without adding other providers' credential reads.
+  workerAccounts: (fleet, harnesses) =>
+    captain.readWorkerAccounts!(
+      fleet,
+      harnesses?.filter((harness) => harness !== "prime") ?? ["claude", "codex", "pi"],
+    ),
   prepareFleet: async (id: string, options, fleet) => {
     // The route admits an exact target; resolving the ID again could substitute
     // a different machine while operator authority is being revalidated.

@@ -83,7 +83,7 @@ function windowName(window: UsageWindow, compact: boolean): string {
 
 /** The account's own name: its signed-in identity's local part, else its label. */
 function accountName(account: UsageAccount): string {
-  return account.identity?.split("@")[0] ?? account.label;
+  return account.displayName ?? account.identity ?? (account.harness === "prime" ? account.label : "Sign in");
 }
 
 interface WindowView {

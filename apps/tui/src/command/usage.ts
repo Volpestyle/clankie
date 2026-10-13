@@ -116,7 +116,8 @@ export function formatUsageTable(report: UsageReport, now = Date.now(), timeZone
       : `${String(Math.round(window.usedPercent)).padStart(3)}% ${bar(window.usedPercent)} ${usageResetLocal(window.resetsAt, now, timeZone)}`;
   const rows = report.accounts.map((account) => {
     const windows = account.usage?.windows ?? [];
-    const name = account.identity?.split("@")[0] ?? account.label;
+    const name =
+      account.displayName ?? account.identity ?? (account.harness === "prime" ? account.label : "Sign in");
     const note = account.held
       ? `held${account.held.reason ? `: ${account.held.reason}` : ""}`
       : account.spend !== undefined

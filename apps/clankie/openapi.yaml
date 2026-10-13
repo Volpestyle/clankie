@@ -1457,11 +1457,11 @@ paths:
       tags: [Operator]
       operationId: listCodexAccounts
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
-      summary: List registered local Codex homes and observed headroom
-      description: Owner-authorized. Reports credential-file presence, never credential contents. Queries current quota without a model turn, with recent rollouts as fallback. Missing or stale usage is unknown.
+      summary: List discovered local Codex identities and their homes
+      description: Owner-authorized. The same identity-keyed discovery as worker accounts and usage. Native account/read uses refreshToken:false; identity, plan and usage only. Multiple homes signed into one identity share one account. Missing or stale usage is unknown.
       responses:
         "200":
-          description: Default and registered account labels, paths, rate windows and headroom
+          description: Stable identity keys, signed-in email, current homes, rate windows and headroom
         "401":
           description: Authentication required
         "403":
@@ -2760,7 +2760,7 @@ paths:
       tags: [Operator]
       operationId: getWorkerAccounts
       summary: Read one machine's worker accounts and verified Pi profile
-      description: Sign-in, identity, plan, Codex usage headroom, verified Pi model references, holds and whether Clankie would hire on each account now (MachineWorkerAccountsSchema). Omit fleet for this machine; fleet names a runtime connection, the only query accepted. Owner or Take Control device authority.
+      description: Discovered identity-keyed accounts and their homes, sign-in, email, plan, usage headroom, re-sign notices, verified Pi model references, holds and whether Clankie would hire now (MachineWorkerAccountsSchema). Duplicate homes share one account; preferences remain with the identity after a home re-signs. Omit fleet for this machine; fleet names a runtime connection, the only query accepted. Owner or Take Control device authority.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {

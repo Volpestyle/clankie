@@ -1,8 +1,7 @@
+import { gzipSync } from "node:zlib";
 import { execFile } from "node:child_process";
 import { posix, win32 } from "node:path";
 import { z } from "zod";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import {
   codexAccounts,
   codexRateLimit,
@@ -10,6 +9,8 @@ import {
   type ClankieSettings,
 } from "@clankie/settings";
 import type { AccountUsage, MachineAllocation } from "@clankie/protocol/worker-accounts";
+import { harnessAccountIdentities, type HarnessAccountIdentities } from "./harness-account-identities.ts";
+import type { AccountIdentityNotice } from "@clankie/protocol/worker-accounts";
 import { allocateAccounts, rankedAccounts } from "./account-allocation.ts";
 import {
   CLAUDE_USAGE_MIN_VERSION_NUMBER,
@@ -60,6 +61,12 @@ const WORKER_ACCOUNT_HARNESSES: readonly WorkerAccountHarness[] = ["claude", "co
 export interface WorkerAccountStatus {
   readonly harness: WorkerAccountHarness;
   readonly label: string;
+  readonly accountKey?: string;
+  readonly aliases?: readonly string[];
+  readonly homes?: readonly { readonly label: string; readonly home: string }[];
+  readonly displayName?: string;
+  readonly identityId?: string;
+  readonly organizationId?: string;
   /** The profile home on its own machine. */
   readonly home: string;
   readonly signedIn: boolean | null;
@@ -100,6 +107,9 @@ export interface MachineWorkerAccounts {
   readonly shell: HerdrSshTransport["shell"];
   readonly observedAt: string;
   readonly accounts: readonly WorkerAccountStatus[];
+  readonly notices?: readonly AccountIdentityNotice[];
+  readonly accountNames?: Readonly<Record<string, string>>;
+  readonly accountAliases?: Readonly<Record<string, string>>;
   /** A harness the machine could not answer for, with why. */
   readonly unavailable?: Partial<Record<WorkerAccountHarness, string>>;
   /** How Clankie would spread hires over these accounts now (VUH-1974). */
@@ -128,12 +138,13 @@ const dirs = (prefix, extra) => {
   let names = [];
   try { names = fs.readdirSync(home, { withFileTypes: true }); } catch {}
   for (const entry of names) {
-    if (!entry.isDirectory() || !entry.name.startsWith(prefix + "-")) continue;
-    const name = entry.name.slice(prefix.length + 1).toLowerCase();
-    if (!label.test(name) || name === "default") continue;
+    if (!entry.name.startsWith(prefix + "-")) continue;
     const dir = path.join(home, entry.name);
+    try { if (!fs.statSync(dir).isDirectory()) continue; } catch { continue; }
+    const suffix = entry.name.slice(prefix.length + 1).toLowerCase();
+    const name = label.test(suffix) ? suffix : "profile-" + require("node:crypto").createHash("sha256").update(dir).digest("hex").slice(0, 16);
     if (extra && !extra.some((file) => fs.existsSync(path.join(dir, file)))) continue;
-    out.push({ label: name, home: dir });
+    out.push({ label: name === "default" ? "profile-default" : name, home: dir });
   }
   return out.sort((a, b) => a.label.localeCompare(b.label));
 };
@@ -166,21 +177,25 @@ const claudeUsage = async (env) => {
   return r.local_command == "usage" ? { usageLines: String(r.result).split("\n").filter((l) => l.startsWith("Current ")).slice(0, 8) } : {};
 };
 const claude = async (profile) => {
-  const env = envFor("CLAUDE_CONFIG_DIR", profile.isDefault ? process.env.CLAUDE_CONFIG_DIR : profile.home);
+  const env = envFor("CLAUDE_CONFIG_DIR", profile.nativeDefault ? undefined : profile.home);
   const raw = await run("claude", ["auth", "status", "--json"], env);
   let status = null;
   try { status = JSON.parse(String(raw).slice(String(raw).indexOf("{"))); } catch {}
   const usage = status && status.loggedIn === true ? await claudeUsage(env) : {};
   let c = null;
-  try { c = JSON.parse(fs.readFileSync(path.join(profile.isDefault && !process.env.CLAUDE_CONFIG_DIR ? home : profile.home, ".claude.json"), "utf8")); } catch (e) { if (e.code == "ENOENT") c = {}; }
-  const o = c && status && status.loggedIn && c.oauthAccount && c.oauthAccount.emailAddress == status.email ? c.oauthAccount : {};
+  try { c = JSON.parse(fs.readFileSync(path.join(profile.nativeDefault ? home : profile.home, ".claude.json"), "utf8")); } catch (e) { if (e.code == "ENOENT") c = {}; }
+  const o = c && status && status.loggedIn && c.oauthAccount && c.oauthAccount.emailAddress == status.email &&
+    (typeof status.accountId !== "string" || c.oauthAccount.accountUuid === status.accountId) &&
+    (typeof status.orgId !== "string" || c.oauthAccount.organizationUuid === status.orgId) ? c.oauthAccount : {};
   let plugin = false;
   try {
     const registry = JSON.parse(fs.readFileSync(path.join(profile.home, "plugins", "installed_plugins.json"), "utf8"));
     plugin = Array.isArray(registry.plugins && registry.plugins["clankie-worker@clankie"]);
   } catch {}
   return {
-    harness: "claude", label: profile.label, home: profile.home,
+    harness: "claude", label: profile.label, home: profile.home, aliases: profile.aliases,
+    identityId: status && status.loggedIn && typeof status.accountId === "string" ? status.accountId : undefined,
+    organizationId: status && status.loggedIn && typeof status.orgId === "string" ? status.orgId : undefined,
     signedIn: status && typeof status.loggedIn === "boolean" ? status.loggedIn : null,
     identity: status && status.loggedIn && typeof status.email === "string" ? status.email : undefined,
     plan: status && status.loggedIn && typeof status.subscriptionType === "string" ? status.subscriptionType : (status && status.loggedIn && typeof status.authMethod === "string" ? status.authMethod : undefined),
@@ -190,9 +205,9 @@ const claude = async (profile) => {
   };
 };
 const codex = (profile) => new Promise((resolve) => {
-  const result = { harness: "codex", label: profile.label, home: profile.home, signedIn: null };
+  const result = { harness: "codex", label: profile.label, home: profile.home, aliases: profile.aliases, signedIn: null };
   let done = false, buffer = "";
-  const child = cp.spawn("codex", ["app-server", "--listen", "stdio://"], { env: envFor("CODEX_HOME", profile.isDefault ? process.env.CODEX_HOME : profile.home), shell: windows, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+  const child = cp.spawn("codex", ["app-server", "--listen", "stdio://"], { env: envFor("CODEX_HOME", profile.nativeDefault ? undefined : profile.home), shell: windows, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
   const finish = () => { if (done) return; done = true; clearTimeout(timer); try { child.stdin.end(); } catch {} setTimeout(() => kill(child), 500); resolve(result); };
   const timer = setTimeout(finish, input.timeoutMs);
   const send = (value) => { try { child.stdin.write(JSON.stringify(value) + "\n"); } catch {} };
@@ -211,6 +226,7 @@ const codex = (profile) => new Promise((resolve) => {
         const account = message.result && message.result.account;
         result.signedIn = message.error ? null : Boolean(account);
         if (account && typeof account.email === "string") result.identity = account.email;
+        if (account && typeof account.accountId === "string") result.identityId = account.accountId;
         if (account && typeof account.planType === "string") result.plan = account.planType;
         else if (account && typeof account.type === "string") result.plan = account.type;
         const routing = message.result && message.result.workspaceRouting;
@@ -240,14 +256,29 @@ const codex = (profile) => new Promise((resolve) => {
 });
 (async () => {
   const output = { schemaVersion: 1, accounts: [] };
-  const listed = (harness) => input.profiles && input.profiles[harness] ? input.profiles[harness].map((entry) => ({ ...entry, isDefault: entry.label === "default" })) : undefined;
+  const listed = (harness) => input.profiles && input.profiles[harness] ? input.profiles[harness].map(entry => ({ ...entry })) : [];
+  const profiles = (harness) => {
+    const prefix = "." + harness;
+    const configured = process.env[harness === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME"];
+    const selected = configured || path.join(home, prefix);
+    const entries = [{ label: "default", home: selected, nativeDefault: !configured }, ...listed(harness),
+      { label: selected === path.join(home, prefix) ? "default" : "standard-home", home: path.join(home, prefix), nativeDefault: true },
+      ...dirs(prefix, harness === "codex" ? ["config.toml"] : undefined)];
+    const out = new Map();
+    for (const entry of entries) {
+      let canonical; try { canonical = fs.realpathSync(entry.home); } catch { canonical = path.resolve(entry.home); }
+      const key = windows ? canonical.toLowerCase() : canonical;
+      const previous = out.get(key);
+      if (previous) previous.aliases.push(entry.label);
+      else out.set(key, { ...entry, home: canonical, aliases: [entry.label] });
+    }
+    return [...out.values()];
+  };
   if (input.harnesses.includes("claude")) {
-    const profiles = listed("claude") || [{ label: "default", home: process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude"), isDefault: true }, ...dirs(".claude")];
-    output.accounts.push(...(await Promise.all(profiles.map(claude))));
+    output.accounts.push(...(await Promise.all(profiles("claude").map(claude))));
   }
   if (input.harnesses.includes("codex")) {
-    const profiles = listed("codex") || [{ label: "default", home: process.env.CODEX_HOME || path.join(home, ".codex"), isDefault: true }, ...dirs(".codex", ["config.toml", "auth.json"])];
-    output.accounts.push(...(await Promise.all(profiles.map(codex))));
+    output.accounts.push(...(await Promise.all(profiles("codex").map(codex))));
   }
   process.stdout.write(JSON.stringify(output));
   process.exit(0);
@@ -275,6 +306,9 @@ const ProbeOutput = z.object({
         home: z.string().min(1).max(4096),
         signedIn: z.boolean().nullable(),
         identity: z.string().max(320).optional(),
+        identityId: z.string().max(256).optional(),
+        organizationId: z.string().max(256).optional(),
+        aliases: z.array(z.string()).optional(),
         plan: z.string().max(64).optional(),
         workerPlugin: z.boolean().optional(),
         onboarded: z.boolean().optional(),
@@ -313,12 +347,14 @@ const PROBE_OUTPUT_BYTES = 256 * 1024;
 export function workerAccountsProbeCommand(
   shell: HerdrSshTransport["shell"],
   harnesses: readonly WorkerAccountHarness[] = WORKER_ACCOUNT_HARNESSES,
-  /** Registered profiles instead of discovery (this Mac's own registry). */
+  /** Optional extra homes are merged with standard discovery. */
   profiles?: Partial<Record<WorkerAccountHarness, readonly { label: string; home: string }[]>>,
 ): string {
   return remoteProgramCommand(shell, "node", [
     "-e",
-    PROBE,
+    shell === "powershell"
+      ? `require("node:vm").runInThisContext(require("node:zlib").gunzipSync(Buffer.from("${gzipSync(PROBE).toString("base64")}","base64")).toString())`
+      : PROBE,
     JSON.stringify({
       harnesses,
       timeoutMs: PROBE_TIMEOUT_MS,
@@ -347,6 +383,7 @@ export async function readMachineWorkerAccounts(
     readonly harnesses?: readonly WorkerAccountHarness[];
     readonly holds?: readonly WorkerAccountHold[];
     readonly profiles?: Partial<Record<WorkerAccountHarness, readonly { label: string; home: string }[]>>;
+    readonly registry?: HarnessAccountIdentities;
     readonly now?: number;
   } = {},
 ): Promise<MachineWorkerAccounts> {
@@ -375,9 +412,27 @@ export async function readMachineWorkerAccounts(
     machine: fleet.id,
     shell: fleet.ssh.shell,
     observedAt: new Date(now).toISOString(),
-    accounts: parsed.accounts.map((account) =>
-      judgeWorkerAccount(fleet.id, fleet.ssh.shell, account, options.holds ?? [], now),
+    accounts: (options.registry ?? harnessAccountIdentities()).group(
+      fleet.id,
+      parsed.accounts.map((account) =>
+        judgeWorkerAccount(
+          fleet.id,
+          fleet.ssh.shell,
+          account,
+          account.identity ? [] : (options.holds ?? []),
+          now,
+        ),
+      ),
+      options.holds ?? [],
+      now,
     ),
+    ...(options.registry
+      ? {
+          notices: options.registry.notices(fleet.id),
+          accountAliases: options.registry.aliases(fleet.id),
+          accountNames: options.registry.names(fleet.id),
+        }
+      : {}),
   };
 }
 
@@ -450,6 +505,9 @@ function judgeWorkerAccount(
     home: account.home,
     signedIn: account.signedIn,
     ...(account.identity === undefined ? {} : { identity: account.identity }),
+    ...(account.identityId === undefined ? {} : { identityId: account.identityId }),
+    ...(account.organizationId === undefined ? {} : { organizationId: account.organizationId }),
+    ...(account.aliases === undefined ? {} : { aliases: account.aliases }),
     ...(account.plan === undefined ? {} : { plan: account.plan }),
     ...(account.tier === undefined ? {} : { tier: account.tier }),
     headroom,
@@ -528,14 +586,27 @@ export function chooseWorkerAccount(
   const accounts = report.accounts.filter((account) => account.harness === harness);
   const noun = harness === "claude" ? "Claude profile" : "Codex account";
   if (label !== undefined) {
-    const selected = accounts.find((account) => account.label === label);
+    const target = report.accountAliases?.[`${harness}:${label}`] ?? label;
+    const identified = /^account-[a-f0-9]{32}$/u.test(target);
+    const selected = accounts.find((account) =>
+      identified
+        ? account.accountKey === target
+        : account.label === target || account.identity === label || account.aliases?.includes(label),
+    );
     if (!selected) {
       const unavailable = report.unavailable?.[harness];
+      if (unavailable)
+        return {
+          refused: `Cannot confirm ${noun} ${label} on ${machine}: ${unavailable}. No other account was tried.`,
+        };
+      if (target.startsWith("account-"))
+        return {
+          refused: `No verified home on ${machine} for ${noun} ${report.accountNames?.[target] ?? target}. Sign in to the intended account with ${harness === "claude" ? "claude auth login" : "codex login"}, then refresh accounts. No other account was tried.`,
+        };
       return {
-        refused: unavailable
-          ? `Cannot confirm ${noun} ${label} on ${machine}: ${unavailable}. No other account was tried.`
-          : `${machine} has no ${noun} ${label} (it has: ${accounts.map((a) => a.label).join(", ") || "none"}). ` +
-            `${accountFix(machine, report.shell, harness, label, newProfileHome(report, harness, label))} No other account was tried.`,
+        refused:
+          `${machine} has no ${noun} ${label} (it has: ${accounts.map((a) => a.label).join(", ") || "none"}). ` +
+          `${accountFix(machine, report.shell, harness, label, newProfileHome(report, harness, label))} No other account was tried.`,
       };
     }
     if (!selected.usable)
@@ -600,7 +671,13 @@ export function chooseWorkerHarness(
   const allocation = report.allocation ?? allocateAccounts(report);
   const skipped: string[] = [];
   for (const account of report.accounts) {
-    if (!allowed.includes(account.harness) || (label !== undefined && account.label !== label)) continue;
+    if (
+      !allowed.includes(account.harness) ||
+      (label !== undefined &&
+        account.label !== (report.accountAliases?.[`${account.harness}:${label}`] ?? label) &&
+        account.identity !== label)
+    )
+      continue;
     if (!account.usable || account.held) {
       skipped.push(
         `${account.harness} ${account.label}: ${account.held ? `held by the owner${account.held.reason ? ` (${account.held.reason})` : ""}` : account.reason}`,
@@ -675,6 +752,8 @@ export function chooseWorkerHarness(
  * connection id or the machine that connection rides.
  */
 export function createWorkerAccountsReader(options: {
+  readonly identityPath?: string;
+  readonly notifyIdentityChange?: (text: string) => boolean;
   readonly settings: () => Promise<
     Pick<ClankieSettings, "claudeAccounts" | "codexAccounts" | "workerAccountHolds" | "execution">
   >;
@@ -685,6 +764,7 @@ export function createWorkerAccountsReader(options: {
   readonly fleet: (id: string) => Promise<HerdrFleet | undefined>;
   readonly shell?: (fleet: HerdrFleet) => FleetShellRun;
 }) {
+  const registry = harnessAccountIdentities(options.identityPath);
   const readAccounts = async (
     fleetId?: string,
     harnesses?: readonly WorkerAccountHarness[],
@@ -692,26 +772,25 @@ export function createWorkerAccountsReader(options: {
     const current = await options.settings();
     const machine = fleetId ?? "local";
     const connection = current.execution.connections.find((entry) => entry.id === fleetId);
+    registry.bindMachine(machine, connection?.machine ?? machine);
     const names = new Set([machine, ...(connection?.machine ? [connection.machine] : [])]);
     const holds = current.workerAccountHolds
       .filter((hold) => names.has(hold.machine))
       .map((hold) => ({ ...hold, machine }));
-    const read = { holds, ...(harnesses === undefined ? {} : { harnesses }) };
+    const read = { registry, holds, ...(harnesses === undefined ? {} : { harnesses }) };
     const local =
       fleetId === undefined ||
       options.localFleet?.(fleetId) === true ||
       (connection !== undefined && "socketPath" in connection && connection.socketPath !== undefined);
     if (local) {
+      registry.bindMachine(machine, "local");
       const report = await readMachineWorkerAccounts(
         { id: machine, ssh: { host: "localhost", shell: "posix" } },
         localWorkerAccountsShell,
         {
           ...read,
           profiles: {
-            claude: [
-              { label: "default", home: process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude") },
-              ...current.claudeAccounts,
-            ],
+            claude: current.claudeAccounts,
             codex: codexAccounts(current),
           },
         },
@@ -761,6 +840,7 @@ export function createWorkerAccountsReader(options: {
     harnesses?: readonly WorkerAccountHarness[],
   ): Promise<MachineWorkerAccounts> => {
     const read = await readAccounts(fleetId, harnesses);
+    registry.deliver(options.notifyIdentityChange);
     const report = {
       ...read,
       accounts: read.accounts.map(({ chatgptAccountId: _id, ...account }) => account),

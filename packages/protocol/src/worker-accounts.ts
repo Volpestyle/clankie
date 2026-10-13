@@ -75,7 +75,45 @@ const PrimeAccountFields = {
   sharesLimitsWith: z.object({ harness: z.enum(["claude", "codex"]), label: z.string() }).optional(),
 };
 
+export const AccountIdentityNoticeSchema = z.object({
+  id: z.string(),
+  machine: z.string(),
+  harness: z.enum(["claude", "codex"]),
+  home: z.string(),
+  before: z.string(),
+  after: z.string(),
+  message: z.string(),
+  observedAt: z.string(),
+});
+export type AccountIdentityNotice = z.infer<typeof AccountIdentityNoticeSchema>;
+
+/** One name for CLI, usage cards and Settings; folder aliases are never account names. */
+export function harnessAccountName(account: {
+  harness: string;
+  label?: string | undefined;
+  identity?: string | undefined;
+  displayName?: string | undefined;
+}): string {
+  const harness =
+    account.harness === "claude"
+      ? "Claude"
+      : account.harness === "codex"
+        ? "Codex"
+        : account.harness === "prime"
+          ? "Prime Agent"
+          : "Pi";
+  return `${harness} · ${account.displayName ?? account.identity ?? (account.harness === "prime" || account.harness === "pi" ? (account.label ?? harness) : "Sign in")}`;
+}
+
+const IdentityFields = {
+  accountKey: z.string().optional(),
+  displayName: z.string().optional(),
+  aliases: z.array(z.string()).optional(),
+  homes: z.array(z.object({ label: z.string(), home: z.string() })).optional(),
+};
+
 export const WorkerAccountStatusSchema = z.object({
+  ...IdentityFields,
   harness: ReportedHarnessSchema,
   label: z.string(),
   /** The profile home on its own machine. */
@@ -178,6 +216,9 @@ export const USAGE_ALLOCATION_DEFAULTS: UsageAllocationSettings = {
 };
 
 export const MachineWorkerAccountsSchema = z.object({
+  accountAliases: z.record(z.string(), z.string()).optional(),
+  accountNames: z.record(z.string(), z.string()).optional(),
+  notices: z.array(AccountIdentityNoticeSchema).optional(),
   machine: z.string(),
   shell: z.enum(["posix", "powershell"]),
   observedAt: z.string(),
@@ -243,6 +284,7 @@ export const USAGE_PATH = "/v1/usage";
 export const USAGE_SETTINGS_PATH = "/v1/usage/settings";
 
 export const UsageAccountSchema = z.object({
+  ...IdentityFields,
   harness: z.enum(["claude", "codex", "prime"]),
   label: z.string(),
   identity: z.string().optional(),
@@ -295,6 +337,7 @@ export const UpdateUsageSettingsSchema = z
 export type UpdateUsageSettings = z.infer<typeof UpdateUsageSettingsSchema>;
 
 export const UsageReportSchema = z.object({
+  notices: z.array(AccountIdentityNoticeSchema).optional(),
   schemaVersion: z.literal(1),
   machine: z.string(),
   observedAt: z.iso.datetime(),

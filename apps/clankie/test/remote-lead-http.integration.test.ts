@@ -109,7 +109,7 @@ fs.appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({args, profile})+
 if(args[0]==='auth') {
   if(profile.endsWith('-failed')) { console.error('private fixture failure'); process.exit(1); }
   if(profile.endsWith('-broken')) console.log('private fixture invalid JSON');
-  else console.log(JSON.stringify({ loggedIn: !profile.endsWith('-logged-out'), authMethod: profile.endsWith('-api') ? 'api_key' : 'claude.ai' }));
+  else console.log(JSON.stringify({ email: "owner@example.test", accountId: "fixture-a", loggedIn: !profile.endsWith('-logged-out'), authMethod: profile.endsWith('-api') ? 'api_key' : 'claude.ai' }));
 } else if(args[1]==='list') console.log(JSON.stringify([{id:${JSON.stringify(leadPlugin)},scope:'user',enabled:false}]));
 else console.log('{}');
 `,
@@ -131,6 +131,24 @@ else console.log('{}');
         .split("\n")
         .map((line) => JSON.parse(line));
       expect(calls.every((call) => call.profile === selected)).toBe(true);
+      // Identity-key requests select the observed home, never a folder named
+      // after the key. The native identity must match before any setup.
+      expect(
+        await prepareClaude(executable, plugin, {
+          ...options,
+          account: "account-fixture",
+          profileHome: selected,
+          expectedIdentity: { email: "owner@example.test", accountId: "fixture-a" },
+        }),
+      ).toBe(selected);
+      await expect(
+        prepareClaude(executable, plugin, {
+          ...options,
+          account: "account-fixture",
+          profileHome: selected,
+          expectedIdentity: { email: "other@example.test" },
+        }),
+      ).rejects.toThrow("changed sign-in");
       expect(await readFile(join(selected, ".credentials.json"), "utf8")).toBe(credential);
       expect(await readdir(other)).toEqual(beforeOther);
       expect(await readFile(policyPath, "utf8")).toBe(beforePolicy);

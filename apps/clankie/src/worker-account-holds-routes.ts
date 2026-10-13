@@ -6,14 +6,21 @@ import type { ClankieSettings, SettingsStore } from "@clankie/settings";
 
 class TooManyHolds extends Error {}
 
-function snapshot(settings: ClankieSettings) {
-  const holds = settings.workerAccountHolds;
+function snapshot(
+  settings: ClankieSettings,
+  resolve?: (machine: string, harness: string, label: string) => string,
+) {
+  const holds = settings.workerAccountHolds.map((hold) => ({
+    ...hold,
+    label: resolve?.(hold.machine, hold.harness, hold.label) ?? hold.label,
+  }));
   return { holds, revision: createHash("sha256").update(JSON.stringify(holds)).digest("hex") };
 }
 
 export function createWorkerAccountHoldsRoutes(
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
   settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>,
+  resolve?: (machine: string, harness: string, label: string) => string,
 ): Hono {
   const app = new Hono();
   app.use(WORKER_ACCOUNT_HOLDS_PATH, async (context, next) => {
@@ -26,7 +33,7 @@ export function createWorkerAccountHoldsRoutes(
     const current = await settings.load();
     const authority = await authorize(context.req.raw);
     if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
-    return context.json(snapshot(current));
+    return context.json(snapshot(current, resolve));
   });
   app.post(WORKER_ACCOUNT_HOLDS_PATH, bodyLimit({ maxSize: 4096 }), async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
@@ -37,17 +44,31 @@ export function createWorkerAccountHoldsRoutes(
     try {
       const updated = await settings.update(
         (current) => {
-          if (snapshot(current).revision !== expectedRevision)
+          if (snapshot(current, resolve).revision !== expectedRevision)
             throw new Error("Worker account holds changed");
           before = JSON.stringify(current);
           const others = current.workerAccountHolds.filter(
-            (hold) => !(hold.machine === machine && hold.harness === harness && hold.label === label),
+            (hold) =>
+              !(
+                hold.machine === machine &&
+                hold.harness === harness &&
+                (resolve?.(machine, harness, hold.label) ?? hold.label) ===
+                  (resolve?.(machine, harness, label) ?? label)
+              ),
           );
           if (held && others.length >= 64) throw new TooManyHolds();
           return {
             ...current,
             workerAccountHolds: held
-              ? [...others, { machine, harness, label, ...(reason === undefined ? {} : { reason }) }]
+              ? [
+                  ...others,
+                  {
+                    machine,
+                    harness,
+                    label: resolve?.(machine, harness, label) ?? label,
+                    ...(reason === undefined ? {} : { reason }),
+                  },
+                ]
               : others,
           };
         },
@@ -56,7 +77,7 @@ export function createWorkerAccountHoldsRoutes(
           if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
         },
       );
-      return context.json(snapshot(updated));
+      return context.json(snapshot(updated, resolve));
     } catch (error) {
       if (error instanceof TooManyHolds) return context.json({ error: "too_many_worker_account_holds" }, 400);
       return context.json({ error: "worker_account_holds_conflict" }, 409);

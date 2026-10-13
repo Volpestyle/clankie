@@ -47,6 +47,9 @@ function usageAccounts(report: MachineWorkerAccounts, now: number): UsageAccount
       {
         harness: account.harness,
         label: account.label,
+        ...(account.accountKey ? { accountKey: account.accountKey } : {}),
+        ...(account.homes ? { homes: [...account.homes] } : {}),
+        ...(account.displayName ? { displayName: account.displayName } : {}),
         signedIn: account.signedIn,
         headroom: account.headroom,
         ...(account.identity === undefined ? {} : { identity: account.identity }),
@@ -83,7 +86,7 @@ export function createUsageRoutes(
   const steady = (report: MachineWorkerAccounts, now: number): MachineWorkerAccounts => ({
     ...report,
     accounts: report.accounts.map((account) => {
-      const key = `${account.harness}:${account.label}:${account.identity ?? ""}`;
+      const key = account.accountKey ?? `${account.harness}:${account.label}:${account.identity ?? ""}`;
       if (account.usage) {
         lastGood.set(key, account.usage);
         return account;
@@ -138,6 +141,7 @@ export function createUsageRoutes(
       machine: machine.machine,
       observedAt: machine.observedAt,
       accounts: usageAccounts(machine, now),
+      ...(machine.notices ? { notices: [...machine.notices] } : {}),
       ...(Object.keys(unavailable).length ? { unavailable } : {}),
       settings: usageSettings(current),
       allocation: allocateAccounts(machine, now),

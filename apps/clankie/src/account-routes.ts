@@ -34,6 +34,7 @@ import {
   AccountLinearStartResultSchema,
   AccountsResponseSchema,
 } from "@clankie/protocol/accounts";
+import type { MachineWorkerAccounts } from "./captain/harness-accounts.ts";
 import type { AccountsPort } from "./accounts.ts";
 
 /** Like model keys (ADR 0232): no request, token or provider-error logging, ever. */
@@ -41,6 +42,7 @@ export function createAccountRoutes(
   accounts: AccountsPort | undefined,
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
   settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">> = new SettingsStore(),
+  readHarnessAccounts?: (fleet?: string) => Promise<MachineWorkerAccounts>,
 ): Hono {
   const app = new Hono();
   const paths = [
@@ -82,7 +84,11 @@ export function createAccountRoutes(
   app.get("/v1/accounts/codex", async (context) =>
     context.json({
       ok: true,
-      accounts: await Promise.all(codexAccounts(await settings.load()).map(readCodexAccountStatus)),
+      accounts: readHarnessAccounts
+        ? (await readHarnessAccounts()).accounts
+            .filter((account) => account.harness === "codex")
+            .map((account) => ({ ...account, authPresent: account.signedIn === true }))
+        : await Promise.all(codexAccounts(await settings.load()).map(readCodexAccountStatus)),
     }),
   );
   app.post("/v1/accounts/codex", async (context) => {
