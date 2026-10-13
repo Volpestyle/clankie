@@ -20,6 +20,12 @@
       "url": "clankie://evidence/sha256/b9f38d9b3d75d0b213ab1b9dbffbbb044dfce50ca6dbb2e648169839436045b6"
     },
     {
+      "path": "raw/presence-gate-correction.json",
+      "size": 770559,
+      "sha256": "07a9eeca272fc26144ff39ffa4147af8daf215a736a47d19f1f026e2c61382e9",
+      "url": "clankie://evidence/sha256/07a9eeca272fc26144ff39ffa4147af8daf215a736a47d19f1f026e2c61382e9"
+    },
+    {
       "path": "raw/profile-and-roster-proof.json",
       "size": 431531,
       "sha256": "e66c9377c0925b605c4f2de825239e45449b6ef5f78ae4bcc70ed2ae296f9e62",

@@ -6,7 +6,7 @@ import { OperatorPresenceResultSchema, OperatorPresenceSnapshotSchema } from "@c
 import { ConversationStore, OPERATOR_CONVERSATION_RETAINED_MAX } from "../src/captain/conversations.ts";
 import { createWorkerReports, type WorkerReportsContext } from "../src/captain/captain-worker-reports.ts";
 import { deliveryFingerprint } from "../src/captain/delivery-fence.ts";
-import { InboundAcceptanceSchema } from "../src/captain/conversations/constants.ts";
+import { WorkerReportSummarySchema } from "@clankie/protocol";
 import {
   createOperatorService,
   type CreateOperatorServiceContext,
@@ -284,12 +284,12 @@ it("retains a confirmed report cue when the lead reads it before the first prese
   expect((await f.presence(true, true)).beats).toBeUndefined();
 });
 
-it("samples only recent report payloads once per fleet revision and invalidates on durable progress and reads", async () => {
+it("samples only recent report metadata once per fleet revision and invalidates on durable progress and reads", async () => {
   const f = await fixture();
   const old = await f.report("10000000-0000-4000-8000-000000000021", "delivered");
   vi.setSystemTime(Date.now() + 10_001);
   const recent = await f.report("10000000-0000-4000-8000-000000000022", "unavailable");
-  const parse = vi.spyOn(InboundAcceptanceSchema, "parse");
+  const parse = vi.spyOn(WorkerReportSummarySchema, "parse");
   f.reportSummaries.mockClear();
   expect((await f.presence(true, true)).beats).toBeUndefined();
   expect(f.reportSummaries).toHaveBeenCalledTimes(1);
