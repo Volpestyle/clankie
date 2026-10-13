@@ -248,6 +248,79 @@ it("attributes a conflict to its input commit and blocks subsequent commits with
   expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(remote);
 });
 
+it("records a real gate driver stopped mid-test as interrupted with its retained logs and no push", async () => {
+  const f = await fixture(`
+let parent = process.ppid;
+let stopped = false;
+for (let depth = 0; depth < 6 && parent > 1; depth++) {
+  const row = execFileSync('ps', ['-p', String(parent), '-o', 'ppid=', '-o', 'command='], { encoding: 'utf8' }).trim();
+  const next = Number(row.split(/\\s+/, 1)[0]);
+  if (row.includes('integrate-gate-driver.mjs')) {
+    console.log('fixture stopped its owned gate driver', parent);
+    process.kill(parent, 'SIGTERM');
+    stopped = true;
+    break;
+  }
+  parent = next;
+}
+assert.ok(stopped, 'exact owned driver ancestor must be found');
+`);
+  const approved = await commit(f.core.source, "feature", "retain interrupted work");
+  const request = IntegrationRunSchema.parse({
+    action: "run",
+    id: randomUUID(),
+    core: [approved],
+    push: true,
+  });
+  await f.queue.start(request, guard);
+  await f.queue.wait();
+  const batch = await f.queue.status(request.id);
+  expect(batch.state, JSON.stringify(batch)).toBe("interrupted");
+  expect(batch.error).toMatch(/without a completion receipt for core gate/u);
+  expect(batch.error).not.toContain("undefined");
+  expect(batch.repos[0]!.install?.exitCode).toBe(0);
+  expect(batch.repos[0]!.gate).toBeUndefined();
+  expect(await readFile(join(f.directory, "batches", request.id, "core-gate.log"), "utf8")).toContain(
+    "fixture-gate-isolated",
+  );
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
+  const stored = JSON.parse(await readFile(batch.evidence, "utf8"));
+  expect(stored.state).toBe("interrupted");
+  expect((await f.queue.snapshot()).interrupted.map((entry) => entry.id)).toContain(request.id);
+  console.log(
+    "Interrupted driver proof:",
+    JSON.stringify({
+      state: batch.state,
+      error: batch.error,
+      install: batch.repos[0]!.install,
+      gate: batch.repos[0]!.gate ?? null,
+      originUnchanged: true,
+    }),
+  );
+});
+
+it("keeps a completed frozen-lockfile install failure failed when later sibling phases never started", async () => {
+  const f = await fixture("", true);
+  const manifest = JSON.parse(await readFile(join(f.core.source, "package.json"), "utf8"));
+  manifest.dependencies = { "not-in-the-installed-lockfile": "1.0.0" };
+  const approved = await commit(f.core.source, "package.json", JSON.stringify(manifest));
+  const appApproved = await commit(f.app!.source, "app-feature", "retain sibling source");
+  const request = IntegrationRunSchema.parse({
+    action: "run",
+    id: randomUUID(),
+    core: [approved],
+    app: [appApproved],
+    push: true,
+  });
+  await f.queue.start(request, guard);
+  await f.queue.wait();
+  const batch = await f.queue.status(request.id);
+  expect(batch.state, JSON.stringify(batch)).toBe("failed");
+  expect(batch.repos[0]!.install?.exitCode).not.toBe(0);
+  expect(batch.repos[1]!.install).toBeUndefined();
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
+});
+
 it.each(["process.exit(7);", "execFileSync('git', ['commit', '--allow-empty', '-m', 'gate moved HEAD']);"])(
   "retains exit and tested HEAD when a gate fails or changes HEAD (%s)",
   async (extra) => {

@@ -6,6 +6,12 @@
       "size": 160517,
       "sha256": "79a093075fd3aa1ac1c9aff530c864979668a5c2fb0122213ad453503a821fca",
       "url": "clankie://evidence/sha256/79a093075fd3aa1ac1c9aff530c864979668a5c2fb0122213ad453503a821fca"
+    },
+    {
+      "path": "raw/interrupted-driver-proof.json",
+      "size": 352346,
+      "sha256": "fa24c048314040c1b1f6dbd55f488ad84acfe5871beda3125d91a93b8ca91527",
+      "url": "clankie://evidence/sha256/fa24c048314040c1b1f6dbd55f488ad84acfe5871beda3125d91a93b8ca91527"
     }
   ]
 }

@@ -96,6 +96,8 @@ class RemoteCommandFailure extends Error {
 }
 /** Main moved after the gate and its recorded selection no longer covers the result. */
 class GateNotCovering extends Error {}
+/** A stopped runner cannot attest a completed install or gate. */
+class IntegrationInterrupted extends Error {}
 /** A revalidated HEAD inherits its gate; otherwise only the gated HEAD is attested. */
 const attested = (repo: IntegrationRepo) =>
   repo.revalidations?.findLast((record) => record.covered)?.head ?? repo.gate?.head;
@@ -786,7 +788,7 @@ export class IntegrationQueue {
       try {
         await this.composeAndGate(batch, job.reuse);
       } catch (error) {
-        batch.state = "failed";
+        batch.state = error instanceof IntegrationInterrupted ? "interrupted" : "failed";
         batch.error = String(error);
         await this.save(batch);
       }
@@ -1315,7 +1317,8 @@ export class IntegrationQueue {
     const governor =
       this.options.governor?.() ??
       createResourceGovernor(resourceDirectory?.directory ? { directory: resourceDirectory.directory } : {});
-    const errors = createWriteStream(join(root, `gate-runner-${randomUUID()}.log`), { mode: 0o600 });
+    const runnerLog = join(root, `gate-runner-${randomUUID()}.log`);
+    const errors = createWriteStream(runnerLog, { mode: 0o600 });
     let pending = "";
     let updates = Promise.resolve();
     const output = new Writable({
@@ -1368,13 +1371,36 @@ export class IntegrationQueue {
         },
       );
       await updates;
-      if (pending.trim()) throw new Error("Incomplete integration phase receipt");
-      if (code !== 0 && batch.repos.some((repo) => repo.install?.exitCode !== 0)) {
+      if (pending.trim())
+        throw new IntegrationInterrupted(
+          `Integration runner exited ${code} with an incomplete phase receipt; see ${runnerLog}`,
+        );
+      const stopped = batch.repos.find((repo) => repo.install?.signal || repo.gate?.signal);
+      if (stopped) {
+        const phase = stopped.gate?.signal ? "gate" : "install";
+        throw new IntegrationInterrupted(
+          `Integration ${stopped.name} ${phase} interrupted by ${stopped[phase]!.signal}; see ${stopped[phase]!.log}`,
+        );
+      }
+      // A completed failed install deliberately stops the plan before later phases.
+      if (batch.repos.some((repo) => repo.install && repo.install.exitCode !== 0)) {
         batch.state = "failed";
         await this.save(batch);
-      } else if (code !== 0 && batch.repos.every((repo) => repo.gateReuse || repo.gate?.exitCode === 0)) {
-        throw new Error(`Integration runner exited ${code} without a failed phase receipt`);
+        return;
       }
+      // An interrupted driver can stop after begin without emitting its end receipt.
+      // Missing evidence is interruption, never a failed test or an attested pass.
+      const incomplete = phases.find(
+        (phase) => !batch.repos.find((repo) => repo.name === phase.repo)![phase.name],
+      );
+      if (incomplete)
+        throw new IntegrationInterrupted(
+          `Integration runner exited ${code} without a completion receipt for ${incomplete.repo} ${incomplete.name}; runner interrupted or stopped; see ${incomplete.log} and ${runnerLog}`,
+        );
+      if (code !== 0 && batch.repos.every((repo) => repo.gateReuse || repo.gate?.exitCode === 0))
+        throw new IntegrationInterrupted(
+          `Integration runner exited ${code} without a failed phase receipt; see ${runnerLog}`,
+        );
     } finally {
       this.commands.delete(batch.id);
       errors.end();

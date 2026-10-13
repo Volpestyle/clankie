@@ -13,3 +13,11 @@ Checks through `clankie heavy --`:
 - Explicit touched-file formatting and lint: passed. The integrator supplies the root exact-tree landing gate.
 
 Protected raw evidence: `clankie://evidence/sha256/79a093075fd3aa1ac1c9aff530c864979668a5c2fb0122213ad453503a821fca`. The bundle includes all real receipts, df checkpoints, HEAD/status comparisons, landed proof, native test results and source CLI proof programs. Deployment and issue closure belong to the lead.
+
+## Landing and interrupted runner follow-up
+
+The original gate was stopped by a deployment restart, confirmed by the lead. It had no final phase receipt but was incorrectly recorded as failed with `see undefined`. The unchanged warning and reclaim commits landed through retry batch `265e391a-5f28-4616-86c3-ae6cc6a73d0e` at `2eadaa8474216ea1ad181466ff48a11e9d2892eb`: installation and root landing gate exited 0; 82 test files / 553 tests passed, 1 file / 2 tests skipped.
+
+A separate small follow-up records missing completion receipts or signaled commands as interrupted, naming the phase and retained logs. Complete nonzero installs and tests stay failed. Five focused real integration cases passed, including killing the fixture's exact gate-driver ancestor, preserving its logs and preventing a push, plus a genuine frozen-lockfile failure before sibling phases started. Formatting and lint passed. No service was restarted for the proof and no admission or timeout changed.
+
+Follow-up evidence: `clankie://evidence/sha256/fa24c048314040c1b1f6dbd55f488ad84acfe5871beda3125d91a93b8ca91527`. It contains the original interrupted batch/log, the successful primary landing record, focused real-process results and changed source.

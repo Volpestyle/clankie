@@ -987,6 +987,12 @@ Opening and recovery notices are durably deduplicated across service restarts;
 unavailable observations retain the incident. The observer never cancels,
 restarts or resubmits a batch. Inspect the named receipt with `integrate status`.
 
+If the local install/gate runner stops without a completed phase receipt, the
+batch is `interrupted`, with the phase, runner exit and retained log paths in its
+reason. Signaled commands are also interrupted. Completed nonzero installs or
+gates remain failures. An interruption never attests a pass or triggers automatic
+resubmission; inspect the receipt before submitting a fresh batch.
+
 `cancel UUID --actor NAME --reason TEXT` withdraws a waiting request or active
 isolated retry before landing. It reads `cancelled` with who and why. An in-flight
 isolated gate finishes, but its tree cannot land with a withdrawn input even if
