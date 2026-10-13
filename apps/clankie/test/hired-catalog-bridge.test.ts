@@ -430,7 +430,7 @@ it("keeps the published snapshot when a call starts during a catalog lookup", as
 });
 
 it("reports the catalog actually published to the native client rather than background discovery", async () => {
-  let revision = "before";
+  let revision: string | undefined = "before";
   const reports: Array<{ runtimeRevision?: string; tools: string[] }> = [];
   const f = await bridge(
     undefined,
@@ -486,6 +486,9 @@ it("reports the catalog actually published to the native client rather than back
     await f.client.listTools();
     await observed("after");
     expect(reports.at(-1)?.tools).toContain("message_peer");
+    revision = undefined;
+    await f.client.listTools();
+    expect(reports.at(-1)).not.toHaveProperty("runtimeRevision");
   } finally {
     await f.close();
   }

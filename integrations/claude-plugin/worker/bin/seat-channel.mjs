@@ -585,7 +585,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       status,
       reason: reason.slice(0, 500),
       tools: tools.map((tool) => tool.name).slice(0, 128),
-      ...(revision === undefined ? {} : { runtimeRevision: revision }),
+      ...(revision === undefined || revision === null ? {} : { runtimeRevision: revision }),
       pluginVersion: PLUGIN_VERSION,
     });
   };
@@ -1106,7 +1106,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         // Codex status discovery uses a temporary MCP client and can terminate
         // this process as soon as tools/list returns. Finish the bounded health
         // observation while its socket caller still exists; failures stay advisory.
-        await report("ready", result.reason, result.tools, result.runtimeRevision);
+        await report("ready", result.reason, result.tools, result.runtimeRevision ?? null);
         // A call can start while the HTTP/native-status lookup is pending.
         // Re-enter the barrier before publishing its new definitions.
         if (!activeToolCalls) break;

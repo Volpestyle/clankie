@@ -45,9 +45,11 @@ Fixed **after**, 903,037 ms (15.05 minutes), 07:59:06–08:14:06 UTC:
 **1,200 requests, 120 health notifications, 116 temporary catalog probes,
 zero refusals — 0/minute**. The four persistent bridges stayed idle throughout.
 
-[Raw proof packet](clankie://evidence/sha256/451b91a854bbaabdee48b48f715f021b777b5817ed9a1bddf31f61caffd01eef):
+[Raw proof packet](clankie://evidence/sha256/6796edec5400090666bdde1400e6b6dd1d7574d627c6a884e046678818fb23fb):
 scratch results, sanitized live baseline, runtime log, exact producer and both
-check logs. The archive receipt is applied and associated with VUH-2214.
+check logs. The archive receipt is applied and associated with VUH-2214. The packet also
+retains the final publication check for an omitted runtime revision; the measured
+producer always supplies a revision, so that path is unchanged.
 
 Focused checks: `clankie heavy -- pnpm exec vitest run
 apps/clankie/test/hired-catalog-bridge.test.ts
