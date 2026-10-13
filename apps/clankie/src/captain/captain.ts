@@ -1,3 +1,7 @@
+import {
+  fleetProjectionDiagnostics,
+  type FleetProjectionDiagnostics,
+} from "./fleet-projection-diagnostics.ts";
 import { harnessAccountIdentities, harnessAccountIdentityPath } from "./harness-account-identities.ts";
 import { remoteRetirementWork } from "./remote-retirement-work.ts";
 import { workerWorktreeHold } from "./worktree-decisions.ts";
@@ -3162,17 +3166,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const parentEdges = new HerdrParentEdges(join(options.stateDir, "herdr-parent-edges.json"));
 
   /** Admission reads this fresh census; cached roster/bridge cards confer no authority. */
-  async function observeFleet(localOnly = false, onPending?: (source: string, pending: boolean) => void) {
+  async function observeFleet(
+    localOnly = false,
+    onPending?: (source: string, pending: boolean, outcome?: "ok" | "error") => void,
+    diagnostics?: FleetProjectionDiagnostics,
+  ) {
+    const stopBinding = diagnostics?.start("settings_binding");
     const binding = await deps.runtimes?.configuredBinding("default");
-    return parentEdges.observe(
-      await readFleet({
+    const fleets = localOnly ? [] : await censusFleets();
+    stopBinding?.();
+    const read = () =>
+      readFleet({
         ...(options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner, summaries: {} } : {}),
-        fleets: localOnly ? [] : await censusFleets(),
+        fleets,
         localAvailable: deps.herdrAvailable?.() !== false,
         ...(onPending ? { onPending } : {}),
         ...(binding ? { herdrSession: binding.session, bridgeSocket: binding.socketPath } : {}),
-      }),
-    );
+      });
+    if (!diagnostics) return parentEdges.observe(await read());
+    return diagnostics.measure("census", async () => parentEdges.observe(await read()));
   }
 
   async function laneToolBankFor(
@@ -3490,11 +3502,30 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
   }
   async function observeFleetProjection(): Promise<readonly OperatorFleetSeat[]> {
-    await personas.ready(settingsStore);
-    const fleet = await observeFleet(false, (source, pending) => {
-      if (pending) pendingFleetSources.add(source);
-      else pendingFleetSources.delete(source);
-    });
+    const diagnostics = fleetProjectionDiagnostics();
+    try {
+      const seats = await observeTimedFleetProjection(diagnostics);
+      diagnostics.complete("ok");
+      return seats;
+    } catch (error) {
+      diagnostics.complete("error");
+      throw error;
+    }
+  }
+  async function observeTimedFleetProjection(
+    diagnostics: FleetProjectionDiagnostics,
+  ): Promise<readonly OperatorFleetSeat[]> {
+    await diagnostics.measure("settings_binding", () => personas.ready(settingsStore));
+    const fleet = await observeFleet(
+      false,
+      (source, pending, outcome) => {
+        diagnostics.census(source, pending, outcome);
+        if (pending) pendingFleetSources.add(source);
+        else pendingFleetSources.delete(source);
+      },
+      diagnostics,
+    );
+    const stopGoalStatus = diagnostics.start("goal_status");
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
     const goalList = await conversations.serve({ op: "list", schemaVersion: 1 });
@@ -3512,27 +3543,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       captainGoals = nextGoals;
       fleetChanges.touch();
     }
-    const workSeats = options.nativeCensusRunner
-      ? personas.reconcile(fleet.seats)
-      : await withRemoteGoals(
-          withSeatWork(
-            await withSeatSubagents(
-              personas.reconcile(fleet.seats),
-              fleet.seats,
-              (seat) =>
-                conversations.conversationIdForPersona(seat.personaId) !== undefined ||
-                conversations.conversationIdForSeat(seat.seatId) !== undefined,
-              undefined,
-              async (session) =>
-                session.kind === "id" ? deps.agentSessions?.subagents?.(`local:${session.value}`) : undefined,
-            ),
-            fleet.seats,
-            agentWork,
-          ),
+    let workSeats: readonly OperatorFleetSeat[];
+    if (options.nativeCensusRunner) {
+      workSeats = personas.reconcile(fleet.seats);
+    } else {
+      const subagents = await diagnostics.measure("subagents", () =>
+        withSeatSubagents(
+          personas.reconcile(fleet.seats),
           fleet.seats,
-          remoteFleets,
-        );
-    const seats = await herdrWatches.withNativeStatus(workSeats, fleet.seats);
+          (seat) =>
+            conversations.conversationIdForPersona(seat.personaId) !== undefined ||
+            conversations.conversationIdForSeat(seat.seatId) !== undefined,
+          undefined,
+          async (session) =>
+            session.kind === "id" ? deps.agentSessions?.subagents?.(`local:${session.value}`) : undefined,
+        ),
+      );
+      const work = withSeatWork(subagents, fleet.seats, agentWork);
+      workSeats = await diagnostics.measure("remote_goals", () =>
+        withRemoteGoals(work, fleet.seats, remoteFleets),
+      );
+    }
+    const seats = await diagnostics.measure("native_status", () =>
+      herdrWatches.withNativeStatus(workSeats, fleet.seats),
+    );
+    stopGoalStatus();
     // Live proof is refreshed asynchronously. Missing census or an untracked
     // head never establishes that an original process exited.
     void options.fleetResources?.observeSeats(fleet.seats).catch(() => undefined);
@@ -3547,16 +3582,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (seat.harness === "claude") {
         seat.messageReceiver = seatMessageReceiver(native);
       }
-      seat.inputCapabilities = await herdrWatches.inputCapabilities(native);
+      seat.inputCapabilities = await diagnostics.measure("capability", () =>
+        herdrWatches.inputCapabilities(native),
+      );
       seat.waitingMessages = nextTurnMailboxes.waiting(
         observed.seatId,
         inboundBinding(observedAgent(observed)),
       );
-      await publishWaitingNotice(
-        observed.seatId,
-        inboundBinding(observedAgent(observed)),
-        observed.paneId,
-      ).catch(() => undefined);
+      await diagnostics
+        .measure("waiting_notice", () =>
+          publishWaitingNotice(observed.seatId, inboundBinding(observedAgent(observed)), observed.paneId),
+        )
+        .catch(() => undefined);
       const pluginVersion = seat.workerTools?.pluginVersion;
       if (
         !qualified &&
@@ -3624,6 +3661,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       herdrWatches.trackSeat(seat.seatId);
     }
     liveSeats = seats;
+    const stopRouting = diagnostics.start("routing_catalog");
     const projected = await Promise.all(
       seats.map(async (seat) => {
         // A lapsed stance simply is not here, so no surface has to reason about
@@ -3635,7 +3673,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const parentSeatId = parents.get(seat.seatId);
         const observed = fleet.seats.find((entry) => entry.seatId === seat.seatId);
         const activity =
-          observed === undefined ? undefined : await readSeatActivity(observed, seat.status, stance);
+          observed === undefined
+            ? undefined
+            : await diagnostics.measure("activity", () => readSeatActivity(observed, seat.status, stance));
         let workerReportRouting: WorkerReportRouting | undefined;
         let leadOwner: ConversationOwner | undefined;
         let admitted = true;
@@ -3706,6 +3746,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return result;
       }),
     );
+    stopRouting();
+    const stopGit = diagnostics.start("git_enrichment");
     // Establish all native worktree claims once per occupant, including seats
     // led elsewhere. A shared worktree cannot attribute HEAD progress to one seat.
     const claims = await Promise.all(
@@ -3775,6 +3817,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         });
       }),
     );
+    stopGit();
     for (const seat of projected) {
       const efficiency = seat.efficiency;
       if (!efficiency?.assignedDeliverable) continue;
@@ -3802,6 +3845,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     liveSeats = projected;
     lastProjectedSeats = projected;
     observeReportFailureAlerts(projected);
+    const stopIssues = diagnostics.start("issue_enrichment");
     const liveIssues: import("./seat-issue-status.ts").LiveSeatIssue[] = await Promise.all(
       projected.map(async (seat) => {
         const issue = liveSeatIssue(seat);
@@ -3864,6 +3908,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (result.outcome === "failed")
           console.warn("Seat issue status unavailable", result.issue, result.detail);
     });
+    stopIssues();
     return projected;
   }
 

@@ -5236,6 +5236,22 @@ Project `pane_unavailable` now requires an actual native pane-not-found result;
 other failures retain their specific observation stage in the private log.
 Keep process and pane details in private evidence when publishing aggregate rates.
 
+Native fleet projection timings also appear in the launcher's private service log
+as `fleet.projection.timings` JSON events at info level. Each actual refresh logs
+one completion/error record, with total `durationMs` and `phases` containing
+`phase`, union wall-time `durationMs`, longest individual `maxCallMs`, and
+`outcome`. Cached display reads do not start extra observations. Phases distinguish
+settings/binding, census (including parent-edge reconciliation), local/PC/other
+fleet reads, goals/status and their subagent/remote-goal/native-status awaits,
+capabilities, waiting notices, activity, routing/catalog, Git and issue enrichment.
+Nested and parallel phases overlap; do not add their durations. Outcomes describe
+await completion, not proof of admission or a healthy native session. Records
+contain no pane/session IDs, paths, commands, content or error messages.
+
+The default local service log is `~/.local/state/clankie/clankie.log`;
+`CLANKIE_STATE_HOME`, then `XDG_STATE_HOME`, override its state-home prefix.
+Filter that log for `fleet.projection.timings` when comparing a roster window.
+
 ### `metrics --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]`
 
 Per-issue and per-worker measurements from the service's existing records,

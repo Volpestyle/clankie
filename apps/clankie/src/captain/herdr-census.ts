@@ -799,17 +799,20 @@ export async function readFleet(
     readonly localAvailable?: boolean;
     readonly localCodexRecordsPath?: string;
     /** Display diagnostics only; an unfinished census never establishes absence. */
-    readonly onPending?: (source: string, pending: boolean) => void;
+    readonly onPending?: (source: string, pending: boolean, outcome?: "ok" | "error") => void;
   } = {},
 ): Promise<ObservedFleet> {
   // Herdr's snapshot contains the same complete AgentInfo rows as agent.list,
   // alongside placement. Read them together, once, without an authority cache.
   async function observe<T>(source: string, read: () => Promise<T>): Promise<T> {
     options.onPending?.(source, true);
+    let outcome: "ok" | "error" = "error";
     try {
-      return await read();
+      const value = await read();
+      outcome = "ok";
+      return value;
     } finally {
-      options.onPending?.(source, false);
+      options.onPending?.(source, false, outcome);
     }
   }
   const [local, remote] = await Promise.all([

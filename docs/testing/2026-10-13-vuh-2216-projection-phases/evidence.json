@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "raw/focused-phase-diagnostics.txt",
+      "size": 33619,
+      "sha256": "9470320bd08e4c05cbdab05afc70af2f438e992786f0c1265dd59b55ab1a9c74",
+      "url": "clankie://evidence/sha256/9470320bd08e4c05cbdab05afc70af2f438e992786f0c1265dd59b55ab1a9c74"
+    }
+  ]
+}
