@@ -227,3 +227,28 @@ it("retires a moved thread's old completion wake even when native delivery is al
     release();
   }
 });
+
+it("retains the original configured hire project through adoption and exact native reattachment", () => {
+  const f = fixture();
+  const owners = new HireOwners(join(f.root, "placement-owners.json"));
+  owners.bind("pane", owner, "seat", undefined, "occupant", "session", "clankie");
+  owners.adopt("pane", "seat", "occupant", { conversationId: "later-conversation" }, "session");
+  expect(owners.hiredProjectContext("pane", "seat", "occupant")).toEqual({
+    conversationId: "global-default",
+    projectId: "clankie",
+  });
+  expect(owners.hiredProjectContext("pane", "seat", "replacement")).toBeNull();
+  owners.readopt(
+    "next-pane",
+    "next-seat",
+    "next-occupant",
+    { conversationId: "later-conversation" },
+    "session",
+  );
+  expect(owners.hiredProjectContext("next-pane", "next-seat", "next-occupant")).toEqual({
+    conversationId: "global-default",
+    projectId: "clankie",
+  });
+  owners.adopt("hand-pane", "hand-seat", "hand-occupant", owner);
+  expect(owners.hiredProjectContext("hand-pane", "hand-seat", "hand-occupant")).toBeUndefined();
+});

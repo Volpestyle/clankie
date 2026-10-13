@@ -757,3 +757,40 @@ it("holds shared-final roster reads behind other batches' active process proofs"
   }
   expect(active).toBe(0);
 });
+
+it("attributes an exact lead hire outside enrolled folders and rechecks its configured project", async () => {
+  const f = await fixture();
+  f.options.hires.projectHireMembershipCandidate = () => ({ state: "none" });
+  f.options.hires.leadHireMembershipProject = async () => "repo";
+  f.options.workspace = vi.fn(async () => undefined);
+  const reader = new FleetProjectMembership(f.options);
+  const result = await reader.read(f.input, new AbortController().signal, async () => true);
+  expect(result.seats[0]!.membership).toMatchObject({ outcome: "member", source: "hire", projectId: "repo" });
+  expect(f.options.workspace).not.toHaveBeenCalled();
+  let reads = 0;
+  f.options.hires.leadHireMembershipProject = async () => (++reads === 1 ? "repo" : undefined);
+  await expect(reader.read(f.input, new AbortController().signal, async () => true)).rejects.toMatchObject({
+    code: "changed",
+  });
+});
+
+it("keeps an unattributable recorded lead hire unknown even inside an enrolled folder", async () => {
+  const f = await fixture();
+  f.options.hires.projectHireMembershipCandidate = () => ({ state: "none" });
+  f.options.hires.leadHireMembershipProject = async () => null;
+  f.options.workspace = vi.fn(async () => "repo");
+  const result = await read(new FleetProjectMembership(f.options), f.input);
+  expect(result.seats[0]!.membership.outcome).toBe("unknown");
+  expect(f.options.workspace).not.toHaveBeenCalled();
+});
+
+it("refuses a workspace placement if lead-hire provenance changes before publication", async () => {
+  const f = await fixture();
+  f.options.hires.projectHireMembershipCandidate = () => ({ state: "none" });
+  let reads = 0;
+  f.options.hires.leadHireMembershipProject = async () => (++reads === 1 ? undefined : null);
+  f.options.workspace = vi.fn(async () => "repo");
+  await expect(read(new FleetProjectMembership(f.options), f.input)).rejects.toMatchObject({
+    code: "changed",
+  });
+});

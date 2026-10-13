@@ -1845,6 +1845,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         authority.intentId,
         occupantId,
         sessionKey,
+        this.projectContexts.get(input)?.projectId ?? input.projectId,
       );
   }
 
@@ -1898,6 +1899,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return requested?.startsWith(`${hosted.provider.id}/`) === true ? requested : hosted.model;
   }
 
+  public leadHireMembershipOwner(pane: string, seat: string, occupant: string) {
+    return this.hireOwners.hiredProjectContext(pane, seat, occupant);
+  }
   public projectHireMembershipCandidate(fleet: string, pane: string) {
     const address = projectHirePane(fleet, pane);
     if (address === undefined) return { state: "none" as const };

@@ -1,3 +1,4 @@
+import { createDeliverableProjectReader } from "./fleet-project-deliverable.ts";
 import { MachineJoins } from "./machine-joins.ts";
 import { connectedLinearSession, importConnectedLinear, importLinearMedia } from "./linear-import.ts";
 import { LinearMirrors } from "./linear-mirror.ts";
@@ -1499,6 +1500,7 @@ const captain = createCaptain(
       };
     },
     workerReportBridgeStatus: (fleet, pane) => workerMcp.reportBridgeStatus(fleet, pane),
+    projectHireDeliverableTrackerProject: createDeliverableProjectReader(mcpHost),
     projectHireWorkspace: createProjectWorkspaceResolver({
       settings: async () => (await settingsStore.load()).projects,
       observe: projectProcessObserver,

@@ -5857,6 +5857,37 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         .map((seat) => seat.workingDirectory!);
       return { projects: await projectStatuses(projects, seats, questions), needsYou: questions.length };
     },
+    leadHireMembershipProject: async (_fleet, pane, seat, occupant) => {
+      const owner = herdrWatches.leadHireMembershipOwner(pane, seat, occupant);
+      if (owner === null) return null;
+      if (!owner) return undefined;
+      const current = await settings();
+      if (owner.projectId !== undefined)
+        return current.projects.projects.some((project) => project.id === owner.projectId)
+          ? owner.projectId
+          : null;
+      let configured: string | undefined;
+      try {
+        configured = configuredLeadHireProject(
+          current.projects,
+          current.linearWebhook.projectChats,
+          owner.conversationId,
+        );
+      } catch {
+        return null;
+      }
+      if (configured !== undefined) return configured;
+      const deliverable = seatEfficiency.readAssignedDeliverable(occupant, owner.conversationId);
+      if (deliverable === undefined) return null;
+      const trackerProject = await options.projectHireDeliverableTrackerProject?.(deliverable);
+      if (trackerProject === undefined) return null;
+      const projects = current.projects.projects.filter(
+        (project) =>
+          project.trackerProjectId?.toLowerCase() === trackerProject ||
+          project.linearProjectBinding?.projectId.toLowerCase() === trackerProject,
+      );
+      return projects.length === 1 ? projects[0]!.id : null;
+    },
     projectHireMembershipCandidate: (fleet, pane) => herdrWatches.projectHireMembershipCandidate(fleet, pane),
     confirmedProjectHireAssignment: (fleet, pane, revision, proof) =>
       herdrWatches.confirmedProjectHireAssignment(fleet, pane, revision, proof),

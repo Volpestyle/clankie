@@ -55,6 +55,7 @@ export interface CaptainOptions {
     fleet: string,
     pane: string,
   ) => Promise<ProjectHireProcessProof | undefined>;
+  readonly projectHireDeliverableTrackerProject?: (deliverable: string) => Promise<string | undefined>;
   readonly projectHireTools?: (projectId: string) => Promise<readonly string[]>;
   readonly fleetHireTools?: () => Promise<readonly string[]>;
   readonly workerBridgeStatus?: (

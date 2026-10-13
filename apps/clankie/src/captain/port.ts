@@ -239,6 +239,13 @@ export interface CaptainPort {
   }>;
   /** Current host-bound persona for the exact native seat and occupant. */
   personaForFleetOccupant(seatId: string, occupantId: string): string | undefined;
+  /** Display-only hire attribution: null means a recorded hire with no project; undefined means no hire. */
+  leadHireMembershipProject?(
+    fleet: string,
+    pane: string,
+    seat: string,
+    occupant: string,
+  ): Promise<string | null | undefined>;
   projectHireMembershipCandidate(fleet: string, pane: string): ProjectHireMembershipCandidate;
   confirmedProjectHireAssignment(
     fleet: string,

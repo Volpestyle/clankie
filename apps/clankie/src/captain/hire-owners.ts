@@ -21,6 +21,8 @@ const RecordSchema = z
     occupantId: z.string().min(1).optional(),
     sessionKey: z.string().min(1).optional(),
     hired: z.boolean().optional(),
+    hireConversationId: z.string().min(1).optional(),
+    hireProjectId: z.string().min(1).optional(),
     owner: ConversationOwnerSchema,
   })
   .strict();
@@ -64,6 +66,26 @@ export class HireOwners {
     return held === undefined
       ? undefined
       : { owner: ConversationOwnerSchema.parse(held.owner), hired: held.hired !== false };
+  }
+  /** Display attribution requires an explicitly recorded hire, never adoption alone. */
+  public hiredProjectContext(
+    paneId: string,
+    seatId: string,
+    occupantId: string,
+  ): { conversationId: string; projectId?: string } | null | undefined {
+    const records = this.state.hires.filter((entry) => entry.paneId === paneId || entry.seatId === seatId);
+    const held = records.length === 1 ? records[0] : undefined;
+    return held?.hired === true &&
+      held.paneId === paneId &&
+      held.seatId === seatId &&
+      held.occupantId === occupantId
+      ? {
+          conversationId: held.hireConversationId ?? held.owner.conversationId,
+          ...(held.hireProjectId === undefined ? {} : { projectId: held.hireProjectId }),
+        }
+      : records.some((record) => record.hired === true)
+        ? null
+        : undefined;
   }
   public seatOwner(seatId: string, occupantId: string): ConversationOwner | undefined {
     const held = this.state.hires.find((entry) => entry.seatId === seatId && entry.occupantId === occupantId);
@@ -149,6 +171,8 @@ export class HireOwners {
           // Reattachment changes native admission, not how the thread was started.
           // Keep false and unknown too: re-adoption must never manufacture a hire.
           ...(prior.hired === undefined ? {} : { hired: prior.hired }),
+          ...(prior.hireConversationId === undefined ? {} : { hireConversationId: prior.hireConversationId }),
+          ...(prior.hireProjectId === undefined ? {} : { hireProjectId: prior.hireProjectId }),
         },
       ],
     });
@@ -184,6 +208,10 @@ export class HireOwners {
           seatId,
           occupantId,
           owner,
+          ...(prior?.hireConversationId === undefined
+            ? {}
+            : { hireConversationId: prior.hireConversationId }),
+          ...(prior?.hireProjectId === undefined ? {} : { hireProjectId: prior.hireProjectId }),
           ...(prior === undefined
             ? { hired: false }
             : prior.hired === undefined
@@ -206,6 +234,7 @@ export class HireOwners {
     intentId?: string,
     occupantId?: string,
     sessionKey?: string,
+    projectId?: string,
   ): void {
     const prior = this.state.hires.find(
       (entry) => entry.paneId === paneId || (seatId !== undefined && entry.seatId === seatId),
@@ -240,6 +269,10 @@ export class HireOwners {
           paneId,
           owner: held ?? owner,
           hired: true,
+          hireConversationId: prior?.hireConversationId ?? owner.conversationId,
+          ...((prior?.hireProjectId ?? projectId) === undefined
+            ? {}
+            : { hireProjectId: prior?.hireProjectId ?? projectId }),
           ...(seatId === undefined ? {} : { seatId }),
           ...(occupantId === undefined ? {} : { occupantId }),
           ...(sessionKey === undefined ? {} : { sessionKey }),

@@ -49,7 +49,7 @@ export interface FleetProjectMembershipOptions {
   /** Uses actual process cwd and canonical enrolled workspaces; never roster metadata. */
   workspace?(proof: ProjectProcessProof, signal: AbortSignal): Promise<string | undefined>;
   hires: Pick<CaptainPort, "projectHireMembershipCandidate" | "confirmedProjectHireAssignment"> &
-    Partial<Pick<CaptainPort, "personaForFleetOccupant">>;
+    Partial<Pick<CaptainPort, "personaForFleetOccupant" | "leadHireMembershipProject">>;
   /** Deterministic deadline fixture; production bounds the proof/publication batch to five seconds. */
   deadlineMs?: number;
 }
@@ -161,7 +161,19 @@ export class FleetProjectMembership {
             }
             const candidate = this.options.hires.projectHireMembershipCandidate(fleet, agent.paneId);
             candidates.push({ pane: agent.paneId, seatId: row.seatId, value: candidate });
-            const ownerStarted = candidate.state === "none" && this.options.workspace !== undefined;
+            const leadProject =
+              candidate.state === "none"
+                ? await this.options.hires.leadHireMembershipProject?.(
+                    fleet,
+                    agent.paneId,
+                    row.seatId,
+                    row.occupantId,
+                  )
+                : undefined;
+            const ownerStarted =
+              candidate.state === "none" &&
+              leadProject !== null &&
+              (leadProject !== undefined || this.options.workspace !== undefined);
             if (candidate.state !== "confirmed" && !ownerStarted) {
               row.membership = unknown("no_confirmed_hire");
               return;
@@ -206,7 +218,7 @@ export class FleetProjectMembership {
                     )
                   : undefined;
               if (ownerStarted) {
-                const projectId = await this.options.workspace!(proof, signal);
+                const projectId = leadProject ?? (await this.options.workspace?.(proof, signal));
                 signal.throwIfAborted();
                 if (!projectId || !settings.projects.some((project) => project.id === projectId)) return;
                 proofs.set(agent.paneId, proof);
@@ -216,7 +228,7 @@ export class FleetProjectMembership {
                   personaId === undefined ? undefined : projectRoleForPersona(settings, personaId, projectId);
                 row.membership = {
                   outcome: "member",
-                  source: "workspace",
+                  source: leadProject === undefined ? "workspace" : "hire",
                   projectId,
                   ...(role === undefined ? {} : { role }),
                 };
@@ -443,6 +455,17 @@ export class FleetProjectMembership {
                 );
                 publicationSignal.throwIfAborted();
                 if (!isDeepStrictEqual(finalProof, receipt.proofs.get(candidate.pane)))
+                  throw new FleetMembershipReadError("changed");
+                if (
+                  candidate.value.state === "none" &&
+                  row.membership.outcome === "member" &&
+                  (await this.options.hires.leadHireMembershipProject?.(
+                    this.options.fleet ?? "default",
+                    candidate.pane,
+                    row.seatId,
+                    row.occupantId,
+                  )) !== (row.membership.source === "hire" ? row.membership.projectId : undefined)
+                )
                   throw new FleetMembershipReadError("changed");
                 if (
                   row.membership.outcome === "member" &&

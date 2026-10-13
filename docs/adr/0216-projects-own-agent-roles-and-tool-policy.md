@@ -227,3 +227,23 @@ sources cancel before submission. Work assignment and the pickup note remain
 separate receipts; there is no inverse API, compensation or uncertain replay.
 The private app records the gesture decision in its ADR 0072. The shared `co-w`
 skill adds optional quick-action metadata without changing its CLI or workflow.
+
+## Display placement amendment (2026-10-12, VUH-2192)
+
+The bounded fleet-membership display read also accepts an exact native
+lead-hire record. It retains the original hiring conversation and optional
+configured project through later adoption or reattachment. If that conversation
+has no configured project, its exact recorded deliverable may resolve through
+the verified tracker to one configured project binding. Ambiguous or missing
+bindings remain unknown. Tracker lookups coalesce for sixty seconds, retain at
+most 128 records and admit at most two simultaneous background reads.
+
+Publication still rechecks native occupant/process proof, the settings revision,
+hire provenance and current persona role. This extends display attribution,
+not native assignments or tool authority. Paths alone never attribute a
+lead-hired worker. Each read stays limited to eight tuples; clients batch their
+full roster and preserve freshness independently for each batch.
+
+Linear project UUID validation uses a direct project read. Collection searches
+use fifty-project pages because the nested project projection at 250 entries
+exceeds Linear's query-complexity limit, including a UUID-filtered collection.

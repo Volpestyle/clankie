@@ -166,6 +166,12 @@ export class SeatEfficiencyStore {
     this.save();
   }
 
+  /** Exact recorded assignment for a host-proven hire; owner changes never inherit it. */
+  public readAssignedDeliverable(occupantId: string, conversationId: string): string | undefined {
+    const record = Object.hasOwn(this.records, occupantId) ? this.records[occupantId] : undefined;
+    return record?.owner.conversationId === conversationId ? record.assignedDeliverable : undefined;
+  }
+
   /** Internal host evidence only; owner changes never inherit another baseline. */
   public readCommitBaseline(occupantId: string, owner: ConversationOwner): SeatCommitBaseline | undefined {
     const record = Object.hasOwn(this.records, occupantId) ? this.records[occupantId] : undefined;

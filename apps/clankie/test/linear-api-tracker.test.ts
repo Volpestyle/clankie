@@ -7,6 +7,7 @@ import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker, writeConvention } from "@clankie/work-items";
 import { createAccounts } from "../src/accounts.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
+import { linearProjectExists } from "../src/linear-project-binding.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import {
@@ -68,6 +69,16 @@ async function setup() {
 }
 
 describe("registered Linear OAuth through real broker and hosted tracker", () => {
+  it("verifies an exact project binding without a complexity-heavy collection scan", async () => {
+    const { tracker, provider } = await setup();
+    const before = provider.seen.length;
+    expect(await linearProjectExists(tracker, PROJECT_ID)).toBe(true);
+    const reads = provider.seen.slice(before).filter((entry) => entry.path === "/graphql");
+    expect(reads).toHaveLength(1);
+    expect(reads[0]!.query).toContain("project(id: $id)");
+    expect(JSON.parse(reads[0]!.body).variables.id).toBe(PROJECT_ID);
+    expect(await linearProjectExists(tracker, "00000000-0000-4000-8000-000000000000")).toBe(false);
+  });
   it("coalesces registered API list reads without caching fresh issue reads or writes", async () => {
     const { host, provider } = await setup();
     const list = () =>

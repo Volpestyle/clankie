@@ -179,12 +179,18 @@ export function createLinearApiTracker(options: {
       cursor: info.endCursor ?? undefined,
     };
   };
-  const all = async (field: string, filterType: string, selection: string, filter: RecordValue = {}) => {
+  const all = async (
+    field: string,
+    filterType: string,
+    selection: string,
+    filter: RecordValue = {},
+    limit = 250,
+  ) => {
     const nodes: RecordValue[] = [];
     const seen = new Set<string>();
     let cursor: string | undefined;
     for (;;) {
-      const result = await page(field, filterType, selection, { limit: 250, cursor }, filter);
+      const result = await page(field, filterType, selection, { limit, cursor }, filter);
       nodes.push(...result.nodes);
       if (nodes.length > 25_000)
         throw new LinearApiTrackerError("invalid_response", "Linear lookup is too broad");
@@ -203,6 +209,9 @@ export function createLinearApiTracker(options: {
     if (typeof value !== "string" || !value) throw new LinearApiTrackerError("not_found");
     if (kind === "user" && value === "me")
       return record((await graphql(`query TrackerViewer { viewer { ${USER} } }`)).viewer);
+    // The nested project selection exceeds Linear's complexity budget at 250 rows.
+    // Exact bindings need one verified UUID, without scanning the workspace.
+    if (kind === "project" && uuid(value)) return one("project", value, PROJECT);
     const specs = {
       team: ["teams", "TeamFilter", TEAM],
       project: ["projects", "ProjectFilter", PROJECT],
@@ -219,7 +228,7 @@ export function createLinearApiTracker(options: {
         ? { or: [{ team: { null: true } }, { team: { id: { eq: teamId } } }] }
         : {}),
     };
-    const candidates = await all(field, filterType, selection, filter);
+    const candidates = await all(field, filterType, selection, filter, kind === "project" ? 50 : 250);
     const matches = candidates.filter((entry) =>
       [
         entry.id,

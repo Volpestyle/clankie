@@ -470,6 +470,7 @@ export interface FleetMembershipReport {
 
 /** Host-verified owner display and semantic role context; never hire, control or tool authority. */
 export const FLEET_PROJECT_MEMBERSHIP_PATH = "/v1/operator/fleet-membership/read";
+export const FLEET_PROJECT_MEMBERSHIP_BATCH_SIZE = 8;
 const FleetMembershipSeatSchema = z
   .object({
     seatId: z.string().trim().min(1).max(512),
@@ -486,7 +487,7 @@ export const ReadFleetProjectMembershipSchema = z
     seats: z
       .array(FleetMembershipSeatSchema)
       .min(1)
-      .max(8)
+      .max(FLEET_PROJECT_MEMBERSHIP_BATCH_SIZE)
       .refine(
         (seats) =>
           new Set(seats.map((seat) => JSON.stringify([seat.fleet ?? "default", seat.seatId]))).size ===
@@ -529,7 +530,7 @@ export const FleetProjectMembershipSnapshotSchema = z
           ]),
         }).strict(),
       )
-      .max(8),
+      .max(FLEET_PROJECT_MEMBERSHIP_BATCH_SIZE),
   })
   .strict();
 export type ReadFleetProjectMembership = z.infer<typeof ReadFleetProjectMembershipSchema>;
