@@ -4167,8 +4167,9 @@ record was too large for a single read and was stepped over.
 with none. `clankie sessions` is also an alias for these CLI commands. Existing
 `/agents` session arguments remain supported, but `/agents` without arguments
 now opens the agents that are live, with offline agents that kept a thread behind
-one "Past agents" entry. `clankie agents contacts` returns every known identity,
-live or not, through the existing fleet API. A quiet fleet returns the usual
+one "Past agents" entry. `clankie agents contacts` returns up to 1,000 display
+identities through the existing fleet API, with live contacts first, followed by
+recent contacts. Older identities remain in the durable store. A quiet fleet returns the usual
 identity array. The display read has a five-second budget and retries a changing
 fleet once. If it cannot finish, contacts returns `{ personas, readWarnings }`:
 `personas` contains the last available identities; each warning names the pending

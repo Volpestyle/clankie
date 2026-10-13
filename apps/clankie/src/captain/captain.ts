@@ -4166,7 +4166,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         });
       }
       const fleetPersonas = [
-        ...personas.all(seats, (personaId) => conversations.conversationForPersona(personaId)),
+        ...personas.projection(seats, (personaId) => conversations.conversationForPersona(personaId)),
       ];
       return {
         op: "fleet",

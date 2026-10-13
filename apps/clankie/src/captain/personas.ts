@@ -25,6 +25,7 @@ import { OperatorAgentRoleSchema } from "@clankie/protocol";
 import { DEFAULT_PROJECT_ID, ProjectIdSchema } from "@clankie/protocol/projects";
 import {
   defaultOperatorAgentAppearance,
+  OPERATOR_AGENT_PERSONA_LIST_MAX,
   OPERATOR_AGENT_ROLES,
   operatorAgentRoleKey,
   OperatorAgentNameSchema,
@@ -422,6 +423,18 @@ export class PersonaStore {
           left.persona.name.localeCompare(right.persona.name),
       )
       .map(({ persona }) => persona);
+  }
+
+  /** Bounded display cards: live seats first, then the existing recent-contact order. */
+  public projection(
+    seats: readonly OperatorFleetSeat[],
+    conversationForPersona: (personaId: string) => OperatorConversation | undefined,
+  ): readonly OperatorAgentPersona[] {
+    const personas = this.all(seats, conversationForPersona);
+    return [
+      ...personas.filter((persona) => persona.activeSeatId !== undefined),
+      ...personas.filter((persona) => persona.activeSeatId === undefined),
+    ].slice(0, OPERATOR_AGENT_PERSONA_LIST_MAX);
   }
 
   public update(input: UpdateOperatorAgentPersona): OperatorAgentPersona {

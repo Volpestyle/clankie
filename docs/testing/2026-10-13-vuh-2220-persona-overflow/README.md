@@ -1,0 +1,13 @@
+# VUH-2220: retained persona overflow
+
+Live main `03ef43b84`, PID 32880, returned HTTP 200 fleet snapshots containing **1,056 personas** against the published **1,000** maximum. Only 22 were active; 1,034 retained inactive personas counted too. The producer kept every identity in its display list. The real SDK rejected six fleet calls with `Clankie conversation response failed schema validation`; raw validation identifies only `snapshot.personas` / `too_big`.
+
+Retained creation history reached its 1,001st identity at **2026-10-12T05:54:34.159Z**. The 1,000th was created at 05:10:36.007Z. This is a reconstruction from retained timestamps, not a captured historical HTTP response; source retains identities after seat closure. All nine exact `Pip` personas were inactive in the observed snapshot. Five were created on October 13 at 07:54, 08:03, 08:15, 11:01 and 11:18Z, after the first overflow.
+
+Client behavior: TUI `HerdrRoster.follow` catches fleet validation failures and falls back to roster polling; persona contacts also receive the overlarge producer list. App `liveCaptainTransport` validates before applying its home filter, and `liveMessagesHost` marks failed fleet loads disconnected; invalid saved snapshots are rejected too. The presence-only desktop pet uses `OperatorPresenceResultSchema`, which has no persona array, so this overflow does not establish a failure of that view. No live UI visual failure is claimed.
+
+The fix bounds display projection to the existing contract, prioritizing live seats followed by the existing recent-contact order. Full records, internal identity lookups, conversation history and settings remain. Only the cleared fleet and persona-list producer call sites use the bounded projection. The published schema is unchanged.
+
+The requested file-backed regression uses 1,056 retained personas and a real conversation store: unbounded output fails the full fleet schema, projected output validates the snapshot and service response, live and recent contacts remain, projection leaves persisted bytes unchanged, and omitted identities remain readable and updateable. Governed focused checks passed: 25 persona/projection/role cases, formatting and lint; docs checks validated 740 Markdown files and all ten generated public docs pages. Exact landing gate and actual post-deploy fleet validation remain pending. The separate tested VUH-2219 source is parked locally until this fix lands, per the lead's priority.
+
+Protected live overflow and client/timeline evidence: `clankie://evidence/sha256/801bdcba0714967418e6d36197a18494749a7a35559ced5030346e60124b31b3`.

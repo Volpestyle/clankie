@@ -494,7 +494,7 @@ export function createOperatorService(
         op: "personas",
         schemaVersion: 1,
         personas: [
-          ...ctx.personas.all(ctx.liveSeats, (personaId) =>
+          ...ctx.personas.projection(ctx.liveSeats, (personaId) =>
             ctx.conversations.conversationForPersona(personaId),
           ),
         ],
