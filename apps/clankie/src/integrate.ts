@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { syncOwnerCheckout } from "@clankie/settings";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, open, readdir, rm, realpath, lstat } from "node:fs/promises";
-import { basename, dirname, join, resolve, relative } from "node:path";
+import { mkdir, readFile, open, readdir, rm, rmdir, realpath, lstat } from "node:fs/promises";
+import { basename, dirname, join, resolve, relative, isAbsolute, sep } from "node:path";
 import { promisify } from "node:util";
 import { Writable } from "node:stream";
 import {
@@ -80,8 +80,6 @@ interface IntegrationOptions {
     signal?: AbortSignal,
   ) => Promise<GateRunner | undefined>;
   /** Internal deadlines, overridable by real-process integration fixtures. */
-  /** Terminal scratch worktrees are kept for one hour by default. */
-  worktreeRetentionMs?: number;
   remotePreparationTimeoutMs?: number;
   remoteCleanupTimeoutMs?: number;
   remoteExecutionTimeoutMs?: number;
@@ -468,7 +466,28 @@ export class IntegrationQueue {
                       !this.retries.some((retry) => retry.members.some((m) => m.batch.id === member.batch.id))
                     )
                       this.running.delete(member.batch.id);
+                  const completed = [this.current?.batch, job.reuse];
                   this.current = undefined;
+                  const result = {
+                    reclaimed: [] as string[],
+                    kept: [] as { id: string; reason: string }[],
+                    freedBytes: 0,
+                  };
+                  try {
+                    const cwds = await processWorkingDirectories();
+                    for (const batch of completed)
+                      if (batch)
+                        await this.reclaimBatch(
+                          await this.read(batch.id),
+                          result,
+                          cwds,
+                          async () => {},
+                          Date.now(),
+                        );
+                    if (result.kept.length) console.warn("Integration cleanup retained trees", result.kept);
+                  } catch (error) {
+                    console.warn("Integration cleanup deferred", error);
+                  }
                 }
               }
             },
@@ -514,94 +533,155 @@ export class IntegrationQueue {
     } while (this.draining);
   }
 
-  /** Terminal scratch trees expire; records, logs and cloned commit stores remain. */
+  /** Only disposable terminal scratch trees; passed/held/partial trees still support push. */
+  private async reclaimBatch(
+    batch: IntegrationBatch,
+    result: { reclaimed: string[]; kept: { id: string; reason: string }[]; freedBytes: number },
+    cwds: string[],
+    guard: () => Promise<void>,
+    at: number,
+  ): Promise<void> {
+    const id = batch.id;
+    if (
+      this.running.has(id) ||
+      this.retries.some((job) => job.reuse?.id === id) ||
+      this.current?.job.reuse?.id === id ||
+      !["pushed", "failed", "cancelled", "interrupted", "conflict"].includes(batch.state)
+    )
+      return;
+    const root = resolve(dirname(this.path(id)));
+    const contains = (path: string) => {
+      const child = relative(root, path);
+      return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
+    };
+    try {
+      if (batch.evidence !== join(root, "record.json") || (await realpath(root)) !== root)
+        throw Error("batch_alias");
+      if (cwds.some(contains)) throw Error("live_cwd");
+      const trees = join(root, "worktrees");
+      if (await lstat(trees).catch(() => undefined)) {
+        if ((await realpath(trees)) !== trees) throw Error("worktrees_alias");
+        for (const name of ["core", "app"] as const) {
+          const tree = join(trees, name === "core" ? "clankie" : "clankie-app");
+          if (!(await lstat(tree).catch(() => undefined))) continue;
+          try {
+            if ((await realpath(tree)) !== tree) throw Error("worktree_alias");
+            const repo = batch.repos.find((repo) => repo.name === name && repo.directory === tree);
+            if (!repo) throw Error("worktree_unrecorded");
+            const repository = join(root, "repositories", name);
+            if (
+              (await realpath(repository)) !== repository ||
+              (await realpath(join(repository, ".git"))) !== join(repository, ".git")
+            )
+              throw Error("repository_alias");
+            const registration = (await this.git(repository, ["worktree", "list", "--porcelain"]))
+              .split("\n\n")
+              .find((entry) => entry.split("\n")[0] === `worktree ${tree}`);
+            if (!registration || registration.split("\n").some((line) => line.startsWith("locked")))
+              throw Error("worktree_unverified_or_locked");
+            const head = registration.match(/^HEAD ([a-f0-9]{40,64})$/mu)?.[1];
+            if (!head) throw Error("worktree_head_unknown");
+            const marker = await lstat(join(tree, ".git")).catch(() => undefined);
+            if (marker) {
+              if (
+                !marker.isFile() ||
+                (await this.git(tree, ["rev-parse", "--path-format=absolute", "--git-common-dir"])) !==
+                  join(repository, ".git")
+              )
+                throw Error("worktree_unverified");
+            }
+            if ((await processWorkingDirectories()).some(contains)) throw Error("live_cwd");
+            // du counts allocated blocks and does not follow symlinks into other checkouts.
+            const { stdout } = await execute("du", ["-sk", tree], { maxBuffer: 1024 * 1024 });
+            const bytes = Number(stdout.trim().split(/\s/u)[0]) * 1024;
+            if (!Number.isSafeInteger(bytes) || bytes < 0) throw Error("worktree_size_unknown");
+            const keptRef = `refs/clankie/retained/${name}`;
+            await this.git(repository, ["update-ref", keptRef, head]);
+            await guard();
+            // Gates leave tracked and untracked output. These are service-owned scratch trees.
+            if (marker) await this.git(repository, ["worktree", "remove", "--force", tree]);
+            else {
+              // Finish an interrupted Git removal, only with its exact private registration above.
+              await rm(tree, { recursive: true, force: true });
+            }
+            await this.git(repository, ["worktree", "prune"]);
+            result.reclaimed.push(tree);
+            result.freedBytes += bytes;
+            (batch.worktreeReclamation ??= []).push({
+              path: tree,
+              head,
+              keptRef,
+              at: new Date(at).toISOString(),
+            });
+            await this.save(batch);
+          } catch (error) {
+            result.kept.push({ id, reason: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        if ((await readdir(trees)).length === 0) await rmdir(trees);
+      }
+      const isolation = join(root, "isolation");
+      if (await lstat(isolation).catch(() => undefined)) {
+        if ((await realpath(isolation)) !== isolation) throw Error("isolation_alias");
+        // Logs must remain even if a future runner changes where it writes them.
+        if (
+          batch.repos.some((repo) =>
+            [
+              repo.install?.log,
+              repo.gate?.log,
+              repo.push?.log,
+              ...(repo.revalidations ?? []).map((entry) => entry.log),
+            ].some((log) => log && (log === isolation || log.startsWith(`${isolation}/`))),
+          )
+        )
+          throw Error("isolation_contains_logs");
+        if ((await processWorkingDirectories()).some(contains)) throw Error("live_cwd");
+        const { stdout } = await execute("du", ["-sk", isolation], { maxBuffer: 1024 * 1024 });
+        const bytes = Number(stdout.trim().split(/\s/u)[0]) * 1024;
+        if (!Number.isSafeInteger(bytes) || bytes < 0) throw Error("isolation_size_unknown");
+        await guard();
+        // rm removes the private tmp symlink itself, never its external target.
+        await rm(isolation, { recursive: true, force: true });
+        result.reclaimed.push(isolation);
+        result.freedBytes += bytes;
+        batch.isolationReclamation = { path: isolation, freedBytes: bytes, at: new Date(at).toISOString() };
+        await this.save(batch);
+      }
+    } catch (error) {
+      result.kept.push({ id, reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /** Sweep every historical batch under the queue lock; records, logs and commit stores remain. */
   async reclaimWorktrees(
     at = Date.now(),
     guard: () => Promise<void> = async () => {},
-  ): Promise<{ reclaimed: string[]; kept: { id: string; reason: string }[] }> {
-    return withDirectoryLock(
-      join(this.options.directory, "queue.lock"),
-      async () => {
-        await guard();
-        const result: { reclaimed: string[]; kept: { id: string; reason: string }[] } = {
-          reclaimed: [],
-          kept: [],
-        };
-        const ids = await readdir(join(this.options.directory, "batches")).catch(
-          (error: NodeJS.ErrnoException) => {
-            if (error.code === "ENOENT") return [];
-            throw error;
-          },
-        );
-        if (ids.length > 4096) throw Error("Integration batch census exceeds its bound");
-        const cwds = await processWorkingDirectories();
-        let attempted = 0;
-        for (const id of ids) {
-          if (attempted >= 32) break;
-          if (!/^[a-f0-9-]{36}$/u.test(id) || this.running.has(id)) continue;
-          const batch = await this.read(id).catch(() => undefined);
-          if (
-            !batch ||
-            batch.batchId ||
-            !["pushed", "failed", "cancelled", "interrupted", "conflict"].includes(batch.state)
-          )
-            continue;
-          if (at - Date.parse(batch.updatedAt) < (this.options.worktreeRetentionMs ?? 60 * 60_000)) continue;
-          const root = resolve(dirname(this.path(id)));
-          if ((await realpath(root)) !== root) {
-            result.kept.push({ id, reason: "batch_alias" });
-            continue;
-          }
-          // An inspector shell is still live even though the queue's own command finished.
-          const contains = (path: string) =>
-            path === root ||
-            (relative(root, path) !== "" &&
-              !relative(root, path).startsWith("..") &&
-              !relative(root, path).startsWith("/"));
-          if (cwds.some(contains)) {
-            result.kept.push({ id, reason: "live_cwd" });
-            continue;
-          }
-          for (const name of ["core", "app"] as const) {
-            if (attempted >= 32) break;
-            const tree = join(root, "worktrees", name === "core" ? "clankie" : "clankie-app");
-            if (!(await lstat(tree).catch(() => undefined))) continue;
-            try {
-              if ((await realpath(tree)) !== tree) throw Error("worktree_alias");
-              const repository = join(root, "repositories", name);
-              if ((await realpath(repository)) !== repository) throw Error("repository_alias");
-              const common = await this.git(tree, [
-                "rev-parse",
-                "--path-format=absolute",
-                "--git-common-dir",
-              ]);
-              if (common !== join(repository, ".git")) throw Error("worktree_unverified");
-              if (await this.git(tree, ["status", "--porcelain=v1", "--untracked-files=all"]))
-                throw Error("dirty");
-              if ((await processWorkingDirectories()).some(contains)) throw Error("live_cwd");
-              // Keep detached commits reachable for later inspection and restore.
-              const head = await this.git(tree, ["rev-parse", "HEAD"]);
-              await this.git(repository, ["update-ref", `refs/clankie/retained/${name}`, head]);
-              await guard();
-              attempted++;
-              await this.git(repository, ["worktree", "remove", tree]);
-              result.reclaimed.push(tree);
-              (batch.worktreeReclamation ??= []).push({
-                path: tree,
-                head,
-                keptRef: `refs/clankie/retained/${name}`,
-                at: new Date(at).toISOString(),
-              });
-              await this.save(batch);
-            } catch (error) {
-              result.kept.push({ id, reason: String(error) });
-            }
-          }
+  ): Promise<{ reclaimed: string[]; kept: { id: string; reason: string }[]; freedBytes: number }> {
+    return withDirectoryLock(join(this.options.directory, "queue.lock"), async () => {
+      await guard();
+      const result = {
+        reclaimed: [] as string[],
+        kept: [] as { id: string; reason: string }[],
+        freedBytes: 0,
+      };
+      const ids = await readdir(join(this.options.directory, "batches")).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return [];
+          throw error;
+        },
+      );
+      if (ids.length > 4096) throw Error("Integration batch census exceeds its bound");
+      const cwds = await processWorkingDirectories();
+      for (const id of ids) {
+        if (!/^[a-f0-9-]{36}$/u.test(id)) continue;
+        try {
+          await this.reclaimBatch(await this.read(id), result, cwds, guard, at);
+        } catch (error) {
+          result.kept.push({ id, reason: error instanceof Error ? error.message : String(error) });
         }
-        return result;
-      },
-      (owner) => this.interruptAbandoned(owner),
-    );
+      }
+      return result;
+    });
   }
   watchReclamation(onError: (error: unknown) => void): () => void {
     let pending: Promise<unknown> | undefined;
@@ -1632,7 +1712,10 @@ export class IntegrationQueue {
         }
       });
     } finally {
-      if (!wasRunning) this.running.delete(id);
+      if (!wasRunning) {
+        this.running.delete(id);
+        await this.reclaimWorktrees().catch((error) => console.warn("Integration cleanup deferred", error));
+      }
     }
   }
 }

@@ -349,3 +349,10 @@ Terminal integration scratch worktrees are reclaimed after one hour by a
 five-minute sweep under the queue lock. Records, logs and cloned commit stores
 remain. Dirty trees and live process cwd stay protected. Passed/held/partial
 batches needed for a later push stay retained; `record.json` records each removal.
+
+Integration scratch trees and batch-owned isolation caches are removed after push
+or an unused terminal failure.
+`clankie integrate reclaim` sweeps the historical backlog under the queue lock and
+reports `freedBytes` (allocated blocks). Batch records, gate logs and private
+commit stores remain. Passed/held/partial batches and failed attempts needed by
+queued retries stay retained; never manually delete an active batch or a lock.

@@ -208,7 +208,11 @@ export const IntegrationBatchSchema = z.object({
   updatedAt: z.iso.datetime(),
   evidence: z.string(),
   repos: z.array(IntegrationRepoSchema),
-  /** Expired scratch trees; commits stay reachable in the retained repository clone. */
+  /** Reclaimed private install/gate homes and caches; root gate logs remain. */
+  isolationReclamation: z
+    .object({ path: z.string(), freedBytes: z.number().nonnegative(), at: z.iso.datetime() })
+    .optional(),
+  /** Reclaimed scratch trees; commits stay reachable in the retained repository clone. */
   worktreeReclamation: z
     .array(z.object({ path: z.string(), head: Sha, keptRef: z.string(), at: z.iso.datetime() }))
     .optional(),
@@ -264,7 +268,11 @@ export const IntegrationResponseSchema = z.object({
   receipts: z.array(DeployHoldReceiptSchema).optional(),
   queue: IntegrationQueueStatusSchema.optional(),
   reclamation: z
-    .object({ reclaimed: z.array(z.string()), kept: z.array(z.object({ id: Id, reason: z.string() })) })
+    .object({
+      reclaimed: z.array(z.string()),
+      kept: z.array(z.object({ id: Id, reason: z.string() })),
+      freedBytes: z.number().nonnegative().optional(),
+    })
     .optional(),
   error: z.string().optional(),
 });

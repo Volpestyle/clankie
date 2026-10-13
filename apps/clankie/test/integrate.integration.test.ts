@@ -65,6 +65,12 @@ afterEach(async (context) => {
   await Promise.all(roots.splice(0).map((p) => rm(p, { recursive: true, force: true })));
 });
 async function git(directory: string, ...args: string[]): Promise<string> {
+  // Pushed history remains inspectable in the private commit store after scratch cleanup.
+  if (!existsSync(directory)) {
+    const name = directory.endsWith("clankie-app") ? "app" : "core";
+    directory = directory.replace(/[/]worktrees[/]clankie(-app)?$/u, `/repositories/${name}`);
+    args = args.map((arg) => arg.replace(/^HEAD(?=$|[~^:])/u, `refs/clankie/retained/${name}`));
+  }
   return (await execute("git", ["-c", "core.hooksPath=/dev/null", "-C", directory, ...args])).stdout.trim();
 }
 function fixture(
@@ -436,9 +442,21 @@ it("restores a passed tree with a new gated forward commit, retaining bad histor
   const restored = await f.queue.status(restore.id);
   expect(restored.state).toBe("pushed");
   const head = restored.repos[0]!.head;
-  expect(await git(restored.repos[0]!.directory, "rev-parse", `${head}^`)).toBe(bad);
-  expect(await git(restored.repos[0]!.directory, "rev-parse", `${head}^{tree}`)).toBe(
-    await git(repo.directory, "rev-parse", `${repo.head}^{tree}`),
+  expect(
+    await git(join(f.directory, "batches", restored.id, "repositories", "core"), "rev-parse", `${head}^`),
+  ).toBe(bad);
+  expect(
+    await git(
+      join(f.directory, "batches", restored.id, "repositories", "core"),
+      "rev-parse",
+      `${head}^{tree}`,
+    ),
+  ).toBe(
+    await git(
+      join(f.directory, "batches", good.id, "repositories", "core"),
+      "rev-parse",
+      `${repo.head}^{tree}`,
+    ),
   );
   expect(head).not.toBe(repo.head);
   expect(restored.repos[0]!.gate?.head).toBe(head);
@@ -1592,7 +1610,7 @@ it("reclaims a queue lock its dead earlier owner left, records that owner's batc
 });
 
 it.runIf(process.platform === "darwin")(
-  "terminal integration trees expire after retention, keeping logs, records and restorable commits",
+  "ten consecutive landings remove scratch trees immediately, keeping logs, records and restorable commits",
   async () => {
     const f = await fixture();
     const change = await commit(f.core.source, "retained-feature", "keep this commit");
@@ -1602,15 +1620,35 @@ it.runIf(process.platform === "darwin")(
     const batch = await f.queue.status(id);
     expect(batch.state).toBe("pushed");
     const tree = batch.repos[0]!.directory;
-    const cli = await queueCli(f);
-    expect((await runIntegrationCommand(["reclaim"], cli)).reclamation?.reclaimed).toEqual([]);
-    const before = await readFile(batch.evidence, "utf8");
-    const log = await readFile(batch.repos[0]!.gate!.log, "utf8");
-    expect((await f.queue.reclaimWorktrees()).reclaimed).toEqual([]);
-    expect(await readFile(batch.evidence, "utf8")).toBe(before);
-    const result = await f.queue.reclaimWorktrees(Date.now() + 61 * 60_000);
-    expect(result.reclaimed).toContain(tree);
     expect(existsSync(tree)).toBe(false);
+    for (let round = 1; round < 10; round++) {
+      const next = randomUUID();
+      const sha = await commit(f.core.source, `landing-${round}`, `change ${round}`);
+      await f.queue.start(
+        IntegrationRunSchema.parse({ action: "run", id: next, core: [sha], push: true }),
+        guard,
+      );
+      await f.queue.wait();
+      const landed = await f.queue.status(next);
+      expect(landed.state).toBe("pushed");
+      expect(existsSync(landed.repos[0]!.directory)).toBe(false);
+      expect(existsSync(join(f.directory, "batches", next, "isolation"))).toBe(false);
+      expect(existsSync(landed.evidence)).toBe(true);
+      expect(existsSync(landed.repos[0]!.gate!.log)).toBe(true);
+      expect(
+        (
+          await git(
+            join(f.directory, "batches", next, "repositories", "core"),
+            "worktree",
+            "list",
+            "--porcelain",
+          )
+        ).includes(landed.repos[0]!.directory),
+      ).toBe(false);
+    }
+    const cli = await queueCli(f);
+    expect((await runIntegrationCommand(["reclaim"], cli)).reclamation?.freedBytes).toBe(0);
+    const log = await readFile(batch.repos[0]!.gate!.log, "utf8");
     expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toBe(log);
     const retained = await f.queue.status(id);
     expect(retained.worktreeReclamation?.[0]?.head).toBe(batch.repos[0]!.head);
@@ -1629,27 +1667,32 @@ it.runIf(process.platform === "darwin")(
     expect((await f.queue.reclaimWorktrees(Date.now() + 61 * 60_000)).reclaimed).toEqual([]);
     expect(existsSync(restored.repos[0]!.directory)).toBe(true);
     console.log("Batch retention proof", {
+      consecutiveLandings: 10,
       terminal: batch.state,
-      reclaimed: result.reclaimed,
+      reclaimed: retained.worktreeReclamation,
       restore: restored.state,
     });
   },
-  30_000,
+  120_000,
 );
 
 it.runIf(process.platform === "darwin")(
-  "terminal reclamation keeps live process cwd and uncommitted files in real failed scratch trees",
+  "terminal reclamation protects live processes and removes dirty historical scratch trees",
   async () => {
-    const f = await fixture("process.exit(1);");
+    const f = await fixture();
     const change = await commit(f.core.source, "failed-feature", "keep failed commit");
     const id = randomUUID();
     await f.queue.start(IntegrationRunSchema.parse({ action: "run", id, core: [change] }), guard);
     await f.queue.wait();
     const batch = await f.queue.status(id);
-    expect(batch.state).toBe("failed");
+    expect(batch.state).toBe("passed");
+    batch.state = "failed";
+    await durableJson(batch.evidence, batch);
     const tree = batch.repos[0]!.directory;
+    const inspection = join(f.directory, "batches", id, "..inspection");
+    await mkdir(inspection);
     const child = spawn(process.execPath, ["-e", "setInterval(()=>{}, 1000)"], {
-      cwd: tree,
+      cwd: inspection,
       stdio: "ignore",
     });
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
@@ -1670,10 +1713,10 @@ it.runIf(process.platform === "darwin")(
     const edit = join(tree, "failed-feature");
     await writeFile(edit, "uncommitted edit");
     const result = await f.queue.reclaimWorktrees(Date.now() + 61 * 60_000);
-    expect(result.kept.some((row) => row.id === id && row.reason.includes("dirty"))).toBe(true);
-    expect(await readFile(edit, "utf8")).toBe("uncommitted edit");
-    await writeFile(edit, "keep failed commit");
-    expect((await f.queue.reclaimWorktrees(Date.now() + 61 * 60_000)).reclaimed).toContain(tree);
+    expect(result.reclaimed).toContain(tree);
+    expect(result.freedBytes).toBeGreaterThan(0);
+    expect(existsSync(tree)).toBe(false);
+    expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toContain("fixture-gate-isolated");
   },
   30_000,
 );
@@ -1743,4 +1786,81 @@ it("reports a newly dead queue owner as stale instead of waiting forever or stea
       process.env.VUH2157_EVIDENCE_FILE,
       JSON.stringify({ scenario: "dead-current-owner", failed }) + "\n",
     );
+});
+
+it.runIf(process.platform === "darwin")(
+  "reclaim covers more than 32 historical trees, partial removals and active/foreign boundaries",
+  async () => {
+    const f = await fixture();
+    const reclaimable: string[] = [];
+    const protectedTrees: string[] = [];
+    for (let round = 0; round < 40; round++) {
+      const id = randomUUID();
+      const root = join(f.directory, "batches", id);
+      const repository = join(root, "repositories", "core");
+      const tree = join(root, "worktrees", "clankie");
+      await mkdir(join(root, "repositories"), { recursive: true });
+      await mkdir(join(root, "worktrees"));
+      await git(root, "clone", "--no-checkout", f.core.source, repository);
+      await git(repository, "worktree", "add", "--detach", tree, f.core.base);
+      await mkdir(join(tree, "node_modules"));
+      await writeFile(join(tree, "node_modules", "gate-cache"), "cache".repeat(1024));
+      await writeFile(join(tree, "gate-output"), "untracked gate output");
+      const state =
+        round < 34 ? "pushed" : ["queued", "gating", "installing", "passed", "held", "partial"][round - 34]!;
+      const isolation = join(root, "isolation");
+      await mkdir(isolation);
+      await writeFile(join(isolation, "cache"), "private install cache".repeat(1024));
+      if (round < 34) reclaimable.push(isolation);
+      else protectedTrees.push(isolation);
+      const record = join(root, "record.json");
+      await durableJson(record, {
+        schemaVersion: 1,
+        id,
+        request: { action: "run", id, core: [f.core.base], push: true },
+        state,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        evidence: record,
+        repos: [
+          {
+            name: "core",
+            source: f.core.source,
+            origin: f.core.origin,
+            base: f.core.base,
+            head: f.core.base,
+            directory: tree,
+            commits: [],
+          },
+        ],
+      });
+      if (round === 0) await rm(join(tree, ".git")); // Interrupted removal with a private registration.
+      if (round === 1) {
+        await writeFile(join(tree, ".git"), `gitdir: ${join(f.core.source, ".git")}\n`);
+        protectedTrees.push(tree);
+      } else if (round < 34) reclaimable.push(tree);
+      else protectedTrees.push(tree);
+    }
+    const result = await f.queue.reclaimWorktrees();
+    expect(result.reclaimed.sort()).toEqual(reclaimable.sort());
+    expect(result.freedBytes).toBeGreaterThan(0);
+    for (const tree of reclaimable) expect(existsSync(tree)).toBe(false);
+    for (const tree of protectedTrees) expect(existsSync(tree)).toBe(true);
+    expect(await git(f.core.source, "rev-parse", "HEAD")).toBe(f.core.base);
+    expect((await f.queue.reclaimWorktrees()).freedBytes).toBe(0);
+  },
+  120_000,
+);
+
+it("a failed gate removes its scratch tree immediately and preserves its record and gate log", async () => {
+  const f = await fixture("writeFileSync('gate-output', 'dirty'); process.exit(1);");
+  const change = await commit(f.core.source, "failure", "feature");
+  const id = randomUUID();
+  await f.queue.start(IntegrationRunSchema.parse({ action: "run", id, core: [change] }), guard);
+  await f.queue.wait();
+  const batch = await f.queue.status(id);
+  expect(batch.state).toBe("failed");
+  expect(existsSync(batch.repos[0]!.directory)).toBe(false);
+  expect(existsSync(batch.evidence)).toBe(true);
+  expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toContain("fixture-gate-isolated");
 });

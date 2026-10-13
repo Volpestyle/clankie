@@ -1017,18 +1017,21 @@ remain explicit failures; do not delete locks or resubmit an uncertain request.
 
 Integration clones keep client hooks disabled.
 
-`clankie integrate reclaim` runs the same retention-respecting sweep immediately
-through the owner-authorized integration API. It cannot bypass the queue lock,
-retention window, cwd census, or cleanliness checks.
+`clankie integrate reclaim` sweeps every historical terminal batch under the
+queue lock and reports removed paths, retained reasons, and `freedBytes`
+(allocated blocks measured before removal). It also removes empty worktrees folders.
 
-Terminal integration scratch worktrees (`pushed`, `failed`, `cancelled`,
-`interrupted`, or an excluded conflict) expire after one hour. The service
-checks every five minutes, up to 32 trees per sweep, under the queue lock.
-Records, logs and repository clones remain; detached commits are pinned before
-Git removes their scratch checkout. Passed, held and partial batches remain
-available for a later push. Dirty, aliased, locked or live-process directories
-stay retained. An incomplete cwd observation skips reclamation. Restore can
-read a reclaimed pushed batch's retained commit store.
+Pushed batches and failed, cancelled, interrupted or conflicting attempts lose
+their disposable scratch worktrees and private `isolation/` install/gate caches as soon as the queue no longer needs them.
+Failed shared attempts remain while individual retries reuse them. Records,
+gate logs and repository clones remain; detached commits are pinned before
+`git worktree remove --force` and `git worktree prune`. Gate artifacts and dirty
+scratch files do not prevent cleanup. A partially removed checkout missing its
+`.git` file can be finished only when its exact private Git registration and
+batch record agree. Passed, held and partial batches remain available for push.
+Aliased, locked, unverified or live-process directories stay retained; incomplete
+cwd observations defer cleanup. A five-minute sweep retries deferred removals.
+Restore reads a reclaimed pushed batch's retained commit store.
 
 ### Scratch service and relay proofs
 

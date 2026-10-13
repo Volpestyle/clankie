@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "cache-proof.json",
+      "size": 118316,
+      "sha256": "2a5ef4aa7ad124b3efe9a6da5dec06d4f7354163cdc708b0dbd31b029a46e5b0",
+      "url": "clankie://evidence/sha256/2a5ef4aa7ad124b3efe9a6da5dec06d4f7354163cdc708b0dbd31b029a46e5b0"
+    },
+    {
+      "path": "isolation-reclaim-cli.log",
+      "size": 27291,
+      "sha256": "885db716bcb595cc65bcd6eefda806394e0109e288d1ce6b61ea22b4088603d2",
+      "url": "clankie://evidence/sha256/885db716bcb595cc65bcd6eefda806394e0109e288d1ce6b61ea22b4088603d2"
+    },
+    {
+      "path": "proof.json",
+      "size": 39387,
+      "sha256": "a7ccc9f524e11223f749956ca8c20e110474e8e7cfd833e155e1cc5c3446cca7",
+      "url": "clankie://evidence/sha256/a7ccc9f524e11223f749956ca8c20e110474e8e7cfd833e155e1cc5c3446cca7"
+    },
+    {
+      "path": "recovered-isolation-reclaim.json",
+      "size": 59284,
+      "sha256": "ec3d0863b01bc6bd0f5192d9c78b1bbbce0fe0cc96b54bb81357802869c8a631",
+      "url": "clankie://evidence/sha256/ec3d0863b01bc6bd0f5192d9c78b1bbbce0fe0cc96b54bb81357802869c8a631"
+    }
+  ]
+}
