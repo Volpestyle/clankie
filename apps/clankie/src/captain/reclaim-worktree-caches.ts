@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { lstat, readdir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { lstat, opendir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, relative as relativePath, resolve } from "node:path";
-import { checkoutGit, projectPathContains } from "@clankie/settings";
+import { promisify } from "node:util";
+import { projectPathContains } from "@clankie/settings";
 import { withDirectoryLock } from "../deploy-holds.ts";
 import { processWorkingDirectories } from "../process-working-directories.ts";
 import {
@@ -21,25 +23,64 @@ export interface CacheReclamationResult {
 const platform = process.platform === "win32" ? "windows" : "posix";
 const contains = (root: string, path: string) => projectPathContains(root, path, platform);
 const rustCacheSignature = "Signature: 8a477f597d28d172789f06886806bc55";
+const exec = promisify(execFile);
+const gitOutputLimit = 4 * 1024 * 1024;
+const ignoredOutputLimit = 1024 * 1024;
+
+// Bound capture before Git returns, including ignored inventories that used to overflow
+// the shared Git helper before reaching their smaller cache-specific limit.
+async function cacheGit(path: string, args: readonly string[], phase: string, limit = gitOutputLimit) {
+  try {
+    const { stdout } = await exec("git", ["--no-optional-locks", "-C", path, ...args], {
+      encoding: "utf8",
+      timeout: 60_000,
+      maxBuffer: limit,
+      windowsHide: true,
+      env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
+    });
+    return stdout;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
+      throw Error(
+        `git_output_limit: phase=${phase} path=${path} limit_bytes=${limit}; retained; inventory incomplete, preserve contents for review`,
+      );
+    throw error;
+  }
+}
 
 // Declared caches can still contain a nested checkout or bare repository.
 // Refuse oversized or changing inventories instead of risking its commits.
-async function verifyCacheHasNoRepository(cache: string) {
-  const pending = [{ path: cache, depth: 0 }];
+async function verifyCacheHasNoRepository(cache: string, phase: string) {
   let seen = 0;
-  while (pending.length) {
-    const next = pending.pop()!;
-    if (next.depth > 40) throw Error("cache_inventory_too_deep");
-    const entries = await readdir(next.path, { withFileTypes: true });
-    seen += entries.length;
-    if (seen > 100_000) throw Error("cache_inventory_too_large");
-    const names = new Set(entries.map((entry) => entry.name));
-    if (names.has(".git") || (names.has("HEAD") && names.has("objects") && names.has("refs")))
-      throw Error("nested_repository");
-    for (const entry of entries)
-      if (entry.isDirectory() && !entry.isSymbolicLink())
-        pending.push({ path: join(next.path, entry.name), depth: next.depth + 1 });
-  }
+  let directories = 0;
+  const started = Date.now();
+  const fail = (reason: string, path: string, limit: string) => {
+    throw Error(
+      `${reason}: phase=${phase} cache=${cache} at=${relativePath(cache, path) || "."} entries=${seen} directories=${directories} ${limit}; retained; repository check incomplete, preserve contents for review`,
+    );
+  };
+  const visit = async (path: string, depth: number): Promise<void> => {
+    if (depth > 40) fail("cache_inventory_depth_limit", path, "limit_depth=40");
+    // At most 41 directory handles, each reading a small batch. Never materialize
+    // a whole large directory before enforcing the existing entry budget.
+    const directory = await opendir(path, { bufferSize: 32 });
+    directories++;
+    let head = false;
+    let objects = false;
+    let refs = false;
+    for await (const entry of directory) {
+      seen++;
+      if (seen > 100_000) fail("cache_inventory_entry_limit", path, "limit_entries=100000");
+      if (Date.now() - started > 60_000) fail("cache_inventory_time_limit", path, "limit_ms=60000");
+      if (entry.name === ".git") throw Error("nested_repository");
+      head ||= entry.name === "HEAD";
+      objects ||= entry.name === "objects";
+      refs ||= entry.name === "refs";
+      if (head && objects && refs) throw Error("nested_repository");
+      if (entry.isDirectory() && !entry.isSymbolicLink()) await visit(join(path, entry.name), depth + 1);
+    }
+  };
+  await visit(cache, 0);
 }
 
 /** Remove only ignored package-manager installs and tagged Rust caches in enrolled linked trees. */
@@ -62,14 +103,13 @@ export async function reclaimWorktreeCaches(
     const repo = await inspectTidyRepository(repository);
     // Serialize manual and automatic sweeps in this repository; no index lock or source edit.
     return await withDirectoryLock(join(repo.common, "clankie-cache-reclaim.lock"), async () => {
-      const inventory = await checkoutGit(repository, ["worktree", "list", "--porcelain", "-z"]);
+      const inventory = await cacheGit(repository, ["worktree", "list", "--porcelain", "-z"], "worktrees");
       const entries = tidyWorktreeInventory(inventory);
       const managed = await managedWorktreePaths(options.protection ?? {});
       const cwds = await processWorkingDirectories();
       const panes = await tidyPaneDirectories(runner);
       let attempted = 0;
       for (const entry of entries) {
-        if (attempted >= 32) break;
         if (options.path && entry.path !== options.path) continue;
         if (
           entry.bare ||
@@ -80,6 +120,14 @@ export async function reclaimWorktreeCaches(
           managed.some((root) => contains(root, entry.path) || contains(entry.path, root))
         )
           continue;
+        if (attempted >= 32) {
+          result.kept.push({
+            path: entry.path,
+            reason:
+              "cache_candidate_limit: limit=32; remaining worktrees deferred; rerun with --path for an unexamined worktree",
+          });
+          break;
+        }
         const keep = (reason: string) => result.kept.push({ path: entry.path, reason });
         try {
           const candidate = await inspectTidyRepository(entry.path);
@@ -96,31 +144,32 @@ export async function reclaimWorktreeCaches(
           )
             throw Error("worktree_unverified");
           const idle = async (aside?: string) => {
-            if ((await checkoutGit(entry.path, ["rev-parse", "HEAD"])) !== entry.sha + "\n")
+            if ((await cacheGit(entry.path, ["rev-parse", "HEAD"], "head")) !== entry.sha + "\n")
               throw Error("head_changed");
             if (
-              await checkoutGit(entry.path, [
-                "status",
-                "--porcelain=v1",
-                "-z",
-                "--untracked-files=all",
-                ...(aside ? ["--", ".", `:(literal,exclude)${relativePath(entry.path, aside)}`] : []),
-              ])
+              await cacheGit(
+                entry.path,
+                [
+                  "status",
+                  "--porcelain=v1",
+                  "-z",
+                  "--untracked-files=normal",
+                  ...(aside ? ["--", ".", `:(literal,exclude)${relativePath(entry.path, aside)}`] : []),
+                ],
+                "cleanliness",
+              )
             )
               throw Error("dirty");
           };
           await idle();
           if ([...cwds, ...panes].some((path) => contains(entry.path, path))) throw Error("live_cwd");
           // Git stops at ignored directory boundaries; never recursively walk node_modules.
-          const ignored = await checkoutGit(entry.path, [
-            "ls-files",
-            "--others",
-            "--ignored",
-            "--exclude-standard",
-            "--directory",
-            "-z",
-          ]);
-          if (ignored.length > 1024 * 1024) throw Error("cache_inventory_too_large");
+          const ignored = await cacheGit(
+            entry.path,
+            ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
+            "ignored-paths",
+            ignoredOutputLimit,
+          );
           const caches = ignored
             .split("\0")
             .filter((path) => path.endsWith("/") && ["node_modules", "target"].includes(basename(path)));
@@ -134,96 +183,127 @@ export async function reclaimWorktreeCaches(
             root.mtimeMs,
           );
           for (const relative of caches) {
-            if (attempted >= 32) break;
-            const cache = resolve(entry.path, relative);
-            if (
-              !contains(entry.path, cache) ||
-              cache === entry.path ||
-              entries.some((tree) => contains(cache, tree.path))
-            )
-              throw Error("nested_worktree");
-            const metadata = await lstat(cache);
-            if (!metadata.isDirectory() || metadata.isSymbolicLink() || (await realpath(cache)) !== cache) {
-              result.kept.push({ path: cache, reason: "cache_alias" });
-              continue;
+            if (attempted >= 32) {
+              result.kept.push({
+                path: entry.path,
+                reason:
+                  "cache_candidate_limit: limit=32; remaining caches deferred; rerun with --path for an unexamined worktree",
+              });
+              break;
             }
-            if (
-              await checkoutGit(entry.path, ["ls-files", "--cached", "-z", "--", `:(literal)${relative}`])
-            ) {
-              result.kept.push({ path: cache, reason: "tracked_cache" });
-              continue;
-            }
-            let markerAt = 0;
-            if (basename(cache) === "target") {
-              const tag = join(cache, "CACHEDIR.TAG");
-              const tagStat = await lstat(tag).catch(() => undefined);
-              if (
-                !tagStat?.isFile() ||
-                tagStat.isSymbolicLink() ||
-                tagStat.size > 4096 ||
-                (await realpath(tag).catch(() => "")) !== tag ||
-                !(await readFile(tag, "utf8")).startsWith(rustCacheSignature + "\n")
-              ) {
-                result.kept.push({ path: cache, reason: "untagged_target" });
-                continue;
-              }
-              markerAt = (await stat(tag)).mtimeMs;
-            } else {
-              const markers = await Promise.all(
-                [".modules.yaml", ".package-lock.json", ".yarn-state.yml"].map(async (name) => {
-                  const file = join(cache, name);
-                  const value = await lstat(file).catch(() => undefined);
-                  return value?.isFile() && !value.isSymbolicLink() ? value.mtimeMs : undefined;
-                }),
-              );
-              if (!markers.some((at) => at !== undefined)) {
-                result.kept.push({ path: cache, reason: "install_unverified" });
-                continue;
-              }
-              markerAt = Math.max(...markers.filter((at): at is number => at !== undefined));
-            }
-            if (Date.now() - Math.max(registrationAt, metadata.mtimeMs, markerAt) < retention) {
-              result.kept.push({ path: cache, reason: "recent" });
-              continue;
-            }
-            await verifyCacheHasNoRepository(cache);
-            await guard();
-            await idle();
-            if ((await checkoutGit(repository, ["worktree", "list", "--porcelain", "-z"])) !== inventory)
-              throw Error("inventory_changed");
-            if (
-              [...(await processWorkingDirectories()), ...(await tidyPaneDirectories(runner))].some((path) =>
-                contains(entry.path, path),
-              )
-            )
-              throw Error("live_cwd");
-            const fresh = await lstat(cache);
-            if (
-              fresh.ino !== metadata.ino ||
-              fresh.dev !== metadata.dev ||
-              fresh.mtimeMs !== metadata.mtimeMs
-            )
-              throw Error("cache_changed");
-            const aside = `${cache}.clankie-reclaim-${randomUUID()}`;
             attempted++;
-            await rename(cache, aside);
+            const cache = resolve(entry.path, relative);
             try {
+              if (
+                !contains(entry.path, cache) ||
+                cache === entry.path ||
+                entries.some((tree) => contains(cache, tree.path))
+              )
+                throw Error("nested_worktree");
+              const metadata = await lstat(cache);
+              if (!metadata.isDirectory() || metadata.isSymbolicLink() || (await realpath(cache)) !== cache) {
+                result.kept.push({ path: cache, reason: "cache_alias" });
+                continue;
+              }
+              if (
+                await cacheGit(
+                  entry.path,
+                  ["ls-files", "--cached", "-z", "--", `:(literal)${relative}`],
+                  "tracked-cache",
+                )
+              ) {
+                result.kept.push({ path: cache, reason: "tracked_cache" });
+                continue;
+              }
+              let markerAt = 0;
+              if (basename(cache) === "target") {
+                const tag = join(cache, "CACHEDIR.TAG");
+                const tagStat = await lstat(tag).catch(() => undefined);
+                if (
+                  !tagStat?.isFile() ||
+                  tagStat.isSymbolicLink() ||
+                  tagStat.size > 4096 ||
+                  (await realpath(tag).catch(() => "")) !== tag ||
+                  !(await readFile(tag, "utf8")).startsWith(rustCacheSignature + "\n")
+                ) {
+                  result.kept.push({ path: cache, reason: "untagged_target" });
+                  continue;
+                }
+                markerAt = (await stat(tag)).mtimeMs;
+              } else {
+                const markers = await Promise.all(
+                  [".modules.yaml", ".package-lock.json", ".yarn-state.yml"].map(async (name) => {
+                    const file = join(cache, name);
+                    const value = await lstat(file).catch(() => undefined);
+                    return value?.isFile() && !value.isSymbolicLink() ? value.mtimeMs : undefined;
+                  }),
+                );
+                if (!markers.some((at) => at !== undefined)) {
+                  result.kept.push({ path: cache, reason: "install_unverified" });
+                  continue;
+                }
+                markerAt = Math.max(...markers.filter((at): at is number => at !== undefined));
+              }
+              if (Date.now() - Math.max(registrationAt, metadata.mtimeMs, markerAt) < retention) {
+                result.kept.push({ path: cache, reason: "recent" });
+                continue;
+              }
+              await verifyCacheHasNoRepository(cache, "before-rename");
               await guard();
-              await idle(aside);
-              await verifyCacheHasNoRepository(aside);
+              await idle();
+              if (
+                (await cacheGit(
+                  repository,
+                  ["worktree", "list", "--porcelain", "-z"],
+                  "worktree-recheck",
+                )) !== inventory
+              )
+                throw Error("inventory_changed");
               if (
                 [...(await processWorkingDirectories()), ...(await tidyPaneDirectories(runner))].some(
                   (path) => contains(entry.path, path),
                 )
               )
                 throw Error("live_cwd");
-              await rm(aside, { recursive: true });
-              result.reclaimed.push(cache);
+              const fresh = await lstat(cache);
+              if (
+                fresh.ino !== metadata.ino ||
+                fresh.dev !== metadata.dev ||
+                fresh.mtimeMs !== metadata.mtimeMs
+              )
+                throw Error("cache_changed");
+              const aside = `${cache}.clankie-reclaim-${randomUUID()}`;
+              await rename(cache, aside);
+              try {
+                await guard();
+                await idle(aside);
+                await verifyCacheHasNoRepository(aside, "after-rename");
+                if (
+                  [...(await processWorkingDirectories()), ...(await tidyPaneDirectories(runner))].some(
+                    (path) => contains(entry.path, path),
+                  )
+                )
+                  throw Error("live_cwd");
+                await rm(aside, { recursive: true });
+                result.reclaimed.push(cache);
+              } catch (error) {
+                // A new install can occupy the original name; never overwrite it to roll back.
+                try {
+                  const original = await lstat(cache).catch((observationError: NodeJS.ErrnoException) => {
+                    if (observationError.code !== "ENOENT") throw observationError;
+                    return undefined;
+                  });
+                  if (!original) await rename(aside, cache);
+                  result.kept.push({ path: original ? aside : cache, reason: String(error) });
+                } catch (restoreError) {
+                  result.kept.push({
+                    path: aside,
+                    reason: `cache_restore_failed: original=${cache}; retained aside for review; cause=${String(error)} restore=${String(restoreError)}`,
+                  });
+                }
+              }
             } catch (error) {
-              // A new install can occupy the original name; never overwrite it to roll back.
-              const restored = !(await lstat(cache).catch(() => undefined));
-              if (restored) await rename(aside, cache);
-              result.kept.push({ path: restored ? cache : aside, reason: String(error) });
+              result.kept.push({ path: cache, reason: String(error) });
             }
           }
         } catch (error) {
