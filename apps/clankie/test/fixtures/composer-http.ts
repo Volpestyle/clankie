@@ -1,3 +1,4 @@
+import { HostedOwnerDeviceSchema } from "@clankie/protocol/hosted-browser-session";
 import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -120,6 +121,12 @@ export async function composerHttpFixture(managed = true) {
         if (!revoked.some((entry) => entry.dev === body.deviceId))
           revoked.push({ dev: body.deviceId, at: now, gen: ++gen });
         res.end(JSON.stringify({ generation: gen }));
+        return;
+      }
+      if (req.url === "/owner-device") {
+        HostedOwnerDeviceSchema.parse(body);
+        expect(req.headers["x-clankie-body-signature"]).toBeTypeOf("string");
+        res.end("{}");
         return;
       }
       if (req.url === "/device-purpose") {

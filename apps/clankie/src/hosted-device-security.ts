@@ -18,7 +18,7 @@ type Identity = z.infer<typeof IdentitySchema>;
 export class HostedDeviceSecurity {
   private generation = -1;
   private readonly client: Pick<HostedBodyClient, "readSecurityState" | "declareAuthKey" | "revokeDevice"> &
-    Partial<Pick<HostedBodyClient, "declareSupportDevice">>;
+    Partial<Pick<HostedBodyClient, "declareSupportDevice" | "declareOwnerDevice">>;
   private readonly identityPath: string;
   constructor(client: HostedDeviceSecurity["client"], identityPath: string) {
     this.client = client;
@@ -94,6 +94,16 @@ export class HostedDeviceSecurity {
 
   async revokeDevice(deviceId: string): Promise<void> {
     await this.client.revokeDevice(deviceId);
+  }
+
+  async publishOwnerDevice(deviceId: string): Promise<void> {
+    if (this.client.declareOwnerDevice === undefined)
+      throw new Error("Hosted owner device publication unavailable");
+    await this.client.declareOwnerDevice(deviceId);
+  }
+
+  async isRevoked(deviceId: string): Promise<boolean> {
+    return (await this.read()).rev.some((entry) => entry.dev === deviceId);
   }
 
   async publishSupportDevice(deviceId: string, supportGrantId: string): Promise<void> {

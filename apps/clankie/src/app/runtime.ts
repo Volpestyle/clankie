@@ -259,7 +259,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   let securityClosed = false;
   let composerAuthKeyId: string | undefined;
   const publishHostedSupportDevice = async (record: DeviceRecord) => {
-    if (record.supportGrantId === undefined || dependencies.hostedBody === undefined) return;
+    if (dependencies.hostedBody === undefined) return;
+    if (record.supportGrantId === undefined) {
+      if (record.status === "revoked") return;
+      if (dependencies.hostedDeviceSecurity?.publishOwnerDevice !== undefined)
+        await dependencies.hostedDeviceSecurity.publishOwnerDevice(record.deviceId);
+      return;
+    }
     if (dependencies.hostedDeviceSecurity?.publishSupportDevice === undefined)
       throw new Error("Hosted support device publication unavailable");
     await dependencies.hostedDeviceSecurity.publishSupportDevice(record.deviceId, record.supportGrantId);
@@ -528,7 +534,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (record.status === "revoked") return { denied: "revoked" };
     if (record.status !== "active") return { denied: "invalid" };
     try {
-      await publishHostedSupportDevice(record);
+      if (await dependencies.hostedDeviceSecurity?.isRevoked?.(record.deviceId)) return { denied: "revoked" };
+      if (record.supportGrantId !== undefined) await publishHostedSupportDevice(record);
     } catch {
       return "unavailable";
     }

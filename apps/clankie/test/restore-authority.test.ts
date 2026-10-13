@@ -25,7 +25,12 @@ async function fixture() {
   let reachable = true;
   let state: HostedSecurityState = { gen: 0, rev: [], ak: null, pk: null }; // external fleet fixture, not restored
   const hostedBody = { registerWakeKey: async () => {}, revokeWakeKey: async () => {} };
+  const ownerDevices = new Set<string>();
   const source = {
+    async declareOwnerDevice(deviceId: string) {
+      if (!reachable) throw new Error("fleet unavailable");
+      ownerDevices.add(deviceId);
+    },
     async readSecurityState() {
       if (!reachable) throw new Error("fleet unavailable");
       return structuredClone(state);

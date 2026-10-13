@@ -162,3 +162,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0248 — Owner settings use one revision-fenced API](0248-owner-settings-use-one-revision-fenced-api.md)
 
 - [0267 — Skins share one public animation spec](0267-skins-share-one-public-animation-spec.md)
+- [0268: Account-owned device revocation survives a sleeping body](0268-account-owned-device-revocation-survives-a-sleeping-body.md) — VUH-2121 / VUH-2215.

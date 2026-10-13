@@ -27,6 +27,7 @@
     "./app-telemetry": "./src/app-telemetry.ts",
     "./discord-ingress": "./src/discord-ingress.ts",
     "./discord-ingress-crypto": "./src/discord-ingress-crypto.ts",
+    "./hosted-browser-session": "./src/hosted-browser-session.ts",
     "./hosted-pairing": "./src/hosted-pairing.ts",
     "./hosted-operator": "./src/hosted-operator.ts",
     "./hosted-discord": "./src/hosted-discord.ts",

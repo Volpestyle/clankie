@@ -429,7 +429,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     const accepted = parsed.data.acceptedGrants;
     if (!isSubsetGrants(accepted, pending.offeredGrants)) return context.json({ error: "malformed" }, 400);
     return withSerializedLock(ctx.deviceLocks, pending.deviceId, async () => {
-      const now = ctx.clock();
+      let now = ctx.clock();
       const record = ctx.devices.get(pending.deviceId);
       if (record === undefined || isDevicePendingExpired(record, now))
         return context.json({ error: "expired" }, 410);
@@ -445,7 +445,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         return context.json({ error: "expired" }, 410);
       const supportGrant =
         record.supportGrantId === undefined ? undefined : ctx.supportGrants.active(record.supportGrantId);
-      const ttlSeconds =
+      let ttlSeconds =
         supportGrant === undefined
           ? undefined
           : Math.floor(Date.parse(supportGrant.expiresAt) / 1000) - Math.floor(now.getTime() / 1000);
@@ -455,6 +455,24 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         return context.json({ error: "support_pairing_requires_read_state" }, 409);
       const current = ctx.completionTokens.get(tokenHash);
       if (current === undefined || current.consumed) return context.json({ error: "consumed" }, 409);
+      try {
+        await ctx.publishHostedSupportDevice(record);
+      } catch {
+        return context.json({ error: "device_authentication_unavailable" }, 503);
+      }
+      // Publication awaited fleet authority; expiry and revocation may have moved meanwhile.
+      now = ctx.clock();
+      if (ctx.devices.get(pending.deviceId)?.status !== "pending")
+        return context.json({ error: "revoked" }, 403);
+      if (pending.expiresAtMs <= now.getTime()) return context.json({ error: "expired" }, 410);
+      if (record.supportGrantId !== undefined) {
+        const liveGrant = ctx.supportGrants.active(record.supportGrantId);
+        if (liveGrant === undefined) return context.json({ error: "expired" }, 410);
+        if (liveGrant.scope !== "read-state")
+          return context.json({ error: "support_pairing_requires_read_state" }, 409);
+        ttlSeconds = Math.floor(Date.parse(liveGrant.expiresAt) / 1000) - Math.floor(now.getTime() / 1000);
+        if (ttlSeconds <= 0) return context.json({ error: "expired" }, 410);
+      }
       current.consumed = true;
       const claims = mintDeviceSessionClaims({
         deviceId: pending.deviceId,

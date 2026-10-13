@@ -1,3 +1,4 @@
+import { HostedOwnerDeviceSchema } from "@clankie/protocol/hosted-browser-session";
 import {
   ActivityLaunchReceiptSchema,
   ActivityAuthorizationSchema,
@@ -762,6 +763,11 @@ export class HostedBodyClient {
     z.object({ generation: z.number().int().nonnegative() })
       .strict()
       .parse(await response.json());
+  }
+  async declareOwnerDevice(deviceId: string): Promise<void> {
+    const input = HostedOwnerDeviceSchema.parse({ installationId: this.bootstrap.installationId, deviceId });
+    const response = await this.post("owner-device", input);
+    await response.body?.cancel();
   }
   async declareSupportDevice(deviceId: string, supportGrantId: string): Promise<void> {
     const input = HostedDevicePurposeRequestSchema.parse({
