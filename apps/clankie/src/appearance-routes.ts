@@ -46,7 +46,11 @@ export function createAppearanceRoutes(
           before = JSON.stringify(current);
           return {
             ...current,
-            appearance: { ...current.appearance, ...input.data.changes },
+            appearance: {
+              ...current.appearance,
+              ...input.data.changes,
+              leadSkin: input.data.changes.leadSkin ?? current.appearance.leadSkin,
+            },
           };
         },
         async () => {
