@@ -14,6 +14,12 @@
       "url": "clankie://evidence/sha256/b2f4f40e91da043bfc01b9446f97d65b314614734a904656ed54979837a0be1b"
     },
     {
+      "path": "raw/landed-gate.txt",
+      "size": 777746,
+      "sha256": "8432961ea47fdc145da051d1aa883c639e4adb86fd3e717be5ac95a619f6eb11",
+      "url": "clankie://evidence/sha256/8432961ea47fdc145da051d1aa883c639e4adb86fd3e717be5ac95a619f6eb11"
+    },
+    {
       "path": "raw/restart-snapshot-proof.txt",
       "size": 798454,
       "sha256": "d1c854fd783e86bb9b8cfb822a9c4f15dbfc380500b6b9b6d78aa7c7796e7edf",
