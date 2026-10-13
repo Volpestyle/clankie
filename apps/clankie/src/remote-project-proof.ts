@@ -49,6 +49,8 @@ interface Observation {
   installed: string[];
   foregroundMarkers?: SeatMarkers | null;
   defaultHomeHash?: string | null;
+  /** Kernel listener discovered from the visible TUI's argv, outside its ancestry. */
+  detachedCodexServer?: { native: NativeProcess; process: Process } | null;
   privateServer?: {
     pid: number;
     startTime: string;
@@ -217,7 +219,7 @@ function loopbackPort(endpoint: unknown, allowZero = false): number | undefined 
   return port <= 65535 && (allowZero || port > 0) ? port : undefined;
 }
 
-/** Both native processes must descend from this exact live foreground wrapper above the shell. */
+/** Pane ancestry, or its independently observed detached listener, binds the backend. */
 function selectCodexControl(
   observation: Observation,
   fleet: HerdrFleet,
@@ -238,20 +240,24 @@ function selectCodexControl(
     return undefined;
   const tuis = observation.nativeProcesses.filter((native) => native.role === "tui");
   const servers = observation.nativeProcesses.filter((native) => native.role === "server");
+  const detached = servers.length === 0 ? observation.detachedCodexServer : undefined;
   // Unknown argv could conceal another native TUI or daemon; unavailable facts never authorize.
   if (
     tuis.length !== 1 ||
-    servers.length !== 1 ||
+    (detached ? detached.native.role !== "server" : servers.length !== 1) ||
     observation.nativeProcesses.some((native) => native.role === undefined || native.role === "unavailable")
   )
     return undefined;
   const tui = tuis[0]!;
-  const server = servers[0]!;
+  const server = detached?.native ?? servers[0]!;
   const port = loopbackPort(tui.endpoint);
   const listenPort = loopbackPort(server.endpoint, true);
   const shell = view.proof.shell;
   const tuiChain = ancestry(observation.processes, tui.pid, shell.pid);
-  const serverChain = ancestry(observation.processes, server.pid, shell.pid);
+  // A detached launch's former SSH parent may have exited or its PID may have
+  // been reused. Its current kernel lifetime and exact listener are the anchor;
+  // do not reconstruct launch authority or trust that dead parent's ancestry.
+  const serverChain = detached ? [detached.process] : ancestry(observation.processes, server.pid, shell.pid);
   const foreground = observation.processes.find((process) => process.pid === view.foreground);
   if (
     port === undefined ||
@@ -262,10 +268,14 @@ function selectCodexControl(
     !foreground ||
     foreground.pid === shell.pid ||
     !tuiChain.slice(1).some((process) => process.pid === foreground.pid) ||
-    !serverChain.slice(1).some((process) => process.pid === foreground.pid) ||
+    (!detached && !serverChain.slice(1).some((process) => process.pid === foreground.pid)) ||
     serverChain.slice(1).some((process) => process.pid === tui.pid) ||
     tui.pid !== view.proof.processes[0]?.pid ||
     server.pid === tui.pid ||
+    serverChain[0]?.pid !== server.pid ||
+    !Number.isSafeInteger(server.pid) ||
+    server.pid <= 4 ||
+    creationTicks(serverChain[0]?.startTime ?? "") === undefined ||
     !observation.installed.includes(server.executable) ||
     server.executable !== tui.executable ||
     serverChain[0]?.executable !== server.executable ||

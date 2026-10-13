@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "native-proof.json",
+      "size": 65512,
+      "sha256": "c7adb7a1c33f5111dc63a15c2493507418e2881f72231329bad03157470f8067",
+      "url": "clankie://evidence/sha256/c7adb7a1c33f5111dc63a15c2493507418e2881f72231329bad03157470f8067"
+    }
+  ]
+}

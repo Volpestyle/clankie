@@ -264,11 +264,15 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
     forward.stderr?.on("data", (chunk: string) => {
       forwardErrors = `${forwardErrors}${chunk}`.slice(-2_000);
     });
+    let handedOff = false;
     const dropped = (detail: string) => {
       if (closed || failure !== undefined) return;
       failure = new Error(`The ssh link to fleet ${fleet.id} dropped: ${detail}`);
       registration?.release();
-      if (registration) void stopServer();
+      // A bound visible TUI owns its detached backend's lifetime. Killing it
+      // when this service's SSH controller exits strands that TUI on deploy.
+      // Fresh kernel proof can rediscover it without restoring launch authority.
+      if (registration && !handedOff) void stopServer();
       input.onExit(null);
     };
     forward.on("error", (error) => dropped(error.message));
@@ -292,7 +296,13 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
     return {
       ...(registration
         ? {
-            remoteRegistration: registration,
+            remoteRegistration: {
+              ...registration,
+              bindThread(threadId, soleThread) {
+                registration.bindThread(threadId, soleThread);
+                handedOff = true;
+              },
+            },
             waitForClankieCatalog: true as const,
             viewConfigArgs: [
               "mcp_servers.clankie.enabled=false",
@@ -503,7 +513,7 @@ export function remoteCodexQueue(
           native ?? {
             outcome: "undelivered",
             deliveryStage: "unavailable",
-            detail: "The Windows pane's Codex queue backend cannot be proven; nothing was sent.",
+            detail: windowsCodexRecovery(paneId, sessionId),
           }
         );
       }
@@ -553,6 +563,11 @@ export function remoteCodexQueue(
   };
 }
 
+function windowsCodexRecovery(paneId: string, sessionId: string): string {
+  const fleetId = splitFleetQualified(paneId)?.fleet;
+  return `The Windows pane's Codex backend is unavailable or its native identity cannot be proven; nothing was sent. Re-adopt ${paneId} to retry fresh endpoint discovery. If its original backend has exited, have the owner end the stale TUI, then resume the saved session with a new dedicated backend (hire_agent resume=${JSON.stringify(`${fleetId}:${sessionId}`)}); re-adoption alone cannot recreate it. Do not restart or replace the existing pane automatically.`;
+}
+
 /** SSH carries only the selected fleet's existing proxy, never a new daemon. */
 export function remoteCodexControl(
   fleet: HerdrFleet,
@@ -581,7 +596,7 @@ export function remoteCodexControl(
           ? {
               outcome: "undelivered",
               deliveryStage: "unavailable",
-              detail: "The Windows pane's Codex queue backend cannot be proven; nothing was sent.",
+              detail: windowsCodexRecovery(paneId, sessionId),
             }
           : undefined;
       let connection: RemoteCodexConnection | undefined;

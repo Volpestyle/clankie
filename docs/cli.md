@@ -4582,6 +4582,15 @@ What crosses the link, and what cannot:
   typed into the pane. Its inherited Linear connectors are switched off from
   that machine's own Codex configuration. On Windows, launch arguments that
   `cmd.exe` would reinterpret are refused rather than altered.
+  Once its visible TUI binds a native thread, a dropped service SSH controller
+  leaves the detached Windows backend running. After restart, the first send
+  discovers its kernel listener from the TUI's native `--remote` endpoint,
+  checking installed executable, process lifetime, pane/socket/home markers,
+  working directory and the actual forwarded connection again before input.
+  The service's former launch registration is not reconstructed. If the
+  backend has exited, re-adoption cannot bring it back: the refusal asks the
+  owner to end the stale TUI, then resume the saved session with `hire_agent`'s
+  `resume` reference and a new dedicated backend. It never restarts the existing pane automatically.
   Private catalog readiness reads the pinned `worker` server on the original
   loaded thread. A newly named native root can have metadata before its rollout
   materializes. Observer subscription and history hydration stay distinct:

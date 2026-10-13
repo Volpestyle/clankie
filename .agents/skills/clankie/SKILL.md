@@ -443,6 +443,13 @@ stay bare. Machine, fleet/session, pane and native occupant are distinct. Keep
 remote cwd and workspace policy on the remote machine. Do not close or restart
 other agents as a diagnostic step. Existing leads retain their assignments.
 
+Windows Codex sends rediscover the backend from the visible TUI's native
+`--remote` endpoint and its kernel listener, including detached hired servers
+after service restart. Re-adoption never restores cached launch authority.
+If that listener is gone, re-adoption cannot recreate it: ask the owner to
+end the stale TUI, then resume the exact saved session with `hire_agent`'s
+`resume` reference and a new dedicated backend. Do not restart or replace the existing pane as a probe.
+
 For GitHub, discover its tools through the fleet bridge and inspect authenticated
 repository identity before an authorized write. A verified connected MCP account
 contributes its tools while fleet tools are on. If no appropriate route is

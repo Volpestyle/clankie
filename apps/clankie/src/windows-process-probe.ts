@@ -424,6 +424,27 @@ $nativeProcesses = @(foreach ($row in $all) {
     }
   } catch { }
 })
+# Hired app-servers break away from SSH and are not descendants of the pane.
+# Discover only the unique kernel listener at the visible TUI's native --remote
+# endpoint. Never use saved launch PIDs, a request endpoint or account-wide files.
+$detachedCodexServer=$null
+${
+  input.codexControl
+    ? `if ($nativeProcesses.Count -eq 1 -and $nativeProcesses[0].role -eq 'tui' -and $nativeProcesses[0].endpoint -match '^ws://127\\.0\\.0\\.1:([1-9][0-9]{0,4})$') {
+  $port=[int]$Matches[1]
+  $listenerOwners=@([ClankieProcess]::Owners($port,0))
+  if ($port -le 65535 -and $listenerOwners.Count -eq 1 -and $byPid.ContainsKey($listenerOwners[0]) -and $byPid[$listenerOwners[0]].name -eq 'codex.exe') {
+    try {
+      $detail=[ClankieProcess]::Details($listenerOwners[0])
+      $detail.executable=[ClankieProcess]::Canonical($detail.executable)
+      $role=[ClankieProcess]::Codex($detail.pid)
+      $listeners=@([ClankieProcess]::Listeners($detail.pid))
+      $detachedCodexServer=[ordered]@{process=$detail;native=[ordered]@{pid=$detail.pid;executable=$detail.executable;cwd=[ClankieProcess]::Cwd($detail.pid);role=$role.role;endpoint=$role.endpoint;markers=[ClankieProcess]::Markers($detail.pid);listeners=$listeners;listenerOwners=@(foreach ($listener in $listeners) { [ClankieProcess]::Owners($listener.port,0) })}}
+    } catch { }
+  }
+}`
+    : ""
+}
 $owners = @(${input.clientPort === undefined || input.serverPort === undefined ? "" : `[ClankieProcess]::Owners(${input.clientPort}, ${input.serverPort})`})
 $privateServer=$null
 ${
@@ -457,7 +478,7 @@ ${
 } catch { }`
     : ""
 }
-[ordered]@{binding=[ordered]@{socketPath=$binding[0].socket_path;session=$session};info=[ordered]@{pane_id=$info.pane_id;shell_pid=$info.shell_pid;foreground_process_group_id=$info.foreground_process_group_id};agent=[ordered]@{pane_id=$agent.pane_id;terminal_id=$agent.terminal_id;agent=$agent.agent;agent_session=$agent.agent_session;agent_status=$agent.agent_status};processes=$relevant;nativeProcesses=$nativeProcesses;owners=$owners;installed=$installed;privateServer=$privateServer;foregroundMarkers=$foregroundMarkers;defaultHomeHash=$defaultHomeHash}
+[ordered]@{binding=[ordered]@{socketPath=$binding[0].socket_path;session=$session};info=[ordered]@{pane_id=$info.pane_id;shell_pid=$info.shell_pid;foreground_process_group_id=$info.foreground_process_group_id};agent=[ordered]@{pane_id=$agent.pane_id;terminal_id=$agent.terminal_id;agent=$agent.agent;agent_session=$agent.agent_session;agent_status=$agent.agent_status};processes=$relevant;nativeProcesses=$nativeProcesses;owners=$owners;installed=$installed;privateServer=$privateServer;foregroundMarkers=$foregroundMarkers;defaultHomeHash=$defaultHomeHash;detachedCodexServer=$detachedCodexServer}
 }
 $first = Observe-ClankieProcess
 $last = Observe-ClankieProcess
