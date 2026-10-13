@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -56,7 +56,16 @@ it.each([
       ]);
       // Capture disk before graceful close to model abrupt loss without leaving
       // another live object writing the recovered state. Neither run resumes a model.
-      if (abrupt) cpSync(root, recoveryRoot, { recursive: true });
+      if (abrupt) {
+        cpSync(root, recoveryRoot, { recursive: true });
+        // Node cpSync recreates directories as 0755. A crash keeps the actual
+        // state directory's permissions; preserve the registry's private mode.
+        const registryDirectory = "harness-account-identities";
+        const mode = statSync(join(root, registryDirectory)).mode & 0o777;
+        expect(mode).toBe(0o700);
+        chmodSync(join(recoveryRoot, registryDirectory), mode);
+        expect(statSync(join(recoveryRoot, registryDirectory)).mode & 0o777).toBe(mode);
+      }
       await captain.close();
       const restarted = create(recoveryRoot);
       try {

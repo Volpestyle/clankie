@@ -12,6 +12,12 @@
       "size": 24150,
       "sha256": "b2f4f40e91da043bfc01b9446f97d65b314614734a904656ed54979837a0be1b",
       "url": "clankie://evidence/sha256/b2f4f40e91da043bfc01b9446f97d65b314614734a904656ed54979837a0be1b"
+    },
+    {
+      "path": "raw/restart-snapshot-proof.txt",
+      "size": 798454,
+      "sha256": "d1c854fd783e86bb9b8cfb822a9c4f15dbfc380500b6b9b6d78aa7c7796e7edf",
+      "url": "clankie://evidence/sha256/d1c854fd783e86bb9b8cfb822a9c4f15dbfc380500b6b9b6d78aa7c7796e7edf"
     }
   ]
 }
