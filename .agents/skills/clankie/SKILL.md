@@ -21,7 +21,10 @@ installed ports `4310`/`4321` for scratch listeners or targets.
 For guarded project/settings reads, generate a **new** preset with
 `--broker-operator`: normal service startup mints into its private file broker.
 Run source commands with `scratch-stack.mjs run DIRECTORY cli ARGS...` under
-`clankie heavy`. Preserve the original env-only refusal; never persist its test
+`clankie heavy`. The runner CLI cwd is core source; pass
+`--repo ABSOLUTE_SCRATCH_ROOT` to work-tracker commands (including `work status`).
+Bare status is not the proven scratch boundary. Preserve the original env-only
+refusal; never persist its test
 bearer or copy owner credentials. Stop the owned stack, then remove its whole
 scratch root, including the broker. See the LOCAL-VUH-14 section in `docs/cli.md`.
 Boot simulators only through `clankie simulator acquire`, never `simctl boot` directly.

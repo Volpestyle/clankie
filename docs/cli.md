@@ -1093,8 +1093,12 @@ clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli mod
 clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli auto status
 clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli devices --json
 clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli body status
-clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli work status
+clankie heavy -- node scripts/scratch-stack.mjs run .local/project-proof cli work status --repo "$PWD/.local/project-proof"
 ```
+
+The runner starts the source CLI from the core checkout. Work-tracker commands
+therefore need `--repo` with the **absolute scratch root**, as above; bare
+`work status` selects the core checkout and does not prove the scratch boundary.
 
 This separate option omits `CLANKIE_OPERATOR_TOKEN`.
 The new scratch root must be empty and must not be a symlink; an existing
