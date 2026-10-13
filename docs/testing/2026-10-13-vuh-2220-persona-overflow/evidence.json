@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "raw/deployed-verification.txt",
+      "size": 388886,
+      "sha256": "b14b8310cf8c53d928549d513e441160afba7d8dd765437a542122f27dc052cb",
+      "url": "clankie://evidence/sha256/b14b8310cf8c53d928549d513e441160afba7d8dd765437a542122f27dc052cb"
+    },
+    {
       "path": "raw/live-overflow-and-client-proof.json",
       "size": 49801,
       "sha256": "801bdcba0714967418e6d36197a18494749a7a35559ced5030346e60124b31b3",
