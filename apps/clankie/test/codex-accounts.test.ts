@@ -36,13 +36,15 @@ test("CLI and owner-authorized API register the same path-only accounts without 
     });
   expect((await send({ op: "add", home, label: "second", credentials: "not allowed" })).status).toBe(400);
   expect((await send({ op: "add", home, label: "second" })).status).toBe(200);
-  expect(await runAccountsCommand(["codex", "list"], { settings })).toMatchObject({
-    accounts: [{ label: "default" }, { label: "second", authPresent: true, headroom: null }],
-  });
+  expect((await settings.load()).codexAccounts).toEqual([{ label: "second", home }]);
   expect((await send({ op: "add", home, label: "duplicate" })).status).toBe(400);
   await runAccountsCommand(["codex", "remove", "second"], { settings });
   expect((await settings.load()).codexAccounts).toEqual([]);
-  await runAccountsCommand(["codex", "add", home, "--label", "restored"], { settings });
+  expect(await runAccountsCommand(["codex", "add", home, "--label", "restored"], { settings })).toMatchObject(
+    {
+      profiles: [{ label: "restored", home }],
+    },
+  );
   vi.mocked(readCodexRateLimits).mockResolvedValueOnce(
     JSON.stringify({ payload: { rate_limits: { primary: { used_percent: 92, window_minutes: 10080 } } } }),
   );
