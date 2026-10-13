@@ -365,6 +365,52 @@ it.each(["hire", "workspace"])(
     expect((await read(root, f.input)).seats[0]!.membership.outcome).toBe("unknown");
   },
 );
+it("stalled remote native observations leave local renewal capacity until remote cleanup settles", async () => {
+  const f = await fixture(4);
+  let entered = 0;
+  let finish!: () => void;
+  const held = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const remote: FleetProjectMembershipOptions = {
+    ...f.options,
+    fleet: "pc",
+    roster: async () => f.agents.map((agent) => ({ ...agent, terminalId: `pc/${agent.terminalId}` })),
+    hires: { ...f.options.hires, projectHireMembershipCandidate: () => ({ state: "none" }) },
+    workspace: async () => undefined,
+    observe: async () => {
+      entered++;
+      await held;
+      return undefined;
+    },
+  };
+  const service = new FleetProjectMembership({ ...f.options, remoteOptions: async () => remote });
+  const abort = new AbortController();
+  const pending = service.read(
+    {
+      ...f.input,
+      seats: f.input.seats.map((seat) => ({ ...seat, fleet: "pc", seatId: `pc/${seat.seatId}` })),
+    },
+    abort.signal,
+    async () => true,
+  );
+  const rejected = expect(pending).rejects.toThrow();
+  try {
+    await vi.waitFor(() => expect(entered).toBe(2));
+    expect((await read(service, f.input)).seats.every((seat) => seat.membership.outcome === "member")).toBe(
+      true,
+    );
+    abort.abort();
+    expect(entered).toBe(2);
+    expect((await read(service, f.input)).seats.every((seat) => seat.membership.outcome === "member")).toBe(
+      true,
+    );
+  } finally {
+    abort.abort();
+    finish();
+    await rejected;
+  }
+});
 it("a failed final census discards positive membership", async () => {
   const f = await fixture();
   f.roster.mockResolvedValueOnce(f.agents).mockRejectedValue(new Error("disconnected"));

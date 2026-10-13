@@ -66,11 +66,11 @@ const matches = (agent: HerdrCensusAgent, seat: Seat) =>
 /** Separate from control/tool authority. No effects, adoption, transcript reads or result cache. */
 export class FleetProjectMembership {
   private readonly batches = new Map<string, Batch>();
-  private readonly pool: { active: number; batches: number; queued: Set<() => void> };
+  private readonly pool: { active: number; remoteActive: number; batches: number; queued: Set<() => void> };
   private readonly options: FleetProjectMembershipOptions;
   constructor(
     options: FleetProjectMembershipOptions,
-    pool = { active: 0, batches: 0, queued: new Set<() => void>() },
+    pool = { active: 0, remoteActive: 0, batches: 0, queued: new Set<() => void>() },
   ) {
     this.options = options;
     this.pool = pool;
@@ -78,7 +78,10 @@ export class FleetProjectMembership {
 
   /** Global across every batch. Capacity is held through observer/owned child cleanup. */
   private async permit(signal: AbortSignal): Promise<() => void> {
-    while (this.pool.active >= 4) {
+    const remote = this.options.fleet !== undefined && this.options.fleet !== "default";
+    // Slow SSH observations must leave capacity for local receipt renewals.
+    // Remote work still holds its slots through actual child cleanup.
+    while (this.pool.active >= 4 || (remote && this.pool.remoteActive >= 2)) {
       await new Promise<void>((resolve, reject) => {
         const finish = () => {
           this.pool.queued.delete(wake);
@@ -99,8 +102,10 @@ export class FleetProjectMembership {
     }
     signal.throwIfAborted();
     this.pool.active++;
+    if (remote) this.pool.remoteActive++;
     return () => {
       this.pool.active--;
+      if (remote) this.pool.remoteActive--;
       for (const wake of this.pool.queued) wake();
     };
   }

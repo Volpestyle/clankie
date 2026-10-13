@@ -244,6 +244,11 @@ not native assignments or tool authority. Paths alone never attribute a
 lead-hired worker. Each read stays limited to eight tuples; clients batch their
 full roster and preserve freshness independently for each batch.
 
+The shared native observation pool still admits four operations. Remote fleets
+may hold at most two of those slots across all reads, including child cleanup,
+so a stalled SSH batch leaves capacity for local renewal. This does not cache
+proofs or relax publication checks.
+
 Linear project UUID validation uses a direct project read. Collection searches
 use fifty-project pages because the nested project projection at 250 entries
 exceeds Linear's query-complexity limit, including a UUID-filtered collection.
