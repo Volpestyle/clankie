@@ -37,13 +37,51 @@ it("stores Clankie's look once for every surface, fenced by revision and owner a
     expect(second.revision).not.toBe(first.revision);
     expect((await new SettingsStore(settings.path).load()).appearance.leadSkin).toBe("clankie.lead.operator");
 
+    // Pet packs are independent of World/chat lead art, including packs this client cannot render.
+    const pet = await request("POST", {
+      schemaVersion: 1,
+      expectedRevision: second.revision,
+      changes: { petSkin: "hoodie" },
+    });
+    expect(pet.status).toBe(200);
+    const petSnapshot = AppearanceSettingsSnapshotSchema.parse(await pet.json());
+    expect(petSnapshot.appearance).toEqual({ leadSkin: "clankie.lead.operator", petSkin: "hoodie" });
+    const leadOnly = await request("POST", {
+      schemaVersion: 1,
+      expectedRevision: petSnapshot.revision,
+      changes: { leadSkin: "pack" },
+    });
+    const leadSnapshot = AppearanceSettingsSnapshotSchema.parse(await leadOnly.json());
+    expect(leadSnapshot.appearance).toEqual({ leadSkin: "pack", petSkin: "hoodie" });
+    const future = await request("POST", {
+      schemaVersion: 1,
+      expectedRevision: leadSnapshot.revision,
+      changes: { petSkin: "future.robot" },
+    });
+    const futureSnapshot = AppearanceSettingsSnapshotSchema.parse(await future.json());
+    expect((await new SettingsStore(settings.path).load()).appearance.petSkin).toBe("future.robot");
+    const cleared = await request("POST", {
+      schemaVersion: 1,
+      expectedRevision: futureSnapshot.revision,
+      changes: { petSkin: null },
+    });
+    expect(AppearanceSettingsSnapshotSchema.parse(await cleared.json()).appearance).toEqual({
+      leadSkin: "pack",
+      petSkin: null,
+    });
+
     const stale = await request("POST", {
       schemaVersion: 1,
       expectedRevision: first.revision,
       changes: { leadSkin: "pack" },
     });
     expect(stale.status).toBe(409);
-    for (const changes of [{}, { leadSkin: "Not An Id" }, { leadSkin: "pack", extra: true }]) {
+    for (const changes of [
+      {},
+      { leadSkin: "Not An Id" },
+      { petSkin: "Not An Id" },
+      { leadSkin: "pack", extra: true },
+    ]) {
       expect(
         (await request("POST", { schemaVersion: 1, expectedRevision: second.revision, changes })).status,
       ).toBe(400);
@@ -59,7 +97,7 @@ it("stores Clankie's look once for every surface, fenced by revision and owner a
         })
       ).status,
     ).toBe(403);
-    expect((await settings.load()).appearance.leadSkin).toBe("clankie.lead.operator");
+    expect((await settings.load()).appearance).toEqual({ leadSkin: "pack", petSkin: null });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

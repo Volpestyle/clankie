@@ -160,23 +160,27 @@ export type HostSettingsSnapshot = z.infer<typeof HostSettingsSnapshotSchema>;
  * and overlay. Skins are bundled client data, so the service stores only a
  * well-formed id. `pack` keeps the selected skin pack's own lead, and a
  * client that does not bundle a chosen id falls back to it.
+ * The independent petSkin pack ID defaults to original 2D Clankie when absent/null.
+ * Unsupported pet clients preserve the saved ID while rendering that fallback.
  */
 export const APPEARANCE_SETTINGS_PATH = "/v1/operator/appearance";
 export const LeadSkinIdSchema = z.string().regex(/^[a-z0-9][a-z0-9.-]{0,127}$/u);
-export const AppearanceSettingsSchema = z.object({ leadSkin: LeadSkinIdSchema.default("pack") }).strict();
+export const AppearanceSettingsSchema = z
+  .object({ leadSkin: LeadSkinIdSchema.default("pack"), petSkin: LeadSkinIdSchema.nullable().optional() })
+  .strict();
 export type AppearanceSettings = z.infer<typeof AppearanceSettingsSchema>;
 /** Not strict, so a later layer (agents, scene) reaches older readers as an ignored key. */
 export const AppearanceSettingsSnapshotSchema = z.object({
   schemaVersion: z.literal(1),
   revision: RevisionSchema,
-  appearance: z.object({ leadSkin: LeadSkinIdSchema }),
+  appearance: z.object({ leadSkin: LeadSkinIdSchema, petSkin: LeadSkinIdSchema.nullable().optional() }),
 });
 export const UpdateAppearanceSettingsSchema = z
   .object({
     schemaVersion: z.literal(1),
     expectedRevision: RevisionSchema,
     changes: z
-      .object({ leadSkin: LeadSkinIdSchema.optional() })
+      .object({ leadSkin: LeadSkinIdSchema.optional(), petSkin: LeadSkinIdSchema.nullable().optional() })
       .strict()
       .refine((v) => Object.values(v).some((x) => x !== undefined), "No appearance change"),
   })

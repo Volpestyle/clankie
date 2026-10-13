@@ -91,6 +91,11 @@ changes, update this page.
 | Voice brain and TTS (`voice.*`)        | providers, models, voices | `GET`/`POST /v1/operator/voice` (relayed, fenced)      | ✓    | ✓ `/voice`                         | —                | —                       | Advanced |
 | Clankie's look (`appearance.leadSkin`) | bundled skin id (`pack`)  | `GET`/`POST /v1/operator/appearance` (relayed, fenced) | —    | —                                  | ✓ Clankie's look | —                       | Common   |
 
+Pet skins use the separate `appearance.petSkin` pack ID on that same fenced
+API. Unset/null selects original 2D Clankie; the Mac pet offers previews of
+original Clankie and Hoodie (3D). Unsupported pet surfaces keep the saved ID
+and render original Clankie. This does not change World/chat lead art.
+
 ### 4. How the fleet works
 
 | Setting                                                                                           | Values (default)                                             | API                                                                        | CLI                  | TUI                             | App                                       | Dash | Tier     |

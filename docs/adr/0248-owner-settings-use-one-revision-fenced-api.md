@@ -46,3 +46,11 @@ controls bind to the public contracts separately. Existing API consumers must
 read revisions and adopt the fenced envelopes. Checks exercise real HTTP,
 settings persistence, schema and credential boundaries; they do not restart a
 service, install a release or contact voice providers.
+
+## Desktop pet skins (VUH-2201, 2026-10-13)
+
+The appearance document stores `petSkin` independently of `leadSkin`. It is a
+pack ID; absent or null selects original 2D Clankie. World/chat lead art follows
+`leadSkin` as before. Clients that cannot render a pet pack show original 2D
+Clankie without overwriting the saved ID. Updates preserve the other appearance
+fields, and use the same owner authority and revision fence.

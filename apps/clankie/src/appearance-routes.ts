@@ -18,7 +18,7 @@ export function createAppearanceRoutes(
 ): Hono {
   const app = new Hono();
   const snapshot = (current: ClankieSettings): AppearanceSettingsSnapshot => {
-    const appearance = { leadSkin: current.appearance.leadSkin };
+    const appearance = { ...current.appearance };
     return {
       schemaVersion: 1,
       revision: createHash("sha256").update(JSON.stringify(appearance)).digest("hex"),
@@ -46,7 +46,7 @@ export function createAppearanceRoutes(
           before = JSON.stringify(current);
           return {
             ...current,
-            appearance: { leadSkin: input.data.changes.leadSkin ?? current.appearance.leadSkin },
+            appearance: { ...current.appearance, ...input.data.changes },
           };
         },
         async () => {
