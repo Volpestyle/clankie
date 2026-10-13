@@ -160,3 +160,5 @@ scope is archived; readers should follow the successor for its implementation.
 
 - [0246 — Worker questions use native hook answers](0246-worker-questions-use-native-hook-answers.md)
 - [0248 — Owner settings use one revision-fenced API](0248-owner-settings-use-one-revision-fenced-api.md)
+
+- [0267 — Skins share one public animation spec](0267-skins-share-one-public-animation-spec.md)

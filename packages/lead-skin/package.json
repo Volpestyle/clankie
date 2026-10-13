@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@clankie/skin-spec": "workspace:*",
     "jpeg-js": "0.4.4"
   },
   "devDependencies": {

@@ -1,54 +1,17 @@
 /** Node-free lead-body contract, shared by installed compilers and client renderers. */
 export const SKIN_CONTRACT_VERSION = 1 as const;
-export const SKIN_LEAD_ANIMATION_KEYS = [
-  "idle",
-  "blink",
-  "look_left",
-  "look_right",
-  "walk_left",
-  "walk_right",
-  "walk_down",
-  "walk_up",
-  "hop",
-  "fall_asleep",
-  "sleep",
-  "wake",
-  "think",
-  "talk",
-  "play",
-  "alert",
-  "happy",
-  "catch",
-  "offline",
-  "rustle",
-  "tap",
-  "lead",
-  "lift",
-  "drop",
-] as const;
+import { LEAD_STATE_KEYS } from "@clankie/skin-spec";
+import type { SkinAtlas, SkinFrame, SkinPoint, SkinAnimationSequence } from "@clankie/skin-spec";
+export type {
+  SkinAssetReference,
+  SkinAtlas,
+  SkinFrame,
+  SkinFrameId,
+  SkinPoint,
+  SkinAnimationSequence,
+} from "@clankie/skin-spec";
+export const SKIN_LEAD_ANIMATION_KEYS = LEAD_STATE_KEYS;
 export type SkinLeadAnimationKey = (typeof SKIN_LEAD_ANIMATION_KEYS)[number];
-export type SkinAssetReference = string | number;
-export type SkinFrameId = string;
-export interface SkinPoint {
-  x: number;
-  y: number;
-}
-export interface SkinFrame extends SkinPoint {
-  width: number;
-  height: number;
-}
-export interface SkinAnimationSequence {
-  frames: SkinFrameId[];
-  playback: "loop" | "once" | "hold";
-  fps?: number | undefined;
-  frameDurationsMs?: number[] | undefined;
-}
-export interface SkinAtlas {
-  image: SkinAssetReference;
-  width: number;
-  height: number;
-  frames: Record<SkinFrameId, SkinFrame>;
-}
 export interface SkinLeadBody {
   atlas: SkinAtlas;
   scale?: number | undefined;
