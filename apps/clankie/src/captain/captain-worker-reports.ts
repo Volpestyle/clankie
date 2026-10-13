@@ -97,24 +97,14 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
     acceptedAfterMs?: number,
   ) {
     return ctx.conversations
-      .inboundReports(conversationId, {
+      .inboundReportSummaries(conversationId, {
         includeRead,
         ...(acceptedAfterMs === undefined ? {} : { acceptedAfterMs }),
+        ...(native === undefined
+          ? {}
+          : { sender: { paneId: native.paneId, binding: ctx.inboundBinding(native) } }),
       })
-      .filter(
-        (report) =>
-          native === undefined ||
-          (report.paneId === native.paneId && report.binding === ctx.inboundBinding(native)),
-      )
-      .slice(-1000)
-      .map((report) => ({
-        deliveryId: report.deliveryId,
-        conversationId: report.conversationId,
-        paneId: report.paneId,
-        acceptedAt: report.acceptedAt,
-        state: report.reportDelivery.state,
-        ...(report.reportDelivery.stage === undefined ? {} : { stage: report.reportDelivery.stage }),
-      }));
+      .slice(-1000);
   }
 
   function conversationReportRunner(owner: ConversationOwner, deliveryId: string): ConversationRunner {

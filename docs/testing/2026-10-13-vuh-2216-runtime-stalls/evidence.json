@@ -6,6 +6,24 @@
       "size": 10800502,
       "sha256": "aee7f4ab8e8343d9af7f188c2df28abaaee245621f7b38969d67e9bc2539108b",
       "url": "clankie://evidence/sha256/aee7f4ab8e8343d9af7f188c2df28abaaee245621f7b38969d67e9bc2539108b"
+    },
+    {
+      "path": "raw/live-runtime-92871.cpuprofile",
+      "size": 15860800,
+      "sha256": "b4f7545c891ecd4ed6b273a5ade998ca99accd1fd99f77c1671b8823dc50a2a6",
+      "url": "clankie://evidence/sha256/b4f7545c891ecd4ed6b273a5ade998ca99accd1fd99f77c1671b8823dc50a2a6"
+    },
+    {
+      "path": "raw/metadata-validation.json",
+      "size": 109330,
+      "sha256": "b9f38d9b3d75d0b213ab1b9dbffbbb044dfce50ca6dbb2e648169839436045b6",
+      "url": "clankie://evidence/sha256/b9f38d9b3d75d0b213ab1b9dbffbbb044dfce50ca6dbb2e648169839436045b6"
+    },
+    {
+      "path": "raw/profile-and-roster-proof.json",
+      "size": 431531,
+      "sha256": "e66c9377c0925b605c4f2de825239e45449b6ef5f78ae4bcc70ed2ae296f9e62",
+      "url": "clankie://evidence/sha256/e66c9377c0925b605c4f2de825239e45449b6ef5f78ae4bcc70ed2ae296f9e62"
     }
   ]
 }

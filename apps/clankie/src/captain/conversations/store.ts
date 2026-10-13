@@ -35,6 +35,7 @@ import {
   type SubmitOperatorConversationTurnResult,
   type UpsertOperatorChannel,
   type WorkerReportPage,
+  type WorkerReportSummary,
 } from "@clankie/protocol";
 import { type ProjectProposalDraft, type ProjectProposalResult } from "@clankie/protocol/projects";
 import { createHash, randomUUID } from "node:crypto";
@@ -224,6 +225,7 @@ import {
   acknowledgeSenderReportEvent,
   hasUnreadInboundReports,
   inboundReports,
+  inboundReportSummaries,
   notifyInboundReportChange,
   readInboundReports,
   recordInboundReportDelivery,
@@ -232,6 +234,14 @@ import {
   retryInboundReport,
   unansweredInboundReports,
 } from "./worker-reports.ts";
+
+const InboundReceiptInputSchema = InboundAcceptanceSchema.omit({
+  message: true,
+  runId: true,
+  acceptedCursor: true,
+  acceptedAt: true,
+  reportDelivery: true,
+});
 
 /**
  * File-backed conversation registry: `meta.json` + append-only `events.jsonl`
@@ -1821,6 +1831,13 @@ export class ConversationStore {
     return inboundReports(this, conversationId, options);
   }
 
+  public inboundReportSummaries(
+    conversationId?: string,
+    options: Parameters<typeof inboundReportSummaries>[2] = {},
+  ): WorkerReportSummary[] {
+    return inboundReportSummaries(this, conversationId, options);
+  }
+
   public senderReportEvents(paneId: string, binding: string) {
     return senderReportEvents(this, paneId, binding);
   }
@@ -1897,6 +1914,8 @@ export class ConversationStore {
     /** Host-selected room/native runner; clients cannot select execution authority. */
     admittedRunner?: ConversationRunner,
   ): SubmitOperatorConversationTurnResult {
+    // Validate the full host-admitted input once, before changing conversation state.
+    receipt = InboundReceiptInputSchema.parse(receipt);
     const meta = this.metas.get(conversationId);
     if (!meta) throw new Error(`Unknown conversation ${conversationId}`);
     const native = meta.scope.kind === "seat" || meta.scope.kind === "persona";

@@ -1,8 +1,10 @@
 import {
+  WorkerReportSummarySchema,
   type DeliveryStage,
   type OperatorSeatEvent,
   type SubmitOperatorConversationTurnResult,
   type WorkerReportPage,
+  type WorkerReportSummary,
 } from "@clankie/protocol";
 import { z } from "zod";
 import { InboundAcceptanceSchema, WORKER_REPORT_PAGE_BYTES } from "./constants.ts";
@@ -73,6 +75,46 @@ export function inboundReports(
     )
     .filter((receipt) => options.includeRead || receipt.reportDelivery.state !== "read")
     .sort((a, b) => a.acceptedAt.localeCompare(b.acceptedAt) || a.deliveryId.localeCompare(b.deliveryId));
+}
+
+/** Metadata cards never clone report payloads; admission and restoration validate the full receipt. */
+export function inboundReportSummaries(
+  ctx: ConversationStore,
+  conversationId?: string,
+  options: {
+    includeRead?: boolean;
+    acceptedAfterMs?: number;
+    sender?: { paneId: string; binding: string | undefined };
+  } = {},
+): WorkerReportSummary[] {
+  const summaries: WorkerReportSummary[] = [];
+  for (const meta of ctx["metas"].values()) {
+    if (conversationId !== undefined && meta.conversationId !== conversationId) continue;
+    for (const receipt of Object.values(meta.inboundAcceptances ?? {})) {
+      const state = receipt.reportDelivery?.state ?? "uncertain";
+      const acceptedAt = receipt.acceptedAt ?? meta.createdAt;
+      if (
+        (!options.includeRead && state === "read") ||
+        (options.acceptedAfterMs !== undefined && !(Date.parse(acceptedAt) > options.acceptedAfterMs)) ||
+        (options.sender !== undefined &&
+          (receipt.paneId !== options.sender.paneId || receipt.binding !== options.sender.binding))
+      )
+        continue;
+      summaries.push(
+        WorkerReportSummarySchema.parse({
+          deliveryId: receipt.deliveryId,
+          conversationId: meta.conversationId,
+          paneId: receipt.paneId,
+          acceptedAt,
+          state,
+          ...(receipt.reportDelivery?.stage === undefined ? {} : { stage: receipt.reportDelivery.stage }),
+        }),
+      );
+    }
+  }
+  return summaries.sort(
+    (a, b) => a.acceptedAt.localeCompare(b.acceptedAt) || a.deliveryId.localeCompare(b.deliveryId),
+  );
 }
 
 /** Offering full, bounded payloads does not mark them read. */

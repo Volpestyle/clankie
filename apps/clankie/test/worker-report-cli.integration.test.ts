@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { text } from "node:stream/consumers";
 import { afterEach, expect, it } from "vitest";
-import { WorkerReportPageSchema } from "@clankie/protocol";
+import { WorkerReportPageSchema, WorkerReportSummarySchema } from "@clankie/protocol";
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -137,6 +137,91 @@ async function fixture(
   });
   return { store, service, ids, env, root, serve };
 }
+
+it("projects a large restored inbox without offering or changing retained payloads, preserving admission and acknowledgment fences", async () => {
+  const f = await fixture(585, {
+    directAcceptance: true,
+    reportText: (index) => `Original retained report ${index}: ${"retained payload ".repeat(512)}`,
+  });
+  const metaPath = join(f.root, "conversations", "global-default", "meta.json");
+  const before = await readFile(metaPath, "utf8");
+  const summaries = f.store.inboundReportSummaries("global-default");
+  expect(summaries).toHaveLength(585);
+  for (const summary of summaries) WorkerReportSummarySchema.parse(summary);
+  const selected = summaries.at(-1)!;
+  const sibling = summaries.at(-2)!;
+  expect(Object.keys(selected).sort()).toEqual(
+    ["deliveryId", "conversationId", "paneId", "acceptedAt", "state", "stage"].sort(),
+  );
+  expect(
+    f.store.inboundReportSummaries(undefined, {
+      sender: { paneId: selected.paneId, binding: "a".repeat(64) },
+    }),
+  ).toEqual(summaries);
+  expect(
+    f.store.inboundReportSummaries(undefined, {
+      sender: { paneId: selected.paneId, binding: "b".repeat(64) },
+    }),
+  ).toEqual([]);
+  expect(
+    f.store.inboundReportSummaries(undefined, { acceptedAfterMs: Date.parse(selected.acceptedAt) }),
+  ).toEqual([]);
+  expect(await readFile(metaPath, "utf8")).toBe(before);
+  const corruptRoot = join(f.root, "corrupt-history");
+  const corruptPath = join(corruptRoot, "invalid-report-history", "meta.json");
+  const corrupt = JSON.parse(before);
+  corrupt.conversationId = "invalid-report-history";
+  corrupt.inboundAcceptances[selected.deliveryId].text = {};
+  await mkdir(join(corruptRoot, "invalid-report-history"), { recursive: true });
+  const corruptBytes = JSON.stringify(corrupt);
+  await writeFile(corruptPath, corruptBytes);
+  const reopened = new ConversationStore(corruptRoot, async () => {
+    throw new Error("Malformed retained input must never run");
+  });
+  try {
+    expect(reopened.inboundReportSummaries()).toEqual([]);
+    expect(reopened.conversation("invalid-report-history")).toBeUndefined();
+    expect(await readFile(corruptPath, "utf8")).toBe(corruptBytes);
+  } finally {
+    await reopened.close();
+  }
+  expect(f.store.inboundAcceptance(selected.deliveryId)?.reportDelivery?.offeredAt).toBeUndefined();
+  await expect(
+    runAgentsCommand(["reports", "ack", selected.deliveryId, "--conversation", "global-default"], {
+      env: f.env,
+    }),
+  ).rejects.toThrow("Only fully offered worker reports may be acknowledged");
+  expect(() =>
+    f.store.submitInbound("invalid report", {
+      deliveryId: randomUUID(),
+      binding: "a".repeat(64),
+      paneId: selected.paneId,
+      fingerprint: "invalid",
+      text: {} as unknown as string,
+    }),
+  ).toThrow();
+  expect(await readFile(metaPath, "utf8")).toBe(before);
+  const page = WorkerReportPageSchema.parse(
+    await runAgentsCommand(
+      ["reports", "--conversation", "global-default", "--delivery-ids", selected.deliveryId],
+      { env: f.env },
+    ),
+  );
+  expect(page.items).toEqual([
+    expect.objectContaining({
+      deliveryId: selected.deliveryId,
+      text: f.store.inboundAcceptance(selected.deliveryId)!.text,
+    }),
+  ]);
+  expect(f.store.inboundAcceptance(sibling.deliveryId)?.reportDelivery?.offeredAt).toBeUndefined();
+  expect(
+    await runAgentsCommand(["reports", "ack", selected.deliveryId, "--conversation", "global-default"], {
+      env: f.env,
+    }),
+  ).toMatchObject({ acknowledged: 1 });
+  expect(f.store.inboundReportSummaries()).toHaveLength(584);
+  expect(f.store.inboundReportSummaries(undefined, { includeRead: true })).toHaveLength(585);
+}, 60_000);
 
 it.each([20, 100])("acknowledges %i exact IDs returned by a real CLI HTTP page", async (count) => {
   const f = await fixture(count);
