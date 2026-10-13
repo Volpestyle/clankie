@@ -6,6 +6,12 @@
       "size": 46424,
       "sha256": "b09248c2a9bfb23c3c544f4e639644abeeda5d476c803fa7623a47514876e597",
       "url": "clankie://evidence/sha256/b09248c2a9bfb23c3c544f4e639644abeeda5d476c803fa7623a47514876e597"
+    },
+    {
+      "path": "raw/gate-typecheck-correction.txt",
+      "size": 24150,
+      "sha256": "b2f4f40e91da043bfc01b9446f97d65b314614734a904656ed54979837a0be1b",
+      "url": "clankie://evidence/sha256/b2f4f40e91da043bfc01b9446f97d65b314614734a904656ed54979837a0be1b"
     }
   ]
 }

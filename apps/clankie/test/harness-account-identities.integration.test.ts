@@ -382,7 +382,7 @@ if (harness === "claude") {
       undefined,
       store,
     ).find((tool) => tool.name === "worker_accounts")!;
-    const toolResult = await accountsTool.execute("accounts-0755", {});
+    const toolResult = await accountsTool.execute("accounts-0755", {}, undefined, undefined, {} as never);
     expect(MachineWorkerAccountsSchema.parse(toolResult.details).accounts.length).toBeGreaterThan(0);
     expect((await stat(stateDir)).mode & 0o777).toBe(0o755);
     expect(
