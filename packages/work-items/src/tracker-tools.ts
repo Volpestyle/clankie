@@ -581,7 +581,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   ),
   tool(
     "post_bundle_check",
-    "Built-in tracker only. Independently check the current bundle by its ID; the worker who did the work cannot check it. An owner verification counts too.",
+    "Built-in tracker only. Independently check the current bundle by its ID; its publisher and actors who did the work cannot self-check. For native-first work, use an already-hired genuinely independent peer in the same project through that peer's own authenticated native channel. Children sharing the implementer's bridge and the CLI do not supply that peer's identity. Read back the current bundle, checked actor and matching bundle_checked event. An owner verification counts too.",
     { bundleId: string, body: { ...string, maxLength: 4000 }, idempotencyKey },
     ["bundleId"],
   ),

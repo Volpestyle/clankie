@@ -343,6 +343,16 @@ cannot check it. The owner's verify answer counts as a check. Replacing a bundle
 requires another check; the owner must reopen an item past landed before its
 completion bundle can be replaced. Name gaps honestly. Release sync obeys the same gate.
 
+For native-first work, an already-hired genuinely independent peer in the same
+project inspects the current ISSUE bundle (`runId` omitted) and calls the check
+through its own authenticated `clankie_call`. Read back the same current bundle's
+`checked.actor` and `checked.eventId` and the matching `bundle_checked` issue event.
+Children sharing the implementer's bridge retain the parent's actor; the CLI
+writes as Clankie for the owner, not as that peer. Keep the source producer, holds
+and receipts; an unavailable checker stays a gap, never a reason to rename the
+deliverable or copy identity/grants. See
+[lead harvest](../lead/SKILL.md#harvest-land-deliver).
+
 Use `linear_post_issue_ask {issueId, purpose: "decision", body}` for an item
 question. This raises the existing ADR 0245 owner ask, linked by `requestId`,
 not a "Needs owner" comment. For a gate, supply `purpose: "gate"`, `runId` and

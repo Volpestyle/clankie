@@ -2391,6 +2391,14 @@ PROJECT DAYS` sets the project's cycle length (default 7), starting with its
   bundles need a fresh check; the owner must reopen an item past landed before
   replacing its completion bundle. Completion past landed needs the item's bundle
   and a check; the owner's existing "It works" answer counts as a check.
+  For native-first work, an already-hired genuinely independent peer in the same
+  project inspects the current ISSUE bundle and uses `linear_post_bundle_check`
+  through its own authenticated `clankie_call`. Read back the same current bundle's
+  checked actor/event ID and matching `bundle_checked` issue event. A run-bundle
+  check does not replace the ISSUE check. Native children sharing the implementer's
+  bridge retain the parent's tracker identity; the CLI writes as Clankie, not as
+  the peer. Preserve the producer, deliverable and holds. An unavailable checker
+  remains a gap; changing an actor, grant or deliverable cannot supply independence.
 - `clankie work ask ITEM --body TEXT` raises an ADR 0245 owner decision ask,
   linked from the item. `work gate ask ITEM --run ID --kind
 plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run

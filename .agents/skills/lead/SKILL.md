@@ -242,6 +242,26 @@ the boundary that could break. Reuse valid proof for unchanged inputs; waived
 verification stays labelled and is never a pass. Landing directly on
 `main`, and the optional `clankie integrate`: [delivery](reference/delivery.md).
 
+For a built-in native-first item's independent ISSUE check, ask an already-hired,
+genuinely independent peer in that same project to inspect the current issue
+bundle and call `linear_post_bundle_check {bundleId, body}` through its own
+`clankie_call`. Keep the existing producer, deliverable, holds and receipts.
+The peer must not have implemented the code/runtime proof, published the packet,
+or recorded implementation work for the item. Read the issue bundle with `runId`
+omitted, then read back the same current bundle's `checked` actor/eventId and the
+matching `bundle_checked` issue event. A run-bundle check does not replace the
+ISSUE check. A replaced bundle requires fresh inspection and a new check.
+
+A native child sharing its implementation parent's bridge has that parent's
+tracker identity; an independent review transcript does not change it.
+`clankie work bundle check` records Clankie for the owner, not the peer, and is
+refused when Clankie published or did the work. Neither route substitutes for the
+peer's authenticated check. If no suitable current native peer is available,
+report that gap and retain the unchecked bundle. Do not create a duplicate
+producer, rename the deliverable, reassign a held producer, copy grants or
+credentials, supply an actor, or impersonate owner verification. Reconcile an
+uncertain native call by its original receipt ID; do not resend it.
+
 When nothing needs judgment, let workers work. Do not manufacture supervision.
 
 When Clankie itself gets in the way (a tool refuses wrongly, a message stalls,
