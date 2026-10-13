@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "app-integration.log",
+      "size": 27797,
+      "sha256": "b737a4a5509c75d7103d443b5fcfd3066216ced590cbe6b43553c2725a0a8686",
+      "url": "clankie://evidence/sha256/b737a4a5509c75d7103d443b5fcfd3066216ced590cbe6b43553c2725a0a8686"
+    },
+    {
+      "path": "proof.log",
+      "size": 39838,
+      "sha256": "99ea635089d3be0152b4dd760dc26d322c0b159cc889ea287e70e6e884cab148",
+      "url": "clankie://evidence/sha256/99ea635089d3be0152b4dd760dc26d322c0b159cc889ea287e70e6e884cab148"
+    }
+  ]
+}

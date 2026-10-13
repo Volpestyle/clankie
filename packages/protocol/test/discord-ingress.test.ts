@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { createECDH, createHash, generateKeyPairSync, sign } from "node:crypto";
-import { discordEventDigest, DiscordIngressEventSchema } from "../src/discord-ingress.ts";
+import {
+  discordEventDigest,
+  discordRequestDigest,
+  DISCORD_INGRESS_DOMAIN,
+  DiscordIngressEventSchema,
+} from "../src/discord-ingress.ts";
 import { openDiscordIngress, prepareDiscordIngress } from "../src/discord-ingress-crypto.ts";
 
 const event = DiscordIngressEventSchema.parse({
@@ -52,6 +57,25 @@ const options = {
   nowMs: 1_001_000,
 };
 describe("Discord ingress sealed scope", () => {
+  it.each([
+    "a",
+    "a".repeat(55),
+    "a".repeat(56),
+    "a".repeat(63),
+    "a".repeat(64),
+    "héllo 🦀",
+    "a".repeat(16_384),
+  ])("preserves signed SHA-256 event and recipient digests (%#)", (content) => {
+    const parsed = DiscordIngressEventSchema.parse({ ...event, content });
+    expect(discordEventDigest(parsed)).toBe(
+      createHash("sha256").update(JSON.stringify(parsed)).digest("base64url"),
+    );
+    expect(discordRequestDigest(parsed, "recipient-key", "nonce")).toBe(
+      createHash("sha256")
+        .update(JSON.stringify([DISCORD_INGRESS_DOMAIN, parsed, "recipient-key", "nonce"]))
+        .digest("base64url"),
+    );
+  });
   it("seals both directions and binds authority, event and tenant", () => {
     const prepared = prepareDiscordIngress(event, key.getPublicKey().toString("base64url"));
     const sealed = prepared.seal(permit(prepared.digest));

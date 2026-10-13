@@ -45,7 +45,7 @@ import {
   HARNESS_LOGIN_START_PATH,
   HARNESS_LOGIN_STATUS_PATH,
 } from "./harness-logins.ts";
-import { createHash } from "node:crypto";
+import { sha256Base64Url } from "./sha256.ts";
 import { z } from "zod";
 import { DISCORD_VOICE_TRANSCRIPTS_PATH } from "./discord-voice-evidence.ts";
 import { OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH } from "./operator-conversations.ts";
@@ -276,12 +276,7 @@ export function derivePublicGatewayHostId(accountId: string, installationId: str
   const parsedInstallationId = PublicGatewayInstallationIdSchema.parse(installationId);
   if (accountId.length === 0 || accountId.length > 2_048) throw new Error("Account id is invalid");
   return PublicGatewayHostIdSchema.parse(
-    createHash("sha256")
-      .update("clankie-host-v1\0")
-      .update(accountId)
-      .update("\0")
-      .update(parsedInstallationId)
-      .digest("base64url"),
+    sha256Base64Url(`clankie-host-v1\0${accountId}\0${parsedInstallationId}`),
   );
 }
 

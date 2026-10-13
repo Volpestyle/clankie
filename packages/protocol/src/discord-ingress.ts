@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Base64Url } from "./sha256.ts";
 import { z } from "zod";
 import {
   CaptainChannelTurnResultSchema,
@@ -85,9 +85,7 @@ export const DiscordIngressEventSchema = z
   });
 export type DiscordIngressEvent = z.infer<typeof DiscordIngressEventSchema>;
 export function discordEventDigest(event: DiscordIngressEvent): string {
-  return createHash("sha256")
-    .update(JSON.stringify(DiscordIngressEventSchema.parse(event)))
-    .digest("base64url");
+  return sha256Base64Url(JSON.stringify(DiscordIngressEventSchema.parse(event)));
 }
 /** Bind the response recipient too: a relay must not re-encrypt known text to its own key. */
 export function discordRequestDigest(
@@ -95,16 +93,14 @@ export function discordRequestDigest(
   ephemeralPublicKey: string,
   nonce: string,
 ): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify([
-        DISCORD_INGRESS_DOMAIN,
-        DiscordIngressEventSchema.parse(event),
-        ephemeralPublicKey,
-        nonce,
-      ]),
-    )
-    .digest("base64url");
+  return sha256Base64Url(
+    JSON.stringify([
+      DISCORD_INGRESS_DOMAIN,
+      DiscordIngressEventSchema.parse(event),
+      ephemeralPublicKey,
+      nonce,
+    ]),
+  );
 }
 export const DiscordPermitHeaderSchema = z
   .object({

@@ -28,18 +28,22 @@ function importGraph(entry: string): Map<string, string[]> {
 
 describe("protocol index stays node-free", () => {
   // The app also imports these subpaths directly (VUH-1766's Settings → Discord).
-  it.each(["index.ts", "official-discord.ts", "hosted-operator.ts"])(
-    "imports no node built-in anywhere in %s's relative import graph",
-    (entry) => {
-      const builtins = new Set(builtinModules);
-      const offenders: string[] = [];
-      for (const [file, imports] of importGraph(resolve(import.meta.dirname, "../src", entry))) {
-        for (const specifier of imports) {
-          if (specifier.startsWith("node:") || builtins.has(specifier))
-            offenders.push(`${file} -> ${specifier}`);
-        }
+  it.each([
+    "index.ts",
+    "official-discord.ts",
+    "hosted-operator.ts",
+    "hosted-browser-session.ts",
+    "hosted-pairing.ts",
+    "public-gateway.ts",
+  ])("imports no node built-in anywhere in %s's relative import graph", (entry) => {
+    const builtins = new Set(builtinModules);
+    const offenders: string[] = [];
+    for (const [file, imports] of importGraph(resolve(import.meta.dirname, "../src", entry))) {
+      for (const specifier of imports) {
+        if (specifier.startsWith("node:") || builtins.has(specifier))
+          offenders.push(`${file} -> ${specifier}`);
       }
-      expect(offenders).toEqual([]);
-    },
-  );
+    }
+    expect(offenders).toEqual([]);
+  });
 });

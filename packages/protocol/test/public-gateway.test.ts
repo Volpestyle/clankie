@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { PairingRedeemResponseSchema } from "../src/index.ts";
 import {
@@ -11,11 +12,26 @@ import {
   PublicGatewayTunnelFrameSchema,
   PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST,
   publicGatewayTargetFor,
+  derivePublicGatewayHostId,
 } from "../src/public-gateway.ts";
 
 const requestId = "request_12345678";
 
 describe("public gateway protocol", () => {
+  it.each(["account-1", "héllo 🦀", "a".repeat(2048), "\ud800"])(
+    "preserves SHA-256 host identities for account %j",
+    (accountId) => {
+      const installationId = "a".repeat(22);
+      expect(derivePublicGatewayHostId(accountId, installationId)).toBe(
+        createHash("sha256")
+          .update("clankie-host-v1\0")
+          .update(accountId)
+          .update("\0")
+          .update(installationId)
+          .digest("base64url"),
+      );
+    },
+  );
   it("publishes only bounded non-secret account discovery", () => {
     const config = {
       schemaVersion: 1,
