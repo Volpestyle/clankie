@@ -2,6 +2,30 @@
   "version": 1,
   "objects": [
     {
+      "path": "live-raw/audit.json",
+      "size": 101233,
+      "sha256": "84cbdc3e5edbe71812c1b83c22628a984a3dc3e6870bcc5fdae4abf5d2aa549f",
+      "url": "clankie://evidence/sha256/84cbdc3e5edbe71812c1b83c22628a984a3dc3e6870bcc5fdae4abf5d2aa549f"
+    },
+    {
+      "path": "live-raw/remote-timing-live-projections.json",
+      "size": 107383,
+      "sha256": "27e74ec85f4a94c1fee069ab4222e8ce3a2a122aac580b7aae9a3902d4c6d16b",
+      "url": "clankie://evidence/sha256/27e74ec85f4a94c1fee069ab4222e8ce3a2a122aac580b7aae9a3902d4c6d16b"
+    },
+    {
+      "path": "live-raw/remote-timing-live-spans.json",
+      "size": 1178644,
+      "sha256": "7c3911d39c63891a23c13fba4dda3fe9d51be5fc94c9dd4b490c9b9b8acc6dff",
+      "url": "clankie://evidence/sha256/7c3911d39c63891a23c13fba4dda3fe9d51be5fc94c9dd4b490c9b9b8acc6dff"
+    },
+    {
+      "path": "live-raw/remote-timing-live.json",
+      "size": 89003,
+      "sha256": "9eb384d369e0d8c75f8279139ccbb56ac1e1c8ea9b736224aa0c49b890a6ea15",
+      "url": "clankie://evidence/sha256/9eb384d369e0d8c75f8279139ccbb56ac1e1c8ea9b736224aa0c49b890a6ea15"
+    },
+    {
       "path": "raw/focused.log",
       "size": 18625,
       "sha256": "b1b8ea41468ecfddaf51c130d90b3fd4514fc0c6af4a670011a00db30f6a7cb7",

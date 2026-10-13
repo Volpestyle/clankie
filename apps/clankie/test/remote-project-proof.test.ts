@@ -1,3 +1,4 @@
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { RemoteCodexSeats } from "../src/remote-codex-seats.ts";
 import { gunzipSync } from "node:zlib";
 import { readFileSync } from "node:fs";
@@ -5,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
   createRemoteProjectObserver,
+  createRemoteProjectBatchObserver,
   createRemoteWorkspaceCanonical,
   createRemoteGitWorktreeObserver,
   createRemoteWorktreeRootObserver,
@@ -813,5 +815,103 @@ describe("Windows dedicated Codex observation boundary", () => {
     expect(script).toContain("[ClankieProcess]::Owners(45000, 54000)");
     expect(script).not.toContain("Win32_Process");
     expect(script).not.toContain("ConvertTo-Json $args");
+  });
+});
+
+describe("fresh remote projection proof batches", () => {
+  function row(pane: string) {
+    const observation = fixture();
+    const offset = Number(pane.split("p").at(-1)) * 100;
+    for (const process of observation.processes) {
+      process.pid += offset;
+      if (process.parent !== 999) process.parent += offset;
+    }
+    observation.nativeProcesses[0]!.pid += offset;
+    observation.info.shell_pid += offset;
+    observation.info.foreground_process_group_id += offset;
+    observation.agent.agent_session.value = `native-session-${pane}`;
+    observation.info.pane_id = pane;
+    observation.agent.pane_id = pane;
+    return { pane, observation };
+  }
+  function request(pane: string) {
+    return {
+      pane,
+      nativeOccupantId: occupantIdForHerdrSession({
+        agent: "claude",
+        kind: "id",
+        source: "herdr:claude",
+        value: `native-session-${pane}`,
+      }),
+    };
+  }
+  it.each(["wrong occupant", "reused pane", "missing pane", "duplicate pane", "malformed pane"])(
+    "refuses %s independently while valid neighbours pass",
+    async (failure) => {
+      const first = [row("w3:p1"), row("w3:p2"), row("w3:p3")];
+      const last = structuredClone(first);
+      if (failure === "wrong occupant") {
+        first[1]!.observation.agent.agent_session.value = "foreign";
+        last[1]!.observation.agent.agent_session.value = "foreign";
+      }
+      if (failure === "reused pane")
+        last[1]!.observation.processes[2]!.startTime = "2026-10-03T10:00:05.000Z";
+      if (failure === "missing pane") last.splice(1, 1);
+      if (failure === "duplicate pane") last.push(structuredClone(last[1]!));
+      const payload = { first, last } as { first: unknown[]; last: unknown[] };
+      if (failure === "malformed pane") payload.last[1] = { pane: "w3:p2", observation: {} };
+      const observe = createRemoteProjectBatchObserver({
+        fleet: async () => fleet,
+        shell: () => async () => JSON.stringify(payload),
+      });
+      const result = await observe("pc", [request("w3:p1"), request("w3:p2"), request("w3:p3")]);
+      expect(result.get("w3:p1")?.pane).toBe("w3:p1");
+      expect(result.get("w3:p2")).toBeUndefined();
+      expect(result.get("w3:p3")?.pane).toBe("w3:p3");
+    },
+  );
+  it("a batch transport error refuses every pane without returning an earlier proof", async () => {
+    let failing = false;
+    const observe = createRemoteProjectBatchObserver({
+      fleet: async () => fleet,
+      shell: () => async () => {
+        if (failing) throw new RemoteObservationError("remote_observation_timeout");
+        return JSON.stringify({ first: [row("w3:p1"), row("w3:p2")], last: [row("w3:p1"), row("w3:p2")] });
+      },
+    });
+    const requests = [request("w3:p1"), request("w3:p2")];
+    expect([...(await observe("pc", requests)).values()].every(Boolean)).toBe(true);
+    failing = true;
+    expect([...(await observe("pc", requests)).values()].every((proof) => proof === undefined)).toBe(true);
+  });
+  it("groups fresh reads into at most four panes and rejects a changed registered fleet", async () => {
+    const groups: string[][] = [];
+    let changed = false;
+    let replaceDuringRead = false;
+    const observe = createRemoteProjectBatchObserver({
+      fleet: async () => (changed ? { ...fleet, session: "replaced" } : fleet),
+      shell: () => async (command) => {
+        const script = scriptFromCommand(command);
+        const panes = [...script.matchAll(/'w3:p[0-9]+'/gu)].map((match) => match[0].slice(1, -1));
+        const unique = [...new Set(panes)];
+        groups.push(unique);
+        const observations = unique.map(row);
+        if (replaceDuringRead) changed = true;
+        return JSON.stringify({ first: observations, last: structuredClone(observations) });
+      },
+    });
+    const requests = Array.from({ length: 9 }, (_, i) => request(`w3:p${i + 1}`));
+    const result = await observe("pc", requests);
+    expect(groups.map((group) => group.length)).toEqual([4, 4, 1]);
+    expect([...result.values()].every(Boolean)).toBe(true);
+    replaceDuringRead = true;
+    expect([...(await observe("pc", requests)).values()].every((proof) => proof === undefined)).toBe(true);
+    expect(() =>
+      windowsProcessCommand({
+        session: fleet.session,
+        pane: "w3:p1",
+        panes: requests.map(({ pane }) => pane),
+      }),
+    ).toThrow("Invalid bounded process-proof batch");
   });
 });

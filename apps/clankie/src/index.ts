@@ -1048,6 +1048,7 @@ const remoteProofOptions = {
     proofFleetLinks?.observer(fleet) ?? runtimes.fleetShell(fleet),
 };
 const remoteProjectObserver = createRemoteProjectObserver(remoteProofOptions);
+const remoteProjectBatchObserver = remoteProjectObserver.batch;
 const remoteCanonical = createRemoteWorkspaceCanonical(remoteProofOptions);
 const remoteGitWorktree = createRemoteGitWorktreeObserver(remoteProofOptions);
 const remoteWorktreeRoot = createRemoteWorktreeRootObserver(remoteProofOptions);
@@ -1496,6 +1497,7 @@ const captain = createCaptain(
     fleetResources,
     onHealthAlertDelivery: (result) => logger.info({ event: "native.health_alert.delivery", ...result }),
     projectHireIdentity: projectProcessObserver,
+    projectHireIdentityBatch: remoteProjectBatchObserver,
     fleetProjectMembership: () => fleetProjectMembership,
     projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),
     fleetHireTools: () => workerMcp.expectedFleetToolNames(),

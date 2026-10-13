@@ -434,9 +434,91 @@ export function createRemoteCodexQueueObserver(options: Pick<Options, "fleet" | 
   };
 }
 
+export function createRemoteProjectBatchObserver(options: Options) {
+  return async (
+    fleetId: string,
+    requests: readonly { pane: string; nativeOccupantId: string | undefined }[],
+  ): Promise<ReadonlyMap<string, ProjectProcessProof | undefined>> => {
+    const result = new Map<string, ProjectProcessProof | undefined>(
+      requests.map(({ pane }) => [pane, undefined]),
+    );
+    if (fleetId === "default") return result;
+    const eligible = requests.filter(({ pane, nativeOccupantId }) => {
+      const qualified = splitFleetQualified(pane);
+      return (
+        !!nativeOccupantId &&
+        (!qualified || qualified.fleet === fleetId) &&
+        /^w[\w]+:p[\w]+$/u.test(qualified?.id ?? pane)
+      );
+    });
+    // Conflicting requests for one pane never establish an identity.
+    const unique = eligible.filter(
+      (request, index) =>
+        eligible.findIndex((other) => other.pane === request.pane) === index &&
+        eligible.every(
+          (other) => other.pane !== request.pane || other.nativeOccupantId === request.nativeOccupantId,
+        ),
+    );
+    for (let offset = 0; offset < unique.length; offset += 4) {
+      const group = unique.slice(offset, offset + 4);
+      try {
+        const fleet = await options.fleet(fleetId);
+        if (!fleet || fleet.id !== fleetId || fleet.ssh.shell !== "powershell") continue;
+        const panes = group.map(({ pane }) => splitFleetQualified(pane)?.id ?? pane);
+        if (new Set(panes).size !== panes.length) continue;
+        const snapshots: unknown = JSON.parse(
+          await options.shell(fleet)(
+            windowsProcessCommand({ session: fleet.session, pane: panes[0]!, panes, codexControl: true }),
+            10_000,
+          ),
+        );
+        if (
+          !snapshots ||
+          typeof snapshots !== "object" ||
+          !isDeepStrictEqual(await options.fleet(fleetId), fleet)
+        )
+          continue;
+        const pair = snapshots as { first?: unknown; last?: unknown };
+        if (!Array.isArray(pair.first) || !Array.isArray(pair.last)) continue;
+        const read = (pass: unknown[], pane: string): Observation | undefined => {
+          const matches = pass.filter(
+            (value: unknown) =>
+              value && typeof value === "object" && (value as { pane?: unknown }).pane === pane,
+          );
+          return matches.length === 1 ? (matches[0] as { observation?: Observation }).observation : undefined;
+        };
+        for (const request of group) {
+          try {
+            const pane = splitFleetQualified(request.pane)?.id ?? request.pane;
+            const before = read(pair.first, pane),
+              after = read(pair.last, pane);
+            if (!before || !after) continue;
+            const first = select(before, fleet, pane),
+              last = select(after, fleet, pane);
+            if (
+              !first ||
+              !last ||
+              !isDeepStrictEqual(first, last) ||
+              first.proof.nativeSessionPending ||
+              first.proof.nativeOccupantId !== request.nativeOccupantId
+            )
+              continue;
+            result.set(request.pane, { ...first.proof, pane: request.pane });
+          } catch {
+            /* A malformed pane never lends proof to another pane. */
+          }
+        }
+      } catch {
+        /* This group's original error/timeout refuses all its panes. */
+      }
+    }
+    return result;
+  };
+}
+
 /** Fresh host observations; accept either pane address form within the exact registered fleet. */
 export function createRemoteProjectObserver(options: Options) {
-  return async (
+  const observe = async (
     fleetId: string,
     paneAddress: string,
     stream?: RemoteStream,
@@ -549,6 +631,7 @@ export function createRemoteProjectObserver(options: Options) {
       return undefined;
     }
   };
+  return Object.assign(observe, { batch: createRemoteProjectBatchObserver(options) });
 }
 
 export function createRemoteWorkspaceCanonical(options: Options) {

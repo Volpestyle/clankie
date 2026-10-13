@@ -3851,6 +3851,28 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     observeReportFailureAlerts(projected);
     const stopIssues = diagnostics.start("issue_enrichment");
     const stopAttribution = diagnostics.start("issue_attribution");
+    const batchProofs = new Map<string, ReturnType<NonNullable<typeof options.projectHireIdentityBatch>>>();
+    if (options.projectHireIdentityBatch && deps.workItems?.prepareSeatIssueTracker) {
+      const groups = new Map<string, { pane: string; nativeOccupantId: string | undefined }[]>();
+      for (const seat of projected) {
+        const observed = seatLeadOwners.get(seat)?.observed;
+        if (!observed?.fleet || observed.fleet === "default") continue;
+        const group = groups.get(observed.fleet) ?? [];
+        group.push({
+          pane: observed.paneId,
+          nativeOccupantId: observed.session ? occupantIdForHerdrSession(observed.session) : undefined,
+        });
+        groups.set(observed.fleet, group);
+      }
+      for (const [fleet, group] of groups) {
+        batchProofs.set(
+          fleet,
+          diagnostics
+            .measure("issue_proof_remote", () => options.projectHireIdentityBatch!(fleet, group))
+            .catch(() => new Map()),
+        );
+      }
+    }
     const liveIssues: import("./seat-issue-status.ts").LiveSeatIssue[] = await Promise.all(
       projected.map(async (seat) => {
         const issue = liveSeatIssue(seat);
@@ -3868,7 +3890,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               proof: (fleet, pane) =>
                 diagnostics.measure(
                   fleet === "default" ? "issue_proof_local" : "issue_proof_remote",
-                  () => options.projectHireIdentity?.(fleet, pane) ?? Promise.resolve(undefined),
+                  async () =>
+                    batchProofs.has(fleet)
+                      ? (await batchProofs.get(fleet)!).get(pane)
+                      : (options.projectHireIdentity?.(fleet, pane) ?? Promise.resolve(undefined)),
                 ),
               watches: herdrWatches,
               workItems: { prepareSeatIssueTracker: deps.workItems.prepareSeatIssueTracker },

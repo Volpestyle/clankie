@@ -55,6 +55,11 @@ export interface CaptainOptions {
     fleet: string,
     pane: string,
   ) => Promise<ProjectHireProcessProof | undefined>;
+  /** Fresh same-call display attribution only; individual steering still revalidates. */
+  readonly projectHireIdentityBatch?: (
+    fleet: string,
+    seats: readonly { pane: string; nativeOccupantId: string | undefined }[],
+  ) => Promise<ReadonlyMap<string, ProjectHireProcessProof | undefined>>;
   readonly projectHireDeliverableTrackerProject?: (deliverable: string) => Promise<string | undefined>;
   readonly projectHireTools?: (projectId: string) => Promise<readonly string[]>;
   readonly fleetHireTools?: () => Promise<readonly string[]>;

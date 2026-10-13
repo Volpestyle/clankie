@@ -5256,6 +5256,11 @@ capabilities, waiting notices, activity, routing/catalog, Git and issue enrichme
 proof, project membership and operator-head assignment spans). Capability display reads
 use at most four concurrent fresh observations; returned seat order and waiting-notice
 writes remain ordered. Delivery still revalidates its native proof.
+Remote issue-attribution proofs use fresh groups of at most four panes. Each
+first/last pass shares only that call's host binding, kernel and launcher reads;
+per-pane native reads, occupant/birth/workspace/fleet checks and refusal remain
+independent. Local and individual steering proofs keep their existing path.
+No proof or census is reused between calls.
 Nested and parallel phases overlap; do not add their durations. Outcomes describe
 await completion, not proof of admission or a healthy native session. Records
 contain no pane/session IDs, paths, commands, content or error messages.
