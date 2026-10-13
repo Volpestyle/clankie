@@ -261,9 +261,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             const storeId: unknown = await readStoreId();
             if (typeof storeId !== "string" || !storeId)
               throw new Error("Built-in tracker store is unavailable");
+            const project = (await tracker.call("get_project", { query: id })) as { id?: unknown };
+            if (project.id !== id) throw new Error("Built-in tracker project or store changed");
             const validate = async () => {
-              const project = (await tracker.call("get_project", { query: id })) as { id?: unknown };
-              if (project.id !== id || (await readStoreId()) !== storeId)
+              // Publication already holds the store lock; tool calls would wait on that same lock.
+              if (!("projectStoreId" in tracker) || typeof tracker.projectStoreId !== "function")
+                throw new Error("Built-in tracker project cannot be verified");
+              if ((await tracker.projectStoreId(id)) !== storeId)
                 throw new Error("Built-in tracker project or store changed");
             };
             await validate();

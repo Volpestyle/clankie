@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { readFileSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -12,6 +13,7 @@ import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker, writeConvention } from "@clankie/work-items";
 import { runProjectSettingsCommand } from "../../tui/src/command/project-settings.ts";
+import { projectWorkRepoId } from "../src/project-work-items.ts";
 import { createProjectRoutes } from "../src/project-routes.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 
@@ -173,6 +175,100 @@ it("edits the exact built-in UUID through project settings CLI and withholds una
     expect(
       (await settings.load()).projects.projects.find((entry) => entry.id === "garden"),
     ).not.toHaveProperty("trackerProjectId");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("publishes bound tracker writes without lock reentry and refuses a vanished project before publication", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tracker-publication-")));
+  try {
+    const workspace = join(root, "garden");
+    await mkdir(workspace);
+    await writeConvention(workspace, {
+      schemaVersion: 1,
+      backend: "builtin",
+      decidedBy: "owner",
+      decidedAt: "2026-10-13T00:00:00Z",
+    });
+    const directory = join(root, "tracker");
+    const storeFile = join(directory, "tracker.json");
+    let removeProject = false;
+    let externalBytes: string | undefined;
+    const tracker = createLocalTracker({
+      directory,
+      assertIssueWrite: (issue) => {
+        if (!removeProject) return;
+        removeProject = false;
+        // A real external file change after preparation keeps the same store identity.
+        const saved = JSON.parse(readFileSync(storeFile, "utf8"));
+        saved.projects = saved.projects.filter((entry: { id: string }) => entry.id !== issue.projectId);
+        externalBytes = JSON.stringify(saved);
+        writeFileSync(storeFile, externalBytes);
+      },
+    });
+    const project = (await tracker.call("save_project", { name: "Garden", addTeams: ["LOCAL"] })) as {
+      id: string;
+    };
+    const settings = ProjectsSettingsSchema.parse({
+      projects: [
+        {
+          id: "garden",
+          name: "Garden",
+          workspaces: [{ id: "repo", machineId: "local", platform: "posix", path: workspace }],
+          trackerRef: { workspaceId: "repo", path: ".clankie/tracking.json" },
+          trackerProjectId: project.id,
+        },
+      ],
+    });
+    const work = createWorkItemsService({
+      stateDirectory: root,
+      localMachineId: "local",
+      projects: async () => settings,
+      builtInTracker: () => tracker,
+    });
+    const repo = projectWorkRepoId("garden");
+    const issue = (await work.callTracker(
+      "save_issue",
+      { title: "Published once" },
+      { repo, local: true },
+    )) as {
+      id: string;
+    };
+    expect(await tracker.call("get_issue", { id: issue.id })).toMatchObject({ title: "Published once" });
+    const storeId = await tracker.storeId();
+    expect(await tracker.projectStoreId(project.id)).toBe(storeId);
+    expect(await tracker.projectStoreId("Garden")).toBeUndefined();
+    let dispatched = false;
+    removeProject = true;
+    await expect(
+      work.callTracker(
+        "save_issue",
+        { id: issue.id, title: "Must not publish" },
+        {
+          repo,
+          local: true,
+          onDispatch: () => {
+            dispatched = true;
+          },
+        },
+      ),
+    ).rejects.toThrow("Built-in tracker project or store changed");
+    expect(dispatched).toBe(false);
+    expect(await readFile(storeFile, "utf8")).toBe(externalBytes);
+    expect(await tracker.storeId()).toBe(storeId);
+    expect(await tracker.projectStoreId(project.id)).toBeUndefined();
+    const corrupt = JSON.parse(externalBytes!);
+    corrupt.version = -1;
+    await writeFile(storeFile, JSON.stringify(corrupt));
+    await expect(tracker.projectStoreId(project.id)).rejects.toThrow(
+      "Invalid or unsupported local tracker store",
+    );
+    const missingDirectory = join(root, "missing");
+    expect(
+      await createLocalTracker({ directory: missingDirectory }).projectStoreId(project.id),
+    ).toBeUndefined();
+    await expect(stat(missingDirectory)).rejects.toMatchObject({ code: "ENOENT" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

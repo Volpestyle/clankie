@@ -336,6 +336,8 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
   linearMirrorView(projectId: string): Promise<LinearMirrorView | undefined>;
   /** The persisted store identity; it changes when a cutover or switch-back replaces the store. */
   storeId(): Promise<string>;
+  /** Host-only: persisted store identity for an exact project UUID; safe inside publication fences. */
+  projectStoreId(id: string): Promise<string | undefined>;
   /** Replays events after the cursor (seq), then pushes new ones. Returns an unsubscribe. */
   /** Host-only: link the existing mailbox record to its requesting item event. */
   linkOwnerAsk(eventId: string, requestId: string): Promise<void>;
@@ -3702,6 +3704,11 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     },
     async storeId() {
       const { store } = await load({ mutable: false });
+      return store.storeId ?? store.team.id;
+    },
+    async projectStoreId(id) {
+      const { store, initialized } = await load({ mutable: false });
+      if (initialized || !store.projects.some((project) => project.id === id)) return undefined;
       return store.storeId ?? store.team.id;
     },
     async linearMirrorView(projectId) {
