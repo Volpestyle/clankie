@@ -1226,6 +1226,15 @@ export class ClankieFaceShell {
     // The agent modal owns its keys, including Esc/Ctrl+C while a turn is running.
     if (this.liveAgentOverlay?.isFocused() === true) return undefined;
     if (!this.setupFlow.isWaitingForInput() && !this.tui.hasOverlay()) {
+      if (matchesKey(data, "f8")) {
+        const command = this.options.commands.find((c) => c.name === "question");
+        if (command) {
+          void Promise.resolve(command.run("", this)).catch((error) =>
+            this.insertCommandResult("/question", formatError(error), "error"),
+          );
+          return { consume: true };
+        }
+      }
       if (this.agentNavigationBusy) return { consume: true };
       const toolRow = this.routeToolRowInput(data);
       if (toolRow !== undefined) return toolRow;

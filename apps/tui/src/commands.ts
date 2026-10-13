@@ -163,7 +163,7 @@ export interface ConsoleCommandContext {
     close(): Promise<HerdLeadCompanionResult>;
   };
   readonly conversations?: {
-    question?(argument: string): Promise<string>;
+    question?(argument: string, flow?: import("./shell/setup-flow.ts").SetupFlow): Promise<string>;
     updates?(argument: string): Promise<string>;
     readonly conversationId?: string | undefined;
     readonly title?: string | undefined;
@@ -215,12 +215,16 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     commands.push({
       name: "question",
       aliases: [],
-      description: "List owner asks, or read, answer and cancel the source conversation ask",
+      description: "Open the owner mailbox (F8), or answer the displayed ask with text commands",
       takesArgument: true,
-      argumentHint: "[list | answer NUMBER | text TEXT | worker JSON | cancel]",
+      argumentHint: "[list | read | answer NUMBER | text TEXT | worker JSON | cancel]",
       async run(argument, shell) {
         try {
-          shell.insertCommandResult("/question", await conversations.question!(argument), "success");
+          shell.insertCommandResult(
+            "/question",
+            await conversations.question!(argument, shell.setupFlow),
+            "success",
+          );
         } catch (error) {
           shell.insertCommandResult(
             "/question",

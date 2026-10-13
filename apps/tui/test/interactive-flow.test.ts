@@ -228,3 +228,37 @@ describe("InteractiveSelectPrompt single select", () => {
     expect(prompt.render(80).some((line) => stripAnsi(line).includes('filter "x"'))).toBe(false);
   });
 });
+
+it("owner-ask details scroll on a short terminal while the selected answer remains visible", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+  Object.defineProperty(process.stdout, "rows", { configurable: true, value: 24 });
+  try {
+    const prompt = new InteractiveSelectPrompt({
+      message: [
+        "Check the change",
+        ...Array.from({ length: 20 }, (_, i) => `Step ${i + 1}: Try the route`),
+      ].join("\n"),
+      scrollMessage: true,
+      options: Array.from({ length: 8 }, (_, i) => ({ value: String(i), label: `Answer ${i + 1}` })),
+      theme,
+      onCancel() {},
+      onRender() {},
+      onSubmit() {},
+    });
+    const seen: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      const lines = prompt.render(80);
+      expect(lines.length).toBeLessThanOrEqual(Math.floor(24 * 0.7));
+      const text = lines.map(stripAnsi).join("\n");
+      expect(text).toContain("Answer 1");
+      seen.push(text);
+      prompt.handleInput("\x1b[6~");
+    }
+    expect(seen.join("\n")).toContain("Step 20");
+    prompt.handleInput("\x1b[F");
+    expect(prompt.render(80).map(stripAnsi).join("\n")).toContain("Answer 8");
+  } finally {
+    if (descriptor) Object.defineProperty(process.stdout, "rows", descriptor);
+    else Reflect.deleteProperty(process.stdout, "rows");
+  }
+});

@@ -72,6 +72,15 @@ clankie discord set --application-id 12345 --active-body bot
 From the repository, `pnpm --filter @clankie/tui dev` opens only the console and
 expects the service to be running already.
 
+## Owner asks
+
+`/question` or F8 opens a centered mailbox of pending asks from every lead,
+newest first. Choose one to see its prompt, recommendation and steps; choose an
+option or type an answer. Send it back takes a reason. Esc leaves the ask pending.
+Revision conflicts refresh the exact displayed request and require a fresh choice.
+`/question list`, `read`, `answer NUMBER`, `text TEXT`, `worker JSON` and `cancel`
+remain available for text workflows. Answers return to the ask's source conversation.
+
 ## Workspaces
 
 Starting `clankie` opens the existing main Clankie conversation regardless of

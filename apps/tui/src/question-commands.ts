@@ -1,4 +1,6 @@
 import type { ConversationQuestionResult, OperatorConversationServiceClient } from "@clankie/protocol";
+import type { SetupFlow } from "./shell/setup-flow.ts";
+import { questionMailbox } from "./question-mailbox.ts";
 
 /** An answer targets the last displayed immutable request, never a newly fetched replacement. */
 export function questionConsoleCommand(
@@ -6,8 +8,20 @@ export function questionConsoleCommand(
   conversation: () => string | undefined,
 ) {
   let shown: ConversationQuestionResult | undefined;
-  return async (argument: string): Promise<string> => {
+  let opening = false;
+  return async (argument: string, flow?: SetupFlow): Promise<string> => {
     const command = argument.trim();
+    if (!command && flow) {
+      if (opening) return "Mailbox is already open";
+      opening = true;
+      try {
+        return await questionMailbox(client, flow, (snapshot) => {
+          shown = snapshot;
+        });
+      } finally {
+        opening = false;
+      }
+    }
     if (command === "list") {
       if (!client.inputList) throw new Error("Ask listing is unavailable");
       const { questions } = await client.inputList({ status: "pending" });
@@ -16,7 +30,7 @@ export function questionConsoleCommand(
     const conversationId = conversation();
     if (!conversationId || !client.inputGet || !client.inputAnswer || !client.inputCancel)
       throw new Error("Select a source conversation first");
-    if (!command) {
+    if (!command || command === "read") {
       let snapshot = await client.inputGet(conversationId);
       if (!snapshot.question && shown?.conversationId === conversationId && shown.question)
         snapshot = await client.inputGet(conversationId, shown.question.requestId);
@@ -30,7 +44,7 @@ export function questionConsoleCommand(
       shown?.conversationId !== conversationId ||
       shown.revision === undefined
     )
-      throw new Error("Read the current question with /question before answering");
+      throw new Error("Read the current question with /question read before answering");
     const target = {
       conversationId,
       requestId: q.requestId,
@@ -54,11 +68,12 @@ export function questionConsoleCommand(
         ...target,
         answer: { kind: "worker", answers: JSON.parse(command.slice(7)) },
       });
-    } else throw new Error("Usage: /question [list | answer NUMBER | text TEXT | worker JSON | cancel]");
+    } else
+      throw new Error("Usage: /question [list | read | answer NUMBER | text TEXT | worker JSON | cancel]");
     shown = result;
     if (result.status === "revision_conflict") {
       shown = undefined;
-      throw new Error("The conversation changed. Read /question again before choosing.");
+      throw new Error("The conversation changed. Read /question read again before choosing.");
     }
     if (result.status === "refused") throw new Error(result.reason ?? "Question response refused");
     return formatQuestion(result);

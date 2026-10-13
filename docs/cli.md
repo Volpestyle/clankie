@@ -6048,10 +6048,17 @@ refused. Pending or uncertain asks retain their IDs and are never recreated.
 An answer resolves the ask on every surface and wakes its source with the
 owner's attributed answer. A native source uses its existing native channel.
 
-`/question list` shows all pending asks in the TUI. Select the source conversation
-and read `/question`, then use `/question answer NUMBER`, `/question text TEXT`,
-or `/question cancel`. Cards show the source, what waits, recommendation, gate,
-steps and native question IDs. Native multi-question answers use
+`/question` opens the console's centered owner mailbox; F8 opens it from the
+composer too. It lists pending asks across all source conversations, newest
+first, with the lead, linked item, what waits and age. Choose an ask for its
+prompt, recommendation and steps, then choose an option or type an answer.
+Send it back asks for a reason. Esc closes without answering. An answer keeps
+the displayed request, incarnation and revision; a conflict re-reads that exact
+request and asks you to open the mailbox again, without answering a replacement.
+
+Text commands remain available: `/question list` lists asks, `/question read`
+displays the selected source conversation's request for `/question answer NUMBER`,
+`/question text TEXT` or `/question cancel`. Native worker asks can also use
 `/question worker JSON` or CLI `--worker-stdin`, with a JSON map
 `{"QUESTION_ID":{"answers":["Owner answer"]}}` covering every observed ID.
 

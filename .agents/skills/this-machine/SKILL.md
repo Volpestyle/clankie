@@ -268,8 +268,9 @@ stays unknown.
 `clankie conversations questions` lists pending asks across sources;
 `conversations questions ID --request UUID` reads an exact target. Answer with
 `conversations answer ID UUID --incarnation UUID --revision N --text TEXT`
-or `--option UUID`; native maps use `--worker-stdin`. `/question list` and
-`/question` expose the same state in the console. Full contract: `docs/cli.md`.
+or `--option UUID`; native maps use `--worker-stdin`. `/question` or F8 opens the owner mailbox across conversations; `/question list`
+prints pending asks. Scripts can use `/question read` before the existing text
+answer subcommands. Full contract: `docs/cli.md`.
 
 `clankie body status` shows the stable conversation holding each of Discord
 mouth, voice/Go Live, browser and play. Inspecting status grants no control.

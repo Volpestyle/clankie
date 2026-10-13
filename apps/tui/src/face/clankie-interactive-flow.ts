@@ -23,6 +23,7 @@ export type InteractivePromptOption = {
 
 export type InteractiveTextPromptOptions = {
   readonly message: string;
+  readonly scrollMessage?: boolean | undefined;
   readonly defaultValue?: string | undefined;
   readonly placeholder?: string | undefined;
   readonly error?: string | undefined;
@@ -38,6 +39,7 @@ export type InteractiveTextPromptOptions = {
 
 export type InteractiveSelectPromptOptions = {
   readonly message: string;
+  readonly scrollMessage?: boolean | undefined;
   readonly options: readonly InteractivePromptOption[];
   readonly statusActions?: readonly InteractivePromptOption[] | undefined;
   readonly initialValue?: string | undefined;
@@ -75,6 +77,7 @@ export class InteractiveTextPrompt implements Component, Focusable {
   private readonly options: InteractiveTextPromptOptions;
 
   private _focused = false;
+  private messageOffset = 0;
 
   constructor(options: InteractiveTextPromptOptions) {
     this.options = options;
@@ -108,6 +111,11 @@ export class InteractiveTextPrompt implements Component, Focusable {
   }
 
   handleInput(data: string): void {
+    if (this.options.scrollMessage && (matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown))) {
+      this.messageOffset += matchesKey(data, Key.pageUp) ? -5 : 5;
+      this.options.onRender();
+      return;
+    }
     if (this.input instanceof Editor && (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")))) {
       this.options.onCancel();
       return;
@@ -128,12 +136,20 @@ export class InteractiveTextPrompt implements Component, Focusable {
             ),
           ]
         : this.input.render(contentWidth);
+    const header = promptHeader(
+      this.options.sensitive === true ? "Secret" : "Input",
+      this.options.message,
+      contentWidth,
+    );
+    const view = promptHeaderWindow(
+      header,
+      this.messageOffset,
+      inputLines.length + 10,
+      this.options.scrollMessage,
+    );
+    this.messageOffset = view.offset;
     const lines = [
-      ...promptHeader(
-        this.options.sensitive === true ? "Secret" : "Input",
-        this.options.message,
-        contentWidth,
-      ),
+      ...view.lines,
       ...(this.options.sensitive === true ||
       this.options.editor !== undefined ||
       this.options.defaultValue === undefined
@@ -165,6 +181,7 @@ export class InteractiveSelectPrompt implements Component, Focusable {
   focused = false;
   private cursorIndex = 0;
   private filter = "";
+  private messageOffset = 0;
   private error: string | undefined;
 
   constructor(options: InteractiveSelectPromptOptions) {
@@ -182,6 +199,11 @@ export class InteractiveSelectPrompt implements Component, Focusable {
   }
 
   handleInput(data: string): void {
+    if (this.options.scrollMessage && (matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown))) {
+      this.messageOffset += matchesKey(data, Key.pageUp) ? -5 : 5;
+      this.options.onRender();
+      return;
+    }
     const printable = decodeKittyPrintable(data) ?? printableInput(data);
     if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
       this.options.onCancel();
@@ -268,13 +290,21 @@ export class InteractiveSelectPrompt implements Component, Focusable {
     const statusActionLines = statusActions.map((item) =>
       this.renderItem(item, item === active, contentWidth, labelWidth, "none"),
     );
+    const header = promptHeader(
+      selectPromptTitle(this.options.message),
+      this.options.message,
+      contentWidth,
+      statusActionLines,
+    );
+    const view = promptHeaderWindow(
+      header,
+      this.messageOffset,
+      visibleMenuItems.items.length + statusActionLines.length + 15,
+      this.options.scrollMessage,
+    );
+    this.messageOffset = view.offset;
     const lines = [
-      ...promptHeader(
-        selectPromptTitle(this.options.message),
-        this.options.message,
-        contentWidth,
-        statusActionLines,
-      ),
+      ...view.lines,
       ...this.statusLines(filtered.length, this.allOptions().length, contentWidth),
       ...(this.error === undefined ? [] : [errorLine(this.error)]),
       "",
@@ -314,7 +344,13 @@ export class InteractiveSelectPrompt implements Component, Focusable {
     active: IndexedOption | undefined,
   ): { readonly items: readonly IndexedOption[]; readonly startIndex: number } {
     if (items.length === 0) return { items, startIndex: 0 };
-    const maxVisible = Math.min(MAX_VISIBLE_OPTIONS, items.length);
+    const maxVisible = Math.min(
+      MAX_VISIBLE_OPTIONS,
+      items.length,
+      this.options.scrollMessage
+        ? Math.max(1, Math.floor((process.stdout.rows || 40) * 0.7) - 16)
+        : MAX_VISIBLE_OPTIONS,
+    );
     const cursorMenuIndex = active?.placement === "menu" ? items.indexOf(active) : 0;
     const startIndex = clamp(
       cursorMenuIndex - Math.floor(maxVisible / 2),
@@ -422,6 +458,33 @@ export class InteractiveSelectPrompt implements Component, Focusable {
   private currentOption(): InteractivePromptOption | undefined {
     return this.filteredOptions()[this.cursorIndex]?.option;
   }
+}
+
+/** Keep owner-ask details readable without clipping the choices or answer field. */
+function promptHeaderWindow(
+  lines: string[],
+  offset: number,
+  reserved: number,
+  enabled?: boolean,
+): { lines: string[]; offset: number } {
+  if (!enabled) return { lines, offset: 0 };
+  const size = Math.max(2, Math.floor((process.stdout.rows || 40) * 0.7) - reserved);
+  const details = lines.slice(2);
+  const start = Math.max(0, Math.min(offset, Math.max(0, details.length - size)));
+  return {
+    offset: start,
+    lines: [
+      ...lines.slice(0, 2),
+      ...details.slice(start, start + size),
+      ...(details.length > size
+        ? [
+            dim(
+              `PgUp/PgDn read details · ${start + 1}–${Math.min(start + size, details.length)} of ${details.length}`,
+            ),
+          ]
+        : []),
+    ],
+  };
 }
 
 function promptHeader(

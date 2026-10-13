@@ -313,12 +313,16 @@ export async function runHostedConsole() {
     {
       name: "question",
       aliases: [],
-      description: "List owner asks, or read, answer and cancel the source conversation ask",
+      description: "Open the owner mailbox (F8), or answer the displayed ask with text commands",
       takesArgument: true,
-      argumentHint: "[list | answer NUMBER | text TEXT | worker JSON | cancel]",
+      argumentHint: "[list | read | answer NUMBER | text TEXT | worker JSON | cancel]",
       async run(argument, active) {
         try {
-          active.insertCommandResult("/question", await questionCommand(argument), "success");
+          active.insertCommandResult(
+            "/question",
+            await questionCommand(argument, active.setupFlow),
+            "success",
+          );
         } catch (error) {
           active.insertCommandResult(
             "/question",

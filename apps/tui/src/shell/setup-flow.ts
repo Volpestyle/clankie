@@ -49,6 +49,7 @@ export type SetupFlow = {
   setStatus(status: string | undefined): void;
   readText(options: {
     readonly message: string;
+    readonly scrollMessage?: boolean;
     readonly defaultValue?: string;
     readonly placeholder?: string;
     readonly multiline?: boolean;
@@ -57,11 +58,13 @@ export type SetupFlow = {
   }): Promise<string | undefined>;
   readSecret(options: {
     readonly message: string;
+    readonly scrollMessage?: boolean;
     readonly allowBack?: boolean;
     readonly validate?: (value: string) => string | undefined;
   }): Promise<string | undefined>;
   readSelect(options: {
     readonly message: string;
+    readonly scrollMessage?: boolean;
     readonly options: readonly MenuOption[];
     readonly statusActions?: readonly MenuOption[];
     readonly initialValue?: string;
@@ -179,6 +182,7 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
           defaultValue,
           error,
           message: options.message,
+          scrollMessage: options.scrollMessage,
           editor: options.multiline === true ? new Editor(context.tui, context.editorTheme) : undefined,
           onCancel: cancel,
           onRender: () => context.tui.requestRender(),
@@ -199,6 +203,7 @@ export function createSetupFlow(context: SetupFlowContext): SetupFlowController 
           currentValue: options.currentValue,
           initialValue: options.initialValue,
           message: options.message,
+          scrollMessage: options.scrollMessage,
           onCancel: cancel,
           ...(options.onClose === undefined
             ? {}
