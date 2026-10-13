@@ -330,7 +330,15 @@ export function windowsProcessCommand(input: {
   /** Compare the native home to the SSH account's default; no home path is exported. */
   codexDefaultHome?: boolean;
 }): string {
-  return probeCommand(`${native}
+  return probeCommand(`function Record-ClankieProcessTiming($phase, $watch) {
+  # Older resident relays have no telemetry method; proof output stays identical.
+  try {
+    $relayType = 'ClankieRelay' -as [type]
+    if ($relayType -and $relayType.GetMethod('Phase')) { [ClankieRelay]::Phase($command.Id, $phase, $watch.Elapsed.TotalMilliseconds) }
+  } catch { }
+  $watch.Restart()
+}
+${native}
 $session = ${powershellLiteral(input.session)}
 $pane = ${powershellLiteral(input.pane)}
 # A replaced native Claude image can remain loaded under its predecessor name.
@@ -350,16 +358,21 @@ function Test-ClankieClaudePredecessor($running, $installed, $processId, $birth)
   return $false
 }
 function Observe-ClankieProcess {
+$phaseWatch = [Diagnostics.Stopwatch]::StartNew()
 $sessions = (& herdr session list --json | ConvertFrom-Json).sessions
 $binding = @($sessions | Where-Object { $_.name -ceq $session -and $_.running })
 if ($binding.Count -ne 1) { throw 'Session unavailable' }
 $env:HERDR_SOCKET_PATH = $binding[0].socket_path
+Record-ClankieProcessTiming 0 $phaseWatch
 $info = (& herdr pane process-info --pane $pane | ConvertFrom-Json).result.process_info
+Record-ClankieProcessTiming 1 $phaseWatch
 $agent = (& herdr agent get $pane | ConvertFrom-Json).result.agent
 if ($info.pane_id -cne $pane -or $agent.pane_id -cne $pane) { throw 'Pane unavailable' }
+Record-ClankieProcessTiming 2 $phaseWatch
 $all = @([ClankieProcess]::Table())
 $byPid = @{}
 foreach ($row in $all) { if ($byPid.ContainsKey($row.pid)) { throw 'Duplicate PID' }; $byPid[$row.pid]=$row }
+Record-ClankieProcessTiming 3 $phaseWatch
 $installed = @()
 if ($agent.agent -eq 'claude') {
   $installed = @(Get-Command claude.exe -All -CommandType Application -ErrorAction SilentlyContinue | ForEach-Object { [ClankieProcess]::Canonical($_.Source) })
@@ -377,6 +390,7 @@ if ($agent.agent -eq 'claude') {
   }
   $installed += @(Get-Command codex.exe -All -CommandType Application -ErrorAction SilentlyContinue | ForEach-Object { [ClankieProcess]::Canonical($_.Source) })
 }
+Record-ClankieProcessTiming 4 $phaseWatch
 $launchers = @($installed)
 $nativeProcesses = @(foreach ($row in $all) {
   if ($row.name -notin @('claude.exe','codex.exe')) { continue }
@@ -424,6 +438,7 @@ $nativeProcesses = @(foreach ($row in $all) {
     }
   } catch { }
 })
+Record-ClankieProcessTiming 5 $phaseWatch
 # Hired app-servers break away from SSH and are not descendants of the pane.
 # Discover only the unique kernel listener at the visible TUI's native --remote
 # endpoint. Never use saved launch PIDs, a request endpoint or account-wide files.
@@ -453,6 +468,7 @@ ${
 $privateServer=[ordered]@{pid=$detail.pid;startTime=$detail.startTime;executable=[ClankieProcess]::Canonical($detail.executable);cwd=[ClankieProcess]::Cwd($detail.pid);port=${input.privateServer.port};listeners=@([ClankieProcess]::Owners(${input.privateServer.port},0))}`
     : ""
 }
+Record-ClankieProcessTiming 6 $phaseWatch
 # Return only relevant ancestry; unrelated machine process paths never cross the link.
 $needed = New-Object 'System.Collections.Generic.HashSet[int]'
 foreach ($start in @($nativeProcesses | ForEach-Object { $_.pid }) + @($owners) + @(${input.privateServer?.pid ?? 0}) + @([int]$info.shell_pid, [int]$info.foreground_process_group_id)) {
@@ -465,6 +481,7 @@ foreach ($start in @($nativeProcesses | ForEach-Object { $_.pid }) + @($owners) 
   }
 }
 $relevant = @(foreach ($processId in $needed) { try { $detail=[ClankieProcess]::Details($processId); $detail.executable=[ClankieProcess]::Canonical($detail.executable); $detail } catch { } })
+Record-ClankieProcessTiming 7 $phaseWatch
 $foregroundMarkers=$null
 ${input.codexControl ? "try { $foregroundMarkers=[ClankieProcess]::Markers([int]$info.foreground_process_group_id) } catch { }" : ""}
 $defaultHomeHash=$null
@@ -478,6 +495,7 @@ ${
 } catch { }`
     : ""
 }
+Record-ClankieProcessTiming 8 $phaseWatch
 [ordered]@{binding=[ordered]@{socketPath=$binding[0].socket_path;session=$session};info=[ordered]@{pane_id=$info.pane_id;shell_pid=$info.shell_pid;foreground_process_group_id=$info.foreground_process_group_id};agent=[ordered]@{pane_id=$agent.pane_id;terminal_id=$agent.terminal_id;agent=$agent.agent;agent_session=$agent.agent_session;agent_status=$agent.agent_status};processes=$relevant;nativeProcesses=$nativeProcesses;owners=$owners;installed=$installed;privateServer=$privateServer;foregroundMarkers=$foregroundMarkers;defaultHomeHash=$defaultHomeHash;detachedCodexServer=$detachedCodexServer}
 }
 $first = Observe-ClankieProcess

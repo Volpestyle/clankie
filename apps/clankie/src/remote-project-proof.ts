@@ -1,3 +1,4 @@
+import { logger } from "./app/log.ts";
 import type { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import type { ProjectGitWorktreeObservation, ProjectWorktreeRootObservation } from "@clankie/settings";
 import { createHash } from "node:crypto";
@@ -457,7 +458,22 @@ export function createRemoteProjectObserver(options: Options) {
         ...(stream ? { clientPort: stream.clientPort, serverPort: stream.serverPort } : {}),
       });
       const shell = options.shell(fleet);
-      const snapshots = JSON.parse(await shell(command, 10_000)) as { first: Observation; last: Observation };
+      const shellStarted = performance.now();
+      let shellOutcome = "error";
+      let response: string;
+      try {
+        response = await shell(command, 10_000);
+        shellOutcome = "ok";
+      } finally {
+        logger.info(
+          {
+            event: "remote.proof.timings",
+            phases: [{ phase: "shell", durationMs: performance.now() - shellStarted, outcome: shellOutcome }],
+          },
+          "Remote proof timings",
+        );
+      }
+      const snapshots = JSON.parse(response) as { first: Observation; last: Observation };
       const choose = async (snapshot: Observation) => {
         const direct = select(snapshot, fleet, pane, stream);
         if (direct || !stream) return direct;

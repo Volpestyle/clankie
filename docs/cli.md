@@ -5264,6 +5264,17 @@ The default local service log is `~/.local/state/clankie/clankie.log`;
 `CLANKIE_STATE_HOME`, then `XDG_STATE_HOME`, override its state-home prefix.
 Filter that log for `fleet.projection.timings` when comparing a roster window.
 
+Remote proof diagnostics use `remote.proof.timings` for the caller's shell await
+and `remote.observation.timings` for authenticated relay queue residence and
+execution. The latter also includes the existing binding, pane-process, agent,
+kernel-table, launcher, native-process, listener, ancestry and marker steps for
+process proofs. Fields are fixed phase names, durations and outcomes only. These
+are nested measurements: do not add shell, queue/execution and probe-step totals.
+Telemetry never settles an observation or changes proof data or deadlines.
+The Mac service generates the Windows relay bootstrap and sends it over the
+existing SSH stream; a newly launched relay after deployment receives the timing
+code. Existing older relays remain compatible and emit no telemetry.
+
 ### `metrics --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]`
 
 Per-issue and per-worker measurements from the service's existing records,

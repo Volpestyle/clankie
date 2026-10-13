@@ -1,8 +1,20 @@
+import { logger } from "./app/log.ts";
 import { createConnection, type Socket, type Server } from "node:net";
 import { timingSafeEqual } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
 import type { RemoteStream } from "./remote-project-proof.ts";
 
+const OBSERVATION_PHASES = [
+  "binding",
+  "pane_process",
+  "agent",
+  "kernel_table",
+  "launchers",
+  "native_processes",
+  "listeners",
+  "ancestry",
+  "markers",
+];
 const MAX_FRAME = 65536;
 const MAX_PENDING = 4 * 1024 * 1024;
 const OBSERVATION_GRACE_MS = 30_000;
@@ -77,6 +89,7 @@ export class RemoteFleetRelay {
       reject(error: Error): void;
       timer: ReturnType<typeof setTimeout>;
       expired: boolean;
+      phases?: { phase: string; durationMs: number; outcome: string }[];
     }
   >();
   private readonly options: {
@@ -328,6 +341,35 @@ export class RemoteFleetRelay {
     ) {
       this.nonce = Buffer.from(bytes);
       this.bindResponse();
+      return;
+    }
+    if (kind === 7) {
+      const command = this.commands.get(id);
+      if (!command || bytes.length !== 9 || bytes[0]! >= OBSERVATION_PHASES.length) return;
+      const durationMs = bytes.readDoubleLE(1);
+      if (!Number.isFinite(durationMs) || durationMs < 0) return;
+      const phases = (command.phases ??= []);
+      if (phases.length < 18)
+        phases.push({ phase: OBSERVATION_PHASES[bytes[0]!]!, durationMs, outcome: "ok" });
+      return;
+    }
+    if (kind === 6) {
+      // Optional telemetry from the authenticated relay; never a result/proof.
+      if (id === 0 || !this.commands.has(id) || bytes.length !== 17 || bytes[16]! > 1) return;
+      const queueMs = bytes.readDoubleLE(0),
+        executionMs = bytes.readDoubleLE(8);
+      if (![queueMs, executionMs].every((value) => Number.isFinite(value) && value >= 0)) return;
+      logger.info(
+        {
+          event: "remote.observation.timings",
+          phases: [
+            ...(this.commands.get(id)?.phases ?? []),
+            { phase: "queue_wait", durationMs: queueMs, outcome: "ok" },
+            { phase: "execution", durationMs: executionMs, outcome: bytes[16] === 1 ? "ok" : "error" },
+          ],
+        },
+        "Remote observation timings",
+      );
       return;
     }
     if (kind === 4 && id > 0) {

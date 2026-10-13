@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "raw/focused.log",
+      "size": 18625,
+      "sha256": "b1b8ea41468ecfddaf51c130d90b3fd4514fc0c6af4a670011a00db30f6a7cb7",
+      "url": "clankie://evidence/sha256/b1b8ea41468ecfddaf51c130d90b3fd4514fc0c6af4a670011a00db30f6a7cb7"
+    }
+  ]
+}

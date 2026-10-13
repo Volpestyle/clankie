@@ -55,6 +55,34 @@ async function settle(check: () => boolean) {
   await vi.waitFor(() => expect(check()).toBe(true));
 }
 describe("trusted remote SSH relay", () => {
+  it("diagnostic frames cannot settle or alter an authenticated observation result", async () => {
+    const { child, relay } = await setup();
+    const command =
+      "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
+      Buffer.from("'original'", "utf16le").toString("base64");
+    let settled = false;
+    const result = relay.execute(command);
+    void result.then(() => {
+      settled = true;
+    });
+    const phase = Buffer.alloc(9);
+    phase[0] = 0;
+    phase.writeDoubleLE(12, 1);
+    child.stdout.write(frame(7, 1, phase));
+    const timing = Buffer.alloc(17);
+    timing.writeDoubleLE(3, 0);
+    timing.writeDoubleLE(20, 8);
+    timing[16] = 1;
+    child.stdout.write(frame(6, 1, timing));
+    // Unknown IDs and malformed telemetry remain diagnostics, never proof.
+    child.stdout.write(frame(6, 999, timing));
+    child.stdout.write(frame(7, 1, Buffer.from("private payload")));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    child.stdout.write(frame(4, 1, Buffer.from("original result bytes")));
+    expect(await result).toBe("original result bytes");
+  });
+
   it("binds each accepted service socket to its own exact remote TCP tuple", async () => {
     const { child, relay, ready, sockets } = await setup();
     child.stdout.write(frame(1, 1, ports(4321, 1234)));

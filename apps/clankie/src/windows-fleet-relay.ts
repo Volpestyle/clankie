@@ -21,6 +21,7 @@ using System.Threading;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Diagnostics;
 public static class ClankieRelay {
   static readonly object outputLock = new object();
   static readonly object clientsLock = new object();
@@ -28,10 +29,27 @@ public static class ClankieRelay {
   static readonly Stream output = Console.OpenStandardOutput();
   static Stream input;
   static TcpClient control;
-  public class Command { public uint Id; public string Script; }
+  public class Command { public uint Id; public string Script; public long Enqueued; public double QueueMs; }
   static readonly BlockingCollection<Command> commands = new BlockingCollection<Command>(16);
   public static bool Running { get { return !stopped; } }
-  public static Command NextCommand() { Command command; return commands.TryTake(out command, 250) ? command : null; }
+  public static Command NextCommand() { Command command; if (!commands.TryTake(out command, 250)) return null; command.QueueMs = (Stopwatch.GetTimestamp() - command.Enqueued) * 1000.0 / Stopwatch.Frequency; return command; }
+  // Content-free diagnostics never settle an observation or change its result.
+  public static void Phase(uint id, byte phase, double durationMs) {
+    try {
+      byte[] bytes = new byte[9]; bytes[0] = phase;
+      Array.Copy(BitConverter.GetBytes(durationMs), 0, bytes, 1, 8);
+      Send(7, id, bytes, bytes.Length);
+    } catch { }
+  }
+  public static void Timing(uint id, double queueMs, double executionMs, bool ok) {
+    try {
+      byte[] bytes = new byte[17];
+      Array.Copy(BitConverter.GetBytes(queueMs), 0, bytes, 0, 8);
+      Array.Copy(BitConverter.GetBytes(executionMs), 0, bytes, 8, 8);
+      bytes[16] = ok ? (byte)1 : (byte)0;
+      Send(6, id, bytes, bytes.Length);
+    } catch { }
+  }
   public static void Result(uint id, string result) {
     byte[] bytes = Encoding.UTF8.GetBytes(result);
     if (bytes.Length > MAX_FRAME) { Stop(); return; }
@@ -74,7 +92,7 @@ public static class ClankieRelay {
         if (id == 0 || length < 0 || length > MAX_FRAME || (kind != 2 && kind != 3 && kind != 4) || (kind == 3 && length != 0)) throw new Exception("Invalid relay frame");
         byte[] bytes = Read(length);
         if (kind == 4) {
-          if (!commands.TryAdd(new Command { Id=id, Script=Encoding.UTF8.GetString(bytes) })) throw new Exception("Relay proof queue full");
+          if (!commands.TryAdd(new Command { Id=id, Script=Encoding.UTF8.GetString(bytes), Enqueued=Stopwatch.GetTimestamp() })) throw new Exception("Relay proof queue full");
           continue;
         }
         TcpClient client;
@@ -132,10 +150,17 @@ while ([ClankieRelay]::Running) {
     $fresh = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) | Where-Object { $_ }
     if ($fresh) { $env:Path = $fresh -join ';' }
   } catch { }
+  $execution = [Diagnostics.Stopwatch]::StartNew()
   try {
     $result = (& ([scriptblock]::Create($command.Script)) | Out-String).Trim()
+    $execution.Stop()
+    [ClankieRelay]::Timing($command.Id, $command.QueueMs, $execution.Elapsed.TotalMilliseconds, $true)
     [ClankieRelay]::Result($command.Id, $result)
-  } catch { [ClankieRelay]::Result($command.Id, 'null') }
+  } catch {
+    $execution.Stop()
+    [ClankieRelay]::Timing($command.Id, $command.QueueMs, $execution.Elapsed.TotalMilliseconds, $false)
+    [ClankieRelay]::Result($command.Id, 'null')
+  }
 }
 `)
     .split(" ")
