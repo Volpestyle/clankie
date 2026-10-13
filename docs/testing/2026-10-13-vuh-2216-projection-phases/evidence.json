@@ -6,6 +6,18 @@
       "size": 33619,
       "sha256": "9470320bd08e4c05cbdab05afc70af2f438e992786f0c1265dd59b55ab1a9c74",
       "url": "clankie://evidence/sha256/9470320bd08e4c05cbdab05afc70af2f438e992786f0c1265dd59b55ab1a9c74"
+    },
+    {
+      "path": "raw/landed-phase-gate.txt",
+      "size": 1566177,
+      "sha256": "9b5ecda08639e4897c69df8ebde36a5da4f128fa7ad3f7cb2f1d293e73ccd057",
+      "url": "clankie://evidence/sha256/9b5ecda08639e4897c69df8ebde36a5da4f128fa7ad3f7cb2f1d293e73ccd057"
+    },
+    {
+      "path": "raw/live-five-minute-phases.txt",
+      "size": 219418,
+      "sha256": "ab5529a0b665ad3e0ecc58d2d8af1c02e64371249714b291ee58946a66cafbef",
+      "url": "clankie://evidence/sha256/ab5529a0b665ad3e0ecc58d2d8af1c02e64371249714b291ee58946a66cafbef"
     }
   ]
 }
