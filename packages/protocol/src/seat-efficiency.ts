@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+/** Full stable builtin keys and imported/default keys; never compare a stripped suffix. */
+export const SeatEfficiencyIssueKeyPattern = "^(?:[A-Z][A-Z0-9]*-[0-9]+|LOCAL-[A-Z][A-Z0-9]*-[1-9][0-9]*)$";
+export const SeatEfficiencyIssueKeySchema = z.string().regex(new RegExp(SeatEfficiencyIssueKeyPattern, "u"));
+
 /** Observed evidence for the owning lead to review; flags never control a worker. */
 export const OperatorSeatEfficiencySchema = z
   .object({
@@ -11,10 +15,7 @@ export const OperatorSeatEfficiencySchema = z
     assignedDeliverable: z.string().min(1).max(16_384).optional(),
     objective: z.string().min(1).max(16_384).optional(),
     /** Issue assignments explicitly reported live by the lead, including native children. */
-    ownedIssues: z
-      .array(z.string().regex(/^[A-Z][A-Z0-9]*-\d+$/u))
-      .max(100)
-      .optional(),
+    ownedIssues: z.array(SeatEfficiencyIssueKeySchema).max(100).optional(),
     currentIssue: z.string().min(1).max(64).optional(),
     model: z.string().min(1).max(256).optional(),
     effort: z.string().min(1).max(64).optional(),

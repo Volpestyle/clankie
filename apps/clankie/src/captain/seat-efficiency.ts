@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname } from "node:path";
 import {
   OperatorSeatEfficiencySchema,
+  SeatEfficiencyIssueKeySchema,
   type OperatorSeatEfficiency,
   type OperatorWorkAssignment,
   type OperatorGoal,
@@ -61,11 +62,15 @@ const latest = (...values: (string | undefined)[]) =>
     .sort()
     .at(-1);
 const displayIssue = (value: string | undefined) => {
-  const matches = value?.match(/\b[A-Z][A-Z0-9]*-\d+\b/gu);
+  // Validate whole tokens so a malformed/full builtin key cannot become an imported suffix.
+  const matches = value
+    ?.match(/[\p{L}\p{M}\p{N}_-]+/gu)
+    ?.filter((token) => SeatEfficiencyIssueKeySchema.safeParse(token).success);
   return matches?.length === 1 ? matches[0] : undefined;
 };
 const comparableIssues = (left: string, right: string) =>
-  (/^[A-Z][A-Z0-9]*-\d+$/u.test(left) && /^[A-Z][A-Z0-9]*-\d+$/u.test(right)) ||
+  (SeatEfficiencyIssueKeySchema.safeParse(left).success &&
+    SeatEfficiencyIssueKeySchema.safeParse(right).success) ||
   (/^[a-f0-9-]{36}$/iu.test(left) && /^[a-f0-9-]{36}$/iu.test(right));
 
 export interface SeatEfficiencyObservation {

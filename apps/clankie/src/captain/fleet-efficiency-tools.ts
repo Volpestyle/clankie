@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { OperatorFleetSeat } from "@clankie/protocol";
+import {
+  OperatorSeatEfficiencySchema,
+  SeatEfficiencyIssueKeyPattern,
+  type OperatorFleetSeat,
+} from "@clankie/protocol";
 import {
   assertConversationAuthority,
   captureConversationAuthority,
@@ -14,10 +18,7 @@ export const FleetEfficiencyReviewSchema = z.strictObject({
   offScope: z.boolean().optional(),
   assignmentStatus: z.enum(["active", "paused", "canceled", "done"]).optional(),
   deliverable: z.string().trim().min(1).max(512).optional(),
-  ownedIssues: z
-    .array(z.string().regex(/^[A-Z][A-Z0-9]*-\d+$/u))
-    .max(100)
-    .optional(),
+  ownedIssues: OperatorSeatEfficiencySchema.shape.ownedIssues,
   progressAt: z.string().datetime().optional(),
   evidence: z.string().trim().min(1).max(2048),
 });
@@ -59,7 +60,7 @@ export function fleetEfficiencyTools(actions: FleetEfficiencyActions, turn: Turn
           ),
           deliverable: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
           ownedIssues: Type.Optional(
-            Type.Array(Type.String({ pattern: "^[A-Z][A-Z0-9]*-[0-9]+$" }), { maxItems: 100 }),
+            Type.Array(Type.String({ pattern: SeatEfficiencyIssueKeyPattern }), { maxItems: 100 }),
           ),
           progressAt: Type.Optional(Type.String({ format: "date-time" })),
           evidence: Type.String({ minLength: 1, maxLength: 2048 }),

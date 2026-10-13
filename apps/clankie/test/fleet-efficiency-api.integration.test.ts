@@ -157,7 +157,7 @@ it("dispatches exact review fields and rejects body-supplied authority and malfo
     offScope: true,
     assignmentStatus: "paused",
     deliverable: "VUH-1662",
-    ownedIssues: ["VUH-1662", "VUH-2026"],
+    ownedIssues: ["LOCAL-VUH-12", "VUH-12", "LOCAL-12", "VUH-0", "VUH-01", "LOCAL-0", "LOCAL-01"],
     progressAt: checkedAt,
     evidence: "Inspected native report and tracker assignment",
   } as const;
@@ -174,6 +174,17 @@ it("dispatches exact review fields and rejects body-supplied authority and malfo
     { ...body, progressAt: "not-a-date" },
     { ...body, assignmentStatus: "running" },
     { ...body, offScope: "yes" },
+    { ...body, ownedIssues: Array.from({ length: 101 }, () => "LOCAL-VUH-12") },
+    ...[
+      "LOCAL-VUH-0",
+      "LOCAL-VUH-01",
+      "LOCAL-VUH--12",
+      "local-VUH-12",
+      "X-LOCAL-VUH-12",
+      "LOCAL-VUH-12_suffix",
+      "LOCAL-VUH-12-extra",
+      " LOCAL-VUH-12",
+    ].map((key) => ({ ...body, ownedIssues: [key] })),
     { action: "show", conversationId: "global-default", seatId: "worker-seat" },
   ])
     expect((await f.post("/v1/fleet/efficiency", invalid)).status).toBe(400);

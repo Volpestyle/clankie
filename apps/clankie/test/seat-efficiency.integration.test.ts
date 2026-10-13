@@ -416,6 +416,64 @@ it("flags comparable explicit assignment mismatch and reviewed paused work, pres
   ).toContain("done");
 });
 
+it("persists full builtin claims, refuses malformed/bounded claims, and compares whole issue tokens", async () => {
+  const dir = await directory();
+  const path = join(dir, "efficiency.json");
+  const store = new SeatEfficiencyStore(path, { now: () => now });
+  const input = { occupantId: "full-key-session", seatId: "full-key-seat", owner };
+  store.assign(input.occupantId, { owner, deliverable: "Implement LOCAL-VUH-12" });
+  const ownedIssues = ["LOCAL-VUH-12", "VUH-12", "LOCAL-12", "VUH-0", "VUH-01", "LOCAL-0", "LOCAL-01"];
+  store.review({ ...input, ownedIssues, evidence: "Disposable schema/store fixture; no native admission" });
+  expect(store.observe(input).ownedIssues).toEqual(ownedIssues);
+  const restored = new SeatEfficiencyStore(path, { now: () => now });
+  expect(restored.observe(input).ownedIssues).toEqual(ownedIssues);
+  expect(restored.observe({ ...input, assignment: assignment("LOCAL-VUH-12") }).flags).not.toContain(
+    "off-scope",
+  );
+  for (const key of ["VUH-12", "LOCAL-12", "LOCAL-VUH-13"])
+    expect(restored.observe({ ...input, assignment: assignment(key) }).flags).toContain("off-scope");
+  expect(restored.observe({ ...input, assignment: assignment(sessionId) }).flags).not.toContain("off-scope");
+  for (const key of [
+    "LOCAL-VUH-0",
+    "LOCAL-VUH-01",
+    "LOCAL-VUH--12",
+    "local-VUH-12",
+    "X-LOCAL-VUH-12",
+    "LOCAL-VUH-12_suffix",
+    "LOCAL-VUH-12-extra",
+    "éLOCAL-VUH-12",
+    "e\u0301LOCAL-VUH-12",
+    "LOCAL-VUH-12\u0301",
+  ]) {
+    expect(() =>
+      restored.review({ ...input, ownedIssues: [key], evidence: "Malformed fixture claim" }),
+    ).toThrow();
+    restored.assign(input.occupantId, { owner, deliverable: key });
+    expect(restored.observe({ ...input, assignment: assignment("VUH-13") }).flags).not.toContain("off-scope");
+  }
+  expect(() =>
+    restored.review({
+      ...input,
+      ownedIssues: Array.from({ length: 101 }, () => "LOCAL-VUH-12"),
+      evidence: "Over bound",
+    }),
+  ).toThrow();
+  expect(restored.observe(input).ownedIssues).toEqual(ownedIssues);
+  expect(() =>
+    restored.review({
+      ...input,
+      owner: { conversationId: "another-lead" },
+      ownedIssues,
+      evidence: "Wrong owner",
+    }),
+  ).toThrow(/owner does not match/u);
+  expect(() =>
+    restored.review({ ...input, occupantId: "another-session", ownedIssues, evidence: "Wrong occupant" }),
+  ).toThrow(/unavailable/u);
+  restored.review({ ...input, ownedIssues: [], evidence: "Fixture work ended" });
+  expect(new SeatEfficiencyStore(path).observe(input).ownedIssues).toEqual([]);
+});
+
 it("uses admitted/observed baseline and substantive evidence, not native activity, for stalled progress", async () => {
   const dir = await directory();
   const store = new SeatEfficiencyStore(join(dir, "efficiency.json"), { now: () => now });

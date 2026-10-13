@@ -196,9 +196,13 @@ describe("lane MCP endpoint", () => {
       expect(reviewSchema.properties.ownedIssues).toMatchObject({
         type: "array",
         maxItems: 100,
-        items: { type: "string", pattern: "^[A-Z][A-Z0-9]*-[0-9]+$" },
+        items: { type: "string", pattern: "^(?:[A-Z][A-Z0-9]*-[0-9]+|LOCAL-[A-Z][A-Z0-9]*-[1-9][0-9]*)$" },
       });
-      for (const ownedIssues of [["VUH-2026", "VUH-2108"], []]) {
+      for (const ownedIssues of [
+        ["VUH-2026", "VUH-2108"],
+        ["LOCAL-VUH-12", "VUH-12", "LOCAL-12", "VUH-01", "LOCAL-01"],
+        [],
+      ]) {
         const review = { seatId: "worker-seat", ownedIssues, evidence: "Exact live follow-up assignment" };
         const response = await call(
           app,
@@ -214,7 +218,37 @@ describe("lane MCP endpoint", () => {
         expect((await response.json()).result.isError).not.toBe(true);
         expect(reviews.at(-1)).toEqual(review);
       }
-      expect(reviews).toHaveLength(2);
+      expect(reviews).toHaveLength(3);
+      for (const ownedIssues of [
+        ["LOCAL-VUH-0"],
+        ["LOCAL-VUH-01"],
+        ["X-LOCAL-VUH-12"],
+        Array.from({ length: 101 }, () => "LOCAL-VUH-12"),
+      ]) {
+        const response = await call(
+          app,
+          "operator",
+          {
+            jsonrpc: "2.0",
+            id: 4,
+            method: "tools/call",
+            params: {
+              name: "fleet_efficiency",
+              arguments: {
+                action: "review",
+                seatId: "worker-seat",
+                ownedIssues,
+                evidence: "Malformed/bounded fixture claim",
+              },
+            },
+          },
+          session,
+        );
+        expect((await response.json()).error).toMatchObject({
+          message: expect.stringContaining("ownedIssues"),
+        });
+      }
+      expect(reviews).toHaveLength(3);
     } finally {
       app.close();
     }

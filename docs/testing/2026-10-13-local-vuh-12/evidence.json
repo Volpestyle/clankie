@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "proof-packet.json",
+      "size": 71245,
+      "sha256": "e2cb5de6da4003fe7968a137513647788591766da6ca24926e7f6c80ff9bea72",
+      "url": "clankie://evidence/sha256/e2cb5de6da4003fe7968a137513647788591766da6ca24926e7f6c80ff9bea72"
+    },
+    {
+      "path": "scoped-keeper-test.ts",
+      "size": 29177,
+      "sha256": "26b48ae442149b90a2d3a025a67a765c40be83a3f89b725b038ed01b96696e73",
+      "url": "clankie://evidence/sha256/26b48ae442149b90a2d3a025a67a765c40be83a3f89b725b038ed01b96696e73"
+    }
+  ]
+}

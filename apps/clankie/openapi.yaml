@@ -7181,7 +7181,7 @@ components:
             ownedIssues:
               type: array
               maxItems: 100
-              items: { type: string, pattern: "^[A-Z][A-Z0-9]*-[0-9]+$" }
+              items: { type: string, pattern: "^(?:[A-Z][A-Z0-9]*-[0-9]+|LOCAL-[A-Z][A-Z0-9]*-[1-9][0-9]*)$" }
               description: Issues the lead reports live on this native session or its children; empty clears the claim
             progressAt:
               type: string
@@ -7239,7 +7239,7 @@ components:
         ownedIssues:
           type: array
           maxItems: 100
-          items: { type: string, pattern: "^[A-Z][A-Z0-9]*-[0-9]+$" }
+          items: { type: string, pattern: "^(?:[A-Z][A-Z0-9]*-[0-9]+|LOCAL-[A-Z][A-Z0-9]*-[1-9][0-9]*)$" }
         objective: { type: string, minLength: 1, maxLength: 16384 }
         currentIssue: { type: string, minLength: 1, maxLength: 64 }
         model: { type: string, minLength: 1, maxLength: 256 }
