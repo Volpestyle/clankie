@@ -2,10 +2,22 @@
   "version": 1,
   "objects": [
     {
+      "path": "failed-root-gate.log",
+      "size": 860488,
+      "sha256": "56e748fd5002d3a3d7753fb6f9979a1456806d618811ab1dd0c49074d92b816a",
+      "url": "clankie://evidence/sha256/56e748fd5002d3a3d7753fb6f9979a1456806d618811ab1dd0c49074d92b816a"
+    },
+    {
       "path": "receipt-proof.json",
       "size": 27468,
       "sha256": "552ba90da12736baf1c2739aa8f873e7954b65c1cf86f9ae1719efb68eafd890",
       "url": "clankie://evidence/sha256/552ba90da12736baf1c2739aa8f873e7954b65c1cf86f9ae1719efb68eafd890"
+    },
+    {
+      "path": "regression-correction.json",
+      "size": 28903,
+      "sha256": "3e23963a9a6046d4841d95b17696d573331e2eca090a89ccdc27a2282f82eb00",
+      "url": "clankie://evidence/sha256/3e23963a9a6046d4841d95b17696d573331e2eca090a89ccdc27a2282f82eb00"
     },
     {
       "path": "typecheck-report.json",

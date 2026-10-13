@@ -112,3 +112,7 @@ missing structured refusal found by that proof. Formatting and lint passed.
 The original compiler report predates this correction; the replacement
 integrator runs a new compiler/landing gate. The replacement batch is reported
 on VUH-2180.
+
+`regression-correction.json` bundles the post-correction captures, check output
+and tested diff by their original filenames. The failed root-gate log is
+uploaded separately; both are referenced by `evidence.json`.
