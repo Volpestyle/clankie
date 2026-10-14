@@ -381,10 +381,19 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
    * captain, a hire on this machine) may also name a path, which registers it.
    */
   const locate = async (ref: string, local: boolean) => {
-    const byId = (await known()).find((repo) => repo.id === ref);
+    const repos = await known();
+    const byId = repos.find((repo) => repo.id === ref);
     if (byId !== undefined) return byId;
     if (local && isAbsolute(ref)) return register(ref);
-    throw new WorkRequestError("unknown_repo", `No registered repo ${ref}`);
+    // Only a registered id addresses a repo here. Name it, so a caller that
+    // gave a registered path can correct the call itself (VUH-2244).
+    const byPath = isAbsolute(ref) ? repos.find((repo) => repo.path === resolve(ref)) : undefined;
+    throw new WorkRequestError(
+      "unknown_repo",
+      byPath === undefined
+        ? `No registered repo ${ref}`
+        : `Name repo ${ref} by its registered id ${byPath.id}; a path is accepted only from this machine's own CLI and Clankie.`,
+    );
   };
 
   const describe = async (entry: { id: string; path: string; name: string }): Promise<WorkRepo> => {

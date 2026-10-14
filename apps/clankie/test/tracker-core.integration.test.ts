@@ -106,6 +106,8 @@ async function surface(root: string) {
   }
   return {
     host,
+    repo,
+    workItems,
     raw,
     call,
     close: async () => {
@@ -233,6 +235,34 @@ it("records actors and chains, replays keyed writes, refuses stale updates and k
     const tampered = await f.raw("linear_get_issue", { id: first.id });
     expect(tampered.outcome).toBe("refused");
     expect(tampered.detail).toContain("audit log is not intact");
+  } finally {
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("a worker naming a registered repo by its path is told its id, and nothing is registered (VUH-2244)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-tracker-repo-path-"));
+  const f = await surface(root);
+  try {
+    await f.workItems.handle({ action: "init", repo: f.repo, backend: "default" }, true);
+    const byId = await f.raw("linear_get_user", { query: "me", repo: "workspace" });
+    expect(byId, JSON.stringify(byId)).toMatchObject({ outcome: "ok", isError: false });
+    expect(await f.raw("linear_get_user", { query: "me", repo: f.repo })).toMatchObject({
+      outcome: "refused",
+      possiblyDispatched: false,
+      detail: expect.stringContaining(`by its registered id workspace`),
+    });
+
+    const elsewhere = join(root, "elsewhere");
+    await mkdir(elsewhere);
+    expect(await f.raw("linear_get_user", { query: "me", repo: elsewhere })).toMatchObject({
+      outcome: "refused",
+      detail: `No registered repo ${elsewhere}`,
+    });
+    await expect(readFile(join(root, "work", "work-repos.json"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   } finally {
     await f.close();
     await rm(root, { recursive: true, force: true });
