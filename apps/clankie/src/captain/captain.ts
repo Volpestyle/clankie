@@ -6561,6 +6561,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           if (agent === undefined || agent.agent === "shell" || agent.agent === "unknown")
             return inboundReceipts.refuse(paneId, delivery, text);
           const fleet = splitFleetQualified(agent.paneId)?.fleet;
+          // A local reporter and its Herdr parent are both on this machine. Like the
+          // fleet health alert route, read only the local census: an unreachable
+          // remote machine must not spend the report's admission deadline (VUH-2244).
+          const census = () => observeFleet(fleet === undefined);
           if (inboundBinding(agent) !== delivery.binding)
             return {
               schemaVersion: 1,
@@ -6636,7 +6640,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           let originalCensus: Awaited<ReturnType<typeof observeFleet>>;
           try {
             owner = herdrWatches.nativeOwner(agent);
-            originalCensus = await observeFleet();
+            originalCensus = await census();
             route = await workerReportRoute(agent, originalCensus, true);
           } catch {
             return inboundReceipts.refuse(agent.paneId, delivery, text);
@@ -6691,7 +6695,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             runner = async (_id, prompt, _publish, context) => {
               const guard = async () => {
                 if (context.signal.aborted) throw new Error("Worker report was cancelled");
-                const fleet = await observeFleet();
+                const fleet = await census();
                 const current =
                   fleet.seats.find((seat) => seat.paneId === recipient.paneId) ??
                   (fleet.head?.paneId === recipient.paneId ? fleet.head : undefined);
@@ -6739,7 +6743,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             const current = await herdrRunner.get(paneId);
             if (
               inboundBinding(current) !== delivery.binding ||
-              proof(await workerReportRoute(current, await observeFleet())) !== originalProof
+              proof(await workerReportRoute(current, await census())) !== originalProof
             )
               return inboundReceipts.refuse(agent.paneId, delivery, text);
           } catch {
@@ -6747,7 +6751,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           }
           // Native control discovery above can await OS work. Finish with a fresh
           // census and synchronous ownership checks before persisting acceptance.
-          const finalCensus = await observeFleet();
+          const finalCensus = await census();
           if (censusProof(finalCensus) !== originalCensusProof)
             return inboundReceipts.refuse(agent.paneId, delivery, text);
           if (route.parent) {

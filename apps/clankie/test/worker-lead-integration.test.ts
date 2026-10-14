@@ -45,6 +45,8 @@ async function fixture(
     unadopted?: boolean;
     /** A hand-started worker a lead adopted by messaging, rather than one it hired. */
     adopted?: boolean;
+    /** A local worker beside a configured remote machine whose census never answers. */
+    unreachable?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "worker-lead-integration-"));
@@ -114,7 +116,7 @@ async function fixture(
     wait: async () => ({ ...agent, status: "idle" }),
   };
   const settings = new SettingsStore(join(root, "settings.json"));
-  if (options.remote) {
+  if (options.remote || options.unreachable) {
     await settings.update((current) => ({
       ...current,
       machines: [{ id: "away", ssh: "fixture.invalid", shell: "posix", aliases: [] }],
@@ -191,7 +193,9 @@ async function fixture(
     } else throw new Error(`Unexpected external Herdr command: ${args.join(" ")}`);
     return JSON.stringify({ result });
   };
-  const remoteRun = vi.fn(async (args: readonly string[]) => herdrResponse(args));
+  const remoteRun = vi.fn(async (args: readonly string[]) =>
+    options.unreachable ? new Promise<never>(() => {}) : herdrResponse(args),
+  );
   const censusRun = vi.fn(async (_command: string, args: readonly string[]) => ({
     stdout: herdrResponse(args),
     stderr: "",
@@ -222,7 +226,7 @@ async function fixture(
                   },
       }),
     },
-    ...(options.remote
+    ...(options.remote || options.unreachable
       ? {
           fleets: {
             list: [{ id: "away", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } }],
@@ -322,6 +326,17 @@ it.each([false, true])(
     if (remote) expect(f.remoteRun).toHaveBeenCalled();
   },
 );
+
+it("a local worker's report is stored while a configured remote machine's census never answers (VUH-2244)", async () => {
+  const f = await fixture({ unreachable: true });
+  const receipt = await delivery(f.captain, f.agent.paneId);
+  const poll = f.captain.pollSeatEvents(2000, undefined, f.leads[0]);
+  expect(await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Local report", receipt)).toMatchObject({
+    received: true,
+    deliveryStage: "stored",
+  });
+  expect((await poll)[0]?.content).toContain("Local report");
+}, 10_000);
 
 it.each([false, true])(
   "a hired %s remote reporter whose raw census session changed refuses before acceptance",
