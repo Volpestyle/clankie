@@ -828,6 +828,19 @@ export class SeatOutbox {
     return true;
   }
 
+  /**
+   * The seat acknowledging an event it took on this conversation's lane. The take
+   * already matched that poll's native binding, and only that poll received the
+   * event's random ID, so a second binding proof cannot change the answer.
+   * Undefined when the event is not taken and in flight; use `acknowledge`.
+   */
+  public acknowledgeTaken(eventId: string): true | undefined {
+    const pending = this.inFlight.find((candidate) => candidate.event.id === eventId);
+    if (pending === undefined || !pending.taken) return undefined;
+    this.ackPending(pending);
+    return true;
+  }
+
   /** Exact bridge receipt, also usable after a timeout or service restart. */
   public acknowledge(eventId: string, recipientBinding?: string): boolean {
     const pending = this.inFlight.find((candidate) => candidate.event.id === eventId);

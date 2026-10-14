@@ -29,7 +29,12 @@ export const capabilities = {
   ownerOrigin: true,
 };
 
-export async function leadChatFixture(remote: boolean, cleanup: Array<() => Promise<void>>) {
+export async function leadChatFixture(
+  remote: boolean,
+  cleanup: Array<() => Promise<void>>,
+  /** A configured machine whose Herdr answers only after this delay, then fails. */
+  options: { slowFleetMs?: number } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "lead-messages-"));
   cleanup.push(async () => rmSync(root, { recursive: true, force: true }));
   const seeded = new ConversationStore(join(root, "conversations"), async () => {});
@@ -85,12 +90,13 @@ export async function leadChatFixture(remote: boolean, cleanup: Array<() => Prom
   const adoption = vi.spyOn(HerdrWatchStore.prototype, "adoptSeat");
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   const runner: HerdrWatchRunner = {
+    ...(options.slowFleetMs === undefined ? {} : { list: async () => [head] }),
     get: async () => head,
     resolveTerminal: async (id) => (id === head.terminalId ? head : Promise.reject(new Error("gone"))),
     wait: async () => head,
   };
   const settings = new SettingsStore(join(root, "settings.json"));
-  if (remote)
+  if (remote || options.slowFleetMs !== undefined)
     await settings.update((current) => ({
       ...current,
       machines: [{ id: "pc", ssh: "fixture.invalid", shell: "posix", aliases: [] }],
@@ -138,7 +144,18 @@ export async function leadChatFixture(remote: boolean, cleanup: Array<() => Prom
             run: () => async (args: readonly string[]) => herdrResponse(args),
           },
         }
-      : {}),
+      : options.slowFleetMs !== undefined
+        ? {
+            fleets: {
+              list: [{ id: "pc", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } }],
+              // Like an ssh connect timeout to a machine that went away.
+              run: () => async () => {
+                await new Promise((resolve) => setTimeout(resolve, options.slowFleetMs));
+                throw new Error("ssh: connect to host fixture.invalid port 22: Operation timed out");
+              },
+            },
+          }
+        : {}),
   } as unknown as CaptainDeps;
   /** One service process over the same state directory; a second call is a restart. */
   const open = () => {
@@ -183,8 +200,11 @@ export async function leadChatFixture(remote: boolean, cleanup: Array<() => Prom
       await pump;
     });
     // The seat is bound once its first poll parks, as a long-running bridge already is.
+    // A slow machine delays that first poll's source proof.
     await expect
-      .poll(() => captain.serveOperatorConversation({ op: "get", schemaVersion: 1, conversationId }))
+      .poll(() => captain.serveOperatorConversation({ op: "get", schemaVersion: 1, conversationId }), {
+        timeout: 10_000,
+      })
       .toMatchObject({ conversation: { driver: {} } });
     return notification;
   };

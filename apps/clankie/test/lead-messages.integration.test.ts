@@ -54,6 +54,20 @@ it.each([false, true])(
   },
 );
 
+it("VUH-2196: a local lead's seat confirms a lead message in time while another machine is unreachable", async () => {
+  // Past the 2s head acknowledgment window (live it was a ~10s ssh timeout), yet
+  // inside the roster's 3s read budget so the fixture still sees its local lead.
+  const f = await leadChatFixture(false, cleanup, { slowFleetMs: 2_500 });
+  const [global, work] = f.leads as [string, string];
+  const workChannel = await f.bridge(work);
+  expect(await f.messageSeat(global, f.head.terminalId, "Deploy at 18:00?")).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "delivered",
+    leadConversationId: work,
+  });
+  expect(workChannel).toHaveBeenCalledOnce();
+}, 30_000);
+
 it("VUH-2174: a disconnected remote-only lead still refuses without a local queue", async () => {
   const f = await fixture(true);
   await f.captain.close();

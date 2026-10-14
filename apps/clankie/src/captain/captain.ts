@@ -6893,9 +6893,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       shutdown.signal.throwIfAborted();
       const binding = seatContext(conversationId);
       if (binding === undefined) return false;
+      const outbox = seatOutbox(binding.conversationId);
+      // The bridge acks right after its take. Proving its source again runs an
+      // all-fleet inventory that waits out an unreachable machine (~10s), which
+      // turned prompt head acks into late ones past the 2s window (VUH-2196).
+      // A taken in-flight event was already matched to that poll's binding.
+      if (outbox.acknowledgeTaken(eventId)) return true;
       const source = await operatorNativeSource(binding.conversationId);
       shutdown.signal.throwIfAborted();
-      return seatOutbox(binding.conversationId).acknowledge(eventId, inboundBinding(source));
+      return outbox.acknowledge(eventId, inboundBinding(source));
     },
 
     async replySeatEvent(eventId, text, conversationId) {
