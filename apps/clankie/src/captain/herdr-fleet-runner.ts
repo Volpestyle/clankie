@@ -218,6 +218,11 @@ export function routeHerdrFleets(
       if (runner.paneProcesses === undefined) throw new Error("Herdr process info is unavailable");
       return runner.paneProcesses(id);
     },
+    paneShell: async (paneId) => {
+      const { runner, id } = await route(paneId);
+      if (runner.paneShell === undefined) throw new Error("Herdr process info is unavailable");
+      return runner.paneShell(id);
+    },
     // A pid is only meaningful on the machine that reported it; the local
     // runner answers for local panes; remote codex seats use their own app-server.
     ...(local.openFiles === undefined ? {} : { openFiles: local.openFiles }),

@@ -812,6 +812,22 @@ recovery instruction: a project-only claim cannot assert an unknown native launc
 See [the refusal and recovery evidence](testing/2026-10-07-project-hire-refusal/README.md)
 for the local VUH-1702 and PC Ada/Pell recovery commands.
 
+A local hire has no host reservation window, so `not-launched` refuses it.
+`clankie hire-receipt settle ORIGINAL_NATIVE_HIRE_UUID abandoned` settles an
+uncertain local hire from this machine's complete Herdr inventory instead
+(VUH-2243). It requires no live occupant in the original pane: the pane is
+absent, or holds no reported harness or session and its own shell is its only
+foreground process. With no recorded pane, no pane of that harness may run in
+the directory. A harness, session or other foreground process refuses; adopt or
+retire that worker instead. Two censuses must agree. The evidence records the
+original key, brief fingerprint, pane observation (shell PID when present) and
+inventory digest. It claims neither launch nor delivery. The original moves to
+`local-settled:ORIGINAL_UUID` in the receipt journal, so a new hire into that
+directory starts normally. Nothing is sent, replayed or closed, and repeating
+the command reads the retained disposition. A local project allocation whose
+original pane never held an observed occupant and now holds only its shell can
+then be released with `release-allocation`.
+
 `clankie hire-receipt settle seat-ORIGINAL_UUID delivered` records historical
 native insertion through the same authenticated host census. The service resolves
 that exact event in its canonical mailbox journal and uniquely links its fingerprint

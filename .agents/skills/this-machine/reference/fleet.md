@@ -185,6 +185,13 @@ Retain handoff evidence and explicitly retire a present worker before releasing.
 The command preserves launch history, records a release disposition and starts
 nothing. Never rewrite project-hire state files to bypass these checks.
 
+An uncertain local hire (receipt key fleet `local`) settles with
+`clankie hire-receipt settle ORIGINAL_UUID abandoned` when this machine's
+complete Herdr inventory shows no occupant in its original pane: absent, or only
+its own shell in the foreground with no reported harness. The evidence claims
+neither launch nor delivery; the original is archived and a new hire into that
+directory starts normally. A live harness in the pane refuses: adopt or retire it.
+
 After authenticated settlement, separately authorized new remote work can use
 `hire_agent` with `freshIntent: {id, afterReceiptId}` or
 `clankie hire-receipt fresh --json-stdin` with the public `spawn_seat` body.

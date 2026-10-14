@@ -89,7 +89,47 @@ export const HireRecoveryEvidenceSchema = HireNoLaunchEvidenceSchema.omit({ wind
       ctx.addIssue({ code: "custom", message: "Unknown abandonment observation interval is invalid" });
   });
 export type HireRecoveryEvidence = z.infer<typeof HireRecoveryEvidenceSchema>;
-export const RetainedHireEvidenceSchema = z.union([HireNoLaunchEvidenceSchema, HireRecoveryEvidenceSchema]);
+/**
+ * A local hire settled from this machine's own complete Herdr inventory (VUH-2243).
+ * Abandonment proves only that no harness occupies the original pane now; it
+ * never claims the hire launched, never launched, or received its brief.
+ */
+export const LocalHireSettlementEvidenceSchema = z
+  .object({
+    receiptId: z.string().uuid(),
+    receiptKey: z.string().min(1).max(8192),
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+    disposition: z.literal("abandoned"),
+    journal: z.literal("local-host-inventory"),
+    census: z
+      .object({
+        observedAt: z.number().int().nonnegative(),
+        panes: z.number().int().nonnegative(),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+      })
+      .strict(),
+    /** The original pane, absent or holding only its own shell. Missing when no pane was recorded. */
+    pane: z
+      .union([
+        z.object({ paneId: z.string().min(1), present: z.literal(false) }).strict(),
+        z
+          .object({
+            paneId: z.string().min(1),
+            present: z.literal(true),
+            terminalId: z.string().min(1),
+            shellPid: z.number().int().positive(),
+          })
+          .strict(),
+      ])
+      .optional(),
+  })
+  .strict();
+export type LocalHireSettlementEvidence = z.infer<typeof LocalHireSettlementEvidenceSchema>;
+export const RetainedHireEvidenceSchema = z.union([
+  HireNoLaunchEvidenceSchema,
+  HireRecoveryEvidenceSchema,
+  LocalHireSettlementEvidenceSchema,
+]);
 export type RetainedHireEvidence = z.infer<typeof RetainedHireEvidenceSchema>;
 export const HireReceiptSettlementSchema = z.discriminatedUnion("state", [
   z
@@ -119,7 +159,7 @@ export const HireReceiptSettlementSchema = z.discriminatedUnion("state", [
     .object({
       state: z.literal("abandoned"),
       receiptId: HireReceiptIdSchema,
-      evidence: HireRecoveryEvidenceSchema,
+      evidence: z.union([HireRecoveryEvidenceSchema, LocalHireSettlementEvidenceSchema]),
     })
     .strict(),
   z.object({ state: z.literal("refused"), receiptId: HireReceiptIdSchema, detail: z.string() }).strict(),

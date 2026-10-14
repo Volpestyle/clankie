@@ -1,0 +1,103 @@
+[
+  {
+    "phase": "held-before-settlement",
+    "result": {
+      "outcome": "failed",
+      "reason": "delivery_unconfirmed",
+      "deliveryStage": "uncertain",
+      "detail": "The original hire remains uncertain in pane w1:p1; reconcile its exact session and brief before any retry. No new seat was started."
+    }
+  },
+  {
+    "phase": "foreground-process",
+    "shell": {
+      "shellPid": 25736,
+      "foreground": [
+        {
+          "pid": 25787,
+          "name": "sleep",
+          "argv0": "sleep",
+          "argv": [
+            "sleep",
+            "600"
+          ]
+        }
+      ]
+    },
+    "result": {
+      "state": "refused",
+      "receiptId": "1ad7ec41-feda-43be-8503-e88dc279a420",
+      "detail": "Local settlement refused: Pane w1:p1 runs a foreground process other than its shell (sleep); its hiring lead may adopt or retire it. Original retained; nothing sent, closed or relaunched."
+    }
+  },
+  {
+    "phase": "shell-only-settled",
+    "result": {
+      "state": "abandoned",
+      "receiptId": "1ad7ec41-feda-43be-8503-e88dc279a420",
+      "evidence": {
+        "receiptId": "1ad7ec41-feda-43be-8503-e88dc279a420",
+        "receiptKey": "[\"local\",\"claude\",\"/private/tmp/clankie-proof-vgJT9o/work\",\"new\"]",
+        "fingerprint": "f96b0a686e10e3e752ab13e5ca4cadfea2bbdd17285ccbb9daadb2cfcfe815eb",
+        "disposition": "abandoned",
+        "journal": "local-host-inventory",
+        "census": {
+          "observedAt": 1791962084538,
+          "panes": 2,
+          "sha256": "9e2e33fd13ff62860822195925ec8e1f69f0f452a1c8cc482ef09be22bdaaf0f"
+        },
+        "pane": {
+          "paneId": "w1:p1",
+          "present": true,
+          "terminalId": "term_65dc7af7db0841",
+          "shellPid": 25736
+        }
+      }
+    }
+  },
+  {
+    "phase": "reported-harness",
+    "result": {
+      "state": "refused",
+      "receiptId": "13e9bc3f-51a4-40c0-9538-02e697f69f51",
+      "detail": "Local settlement refused: Pane w1:p2 reports a herdr:claude session occupant; its hiring lead may adopt or retire it. Original retained; nothing sent, closed or relaunched."
+    }
+  },
+  {
+    "phase": "absent-pane-settled",
+    "result": {
+      "state": "abandoned",
+      "receiptId": "13e9bc3f-51a4-40c0-9538-02e697f69f51",
+      "evidence": {
+        "receiptId": "13e9bc3f-51a4-40c0-9538-02e697f69f51",
+        "receiptKey": "[\"local\",\"claude\",\"/private/tmp/clankie-proof-vgJT9o/other\",\"new\"]",
+        "fingerprint": "294ef1f48fda43f18e2ac145fb1bf4fe32308cf398e2d2b19fcdb374b9191c81",
+        "disposition": "abandoned",
+        "journal": "local-host-inventory",
+        "census": {
+          "observedAt": 1791962084605,
+          "panes": 1,
+          "sha256": "d97b3ac2e16b19a3fdc4e988c8289dd2153bf8c08c2bb5def2bc196963ad59cd"
+        },
+        "pane": {
+          "paneId": "w1:p2",
+          "present": false
+        }
+      }
+    }
+  },
+  {
+    "phase": "new-hire-after-settlement",
+    "result": {
+      "outcome": "failed",
+      "reason": "harness_unavailable",
+      "detail": "No structured harness adapter is available (adapter_unavailable); no seat was started and no terminal input was sent.",
+      "control": {
+        "mode": "unavailable",
+        "reason": "adapter_unavailable",
+        "detail": "No structured harness adapter is available (adapter_unavailable); no seat was started and no terminal input was sent."
+      },
+      "deliveryStage": "unavailable"
+    }
+  }
+]

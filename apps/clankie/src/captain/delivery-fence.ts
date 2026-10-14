@@ -7,10 +7,12 @@ import {
   DeliveryStageSchema,
   HireNoLaunchEvidenceSchema,
   HireRecoveryEvidenceSchema,
+  LocalHireSettlementEvidenceSchema,
   RetainedHireEvidenceSchema,
   SeatDeliveryAbandonmentSchema,
   SpawnOperatorSeatSchema,
   type HireRecoveryEvidence,
+  type LocalHireSettlementEvidence,
   type RetainedHireEvidence,
   type HireNoLaunchEvidence,
 } from "@clankie/protocol";
@@ -167,7 +169,9 @@ export class DeliveryFence {
         `Another original hire at this location is unresolved; expected ${expected?.messageId}; no fresh dispatch may begin`,
       );
     const original = originals[0];
-    const target = original?.[1].settlement?.target ?? original?.[1].remoteAdmission?.target;
+    const settled = original?.[1].settlement;
+    const target =
+      (settled && "target" in settled ? settled.target : undefined) ?? original?.[1].remoteAdmission?.target;
     if (
       originals.length !== 1 ||
       !original ||
@@ -425,6 +429,43 @@ export class DeliveryFence {
     try {
       this.save();
     } catch (error) {
+      this.records.set(key, previous);
+      throw error;
+    }
+  }
+
+  /**
+   * Settle a local hire from host inventory and free its location in one durable
+   * write (VUH-2243). The original keeps its identity, brief fingerprint and
+   * evidence under an archive key; nothing here claims launch or delivery.
+   */
+  public settleLocal(key: string, messageId: string, evidence: LocalHireSettlementEvidence): void {
+    const previous = this.records.get(key);
+    const proof = LocalHireSettlementEvidenceSchema.parse(evidence);
+    const archive = `local-settled:${messageId}`;
+    if (
+      this.unreadable ||
+      previous?.messageId !== messageId ||
+      JSON.parse(key)[0] !== "local" ||
+      previous.freshHire ||
+      previous.remoteAdmission ||
+      previous.recoveryRequested ||
+      previous.completed ||
+      previous.settlement ||
+      previous.abandoned ||
+      proof.receiptId !== messageId ||
+      proof.receiptKey !== key ||
+      proof.fingerprint !== previous.fingerprint ||
+      proof.pane?.paneId !== previous.paneId ||
+      this.records.has(archive)
+    )
+      throw new Error("Local settlement does not match the retained original receipt");
+    this.records.set(archive, { ...previous, hireBaseKey: key, settlement: proof });
+    this.records.delete(key);
+    try {
+      this.save();
+    } catch (error) {
+      this.records.delete(archive);
       this.records.set(key, previous);
       throw error;
     }

@@ -54,7 +54,7 @@ import {
   type CodexAccount,
 } from "@clankie/settings";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -230,6 +230,10 @@ export interface HerdrWatchRunner {
   readPane?(target: string, source: "visible" | "recent-unwrapped", format: "text" | "ansi"): Promise<string>;
   /** `herdr pane process-info --pane` → `foreground_processes`. */
   paneProcesses?(paneId: string): Promise<readonly HerdrForegroundProcess[]>;
+  /** `herdr pane process-info --pane` → the pane's own shell and its foreground processes. */
+  paneShell?(
+    paneId: string,
+  ): Promise<{ readonly shellPid?: number; readonly foreground: readonly HerdrForegroundProcess[] }>;
   /** `lsof -p <pid> -Fn` via execFile (no shell). */
   openFiles?(pid: number): Promise<string>;
   /**
@@ -649,6 +653,17 @@ export function createHerdrWatchRunner(
       runHerdr(["pane", "read", target, "--source", source, "--format", format]),
     paneProcesses: async (paneId) =>
       parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
+    paneShell: async (paneId) => {
+      const stdout = await runHerdr(["pane", "process-info", "--pane", paneId]);
+      const info = (
+        JSON.parse(stdout) as { result?: { process_info?: { pane_id?: unknown; shell_pid?: unknown } } }
+      ).result?.process_info;
+      if (info?.pane_id !== paneId) throw new Error("Herdr process info did not identify the pane");
+      return {
+        ...(typeof info.shell_pid === "number" ? { shellPid: info.shell_pid } : {}),
+        foreground: parseHerdrForegroundProcesses(stdout),
+      };
+    },
     openFiles: async (pid) => {
       const result = await runExecFile("lsof", ["-p", String(pid), "-Fn"]);
       if (result.status !== 0) {
@@ -2931,19 +2946,33 @@ export class HerdrWatchStore implements HerdrWatchPort {
           return refused(
             "Settle the original native hire receipt before releasing this allocation; no receipt was replayed.",
           );
-        const inventory = await this.runner.list(candidate.request.fleet);
+        const census = async () => {
+          const inventory = await this.runner.list!(candidate.request.fleet);
+          const present = inventory.filter(
+            (agent) =>
+              (originalPane !== undefined && originalPane === projectHirePane(fleet, agent.paneId)) ||
+              agent.workingDirectory === candidate.request.workingDirectory,
+          );
+          // A local original pane that never held an observed occupant and now
+          // holds only its own shell launched nothing to retire (VUH-2243).
+          const shell =
+            candidate.request.fleet === undefined &&
+            candidate.occupantId === undefined &&
+            present.length === 1 &&
+            present[0]!.paneId === originalPane
+              ? await this.shellOnlyPane(present[0]!)
+              : undefined;
+          const shellOnly = typeof shell === "number" ? shell : undefined;
+          return { inventory, held: shellOnly === undefined && present.length > 0, shellOnly };
+        };
+        const before = await census();
         await guard();
+        const { inventory, held, shellOnly } = await census();
         if (this.closed || this.activeProjectHires.has(receiptId) || unresolved())
           return refused(
             "Original allocation became active or acquired an unresolved native receipt; nothing released.",
           );
-        if (
-          inventory.some(
-            (agent) =>
-              (originalPane !== undefined && originalPane === projectHirePane(fleet, agent.paneId)) ||
-              agent.workingDirectory === candidate.request.workingDirectory,
-          )
-        )
+        if (held || before.held || before.shellOnly !== shellOnly)
           return refused(
             "The original pane or a worker in its directory is still present. Retain its handoff and retire it explicitly before releasing the allocation.",
           );
@@ -2953,6 +2982,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return refused(`Allocation recovery unavailable: ${reasonDetail(error)}. Nothing released.`);
       }
     }
+    const local = this.localHireReceipt(receiptId);
+    if (local && disposition === "abandoned") return this.abandonLocalHireReceipt(receiptId, guard);
+    if (local && disposition === "not-launched")
+      return refused(
+        "A local hire has no host reservation window, so it cannot prove it never launched. Settle it as abandoned from complete local inventory; nothing settled.",
+      );
     if (disposition !== "not-launched") return this.recoverHireReceipt(receiptId, guard, disposition);
     const settled = this.hireReceipts.settlement(receiptId);
     if (settled)
@@ -2987,6 +3022,123 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return refused(
         `Authenticated host settlement unavailable: ${reasonDetail(error)}. Original receipt retained.`,
       );
+    }
+  }
+
+  /** An unresolved or locally settled original with no remote host admission. */
+  private localHireReceipt(receiptId: string): boolean {
+    const settled = this.hireReceipts.settlement(receiptId);
+    if (settled) return settled.journal === "local-host-inventory";
+    const original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === receiptId);
+    return (
+      original !== undefined &&
+      JSON.parse(original[0])[0] === "local" &&
+      !original[1].remoteAdmission &&
+      !original[1].freshHire
+    );
+  }
+
+  /**
+   * Whether a present pane holds only its own shell: no harness or session
+   * reported, and its shell is the only foreground process (VUH-2243).
+   */
+  private async shellOnlyPane(pane: HerdrAgentSnapshot): Promise<number | string> {
+    if (pane.agent !== "unknown" || pane.session !== undefined)
+      return `Pane ${pane.paneId} reports a ${pane.agent === "unknown" ? `${pane.session!.source} session` : pane.agent} occupant`;
+    if (!this.runner.paneShell) return "Pane process info is unavailable";
+    const shell = await this.runner.paneShell(pane.paneId);
+    return shell.shellPid !== undefined &&
+      shell.foreground.length > 0 &&
+      shell.foreground.every((process) => process.pid === shell.shellPid)
+      ? shell.shellPid
+      : `Pane ${pane.paneId} runs a foreground process other than its shell (${shell.foreground.map((process) => process.name).join(", ") || "none observed"})`;
+  }
+
+  /**
+   * Operator settlement of a local hire from this machine's complete Herdr
+   * inventory (VUH-2243). Settles only while no harness occupies the original
+   * pane (absent, or holding nothing but its shell), then frees the location for
+   * a new hire. Never closes a pane, claims launch or delivery, or replays the brief.
+   */
+  private async abandonLocalHireReceipt(
+    receiptId: string,
+    guard: () => Promise<void>,
+  ): Promise<HireReceiptSettlement> {
+    const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId, detail });
+    const settled = this.hireReceipts.settlement(receiptId);
+    if (settled)
+      return settled.journal === "local-host-inventory" && settled.disposition === "abandoned"
+        ? { state: "abandoned", receiptId, evidence: settled }
+        : refused("Original receipt already has a different retained disposition.");
+    const original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === receiptId);
+    if (!original) return refused("No unresolved original local hire receipt; nothing settled.");
+    const [key, receipt] = original;
+    const [fleet, harness, cwd] = JSON.parse(key) as string[];
+    if (fleet !== "local" || !harness || !cwd || receipt.remoteAdmission || receipt.recoveryRequested)
+      return refused("Original is not a local hire receipt; nothing settled.");
+    if (this.closed || this.activeHires.has(key))
+      return refused("Original hire is still active; nothing settled.");
+    if (!this.runner.list || !this.runner.paneShell)
+      return refused(
+        "Complete local Herdr inventory and pane process info are unavailable; nothing settled.",
+      );
+    this.activeHires.add(key);
+    try {
+      const observe = async () => {
+        const inventory = await this.runner.list!();
+        if (receipt.paneId === undefined) {
+          // No pane was recorded: an unrecorded launch would be a harness in this directory.
+          const occupied = inventory.find(
+            (pane) =>
+              pane.agent === harness &&
+              (pane.workingDirectory === cwd || pane.foregroundWorkingDirectory === cwd),
+          );
+          if (occupied)
+            throw new Error(
+              `${harness} pane ${occupied.paneId} runs in ${cwd} and may be this unrecorded launch`,
+            );
+          return { inventory, pane: undefined };
+        }
+        const pane = inventory.find((entry) => entry.paneId === receipt.paneId);
+        if (!pane) return { inventory, pane: { paneId: receipt.paneId, present: false as const } };
+        const shellPid = await this.shellOnlyPane(pane);
+        if (typeof shellPid === "string")
+          throw new Error(`${shellPid}; its hiring lead may adopt or retire it`);
+        return {
+          inventory,
+          pane: { paneId: pane.paneId, present: true as const, terminalId: pane.terminalId, shellPid },
+        };
+      };
+      const first = await observe();
+      await guard();
+      const final = await observe();
+      if (!isDeepStrictEqual(first.pane, final.pane))
+        throw new Error("The original pane changed during census");
+      // No await follows the final observation before the durable settlement.
+      if (this.closed) throw new Error("Native hire service is closed");
+      const evidence = {
+        receiptId,
+        receiptKey: key,
+        fingerprint: receipt.fingerprint,
+        disposition: "abandoned" as const,
+        journal: "local-host-inventory" as const,
+        census: {
+          observedAt: Date.now(),
+          panes: final.inventory.length,
+          sha256: createHash("sha256")
+            .update(JSON.stringify(final.inventory.map((pane) => [pane.paneId, pane.terminalId]).sort()))
+            .digest("hex"),
+        },
+        ...(final.pane === undefined ? {} : { pane: final.pane }),
+      };
+      this.hireReceipts.settleLocal(key, receiptId, evidence);
+      return { state: "abandoned", receiptId, evidence };
+    } catch (error) {
+      return refused(
+        `Local settlement refused: ${reasonDetail(error)}. Original retained; nothing sent, closed or relaunched.`,
+      );
+    } finally {
+      this.activeHires.delete(key);
     }
   }
 

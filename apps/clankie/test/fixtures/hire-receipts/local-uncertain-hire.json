@@ -1,0 +1,10 @@
+{
+  "key": ["local", "claude", "/Users/james/dev/pet3d-spike", "new"],
+  "receipt": {
+    "messageId": "1ad7ec41-feda-43be-8503-e88dc279a420",
+    "fingerprint": "f96b0a686e10e3e752ab13e5ca4cadfea2bbdd17285ccbb9daadb2cfcfe815eb",
+    "paneId": "w40:p1",
+    "agentName": "ottie-247d",
+    "beforeIds": []
+  }
+}
