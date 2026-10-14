@@ -263,6 +263,7 @@ it("gives a paired device a complete thumbnail of a large recorded PNG, cached b
   // The real local store, with blob opens counted to show where large previews read bytes.
   const local = EvidenceStore.local(join(root, "evidence"));
   const opened: string[] = [];
+  const openSignals: (AbortSignal | undefined)[] = [];
   const store = new EvidenceStore(
     {
       backend: local.blobs.backend,
@@ -270,9 +271,10 @@ it("gives a paired device a complete thumbnail of a large recorded PNG, cached b
       has: (sha256) => local.blobs.has(sha256),
       write: (sha256, size, body) => local.blobs.write(sha256, size, body),
       readRange: (sha256, offset, length) => local.blobs.readRange!(sha256, offset, length),
-      open: (sha256) => {
+      open: (sha256, abortSignal) => {
         opened.push(sha256);
-        return local.blobs.open(sha256);
+        openSignals.push(abortSignal);
+        return local.blobs.open(sha256, abortSignal);
       },
     },
     local.metadata,
@@ -348,8 +350,11 @@ it("gives a paired device a complete thumbnail of a large recorded PNG, cached b
     const rendersBefore = evidenceThumbnails.renders;
     opened.length = 0;
     const thumbnail = await preview(sha.opaque);
-    // The large blob is opened once, by the thumbnail render after the record and cache checks.
+    // The large blob is opened once, by the thumbnail render after the record and cache checks,
+    // with that render's deadline signal (still live: the render finished in time).
     expect(opened).toEqual([sha.opaque]);
+    expect(openSignals.at(-1)).toBeInstanceOf(AbortSignal);
+    expect(openSignals.at(-1)!.aborted).toBe(false);
     expect(thumbnail).toMatchObject({
       outcome: "ready",
       sha256: sha.opaque,
@@ -441,9 +446,16 @@ it("bounds thumbnail time, concurrency and output without caching transient refu
 
   // A stalled storage read is cut off by the deadline, frees its slot, and isn't retried at once.
   const stalled = new EvidenceThumbnails({ ...EVIDENCE_THUMBNAIL_LIMITS, concurrency: 1, deadlineMs: 50 });
-  await expect(stalled.preview(sha256, source.length, () => new Promise(() => {}))).rejects.toEqual(
-    new EvidenceThumbnailUnavailable("timeout"),
-  );
+  let stalledSignal: AbortSignal | undefined;
+  await expect(
+    stalled.preview(sha256, source.length, (abortSignal) => {
+      stalledSignal = abortSignal;
+      return new Promise(() => {});
+    }),
+  ).rejects.toEqual(new EvidenceThumbnailUnavailable("timeout"));
+  // The storage read was handed the deadline signal, now aborted with the timeout.
+  expect(stalledSignal?.aborted).toBe(true);
+  expect(stalledSignal?.reason).toEqual(new EvidenceThumbnailUnavailable("timeout"));
   await expect(stalled.preview(sha256, source.length, open)).rejects.toEqual(
     new EvidenceThumbnailUnavailable("timeout"),
   );

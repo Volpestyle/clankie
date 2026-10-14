@@ -545,12 +545,15 @@ export class EvidenceThumbnails {
 
   /**
    * The preview for a recorded blob over the device cap. `open` is called only
-   * on a cache miss, after a render slot is admitted.
+   * on a cache miss, after a render slot is admitted, with the render's
+   * deadline signal so storage that honours it stops when the deadline passes.
    */
   async preview(
     sha256: string,
     size: number,
-    open: () => Promise<{ size: number; body: ReadableStream<Uint8Array> } | undefined>,
+    open: (
+      abortSignal: AbortSignal,
+    ) => Promise<{ size: number; body: ReadableStream<Uint8Array> } | undefined>,
   ): Promise<EvidenceDevicePreview> {
     const cached = this.cache.get(sha256);
     if (cached !== undefined) {
@@ -604,7 +607,9 @@ export class EvidenceThumbnails {
   private async render(
     sha256: string,
     size: number,
-    open: () => Promise<{ size: number; body: ReadableStream<Uint8Array> } | undefined>,
+    open: (
+      abortSignal: AbortSignal,
+    ) => Promise<{ size: number; body: ReadableStream<Uint8Array> } | undefined>,
   ): Promise<EvidenceDevicePreview> {
     const controller = new AbortController();
     const timer = setTimeout(
@@ -624,7 +629,7 @@ export class EvidenceThumbnails {
     try {
       this.renders++;
       // Storage can stall; the deadline frees this slot even if the read never answers.
-      const opening = open();
+      const opening = open(signal);
       let onAbort = () => {};
       const aborted = new Promise<never>((_, reject) => {
         onAbort = () => reject(signal.reason);

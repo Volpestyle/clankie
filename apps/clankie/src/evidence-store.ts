@@ -703,7 +703,9 @@ export class EvidenceStore {
     if (record.size > EVIDENCE_PREVIEW_MAX_BYTES) {
       // Large blobs are opened only inside the thumbnail's deadline and render slots.
       const { evidenceThumbnails } = await import("./evidence-thumbnail.ts");
-      return evidenceThumbnails.preview(sha256, record.size, () => this.blobs.open(sha256));
+      return evidenceThumbnails.preview(sha256, record.size, (abortSignal) =>
+        this.blobs.open(sha256, abortSignal),
+      );
     }
     const blob = await this.blobs.open(sha256);
     if (!blob || blob.size !== record.size) {
