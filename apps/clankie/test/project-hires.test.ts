@@ -720,6 +720,28 @@ describe("project hiring", () => {
     expect(second.reserve(f.projectSettings, "game", request(tmpdir())).id).not.toBe(held.id);
     f.store.close();
   });
+  it("parses one ledger version once, sees another instance's write, and still refuses invalid bytes", async () => {
+    const f = await fixture();
+    const path = join(f.root, "ledger.json");
+    const reader = new ProjectHires(path);
+    const writer = new ProjectHires(path);
+    const held = writer.reserve(f.projectSettings, "game", request(f.root));
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      // A roster projection asks once per seat; one file version is parsed once.
+      for (let read = 0; read < 10; read++)
+        expect(reader.recoveryCandidate(held.id)).toMatchObject({ id: held.id });
+      expect(parse).toHaveBeenCalledOnce();
+      expect(Object.isFrozen(reader.recoveryCandidate(held.id))).toBe(true);
+    } finally {
+      parse.mockRestore();
+    }
+    writer.failed(held.id);
+    expect(reader.recoveryCandidate(held.id)).toBeUndefined();
+    await writeFile(path, "{");
+    expect(() => reader.recoveryCandidate(held.id)).toThrow();
+    f.store.close();
+  });
   it("reuses an exact running hire at capacity but never replaces it when it vanishes during resume", async () => {
     const f = await fixture();
     await f.store.spawnSeat(request(f.root));

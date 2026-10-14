@@ -8,6 +8,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -97,7 +98,29 @@ export class ProjectHires {
       (entry) => entry.started && entry.confirmed && entry.occupantId === occupantId,
     );
   }
+  /**
+   * Every roster projection reads this ledger once per seat. Parse a given
+   * file version once: writes replace the file by rename, so its identity,
+   * size and timestamps change with every committed state. The cached state
+   * is frozen; mutations go through `change`, which parses afresh under its lock.
+   */
+  private cached: { version: string; state: z.infer<typeof StateSchema> } | undefined;
   private read(): z.infer<typeof StateSchema> {
+    let stat;
+    try {
+      stat = statSync(this.path, { bigint: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      this.cached = undefined;
+      return { version: 1, allocations: [] };
+    }
+    const version = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    if (this.cached?.version === version) return this.cached.state;
+    const state = deepFreeze(this.parse());
+    this.cached = { version, state };
+    return state;
+  }
+  private parse(): z.infer<typeof StateSchema> {
     return existsSync(this.path)
       ? StateSchema.parse(JSON.parse(readFileSync(this.path, "utf8")))
       : { version: 1, allocations: [] };
@@ -112,7 +135,7 @@ export class ProjectHires {
       throw new Error("Project hiring is busy or needs recovery. No new agent was started.");
     }
     try {
-      const state = this.read();
+      const state = this.parse();
       const result = update(state);
       const temporary = `${this.path}.${randomUUID()}.tmp`;
       const file = openSync(temporary, "wx", 0o600);
@@ -557,4 +580,12 @@ function launchPolicy(settings: ProjectsSettings, projectId: string, role?: stri
   const extra = [selected?.subagents, selected?.delegation, selected?.account, selected?.placement];
   // Preserve legacy journals when no new role fields are configured.
   return JSON.stringify(extra.some((value) => value !== undefined) ? [...base, ...extra] : base);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
 }
