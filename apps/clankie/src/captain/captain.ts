@@ -6316,9 +6316,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             binding.conversationId,
             () => {
               // The bridge gives up a fixed slack past its wait, so the proof
-              // spends the wait rather than extending it past that deadline.
+              // spends the wait rather than extending it past that deadline. A
+              // spent poll still parks briefly, so turns its own binding admits
+              // reach it instead of an empty page.
               const pending = outbox.poll(
-                Math.max(0, waitMs - (Date.now() - askedAt)),
+                Math.max(Math.min(waitMs, 1_000), waitMs - (Date.now() - askedAt)),
                 pollSignal,
                 recipientBinding,
                 capabilities,
