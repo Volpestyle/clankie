@@ -4,6 +4,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   OperatorSeatEfficiencySchema,
   SeatEfficiencyIssueKeyPattern,
+  type OperatorFleetReadWarnings,
   type OperatorFleetSeat,
 } from "@clankie/protocol";
 import {
@@ -31,10 +32,15 @@ export const FleetEfficiencyRequestSchema = z.discriminatedUnion("action", [
   }),
 ]);
 export interface FleetEfficiencyActions {
-  run(
-    authority: ConversationAuthority,
-    review?: FleetEfficiencyReview,
-  ): Promise<{ conversationId: string; seats: readonly OperatorFleetSeat[] }>;
+  run(authority: ConversationAuthority, review?: FleetEfficiencyReview): Promise<FleetEfficiencyResult>;
+}
+export interface FleetEfficiencyResult {
+  conversationId: string;
+  seats: readonly OperatorFleetSeat[];
+  /** Fleets that missed the deadline or failed their census; never omitted silently. */
+  readWarnings?: OperatorFleetReadWarnings;
+  /** The recorded review; `efficiency show` reports the same `reviewedAt` after an aborted call. */
+  review?: { seatId: string; occupantId: string; reviewedAt: string };
 }
 
 export function fleetEfficiencyTools(actions: FleetEfficiencyActions, turn: TurnContext): ToolDefinition[] {

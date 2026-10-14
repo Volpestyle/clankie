@@ -3486,8 +3486,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const FLEET_READ_TIMEOUT_MS = 5_000;
   // Under the five-second client deadline of `clankie herdr agent list` and doctor.
   const ROSTER_READ_TIMEOUT_MS = 3_000;
+  // Under the 30-second abort of `clankie agents efficiency`, with room for the
+  // response; a remote fleet's own transport deadline can exceed it (LOCAL-VUH-19).
+  const FLEET_EFFICIENCY_DEADLINE_MS = 25_000;
   let lastProjectedSeats: readonly OperatorFleetSeat[] = [];
   const pendingFleetSources = new Set<string>();
+  // Sources whose latest census failed; their seats are unknown, not absent.
+  const unansweredFleetSources = new Set<string>();
   let fleetRefresh: Promise<readonly OperatorFleetSeat[]> | undefined;
   let refreshedFleet:
     | { seats: readonly OperatorFleetSeat[]; cursor: string; completedAt: number }
@@ -3565,6 +3570,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         diagnostics.census(source, pending, outcome);
         if (pending) pendingFleetSources.add(source);
         else pendingFleetSources.delete(source);
+        if (outcome === "error") unansweredFleetSources.add(source);
+        else if (outcome === "ok") unansweredFleetSources.delete(source);
       },
       diagnostics,
     );
@@ -4400,32 +4407,63 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
   const efficiencyActions = {
     async run(authority: ConversationAuthority, input?: FleetEfficiencyReview) {
+      // One deadline for the whole call, so the CLI hears an answer before its
+      // own abort. Explicit inspection never reuses a completed projection
+      // (Git and native files change without a fleet event): a census still
+      // running answers when no fleet change landed during it, otherwise one
+      // starts after this request. Waiting out a running census and then a
+      // forced one could not fit the deadline while a linked fleet stays
+      // silent (LOCAL-VUH-19).
+      const { readWarnings, bounded } = boundedFleetRead(
+        options.fleetEfficiencyDeadlineMs ?? FLEET_EFFICIENCY_DEADLINE_MS,
+      );
+      const review = input === undefined ? undefined : FleetEfficiencyReviewSchema.parse(input);
+      // Renew admission before the native census that proves ownership.
       await assertConversationAuthority(authority);
-      // Explicit inspection/review asks for current evidence (Git and native
-      // files can change without a fleet event). Background rounds and roster
-      // polls still share the short-lived read projection.
-      const seats = await ledSeats(authority.owner, true);
-      if (input) {
-        const review = FleetEfficiencyReviewSchema.parse(input);
-        const seat = seats.find((candidate) => candidate.seatId === review.seatId);
-        if (!seat) throw new Error("This conversation does not lead that native seat");
-        if (!seatLeadOwners.get(seat)?.admitted)
-          throw new Error("The native occupant must be re-adopted before recording a review");
-        // Renew admission before the final native census. No await separates
-        // its ownership check from writing this display-only review.
-        await assertConversationAuthority(authority);
-        const current = (await ledSeats(authority.owner, true)).find(
-          (candidate) => candidate.seatId === seat.seatId && candidate.occupantId === seat.occupantId,
+      const cursor = fleetChanges.current();
+      let observed = await bounded("native_fleet_projection", fleetRefresh ?? refreshFleet({ force: true }));
+      if (observed !== undefined && cursor !== fleetChanges.current())
+        observed = await bounded("native_fleet_projection", refreshFleet({ force: true }));
+      // A late census never records this review; the caller hears that nothing was written.
+      if (observed === undefined && review)
+        throw new Error(
+          `Review not recorded; nothing was written. ${readWarnings.map((warning) => warning.message).join(" ")}`,
         );
-        if (!current || !seatLeadOwners.get(current)?.admitted || !authority.current())
-          throw new Error("Native seat ownership changed during review");
-        const { seatId: _seat, ...finding } = review;
-        seatEfficiency.review({ occupantId: seat.occupantId, owner: authority.owner, ...finding });
-        fleetChanges.touch();
+      for (const source of [...unansweredFleetSources].slice(0, 16 - readWarnings.length))
+        readWarnings.push({
+          source,
+          reason: "unavailable",
+          message: `${source} did not answer the latest census; its seats are unknown, not absent.`,
+        });
+      const owned = (observed?.value ?? lastProjectedSeats).filter(
+        (seat) => JSON.stringify(seatLeadOwners.get(seat)?.owner) === JSON.stringify(authority.owner),
+      );
+      const answer = (seats: readonly OperatorFleetSeat[]) => ({
+        conversationId: authority.owner.conversationId,
+        seats,
+        ...(readWarnings.length === 0 ? {} : { readWarnings }),
+      });
+      if (!review) {
+        await assertConversationAuthority(authority);
+        return answer(owned);
       }
-      const current = await ledSeats(authority.owner, input !== undefined);
-      await assertConversationAuthority(authority);
-      return { conversationId: authority.owner.conversationId, seats: current };
+      const seat = owned.find((candidate) => candidate.seatId === review.seatId);
+      if (!seat) throw new Error("This conversation does not lead that native seat");
+      if (!seatLeadOwners.get(seat)?.admitted)
+        throw new Error("The native occupant must be re-adopted before recording a review");
+      // No await separates this census's ownership proof from writing the display-only review.
+      if (!authority.current()) throw new Error("Native seat ownership changed during review");
+      const { seatId: _seat, ...finding } = review;
+      const efficiency = seatEfficiency.review({
+        occupantId: seat.occupantId,
+        owner: authority.owner,
+        ...finding,
+      });
+      fleetChanges.touch();
+      return {
+        ...answer(owned.map((candidate) => (candidate === seat ? { ...seat, efficiency } : candidate))),
+        review: { seatId: seat.seatId, occupantId: seat.occupantId, reviewedAt: efficiency.reviewedAt! },
+      };
     },
   };
   herdrWatches.efficiency = efficiencyActions;

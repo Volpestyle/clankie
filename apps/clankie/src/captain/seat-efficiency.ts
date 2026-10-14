@@ -38,6 +38,7 @@ const RecordSchema = z
     reportFailedAt: Timestamp.optional(),
     reportFailures: z.number().int().nonnegative().optional(),
     reportFailureIds: z.array(z.string().min(1).max(256)).max(2000).optional(),
+    reviewedAt: Timestamp.optional(),
     ownedIssues: OperatorSeatEfficiencySchema.shape.ownedIssues,
     observed: OperatorSeatEfficiencySchema.optional(),
   })
@@ -326,6 +327,7 @@ export class SeatEfficiencyStore {
       ...(record.lastProgressAt === undefined ? {} : { lastProgressAt: record.lastProgressAt }),
       ...(record.lastReportAt === undefined ? {} : { lastReportAt: record.lastReportAt }),
       ...(record.reportFailures === undefined ? {} : { reportFailures: record.reportFailures }),
+      ...(record.reviewedAt === undefined ? {} : { reviewedAt: record.reviewedAt }),
     });
     // Roster decoration (for example overlap) must not mutate durable evidence.
     record.observed = { ...result, flags: [...result.flags] };
@@ -347,6 +349,7 @@ export class SeatEfficiencyStore {
     const updated = RecordSchema.parse({
       ...record,
       evidence: input.evidence,
+      reviewedAt: this.timestamp(),
       ...(input.offScope === undefined ? {} : { offScope: input.offScope }),
       ...(input.assignmentStatus === undefined ? {} : { assignmentStatus: input.assignmentStatus }),
       ...(input.deliverable === undefined
@@ -389,6 +392,7 @@ export class SeatEfficiencyStore {
       ...(updated.ownedIssues === undefined ? {} : { ownedIssues: updated.ownedIssues }),
       ...(updated.lastProgressAt === undefined ? {} : { lastProgressAt: updated.lastProgressAt }),
       ...(updated.objective === undefined ? {} : { objective: updated.objective }),
+      reviewedAt: updated.reviewedAt,
     });
     updated.observed = { ...result, flags: [...result.flags] };
     this.save();

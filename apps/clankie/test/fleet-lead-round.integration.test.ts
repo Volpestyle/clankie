@@ -65,6 +65,7 @@ async function fixture(
   bind = true,
   deployHolds?: CaptainDeps["deployHolds"],
   resourceFixture?: (root: string) => Promise<FleetResourceRuntime>,
+  remote?: Pick<CaptainDeps, "fleets"> & { fleetEfficiencyDeadlineMs?: number },
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-lead-round-"));
   const conversations = new ConversationStore(join(root, "conversations"), async () => {});
@@ -189,6 +190,7 @@ async function fixture(
       browser: { catalog: async () => ({ available: false, tools: [] }) },
       mcp: { catalog: async () => [], call: async () => ({ outcome: "ok", content: "", isError: false }) },
       ...(deployHolds === undefined ? {} : { deployHolds }),
+      ...(remote?.fleets === undefined ? {} : { fleets: remote.fleets }),
     } as unknown as CaptainDeps,
     {
       repoRoot: root,
@@ -208,6 +210,9 @@ async function fixture(
       // the original 2s; the 30s head hold has its own coverage (VUH-2045).
       headBoundGraceMs: 2_000,
       workerReportBridgeStatus: (_fleet, pane) => reportHealth?.get(pane),
+      ...(remote?.fleetEfficiencyDeadlineMs === undefined
+        ? {}
+        : { fleetEfficiencyDeadlineMs: remote.fleetEfficiencyDeadlineMs }),
     },
   );
   fixtures.push({ root, captain });
@@ -963,6 +968,90 @@ it("an admitted lead can record a scope finding, and another lead cannot change 
   );
   expect(roster.snapshot.seats.find((seat) => seat.seatId === "term_4")?.efficiency).toBeUndefined();
 });
+
+// LOCAL-VUH-19: with the PC unreachable, every forced census waited out its
+// transport deadline, and a review ran three of them in series (each behind
+// any census already running), past the CLI's abort. The answer now comes from one census inside its deadline,
+// names the silent fleet, and a review that cannot prove ownership in time
+// is refused and never written later.
+it("answers efficiency reviews inside the deadline while a linked fleet stays silent", async () => {
+  let transportMs = 1_200;
+  const held = new Set<() => void>();
+  const f = await fixture(
+    undefined,
+    undefined,
+    false,
+    false,
+    undefined,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    {
+      fleetEfficiencyDeadlineMs: 3_500,
+      fleets: {
+        list: [{ id: "pc", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } }],
+        // ssh to a sleeping machine: no answer until the transport deadline.
+        run: () => () =>
+          new Promise<string>((_resolve, reject) => {
+            const fail = () => {
+              held.delete(fail);
+              reject(new Error("ssh: connect to host fixture.invalid port 22: Operation timed out"));
+            };
+            held.add(fail);
+            setTimeout(fail, transportMs);
+          }),
+        remoteWorkspace: async () => false,
+      },
+    },
+  );
+  resources.push(async () => {
+    for (const fail of held) fail();
+  });
+
+  const started = performance.now();
+  const recorded = await f.captain.fleetEfficiency!("global-default", {
+    seatId: "term_1",
+    assignmentStatus: "paused",
+    evidence: "Owner paused VUH-1662",
+  });
+  expect(performance.now() - started).toBeLessThan(3_500);
+  expect(recorded.review).toMatchObject({ seatId: "term_1", reviewedAt: expect.any(String) });
+  expect(recorded.readWarnings).toEqual([
+    expect.objectContaining({ source: "herdr:pc", reason: "unavailable" }),
+  ]);
+  const reviewedAt = recorded.review!.reviewedAt;
+  expect(recorded.seats.find((seat) => seat.seatId === "term_1")?.efficiency).toMatchObject({
+    flags: expect.arrayContaining(["idle"]),
+    reviewedAt,
+  });
+
+  // The PC now outlasts the whole deadline: show answers with what it last
+  // saw, and the review is refused rather than left to land after the caller gave up.
+  transportMs = 60_000;
+  const shown = await f.captain.fleetEfficiency!("global-default");
+  expect(shown.seats.map((seat) => seat.seatId)).toEqual(["term_1", "term_2"]);
+  expect(shown.readWarnings).toEqual(
+    expect.arrayContaining([expect.objectContaining({ source: "herdr:pc", reason: "timeout" })]),
+  );
+  await expect(
+    f.captain.fleetEfficiency!("global-default", {
+      seatId: "term_1",
+      assignmentStatus: "active",
+      evidence: "Resumed after owner approval",
+    }),
+  ).rejects.toThrow(/Review not recorded; nothing was written/u);
+  for (const fail of held) fail();
+  transportMs = 1;
+  // The late census completes; the refused review still never landed: the
+  // working seat is still paused (off-scope) under the first review's receipt.
+  const after = await f.captain.fleetEfficiency!("global-default");
+  expect(after.seats.find((seat) => seat.seatId === "term_1")?.efficiency).toMatchObject({
+    flags: expect.arrayContaining(["off-scope"]),
+    reviewedAt,
+  });
+}, 30_000);
 
 it("large native objectives stay available in the roster while the wake carries bounded untrusted summaries", async () => {
   const objective = "Long untrusted native context.\n".repeat(500);

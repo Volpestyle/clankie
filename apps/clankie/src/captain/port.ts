@@ -206,7 +206,7 @@ export interface CaptainPort {
   fleetEfficiency?(
     conversationId: string,
     review?: import("./fleet-efficiency-tools.ts").FleetEfficiencyReview,
-  ): Promise<{ conversationId: string; seats: readonly import("@clankie/protocol").OperatorFleetSeat[] }>;
+  ): Promise<import("./fleet-efficiency-tools.ts").FleetEfficiencyResult>;
   checkoutReport?(): Promise<import("@clankie/protocol").CheckoutReport>;
   syncCheckouts?(repository?: string): Promise<import("@clankie/settings").CheckoutSyncResult[]>;
   /** Record worth_landing or safe_to_drop for one linked worktree's unlanded work (VUH-1814). */

@@ -254,6 +254,10 @@ Only `seatId` and `evidence` are required; omit what you cannot establish.
 evidence on that native session: it changes no tracker state, receipt,
 ownership or harness setting. Never set fields to silence a flag. The CLI form
 is `clankie agents efficiency review SEAT --conversation ID --json-stdin`.
+Both answer within 25 seconds. `readWarnings` names fleets that missed the
+census (their seats are unknown, not absent). A review whose census missed the
+deadline is refused and never recorded; after a call ends without an answer,
+compare the seat's `efficiency.reviewedAt` from `show` with when you sent it.
 
 ## Closing panes and tidying worktrees
 

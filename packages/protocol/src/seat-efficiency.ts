@@ -24,6 +24,8 @@ export const OperatorSeatEfficiencySchema = z
     lastProgressAt: z.string().datetime().optional(),
     lastReportAt: z.string().datetime().optional(),
     reportFailures: z.number().int().nonnegative().optional(),
+    /** When the owning lead's latest review was recorded: the receipt an aborted review reconciles against. */
+    reviewedAt: z.string().datetime().optional(),
   })
   .strict();
 export type OperatorSeatEfficiency = z.infer<typeof OperatorSeatEfficiencySchema>;

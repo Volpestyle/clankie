@@ -4605,6 +4605,16 @@ action, seat ID and conversation; extra JSON keys are refused. A review applies
 to that exact owned native session and records inspected evidence. It does not
 change tracker state, harness settings, ownership or report receipts.
 
+Both forms answer within 25 seconds, under the CLI's 30-second abort, from one
+fresh census. A fleet that misses that deadline or fails its census is named in
+`readWarnings` (`timeout` or `unavailable`): its seats are unknown, not absent.
+When the census misses the deadline, `show` returns the last completed
+projection with that warning, and a review is refused with `Review not
+recorded; nothing was written` and never applied later. A recorded review
+returns `review: { seatId, occupantId, reviewedAt }`, and the seat's
+`efficiency.reviewedAt` carries the same time; after a call ends without a
+response, `show` tells whether it was recorded.
+
 The authenticated operator API is POST `/v1/fleet/efficiency` with
 `{ action: "show", conversationId }`, or the review fields plus
 `{ action: "review", conversationId, seatId }`. The model's `fleet_efficiency`

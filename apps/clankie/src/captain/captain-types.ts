@@ -84,6 +84,8 @@ export interface CaptainOptions {
   readonly autoIdleRewakeMs?: number;
   /** How long an operator head stays held after a completed poll; defaults to 30s (VUH-2045). */
   readonly headBoundGraceMs?: number;
+  /** The fleet efficiency show/review answer deadline; defaults to 25s, under the CLI's 30s abort. */
+  readonly fleetEfficiencyDeadlineMs?: number;
   readonly localCodexProcess?: (pid: number, pane: string) => LocalCodexRegistration;
   readonly localCodexSocket?: () => string | undefined;
   readonly remoteCodexProcess?: (launch: RemoteCodexLaunch) => RemoteCodexRegistration;

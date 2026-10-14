@@ -1095,13 +1095,14 @@ export const RoomHandoffMetadataSchema = z
   .strict();
 export type RoomHandoffMetadata = z.infer<typeof RoomHandoffMetadataSchema>;
 
-/** Incomplete display reads name the pending component; they are never live authority. */
+/** Incomplete display reads name the pending component; they are never live authority.
+ * `unavailable` names a fleet that failed its census: its seats are unknown, not absent. */
 export const OperatorFleetReadWarningsSchema = z
   .array(
     z
       .object({
         source: z.string().min(1).max(128),
-        reason: z.enum(["timeout", "changed_during_read"]),
+        reason: z.enum(["timeout", "changed_during_read", "unavailable"]),
         message: z.string().min(1).max(512),
       })
       .strict(),
