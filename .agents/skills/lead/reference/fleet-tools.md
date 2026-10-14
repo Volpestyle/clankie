@@ -298,6 +298,8 @@ not native acknowledgment or review. Reconcile the returned message ID with
 `reconcile_seat_call` from the sending conversation; queued messages survive
 restart. Remote-only leads need their bridge. An uncertain native send stays
 with its original receipt: never resend through the service as a fallback.
+When you answer another lead's message, pass its `event_id` as `inReplyTo`; the
+result's `inReplyTo.acknowledged` says the sender's receipt resolved.
 
 ## Unresolved Claude channel deliveries
 

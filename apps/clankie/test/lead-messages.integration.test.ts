@@ -1,4 +1,4 @@
-import { CHANNEL_NOTIFICATION_METHOD } from "../../tui/src/command/mcp.ts";
+import { CHANNEL_NOTIFICATION_METHOD, pumpSeatEvents } from "../../tui/src/command/mcp.ts";
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -116,6 +116,121 @@ it("only the sender reconciles an unconfirmed lead message after a restart, once
   // Another conversation cannot read the sender's receipt.
   expect(await restarted.reconcileSeatDelivery!(event!.id, work)).toBeUndefined();
   expect(await restarted.pollSeatEvents(0, undefined, work, capabilities)).toEqual([]);
+});
+
+it("VUH-2196: a lead that answers an unconfirmed lead message by its event_id resolves the sender's receipt", async () => {
+  const f = await fixture(false);
+  const [global, work] = f.leads as [string, string];
+  // The recipient's bridge takes the event and never acknowledges it.
+  const taken = f.captain.pollSeatEvents(5000, undefined, work, capabilities);
+  await expect
+    .poll(() => f.captain.serveOperatorConversation({ op: "get", schemaVersion: 1, conversationId: work }))
+    .toMatchObject({ conversation: { driver: {} } });
+  const sending = f.messageSeat(global, f.head.terminalId, "Hold the deploy");
+  const [event] = await taken;
+  expect(event!.content).toContain("inReplyTo");
+  expect(await sending).toMatchObject({ outcome: "unconfirmed", messageId: event!.id });
+  const answer = async (from: string, inReplyTo: string) => {
+    const bank = await f.captain.laneToolBank("operator", from);
+    const sent = await bank.tools
+      .find((tool) => tool.name === "message_seat")!
+      // A non-recipient's answer goes nowhere; the recipient answers the sender.
+      .call({ seat: from === work ? global : "no-such-seat", message: "Holding", inReplyTo });
+    return JSON.parse(sent.content.find((item) => item.type === "text")!.text);
+  };
+  // Only the conversation the original was sent to can confirm it, and only by its exact ID.
+  expect((await answer(global, event!.id)).inReplyTo).toEqual({ messageId: event!.id, acknowledged: false });
+  expect((await answer(work, `seat-${randomUUID()}`)).inReplyTo).toMatchObject({ acknowledged: false });
+  expect(await f.captain.reconcileSeatDelivery!(event!.id, global)).toMatchObject({ outcome: "unconfirmed" });
+
+  expect((await answer(work, event!.id)).inReplyTo).toEqual({ messageId: event!.id, acknowledged: true });
+  expect(await f.captain.reconcileSeatDelivery!(event!.id, global)).toEqual({
+    outcome: "delivered",
+    deliveryStage: "delivered",
+    messageId: event!.id,
+  });
+  const listed = await f.captain.serveOperatorConversation({ op: "seat_deliveries", schemaVersion: 1 });
+  expect(listed.op === "seat_deliveries" && listed.unresolved.map((entry) => entry.receiptId)).not.toContain(
+    event!.id,
+  );
+});
+
+it("VUH-2196: an unresolved lead message alerts its seat once, not again after every service restart", async () => {
+  const f = await fixture(false);
+  const [global, work] = f.leads as [string, string];
+  const taken = f.captain.pollSeatEvents(5000, undefined, work, capabilities);
+  await expect
+    .poll(() => f.captain.serveOperatorConversation({ op: "get", schemaVersion: 1, conversationId: work }))
+    .toMatchObject({ conversation: { driver: {} } });
+  const sending = f.messageSeat(global, f.head.terminalId, "Hold the deploy");
+  const [event] = await taken;
+  await f.captain.close();
+  expect(await sending).toMatchObject({ outcome: "unconfirmed", messageId: event!.id });
+
+  /** One service process with the lead's real seat bridge polling and acknowledging. */
+  const process = async () => {
+    const captain = f.open();
+    const stop = new AbortController();
+    const notification = vi.fn(async (_event: unknown) => {});
+    const pump = pumpSeatEvents(
+      { notification },
+      {
+        pollEvents: (waitMs, signal) => captain.pollSeatEvents(waitMs, signal, work, capabilities),
+        acknowledge: (id) => captain.acknowledgeSeatEvent(id, work),
+      },
+      stop.signal,
+      { waitMs: 200, retryMs: 20 },
+    );
+    await expect
+      .poll(() => captain.serveOperatorConversation({ op: "get", schemaVersion: 1, conversationId: work }))
+      .toMatchObject({ conversation: { driver: {} } });
+    return {
+      captain,
+      notification,
+      stop: async () => {
+        stop.abort();
+        await pump;
+        await captain.close();
+      },
+    };
+  };
+  const alerts = (notification: ReturnType<typeof vi.fn>) =>
+    notification.mock.calls
+      .map(([call]) => call as { params: { content: string; meta: Record<string, string> } })
+      .filter((call) => call.params.meta.source === "seat-delivery-alert");
+
+  const first = await process();
+  await expect.poll(() => alerts(first.notification)).toHaveLength(1);
+  expect(alerts(first.notification)[0]!.params.content).toContain(event!.id);
+  // The bridge acknowledged the alert: only the original stays unresolved.
+  await expect
+    .poll(async () => {
+      const listed = await first.captain.serveOperatorConversation({
+        op: "seat_deliveries",
+        schemaVersion: 1,
+      });
+      return listed.op === "seat_deliveries"
+        ? listed.unresolved.filter((entry) => entry.conversationId === work).map((entry) => entry.receiptId)
+        : [];
+    })
+    .toEqual([event!.id]);
+  await first.stop();
+
+  for (let restart = 0; restart < 2; restart += 1) {
+    const next = await process();
+    // Several full poll cycles: a repeat would arrive on the first page.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(alerts(next.notification)).toEqual([]);
+    await next.stop();
+  }
+  // Still visible and settleable: the alert never claimed receipt.
+  const restarted = f.open();
+  const listed = await restarted.serveOperatorConversation({ op: "seat_deliveries", schemaVersion: 1 });
+  expect(listed).toMatchObject({
+    unresolved: expect.arrayContaining([
+      expect.objectContaining({ conversationId: work, receiptId: event!.id }),
+    ]),
+  });
 });
 
 it.each([false, true])(

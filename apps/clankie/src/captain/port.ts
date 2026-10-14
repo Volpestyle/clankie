@@ -112,10 +112,18 @@ export type MessageSeat = (
   authority?: ConversationAuthority,
   /** A response to one observed native request, never a new worker turn. */
   questionAnswer?: import("@clankie/agent-hosts").SeatQuestionAnswer,
-  /** This message replaces the lead's earlier guidance the worker may not have acted on yet. */
-  options?: { readonly replaces?: boolean },
+  options?: {
+    /** This message replaces the lead's earlier guidance the worker may not have acted on yet. */
+    readonly replaces?: boolean;
+    /** The event_id of the lead message this answers; proves this conversation received it (VUH-2196). */
+    readonly inReplyTo?: string;
+  },
 ) => Promise<SeatMessageResult>;
-type SeatMessageResult = { readonly deliveryStage?: DeliveryStage } & (
+type SeatMessageResult = {
+  readonly deliveryStage?: DeliveryStage;
+  /** Whether the answered lead message's own receipt is now acknowledged. */
+  readonly inReplyTo?: { readonly messageId: string; readonly acknowledged: boolean };
+} & (
   | (Extract<FleetSeatDelivery, { outcome: "delivered" }> & {
       readonly seatId: string;
       readonly status: string;

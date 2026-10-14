@@ -194,7 +194,14 @@ export class SeatOutbox {
   private readonly active = new Set<string>();
   /** Receipts already announced, including the alerts' own, so an alert never alerts about an alert. */
   private readonly alerted = new Set<string>();
-  private readonly onUnresolved: ((receipt: UnresolvedSeatReceipt) => void) | undefined;
+  /**
+   * Receipts whose alert reached the seat, or that are alerts themselves, kept
+   * across restarts (VUH-2196). Without it every deploy re-announced the same
+   * receipt, which read as an alert every ~30 minutes.
+   */
+  private readonly alertedDurably = new Set<string>();
+  private readonly alertedPath: string | undefined;
+  private readonly onUnresolved: ((receipt: UnresolvedSeatReceipt) => unknown) | undefined;
   private lastCapabilities: OperatorSeatCapabilities | undefined;
   private lastBridgePollAt: number | undefined;
   private readonly bridgeIssues = new Set<string>();
@@ -257,8 +264,12 @@ export class SeatOutbox {
       readonly startedAt?: number;
       readonly reconnectGraceMs?: number;
       readonly recentSeatMs?: number;
-      /** Tell the lead about an unresolved receipt instead of failing silently. Called once per receipt. */
-      readonly onUnresolved?: (receipt: UnresolvedSeatReceipt) => void;
+      /**
+       * Tell the lead about an unresolved receipt instead of failing silently.
+       * Resolve true once the alert reached the seat; it is then never repeated,
+       * even after a restart. Otherwise the next process may try once more.
+       */
+      readonly onUnresolved?: (receipt: UnresolvedSeatReceipt) => unknown;
       readonly onBridgeIssue?: (detail: string) => void;
       readonly onDeliveryEvent?: (event: SeatDeliveryEvent) => void;
       /** One call per bridge state change, for the service log (VUH-2036). */
@@ -273,6 +284,12 @@ export class SeatOutbox {
     this.delivered = new DeliveryFence(
       options.uncertaintyPath === undefined ? undefined : `${options.uncertaintyPath}.delivered`,
     );
+    this.alertedPath =
+      options.uncertaintyPath === undefined ? undefined : `${options.uncertaintyPath}.alerted`;
+    for (const id of readAlerted(this.alertedPath)) {
+      this.alertedDurably.add(id);
+      this.alerted.add(id);
+    }
     this.boundGraceMs = options.boundGraceMs ?? BOUND_GRACE_MS;
     this.ackTimeoutMs = options.ackTimeoutMs ?? this.boundGraceMs;
     this.abortKeepsGrace = options.abortKeepsGrace ?? false;
@@ -488,7 +505,11 @@ export class SeatOutbox {
     );
   }
 
-  /** Each unresolved receipt is announced once per process, only while a seat is reachable. */
+  /**
+   * Each unresolved receipt is announced once, only while a seat is reachable.
+   * A delivered alert is remembered across restarts; one that did not reach
+   * the seat may be tried once by a later process.
+   */
   private alertUnresolved(): void {
     if (this.onUnresolved === undefined) return;
     for (const receipt of this.unresolvedDeliveries()) {
@@ -497,11 +518,30 @@ export class SeatOutbox {
       const notify = this.onUnresolved;
       queueMicrotask(() => {
         try {
-          notify(receipt);
+          void Promise.resolve(notify(receipt))
+            .then((reached) => {
+              if (reached === true) this.rememberAlerted(receipt.receiptId);
+            })
+            .catch(() => undefined);
         } catch {
           /* The alert is advisory; doctor still reports the receipt. */
         }
       });
+    }
+  }
+
+  /** Best effort: a failed write only lets a later process alert once more. */
+  private rememberAlerted(receiptId: string): void {
+    this.alertedDurably.add(receiptId);
+    if (this.alertedPath === undefined) return;
+    // Keep only receipts that can still alert: settled ones never will again.
+    const open = new Set(this.fence.entries().map(([, receipt]) => receipt.messageId));
+    for (const id of this.alertedDurably) if (!open.has(id)) this.alertedDurably.delete(id);
+    try {
+      mkdirSync(dirname(this.alertedPath), { recursive: true, mode: 0o700 });
+      writeFileSync(this.alertedPath, `${JSON.stringify([...this.alertedDurably])}\n`, { mode: 0o600 });
+    } catch {
+      /* Advisory state only. */
     }
   }
 
@@ -605,7 +645,10 @@ export class SeatOutbox {
             { sessionId: input.recipientBinding ?? "" }),
       });
       this.active.add(event.id);
-      if (input.source === SEAT_DELIVERY_ALERT_SOURCE) this.alerted.add(event.id);
+      if (input.source === SEAT_DELIVERY_ALERT_SOURCE) {
+        this.alerted.add(event.id);
+        this.rememberAlerted(event.id);
+      }
       const onAbort = (): void =>
         pending.settle(
           pending.acknowledged
@@ -1017,6 +1060,16 @@ export class SeatOutbox {
     if (first === undefined) return;
     const ready = this.take(first.recipientBinding, first.capabilities);
     if (ready.length > 0) first.finish(ready, "wake");
+  }
+}
+
+function readAlerted(path: string | undefined): readonly string[] {
+  if (path === undefined) return [];
+  try {
+    const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
   }
 }
 

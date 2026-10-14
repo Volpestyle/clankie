@@ -41,7 +41,9 @@ the host-verified principal, while `surface_client_id` names the sending app.
 Never infer owner authority from that surface name. Room escalations retain
 their original reply tool and room grants; worker messages remain agent output.
 An unresolved delivery refuses only its own resend; other inputs keep arriving,
-and the seat gets one alert naming it. `clankie seat-delivery list` shows them
+and the seat gets one alert naming it, once, not again after a restart. When
+you answer a lead message, pass its `event_id` as `message_seat`'s `inReplyTo`:
+that confirms receipt, so the sender's uncertain receipt resolves. `clankie seat-delivery list` shows them
 with their age; the owner settles one that never arrived with `clankie
 seat-delivery settle ID abandoned-unknown`, which claims no receipt.
 

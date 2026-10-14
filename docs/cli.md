@@ -875,7 +875,9 @@ fences that block a worker recipient. Entries include conversation, exact
 receipt ID, worker seat ID when applicable, and age when a start time was
 recorded. Native fences remain visible after their mailbox ACK. An unresolved delivery refuses only a resend of that original, by
 ID or exact content; unrelated wakes, watches and worker reports keep reaching
-the seat, and the seat receives one `seat-delivery-alert` message about it.
+the seat, and the seat receives one `seat-delivery-alert` message about it. Once the seat
+acknowledges that alert it is not repeated, even after a service restart; an
+alert that did not reach the seat may be tried once by the next process.
 `clankie doctor` lists the same entries. For a worker channel,
 `reconcile_seat_call` accepts the returned native `messageId` as `deliveryId`,
 or the original MCP dispatch UUID, in the original conversation. An exact

@@ -116,7 +116,12 @@ every later wake and worker report. An unreadable journal still refuses
 everything, because it cannot tell an original from a new message.
 
 The seat receives one notice per unresolved receipt, and `clankie doctor` and
-`clankie seat-delivery list` show each with its age. When the event never
+`clankie seat-delivery list` show each with its age. A notice the seat
+acknowledged is remembered across service restarts, so a receipt is announced
+once, not after every deploy (VUH-2196); a notice that never reached the seat
+may be tried once by the next process. A lead that answers a lead message with
+`message_seat({inReplyTo: <event_id>})` acknowledges that exact original: only
+its own conversation received that ID. When the event never
 arrived, or its fate cannot be known, the owner settles it with `clankie
 seat-delivery settle ID abandoned-unknown`. Like `hire-receipt settle …
 abandoned-unknown`, this retains the original and its identity, claims no
