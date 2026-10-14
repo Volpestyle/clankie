@@ -105,7 +105,11 @@ import {
   type WorkerAccountHarness,
   type WorkerAccountHold,
 } from "./harness-accounts.ts";
-import type { HireReceiptSettlement, HireRecoveryEvidence } from "@clankie/protocol";
+import type {
+  HireReceiptSettlement,
+  HireRecoveryEvidence,
+  LocalHireSettlementEvidence,
+} from "@clankie/protocol";
 import { workerSkills } from "./worker-skills.ts";
 import {
   readHerdrSeatTranscript,
@@ -2852,11 +2856,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
       | "delivered"
       | "abandoned"
       | "abandoned-unknown"
-      | "release-allocation" = "not-launched",
+      | "release-allocation"
+      | "adopt" = "not-launched",
     owner?: ConversationOwner,
   ): Promise<HireReceiptSettlement> {
     const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId, detail });
     if (!guard) return refused("Settlement authority is required; nothing settled.");
+    if (disposition === "adopt")
+      return owner
+        ? refused("Only the operator may adopt an unconfirmed local hire; nothing adopted.")
+        : this.adoptLocalHire(receiptId, guard);
     try {
       await guard();
       const matches = this.hireReceipts
@@ -3139,6 +3148,194 @@ export class HerdrWatchStore implements HerdrWatchPort {
       );
     } finally {
       this.activeHires.delete(key);
+    }
+  }
+
+  /**
+   * Operator adoption of a launched local hire that never confirmed (VUH-2243).
+   * Its harness runs in the pane this hire allocated, but its occupant was never
+   * bound, so its lead cannot reach it. Binds that exact host-observed occupant
+   * to the conversation that hired the pane, confirms its project allocation
+   * from matching process proof, and settles the original receipt. It never
+   * claims the brief arrived, and never sends, replays or closes anything.
+   */
+  private async adoptLocalHire(id: string, guard: () => Promise<void>): Promise<HireReceiptSettlement> {
+    const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId: id, detail });
+    let fenced: string | undefined;
+    let fencedAllocation: string | undefined;
+    try {
+      await guard();
+      if (this.closed || !this.runner.list) throw new Error("Complete local Herdr inventory is unavailable");
+      const localOriginal = ([key, receipt]: readonly [string, UncertainReceipt]) =>
+        JSON.parse(key)[0] === "local" && !receipt.remoteAdmission && !receipt.freshHire;
+      let original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === id);
+      let allocation = this.projectHires.allocation(id);
+      const settled = this.hireReceipts.settlement(id);
+      if (!original && !allocation && settled) {
+        if (settled.journal !== "local-host-inventory" || settled.disposition !== "adopted")
+          throw new Error("Original receipt already has a different retained disposition");
+        const pane = settled.pane as {
+          paneId: string;
+          terminalId: string;
+          occupantId: string;
+          sessionId?: string;
+        };
+        return {
+          state: "adopted",
+          receiptId: id,
+          seat: {
+            paneId: pane.paneId,
+            seatId: pane.terminalId,
+            occupantId: pane.occupantId,
+            ...(pane.sessionId === undefined ? {} : { sessionId: pane.sessionId }),
+          },
+          owner: (settled.pane as { owner: { conversationId: string } }).owner,
+          evidence: settled,
+          detail: "Already adopted; the retained adoption is unchanged.",
+        };
+      }
+      if (original && !localOriginal(original))
+        throw new Error("Only a local hire receipt can be adopted from local inventory");
+      if (original?.[1].paneId && !allocation)
+        allocation = this.projectHires.retirementCandidate("default", original[1].paneId);
+      if (allocation && !original)
+        original = this.hireReceipts
+          .entries()
+          .find((entry) => localOriginal(entry) && entry[1].paneId === allocation!.pane);
+      if (!original && !allocation)
+        throw new Error("No unresolved local hire receipt or project allocation has this UUID");
+      if (allocation && (allocation.gone || allocation.request.fleet !== undefined || !allocation.started))
+        throw new Error(`Allocation ${allocation.id} is not a started local hire`);
+      const receipt = original?.[1];
+      const paneId = receipt?.paneId ?? allocation?.pane;
+      if (!paneId) throw new Error("The original hire never recorded a pane; settle it as abandoned instead");
+      if (allocation?.pane !== undefined && allocation.pane !== paneId)
+        throw new Error("The receipt and project allocation name different panes");
+      const [, keyHarness, keyCwd] = original ? (JSON.parse(original[0]) as string[]) : [];
+      const harness = keyHarness ?? allocation!.request.harness;
+      const cwd = keyCwd ?? allocation!.request.workingDirectory;
+      if (
+        allocation &&
+        (allocation.request.harness !== harness || allocation.request.workingDirectory !== cwd)
+      )
+        throw new Error("The receipt and project allocation name different launches");
+      if (receipt?.recoveryRequested) throw new Error("The original is under remote recovery");
+      if (
+        (original && this.activeHires.has(original[0])) ||
+        (allocation && this.activeProjectHires.has(allocation.id))
+      )
+        throw new Error("The original hire is still active");
+      if (original) this.activeHires.add((fenced = original[0]));
+      if (allocation) this.activeProjectHires.add((fencedAllocation = allocation.id));
+      const observe = async () => {
+        const inventory = await this.runner.list!();
+        const agent = inventory.find((entry) => entry.paneId === paneId);
+        if (!agent)
+          throw new Error(
+            `Pane ${paneId} is absent; settle its receipt as abandoned or release its allocation`,
+          );
+        if (agent.agent !== harness || agent.session === undefined)
+          throw new Error(`Pane ${paneId} holds no observed ${harness} session to adopt`);
+        if (agent.workingDirectory !== cwd && agent.foregroundWorkingDirectory !== cwd)
+          throw new Error(`Pane ${paneId} runs outside the hire's directory`);
+        const occupantId = occupantIdForHerdrSession(agent.session);
+        const sessionId = nativeSessionId(agent);
+        if (
+          (receipt?.occupantId !== undefined && receipt.occupantId !== occupantId) ||
+          (receipt?.sessionId !== undefined && receipt.sessionId !== sessionId) ||
+          (allocation?.occupantId !== undefined &&
+            (allocation.occupantId !== occupantId || allocation.seat !== agent.terminalId))
+        )
+          throw new Error(`Pane ${paneId} holds a different occupant than the original hire observed`);
+        return { inventory, agent, occupantId, sessionId };
+      };
+      const first = await observe();
+      const claim = this.hireOwners.claim(paneId, first.agent.terminalId, first.occupantId);
+      const owner = claim?.owner ?? this.hireOwners.pendingOwner(paneId);
+      if (!owner) throw new Error(`No conversation's hire holds pane ${paneId}`);
+      const proof =
+        allocation && !allocation.confirmed
+          ? await this.projectPolicy?.proof?.("default", paneId).catch(() => undefined)
+          : undefined;
+      if (
+        allocation &&
+        !allocation.confirmed &&
+        (!proof ||
+          proof.nativeOccupantId !== first.occupantId ||
+          proof.pane !== paneId ||
+          proof.fleet !== "default")
+      )
+        throw new Error(`Pane ${paneId} has no current process proof matching its occupant`);
+      await guard();
+      const final = await observe();
+      if (final.agent.terminalId !== first.agent.terminalId || final.occupantId !== first.occupantId)
+        throw new Error("The original pane's occupant changed during census");
+      // No await follows the final observation before the durable adoption.
+      if (this.closed) throw new Error("Native hire service is closed");
+      const { agent, occupantId, sessionId } = final;
+      if (!claim)
+        this.hireOwners.bind(
+          paneId,
+          owner,
+          agent.terminalId,
+          undefined,
+          occupantId,
+          sessionId === undefined ? undefined : JSON.stringify(["local", harness, sessionId]),
+          allocation?.projectId,
+        );
+      if (allocation && !allocation.confirmed) {
+        this.projectHires.observe(allocation.id, agent.terminalId, occupantId, proof);
+        this.projectHires.confirmed(allocation.id);
+      }
+      let evidence: LocalHireSettlementEvidence | undefined;
+      if (original) {
+        evidence = {
+          receiptId: original[1].messageId,
+          receiptKey: original[0],
+          fingerprint: original[1].fingerprint,
+          disposition: "adopted",
+          journal: "local-host-inventory",
+          census: {
+            observedAt: Date.now(),
+            panes: final.inventory.length,
+            sha256: createHash("sha256")
+              .update(JSON.stringify(final.inventory.map((pane) => [pane.paneId, pane.terminalId]).sort()))
+              .digest("hex"),
+          },
+          pane: {
+            paneId,
+            present: true,
+            terminalId: agent.terminalId,
+            occupantId,
+            ...(sessionId === undefined ? {} : { sessionId }),
+            owner: { conversationId: owner.conversationId },
+          },
+        };
+        this.hireReceipts.settleLocal(original[0], original[1].messageId, evidence);
+      }
+      this.watchHiredSeat(agent.terminalId, occupantId, owner);
+      return {
+        state: "adopted",
+        receiptId: id,
+        seat: {
+          paneId,
+          seatId: agent.terminalId,
+          occupantId,
+          ...(sessionId === undefined ? {} : { sessionId }),
+        },
+        owner: { conversationId: owner.conversationId },
+        ...(allocation ? { allocationId: allocation.id } : {}),
+        ...(evidence ? { evidence } : {}),
+        detail:
+          "Adopted the exact occupant for its hiring conversation. Its brief's delivery stays unknown: the lead should message it to confirm its task. Nothing was sent, replayed or closed.",
+      };
+    } catch (error) {
+      return refused(
+        `Local adoption refused: ${reasonDetail(error)}. Original retained; nothing sent, closed or relaunched.`,
+      );
+    } finally {
+      if (fenced) this.activeHires.delete(fenced);
+      if (fencedAllocation) this.activeProjectHires.delete(fencedAllocation);
     }
   }
 

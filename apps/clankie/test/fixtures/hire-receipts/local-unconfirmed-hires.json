@@ -1,0 +1,84 @@
+{
+  "sera": {
+    "key": ["local", "claude", "/Users/james/dev/tracker-research-20261008", "new"],
+    "receipt": {
+      "messageId": "5e29a0d5-d4d8-4fae-bba8-f315f0648618",
+      "fingerprint": "73c7d4fd8a9b54809b6fc9ca2e6c939dbb190c1c9dade59829945a020e12cd65",
+      "paneId": "w4M:pH",
+      "agentName": "sera-5d5b",
+      "beforeIds": []
+    },
+    "allocation": {
+      "id": "1659d85f-3c92-4460-b825-b7ae16a66594",
+      "key": "[\"default\",\"/Users/james/dev/tracker-research-20261008\"]",
+      "projectId": "clankie-work",
+      "role": "builder",
+      "policy": "[null,null,null]",
+      "request": {
+        "schemaVersion": 1,
+        "harness": "claude",
+        "effort": "high",
+        "subagents": {
+          "effort": "high"
+        },
+        "delegation": "native-first",
+        "account": "account-2f18c8f53767b125943c1e9ddc003804",
+        "title": "Sera",
+        "workingDirectory": "/Users/james/dev/tracker-research-20261008",
+        "projectId": "clankie-work",
+        "deliverable": "VUH-1944",
+        "role": "builder"
+      },
+      "started": true,
+      "pane": "w4M:pH",
+      "confirmed": false,
+      "gone": false
+    },
+    "owner": {
+      "id": "b669c9bc-e6dc-4c6e-b19e-91b43a18562d",
+      "paneId": "w4M:pH",
+      "hired": true,
+      "hireConversationId": "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0",
+      "owner": {
+        "conversationId": "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0"
+      }
+    }
+  },
+  "lumi": {
+    "allocation": {
+      "id": "3e5ae683-0d68-43fe-8970-557b2c6c4fb8",
+      "key": "[\"default\",\"/Users/james/dev/tracker-research-20261008/.local/local-vuh-17-source/clankie-app\"]",
+      "projectId": "clankie-work",
+      "role": "builder",
+      "policy": "[null,null,null]",
+      "request": {
+        "schemaVersion": 1,
+        "harness": "claude",
+        "effort": "high",
+        "subagents": {
+          "effort": "high"
+        },
+        "delegation": "native-first",
+        "account": "account-2f18c8f53767b125943c1e9ddc003804",
+        "title": "Lumi",
+        "workingDirectory": "/Users/james/dev/tracker-research-20261008/.local/local-vuh-17-source/clankie-app",
+        "projectId": "clankie-work",
+        "deliverable": "LOCAL-VUH-17",
+        "role": "builder"
+      },
+      "started": true,
+      "pane": "w54:p1",
+      "confirmed": false,
+      "gone": false
+    },
+    "owner": {
+      "id": "8672ef1a-ba1d-45e4-827c-d81d158179c7",
+      "paneId": "w54:p1",
+      "hired": true,
+      "hireConversationId": "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0",
+      "owner": {
+        "conversationId": "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0"
+      }
+    }
+  }
+}

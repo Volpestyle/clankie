@@ -457,6 +457,10 @@ export class DeliveryFence {
       proof.receiptKey !== key ||
       proof.fingerprint !== previous.fingerprint ||
       proof.pane?.paneId !== previous.paneId ||
+      (proof.pane !== undefined &&
+        "occupantId" in proof.pane &&
+        ((previous.occupantId !== undefined && previous.occupantId !== proof.pane.occupantId) ||
+          (previous.sessionId !== undefined && previous.sessionId !== proof.pane.sessionId))) ||
       this.records.has(archive)
     )
       throw new Error("Local settlement does not match the retained original receipt");

@@ -93,13 +93,15 @@ export type HireRecoveryEvidence = z.infer<typeof HireRecoveryEvidenceSchema>;
  * A local hire settled from this machine's own complete Herdr inventory (VUH-2243).
  * Abandonment proves only that no harness occupies the original pane now; it
  * never claims the hire launched, never launched, or received its brief.
+ * Adoption binds the harness observed in the hire's own pane to its hiring
+ * conversation; it still never claims the brief arrived.
  */
 export const LocalHireSettlementEvidenceSchema = z
   .object({
     receiptId: z.string().uuid(),
     receiptKey: z.string().min(1).max(8192),
     fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
-    disposition: z.literal("abandoned"),
+    disposition: z.enum(["abandoned", "adopted"]),
     journal: z.literal("local-host-inventory"),
     census: z
       .object({
@@ -120,10 +122,24 @@ export const LocalHireSettlementEvidenceSchema = z
             shellPid: z.number().int().positive(),
           })
           .strict(),
+        z
+          .object({
+            paneId: z.string().min(1),
+            present: z.literal(true),
+            terminalId: z.string().min(1),
+            occupantId: z.string().min(1),
+            sessionId: z.string().min(1).optional(),
+            owner: z.object({ conversationId: z.string().min(1) }).strict(),
+          })
+          .strict(),
       ])
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (proof) => (proof.disposition === "adopted") === (proof.pane !== undefined && "occupantId" in proof.pane),
+    "Only adoption names an occupant, and adoption always does",
+  );
 export type LocalHireSettlementEvidence = z.infer<typeof LocalHireSettlementEvidenceSchema>;
 export const RetainedHireEvidenceSchema = z.union([
   HireNoLaunchEvidenceSchema,
@@ -160,6 +176,26 @@ export const HireReceiptSettlementSchema = z.discriminatedUnion("state", [
       state: z.literal("abandoned"),
       receiptId: HireReceiptIdSchema,
       evidence: z.union([HireRecoveryEvidenceSchema, LocalHireSettlementEvidenceSchema]),
+    })
+    .strict(),
+  z
+    .object({
+      state: z.literal("adopted"),
+      receiptId: HireReceiptIdSchema,
+      seat: z
+        .object({
+          paneId: z.string(),
+          seatId: z.string(),
+          occupantId: z.string(),
+          sessionId: z.string().optional(),
+        })
+        .strict(),
+      owner: z.object({ conversationId: z.string() }).strict(),
+      /** The project allocation confirmed by this adoption, when the hire had one. */
+      allocationId: z.string().uuid().optional(),
+      /** The original native receipt's settlement, when the hire retained one. */
+      evidence: LocalHireSettlementEvidenceSchema.optional(),
+      detail: z.string(),
     })
     .strict(),
   z.object({ state: z.literal("refused"), receiptId: HireReceiptIdSchema, detail: z.string() }).strict(),

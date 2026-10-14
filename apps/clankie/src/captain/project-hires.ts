@@ -386,6 +386,10 @@ export class ProjectHires {
       a.gone = true;
     });
   }
+  /** Read only: the allocation with this UUID, whatever its state. */
+  public allocation(id: string): Allocation | undefined {
+    return this.read().allocations.find((a) => a.id === id);
+  }
   /** Operator recovery snapshots retain the original allocation; they confer no launch authority. */
   public recoveryCandidate(id: string): Allocation | undefined {
     return this.read().allocations.find((a) => a.id === id && !a.confirmed && (!a.gone || a.operatorRelease));

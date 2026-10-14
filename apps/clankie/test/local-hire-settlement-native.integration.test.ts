@@ -1,5 +1,6 @@
 // Manual Mac-only proof (VUH-2243): real isolated Herdr panes, shells and foreground
-// processes settle a restored live local hire receipt. No harness, model or owner pane.
+// processes settle or adopt restored live local hires. No model turn, credential or owner
+// pane: the adopted occupant is a real process launched as `claude` with a reported session.
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
@@ -8,6 +9,9 @@ import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { DeliveryFence, deliveryFingerprint, ReceiptSchema } from "../src/captain/delivery-fence.ts";
 import { createHerdrWatchRunner, HerdrWatchStore } from "../src/captain/herdr-watch.ts";
+import { HireOwners } from "../src/captain/hire-owners.ts";
+import { ProjectHires } from "../src/captain/project-hires.ts";
+import { createProjectProcessObserver } from "../src/project-process-proof.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 
 const exec = promisify(execFile);
@@ -167,6 +171,175 @@ nativeIt(
         detail: expect.stringContaining("no seat was started"),
       });
       expect(new DeliveryFence(`${path}.hire-receipts.json`).pending(key)).toBeUndefined();
+    } finally {
+      store?.close();
+      await writeFile(join(logs, "results.json"), JSON.stringify(evidence, null, 2));
+      await herdr.close();
+    }
+  },
+  90_000,
+);
+
+nativeIt(
+  "adopts launched but unconfirmed local hires for the conversation that hired their pane",
+  async () => {
+    const logs = join(import.meta.dirname, "../../../docs/testing/2026-10-14-local-hire-settlement/adopt");
+    const herdr = await isolatedHerdr(logs);
+    const evidence: unknown[] = [];
+    let store: HerdrWatchStore | undefined;
+    try {
+      const root = await realpath(herdr.root);
+      // Sera (VUH-1944): a receipt, a started allocation and a pending owner.
+      // Lumi (trust_required): an allocation and pending owner, no receipt.
+      const golden = JSON.parse(
+        await readFile(
+          new URL("./fixtures/hire-receipts/local-unconfirmed-hires.json", import.meta.url),
+          "utf8",
+        ),
+      );
+      const sera = { cwd: join(root, "sera"), pane: herdr.pane, session: randomUUID() };
+      const lumi = { cwd: join(root, "lumi"), pane: herdr.foreignPane, session: randomUUID() };
+      await mkdir(sera.cwd);
+      await mkdir(lumi.cwd);
+      const env = { ...process.env, HERDR_SOCKET_PATH: herdr.socketPath };
+      const run = async (args: readonly string[]) =>
+        (await exec("herdr", [...args], { env, timeout: 10_000 })).stdout;
+      const runner = createHerdrWatchRunner(undefined, run, undefined, { localCodexRecovery: false });
+      const binary = join(root, "bin", "claude");
+      await mkdir(join(root, "bin"));
+      // A real native executable launched as `claude`; it waits and makes no model call.
+      await writeFile(`${binary}.c`, "#include <unistd.h>\nint main(void) { for (;;) pause(); }\n");
+      await exec("cc", ["-O2", "-o", binary, `${binary}.c`], { timeout: 30_000 });
+      const binding = { runtime: "external" as const, socketPath: herdr.socketPath, session: "default" };
+      const proof = createProjectProcessObserver({
+        binding: async () => binding,
+        herdrBinary: "herdr",
+        launcher: async (harness) => (harness === "claude" ? { executable: binary } : undefined),
+        run: async (file, args, childEnv) =>
+          (await exec(file, [...args], { env: childEnv ?? env, timeout: 10_000 })).stdout,
+        refusal: (reason, pane) => evidence.push({ proofRefusal: reason, pane }),
+      });
+      const path = join(root, "watches.json");
+      const translate = (allocation: Record<string, unknown>, cwd: string, pane: string) => ({
+        ...allocation,
+        key: JSON.stringify(["default", cwd]),
+        pane,
+        request: { ...(allocation.request as object), workingDirectory: cwd },
+      });
+      await writeFile(
+        `${path}.project-hires.json`,
+        JSON.stringify({
+          version: 1,
+          allocations: [
+            translate(golden.sera.allocation, sera.cwd, sera.pane),
+            translate(golden.lumi.allocation, lumi.cwd, lumi.pane),
+          ],
+        }),
+      );
+      const owners = new HireOwners(`${path}.owners.json`);
+      owners.bind(sera.pane, golden.sera.owner.owner);
+      owners.bind(lumi.pane, golden.lumi.owner.owner);
+      const key = JSON.stringify(["local", "claude", sera.cwd, "new"]);
+      new DeliveryFence(`${path}.hire-receipts.json`).begin(
+        key,
+        ReceiptSchema.parse({ ...golden.sera.receipt, paneId: sera.pane }),
+      );
+      store = new HerdrWatchStore(path, {
+        runner,
+        projectHirePolicy: {
+          settings: async () => {
+            throw new Error("Adoption reads no project settings");
+          },
+          project: async () => undefined,
+          proof,
+        },
+      });
+      const lead = golden.sera.owner.owner.conversationId as string;
+      const adopt = (id: string) => store!.settleHireReceipt(id, async () => {}, "adopt");
+
+      // Before its harness starts, a pane holds nothing to adopt.
+      expect(await adopt(golden.sera.receipt.messageId)).toMatchObject({
+        state: "refused",
+        detail: expect.stringContaining("holds no observed claude session"),
+      });
+      for (const hire of [sera, lumi]) {
+        await herdr.cli("pane", "run", hire.pane, `cd '${hire.cwd}' && '${binary}'`);
+        await herdr.cli(
+          "pane",
+          "report-agent",
+          hire.pane,
+          "--source",
+          "settlement-fixture",
+          "--agent",
+          "claude",
+          "--state",
+          "idle",
+          "--agent-session-id",
+          hire.session,
+        );
+        await herdr.cli(
+          "pane",
+          "report-agent-session",
+          hire.pane,
+          "--source",
+          "herdr:claude",
+          "--agent",
+          "claude",
+          "--agent-session-id",
+          hire.session,
+        );
+        await expect.poll(() => proof("default", hire.pane), { timeout: 15_000 }).toBeDefined();
+      }
+      // The live failure: the hiring lead cannot reach either seat.
+      for (const hire of [sera, lumi]) {
+        const agent = await runner.get(hire.pane);
+        expect(() => store!.nativeOwner(agent)).toThrow(/no longer matches its persisted owner/u);
+      }
+      expect(
+        await store.settleHireReceipt(golden.sera.receipt.messageId, async () => {}, "adopt", {
+          conversationId: lead,
+        }),
+      ).toMatchObject({ state: "refused", detail: expect.stringContaining("Only the operator") });
+
+      const seraAdopted = await adopt(golden.sera.receipt.messageId);
+      const lumiAdopted = await adopt(golden.lumi.allocation.id);
+      evidence.push({ phase: "adopted", sera: seraAdopted, lumi: lumiAdopted });
+      expect(seraAdopted).toMatchObject({
+        state: "adopted",
+        seat: { paneId: sera.pane, sessionId: sera.session },
+        owner: { conversationId: lead },
+        allocationId: golden.sera.allocation.id,
+        evidence: {
+          receiptId: golden.sera.receipt.messageId,
+          fingerprint: golden.sera.receipt.fingerprint,
+          disposition: "adopted",
+          pane: { paneId: sera.pane, sessionId: sera.session, owner: { conversationId: lead } },
+        },
+      });
+      expect(lumiAdopted).toMatchObject({
+        state: "adopted",
+        seat: { paneId: lumi.pane, sessionId: lumi.session },
+        owner: { conversationId: lead },
+        allocationId: golden.lumi.allocation.id,
+      });
+      expect(lumiAdopted).not.toHaveProperty("evidence");
+
+      // Each lead now reaches its exact seat, the allocations are confirmed, and the
+      // original receipt is retained under its archive key. Nothing is re-adopted.
+      for (const hire of [sera, lumi])
+        expect(store.nativeOwner(await runner.get(hire.pane))).toEqual({ conversationId: lead });
+      const allocations = new ProjectHires(`${path}.project-hires.json`);
+      expect(allocations.allocation(golden.sera.allocation.id)).toMatchObject({ confirmed: true });
+      expect(allocations.allocation(golden.lumi.allocation.id)).toMatchObject({ confirmed: true });
+      const fence = new DeliveryFence(`${path}.hire-receipts.json`);
+      expect(fence.pending(key)).toBeUndefined();
+      expect(fence.settlement(golden.sera.receipt.messageId)).toMatchObject({ disposition: "adopted" });
+      store.close();
+      store = new HerdrWatchStore(path, { runner });
+      expect(await adopt(golden.sera.receipt.messageId)).toMatchObject({
+        state: "adopted",
+        detail: expect.stringContaining("Already adopted"),
+      });
     } finally {
       store?.close();
       await writeFile(join(logs, "results.json"), JSON.stringify(evidence, null, 2));

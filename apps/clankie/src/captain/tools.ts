@@ -1327,14 +1327,14 @@ function herdrWatchTools(
             name: "settle_hire_receipt",
             label: "Settle a fresh hire receipt",
             description:
-              "Settle an uncertain fresh remote hire by its native receipt or freshIntent UUID. The operator may settle any hire; other conversations may settle only their own fresh hires. Uses authenticated host evidence; abandoned does not claim delivery, abandoned-unknown requires an unmapped launch, and not-launched requires a complete reservation window. Operator abandoned also settles an uncertain local hire from complete local inventory when its original pane is absent or holds only its own shell, freeing that directory for a new hire. Operator release-allocation takes a project allocation UUID and complete pane-absent inventory. Retains original launch fences; never sends, replays or closes a pane. New work requires a separate fresh intent and new brief.",
+              "Settle an uncertain fresh remote hire by its native receipt or freshIntent UUID. The operator may settle any hire; other conversations may settle only their own fresh hires. Uses authenticated host evidence; abandoned does not claim delivery, abandoned-unknown requires an unmapped launch, and not-launched requires a complete reservation window. Operator abandoned also settles an uncertain local hire from complete local inventory when its original pane is absent or holds only its own shell, freeing that directory for a new hire. Operator release-allocation takes a project allocation UUID and complete pane-absent inventory. Operator adopt takes a local hire receipt or project allocation UUID whose harness runs in its own pane but never confirmed, and binds that exact occupant to the conversation that hired the pane without claiming its brief arrived. Retains original launch fences; never sends, replays or closes a pane. New work requires a separate fresh intent and new brief.",
             parameters: Type.Object({
               receiptId: Type.String({ format: "uuid" }),
               disposition: Type.Union([
                 Type.Literal("not-launched"),
                 Type.Literal("abandoned"),
                 Type.Literal("abandoned-unknown"),
-                ...(operator ? [Type.Literal("release-allocation")] : []),
+                ...(operator ? [Type.Literal("release-allocation"), Type.Literal("adopt")] : []),
               ]),
             }),
             executionMode: "sequential",

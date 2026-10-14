@@ -624,7 +624,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
       receiptId: HireReceiptIdSchema,
       disposition: z
-        .enum(["not-launched", "delivered", "abandoned", "abandoned-unknown", "release-allocation"])
+        .enum(["not-launched", "delivered", "abandoned", "abandoned-unknown", "release-allocation", "adopt"])
         .optional(),
     })
     .strict(),

@@ -828,6 +828,22 @@ the command reads the retained disposition. A local project allocation whose
 original pane never held an observed occupant and now holds only its shell can
 then be released with `release-allocation`.
 
+`clankie hire-receipt settle ID adopt` is the operator's path for a local hire
+that launched but never confirmed, so its hiring lead cannot reach it (`message_seat`
+refuses "native occupant no longer matches its persisted owner"). `ID` is its local
+native hire receipt UUID or its project allocation UUID; a hire stopped at
+`trust_required` and then trusted by hand has only the allocation. Adoption needs
+the harness the hire named, with a reported session, running in the pane the hire
+recorded and in its directory. It also needs the conversation that hired that pane
+and, for a project allocation, a current process proof of the same occupant. Two
+censuses must agree. It binds that occupant to the hiring conversation, confirms
+the allocation and starts that lead's watch. A receipt settles as `adopted` and
+moves to `local-settled:ORIGINAL_UUID`. The brief's delivery stays unknown, so
+the lead should message the worker to confirm its task. Adoption sends, replays
+and closes nothing. Once adopted, the lead retires the worker with
+`close_worker_pane` and its usual checks. An absent pane or a pane without that
+harness refuses. Repeating the command reads the retained adoption.
+
 `clankie hire-receipt settle seat-ORIGINAL_UUID delivered` records historical
 native insertion through the same authenticated host census. The service resolves
 that exact event in its canonical mailbox journal and uniquely links its fingerprint

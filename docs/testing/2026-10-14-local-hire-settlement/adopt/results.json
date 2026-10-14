@@ -1,0 +1,57 @@
+[
+  {
+    "phase": "adopted",
+    "sera": {
+      "state": "adopted",
+      "receiptId": "5e29a0d5-d4d8-4fae-bba8-f315f0648618",
+      "seat": {
+        "paneId": "w1:p1",
+        "seatId": "term_65dc7daa843971",
+        "occupantId": "session-a7607af65938a27b8c6eb172e86f5f00e8aefa7f7603d1ad893e3c400e9b08ba",
+        "sessionId": "458ba467-8c82-4427-9432-31d1214f0ef8"
+      },
+      "owner": {
+        "conversationId": "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0"
+      },
+      "allocationId": "1659d85f-3c92-4460-b825-b7ae16a66594",
+      "evidence": {
+        "receiptId": "5e29a0d5-d4d8-4fae-bba8-f315f0648618",
+        "receiptKey": "[\"local\",\"claude\",\"/private/tmp/clankie-proof-ZlXEOE/sera\",\"new\"]",
+        "fingerprint": "73c7d4fd8a9b54809b6fc9ca2e6c939dbb190c1c9dade59829945a020e12cd65",
+        "disposition": "adopted",
+        "journal": "local-host-inventory",
+        "census": {
+          "observedAt": 1791962808847,
+          "panes": 2,
+          "sha256": "df88d70014e25ac6ccbe0265487209a371732a539a72c88b8fe8bbb2e6ec9a5a"
+        },
+        "pane": {
+          "paneId": "w1:p1",
+          "present": true,
+          "terminalId": "term_65dc7daa843971",
+          "occupantId": "session-a7607af65938a27b8c6eb172e86f5f00e8aefa7f7603d1ad893e3c400e9b08ba",
+          "sessionId": "458ba467-8c82-4427-9432-31d1214f0ef8",
+          "owner": {
+            "conversationId": "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0"
+          }
+        }
+      },
+      "detail": "Adopted the exact occupant for its hiring conversation. Its brief's delivery stays unknown: the lead should message it to confirm its task. Nothing was sent, replayed or closed."
+    },
+    "lumi": {
+      "state": "adopted",
+      "receiptId": "3e5ae683-0d68-43fe-8970-557b2c6c4fb8",
+      "seat": {
+        "paneId": "w1:p2",
+        "seatId": "term_65dc7daa85fcc2",
+        "occupantId": "session-0275bb530ea8195b992689e219cfd5f240364e0b7922c89f9c3aff83a6c38c8e",
+        "sessionId": "f3b1a328-469d-497a-84d1-41d25103f228"
+      },
+      "owner": {
+        "conversationId": "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0"
+      },
+      "allocationId": "3e5ae683-0d68-43fe-8970-557b2c6c4fb8",
+      "detail": "Adopted the exact occupant for its hiring conversation. Its brief's delivery stays unknown: the lead should message it to confirm its task. Nothing was sent, replayed or closed."
+    }
+  }
+]

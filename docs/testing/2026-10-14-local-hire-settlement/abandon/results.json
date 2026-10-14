@@ -11,16 +11,13 @@
   {
     "phase": "foreground-process",
     "shell": {
-      "shellPid": 25736,
+      "shellPid": 11492,
       "foreground": [
         {
-          "pid": 25787,
+          "pid": 11543,
           "name": "sleep",
           "argv0": "sleep",
-          "argv": [
-            "sleep",
-            "600"
-          ]
+          "argv": ["sleep", "600"]
         }
       ]
     },
@@ -37,20 +34,20 @@
       "receiptId": "1ad7ec41-feda-43be-8503-e88dc279a420",
       "evidence": {
         "receiptId": "1ad7ec41-feda-43be-8503-e88dc279a420",
-        "receiptKey": "[\"local\",\"claude\",\"/private/tmp/clankie-proof-vgJT9o/work\",\"new\"]",
+        "receiptKey": "[\"local\",\"claude\",\"/private/tmp/clankie-proof-yfUHP0/work\",\"new\"]",
         "fingerprint": "f96b0a686e10e3e752ab13e5ca4cadfea2bbdd17285ccbb9daadb2cfcfe815eb",
         "disposition": "abandoned",
         "journal": "local-host-inventory",
         "census": {
-          "observedAt": 1791962084538,
+          "observedAt": 1791962808145,
           "panes": 2,
-          "sha256": "9e2e33fd13ff62860822195925ec8e1f69f0f452a1c8cc482ef09be22bdaaf0f"
+          "sha256": "aa1e02c1e95b2385c28692df7a82e9b15b3454506d5d894cbeeca9c861a6eb8e"
         },
         "pane": {
           "paneId": "w1:p1",
           "present": true,
-          "terminalId": "term_65dc7af7db0841",
-          "shellPid": 25736
+          "terminalId": "term_65dc7da9fd1901",
+          "shellPid": 11492
         }
       }
     }
@@ -59,7 +56,7 @@
     "phase": "reported-harness",
     "result": {
       "state": "refused",
-      "receiptId": "13e9bc3f-51a4-40c0-9538-02e697f69f51",
+      "receiptId": "2ce506ca-0c68-40df-848e-8600138ec860",
       "detail": "Local settlement refused: Pane w1:p2 reports a herdr:claude session occupant; its hiring lead may adopt or retire it. Original retained; nothing sent, closed or relaunched."
     }
   },
@@ -67,17 +64,17 @@
     "phase": "absent-pane-settled",
     "result": {
       "state": "abandoned",
-      "receiptId": "13e9bc3f-51a4-40c0-9538-02e697f69f51",
+      "receiptId": "2ce506ca-0c68-40df-848e-8600138ec860",
       "evidence": {
-        "receiptId": "13e9bc3f-51a4-40c0-9538-02e697f69f51",
-        "receiptKey": "[\"local\",\"claude\",\"/private/tmp/clankie-proof-vgJT9o/other\",\"new\"]",
+        "receiptId": "2ce506ca-0c68-40df-848e-8600138ec860",
+        "receiptKey": "[\"local\",\"claude\",\"/private/tmp/clankie-proof-yfUHP0/other\",\"new\"]",
         "fingerprint": "294ef1f48fda43f18e2ac145fb1bf4fe32308cf398e2d2b19fcdb374b9191c81",
         "disposition": "abandoned",
         "journal": "local-host-inventory",
         "census": {
-          "observedAt": 1791962084605,
+          "observedAt": 1791962808207,
           "panes": 1,
-          "sha256": "d97b3ac2e16b19a3fdc4e988c8289dd2153bf8c08c2bb5def2bc196963ad59cd"
+          "sha256": "478a44c6fbe446990c45d747f4c7adf1dc5beeb90041ef206a99cc62e937353c"
         },
         "pane": {
           "paneId": "w1:p2",

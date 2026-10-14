@@ -192,6 +192,15 @@ its own shell in the foreground with no reported harness. The evidence claims
 neither launch nor delivery; the original is archived and a new hire into that
 directory starts normally. A live harness in the pane refuses: adopt or retire it.
 
+A local hire that launched but never confirmed (its lead's `message_seat` refuses
+"native occupant no longer matches its persisted owner", including a hire stopped
+at `trust_required` and trusted by hand) is adopted with
+`clankie hire-receipt settle RECEIPT_OR_ALLOCATION_UUID adopt`. The harness must
+run in the hire's own pane and directory, with matching process proof for a
+project allocation. Its occupant is bound to the hiring conversation and its
+allocation confirmed; delivery of the brief stays unknown, so that lead messages
+the worker to confirm the task or retires it with `close_worker_pane`.
+
 After authenticated settlement, separately authorized new remote work can use
 `hire_agent` with `freshIntent: {id, afterReceiptId}` or
 `clankie hire-receipt fresh --json-stdin` with the public `spawn_seat` body.
