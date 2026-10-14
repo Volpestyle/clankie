@@ -189,7 +189,11 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       // original. This invocation still cannot send a replacement payload.
       settle(record);
       return observed(
-        { ...value, detail: "The original was not sent. No replacement was sent." },
+        {
+          ...value,
+          detail:
+            "The original was not sent. No replacement was sent. Send it again with a new message_clankie call.",
+        },
         "receipt_unresolved",
       );
     }

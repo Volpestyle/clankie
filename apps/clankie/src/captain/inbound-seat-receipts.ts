@@ -106,11 +106,30 @@ export class InboundSeatReceipts {
       signal: request?.signal,
     };
     this.active.set(delivery.id, attempt);
+    const original = (async () => {
+      try {
+        if (this.abandoned(attempt)) return this.lookup(paneId, delivery, fingerprint);
+        return await run();
+      } finally {
+        this.active.delete(delivery.id);
+      }
+    })();
+    // Answer by the admission deadline, inside the worker bridge's own request
+    // budget, so a slow route returns its sealed not_sent instead of timing out
+    // uncertain (VUH-2244). The late original reconciles that tombstone before
+    // acceptance and can never land after this answer.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<FleetSeatMessageReceipt>((resolve) => {
+      timer = setTimeout(
+        () => resolve(this.lookup(paneId, delivery, fingerprint)),
+        Math.max(0, attempt.stamp.deadlineAt - this.now()),
+      );
+    });
+    original.catch(() => undefined);
     try {
-      if (this.abandoned(attempt)) return this.lookup(paneId, delivery, fingerprint);
-      return await run();
+      return await Promise.race([original, expired]);
     } finally {
-      this.active.delete(delivery.id);
+      clearTimeout(timer);
     }
   }
 
@@ -147,7 +166,8 @@ export class InboundSeatReceipts {
           ...receipt,
           deliveryStage: "unavailable",
           definitive: "not_sent",
-          detail: "This original delivery was not accepted and its ID is sealed; nothing was sent.",
+          detail:
+            "This original delivery was not accepted and its ID is sealed; nothing was sent. Send it again with a new message_clankie call.",
         };
       if (
         !accepted ||
