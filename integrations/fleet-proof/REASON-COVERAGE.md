@@ -11,8 +11,8 @@ sources. Linux evidence and its initial-PID-namespace limits are recorded in
 
 `fleet-health-metrics-native.integration.test.ts` runs the real macOS helper,
 live loopback TCP sockets, an isolated Herdr daemon and a service-owned private
-registry. It asserts thirteen existing terminal refusal cases independently of
-native retry diagnostics: seventeen attempts, fifteen refusals and two admissions.
+registry. It asserts fourteen existing terminal refusal cases independently of
+native retry diagnostics: eighteen attempts, sixteen refusals and two admissions.
 It also checks a real provider method refusal and an actual reply corrupted by
 an owned Unix relay. No kernel observations or successful provider responses
 are fabricated.
@@ -26,6 +26,7 @@ are fabricated.
 | `native_initial_unavailable` | The compiled helper is unavailable at the initial checkpoint.                                                     |
 | `native_final_unavailable`   | The real initial observation succeeds, then the final helper is unavailable.                                      |
 | `pane_unavailable`           | Real Herdr returns `pane_not_found` on the initial pane read.                                                     |
+| `pane_moved`                 | The claimed ID belongs to a pane moved to another workspace; real Herdr answers for it under its new ID.          |
 | `not_member`                 | Neither the actual ancestry nor the service registry grants membership.                                           |
 | `snapshot_changed`           | The TCP owner's actual parent exits between observations.                                                         |
 | `pane_changed`               | The owned pane is removed between the initial and final Herdr reads.                                              |

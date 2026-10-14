@@ -151,6 +151,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
         reason !== "unsupported_pid_namespace" &&
         reason !== "invalid_pane" &&
         reason !== "pane_unavailable" &&
+        reason !== "pane_moved" &&
         reason !== "not_member" &&
         reason !== "private_seat_expired"
       )
@@ -231,7 +232,9 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       };
       const info = await paneInfo();
       if (info === null) return refuse("pane_unavailable");
-      if (info?.pane_id !== pane) return refuse("observation_failed");
+      // Herdr resolves a moved pane's old ID to the pane under its new ID.
+      if (info?.pane_id !== pane)
+        return refuse(typeof info?.pane_id === "string" ? "pane_moved" : "observation_failed");
       const shell = info.shell_pid;
       if (!Number.isSafeInteger(shell) || shell <= 1) return refuse("observation_failed");
       const admitted =
@@ -458,6 +461,8 @@ function projectRefusalReason(event: ProjectProcessRefusal | undefined): FleetPr
   switch (event?.reason) {
     case "pane_unavailable":
       return "pane_unavailable";
+    case "pane_moved":
+      return "pane_moved";
     case "binding_unavailable":
       return "missing_binding";
     case "native_initial_unavailable":

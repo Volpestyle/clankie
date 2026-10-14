@@ -7,7 +7,11 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, it } from "vitest";
 import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
-import { localFleetProof, type LocalFleetProofOptions } from "../src/local-fleet-proof.ts";
+import {
+  localFleetAdmissionProof,
+  localFleetProof,
+  type LocalFleetProofOptions,
+} from "../src/local-fleet-proof.ts";
 import { fleetProcessHelper, observeSocketProcess, observeNativeBirth } from "../src/local-fleet-process.ts";
 import { closeNativeProcessObservers } from "../src/native-process-transport.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
@@ -88,6 +92,17 @@ nativeIt(
       expect(await request(admitted, "invalid/pane")).toBe(false);
       expect(await request(proof({ platform: "unsupported" }))).toBe(false);
       expect(await request(admitted, "w999999:p999999")).toBe(false);
+      // VUH-2242: a pane moved to another workspace takes a new ID, but its
+      // process keeps the old HERDR_PANE_ID and Herdr still answers for it.
+      // That claim is a proven refusal, not an unavailable observation (503).
+      const workspace = (await herdr.cli("pane", "get", herdr.pane)).result.pane.workspace_id as string;
+      const staged = (
+        await herdr.cli("tab", "create", "--workspace", workspace, "--cwd", herdr.root, "--no-focus")
+      ).result.root_pane.pane_id as string;
+      const moved = (await herdr.cli("pane", "move", staged, "--new-workspace", "--no-focus")).result
+        .move_result;
+      expect(moved.pane.pane_id).not.toBe(staged);
+      await expect(localFleetAdmissionProof(options)(socket, staged)).resolves.toBe(false);
       expect(await proof({ privateSeat: async () => false })(socket, herdr.pane)).toBe(false);
       expect(await proof({ binding: async () => undefined })(socket, herdr.pane)).toBe(false);
       expect(await proof({ processHelper: unavailableHelper })(socket, herdr.pane)).toBe(false);
@@ -198,8 +213,8 @@ nativeIt(
       expect(effects).toBe(2);
       const snapshot = metrics.snapshot();
       expect(snapshot.totals.proof).toEqual({
-        attempts: 17,
-        refusals: 15,
+        attempts: 18,
+        refusals: 16,
         byReason: {
           not_member: 1,
           missing_binding: 1,
@@ -213,11 +228,12 @@ nativeIt(
           invalid_pane: 1,
           unsupported_platform: 1,
           pane_unavailable: 1,
+          pane_moved: 1,
           pane_changed: 1,
         },
       });
       expect(snapshot.totals.transportDiagnostics.helper_unavailable).toBe(1);
-      expect(snapshot.windows[0].proofRefusalRate).toBe(15 / 17);
+      expect(snapshot.windows[0].proofRefusalRate).toBe(16 / 18);
       expect(JSON.stringify(snapshot)).not.toContain(herdr.socketPath);
       expect(JSON.stringify(snapshot)).not.toMatch(/\bpid\b/u);
     } finally {

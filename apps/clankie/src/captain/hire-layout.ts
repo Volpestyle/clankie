@@ -244,7 +244,80 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
       while (tabs.some((t) => t.label === tabLabel)) tabLabel = `${group} · ${++number}`;
     }
     let paneId: string;
-    if (target && !input.command) {
+    if (newWorkspace) {
+      // Herdr fixes a pane's HERDR_PANE_ID when its process starts, and a moved
+      // pane keeps the old one, so every proof from that worker names a pane
+      // that is gone (VUH-2242). Create the repo workspace around the hire.
+      if (input.command && !commandTab) throw new Error("Native initial-command pane creation unavailable");
+      let created: { workspaceId: string; tabId: string; rootPaneId: string };
+      try {
+        workspaceEffect();
+        const result = z
+          .object({
+            result: z.object({
+              workspace: Workspace,
+              tab: z.object({ tab_id: z.string() }),
+              root_pane: z.object({ pane_id: z.string().min(1) }),
+            }),
+          })
+          .parse(
+            JSON.parse(
+              await run([
+                "workspace",
+                "create",
+                "--cwd",
+                input.cwd,
+                "--label",
+                repo.label,
+                "--no-focus",
+                ...(input.command ? [] : envArgs),
+              ]),
+            ),
+          ).result;
+        created = {
+          workspaceId: result.workspace.workspace_id,
+          tabId: result.tab.tab_id,
+          rootPaneId: result.root_pane.pane_id,
+        };
+      } catch (error) {
+        throw new HireLayoutUnconfirmed(
+          `Hire workspace creation unconfirmed; inspect Herdr before retrying: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (input.command) {
+        paneId = await createPane(() =>
+          commandTab!({
+            cwd: input.cwd,
+            label: tabLabel,
+            workspaceId: created.workspaceId,
+            command: input.command!,
+            ...(input.env === undefined ? {} : { env: input.env }),
+          }),
+        );
+        // Herdr cannot create a workspace from an initial command; its starter
+        // shell is ours and idle. Left behind if Herdr refuses, it is harmless.
+        await run(["pane", "close", created.rootPaneId]).catch(() => undefined);
+      } else {
+        paneId = created.rootPaneId;
+      }
+      try {
+        if (!input.command) await run(["tab", "rename", created.tabId, tabLabel]);
+        await run([
+          "workspace",
+          "report-metadata",
+          created.workspaceId,
+          "--source",
+          SOURCE,
+          "--token",
+          `${REPO}=${repoToken}`,
+        ]);
+      } catch (error) {
+        throw new HireLayoutUnconfirmed(
+          `Hire workspace setup unconfirmed at ${paneId}; inspect Herdr before retrying: ${error instanceof Error ? error.message : String(error)}`,
+          paneId,
+        );
+      }
+    } else if (target && !input.command) {
       paneId = await createPane(
         async () =>
           z
@@ -334,56 +407,6 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
               ),
             ).result.root_pane.pane_id,
       );
-    }
-    if (newWorkspace) {
-      let moveConfirmed = false;
-      try {
-        const moved = z
-          .object({
-            result: z.object({
-              move_result: z.object({
-                changed: z.literal(true),
-                previous_pane_id: z.literal(paneId),
-                pane: z.object({ pane_id: z.string().min(1) }),
-                created_workspace: Workspace,
-              }),
-            }),
-          })
-          .parse(
-            JSON.parse(
-              await run([
-                "pane",
-                "move",
-                paneId,
-                "--new-workspace",
-                "--label",
-                repo.label,
-                "--tab-label",
-                tabLabel,
-                "--no-focus",
-              ]),
-            ),
-          ).result.move_result;
-        paneId = moved.pane.pane_id;
-        moveConfirmed = true;
-        workspace = moved.created_workspace;
-        await run([
-          "workspace",
-          "report-metadata",
-          workspace.workspace_id,
-          "--source",
-          SOURCE,
-          "--token",
-          `${REPO}=${repoToken}`,
-        ]);
-      } catch (error) {
-        throw new HireLayoutUnconfirmed(
-          `Hire workspace move unconfirmed at ${paneId}; inspect Herdr before retrying: ${error instanceof Error ? error.message : String(error)}`,
-          // Cross-workspace moves change the public pane ID. A lost reply
-          // cannot bind the receipt to the old, now absent ID and permit replay.
-          moveConfirmed ? paneId : undefined,
-        );
-      }
     }
     // Failure after creation must be reconciled, never retried with a new pane.
     try {

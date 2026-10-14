@@ -62,6 +62,15 @@ nothing; sub-leads have exact commands and the out-and-back workaround in the
 A failed/unknown create, move or metadata reply retains an uncertain allocation,
 not a replacement pane.
 
+Updated 2026-10-14 for [VUH-2242](https://linear.app/vuhlp/issue/VUH-2242): a
+missing repo workspace is created around the hire with `workspace create`, not
+by moving a pane allocated in another workspace. A cross-workspace move changes
+the pane ID, while the started process keeps the old `HERDR_PANE_ID`; Herdr
+still resolves that old ID to the moved pane, so the worker's fleet proofs
+failed as `observation_failed` (HTTP 503). A prepared initial command takes a
+tab in the new workspace and its idle starter shell closes. Proofs now refuse a
+claimed ID that resolves to a different pane as `pane_moved`.
+
 A live-session resume reuses its existing pane without rearrangement. A resume
 that needs a new pane, or the destination allocation of an explicitly requested
 move, uses this same rule. A move carries the known worker role and allocates a

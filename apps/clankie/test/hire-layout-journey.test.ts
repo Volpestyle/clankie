@@ -277,7 +277,24 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     // panes, including the same-repo shell, keep their original terminal identity.
     const soloDirectory = join(root, "single-hire");
     await mkdir(soloDirectory);
-    const soloPane = await runner.createTab!({ cwd: soloDirectory, label: "Solo hire" });
+    const soloPane = await runner.createTab!({
+      cwd: soloDirectory,
+      label: "Solo hire",
+      env: { CLANKIE_FIXTURE_LAUNCH: "solo" },
+    });
+    // VUH-2242: the hire's process starts in its final pane, so the pane ID it
+    // claims in fleet proofs is its own, and its launch environment arrived.
+    await run(["pane", "send-text", soloPane, 'echo "claim=$HERDR_PANE_ID launch=$CLANKIE_FIXTURE_LAUNCH"']);
+    await run(["pane", "send-keys", soloPane, "Enter"]);
+    let soloShell = "";
+    for (let i = 0; i < 100 && !/claim=\S+ launch=/u.test(soloShell); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      soloShell = await run(["pane", "read", soloPane, "--source", "recent-unwrapped", "--lines", "20"]);
+    }
+    expect(soloShell).toContain(`claim=${soloPane} launch=solo`);
+    expect(
+      JSON.parse(await run(["pane", "process-info", "--pane", soloPane])).result.process_info.pane_id,
+    ).toBe(soloPane);
     const soloSnapshot = await snapshot();
     const soloWorkspace = soloSnapshot.panes.find((p: any) => p.pane_id === soloPane).workspace_id;
     expect(
@@ -286,8 +303,8 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     await runner.closePane!(soloPane);
     ownedClosedPanes.push(soloPane);
     expect((await snapshot()).panes.filter((p: any) => p.workspace_id === soloWorkspace)).toEqual([]);
-    // A prepared initial-command pane survives its new-workspace move with
-    // the same native terminal/process, and leaves no shell beside it.
+    // A prepared initial command starts in its new workspace's final pane, with
+    // the same native terminal/process, and leaves no starter shell beside it.
     const preparedDirectory = join(root, "prepared-new-workspace");
     await mkdir(preparedDirectory);
     let originalCommand: { terminalId: string; pid: number } | undefined;
@@ -303,6 +320,13 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       label: "Prepared new workspace",
       command: ["/bin/sh", "-c", "sleep 60"],
     });
+    // Herdr cannot create a workspace from an initial command; the allocation
+    // closes only the idle starter shell its own workspace create returned.
+    const preparedWorkspace = calls.findLast((c) => c.args[0] === "workspace" && c.args[1] === "create")!;
+    const starterClose = calls.findLast((c) => c.args[0] === "pane" && c.args[1] === "close")!;
+    expect(starterClose.args[2]).toBe((preparedWorkspace.result as any).result.root_pane.pane_id);
+    expect(calls.indexOf(starterClose)).toBeGreaterThan(calls.indexOf(preparedWorkspace));
+    ownedClosedPanes.push(starterClose.args[2]!);
     const preparedSnapshot = await snapshot();
     const preparedMember = preparedSnapshot.panes.find((p: any) => p.pane_id === preparedNewPane);
     expect(
@@ -490,18 +514,15 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     // Real transport fault after a successful mutation: preserve the uncertain
     // hire receipt across a new store instance, never start/retry a harness.
     const uncertainty: unknown[] = [];
-    for (const fault of ["tab-reply", "pane-label", "workspace-move"] as const) {
-      const faultCwd = fault === "workspace-move" ? join(root, "uncertain-new-workspace") : plain;
-      if (fault === "workspace-move") await mkdir(faultCwd);
+    for (const fault of ["tab-reply", "pane-label", "workspace-create"] as const) {
+      const faultCwd = fault === "workspace-create" ? join(root, "uncertain-new-workspace") : plain;
+      if (fault === "workspace-create") await mkdir(faultCwd);
       let dropped = false;
       const faultRunner = createHerdrWatchRunner(undefined, async (args) => {
         const raw = await run(args);
         if (
           !dropped &&
-          ((fault === "workspace-move" &&
-            args[0] === "pane" &&
-            args[1] === "move" &&
-            args.includes("--new-workspace")) ||
+          ((fault === "workspace-create" && args[0] === "workspace" && args[1] === "create") ||
             (fault === "tab-reply" && args[0] === "tab" && args[1] === "create") ||
             (fault === "pane-label" && args[0] === "pane" && args[1] === "rename"))
         ) {

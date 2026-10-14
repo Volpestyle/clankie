@@ -150,6 +150,7 @@ type ProjectProcessRefusalReason =
   | "unsupported_scope"
   | "binding_unavailable"
   | "pane_unavailable"
+  | "pane_moved"
   | "native_harness_unavailable"
   | "launcher_unavailable"
   | "foreground_missing"
@@ -283,9 +284,12 @@ export function createProjectProcessObserver(options: {
         if (value?.pane_id !== pane)
           throw new ProjectProcessRefusalError({
             reason:
-              at === "final_pane" && value?.pane_id !== undefined
-                ? "process_changed"
-                : "malformed_observation",
+              value?.pane_id === undefined
+                ? "malformed_observation"
+                : at === "final_pane"
+                  ? "process_changed"
+                  : // Herdr resolves a moved pane's old ID to the pane under its new ID.
+                    "pane_moved",
             checkpoint: at,
           });
         return value;
@@ -302,7 +306,10 @@ export function createProjectProcessObserver(options: {
           throw error;
         }
         if (agent.paneId !== pane)
-          throw new ProjectProcessRefusalError({ reason: "session_changed", checkpoint: at });
+          throw new ProjectProcessRefusalError({
+            reason: at === "initial_native" ? "pane_moved" : "session_changed",
+            checkpoint: at,
+          });
         if (!OPERATOR_SEAT_HARNESSES.some((harness) => harness === agent.agent))
           throw new ProjectProcessRefusalError({ reason: "native_harness_unavailable", checkpoint: at });
         const session =

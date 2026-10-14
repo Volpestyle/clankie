@@ -13,6 +13,8 @@ export const FleetProofRefusalReasonSchema = z.enum([
   "native_initial_unavailable",
   "native_final_unavailable",
   "pane_unavailable",
+  /** The claimed pane ID now names a moved pane with a different ID; its process kept the old one. */
+  "pane_moved",
   "not_member",
   "snapshot_changed",
   "pane_changed",
