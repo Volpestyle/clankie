@@ -4119,8 +4119,9 @@ paths:
         ordinary conversations and their durable records remain accessible.
         `presence` returns a strict snapshot with mood (`needs_you`, `thinking`,
         `in_voice`, `playing`, `leading`, `idle`, in that precedence), detail,
-        since (source start timestamp or null when unknown), activeSeats (all live
-        registered fleet seats), and optional pendingOwnerItem (oldest unanswered
+        since (source start timestamp or null when unknown), activeSeats (working
+        seats in the last completed fleet projection; a read never waits for a
+        fresh one), and optional pendingOwnerItem (oldest unanswered
         owner ask: conversationId, questionId, title, since). It uses
         optional cursor and waitMs (0–30000); an absent or changed cursor returns
         immediately. A current cursor parks until the projected sources change,

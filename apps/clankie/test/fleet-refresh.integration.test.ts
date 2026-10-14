@@ -180,7 +180,8 @@ async function captainFixture(tree: Awaited<ReturnType<typeof sessionTree>>) {
     {
       herdrAvailable: () => true,
       memory: {},
-      embodiment: {},
+      embodiment: { getLiveSession: async () => undefined },
+      presence: { listSessions: async () => [] },
       browser: { catalog: async () => ({ available: false, tools: [] }) },
       mcp: { catalog: async () => [] },
     } as unknown as CaptainDeps,
@@ -588,5 +589,40 @@ it("a stalled census still answers the roster CLI inside its deadline, named as 
   } finally {
     held.release();
     await listing.catch(() => undefined);
+  }
+}, 20_000);
+
+it("presence counts working seats from the last projection while a census stalls, then reports the change", async () => {
+  const tree = await sessionTree(1, 0);
+  const f = await captainFixture(tree);
+  const presence = async (cursor?: string) => {
+    const result = await f.captain.serveOperatorConversation({
+      op: "presence",
+      schemaVersion: 1,
+      ...(cursor === undefined ? {} : { cursor, waitMs: 10_000 }),
+    });
+    if (result.op !== "presence") throw new Error("Wrong presence result");
+    return result.snapshot;
+  };
+  await f.captain.serveOperatorConversation({ op: "roster", schemaVersion: 1 });
+  await delay(1050);
+  const held = f.hold();
+  const roster = f.captain.serveOperatorConversation({ op: "roster", schemaVersion: 1 });
+  await held.started;
+  try {
+    // A presence read never waits for the stalled projection, so its client cannot time out to idle.
+    const started = performance.now();
+    const working = await presence();
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(working).toMatchObject({ activeSeats: 1, mood: "leading" });
+    held.release();
+    await roster;
+    // The finished worker reaches presence through the shared refresh and its long poll.
+    f.rows[0]!.agent_status = "idle";
+    await delay(1050);
+    expect(await presence(working.cursor)).toMatchObject({ activeSeats: 0, mood: "idle" });
+  } finally {
+    held.release();
+    await roster.catch(() => undefined);
   }
 }, 20_000);

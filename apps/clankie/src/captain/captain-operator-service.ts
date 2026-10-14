@@ -317,14 +317,19 @@ export function createOperatorService(
     }
     if (request.op === "presence") {
       let seatCursor: string | undefined;
-      let activeSeats = 0;
       const snapshot = await pollPresence(
         async () => {
+          // Count the last completed projection; never wait on a fresh one. A
+          // busy roster takes seconds, and a presence read that misses its
+          // client deadline reads as idle. The shared refresh publishes its
+          // seats and touches the cursor when they change, which this
+          // long poll then reports.
           const currentSeatCursor = ctx.fleetChanges.current();
           if (seatCursor !== currentSeatCursor) {
-            activeSeats = (await ctx.refreshFleet()).filter((seat) => seat.status === "working").length;
             seatCursor = currentSeatCursor;
+            void ctx.refreshFleet().catch(() => undefined);
           }
+          const activeSeats = ctx.liveSeats.filter((seat) => seat.status === "working").length;
           const [voice, play] = await Promise.all([
             ctx.deps.presence.listSessions(),
             ctx.deps.embodiment.getLiveSession(),

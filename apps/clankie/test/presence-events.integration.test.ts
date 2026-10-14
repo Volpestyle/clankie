@@ -91,6 +91,10 @@ async function fixture() {
     },
     fleetChanges: clock,
     refreshFleet: async () => seats,
+    // The last completed projection, which presence counts without waiting.
+    get liveSeats() {
+      return seats;
+    },
     observeFleet: async () => ({}),
     sessions: new Map([
       [
@@ -157,7 +161,13 @@ async function fixture() {
       store = new ConversationStore(join(root, "conversations"), runner);
       stores.push(store);
       reports = reportHelpers();
-      serve = createOperatorService({ ...context, conversations: store });
+      serve = createOperatorService({
+        ...context,
+        conversations: store,
+        get liveSeats() {
+          return seats;
+        },
+      });
     },
     mode: (value: typeof mode) => {
       mode = value;
