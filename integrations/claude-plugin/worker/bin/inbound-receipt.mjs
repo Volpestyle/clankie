@@ -188,11 +188,15 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       // Only an authenticated exact terminal negative releases an unknown
       // original. This invocation still cannot send a replacement payload.
       settle(record);
+      // This call only settled the earlier original; its own text was not sent
+      // either. Say so, or a worker reads its new message as refused (VUH-2244).
       return observed(
         {
           ...value,
           detail:
-            "The original was not sent. No replacement was sent. Send it again with a new message_clankie call.",
+            hash(text) === record.fingerprint
+              ? `Your earlier message ${record.deliveryId} was not sent, and this call sent nothing. Send it again with a new message_clankie call.`
+              : `This call only settled your earlier message ${record.deliveryId}, which was not sent; this message was not sent either. Send this message again with a new message_clankie call.`,
         },
         "receipt_unresolved",
       );

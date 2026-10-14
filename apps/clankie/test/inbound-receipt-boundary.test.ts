@@ -154,8 +154,7 @@ it("settles the old bridge's sealed unknown original through HTTP after service 
       deliveryStage: "unavailable",
       definitive: "not_sent",
       deliveryId: retained.deliveryId,
-      detail:
-        "The original was not sent. No replacement was sent. Send it again with a new message_clankie call.",
+      detail: `This call only settled your earlier message ${retained.deliveryId}, which was not sent; this message was not sent either. Send this message again with a new message_clankie call.`,
     });
     expect(await readdir(f.directory)).toEqual([]);
     expect(f.posts).toHaveLength(1);
