@@ -278,6 +278,7 @@ it("gives a paired device a complete thumbnail of a large recorded PNG, cached b
       },
     },
     local.metadata,
+    { storage: local.storage },
   );
   const opaque = screenshot();
   const transparent = screenshot((x) => (x < 603 ? 255 : 96));
