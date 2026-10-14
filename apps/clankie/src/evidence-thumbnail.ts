@@ -22,6 +22,7 @@ export const EVIDENCE_THUMBNAIL_LIMITS = {
   sourceMaxBytes: 16 * 1024 * 1024,
   maxSide: 16_384,
   maxPixels: 16_777_216,
+  maxChunks: 65_536,
   /** Longest output edge, largest first; each step is one encode. */
   edges: [768, 640, 512, 384, 256],
   jpegQuality: 80,
@@ -82,7 +83,7 @@ interface Png {
 }
 
 /** Walks the chunks with CRCs and checks IHDR before anything is decoded. */
-function parsePng(bytes: Buffer, limits: EvidenceThumbnailLimits): Png {
+function parsePng(bytes: Buffer, limits: EvidenceThumbnailLimits, check: () => void): Png {
   if (!bytes.subarray(0, 8).equals(PNG_SIGNATURE)) throw new Refusal("too_large");
   let offset = 8;
   let header: Omit<Png, "palette" | "paletteSize" | "key" | "idat"> | undefined;
@@ -91,7 +92,10 @@ function parsePng(bytes: Buffer, limits: EvidenceThumbnailLimits): Png {
   let key: number[] | undefined;
   const idat: Buffer[] = [];
   let idatClosed = false;
-  for (;;) {
+  for (let chunks = 0; ; chunks++) {
+    // Real encoders write a few thousand chunks; millions of empty ones are an attack on this loop.
+    if (chunks > limits.maxChunks) throw new Refusal("not_previewable");
+    if (chunks % 1024 === 1023) check();
     if (offset + 12 > bytes.length) throw new Refusal("not_previewable");
     const length = bytes.readUInt32BE(offset);
     const end = offset + 12 + length;
@@ -264,27 +268,34 @@ function expand(png: Png, line: Uint8Array, out: Uint8Array): void {
       }
       continue;
     }
-    const channels = CHANNELS[colorType]!;
-    const at = x * channels * (wide ? 2 : 1);
-    const read = (channel: number) =>
-      wide ? (line[at + channel * 2]! << 8) | line[at + channel * 2 + 1]! : line[at + channel]!;
-    const high = (channel: number) => (wide ? line[at + channel * 2]! : line[at + channel]!);
+    // Each sample is one byte, or two with the high byte first.
+    const bytes = wide ? 2 : 1;
+    const at = x * CHANNELS[colorType]! * bytes;
     if (colorType === 2) {
-      out[o] = high(0);
-      out[o + 1] = high(1);
-      out[o + 2] = high(2);
+      out[o] = line[at]!;
+      out[o + 1] = line[at + bytes]!;
+      out[o + 2] = line[at + 2 * bytes]!;
       out[o + 3] =
-        key !== undefined && key[0] === read(0) && key[1] === read(1) && key[2] === read(2) ? 0 : 255;
+        key !== undefined &&
+        key[0] === sampleAt(line, at, wide) &&
+        key[1] === sampleAt(line, at + bytes, wide) &&
+        key[2] === sampleAt(line, at + 2 * bytes, wide)
+          ? 0
+          : 255;
     } else if (colorType === 4) {
-      out[o] = out[o + 1] = out[o + 2] = high(0);
-      out[o + 3] = high(1);
+      out[o] = out[o + 1] = out[o + 2] = line[at]!;
+      out[o + 3] = line[at + bytes]!;
     } else {
-      out[o] = high(0);
-      out[o + 1] = high(1);
-      out[o + 2] = high(2);
-      out[o + 3] = high(3);
+      out[o] = line[at]!;
+      out[o + 1] = line[at + bytes]!;
+      out[o + 2] = line[at + 2 * bytes]!;
+      out[o + 3] = line[at + 3 * bytes]!;
     }
   }
+}
+
+function sampleAt(line: Uint8Array, at: number, wide: boolean) {
+  return wide ? (line[at]! << 8) | line[at + 1]! : line[at]!;
 }
 
 function paeth(a: number, b: number, c: number) {
@@ -316,6 +327,7 @@ async function decodeScaled(
   png: Png,
   width: number,
   height: number,
+  check: () => void,
   signal: AbortSignal,
 ): Promise<BoxScaler> {
   const bitsPerPixel = CHANNELS[png.colorType]! * png.depth;
@@ -333,7 +345,7 @@ async function decodeScaled(
   try {
     inflater.end(png.idat);
     for await (const chunk of inflater as AsyncIterable<Buffer>) {
-      signal.throwIfAborted();
+      check();
       let read = 0;
       while (read < chunk.length) {
         if (rows === png.height) throw new Refusal("not_previewable");
@@ -374,6 +386,19 @@ function rescale(source: BoxScaler, width: number, height: number): BoxScaler {
 
 const deflateAsync = promisify(deflate);
 
+/** Settles with `work`, or rejects as soon as the deadline aborts; bounded work left behind finishes unobserved. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  let onAbort = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
+  aborted.catch(() => undefined);
+  work.catch(() => undefined);
+  return Promise.race([work, aborted]).finally(() => signal.removeEventListener("abort", onAbort));
+}
+
 function chunk(type: string, data: Buffer): Buffer {
   const out = Buffer.alloc(12 + data.length);
   out.writeUInt32BE(data.length, 0);
@@ -402,7 +427,7 @@ function flatten(image: Raster): Raster {
 }
 
 /** RGBA8 PNG with the minimum-sum filter per row; used only for images with transparency. */
-async function encodePng(image: Raster): Promise<Buffer> {
+async function encodePng(image: Raster, signal: AbortSignal): Promise<Buffer> {
   const stride = image.width * 4;
   const raw = Buffer.alloc((stride + 1) * image.height);
   const candidate = new Uint8Array(stride);
@@ -443,7 +468,7 @@ async function encodePng(image: Raster): Promise<Buffer> {
   return Buffer.concat([
     PNG_SIGNATURE,
     chunk("IHDR", header),
-    chunk("IDAT", await deflateAsync(raw, { level: 9 })),
+    chunk("IDAT", await untilAborted(deflateAsync(raw, { level: 6 }), signal)),
     chunk("IEND", Buffer.alloc(0)),
   ]);
 }
@@ -508,9 +533,14 @@ export class EvidenceThumbnails {
   renders = 0;
 
   private readonly limits: EvidenceThumbnailLimits;
+  private readonly clock: () => number;
 
-  constructor(limits: EvidenceThumbnailLimits = EVIDENCE_THUMBNAIL_LIMITS) {
+  constructor(
+    limits: EvidenceThumbnailLimits = EVIDENCE_THUMBNAIL_LIMITS,
+    options: { clock?: () => number } = {},
+  ) {
     this.limits = limits;
+    this.clock = options.clock ?? (() => performance.now());
   }
 
   /**
@@ -582,6 +612,15 @@ export class EvidenceThumbnails {
       this.limits.deadlineMs,
     );
     const { signal } = controller;
+    // The timer cancels awaited I/O; codec work runs synchronously between
+    // awaits, so elapsed time is also checked after every step and before any
+    // result is cached.
+    const started = this.clock();
+    const check = () => {
+      if (!signal.aborted && this.clock() - started > this.limits.deadlineMs)
+        controller.abort(new EvidenceThumbnailUnavailable("timeout"));
+      signal.throwIfAborted();
+    };
     try {
       this.renders++;
       // Storage can stall; the deadline frees this slot even if the read never answers.
@@ -603,25 +642,38 @@ export class EvidenceThumbnails {
         await blob?.body.cancel();
         throw new EvidenceThumbnailUnavailable("unreadable");
       }
-      const png = parsePng(await readSource(blob.body, size, signal), this.limits);
-      signal.throwIfAborted();
+      try {
+        check();
+      } catch (error) {
+        // The stream is ours until readSource takes it.
+        void blob.body.cancel().catch(() => undefined);
+        throw error;
+      }
+      const source = await readSource(blob.body, size, signal);
+      check();
+      const png = parsePng(source, this.limits, check);
+      check();
       const first = fit(png.width, png.height, this.limits.edges[0]!);
-      const decoded = await decodeScaled(png, first.width, first.height, signal);
+      const decoded = await decodeScaled(png, first.width, first.height, check, signal);
+      check();
       // Transparency is kept when a PNG fits at a large enough edge; otherwise the ladder flattens to JPEG.
       const passes = decoded.opaque ? (["jpeg"] as const) : (["png", "flattened"] as const);
       for (const pass of passes)
         for (const edge of this.limits.edges) {
           if (pass === "png" && edge < this.limits.pngMinEdge) continue;
-          signal.throwIfAborted();
+          check();
           const target = fit(png.width, png.height, edge);
           const image =
             target.width === decoded.width && target.height === decoded.height
               ? decoded
               : rescale(decoded, target.width, target.height);
+          check();
           const bytes =
             pass === "png"
-              ? await encodePng(image)
+              ? await encodePng(image, signal)
               : await encodeJpeg(pass === "jpeg" ? image : flatten(image), this.limits.jpegQuality);
+          // A rendition that finished past the deadline is not an answer.
+          check();
           if (bytes.length <= this.limits.outputMaxBytes)
             return this.remember(sha256, {
               sha256,

@@ -2493,14 +2493,19 @@ plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
   pixels, not interlaced) gets a complete host-side thumbnail under the same
   64 KiB cap: JPEG with a 768-pixel long edge, stepping down to 256 until it
   fits. An image with transparency stays PNG when one fits with at least a
-  512-pixel long edge; otherwise it is flattened onto white as JPEG.
-  Renditions are cached in memory by sha256. Two renders run at a time, each
-  within five seconds, with up to 32 waiting at most 15 seconds. A busy or
-  timed-out render answers `unavailable` without a cached rendition, and a
-  timed-out sha256 is not rendered again for a minute. Other large files still
-  answer `too_large`; a malformed or interlaced PNG answers `not_previewable`.
-  The original stays unchanged. The bearer `/v1/evidence/*` routes stay
-  operator-only, and their `preview` route is unchanged.
+  512-pixel long edge; otherwise it is flattened onto white as JPEG. The
+  record authorizes the request and gives the size before any cached rendition
+  is used or the blob is read; a large blob is opened only inside a render.
+  Renditions are cached in memory by sha256. Two renders run at a time with up
+  to 32 waiting at most 15 seconds. Each render has five seconds, enforced by
+  a timer during reads and by elapsed-time checks between codec steps, so a
+  rendition that finishes late is discarded (a refusal that depends only on
+  the bytes is still kept). A busy or timed-out render answers `unavailable`
+  without a cached rendition, and a timed-out sha256 is not rendered again for
+  a minute. Other large files still answer `too_large`; a malformed or
+  interlaced PNG answers `not_previewable`. The original stays unchanged. The
+  bearer `/v1/evidence/*` routes stay operator-only, and their `preview` route
+  is unchanged.
 - `clankie work create TITLE [--summary S] [--owner NAME] [--criterion C]...
 [--status S] [--priority 0..4]`.
 - `clankie work update ID [--status S] [--owner NAME | --no-owner] [--title T]

@@ -695,13 +695,20 @@ export class EvidenceStore {
    * A PNG over the cap gets a complete downscaled rendition (VUH-1954).
    */
   async devicePreview(sha256: string): Promise<EvidenceDevicePreview> {
-    await this.fetch({ sha256 });
-    const blob = await this.blobs.open(sha256);
-    if (!blob) throw new EvidenceRefusal(404, "unknown_object");
-    if (blob.size > EVIDENCE_PREVIEW_MAX_BYTES) {
-      await blob.body.cancel();
+    if (!EvidenceSha256Schema.safeParse(sha256).success) throw new EvidenceRefusal(400, "invalid_request");
+    // The immutable record authorizes the bytes and gives their size before any
+    // cache or blob read; a record exists only once its blob has settled.
+    const record = await this.metadata.findRecordForBlob?.(sha256);
+    if (!record) throw new EvidenceRefusal(404, "unknown_object");
+    if (record.size > EVIDENCE_PREVIEW_MAX_BYTES) {
+      // Large blobs are opened only inside the thumbnail's deadline and render slots.
       const { evidenceThumbnails } = await import("./evidence-thumbnail.ts");
-      return evidenceThumbnails.preview(sha256, blob.size, () => this.blobs.open(sha256));
+      return evidenceThumbnails.preview(sha256, record.size, () => this.blobs.open(sha256));
+    }
+    const blob = await this.blobs.open(sha256);
+    if (!blob || blob.size !== record.size) {
+      await blob?.body.cancel();
+      throw new EvidenceRefusal(404, "unknown_object");
     }
     const bytes = Buffer.from(await new Response(blob.body).arrayBuffer());
     const image = rasterType(bytes);

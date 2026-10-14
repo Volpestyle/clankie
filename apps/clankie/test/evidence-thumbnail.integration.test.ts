@@ -260,7 +260,23 @@ async function pairedDeviceServer(store: EvidenceStore, root: string) {
 
 it("gives a paired device a complete thumbnail of a large recorded PNG, cached by sha256, over the real route", async () => {
   const root = await mkdtemp(join(tmpdir(), "evidence-thumbnail-"));
-  const store = EvidenceStore.local(join(root, "evidence"));
+  // The real local store, with blob opens counted to show where large previews read bytes.
+  const local = EvidenceStore.local(join(root, "evidence"));
+  const opened: string[] = [];
+  const store = new EvidenceStore(
+    {
+      backend: local.blobs.backend,
+      location: local.blobs.location,
+      has: (sha256) => local.blobs.has(sha256),
+      write: (sha256, size, body) => local.blobs.write(sha256, size, body),
+      readRange: (sha256, offset, length) => local.blobs.readRange!(sha256, offset, length),
+      open: (sha256) => {
+        opened.push(sha256);
+        return local.blobs.open(sha256);
+      },
+    },
+    local.metadata,
+  );
   const opaque = screenshot();
   const transparent = screenshot((x) => (x < 603 ? 255 : 96));
   for (const source of [opaque, transparent]) {
@@ -330,7 +346,10 @@ it("gives a paired device a complete thumbnail of a large recorded PNG, cached b
     expect(await preview(unrecordedSha)).toMatchObject({ outcome: "unavailable" });
 
     const rendersBefore = evidenceThumbnails.renders;
+    opened.length = 0;
     const thumbnail = await preview(sha.opaque);
+    // The large blob is opened once, by the thumbnail render after the record and cache checks.
+    expect(opened).toEqual([sha.opaque]);
     expect(thumbnail).toMatchObject({
       outcome: "ready",
       sha256: sha.opaque,
@@ -353,9 +372,10 @@ it("gives a paired device a complete thumbnail of a large recorded PNG, cached b
     expect(redOfBlue).toBeLessThan(80);
     expect(evidenceThumbnails.renders).toBe(rendersBefore + 1);
 
-    // The same sha256 reuses the rendition without decoding again.
+    // The same sha256 reuses the rendition without opening or decoding the blob again.
     expect(await preview(sha.opaque)).toEqual(thumbnail);
     expect(evidenceThumbnails.renders).toBe(rendersBefore + 1);
+    expect(opened).toEqual([sha.opaque]);
 
     // Transparency keeps a PNG rendition, complete and under the cap.
     const overlay = await preview(sha.transparent);
@@ -483,6 +503,128 @@ it("bounds thumbnail time, concurrency and output without caching transient refu
     new EvidenceThumbnailUnavailable("busy"),
   );
   await running;
+  store.close();
+});
+
+/**
+ * The costliest supported raster: 16.7M pixels of 16-bit RGBA (134 MB inflated),
+ * Paeth-filtered on every row, in translucent random square blocks, compressible
+ * under the 16 MiB source cap. Small blocks defeat every encode on the ladder.
+ */
+function costliestPng(blockShift: number) {
+  const side = 4096;
+  const stride = side * 8;
+  let seed = 1954;
+  const random = () => (seed = (Math.imul(seed, 1_103_515_245) + 12_345) >>> 0) >>> 24;
+  const blocks = Array.from({ length: (side >> blockShift) ** 2 * 4 }, random);
+  const filtered = Buffer.alloc((stride + 1) * side);
+  let previous = new Uint8Array(stride);
+  let row = new Uint8Array(stride);
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++)
+      for (let channel = 0; channel < 4; channel++) {
+        const block =
+          blocks[(((y >> blockShift) * (side >> blockShift) + (x >> blockShift)) << 2) + channel]!;
+        const value = channel === 3 ? 128 + (block >> 1) : block;
+        row[(x * 4 + channel) * 2] = row[(x * 4 + channel) * 2 + 1] = value;
+      }
+    const at = y * (stride + 1);
+    filtered[at] = 4;
+    for (let i = 0; i < stride; i++) {
+      const left = i >= 8 ? row[i - 8]! : 0;
+      const up = previous[i]!;
+      const corner = i >= 8 ? previous[i - 8]! : 0;
+      const p = left + up - corner;
+      const predict =
+        Math.abs(p - left) <= Math.abs(p - up) && Math.abs(p - left) <= Math.abs(p - corner)
+          ? left
+          : Math.abs(p - up) <= Math.abs(p - corner)
+            ? up
+            : corner;
+      filtered[at + 1 + i] = (row[i]! - predict) & 255;
+    }
+    [previous, row] = [row, previous];
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(side, 0);
+  header.writeUInt32BE(side, 4);
+  header.set([16, 6, 0, 0, 0], 8);
+  return {
+    pixels: side * side,
+    bytes: Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      chunk("IHDR", header),
+      chunk("IDAT", deflateSync(filtered, { level: 6 })),
+      chunk("IEND", Buffer.alloc(0)),
+    ]),
+  };
+}
+
+it.each([
+  { blocks: "16-pixel", blockShift: 4, expected: { available: false, reason: "too_large" } },
+  { blocks: "256-pixel", blockShift: 8, expected: { available: true, contentType: "image/png" } },
+])(
+  "finishes the costliest supported raster ($blocks blocks) inside the deadline, checking it between codec steps",
+  async ({ blockShift, expected }) => {
+    const store = EvidenceStore.local(await mkdtemp(join(tmpdir(), "evidence-thumbnail-cost-")));
+    const { pixels, bytes: costliest } = costliestPng(blockShift);
+    expect(pixels).toBe(EVIDENCE_THUMBNAIL_LIMITS.maxPixels);
+    expect(costliest.length).toBeLessThanOrEqual(EVIDENCE_THUMBNAIL_LIMITS.sourceMaxBytes);
+    const sha256 = await record(store, costliest, "docs/testing/costliest.png", "image/png");
+    const open = () => store.blobs.open(sha256);
+    // Shipped limits, with every deadline check timed: a complete answer arrives
+    // inside the deadline, and the longest stretch between checks bounds overshoot.
+    let last = performance.now();
+    let longestGap = 0;
+    const timed = new EvidenceThumbnails(EVIDENCE_THUMBNAIL_LIMITS, {
+      clock: () => {
+        const now = performance.now();
+        longestGap = Math.max(longestGap, now - last);
+        last = now;
+        return now;
+      },
+    });
+    const started = performance.now();
+    const outcome = await timed.preview(sha256, costliest.length, open);
+    expect(performance.now() - started).toBeLessThan(EVIDENCE_THUMBNAIL_LIMITS.deadlineMs);
+    expect(longestGap).toBeLessThan(500);
+    expect(outcome).toMatchObject(expected);
+    if (outcome.available) {
+      const data = Buffer.from(outcome.data!, "base64");
+      expect(data.length).toBeLessThanOrEqual(EVIDENCE_PREVIEW_MAX_BYTES);
+      // Complete: every chunk CRC checks and the IDAT inflates to the exact raster length.
+      expect(completePng(data).width).toBeLessThanOrEqual(768);
+    }
+    store.close();
+  },
+);
+
+it("discards a rendition that finished past the deadline without caching it", async () => {
+  const store = EvidenceStore.local(await mkdtemp(join(tmpdir(), "evidence-thumbnail-late-")));
+  // Small enough to inflate in one chunk, so every render makes the same checks.
+  const source = rgbaPng(32, 32, (x, y) => [x * 8, y * 8, 128, 255]);
+  const sha256 = await record(store, source, "docs/testing/tiny.png", "image/png");
+  const open = () => store.blobs.open(sha256);
+  // Count the deadline checks in a successful render of this image.
+  let calls = 0;
+  const counted = new EvidenceThumbnails(EVIDENCE_THUMBNAIL_LIMITS, { clock: () => (calls++, 0) });
+  expect(await counted.preview(sha256, source.length, open)).toMatchObject({ available: true });
+  const checks = calls;
+  // The same render with time passing only during the final encode, which no timer can interrupt.
+  let seen = 0;
+  const late = new EvidenceThumbnails(
+    { ...EVIDENCE_THUMBNAIL_LIMITS, timeoutRetryMs: 0 },
+    { clock: () => (++seen >= checks ? EVIDENCE_THUMBNAIL_LIMITS.deadlineMs + 1 : 0) },
+  );
+  await expect(late.preview(sha256, source.length, open)).rejects.toEqual(
+    new EvidenceThumbnailUnavailable("timeout"),
+  );
+  // It failed at the last check, after the final encode.
+  expect(seen).toBe(checks);
+  // Nothing was cached: asking again renders again.
+  seen = -Infinity;
+  expect(await late.preview(sha256, source.length, open)).toMatchObject({ available: true });
+  expect(late.renders).toBe(2);
   store.close();
 });
 
