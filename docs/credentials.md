@@ -34,6 +34,28 @@ plumbing before that acceptance criterion is met. Do not copy an owner's AWS
 tokens into the service, shell presets, logs or evidence. Local evidence proof
 does not authorize a real AWS destination or replace hosted roundtrip evidence.
 
+Phase A captures only a private non-secret destination alongside each pending
+upload and record; no bearer, SDK credential, endpoint or signed URL is persisted
+there. Historical reads use that destination, not current settings. Unknown legacy
+destinations require explicit SHA-and-size-verified preparation before S3 startup;
+unchanged verified local reads remain available. Preparation is bounded to 100
+identifiers, 256 MiB and 30 seconds for association progress per batch and preserves originals and partial
+progress. The manual Phase A proof uses a freshly minted disposable file-broker
+operator credential and dedicated loopback MinIO SDK credentials. It does not prove
+full service startup, tenant credential delivery or hosted acceptance. The existing
+authorized presigned GET URL still names its object location; private destination
+columns never enter receipts, records/details, device responses or logs.
+An unknown pending upload can receive a bounded private local-only continuation
+admission for its exact actor key, receipt ID and full request. Newly supplied
+bytes must pass complete SHA/size verification before pending/NULL metadata is
+transactionally assigned and settled; an existing blob does not bypass that
+verification. Wrong, short, cancelled and conflicting inputs preserve originals
+and unresolved metadata. Admission lasts 15 minutes, with a retained private guard
+covering every refreshed signed PUT for another 15 minutes. S3 continuation and
+public controls are absent. A genuine post-install database failure can retain a
+verified unrecorded local blob with pending/NULL metadata, requiring explicit retry;
+this is safe partial state, not filesystem-and-database atomicity.
+
 Clankie caches Keychain credentials in each process. Broker changes and rotations
 invalidate the affected entry in running clients and the service. When the keychain
 is locked, new credential reads fail promptly with **Keychain locked**, back off

@@ -160,6 +160,63 @@ broker-backed renewable tenant credentials, private hosted infrastructure,
 backup policy, migration, or required real-hosted push/fetch proof. The hosted
 metadata decision above remains unchanged; Postgres is not added by this slice.
 
+Phase A (VUH-1913) preserves destinations in private SQLite columns on pending
+uploads and records. CLAIM captures the fixed service-local root identity or the
+non-secret S3 bucket/region/prefix; settlement copies the stored claim, even when
+fixture configuration changes or the store reopens. Fetch, device ranges and the
+service-signed blob GET resolve that recorded identity. A SHA with several records
+selects the earliest `(createdAt,id)` association deterministically; all records
+and issue/actor bindings remain intact. Reads never substitute today's destination
+or fall back to another association. The resolver caches at most 32 historical
+adapters, evicts and reconstructs descriptors without limiting retained destinations,
+and releases its owned SDK clients when operations/streams complete or cancel.
+`.blobs` remains the active upload backend.
+
+Legacy destinations remain unknown. S3 startup refuses unknown records or pending
+uploads. Unchanged local reads verify SHA and size from the fixed original local
+root without tagging or inferring a location from settings. The internal explicit
+preparation helper verifies original bytes before tagging each association and
+preserves originals and successful partial progress. It accepts at most 100 named
+identifiers, 256 MiB declared bytes and 30 seconds for association progress per batch. Missing, unknown,
+oversized or slow inputs leave their associations unresolved; this is bounded
+preparation, not a completed migration. The deadline stops association progress;
+preparation does not currently thread the adapter's optional abort signal into SDK
+HEAD/GET calls, and their eventual streams are cancelled without tagging. No public destination/path/endpoint input
+or owner switch control is introduced.
+
+An unknown pending upload with no original bytes can instead receive an explicit
+private local continuation admission for its exact actor key, receipt ID and full
+immutable request. Admission permits newly supplied bytes into the fixed local
+root; it does not assert historical origin or tag metadata. Every incoming body
+is fully SHA-and-size verified in private staging, even if a correct same-SHA
+original already exists. A transaction checks the upload is still pending, NULL
+and unchanged before exclusive installation and atomic metadata destination,
+record and applied settlement. Existing originals are never replaced. Wrong,
+short, cancelled or conflicting bodies leave the upload unresolved; unadmitted
+uploads remain refused. S3 continuation and public admission controls are absent.
+Admissions cap 100 identities and 256 MiB declared bytes with a 15-minute lifetime.
+Private guards remain through another 15 minutes to cover every refreshed signed
+PUT; changed tagged/applied rows cannot fall through to ordinary backend handling.
+Restart invalidates old links with the existing fresh process signing key.
+
+The metadata transaction is atomic; filesystem installation and SQLite commit
+are not one atomic storage operation. A genuine later database failure may leave
+verified unrecorded local bytes while metadata rolls back to pending/NULL.
+Originals remain intact, record-bound reads hide those bytes, and explicit retry
+must verify the full incoming body again. This describes preserved partial state,
+not a claimed or forced failure proof.
+
+Destination metadata never enters public receipts, records/details, device DTOs,
+signed endpoint bodies or logs. The existing authorized S3 presigned GET contract
+still returns its short-lived URL, which necessarily identifies an object location.
+The two preview implementations remain on the active backend; historical preview
+routing requires its separately cleared follow-up. API/CLI selection and activation,
+full service startup proof, tenant/broker delivery and real-hosted acceptance remain
+outside Phase A. Its manual integration proof uses production evidence routes,
+credential-backed authentication with a real disposable file broker, real SQLite
+and files, the production SDK and an owned loopback MinIO over actual HTTP; it
+neither starts nor switches the owner service.
+
 Paired owner devices may read recorded media in bounded byte ranges through their authenticated device/relay path (`evidence_fetch`), with the record’s content type; they never receive service URLs or store-signed links (VUH-1967, also enabling large-image reads for VUH-1954).
 
 - Workers publish evidence by writing the folder's `README.md`, running

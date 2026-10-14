@@ -8,6 +8,15 @@ import { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
+  EvidenceDestinationResolver,
+  EvidenceLocalContinuationAdmissions,
+  stageLegacyLocalContinuation,
+  parseEvidenceDestination,
+  type EvidenceDestination,
+  type EvidenceLegacyItem,
+  type EvidenceResolverOptions,
+} from "./evidence-storage.ts";
+import {
   EVIDENCE_RECENT_PATH,
   EVIDENCE_PREVIEW_PATH,
   EVIDENCE_PREVIEW_MAX_BYTES,
@@ -44,6 +53,7 @@ import {
 export interface EvidenceBlobStore {
   readonly backend: string;
   readonly location: string;
+  readonly destination?: EvidenceDestination;
   /** Optional storage-signed GET; never an upload URL or a long-lived credential. */
   signedFetch?(
     sha256: string,
@@ -72,6 +82,7 @@ export interface EvidenceUploadRow {
   readonly idempotencyKey: string;
   readonly request: EvidenceUploadRequest;
   readonly actor: EvidenceActor;
+  readonly destination?: EvidenceDestination;
   state: "pending" | "applied" | "refused";
   recordId?: string | undefined;
   refusal?: "sha256_mismatch" | "size_mismatch" | undefined;
@@ -86,8 +97,22 @@ export interface EvidenceMetadataStore {
   /** Moves a pending upload to applied with its record, or to refused; never changes a settled one. */
   settleUpload(
     row: EvidenceUploadRow,
-    outcome: { record: Omit<EvidenceRecord, "url"> } | { refusal: "sha256_mismatch" | "size_mismatch" },
+    outcome:
+      | {
+          record: Omit<EvidenceRecord, "url">;
+          legacyLocalContinuation?: true;
+          installVerifiedLocal?: () => void;
+        }
+      | { refusal: "sha256_mismatch" | "size_mismatch" },
   ): Promise<EvidenceUploadRow>;
+  hasUnknownDestinations(): boolean;
+  findBlobBinding(
+    sha256: string,
+  ): Promise<{ record: Omit<EvidenceRecord, "url">; destination?: EvidenceDestination } | undefined>;
+  legacyItem(
+    item: EvidenceLegacyItem,
+  ): Promise<{ sha256: string; size: number; destination?: EvidenceDestination } | undefined>;
+  tagLegacy(item: EvidenceLegacyItem, destination: EvidenceDestination): Promise<boolean>;
   findRecord(id: string): Promise<Omit<EvidenceRecord, "url"> | undefined>;
   listRecords(filter: { issueKey: string } | { commit: string }): Promise<Omit<EvidenceRecord, "url">[]>;
   recent(query: EvidenceRecentQuery): Promise<EvidenceRecentResponse>;
@@ -194,6 +219,7 @@ interface UploadSqlRow {
   state: EvidenceUploadRow["state"];
   record_id: string | null;
   refusal: EvidenceUploadRow["refusal"] | null;
+  destination: string | null;
 }
 
 interface RecordSqlRow {
@@ -208,6 +234,7 @@ interface RecordSqlRow {
   caption: string | null;
   created_at: string;
   details: string;
+  destination: string | null;
 }
 
 class SqliteEvidenceMetadata implements EvidenceMetadataStore {
@@ -241,6 +268,11 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
     const columns = this.db.prepare("PRAGMA table_info(records)").all() as { name: string }[];
     if (!columns.some((column) => column.name === "details"))
       this.db.exec("ALTER TABLE records ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
+    for (const table of ["records", "uploads"]) {
+      const fields = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+      if (!fields.some((field) => field.name === "destination"))
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN destination TEXT`);
+    }
     this.db.exec("CREATE INDEX IF NOT EXISTS records_recent ON records(created_at DESC, id DESC)");
   }
 
@@ -251,6 +283,9 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
       request: JSON.parse(row.request) as EvidenceUploadRequest,
       actor: JSON.parse(row.actor) as EvidenceActor,
       state: row.state,
+      ...(row.destination === null
+        ? {}
+        : { destination: parseEvidenceDestination(JSON.parse(row.destination)) }),
       ...(row.record_id === null ? {} : { recordId: row.record_id }),
       ...(row.refusal === null ? {} : { refusal: row.refusal }),
     };
@@ -287,7 +322,7 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
   claimUpload(row: EvidenceUploadRow) {
     this.db
       .prepare(
-        "INSERT OR IGNORE INTO uploads(actor_key, idempotency_key, request, actor, state, created_at) VALUES (?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO uploads(actor_key, idempotency_key, request, actor, state, created_at, destination) VALUES (?,?,?,?,?,?,?)",
       )
       .run(
         row.actorKey,
@@ -296,25 +331,50 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
         JSON.stringify(row.actor),
         row.state,
         new Date().toISOString(),
+        row.destination === undefined ? null : JSON.stringify(parseEvidenceDestination(row.destination)),
       );
     return this.findUpload(row.actorKey, row.idempotencyKey).then((stored) => stored!);
   }
 
   settleUpload(
     row: EvidenceUploadRow,
-    outcome: { record: Omit<EvidenceRecord, "url"> } | { refusal: "sha256_mismatch" | "size_mismatch" },
+    outcome:
+      | {
+          record: Omit<EvidenceRecord, "url">;
+          legacyLocalContinuation?: true;
+          installVerifiedLocal?: () => void;
+        }
+      | { refusal: "sha256_mismatch" | "size_mismatch" },
   ) {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.db
-        .prepare("SELECT state FROM uploads WHERE actor_key=? AND idempotency_key=?")
-        .get(row.actorKey, row.idempotencyKey) as { state: string } | undefined;
+        .prepare(
+          "SELECT state, destination, request, actor FROM uploads WHERE actor_key=? AND idempotency_key=?",
+        )
+        .get(row.actorKey, row.idempotencyKey) as
+        | { state: string; destination: string | null; request: string; actor: string }
+        | undefined;
+      const continuation = "record" in outcome && outcome.legacyLocalContinuation === true;
+      if (
+        continuation &&
+        (current?.state !== "pending" ||
+          current.destination !== null ||
+          current.request !== JSON.stringify(row.request) ||
+          current.actor !== JSON.stringify(row.actor))
+      )
+        throw new EvidenceRefusal(409, "legacy_continuation_conflict");
+      if ("record" in outcome && continuation) {
+        if (!outcome.installVerifiedLocal) throw new EvidenceRefusal(409, "legacy_continuation_conflict");
+        outcome.installVerifiedLocal();
+      }
+      const destination = continuation ? JSON.stringify({ backend: "local" }) : current?.destination;
       if (current?.state === "pending") {
         if ("record" in outcome) {
           const record = outcome.record;
           this.db
             .prepare(
-              "INSERT INTO records(id, file_name, sha256, size, content_type, issue_key, commit_sha, actor, caption, created_at, details) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+              "INSERT INTO records(id, file_name, sha256, size, content_type, issue_key, commit_sha, actor, caption, created_at, details, destination) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             )
             .run(
               record.id,
@@ -334,12 +394,13 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
                 model: record.model,
                 outcome: record.outcome,
               }),
+              destination ?? null,
             );
           this.db
             .prepare(
-              "UPDATE uploads SET state='applied', record_id=? WHERE actor_key=? AND idempotency_key=?",
+              "UPDATE uploads SET state='applied', record_id=?, destination=? WHERE actor_key=? AND idempotency_key=?",
             )
-            .run(record.id, row.actorKey, row.idempotencyKey);
+            .run(record.id, destination ?? null, row.actorKey, row.idempotencyKey);
         } else {
           this.db
             .prepare("UPDATE uploads SET state='refused', refusal=? WHERE actor_key=? AND idempotency_key=?")
@@ -352,6 +413,68 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
       throw error;
     }
     return this.findUpload(row.actorKey, row.idempotencyKey).then((stored) => stored!);
+  }
+
+  hasUnknownDestinations() {
+    return (
+      this.db.prepare("SELECT 1 FROM records WHERE destination IS NULL LIMIT 1").get() !== undefined ||
+      this.db.prepare("SELECT 1 FROM uploads WHERE state='pending' AND destination IS NULL LIMIT 1").get() !==
+        undefined
+    );
+  }
+
+  findBlobBinding(sha256: string) {
+    const row = this.db
+      .prepare("SELECT * FROM records WHERE sha256=? ORDER BY created_at, id LIMIT 1")
+      .get(sha256) as unknown as RecordSqlRow | undefined;
+    return Promise.resolve(
+      row === undefined
+        ? undefined
+        : {
+            record: SqliteEvidenceMetadata.record(row),
+            ...(row.destination === null
+              ? {}
+              : { destination: parseEvidenceDestination(JSON.parse(row.destination)) }),
+          },
+    );
+  }
+
+  legacyItem(item: EvidenceLegacyItem) {
+    const row =
+      "recordId" in item
+        ? this.db.prepare("SELECT sha256,size,destination FROM records WHERE id=?").get(item.recordId)
+        : this.db
+            .prepare(
+              "SELECT json_extract(request,'$.sha256') AS sha256,json_extract(request,'$.size') AS size,destination FROM uploads WHERE actor_key=? AND idempotency_key=? AND state='pending'",
+            )
+            .get(item.actorKey, item.idempotencyKey);
+    const value = row as { sha256: string; size: number; destination: string | null } | undefined;
+    return Promise.resolve(
+      value === undefined
+        ? undefined
+        : {
+            sha256: value.sha256,
+            size: value.size,
+            ...(value.destination === null
+              ? {}
+              : { destination: parseEvidenceDestination(JSON.parse(value.destination)) }),
+          },
+    );
+  }
+
+  tagLegacy(item: EvidenceLegacyItem, destination: EvidenceDestination) {
+    const encoded = JSON.stringify(parseEvidenceDestination(destination));
+    const result =
+      "recordId" in item
+        ? this.db
+            .prepare("UPDATE records SET destination=? WHERE id=? AND destination IS NULL")
+            .run(encoded, item.recordId)
+        : this.db
+            .prepare(
+              "UPDATE uploads SET destination=? WHERE actor_key=? AND idempotency_key=? AND state='pending' AND destination IS NULL",
+            )
+            .run(encoded, item.actorKey, item.idempotencyKey);
+    return Promise.resolve(result.changes === 1);
   }
 
   findRecordForBlob(sha256: string) {
@@ -498,25 +621,42 @@ export class EvidenceStore {
 
   readonly blobs: EvidenceBlobStore;
   readonly metadata: EvidenceMetadataStore;
+  readonly storage: EvidenceDestinationResolver;
+  private readonly localContinuations: EvidenceLocalContinuationAdmissions;
 
   constructor(
     blobs: EvidenceBlobStore,
     metadata: EvidenceMetadataStore,
-    options: { clock?: () => number } = {},
+    options: { clock?: () => number; storage: EvidenceDestinationResolver },
   ) {
     this.blobs = blobs;
     this.metadata = metadata;
     this.clock = options.clock ?? Date.now;
+    this.storage = options.storage;
+    this.localContinuations = new EvidenceLocalContinuationAdmissions(this.clock);
   }
 
-  static local(root: string): EvidenceStore {
-    return EvidenceStore.withLocalMetadata(root, new LocalDiskEvidenceBlobs(join(root, "blobs")));
+  static local(root: string, options: EvidenceResolverOptions = {}): EvidenceStore {
+    return EvidenceStore.withLocalMetadata(root, new LocalDiskEvidenceBlobs(join(root, "blobs")), options);
   }
 
   /** Hosted blob storage can reuse the existing local records and receipt contract. */
-  static withLocalMetadata(root: string, blobs: EvidenceBlobStore): EvidenceStore {
+  static withLocalMetadata(
+    root: string,
+    blobs: EvidenceBlobStore,
+    options: EvidenceResolverOptions = {},
+  ): EvidenceStore {
     mkdirSync(root, { recursive: true, mode: 0o700 });
-    return new EvidenceStore(blobs, new SqliteEvidenceMetadata(join(root, "evidence.sqlite")));
+    const metadata = new SqliteEvidenceMetadata(join(root, "evidence.sqlite"));
+    try {
+      const local = new LocalDiskEvidenceBlobs(join(root, "blobs"));
+      const storage = new EvidenceDestinationResolver(blobs, local, options);
+      storage.assertStartup(metadata);
+      return new EvidenceStore(blobs, metadata, { storage });
+    } catch (error) {
+      metadata.close();
+      throw error;
+    }
   }
 
   status(): EvidenceStoreStatus {
@@ -570,10 +710,21 @@ export class EvidenceStore {
   }
 
   private async receipt(row: EvidenceUploadRow): Promise<EvidenceReceipt> {
+    if (row.state === "pending") this.localContinuations.assertCurrent(row);
     let current = row;
     // Another receipt may have supplied the same bytes meanwhile.
-    if (current.state === "pending" && (await this.blobs.has(current.request.sha256)))
-      current = await this.apply(current);
+    if (current.state === "pending" && current.destination === undefined) {
+      this.localContinuations.require(current);
+    } else if (current.state === "pending") {
+      const existing = await this.storage.pending(current).open(current.request.sha256);
+      if (existing) {
+        await existing.body.cancel();
+        current =
+          existing.size === current.request.size
+            ? await this.apply(current)
+            : await this.metadata.settleUpload(current, { refusal: "size_mismatch" });
+      }
+    }
     const base = {
       receiptId: current.idempotencyKey,
       state: current.state,
@@ -588,9 +739,10 @@ export class EvidenceStore {
     return { ...base, uploadUrl: upload.url, uploadExpiresAt: upload.expiresAt };
   }
 
-  private apply(row: EvidenceUploadRow) {
+  private apply(row: EvidenceUploadRow, installVerifiedLocal?: () => void) {
     const request = row.request;
     return this.metadata.settleUpload(row, {
+      ...(installVerifiedLocal ? { legacyLocalContinuation: true as const, installVerifiedLocal } : {}),
       record: {
         id: randomUUID(),
         fileName: request.fileName,
@@ -620,6 +772,7 @@ export class EvidenceStore {
       request,
       actor,
       state: "pending",
+      destination: this.storage.activeDestination,
     });
     if (JSON.stringify(stored.request) !== JSON.stringify(request))
       throw new EvidenceRefusal(409, "idempotency_conflict");
@@ -632,6 +785,27 @@ export class EvidenceStore {
     return this.receipt(row);
   }
 
+  /** Internal explicit admission for newly supplied bytes; never asserts a historical destination. */
+  async admitLegacyLocalUpload(
+    actorKey: string,
+    receiptId: string,
+    input: unknown,
+  ): Promise<EvidenceReceipt> {
+    if (this.storage.activeDestination.backend !== "local")
+      throw new EvidenceRefusal(503, "evidence_legacy_preparation_required");
+    const parsed = EvidenceUploadRequestSchema.safeParse(input);
+    if (!parsed.success) throw new EvidenceRefusal(400, "invalid_request");
+    const row = await this.metadata.findUpload(actorKey, receiptId);
+    if (!row) throw new EvidenceRefusal(404, "unknown_receipt");
+    if (
+      parsed.data.idempotencyKey !== receiptId ||
+      JSON.stringify(parsed.data) !== JSON.stringify(row.request)
+    )
+      throw new EvidenceRefusal(409, "idempotency_conflict");
+    this.localContinuations.admit(row);
+    return this.receipt(row);
+  }
+
   /** The signed PUT: verifies sha256 and size before the blob exists, and settles the receipt. */
   async acceptBlob(
     actorKey: string,
@@ -640,10 +814,36 @@ export class EvidenceStore {
   ): Promise<EvidenceReceipt> {
     const row = await this.metadata.findUpload(actorKey, receiptId);
     if (row === undefined) throw new EvidenceRefusal(404, "unknown_receipt");
-    if (row.state === "pending" && !(await this.blobs.has(row.request.sha256))) {
-      const written = await this.blobs.write(row.request.sha256, row.request.size, body);
-      if (!written.ok)
-        return this.receipt(await this.metadata.settleUpload(row, { refusal: written.reason }));
+    this.localContinuations.assertCurrent(row);
+    if (row.state === "pending" && row.destination === undefined) {
+      this.localContinuations.require(row);
+      if (this.storage.activeDestination.backend !== "local")
+        throw new EvidenceRefusal(503, "evidence_legacy_preparation_required");
+      const staged = await stageLegacyLocalContinuation(
+        this.storage.resolve({ backend: "local" }),
+        row,
+        body,
+      );
+      try {
+        const applied = await this.apply(row, staged.install);
+        this.localContinuations.complete(row);
+        return this.receipt(applied);
+      } finally {
+        await staged.cleanup();
+      }
+    }
+    if (row.state === "pending") {
+      const blobs = this.storage.pending(row);
+      const existing = await blobs.open(row.request.sha256);
+      if (existing) {
+        await existing.body.cancel();
+        if (existing.size !== row.request.size)
+          return this.receipt(await this.metadata.settleUpload(row, { refusal: "size_mismatch" }));
+      } else {
+        const written = await blobs.write(row.request.sha256, row.request.size, body);
+        if (!written.ok)
+          return this.receipt(await this.metadata.settleUpload(row, { refusal: written.reason }));
+      }
     }
     return this.receipt(row);
   }
@@ -652,16 +852,14 @@ export class EvidenceStore {
     const parsed = EvidenceFetchRequestSchema.safeParse(input);
     if (!parsed.success) throw new EvidenceRefusal(400, "invalid_request");
     const { sha256 } = parsed.data;
-    // Only settled, recorded blobs may receive a storage-signed link.
-    if (this.blobs.signedFetch) {
-      if (!(await this.metadata.hasRecordForBlob(sha256))) throw new EvidenceRefusal(404, "unknown_object");
-      const signed = await this.blobs.signedFetch(sha256, SIGNED_URL_MS / 1000);
-      if (!signed) throw new EvidenceRefusal(404, "unknown_object");
+    const { record, blobs } = await this.recordedBlob(sha256);
+    if (blobs.signedFetch) {
+      const signed = await blobs.signedFetch(sha256, SIGNED_URL_MS / 1000);
+      if (!signed || signed.size !== record.size) throw new EvidenceRefusal(404, "unknown_object");
       return { sha256, ...signed };
     }
-    const blob = await this.blobs.open(sha256);
-    // Bytes nobody recorded are not evidence; a half-settled upload stays invisible.
-    if (blob === undefined || !(await this.metadata.hasRecordForBlob(sha256))) {
+    const blob = await blobs.open(sha256);
+    if (!blob || blob.size !== record.size) {
       await blob?.body.cancel();
       throw new EvidenceRefusal(404, "unknown_object");
     }
@@ -675,9 +873,8 @@ export class EvidenceStore {
     const parsed = EvidenceDeviceFetchRequestSchema.safeParse(input);
     if (!parsed.success) throw new EvidenceRefusal(400, "invalid_request");
     const { sha256, offset, length } = parsed.data;
-    const record = await this.metadata.findRecordForBlob?.(sha256);
-    if (!record) throw new EvidenceRefusal(404, "unknown_object");
-    const range = await this.blobs.readRange?.(sha256, offset, length);
+    const { record, blobs } = await this.recordedBlob(sha256);
+    const range = await blobs.readRange?.(sha256, offset, length);
     if (!range || range.bytes.byteLength > length || range.size !== record.size)
       throw new EvidenceRefusal(404, "unknown_object");
     return {
@@ -687,6 +884,14 @@ export class EvidenceStore {
       contentType: record.contentType,
       data: Buffer.from(range.bytes).toString("base64"),
     };
+  }
+
+  /** Private storage binding; never project this into a receipt, record or device DTO. */
+  async recordedBlob(sha256: string) {
+    const binding = await this.metadata.findBlobBinding(sha256);
+    if (!binding) throw new EvidenceRefusal(404, "unknown_object");
+    const blobs = await this.storage.recorded(binding);
+    return { record: binding.record, blobs };
   }
 
   /**
@@ -843,8 +1048,12 @@ export function createEvidenceRoutes(
         )
       )
         throw new EvidenceRefusal(403, "invalid_signature");
-      const blob = await store!.blobs.open(sha256.data);
-      if (blob === undefined) throw new EvidenceRefusal(404, "unknown_object");
+      const { record, blobs } = await store!.recordedBlob(sha256.data);
+      const blob = await blobs.open(sha256.data);
+      if (blob === undefined || blob.size !== record.size) {
+        await blob?.body.cancel();
+        throw new EvidenceRefusal(404, "unknown_object");
+      }
       return new Response(blob.body, {
         headers: {
           "content-type": "application/octet-stream",

@@ -8,6 +8,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
+import type { EvidenceDestination } from "./evidence-storage.ts";
 import type { EvidenceBlobStore } from "./evidence-store.ts";
 import { EvidenceRefusal } from "./evidence-store.ts";
 
@@ -20,6 +21,7 @@ import { EvidenceRefusal } from "./evidence-store.ts";
 export class S3EvidenceBlobs implements EvidenceBlobStore {
   readonly backend = "s3";
   readonly location: string;
+  readonly destination: EvidenceDestination;
   private readonly client: S3Client;
   private readonly bucket: string;
   private readonly prefix: string;
@@ -27,6 +29,12 @@ export class S3EvidenceBlobs implements EvidenceBlobStore {
   constructor(settings: Extract<EvidenceSettings, { backend: "s3" }>, client?: S3Client) {
     const config = EvidenceSettingsSchema.parse(settings);
     if (config.backend !== "s3") throw new Error("evidence_s3_configuration_required");
+    this.destination = Object.freeze({
+      backend: "s3",
+      bucket: config.bucket,
+      region: config.region,
+      prefix: config.prefix,
+    });
     this.bucket = config.bucket;
     this.prefix = config.prefix;
     this.location = `s3://${this.bucket}/${this.prefix}`;

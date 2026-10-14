@@ -2563,6 +2563,37 @@ form is `POST /v1/work` with the operator bearer and `{ "action": ... }`.
 
 ### `evidence push|fetch` / `evidence list|receipt`
 
+Phase A preserves the private destination captured at upload CLAIM, including a
+pending PUT retried after configuration changes or a reopen. Fetch and device
+ranges resolve recorded destinations; same-SHA reads select the earliest
+`(createdAt,id)` record while retaining every association. Unknown legacy locations
+are never filled from current settings. S3 startup refuses them until an explicit
+internal preparation verifies SHA and size; the helper caps a batch at 100 named
+identifiers, 256 MiB and a 30-second association-progress deadline, preserves originals and retains partial
+progress. Verified unchanged-local reads remain available without tagging. This
+helper has no API/CLI switch or migration control. Both preview implementations
+still read the active backend pending a separately cleared follow-up. Authorized
+S3 fetch retains the existing short-lived presigned URL contract; private storage
+metadata never appears in receipts, record details or device responses.
+
+Unknown pending uploads may receive an explicit private local-only continuation
+admission for the exact actor key, receipt ID and full immutable request. It
+permits newly supplied bytes rather than claiming a historical destination.
+Complete incoming SHA/size verification precedes a pending/NULL transactional
+metadata settlement; existing originals are never overwritten, and wrong,
+short, cancelled or conflicting inputs remain unresolved. Admissions bound 100
+identities/256 MiB declared bytes for 15 minutes, with private guards retained
+through every refreshed signed PUT's lifetime. This has no public API/CLI control
+or S3 continuation. A genuine post-install database failure may preserve verified
+unrecorded bytes plus pending/NULL metadata for explicit retry; filesystem and
+SQLite are not one atomic commit.
+
+The manual `apps/clankie/test/evidence-storage.integration.test.ts` check exercises
+real SQLite/files, production credential-backed authentication against a real
+disposable file broker, production SDK/owned loopback MinIO and actual HTTP. It is
+fixture destination proof, not owner activation, full service startup, tenant
+credential delivery or real-hosted acceptance.
+
 Moves raw evidence out of git into Clankie's evidence store
 ([ADR 0258](adr/0258-evidence-lives-in-the-evidence-store.md)). Git keeps each
 folder's `README.md` and an `evidence.json` manifest; the store keeps the bytes

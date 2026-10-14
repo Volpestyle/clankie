@@ -77,10 +77,10 @@ it.runIf(Boolean(minioConfig))(
       { backend: "s3", bucket, region: "us-east-1", prefix: "other" },
       client,
     );
-    const store = EvidenceStore.withLocalMetadata(join(root, "state"), blobs);
-    // Same metadata makes this exercise the real other-prefix HEAD, rather than
-    // stopping at a missing record. Hosted tenant metadata delivery remains separate.
-    const otherStore = EvidenceStore.withLocalMetadata(join(root, "state"), otherBlobs);
+    const store = EvidenceStore.withLocalMetadata(join(root, "state"), blobs, { s3Client: client });
+    // Same metadata retains the original recorded prefix even when the fixture's
+    // active prefix changes. Hosted tenant metadata delivery remains separate.
+    const otherStore = EvidenceStore.withLocalMetadata(join(root, "state"), otherBlobs, { s3Client: client });
     const token = randomUUID();
     const actor = { kind: "operator" as const, id: "owned-local-proof", onBehalfOf: [] };
     const authenticate = async (request: Request) =>
@@ -155,7 +155,13 @@ it.runIf(Boolean(minioConfig))(
         headers,
         body: JSON.stringify({ sha256 }),
       });
-      expect(otherFetch.status).toBe(404);
+      expect(otherFetch.status).toBe(200);
+      const historical = (await otherFetch.json()) as { url: string };
+      expect(
+        createHash("sha256")
+          .update(Buffer.from(await (await fetch(historical.url)).arrayBuffer()))
+          .digest("hex"),
+      ).toBe(sha256);
       // Acceptance's hash/size boundary: refused bytes never enter either prefix.
       const wrongHash = createHash("sha256").update("different bytes").digest("hex");
       for (const [expectedHash, size, refusal] of [
