@@ -54,19 +54,32 @@ After every command, the lockfile and `node_modules` showed no drift.
 
 **Drift caught and corrected.** During the first S3 proof runs, a
 `pnpm exec tsx` invocation most likely re-resolved `pnpm-lock.yaml` and
-`node_modules`. It bumped AWS SDK minor versions, for example the credential
-provider's `@aws-sdk/core` 3.978.1 → 3.978.3. That cause is inferred, not
-confirmed. The client-s3 package itself stayed on the locked 3.978.1.
+`node_modules`. That cause is inferred, not confirmed. The bumps were
+transitive AWS SDK and Smithy packages: `@aws-sdk/core` 3.978.1 → 3.978.3 and
+`@smithy/core` 3.35.1 → 3.35.2. `@aws-sdk/client-s3` itself stayed on its
+locked 3.1138.0.
 
 I restored the lockfile and ran a frozen install. Then I reran every check and
-the S3 proof by calling node and tsx directly. The drifted runs are kept and
-labelled:
+the S3 proof by calling node and the tsx loader directly. The drifted runs are
+kept and labelled, not restamped:
 
 - `checks/drifted-install/`: checks, all exit 0, plus the lock diff and the
   restore log;
-- `s3-combined/drifted-run/`.
+- `s3-combined/drifted-run/`: the MinIO launch and teardown of the drifted
+  session, plus the output of its third and last S3 iteration.
 
-Results matched on both installs.
+Three S3 iterations ran on the drifted install while the script was being
+extended (07:17:52Z, 07:18:14Z and 07:18:34Z). Each overwrote the previous
+iteration's `combined.json`. Only the third output was copied into the
+evidence; the first two survive as verbatim session-transcript excerpts, kept
+locally in the owned clone at
+`.local/vuh1954-proof/composed/drift/earlier-drifted-iterations/` and not in
+the evidence store. They differ in one timing-dependent case: in the second
+iteration, the 3 ms open rejected; in the third drifted iteration and in the
+frozen run, it resolved and the body errored instead.
+
+The frozen-install run (07:23:22Z) is the proof bound below. The third drifted
+iteration gave the same outcome for every case, with timings within 6 ms.
 
 ## Decisive device boundary on `706e879b`
 
@@ -110,22 +123,57 @@ binary. Its sha256, `2f907af9…`, matches his verified provenance
 `clankie heavy --server` with random fixture credentials, which never appear in
 logs.
 
-The setup used the real AWS SDK and `S3EvidenceBlobs` with SQLite metadata. A
-delegating wrapper only records each `open`'s signal, how it settled, and how
-its body ended.
+The setup used the real AWS SDK (`@aws-sdk/client-s3` 3.1138.0) and
+`S3EvidenceBlobs`, with SQLite metadata from `EvidenceStore.withLocalMetadata`.
+A wrapper delegates every call to `S3EvidenceBlobs`. Its `open` records the
+signal and how the promise settled. It also wraps the real S3 body reader in an
+observer stream, which forwards each chunk, error and cancel unchanged and
+records how the body ended.
 
-- **Served from S3 through `devicePreview`:**
-  - a JPEG of 29,924 B, 353×768, byte-identical to the local-disk rendition;
-  - one S3 open on the miss, carrying the deadline signal;
-  - zero S3 opens on the cache hit.
-- **Deadline during the SDK request (1 ms, 3 ms):** the in-flight open rejected
-  with the render's `Evidence thumbnail timeout`.
-- **Deadline while a 15 MiB body was still streaming (6 ms, 10 ms, and 3 ms on
-  a screenshot):** the S3 body stream errored with that same timeout reason.
-- **Later deadlines:** the bodies were read to the end, and the render timed
-  out or answered on its own terms.
-- **MinIO teardown** (`minio-teardown.txt`): both PIDs gone, ports free,
-  scratch data and the credential file removed, no lease left.
+The script has three parts, and only A goes through `devicePreview`:
+
+- **A. `devicePreview` served from S3** (default 5 s deadline): a JPEG of
+  29,924 B, 353×768, byte-identical to the local-disk rendition. The miss made
+  one S3 open carrying the deadline signal; the cache hit made zero S3 opens.
+- **B. Deadline during the open or the body read:** `EvidenceThumbnails`
+  called directly, not `devicePreview` or HTTP. Each case used a new instance
+  with a shortened injected deadline (1, 3, 10, 30, 100 ms) and the same
+  `open(sha256, abortSignal)` callback shape on the real S3 wrapper:
+  - 1 ms: the in-flight open rejected with the render's
+    `Evidence thumbnail timeout`;
+  - 3 ms (a screenshot): the open resolved at 3 ms, then the S3 body errored
+    with that timeout at 4 ms;
+  - 10 and 30 ms: the body was read to the end, and the render timed out on
+    its own checks;
+  - 100 ms: it rendered a JPEG.
+- **C. Deadline while a 15 MiB body is still streaming:** the same direct
+  `EvidenceThumbnails` call with 6, 10 and 20 ms deadlines. The body is the
+  8-byte PNG signature followed by random bytes. It is not a valid image, so it
+  shows only that the abort reaches a streaming S3 body:
+  - 6 and 10 ms: the open resolved, then the S3 body errored with the timeout
+    at 8 and 11 ms;
+  - 20 ms: the body was read to the end and refused as `not_previewable`.
+
+Not shown here: the default-deadline timeout through `devicePreview` or the
+device route against S3.
+
+**Teardown and retention.**
+
+- MinIO (`minio-teardown.txt`): both PIDs gone, ports free, scratch data and
+  the credential file removed, no lease left.
+- The script also created one SQLite metadata root per run with
+  `mkdtemp(tmpdir(), 'vuh1954-s3-')`. These sat outside the owned MinIO and
+  scratch-stack roots and were not covered by those teardowns. There were four,
+  one per iteration. Each was positively mine: the prefix, a creation time
+  within 3 s of one of my runs, and records with the proof actor and my
+  fixtures.
+- Each held only `evidence.sqlite`, with nonsecret upload and record metadata:
+  sha256s, sizes, file names and the proof actor. There were no credentials or
+  S3 location.
+- I copied each file, sha-verified, into the owned clone's ignored
+  `.local/vuh1954-proof/s3/tmp-metadata-roots/`. Then I removed each original
+  by its exact path; no glob delete. `retention.txt` there lists the paths and
+  hashes. These copies are local only, not in the evidence store.
 
 Oren's own seam proof covers the SDK cancellation cases directly
 (`bindings/oren-abort-proof.json`): 10 checks, nothing mocked. It is reused
