@@ -49,16 +49,26 @@ export function notifyInboundReportChange(ctx: ConversationStore): void {
 export function inboundReports(
   ctx: ConversationStore,
   conversationId?: string,
-  options: { includeRead?: boolean; acceptedAfterMs?: number } = {},
+  options: {
+    includeRead?: boolean;
+    acceptedAfterMs?: number;
+    sender?: { paneId: string; binding: string };
+  } = {},
 ): InboundReport[] {
   return [...ctx["metas"].values()]
     .filter((meta) => conversationId === undefined || meta.conversationId === conversationId)
     .flatMap((meta) =>
       Object.values(meta.inboundAcceptances ?? {})
+        // Select before validating: every worker poll asks for one sender's
+        // reports, and parsing all retained payloads to discard them was a
+        // CPU hot path (VUH-2216). Each returned report is still parsed.
         .filter(
           (value) =>
-            options.acceptedAfterMs === undefined ||
-            Date.parse(value.acceptedAt ?? meta.createdAt) > options.acceptedAfterMs,
+            (options.includeRead || value.reportDelivery?.state !== "read") &&
+            (options.sender === undefined ||
+              (value.paneId === options.sender.paneId && value.binding === options.sender.binding)) &&
+            (options.acceptedAfterMs === undefined ||
+              Date.parse(value.acceptedAt ?? meta.createdAt) > options.acceptedAfterMs),
         )
         .map((value) => {
           const receipt = InboundAcceptanceSchema.parse(value);
@@ -342,7 +352,7 @@ export function senderReportEvents(
   paneId: string,
   binding: string,
 ): OperatorSeatEvent[] {
-  return inboundReports(ctx, undefined, { includeRead: true })
+  return inboundReports(ctx, undefined, { includeRead: true, sender: { paneId, binding } })
     .flatMap((report) => {
       const delivery = report.reportDelivery;
       if (report.paneId !== paneId || report.binding !== binding || !delivery.senderNotifications) return [];

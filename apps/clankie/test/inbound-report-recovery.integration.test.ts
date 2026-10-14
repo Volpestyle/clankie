@@ -4,11 +4,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { FleetSeatMessageSchema, WorkerReportPageSchema } from "@clankie/protocol";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
 import { deliveryFingerprint } from "../src/captain/delivery-fence.ts";
+import { InboundAcceptanceSchema } from "../src/captain/conversations/constants.ts";
 
 const roots: string[] = [];
 const children = new Set<ChildProcess>();
@@ -296,6 +297,35 @@ it("does not dispatch a queued report after its recipient has explicitly read it
   await store.close();
   expect(invoked).toEqual(["held turn"]);
   expect(store.inboundReports()).toEqual([]);
+});
+
+it("VUH-2216: a worker's poll validates only its own retained reports", async () => {
+  const root = fixtureRoot();
+  const store = new ConversationStore(join(root, "conversations"), async () => {});
+  const receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+  const binding = "a".repeat(64);
+  for (let report = 0; report < 10; report++)
+    receipts.accept(
+      "busy-pane",
+      { id: randomUUID(), binding },
+      `busy ${report}`,
+      `busy ${report}`,
+      "global-default",
+      async () => {},
+    );
+  receipts.accept("pane", { id: randomUUID(), binding }, "mine", "mine", "global-default", async () => {});
+  const parse = vi.spyOn(InboundAcceptanceSchema, "parse");
+  try {
+    // Every worker poll asks for its own receipt events; others' payloads stay unparsed.
+    expect(store.senderReportEvents("pane", binding)).toHaveLength(1);
+    expect(parse).toHaveBeenCalledOnce();
+    parse.mockRestore();
+    expect(store.senderReportEvents("busy-pane", binding)).toHaveLength(10);
+    expect(store.inboundReports()).toHaveLength(11);
+  } finally {
+    parse.mockRestore();
+    await store.close();
+  }
 });
 
 it.each(["unadopted", "adoption"] as const)(
