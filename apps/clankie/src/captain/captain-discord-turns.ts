@@ -34,7 +34,11 @@ import { ConversationStore } from "./conversations.ts";
 import type { CaptainDeps } from "./deps.ts";
 import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
 import { normalizeDiscordTurn, replyIsUnderway, type NormalizedDiscordTurn } from "./discord-turn.ts";
-import { type DiscordWatchOrigin, type HerdrWatchWakeContext } from "./herdr-watch.ts";
+import {
+  HerdrWatchWakeAbandonedError,
+  type DiscordWatchOrigin,
+  type HerdrWatchWakeContext,
+} from "./herdr-watch.ts";
 import { laneKey, LaneLog } from "./lane-log.ts";
 import { RoomConversations, roomSeatTurnResult } from "./room-conversations.ts";
 import { SeatLinkInterruptedError, SeatOutbox } from "./seat-outbox.ts";
@@ -282,6 +286,11 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         return false;
       await guard?.();
       const outbox = ctx.seatOutbox(owner.conversationId);
+      // An abandoned original is never resent or claimed delivered: the watch ends.
+      if (outbox.recoveryAbandoned(expected.messageId))
+        throw new HerdrWatchWakeAbandonedError(
+          "The owner settled this watch's original wake as abandoned-unknown",
+        );
       const recipientBinding = ctx.watchRecipientBinding
         ? await ctx.watchRecipientBinding(owner.conversationId)
         : outbox.recipientBinding();

@@ -133,6 +133,26 @@ export interface HerdrWatchWakeContext {
 }
 type HerdrWatchWakeResult = "accepted" | "deferred";
 
+/**
+ * The owner settled this watch's reserved original wake as abandoned-unknown.
+ * It is never resent or reported delivered, so the watch ends terminally.
+ */
+export class HerdrWatchWakeAbandonedError extends Error {}
+
+/** Why a watch ended without observing its completion. */
+type HerdrWatchEnd = "native_session_changed" | "native_agent_exited";
+const HerdrWatchSettlementSchema = z.strictObject({
+  watchId: z.string().min(1),
+  conversationId: z.string().min(1),
+  terminalId: z.string().min(1),
+  reason: z.string().min(1),
+  outcome: z.enum(["native_session_changed", "native_agent_exited", "wake_abandoned"]),
+  receiptId: z.string().min(1).optional(),
+  settledAt: z.string().min(1),
+});
+export type HerdrWatchSettlement = z.infer<typeof HerdrWatchSettlementSchema>;
+const SETTLEMENTS_MAX = 200;
+
 const HerdrWatchRecordSchema = z
   .object({
     id: z.string().min(1),
@@ -4720,14 +4740,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     try {
       const current = await this.runner.resolveTerminal(record.terminalId);
       // A missing/rebound native occupant never contributes another worker's output.
-      if (
-        record.occupantId === undefined ||
-        (current !== undefined &&
-          (current.session === undefined || occupantIdForHerdrSession(current.session) !== record.occupantId))
-      ) {
+      if (record.occupantId === undefined) {
         this.remove(record.id);
         return;
       }
+      if (this.endsOnNativeChange(record, current)) return;
       if (current === undefined || current.status === "unknown") {
         prompt = watchPrompt(record, current, "The watched pane is gone.");
       } else {
@@ -4738,13 +4755,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           const event = await control.settled(signal, record.messageId);
           if (event.type === "turn_completed") harvestMessageId ??= event.messageId;
           const after = await this.runner.resolveTerminal(record.terminalId).catch(() => undefined);
-          if (
-            after !== undefined &&
-            (after.session === undefined || occupantIdForHerdrSession(after.session) !== record.occupantId)
-          ) {
-            this.remove(record.id);
-            return;
-          }
+          if (this.endsOnNativeChange(record, after)) return;
           prompt = watchPrompt(record, after ?? current, undefined, event);
         } else if (record.messageId !== undefined) {
           prompt = watchPrompt(
@@ -4756,13 +4767,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           const settled = SETTLED_STATUSES.has(current.status)
             ? current
             : await this.runner.wait(current.paneId, signal);
-          if (
-            settled.session === undefined ||
-            occupantIdForHerdrSession(settled.session) !== record.occupantId
-          ) {
-            this.remove(record.id);
-            return;
-          }
+          if (this.endsOnNativeChange(record, settled)) return;
           // A transcript that cannot be read leaves the ordinary no-report wake.
           const reply = await this.lastReply?.(settled).catch(() => undefined);
           prompt = watchPrompt(record, settled, undefined, undefined, reply?.trim() || undefined);
@@ -4788,7 +4793,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const nativeChanged =
           live !== undefined &&
           (live.session === undefined || occupantIdForHerdrSession(live.session) !== record.occupantId);
-        if (nativeChanged) this.remove(record.id);
+        // A changed occupant is refused here with no wake; only an unread session is retried.
+        if (nativeChanged) {
+          const change = this.nativeEnd(record, live);
+          if (change !== "unread" && change !== undefined) this.settle(record, change);
+        }
         if (
           signal.aborted ||
           this.closed ||
@@ -4852,9 +4861,91 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const result = await this.wake(owner.conversationId, prompt, owner.discord, guard, original);
       if (result === "deferred") this.retry(record);
       else this.remove(record.id);
-    } catch {
+    } catch (error) {
+      if (error instanceof HerdrWatchWakeAbandonedError) {
+        this.settle(record, "wake_abandoned", record.wakeReceipt?.messageId);
+        return;
+      }
       this.retry(record);
     }
+  }
+
+  /**
+   * A different native session, or the harness gone from the pane, ends the
+   * watch. A harness whose session is not readable right now is retried.
+   */
+  private nativeEnd(
+    record: HerdrWatchRecord,
+    live: HerdrAgentSnapshot | undefined,
+  ): HerdrWatchEnd | "unread" | undefined {
+    if (live === undefined) return undefined;
+    if (live.session === undefined)
+      return live.agent === "shell" || live.agent === "unknown" ? "native_agent_exited" : "unread";
+    return occupantIdForHerdrSession(live.session) === record.occupantId
+      ? undefined
+      : "native_session_changed";
+  }
+
+  /**
+   * Another occupant's output never reaches the arming lead or a harvest, so a
+   * native change produces no wake. It is settled in the ledger and the log
+   * instead of vanishing (VUH-2208).
+   */
+  private endsOnNativeChange(record: HerdrWatchRecord, live: HerdrAgentSnapshot | undefined): boolean {
+    const change = this.nativeEnd(record, live);
+    if (change === undefined) return false;
+    if (change === "unread") this.retry(record);
+    else this.settle(record, change);
+    return true;
+  }
+
+  private get settlementsPath(): string {
+    return `${this.path}.settled.json`;
+  }
+
+  private writeSidecar(path: string, value: unknown): void {
+    mkdirSync(dirname(path), { recursive: true });
+    const temporary = `${path}.${String(process.pid)}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    renameSync(temporary, path);
+  }
+
+  /** Terminal settlements, newest last; never a delivery claim. */
+  public settlements(): readonly HerdrWatchSettlement[] {
+    try {
+      return z
+        .array(HerdrWatchSettlementSchema)
+        .parse(JSON.parse(readFileSync(this.settlementsPath, "utf8")));
+    } catch {
+      return [];
+    }
+  }
+
+  private recordSettlement(
+    record: HerdrWatchRecord,
+    outcome: HerdrWatchSettlement["outcome"],
+    receiptId?: string,
+  ): void {
+    const settlement: HerdrWatchSettlement = {
+      watchId: record.id,
+      conversationId: record.conversationId,
+      terminalId: record.terminalId,
+      reason: record.reason,
+      outcome,
+      ...(receiptId === undefined ? {} : { receiptId }),
+      settledAt: new Date().toISOString(),
+    };
+    this.writeSidecar(this.settlementsPath, [...this.settlements(), settlement].slice(-SETTLEMENTS_MAX));
+    console.warn("Herdr watch ended without completion", JSON.stringify(settlement));
+  }
+
+  private settle(
+    record: HerdrWatchRecord,
+    outcome: HerdrWatchSettlement["outcome"],
+    receiptId?: string,
+  ): void {
+    this.recordSettlement(record, outcome, receiptId);
+    this.remove(record.id);
   }
 
   private retry(record: HerdrWatchRecord): void {

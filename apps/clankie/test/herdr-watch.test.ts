@@ -19,8 +19,10 @@ import {
   HerdrWatchStore,
   parseHerdrAgentResult,
   parseHerdrForegroundProcessId,
+  HerdrWatchWakeAbandonedError,
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
+  type HerdrWatchWakeContext,
   type PiSeatModel,
 } from "../src/captain/herdr-watch.ts";
 import { isHerdrWorkspaceMissing } from "../src/captain/herdr-watch.ts";
@@ -244,6 +246,111 @@ describe("HerdrWatchStore", () => {
     await expect(store.seatIdForPane("missing")).resolves.toBeUndefined();
     store.close();
   });
+
+  it("settles a watch whose pane now runs another native session in the ledger, with no wake (VUH-2208)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-watch-session-"));
+    roots.push(root);
+    const path = join(root, "herdr-watches.json");
+    const settled = deferred<HerdrAgentSnapshot>();
+    const resumed: HerdrAgentSnapshot = {
+      ...done,
+      session: { source: "herdr:claude", kind: "id", value: "session-resumed" },
+    };
+    let live = working;
+    const wake = vi.fn(async (_conversationId: string, _prompt: string) => "accepted" as const);
+    const store = new HerdrWatchStore(path, {
+      runner: {
+        get: async () => live,
+        resolveTerminal: async () => live,
+        wait: () => settled.promise,
+      },
+    });
+    store.start(wake);
+    const armed = await store.watch("conv-remote-lead", "w18:p1", "Harvest the long run");
+    expect(armed).toMatchObject({ outcome: "watching" });
+    live = resumed;
+    settled.resolve(resumed);
+    await vi.waitFor(() =>
+      expect(store.settlements()).toEqual([
+        expect.objectContaining({
+          conversationId: "conv-remote-lead",
+          terminalId: "term-potato",
+          reason: "Harvest the long run",
+          outcome: "native_session_changed",
+        }),
+      ]),
+    );
+    expect(JSON.parse(await readFile(path, "utf8")).watches).toEqual([]);
+    // Another occupant's turn never wakes the arming lead.
+    expect(wake).not.toHaveBeenCalled();
+    store.close();
+  });
+
+  it("retries a harness whose session cannot be read instead of dropping the watch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-watch-unread-"));
+    roots.push(root);
+    const path = join(root, "herdr-watches.json");
+    const { session: _session, ...unread } = done;
+    let live: HerdrAgentSnapshot = working;
+    const wait = vi.fn(async () => unread);
+    const wake = vi.fn(async (_conversationId: string, _prompt: string) => "accepted" as const);
+    const store = new HerdrWatchStore(path, {
+      runner: { get: async () => live, resolveTerminal: async () => live, wait },
+    });
+    store.start(wake);
+    await store.watch("global-default", "w18:p1", "Harvest through a hidden session");
+    await vi.waitFor(() => expect(wait).toHaveBeenCalled());
+    expect(wake).not.toHaveBeenCalled();
+    expect(JSON.parse(await readFile(path, "utf8")).watches).toHaveLength(1);
+    expect(store.settlements()).toEqual([]);
+    live = done;
+    wait.mockResolvedValue(done);
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledOnce(), { timeout: 10_000 });
+    expect(wake.mock.calls[0]?.[1]).toContain("agent status done");
+    store.close();
+  }, 15_000);
+
+  it("settles a watch whose original wake the owner abandoned, once and never as delivered", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-watch-abandoned-"));
+    roots.push(root);
+    const path = join(root, "herdr-watches.json");
+    const wake = vi.fn(
+      async (
+        conversationId: string,
+        _prompt: string,
+        _discord?: unknown,
+        _guard?: unknown,
+        original?: HerdrWatchWakeContext,
+      ) => {
+        original!.reserve({
+          messageId: original!.messageId,
+          fingerprint: "f".repeat(64),
+          owner: { conversationId },
+        });
+        throw new HerdrWatchWakeAbandonedError("abandoned-unknown");
+      },
+    );
+    const store = new HerdrWatchStore(path, {
+      runner: { get: async () => working, resolveTerminal: async () => working, wait: async () => done },
+    });
+    store.start(wake);
+    const armed = await store.watch("conv-remote-lead", "w18:p1", "Harvest the abandoned turn");
+    if (armed.outcome !== "watching") throw new Error("Expected a watch");
+    await vi.waitFor(() =>
+      expect(store.settlements()).toEqual([
+        expect.objectContaining({
+          watchId: armed.watchId,
+          outcome: "wake_abandoned",
+          receiptId: `seat-watch-${armed.watchId}`,
+        }),
+      ]),
+    );
+    expect(JSON.parse(await readFile(path, "utf8")).watches).toEqual([]);
+    // No retry follows the terminal settlement.
+    await new Promise((resolve) => setTimeout(resolve, 6_000));
+    expect(wake).toHaveBeenCalledOnce();
+    store.close();
+  }, 15_000);
 
   it("re-arms a persisted watch after restart using the stable terminal id", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-herdr-watch-restart-"));

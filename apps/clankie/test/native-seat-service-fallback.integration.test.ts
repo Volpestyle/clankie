@@ -771,6 +771,10 @@ it("VUH-1779: an unresolved head delivery refuses only its own resend; later wak
   // Durable: after restart nothing is unresolved, nothing claims receipt, and the original ID stays closed.
   const settledBox = fixture(f.root).outbox(ID);
   expect(settledBox.uncertain()).toBe(false);
+  // A watch reserved on this original ends terminally instead of waiting for it (VUH-2208).
+  expect(settledBox.recoveryAbandoned(lost!.id)).toBe(true);
+  expect(settledBox.recoveryAcknowledged(lost!.id)).toBe(false);
+  expect(settledBox.recoveryAbandoned(delivered!.id)).toBe(false);
   expect(settledBox.receipt(lost!.content)).toBeUndefined();
   expect(
     await settledBox.deliver({

@@ -415,6 +415,14 @@ export class SeatOutbox {
       throw new Error("Original channel receipt conflicts with its acknowledgment");
     return pending ?? acknowledged;
   }
+  /** The owner settled this exact original as abandoned-unknown, and no acknowledgment exists. */
+  public recoveryAbandoned(id: string): boolean {
+    return (
+      !this.active.has(id) &&
+      this.fence.all().some(([, receipt]) => receipt.messageId === id && receipt.abandoned !== undefined) &&
+      !this.delivered.all().some(([, receipt]) => receipt.messageId === id)
+    );
+  }
   public recoveryAcknowledged(id: string): boolean {
     const original = this.recoveryReceipt(id);
     const acknowledged = this.delivered.all().find(([, receipt]) => receipt.messageId === id)?.[1];
