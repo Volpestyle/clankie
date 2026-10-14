@@ -1,5 +1,6 @@
 import type { Huddle, StartHuddle } from "@clankie/protocol/huddles";
 import type { FleetProgressObservation } from "../fleet-progress.ts";
+import type { FleetEfficiencyResult, FleetEfficiencyReview } from "./fleet-efficiency-tools.ts";
 import type {
   FleetSeatToolCatalog,
   FleetSeatToolCatalogHealth,
@@ -203,10 +204,7 @@ export interface CaptainPort {
     paneId: string,
     input: { revision: string; beforeDispatch?: () => Promise<void> },
   ): Promise<{ outcome: "refreshed" | "skipped-busy" | "failed"; reason: string }>;
-  fleetEfficiency?(
-    conversationId: string,
-    review?: import("./fleet-efficiency-tools.ts").FleetEfficiencyReview,
-  ): Promise<import("./fleet-efficiency-tools.ts").FleetEfficiencyResult>;
+  fleetEfficiency?(conversationId: string, review?: FleetEfficiencyReview): Promise<FleetEfficiencyResult>;
   checkoutReport?(): Promise<import("@clankie/protocol").CheckoutReport>;
   syncCheckouts?(repository?: string): Promise<import("@clankie/settings").CheckoutSyncResult[]>;
   /** Record worth_landing or safe_to_drop for one linked worktree's unlanded work (VUH-1814). */
