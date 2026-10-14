@@ -83,6 +83,44 @@ it("VUH-2196: a local lead's polls do not each wait on an unreachable machine's 
   expect(await poll()).toBeLessThan(1_000);
 }, 30_000);
 
+it("VUH-2245: a lead's poll answers inside its wait even when its source proof is slow", async () => {
+  // The bridge gives up waitMs + 10s after asking. Parking for the full wait
+  // after a ~10s proof outlived it, and the abort cost the seat its grace.
+  const f = await leadChatFixture(false, cleanup, { slowFleetMs: 2_500 });
+  const started = Date.now();
+  expect(await f.captain.pollSeatEvents(3_000, undefined, f.leads[1]!, capabilities)).toEqual([]);
+  expect(Date.now() - started).toBeLessThan(3_800);
+}, 30_000);
+
+it("VUH-2245: a lead message sent while its seat's poll is still proving its source reaches that seat", async () => {
+  const f = await leadChatFixture(false, cleanup, { slowFleetMs: 2_500 });
+  const [global, work] = f.leads as [string, string];
+  const stop = new AbortController();
+  const notification = vi.fn(async (_event: unknown) => {});
+  const pump = pumpSeatEvents(
+    { notification },
+    {
+      pollEvents: (waitMs, signal) => f.captain.pollSeatEvents(waitMs, signal, work, capabilities),
+      acknowledge: (id) => f.captain.acknowledgeSeatEvent(id, work),
+    },
+    stop.signal,
+    { waitMs: 3_000, retryMs: 20 },
+  );
+  cleanup.push(async () => {
+    stop.abort();
+    await pump;
+  });
+  // The bridge has asked; its first poll is still proving the seat's source.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(await f.messageSeat(global, f.head.terminalId, "Deploy at 18:00?")).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "delivered",
+    status: "lead_channel_acknowledged",
+    leadConversationId: work,
+  });
+  expect(notification).toHaveBeenCalledOnce();
+}, 30_000);
+
 it("VUH-2174: a disconnected remote-only lead still refuses without a local queue", async () => {
   const f = await fixture(true);
   await f.captain.close();

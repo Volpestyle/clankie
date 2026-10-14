@@ -6300,6 +6300,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // Register pending native intent before asynchronous policy preparation;
       // conversation driver admission still fences actual delivery.
       const outbox = seatOutbox(binding.conversationId);
+      // Deliveries wait for this poll while it proves its source (VUH-2245).
+      const askedAt = Date.now();
+      const arrived = outbox.pollArriving();
       // Owner asks remain pending in their source conversation across driver takeover.
       void recoverWorkerReports(binding.conversationId).catch(() => undefined);
       // A wake held after model failures can go to the seat that just bound.
@@ -6312,7 +6315,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           .pollConversationDriver(
             binding.conversationId,
             () => {
-              const pending = outbox.poll(waitMs, pollSignal, recipientBinding, capabilities);
+              // The bridge gives up a fixed slack past its wait, so the proof
+              // spends the wait rather than extending it past that deadline.
+              const pending = outbox.poll(
+                Math.max(0, waitMs - (Date.now() - askedAt)),
+                pollSignal,
+                recipientBinding,
+                capabilities,
+              );
+              arrived();
               deliverServiceHandoff(binding.conversationId);
               void recoverWorkerReports(binding.conversationId).catch(() => undefined);
               return pending;
@@ -6340,6 +6351,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         shutdown.signal.throwIfAborted();
         if (pollSignal.aborted) return [];
         throw error;
+      } finally {
+        arrived();
       }
     },
 

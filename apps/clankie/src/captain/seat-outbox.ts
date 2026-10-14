@@ -183,6 +183,8 @@ export class SeatOutbox {
   private readonly inFlight: Pending[] = [];
   private readonly awaitingReply = new Map<string, Pending>();
   private readonly pollers = new Set<ParkedPoller>();
+  /** Polls that have asked but are still proving their source before they park (VUH-2245). */
+  private arriving = 0;
   private readonly boundGraceMs: number;
   private readonly ackTimeoutMs: number;
   private readonly abortKeepsGrace: boolean;
@@ -565,6 +567,23 @@ export class SeatOutbox {
     return !this.closed && (this.pollers.size > 0 || this.remainingGraceMs() > 0);
   }
 
+  /**
+   * A poll has asked and is proving its source before it parks. Deliveries
+   * meanwhile wait for it instead of settling unbound: a ~10s proof against an
+   * unreachable machine otherwise read as the seat leaving (VUH-2245). The
+   * returned release is idempotent; a poll that never parks settles them
+   * unbound within the bound grace.
+   */
+  public pollArriving(): () => void {
+    this.arriving += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.arriving -= 1;
+    };
+  }
+
   /** Routing observation only: the existing poll carries the native binding. */
   public boundTo(binding: string): boolean {
     return (
@@ -616,7 +635,7 @@ export class SeatOutbox {
     const parkedPoll = this.pollers.size > 0;
     const lastPollAgeMs = this.lastPollAt === undefined ? undefined : this.now() - this.lastPollAt;
     const observed = { parkedPoll, ...(lastPollAgeMs === undefined ? {} : { lastPollAgeMs }) };
-    if (!this.bound()) {
+    if (!this.bound() && this.arriving === 0) {
       this.deliveryEvent({ eventId: "", source: input.source, outcome: "unbound", ...observed });
       return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
     }
@@ -725,9 +744,12 @@ export class SeatOutbox {
       };
       input.signal?.addEventListener("abort", onAbort, { once: true });
       const waitForReceiver = (): void => {
-        const waitMs = this.pollers.size > 0 ? this.boundGraceMs : this.remainingGraceMs();
+        const waitMs =
+          this.pollers.size > 0 || this.arriving > 0 ? this.boundGraceMs : this.remainingGraceMs();
         pending.timer = setTimeout(() => {
           if (pending.taken || pending.settled) return;
+          // An arriving poll takes it once its source proof parks it.
+          if (this.arriving > 0) return waitForReceiver();
           // Held messages remain admitted while their bridge is polling. A
           // definite detach retains the existing pre-take fallback boundary.
           if (pending.holdUntilTurnEnd && this.bound()) {
