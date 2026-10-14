@@ -168,6 +168,8 @@ export const FleetSeatMessageStatusSchema = z
     schemaVersion: z.literal(1),
     deliveryId: z.string().uuid(),
     deliveryStage: DeliveryStageSchema,
+    /** The service sealed this original as never sent. Only returned to readers that ask (`?definitive=1`). */
+    definitive: z.literal("not_sent").optional(),
   })
   .strict();
 export type FleetSeatMessageStatus = z.infer<typeof FleetSeatMessageStatusSchema>;

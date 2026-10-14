@@ -13,7 +13,7 @@ const STAGES = new Set([
 export const MESSAGE_CLANKIE_STATUS_TOOL = {
   name: "message_clankie_status",
   description:
-    "Read the current delivery stage of your original message to Clankie by its returned deliveryId. Use before retrying or when your work depends on the message. Read-only: never resends, marks read, or changes a message. Stages describe delivery, not task completion. An unknown receipt does not prove nothing was sent; preserve and reconcile an uncertain original through message_clankie.",
+    "Read the current delivery stage of your original message to Clankie by its returned deliveryId. Use before retrying or when your work depends on the message. Read-only: never resends, marks read, or changes a message. Stages describe delivery, not task completion. An unknown receipt does not prove nothing was sent; preserve and reconcile an uncertain original through message_clankie. Only definitive not_sent proves it was never sent.",
   inputSchema: {
     type: "object",
     properties: {
@@ -32,7 +32,7 @@ export const MESSAGE_CLANKIE_STATUS_TOOL = {
 export async function readMessageStatus(request, deliveryId) {
   if (typeof deliveryId !== "string" || !UUID.test(deliveryId))
     throw new Error("Use the original deliveryId UUID.");
-  const response = await request(`/${encodeURIComponent(deliveryId)}/status`);
+  const response = await request(`/${encodeURIComponent(deliveryId)}/status?definitive=1`);
   if (!response.ok)
     throw new Error(`Message status lookup answered ${response.status}: ${await response.text()}`);
   const value = await response.json();
@@ -40,8 +40,18 @@ export async function readMessageStatus(request, deliveryId) {
     value?.schemaVersion !== 1 ||
     value.deliveryId !== deliveryId ||
     !STAGES.has(value.deliveryStage) ||
-    Object.keys(value).some((key) => !["schemaVersion", "deliveryId", "deliveryStage"].includes(key))
+    (value.definitive !== undefined &&
+      (value.definitive !== "not_sent" || value.deliveryStage !== "unavailable")) ||
+    Object.keys(value).some(
+      (key) => !["schemaVersion", "deliveryId", "deliveryStage", "definitive"].includes(key),
+    )
   )
     throw new Error("Message status lookup returned a malformed or mismatched receipt.");
-  return value;
+  // The service sealed this original: it was never sent and never will be (VUH-2244).
+  return value.definitive === "not_sent"
+    ? {
+        ...value,
+        detail: `Message ${deliveryId} was not sent and never will be. If message_clankie still holds it, the next call settles it and sends nothing; send your message again after that.`,
+      }
+    : value;
 }

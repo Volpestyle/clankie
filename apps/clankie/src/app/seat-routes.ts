@@ -446,9 +446,12 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     const status = await ctx.dependencies.captain.fleetSeatMessageStatus(pane.paneId, id.data);
     if (identity && !(await identity.validate()))
       return context.json({ error: "native_session_required" }, 403);
-    return status
-      ? context.json(FleetSeatMessageStatusSchema.parse(status))
-      : context.json({ error: "unknown_message_receipt" }, 404);
+    if (!status) return context.json({ error: "unknown_message_receipt" }, 404);
+    // Bridges released before `definitive` reject unknown keys; only readers that ask get it.
+    const { definitive, ...stage } = FleetSeatMessageStatusSchema.parse(status);
+    return context.json(
+      context.req.query("definitive") === "1" && definitive !== undefined ? { ...stage, definitive } : stage,
+    );
   });
   ctx.app.get(`${FLEET_SEAT_MESSAGES_PATH}/:id`, async (context) => {
     const pane = await fleetSeatPane(context);

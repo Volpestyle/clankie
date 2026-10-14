@@ -60,7 +60,9 @@ export class InboundSeatReceipts {
       const pending = this.fence.pending(`id:${deliveryId}`);
       const active = this.active.get(deliveryId);
       if (pending?.paneId === paneId && pending.sessionId === binding)
-        return { schemaVersion: 1, deliveryId, deliveryStage: pending.notSent ? "unavailable" : "uncertain" };
+        return pending.notSent
+          ? { schemaVersion: 1, deliveryId, deliveryStage: "unavailable", definitive: "not_sent" }
+          : { schemaVersion: 1, deliveryId, deliveryStage: "uncertain" };
       if (active?.paneId === paneId && active.delivery.binding === binding)
         return { schemaVersion: 1, deliveryId, deliveryStage: "uncertain" };
       return undefined;

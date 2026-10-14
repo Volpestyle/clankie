@@ -5082,6 +5082,11 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: definitive
+          in: query
+          required: false
+          description: Set to 1 to receive `definitive`. Older bridges reject unknown keys, so it is opt-in.
+          schema: { type: string, enum: ["1"] }
       responses:
         "200":
           description: Current ADR 0211 delivery stage
@@ -5097,6 +5102,10 @@ paths:
                   deliveryStage:
                     type: string
                     enum: [stored, delivered, consumed, responded, unavailable, uncertain, expired, rejected]
+                  definitive:
+                    type: string
+                    enum: [not_sent]
+                    description: The service sealed this original as never sent; it never will be.
         "400":
           description: Invalid delivery ID
         "403":

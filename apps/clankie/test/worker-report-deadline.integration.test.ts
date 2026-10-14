@@ -156,6 +156,26 @@ it("answers a stalled worker report not_sent by its deadline, fences the late or
   expect(refused).toMatchObject({ received: false, deliveryStage: "unavailable", definitive: "not_sent" });
   expect(Date.now() - started).toBeLessThan(10_000);
 
+  // A status read proves the sealed refusal, so a worker holding only its ID can move on.
+  const status = decodeMcpResult(
+    await call("tools/call", {
+      name: "message_clankie_status",
+      arguments: { deliveryId: refused.deliveryId },
+    }),
+  ) as { deliveryStage: string; definitive?: string; detail?: string };
+  expect(status).toMatchObject({ deliveryStage: "unavailable", definitive: "not_sent" });
+  expect(status.detail).toContain("was not sent and never will be");
+  // A bridge released before `definitive` rejects unknown keys; it still reads the bare stage.
+  const legacy = await fetch(
+    `http://127.0.0.1:${String(address.port)}/v1/fleet/seats/${encodeURIComponent(pane)}/messages/${refused.deliveryId}/status`,
+  );
+  expect(legacy.status).toBe(200);
+  expect(await legacy.json()).toEqual({
+    schemaVersion: 1,
+    deliveryId: refused.deliveryId,
+    deliveryStage: "unavailable",
+  });
+
   // The late original reaches acceptance only after its sealed refusal; it never lands.
   release();
   expect(await late).toMatchObject({ received: false, definitive: "not_sent" });

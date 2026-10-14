@@ -12,4 +12,4 @@ export const MESSAGE_CLANKIE_STATUS_TOOL: {
 export function readMessageStatus(
   request: (suffix: string) => Promise<Response>,
   deliveryId: unknown,
-): Promise<FleetSeatMessageStatus>;
+): Promise<FleetSeatMessageStatus & { readonly detail?: string }>;
