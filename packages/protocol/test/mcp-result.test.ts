@@ -48,6 +48,28 @@ it("keeps refusal, uncertainty, receipt metadata and media when decoding", () =>
   }
 });
 
+it("a refusal names its cause beside its reason code (VUH-2244)", () => {
+  const result = readableMcpResult(
+    {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            outcome: "refused",
+            reason: "server_unavailable",
+            detail: "No registered repo /Users/owner/dev/elsewhere",
+          }),
+        },
+      ],
+      isError: true,
+    },
+    "mcp__plugin_clankie-worker_worker__clankie_call",
+  );
+  expect(result.content[0]?.text).toBe(
+    "clankie call: refused — server_unavailable. No registered repo /Users/owner/dev/elsewhere",
+  );
+});
+
 it("an uncertain result names its receipt and why, so it can be reconciled or reported", () => {
   const deliveryId = "440ebcfc-180e-4f40-af4a-a55672d26593";
   const result = readableMcpResult(

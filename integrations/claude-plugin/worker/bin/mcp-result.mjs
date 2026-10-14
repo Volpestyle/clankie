@@ -50,7 +50,8 @@ function summary(value, name, isError) {
     value?.isError === true ||
     ["failed", "uncertain", "refused", "error", "unavailable", "unconfirmed", "waiting_user"].includes(state)
   )
-    return `${label}: ${typeof state === "string" ? state : "failed"}${typeof (data?.reason ?? data?.code ?? data?.error) === "string" ? ` — ${(data.reason ?? data.code ?? data.error).slice(0, 256)}` : ""}.`;
+    // The detail names the actual cause; a bare reason code can mislead (VUH-2244).
+    return `${label}: ${typeof state === "string" ? state : "failed"}${typeof (data?.reason ?? data?.code ?? data?.error) === "string" ? ` — ${(data.reason ?? data.code ?? data.error).slice(0, 256)}` : ""}.${typeof data?.detail === "string" && data.detail ? ` ${data.detail.slice(0, 300)}` : ""}`;
   if (object(data)) {
     const id = data.identifier ?? data.id;
     const status = typeof data.status === "string" ? data.status : data.state?.name;
