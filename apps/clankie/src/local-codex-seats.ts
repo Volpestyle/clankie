@@ -8,6 +8,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
@@ -185,10 +186,26 @@ export class LocalCodexSeats {
     )
       throw new Error("original_local_codex_registration_changed");
     if (this.durable) {
-      const stored = StateSchema.parse(JSON.parse(readFileSync(this.durable.path, "utf8"))).seats;
+      const stored = this.storedSeats(this.durable.path);
       if (!stored.some((entry) => isDeepStrictEqual(entry, candidate)))
         throw new Error("original_local_codex_record_changed");
     }
+  }
+
+  /**
+   * Catalog guards check the durable records on every candidate, twice per
+   * guard (VUH-2216). Parse a given file version once: `save` replaces the file
+   * by rename, so its identity, size and timestamps change with every write.
+   * A missing or invalid file still throws.
+   */
+  private stored: { version: string; seats: z.infer<typeof StateSchema>["seats"] } | undefined;
+  private storedSeats(path: string): z.infer<typeof StateSchema>["seats"] {
+    const stat = statSync(path, { bigint: true });
+    const version = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    if (this.stored?.version === version) return this.stored.seats;
+    const seats = deepFreeze(StateSchema.parse(JSON.parse(readFileSync(path, "utf8"))).seats);
+    this.stored = { version, seats };
+    return seats;
   }
 
   async guardCatalog(candidate: LocalCodexRecord, signal?: AbortSignal): Promise<void> {
@@ -422,4 +439,12 @@ export class LocalCodexSeats {
     }
     return false;
   }
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
 }

@@ -284,6 +284,35 @@ it.each(["release", "replacement"])(
   },
 );
 
+it("VUH-2216: checks one launch-record version once, and still checks every rewrite", async () => {
+  const f = durableFixture();
+  try {
+    const registry = f.create();
+    await registry.register(42, "w1:p1").bindSession?.("thread");
+    const [candidate] = registry.catalogCandidates("w1:p1");
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      // Catalog guards check every candidate, twice per guard.
+      for (let check = 0; check < 10; check++) registry.assertCatalogCurrent(candidate!);
+      expect(parse).toHaveBeenCalledOnce();
+    } finally {
+      parse.mockRestore();
+    }
+    // Another writer's version is read afresh: a record that no longer matches refuses.
+    const stored = JSON.parse(readFileSync(f.path, "utf8"));
+    writeFileSync(f.path, `${JSON.stringify({ ...stored, seats: [] })}\n`);
+    expect(() => registry.assertCatalogCurrent(candidate!)).toThrow("original_local_codex_record_changed");
+    writeFileSync(f.path, `${JSON.stringify(stored)}\n`);
+    registry.assertCatalogCurrent(candidate!);
+    writeFileSync(f.path, "{");
+    expect(() => registry.assertCatalogCurrent(candidate!)).toThrow();
+    rmSync(f.path);
+    expect(() => registry.assertCatalogCurrent(candidate!)).toThrow();
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 it("fails closed on corrupt controller launch records without blocking startup", async () => {
   const f = durableFixture();
   try {
