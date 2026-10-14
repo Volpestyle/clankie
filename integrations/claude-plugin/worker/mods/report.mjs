@@ -69,10 +69,13 @@ if (!link) {
         "local_pane_required",
       ];
       const code = codes.includes(body?.error) ? body.error : undefined;
+      // A refused pane proof carries its observer code beside the retryable
+      // admission error; the catalog proof still names it as the error.
       const observer =
-        response.status === 503 &&
-        ["remote_observation_timeout", "remote_observer_unavailable"].includes(body?.error)
-          ? body.error
+        response.status === 503
+          ? [body?.observation, body?.error].find((value) =>
+              ["remote_observation_timeout", "remote_observer_unavailable"].includes(value),
+            )
           : undefined;
       write(
         verdict(

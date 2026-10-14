@@ -1,9 +1,12 @@
 /** An observation failed before dispatch; no membership decision or effect was made. */
 export class FleetAdmissionUnavailableError extends Error {}
 
-export function fleetAdmissionUnavailableResponse(): Response {
+export function fleetAdmissionUnavailableResponse(
+  diagnostic: { readonly observation?: string } = {},
+): Response {
   return Response.json(
     {
+      ...diagnostic,
       error: "fleet_admission_unavailable",
       retryable: true,
       reason:

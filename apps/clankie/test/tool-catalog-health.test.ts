@@ -180,7 +180,17 @@ it("remote report transport failures return safe 503 reasons at either proof wit
       calls = 0;
       const response = await post();
       expect(response.status).toBe(503);
-      expect(await response.json()).toEqual({ error: "remote_observation_timeout" });
+      // The pane proof is refused with the retryable admission contract the
+      // installed bridges already retry; the route's own proof keeps its code.
+      expect(await response.json()).toMatchObject(
+        failAt === 1
+          ? {
+              error: "fleet_admission_unavailable",
+              retryable: true,
+              observation: "remote_observation_timeout",
+            }
+          : { error: "remote_observation_timeout" },
+      );
       expect(calls).toBe(failAt);
       expect(recorded).not.toHaveBeenCalled();
     }

@@ -42,6 +42,7 @@ import { readJson } from "./http-auth.ts";
 import { type ClankieAppDependencies } from "./types.ts";
 import { peerSeatAuthority as resolvePeerSeatAuthority } from "./peer-seat-authority.ts";
 import { RemoteObservationError } from "../remote-fleet-relay.ts";
+import { fleetAdmissionUnavailableResponse } from "../local-fleet-admission.ts";
 import { SeatLinkInterruptedError } from "../captain/seat-outbox.ts";
 
 /**
@@ -285,8 +286,11 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
           ? { paneId: `${proof.fleet}/${raw}` }
           : { denial: context.json({ error: "remote_pane_required" }, 403) };
       } catch (error) {
+        // A slow or lost remote proof is refused before any route effect. Use
+        // the retryable admission contract installed bridges already retry,
+        // keeping the observer code as a diagnostic (VUH-2208).
         if (error instanceof RemoteObservationError)
-          return { denial: context.json({ error: error.code }, 503) };
+          return { denial: fleetAdmissionUnavailableResponse({ observation: error.code }) };
         throw error;
       }
     }
