@@ -4151,7 +4151,9 @@ paths:
         `fleet_consistency`. Seats and personas reflect the last available
         observation, never fresh admission or ownership proof. The returned
         cursor remains the cursor from before the read so the next poll can
-        catch changes. Optional `view: home`
+        catch changes. `roster` answers within three seconds; a projection
+        still running leaves its seats as the last completed projection and adds
+        the same optional `readWarnings`. Optional `view: home`
         omits historical personas that are neither seated
         contacts nor channel participants. Seats, channels, tallies and edges
         are unchanged. Omitting the selector preserves the full directory;

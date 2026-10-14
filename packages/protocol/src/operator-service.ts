@@ -33,7 +33,7 @@ import {
   WorkerReportPageSchema,
   type WorkerReportPage,
 } from "./worker-reports.ts";
-import { ClosedWorkerPaneSchema } from "./operator-conversations.ts";
+import { ClosedWorkerPaneSchema, OperatorFleetReadWarningsSchema } from "./operator-conversations.ts";
 import { WorktreeReconciliationSchema } from "./checkouts.ts";
 import { HireReceiptIdSchema, HireReceiptSettlementSchema } from "./hire-receipts.ts";
 import { SeatDeliverySettlementSchema, UnresolvedSeatDeliverySchema } from "./seat-deliveries.ts";
@@ -1117,6 +1117,8 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       schemaVersion: z.literal(1),
       closedPanes: z.array(ClosedWorkerPaneSchema).max(128).optional(),
       seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+      /** Present when the live projection missed the display deadline and seats are the last completed one. */
+      readWarnings: OperatorFleetReadWarningsSchema.optional(),
       workerReports: z.array(WorkerReportSummarySchema).max(1000).optional(),
     })
     .strict(),
@@ -1362,6 +1364,11 @@ export interface OperatorConversationServiceClient {
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
   leadChats?(): Promise<LeadChatsResult>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
+  /** The roster with any degraded-read warnings; seats may be the last completed projection. */
+  rosterRead?(): Promise<{
+    seats: readonly OperatorFleetSeat[];
+    readWarnings?: z.infer<typeof OperatorFleetReadWarningsSchema>;
+  }>;
   readoptSeat?(seatId: string, conversationId: string): Promise<boolean>;
   workerReports?(
     conversationId: string,
@@ -1567,6 +1574,19 @@ export function createOperatorConversationServiceClient(
     if (result.op !== "close_seat") throw new Error(`Unexpected ${result.op} result for close_seat`);
     return { closed: result.closed, ...(result.refusal ? { refusal: result.refusal } : {}) };
   };
+  const rosterRead = async () => {
+    const result = await dispatch({
+      op: "roster",
+      schemaVersion: 1,
+      ...workProjection,
+      ...(options.includeCheckouts === true ? { includeCheckouts: true } : {}),
+    });
+    if (result.op !== "roster") throw new Error(`Unexpected ${result.op} result for roster`);
+    return {
+      seats: result.seats,
+      ...(result.readWarnings === undefined ? {} : { readWarnings: result.readWarnings }),
+    };
+  };
   return {
     async projectProposalGet(target) {
       const result = await dispatch({ op: "project_proposal_get", schemaVersion: 1, ...target });
@@ -1688,15 +1708,9 @@ export function createOperatorConversationServiceClient(
       return result.result;
     },
     async roster() {
-      const result = await dispatch({
-        op: "roster",
-        schemaVersion: 1,
-        ...workProjection,
-        ...(options.includeCheckouts === true ? { includeCheckouts: true } : {}),
-      });
-      if (result.op !== "roster") throw new Error(`Unexpected ${result.op} result for roster`);
-      return result.seats;
+      return (await rosterRead()).seats;
     },
+    rosterRead,
     async fleet(cursor, signal) {
       const result = await dispatch(
         {

@@ -70,6 +70,10 @@ export interface CreateOperatorServiceContext {
   readonly enrichCheckoutSeats: (
     seats: readonly OperatorFleetSeat[],
   ) => Promise<readonly OperatorFleetSeat[]>;
+  readonly rosterSeats: (options?: { includeCheckouts?: boolean }) => Promise<{
+    seats: readonly OperatorFleetSeat[];
+    readWarnings?: import("@clankie/protocol").OperatorFleetReadWarnings;
+  }>;
   readonly fleetSnapshot: (options?: {
     includeCheckouts?: boolean;
   }) => Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }>>;
@@ -297,11 +301,13 @@ export function createOperatorService(
       };
     }
     if (request.op === "roster") {
-      const observed = await ctx.refreshFleet();
-      const seats = request.includeCheckouts ? await ctx.enrichCheckoutSeats(observed) : observed;
+      const { seats, readWarnings } = await ctx.rosterSeats({
+        includeCheckouts: request.includeCheckouts === true,
+      });
       return {
         op: "roster",
         schemaVersion: 1,
+        ...(readWarnings === undefined ? {} : { readWarnings }),
         workerReports: ctx.reportSummaries(),
         seats:
           request.includeWork === true

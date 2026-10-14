@@ -176,7 +176,11 @@ export async function withFleetAgentHealth(stdout: string, options: HerdrConnect
     );
     let seats: Awaited<ReturnType<typeof client.roster>>;
     try {
-      seats = await client.roster();
+      const roster = client.rosterRead ? await client.rosterRead() : { seats: await client.roster() };
+      seats = roster.seats;
+      // A busy fleet answers with its last completed roster rather than nothing; say which.
+      for (const warning of roster.readWarnings ?? [])
+        process.stderr.write(`clankie: Clankie's roster is partial: ${warning.message}\n`);
     } catch (error) {
       // Say so: rows without owner and receiver fields must not read as unowned.
       process.stderr.write(

@@ -108,6 +108,7 @@ async function fixture(
     deps: {},
     reportSummaries: reports.reportSummaries,
     refreshFleet: async () => [],
+    rosterSeats: async () => ({ seats: [] }),
     validateConversationOwner: (owner: { conversationId: string }) =>
       store.conversation(owner.conversationId) !== undefined,
   } as unknown as CreateOperatorServiceContext);

@@ -1095,22 +1095,24 @@ export const RoomHandoffMetadataSchema = z
   .strict();
 export type RoomHandoffMetadata = z.infer<typeof RoomHandoffMetadataSchema>;
 
+/** Incomplete display reads name the pending component; they are never live authority. */
+export const OperatorFleetReadWarningsSchema = z
+  .array(
+    z
+      .object({
+        source: z.string().min(1).max(128),
+        reason: z.enum(["timeout", "changed_during_read"]),
+        message: z.string().min(1).max(512),
+      })
+      .strict(),
+  )
+  .max(16);
+export type OperatorFleetReadWarnings = z.infer<typeof OperatorFleetReadWarningsSchema>;
+
 export const OperatorFleetSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
-    /** Incomplete display reads name the pending component; they are never live authority. */
-    readWarnings: z
-      .array(
-        z
-          .object({
-            source: z.string().min(1).max(128),
-            reason: z.enum(["timeout", "changed_during_read"]),
-            message: z.string().min(1).max(512),
-          })
-          .strict(),
-      )
-      .max(16)
-      .optional(),
+    readWarnings: OperatorFleetReadWarningsSchema.optional(),
     /** Cached host capacity and holders; no process probing on a snapshot read. */
     resources: FleetResourceSnapshotSchema.optional(),
     cursor: OperatorConversationCursorSchema,

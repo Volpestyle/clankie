@@ -238,6 +238,8 @@ export {
   OPERATOR_FLEET_WAIT_MS_MAX,
   OperatorFleetSnapshotSchema,
   type OperatorFleetSnapshot,
+  OperatorFleetReadWarningsSchema,
+  type OperatorFleetReadWarnings,
   operatorFleetHome,
   SpawnOperatorSeatSchema,
   type SpawnOperatorSeat,

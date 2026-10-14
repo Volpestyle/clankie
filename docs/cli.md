@@ -6929,9 +6929,12 @@ model consumption. Next-turn-only stays highlighted even before mail is queued
 or after its queue is acknowledged, and stored adoption/message receipts warn
 about the idle-wake limitation. The detail supplies the original session's
 command: `claude --resume SESSION_ID --channels plugin:clankie-worker@clankie`.
-`clankie herdr agent list` adds these roster fields to Herdr's rows; when the
-roster cannot be read in time it prints Herdr's rows unchanged and says why on
-stderr, so a missing `owner` is never mistaken for an unowned seat.
+`clankie herdr agent list` adds these roster fields to Herdr's rows. The roster
+answers within three seconds: when the live projection is still running it
+returns the last completed roster and says on stderr that it is partial and
+which read is pending. When the roster cannot be read at all it prints Herdr's
+rows unchanged and says why on stderr, so a missing `owner` is never mistaken
+for an unowned seat.
 Use the original cwd and account/config home after coordinating any stop or
 resume with the owner. Do not run a duplicate of an existing session. A missing
 poll may also mean a disconnected bridge; inspect before choosing recovery.

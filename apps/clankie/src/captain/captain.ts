@@ -3484,6 +3484,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   const FLEET_FRESH_MS = 1000;
   const FLEET_READ_TIMEOUT_MS = 5_000;
+  // Under the five-second client deadline of `clankie herdr agent list` and doctor.
+  const ROSTER_READ_TIMEOUT_MS = 3_000;
   let lastProjectedSeats: readonly OperatorFleetSeat[] = [];
   const pendingFleetSources = new Set<string>();
   let fleetRefresh: Promise<readonly OperatorFleetSeat[]> | undefined;
@@ -4218,12 +4220,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
-  /** Prefer a stable cursor, but a busy or slow fleet must not starve display reads. */
-  async function fleetSnapshot({ includeCheckouts = false }: { includeCheckouts?: boolean } = {}): Promise<
-    Extract<OperatorConversationServiceResult, { op: "fleet" }>
-  > {
-    const deadline = performance.now() + FLEET_READ_TIMEOUT_MS;
-    const readWarnings: NonNullable<import("@clankie/protocol").OperatorFleetSnapshot["readWarnings"]> = [];
+  /**
+   * One display read's deadline. A read that misses it names the pending
+   * component; the caller falls back to the last completed observation.
+   */
+  function boundedFleetRead(timeoutMs: number) {
+    const deadline = performance.now() + timeoutMs;
+    const readWarnings: import("@clankie/protocol").OperatorFleetReadWarnings = [];
     async function bounded<T>(source: string, read: Promise<T>): Promise<{ value: T } | undefined> {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -4238,11 +4241,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             source === "native_fleet_projection" && pendingFleetSources.size
               ? [...pendingFleetSources].slice(0, 16)
               : [source];
-          for (const pending of sources)
+          for (const pending of sources.slice(0, 16 - readWarnings.length))
             readWarnings.push({
               source: pending,
               reason: "timeout",
-              message: `${pending} did not finish within ${FLEET_READ_TIMEOUT_MS} ms; this response contains the last available observation, not confirmed live seats.`,
+              message: `${pending} did not finish within ${timeoutMs} ms; this response contains the last available observation, not confirmed live seats.`,
             });
         }
         return result;
@@ -4250,6 +4253,36 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (timer !== undefined) clearTimeout(timer);
       }
     }
+    return { deadline, readWarnings, bounded };
+  }
+
+  /**
+   * The roster answers inside its callers' five-second client deadline. A
+   * projection still running keeps going for the next read; this one returns
+   * the last completed projection and says so, never live authority.
+   */
+  async function rosterSeats({ includeCheckouts = false }: { includeCheckouts?: boolean } = {}): Promise<{
+    seats: readonly OperatorFleetSeat[];
+    readWarnings?: import("@clankie/protocol").OperatorFleetReadWarnings;
+  }> {
+    const { readWarnings, bounded } = boundedFleetRead(ROSTER_READ_TIMEOUT_MS);
+    const observed = await bounded("native_fleet_projection", refreshFleet());
+    const basicSeats = observed?.value ?? lastProjectedSeats;
+    const checkout =
+      includeCheckouts && observed !== undefined
+        ? await bounded("checkout_observations", enrichCheckoutSeats(basicSeats))
+        : undefined;
+    return {
+      seats: checkout?.value ?? basicSeats,
+      ...(readWarnings.length === 0 ? {} : { readWarnings }),
+    };
+  }
+
+  /** Prefer a stable cursor, but a busy or slow fleet must not starve display reads. */
+  async function fleetSnapshot({ includeCheckouts = false }: { includeCheckouts?: boolean } = {}): Promise<
+    Extract<OperatorConversationServiceResult, { op: "fleet" }>
+  > {
+    const { deadline, readWarnings, bounded } = boundedFleetRead(FLEET_READ_TIMEOUT_MS);
     // Only one shared refresh can remain in flight after a display deadline.
     // It retains its native transport deadlines and is never cancelled/reused
     // as the fresh census that authorizes a mutation.
@@ -5789,6 +5822,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
       get enrichCheckoutSeats() {
         return enrichCheckoutSeats;
+      },
+      get rosterSeats() {
+        return rosterSeats;
       },
       get fleetSnapshot() {
         return fleetSnapshot;

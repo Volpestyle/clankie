@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { text } from "node:stream/consumers";
 import { setTimeout as delay } from "node:timers/promises";
 import { runAgentsCommand } from "../../tui/src/command/agents.ts";
+import { withFleetAgentHealth } from "../../tui/src/session/herdr-connection.ts";
 import { createClankieApp } from "../src/app.ts";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -450,6 +451,15 @@ it("real addressed-seat subagent projection shares large-tree discovery and avoi
 });
 
 async function contactsHttp(captain: ReturnType<typeof createCaptain>, root: string) {
+  const host = await operatorHttp(captain, root);
+  return () =>
+    runAgentsCommand(["contacts"], {
+      host,
+      env: { CLANKIE_CAPTAIN_TOKEN: "contacts-test" },
+    });
+}
+
+async function operatorHttp(captain: ReturnType<typeof createCaptain>, root: string) {
   const service = await createClankieApp({
     captain,
     settings: { load: async () => ClankieSettingsSchema.parse({ schemaVersion: 1 }) },
@@ -481,11 +491,7 @@ async function contactsHttp(captain: ReturnType<typeof createCaptain>, root: str
     await new Promise<void>((resolve) => server.close(() => resolve()));
     service.close();
   });
-  return () =>
-    runAgentsCommand(["contacts"], {
-      host: `http://127.0.0.1:${address.port}`,
-      env: { CLANKIE_CAPTAIN_TOKEN: "contacts-test" },
-    });
+  return `http://127.0.0.1:${address.port}`;
 }
 
 it("busy fleet changes during a slow census return partial contacts instead of starving the HTTP read", async () => {
@@ -552,4 +558,35 @@ it("a stalled Herdr census returns named partial contacts by the display deadlin
     await f.captain.serveOperatorConversation({ op: "roster", schemaVersion: 1 });
   }
   expect(await contacts()).toHaveLength(1);
+}, 20_000);
+
+it("a stalled census still answers the roster CLI inside its deadline, named as partial", async () => {
+  const tree = await sessionTree(1, 0);
+  const f = await captainFixture(tree);
+  const options = {
+    repoRoot: tree.root,
+    host: await operatorHttp(f.captain, tree.root),
+    env: { CLANKIE_CAPTAIN_TOKEN: "contacts-test" },
+  };
+  const native = JSON.stringify({ result: { agents: f.rows } });
+  const complete = JSON.parse(await withFleetAgentHealth(native, options));
+  expect(complete.result.agents[0].owner).toBe("global-default");
+  await delay(1050);
+  const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  const held = f.hold();
+  const started = performance.now();
+  const listing = withFleetAgentHealth(native, options);
+  await held.started;
+  try {
+    const partial = JSON.parse(await listing);
+    // Inside the CLI's own five-second client deadline, with owner fields kept.
+    expect(performance.now() - started).toBeLessThan(5000);
+    expect(partial.result.agents[0].owner).toBe("global-default");
+    const written = stderr.mock.calls.map(([chunk]) => String(chunk)).join("");
+    expect(written).toContain("roster is partial: herdr:default did not finish within 3000 ms");
+    expect(written).not.toContain("roster is unavailable");
+  } finally {
+    held.release();
+    await listing.catch(() => undefined);
+  }
 }, 20_000);
