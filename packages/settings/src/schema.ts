@@ -1,3 +1,4 @@
+import { EvidenceSettingsSchema } from "@clankie/protocol/owner-settings";
 import { LinearWakeSettingsSchema } from "@clankie/protocol/linear-settings";
 import { MachineAccessSettingsSchema } from "@clankie/protocol/machine-access";
 import { DesktopSettingsSchema } from "./desktop.ts";
@@ -612,38 +613,7 @@ export const AgentHostConnectionSchema = z
   .strict();
 export type AgentHostConnection = z.infer<typeof AgentHostConnectionSchema>;
 
-/** Blob storage only; credentials are never settings. Local remains the default. */
-export const EvidenceSettingsSchema = z.discriminatedUnion("backend", [
-  z.object({ backend: z.literal("local") }).strict(),
-  z
-    .object({
-      backend: z.literal("s3"),
-      bucket: z
-        .string()
-        .min(3)
-        .max(63)
-        .regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/),
-      region: z
-        .string()
-        .min(1)
-        .max(64)
-        .regex(/^[a-z0-9-]+$/),
-      prefix: z
-        .string()
-        .max(512)
-        .refine(
-          (value) =>
-            value === "" ||
-            value
-              .split("/")
-              .every((part) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part) && part !== "." && part !== ".."),
-          "Expected a relative object prefix without empty or traversal segments",
-        )
-        .default(""),
-    })
-    .strict(),
-]);
-export type EvidenceSettings = z.infer<typeof EvidenceSettingsSchema>;
+export { EvidenceSettingsSchema, type EvidenceSettings } from "@clankie/protocol/owner-settings";
 
 export const ClankieSettingsSchema = z
   .object({

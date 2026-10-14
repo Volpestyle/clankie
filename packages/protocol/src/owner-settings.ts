@@ -326,3 +326,55 @@ export type OwnerVoiceSnapshot = z.infer<typeof OwnerVoiceSnapshotSchema>;
 export const OwnerVoiceUpdateSchema = z
   .object({ expectedRevision: RevisionSchema, voice: VoiceSettingsSchema })
   .strict();
+
+/** Blob storage only; credentials are never settings. Local remains the default. */
+export const EvidenceSettingsSchema = z.discriminatedUnion("backend", [
+  z.object({ backend: z.literal("local") }).strict(),
+  z
+    .object({
+      backend: z.literal("s3"),
+      bucket: z
+        .string()
+        .min(3)
+        .max(63)
+        .regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/),
+      region: z
+        .string()
+        .min(1)
+        .max(64)
+        .regex(/^[a-z0-9-]+$/),
+      prefix: z
+        .string()
+        .max(512)
+        .refine(
+          (value) =>
+            value === "" ||
+            value
+              .split("/")
+              .every((part) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part) && part !== "." && part !== ".."),
+          "Expected a relative object prefix without empty or traversal segments",
+        )
+        .default(""),
+    })
+    .strict(),
+]);
+export type EvidenceSettings = z.infer<typeof EvidenceSettingsSchema>;
+
+export const EVIDENCE_STORAGE_SETTINGS_PATH = "/v1/settings/evidence-storage";
+export const EvidenceStorageSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    revision: z.string().regex(/^[a-f0-9]{64}$/u),
+    configured: EvidenceSettingsSchema,
+    active: EvidenceSettingsSchema,
+    restartRequired: z.boolean(),
+  })
+  .strict();
+export type EvidenceStorageSnapshot = z.infer<typeof EvidenceStorageSnapshotSchema>;
+export const UpdateEvidenceStorageSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    configured: EvidenceSettingsSchema,
+  })
+  .strict();

@@ -94,6 +94,7 @@ import { createFleetProjectMembershipRoutes } from "../fleet-project-membership-
 import { ExecutionConnectSchema } from "../herdr-session.ts";
 import { createComposerTranscriptionRoutes } from "../composer-transcription.ts";
 import { createEvidenceRoutes } from "../evidence-store.ts";
+import { createEvidenceStorageSettingsRoutes } from "../evidence-storage-settings-routes.ts";
 import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { createAppearanceRoutes } from "../appearance-routes.ts";
 import { createSkinDraftRoutes } from "../skin-draft-routes.ts";
@@ -1074,6 +1075,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         ? {}
         : { keepAwakeStatus: dependencies.keepAwakeStatus }),
     }),
+  );
+  app.route(
+    "/",
+    createEvidenceStorageSettingsRoutes(authorizeOwnerSecrets, settingsSource, dependencies.evidenceStore),
   );
   app.route("/", createAppearanceRoutes(authorizeOwnerSecrets, settingsSource));
   app.route(

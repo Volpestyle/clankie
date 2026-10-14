@@ -2601,26 +2601,28 @@ and the records that describe them. Paths resolve from the current directory
 inside any git repository, with no per-repository configuration. Each command
 prints one JSON document; push and fetch also print a plain summary on stderr.
 
-The service defaults to local disk blobs and SQLite records. The S3 adapter is
-a partial foundation; its configuration is not yet usable through supported
-controls. No API/CLI selector exists yet. The non-secret `evidence` schema has
-this format:
+The service defaults to local disk blobs and SQLite records. Supported owner
+configuration uses the same authenticated HTTP path as other settings:
 
-```json
-{
-  "evidence": {
-    "backend": "s3",
-    "bucket": "example-evidence-bucket",
-    "region": "us-east-1",
-    "prefix": "tenant-evidence"
-  }
-}
+```sh
+clankie evidence storage status
+clankie evidence storage s3 --bucket example-evidence-bucket --region us-east-1 --prefix tenant-evidence
+clankie evidence storage local
 ```
 
-This JSON describes the schema, not instructions to edit settings files. Local
-remains the default. Startup code branches on the loaded schema, but startup
-selection has only source inspection, not an executed startup proof. Supported
-API/CLI controls and startup-selection proof remain VUH-1913 gaps.
+`--expected-revision REVISION` supplies an explicit reviewed revision for a write.
+Otherwise the command reads the snapshot before saving; conflict is refused
+without retry or settings-file fallback. GET/POST `/v1/settings/evidence-storage`
+use schema version 1. POST contains `expectedRevision` and `configured`, a strict
+`{ "backend": "local" }` or `{ "backend": "s3", "bucket": "...", "region": "...", "prefix": "..." }`.
+Credentials, endpoints and local roots are not accepted. Responses are non-secret
+and `Cache-Control: no-store`, with separate `configured` and `active` values and
+`restartRequired`. Saving does not apply, restart or activate storage. Current
+writes keep the captured adapter; historical reads and pending receipts retain
+recorded destinations. A separately authorized startup may use the saved config;
+full startup-selection and hosted proof remain open. Invalid existing settings
+fail closed with `evidence_settings_invalid` (503), preserving the file bytes;
+these controls do not accept unknown fields or infer legacy locations.
 
 The S3 foundation uses the standard AWS SDK credential provider chain; never
 put credentials in settings. Broker-backed renewable tenant credentials and

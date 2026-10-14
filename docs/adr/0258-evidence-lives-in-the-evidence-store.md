@@ -150,11 +150,14 @@ everything in git is the cost above.
 Implementation note (VUH-1913, partial): the public S3 blob adapter keeps the
 existing authenticated service upload and JSON receipt contract, checks size
 and SHA256 on private temporary disk before PUT, and resolves recorded blobs
-to S3-signed GETs capped at 15 minutes. Local remains the default. No supported
-API/CLI selector exists yet, so configuration is not yet usable through supported
-controls. JSON examples describe the non-secret backend/bucket/region/prefix
-schema, not instructions to edit settings files. Startup selection is inspected
-source only; executed startup proof and API/CLI controls remain VUH-1913 gaps.
+to S3-signed GETs capped at 15 minutes. Local remains the default. Phase B adds
+owner GET/POST and `clankie evidence storage` for strict non-secret destination
+configuration through the revision-fenced settings API. Configured and active
+remain separate: a save does not hot apply, restart, migrate or activate storage.
+Captured writes and private historical/pending associations remain unchanged.
+Arbitrary local roots, endpoints, credential fields and settings-file fallbacks
+are refused. Existing invalid/unknown settings fail closed without overwrite;
+this slice does not broaden the settings schema. Full startup proof remains open.
 This foundation uses the standard AWS provider chain and SQLite metadata. It does not complete the
 broker-backed renewable tenant credentials, private hosted infrastructure,
 backup policy, migration, or required real-hosted push/fetch proof. The hosted

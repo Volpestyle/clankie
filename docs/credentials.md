@@ -21,12 +21,11 @@ This reference owns credential identities and trust boundaries. The
 and locking; [worker access](worker-access.md) owns restricted delegation.
 
 The partial S3 evidence adapter foundation uses the standard AWS SDK credential
-provider chain, including its renewable temporary-credential providers. No
-supported API/CLI selector exists yet; configuration is not yet usable through
-supported controls. The JSON in the CLI reference describes the schema, not
-instructions to edit settings files. Local remains the default. Startup
-selection has source inspection only; its executed proof and API/CLI controls
-remain VUH-1913 gaps. The schema contains only backend, bucket, region and object
+provider chain, including its renewable temporary-credential providers.
+`clankie evidence storage` configures only non-secret destination identifiers
+through the owner HTTP API. It reports configured and active separately; saving
+never applies or restarts the captured adapter. Local remains the default.
+Full startup-selection and hosted credential proof remain VUH-1913 gaps. The schema contains only backend, bucket, region and object
 prefix; no access key, session token or secret is a setting. This adapter does
 not yet route hosted tenant credentials through Clankie's broker. Hosted credential
 issuance, refresh and tenant isolation must be completed in the private hosted

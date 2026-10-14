@@ -1,3 +1,4 @@
+import { runEvidenceStorageCommand } from "./evidence-storage.ts";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -47,7 +48,8 @@ import { commandHost } from "./io.ts";
  * back the operator seat's `evidence_*` MCP tools.
  */
 const EVIDENCE_USAGE = [
-  "Usage: clankie evidence push [PATH] [--issue KEY] [--caption TEXT]",
+  "Usage: clankie evidence storage [status|local|s3 --bucket BUCKET --region REGION [--prefix PREFIX]]",
+  "       clankie evidence push [PATH] [--issue KEY] [--caption TEXT]",
   "       clankie evidence fetch [PATH]",
   "       clankie evidence backfill --database SQLITE [--repo PATH] [--apply]",
   "       clankie evidence list --issue KEY | --commit SHA",
@@ -694,6 +696,7 @@ export async function runEvidenceCommand(
 ): Promise<{ readonly ok: boolean; readonly body: unknown }> {
   const [verb, ...rest] = args;
   const stderr = options.stderr ?? process.stderr;
+  if (verb === "storage") return { ok: true, body: await runEvidenceStorageCommand(rest, options) };
   if (verb === "backfill") {
     const apply = rest.includes("--apply");
     if (rest.filter((arg) => arg === "--apply").length > 1) throw new Error(EVIDENCE_USAGE);
