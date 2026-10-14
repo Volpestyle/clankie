@@ -1,3 +1,4 @@
+import { runEvidenceStorageMenu } from "./evidence-storage-menu.ts";
 import { HOST_SETTINGS_WORDING } from "@clankie/protocol/owner-settings";
 import type { CaptainRouteFetcher } from "./session/operator-conversations.ts";
 import { runCheckoutsCommand } from "./command/checkouts.ts";
@@ -1908,6 +1909,22 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                 ]),
           ].join("\n"),
           "success",
+        );
+      },
+    },
+    {
+      name: "evidence-storage",
+      aliases: [],
+      description: "Choose where evidence is saved",
+      takesArgument: false,
+      async run(argument, shell): Promise<void> {
+        if (argument.trim()) {
+          shell.insertCommandResult("/evidence-storage", "Usage: /evidence-storage", "error");
+          return;
+        }
+        await runEvidenceStorageMenu(
+          shell,
+          context.ownerFetcher === undefined ? {} : { ownerFetcher: context.ownerFetcher },
         );
       },
     },
