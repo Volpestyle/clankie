@@ -1,0 +1,137 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "real-after/04-iphone-authored-room.response.json",
+      "size": 29822,
+      "sha256": "fc6380722a7dfc0ec8587407776cdc0ac73ddbb1fbf4e2ca67fca6fcde27fda5",
+      "url": "clankie://evidence/sha256/fc6380722a7dfc0ec8587407776cdc0ac73ddbb1fbf4e2ca67fca6fcde27fda5"
+    },
+    {
+      "path": "real-after/04-iphone-authored-room.thumb.jpg",
+      "size": 22214,
+      "sha256": "d626bc2e9fef3a4cbf0a708ce52241f720b2f00ac03be70e7d5a34cca031f117",
+      "url": "clankie://evidence/sha256/d626bc2e9fef3a4cbf0a708ce52241f720b2f00ac03be70e7d5a34cca031f117"
+    },
+    {
+      "path": "real-after/12-ipad-small.response.json",
+      "size": 34630,
+      "sha256": "c58d8d6e78608d58053e613c9769551e07f97a0fd3d3d61c4c2a63b899755997",
+      "url": "clankie://evidence/sha256/c58d8d6e78608d58053e613c9769551e07f97a0fd3d3d61c4c2a63b899755997"
+    },
+    {
+      "path": "real-after/12-ipad-small.thumb.jpg",
+      "size": 25821,
+      "sha256": "f0757883e970129d0ebdfd184dd96e9aa6a43bc9b32c3064ee9bf9535880bb94",
+      "url": "clankie://evidence/sha256/f0757883e970129d0ebdfd184dd96e9aa6a43bc9b32c3064ee9bf9535880bb94"
+    },
+    {
+      "path": "real-after/12-iphone-small.response.json",
+      "size": 40102,
+      "sha256": "7a5d75059060557c9e963cffcd503f31b236ac3884a59ffb89cf640194afbc36",
+      "url": "clankie://evidence/sha256/7a5d75059060557c9e963cffcd503f31b236ac3884a59ffb89cf640194afbc36"
+    },
+    {
+      "path": "real-after/12-iphone-small.thumb.jpg",
+      "size": 29924,
+      "sha256": "e1f2dd2d3349e0e89a9613a8cbd31eba3f3223d845d6d3f611b20dfdaa80b562",
+      "url": "clankie://evidence/sha256/e1f2dd2d3349e0e89a9613a8cbd31eba3f3223d845d6d3f611b20dfdaa80b562"
+    },
+    {
+      "path": "real-after/contact-sheet.response.json",
+      "size": 52306,
+      "sha256": "44fbd59ddf0b62bce08c9abcfac6a8fbff57d0c2141772094e33b3dfcc2cd80b",
+      "url": "clankie://evidence/sha256/44fbd59ddf0b62bce08c9abcfac6a8fbff57d0c2141772094e33b3dfcc2cd80b"
+    },
+    {
+      "path": "real-after/contact-sheet.thumb.jpg",
+      "size": 39078,
+      "sha256": "06206af522e82282613af82394dce5790fe3301ba89facbe5c73e66f01b705df",
+      "url": "clankie://evidence/sha256/06206af522e82282613af82394dce5790fe3301ba89facbe5c73e66f01b705df"
+    },
+    {
+      "path": "real-after/iphone-direct-launch.response.json",
+      "size": 33342,
+      "sha256": "b68e022624d30975b026690a4a7da2cf509c35ac57b9f9e5f57644d01c3e08f7",
+      "url": "clankie://evidence/sha256/b68e022624d30975b026690a4a7da2cf509c35ac57b9f9e5f57644d01c3e08f7"
+    },
+    {
+      "path": "real-after/iphone-direct-launch.thumb.jpg",
+      "size": 24854,
+      "sha256": "034442f231247d2285f68283991bac5b2136a437b000bf1481b47a81e0e6be8a",
+      "url": "clankie://evidence/sha256/034442f231247d2285f68283991bac5b2136a437b000bf1481b47a81e0e6be8a"
+    },
+    {
+      "path": "real-after/iphone-terminal-geometry.response.json",
+      "size": 35742,
+      "sha256": "c25dc62bd89afa500debe5f5d3e69fa937c03f86c42572fe97066d4724ed305d",
+      "url": "clankie://evidence/sha256/c25dc62bd89afa500debe5f5d3e69fa937c03f86c42572fe97066d4724ed305d"
+    },
+    {
+      "path": "real-after/iphone-terminal-geometry.thumb.jpg",
+      "size": 26655,
+      "sha256": "f9af5616e442aacb30883dd8be8cfd5de95e7b1f1ec3c5e74bf005b9537b1c3a",
+      "url": "clankie://evidence/sha256/f9af5616e442aacb30883dd8be8cfd5de95e7b1f1ec3c5e74bf005b9537b1c3a"
+    },
+    {
+      "path": "real-after/terminal-hierarchy-ipad.response.json",
+      "size": 39398,
+      "sha256": "e659f5036f89a71c7f92633eb4c1837171f82bd2836737cd26f217b8cc871050",
+      "url": "clankie://evidence/sha256/e659f5036f89a71c7f92633eb4c1837171f82bd2836737cd26f217b8cc871050"
+    },
+    {
+      "path": "real-after/terminal-hierarchy-ipad.thumb.jpg",
+      "size": 29396,
+      "sha256": "e2218438c32cf1c038fc88f5578833c3e13df74faa231bf17a461c443c9ff43f",
+      "url": "clankie://evidence/sha256/e2218438c32cf1c038fc88f5578833c3e13df74faa231bf17a461c443c9ff43f"
+    },
+    {
+      "path": "small-raw.tar",
+      "size": 115712,
+      "sha256": "30fd6fe30886470ae0b594369becf68259aaa29888b88ba2b5477c7a8c40caa8",
+      "url": "clankie://evidence/sha256/30fd6fe30886470ae0b594369becf68259aaa29888b88ba2b5477c7a8c40caa8"
+    },
+    {
+      "path": "supporting-stub/after/04-iphone-authored-room.thumb.jpg",
+      "size": 22214,
+      "sha256": "d626bc2e9fef3a4cbf0a708ce52241f720b2f00ac03be70e7d5a34cca031f117",
+      "url": "clankie://evidence/sha256/d626bc2e9fef3a4cbf0a708ce52241f720b2f00ac03be70e7d5a34cca031f117"
+    },
+    {
+      "path": "supporting-stub/after/12-ipad-small.thumb.jpg",
+      "size": 25821,
+      "sha256": "f0757883e970129d0ebdfd184dd96e9aa6a43bc9b32c3064ee9bf9535880bb94",
+      "url": "clankie://evidence/sha256/f0757883e970129d0ebdfd184dd96e9aa6a43bc9b32c3064ee9bf9535880bb94"
+    },
+    {
+      "path": "supporting-stub/after/12-iphone-small.thumb.jpg",
+      "size": 29924,
+      "sha256": "e1f2dd2d3349e0e89a9613a8cbd31eba3f3223d845d6d3f611b20dfdaa80b562",
+      "url": "clankie://evidence/sha256/e1f2dd2d3349e0e89a9613a8cbd31eba3f3223d845d6d3f611b20dfdaa80b562"
+    },
+    {
+      "path": "supporting-stub/after/contact-sheet.thumb.jpg",
+      "size": 39078,
+      "sha256": "06206af522e82282613af82394dce5790fe3301ba89facbe5c73e66f01b705df",
+      "url": "clankie://evidence/sha256/06206af522e82282613af82394dce5790fe3301ba89facbe5c73e66f01b705df"
+    },
+    {
+      "path": "supporting-stub/after/iphone-direct-launch.thumb.jpg",
+      "size": 24854,
+      "sha256": "034442f231247d2285f68283991bac5b2136a437b000bf1481b47a81e0e6be8a",
+      "url": "clankie://evidence/sha256/034442f231247d2285f68283991bac5b2136a437b000bf1481b47a81e0e6be8a"
+    },
+    {
+      "path": "supporting-stub/after/iphone-terminal-geometry.thumb.jpg",
+      "size": 26655,
+      "sha256": "f9af5616e442aacb30883dd8be8cfd5de95e7b1f1ec3c5e74bf005b9537b1c3a",
+      "url": "clankie://evidence/sha256/f9af5616e442aacb30883dd8be8cfd5de95e7b1f1ec3c5e74bf005b9537b1c3a"
+    },
+    {
+      "path": "supporting-stub/after/terminal-hierarchy-ipad.thumb.jpg",
+      "size": 29396,
+      "sha256": "e2218438c32cf1c038fc88f5578833c3e13df74faa231bf17a461c443c9ff43f",
+      "url": "clankie://evidence/sha256/e2218438c32cf1c038fc88f5578833c3e13df74faa231bf17a461c443c9ff43f"
+    }
+  ]
+}
