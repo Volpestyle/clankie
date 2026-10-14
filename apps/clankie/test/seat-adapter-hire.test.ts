@@ -254,7 +254,7 @@ it.each([
       agent: (id) => routed.get(id),
       transcript: (current) => routed.transcript!(current as HerdrAgentSnapshot),
       mailbox: { bound: () => true, deliver },
-      timing: { readyMs: 10, receiptMs: 10, pollMs: 1 },
+      timing: { readyMs: 10, receiptMs: 10, pollMs: 1, firstTurnMs: 10 },
     });
     const store = new HerdrWatchStore(join(root, "routed.json"), {
       runner: { ...routed, read },

@@ -3494,21 +3494,27 @@ export class HerdrWatchStore implements HerdrWatchPort {
     let remoteAccountEnv: Record<string, string> | undefined;
     let claudeHome: string | undefined;
     let claudeLabel = input.account;
+    // Launch the home exactly as the account probe read it. Setting
+    // CLAUDE_CONFIG_DIR, even to the default home, selects a separately keyed
+    // keychain credential the probe never checked (VUH-2241).
+    const identityEnv =
+      identityAccount === undefined ||
+      (identityHarness === "claude" && identityAccount.nativeDefault === true)
+        ? undefined
+        : { [identityHarness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"]: identityAccount.home };
     if (identityAccount) {
-      if (remote !== undefined)
-        remoteAccountEnv = {
-          [identityHarness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"]: identityAccount.home,
-        };
+      if (remote !== undefined) remoteAccountEnv = identityEnv;
       else if (identityHarness === "claude") {
-        claudeHome = await realpath(identityAccount.home).catch(() => undefined);
+        const home = await realpath(identityAccount.home).catch(() => undefined);
         claudeLabel = identityAccount.label;
-        if (!claudeHome)
+        if (!home)
           return {
             outcome: "failed",
             reason: "harness_unavailable",
             detail:
               "The selected identity's home is unavailable; sign in to that account again. No other account was tried.",
           };
+        if (identityEnv !== undefined) claudeHome = home;
       }
     } else if (prepared === undefined && remote === undefined && input.harness === "codex") {
       // Legacy adapters without account discovery still support saved sessions.
@@ -3555,14 +3561,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ? { env: { CODEX_HOME: account.home } }
           : {}),
     };
-    if (identityAccount && identityHarness)
-      skillLaunch = {
-        ...skillLaunch,
-        env: {
-          ...skillLaunch.env,
-          [identityHarness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"]: identityAccount.home,
-        },
-      };
+    if (identityEnv !== undefined)
+      skillLaunch = { ...skillLaunch, env: { ...skillLaunch.env, ...identityEnv } };
     try {
       if (prepared === undefined && remote === undefined && this.skillBundle !== undefined) {
         skillLaunch = await workerSkills(

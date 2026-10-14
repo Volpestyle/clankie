@@ -69,6 +69,12 @@ export interface WorkerAccountStatus {
   readonly organizationId?: string;
   /** The profile home on its own machine. */
   readonly home: string;
+  /**
+   * The probe read this home with CLAUDE_CONFIG_DIR unset, as the harness's
+   * own default. A hire must launch it the same way: Claude keys its macOS
+   * keychain credential by that variable when it is set (VUH-2241).
+   */
+  readonly nativeDefault?: true;
   readonly signedIn: boolean | null;
   /** The account's email as its CLI reports it; never a token. */
   readonly identity?: string;
@@ -174,7 +180,8 @@ const claudeUsage = async (env) => {
   if (!(v[0] * 1e6 + v[1] * 1e3 + parseFloat(v[2]) >= input.claudeUsageVersion)) return {};
   let r = String(await run("claude", ["-p", "/usage", "--output-format", "json", "--no-session-persistence"], env, os.tmpdir()));
   try { r = JSON.parse(r.slice(r.indexOf("{"))); } catch {}
-  return r.local_command == "usage" ? { usageLines: String(r.result).split("\n").filter((l) => l.startsWith("Current ")).slice(0, 8) } : {};
+  if (r.local_command == "usage") return { usageLines: String(r.result).split("\n").filter((l) => l.startsWith("Current ")).slice(0, 8) };
+  return r.is_error === true && /authenticat|login|expired/i.test(String(r.result)) ? { usageError: "401" } : {};
 };
 const claude = async (profile) => {
   const env = envFor("CLAUDE_CONFIG_DIR", profile.nativeDefault ? undefined : profile.home);
@@ -193,7 +200,7 @@ const claude = async (profile) => {
     plugin = Array.isArray(registry.plugins && registry.plugins["clankie-worker@clankie"]);
   } catch {}
   return {
-    harness: "claude", label: profile.label, home: profile.home, aliases: profile.aliases,
+    harness: "claude", label: profile.label, home: profile.home, aliases: profile.aliases, nativeDefault: profile.nativeDefault === true,
     identityId: status && status.loggedIn && typeof status.accountId === "string" ? status.accountId : undefined,
     organizationId: status && status.loggedIn && typeof status.orgId === "string" ? status.orgId : undefined,
     signedIn: status && typeof status.loggedIn === "boolean" ? status.loggedIn : null,
@@ -309,6 +316,7 @@ const ProbeOutput = z.object({
         identityId: z.string().max(256).optional(),
         organizationId: z.string().max(256).optional(),
         aliases: z.array(z.string()).optional(),
+        nativeDefault: z.boolean().optional(),
         plan: z.string().max(64).optional(),
         workerPlugin: z.boolean().optional(),
         onboarded: z.boolean().optional(),
@@ -508,6 +516,7 @@ function judgeWorkerAccount(
     ...(account.identityId === undefined ? {} : { identityId: account.identityId }),
     ...(account.organizationId === undefined ? {} : { organizationId: account.organizationId }),
     ...(account.aliases === undefined ? {} : { aliases: account.aliases }),
+    ...(account.nativeDefault === true ? { nativeDefault: true as const } : {}),
     ...(account.plan === undefined ? {} : { plan: account.plan }),
     ...(account.tier === undefined ? {} : { tier: account.tier }),
     headroom,

@@ -443,7 +443,12 @@ the fleet link: identity, plan, Codex headroom, worker plugin per Claude profile
 holds and `usable` or why not. Nothing secret crosses. A remote `account` is used
 exactly (as that pane's `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, and the remote Codex
 app-server's) or refused naming the machine, profile and the sign-in command to
-run there; omitted, Clankie takes a usable, unheld account. A Claude profile
+run there; omitted, Clankie takes a usable, unheld account. The default Claude
+home launches without `CLAUDE_CONFIG_DIR`, exactly as the probe read it: Claude
+keys its keychain credential by that variable, so setting it even to `~/.claude`
+selects a different sign-in. A home whose sign-in Claude refuses reports
+unusable with its sign-in command, and a hire whose first turn Claude refuses
+(`authentication_failed`) fails `harness_unavailable` with `sign_in_failed`. A Claude profile
 signed in later needs `clankie herdr prepare NAME` once if its worker plugin is
 missing. Signing in is the owner's step on that machine.
 

@@ -33,7 +33,7 @@ it("keeps watching Claude native subagent work when its real channel poll grace 
       agent: async () => agent,
       transcript: async () => undefined,
       mailbox: { bound: () => mailbox.bound(), deliver: async () => false },
-      timing: { pollMs: 10 },
+      timing: { pollMs: 10, firstTurnMs: 10 },
     });
     const control = await adapter.attach(ref);
     expect(control).toBeDefined();

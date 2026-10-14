@@ -1,7 +1,7 @@
 import { mintOperatorToken } from "@clankie/credential-broker";
 import { createWorkerAccountHoldsRoutes } from "../src/worker-account-holds-routes.ts";
 import { execFile, execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -388,6 +388,20 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
     expect(env).toContain("CLAUDE_CONFIG_DIR=C:\\Users\\volpe\\.claude-james");
   });
 
+  it("launches a default Claude home the probe read natively without CLAUDE_CONFIG_DIR (VUH-2241)", async () => {
+    const machine: MachineWorkerAccounts = {
+      ...PC_REPORT,
+      accounts: PC_REPORT.accounts.map(({ reason: _reason, ...account }) =>
+        account.harness === "claude" && account.label === "default"
+          ? { ...account, signedIn: true, identity: "owner@example.com", usable: true, nativeDefault: true }
+          : { ...account, ...(_reason === undefined ? {} : { reason: _reason }) },
+      ),
+    };
+    const { result, env } = await hireOn("claude", [], "default", machine);
+    expect(result).toMatchObject({ outcome: "spawned", seat: { paneId: "pc/w2:p9" } });
+    expect(env.some((entry) => entry.startsWith("CLAUDE_CONFIG_DIR="))).toBe(false);
+  });
+
   it("refuses an explicit signed-out profile instead of falling back", async () => {
     const { result, env } = await hireOn("claude", [], "default");
     expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
@@ -672,5 +686,64 @@ describe("a Claude profile that has not finished first-run setup", () => {
     expect(byLabel["work"]!.homes).toHaveLength(3);
     expect(byLabel["ready"]).toMatchObject({ tier: "default_claude_max_20x" });
     expect(byLabel["ready"]!.reason ?? "").not.toContain("first-run setup");
+  }, 60_000);
+});
+
+describe("the probe reads each Claude home as a hire launches it (VUH-2241)", () => {
+  it("marks the default home native and reports a home whose sign-in Claude refuses as unusable, with the fix", async () => {
+    const home = await fixtureHome();
+    const bin = join(home, "..", "bin");
+    const log = join(home, "..", "claude-calls.log");
+    await mkdir(bin, { recursive: true });
+    for (const profile of [".claude", ".claude-expired"]) {
+      await mkdir(join(home, profile, "plugins"), { recursive: true });
+      await writeFile(
+        join(home, profile, "plugins", "installed_plugins.json"),
+        JSON.stringify({ plugins: { "clankie-worker@clankie": [{ scope: "user" }] } }),
+      );
+    }
+    // Claude keeps the default home's settings beside it, and a chosen home's inside it.
+    for (const settings of [join(home, ".claude.json"), join(home, ".claude-expired", ".claude.json")])
+      await writeFile(settings, JSON.stringify({ hasCompletedOnboarding: true }));
+    // Stands in for Claude Code: each home is its own sign-in, and the expired
+    // one answers a real request the way Claude does when it cannot refresh.
+    await writeFile(
+      join(bin, "claude"),
+      `#!/bin/sh
+profile="\${CLAUDE_CONFIG_DIR-unset}"
+echo "$profile $*" >> '${log}'
+case "$profile" in *expired) who=expired@example.com;; *work) exit 0;; *) who=owner@example.com;; esac
+case "$*" in
+  "auth status --json") echo "{\\"loggedIn\\":true,\\"email\\":\\"$who\\",\\"subscriptionType\\":\\"max\\"}";;
+  "--version") echo "9.0.0 (Claude Code)";;
+  -p\\ /usage*) case "$profile" in
+    *expired) echo '{"type":"result","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}';;
+    *) echo '{"type":"result","local_command":"usage","result":"Current session: 10% used"}';;
+  esac;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    const shell = fixtureShell(home);
+    const report = await readMachineWorkerAccounts(
+      box,
+      (command, timeout) => shell(`PATH='${bin}':"$PATH"; ${command}`, timeout),
+      { harnesses: ["claude"] },
+    );
+    const byIdentity = Object.fromEntries(report.accounts.map((account) => [account.identity, account]));
+    expect(byIdentity["owner@example.com"]).toMatchObject({
+      home: join(home, ".claude"),
+      nativeDefault: true,
+      usable: true,
+    });
+    expect(byIdentity["expired@example.com"]).toMatchObject({ usable: false });
+    expect(byIdentity["expired@example.com"]!.nativeDefault).toBeUndefined();
+    expect(byIdentity["expired@example.com"]!.reason).toContain(
+      `sign-in was refused when reading usage (expired, revoked or unpaid). Sign it in on box: CLAUDE_CONFIG_DIR='${join(home, ".claude-expired")}' claude auth login`,
+    );
+    // The default home is read without CLAUDE_CONFIG_DIR, the way its hire launches.
+    const calls = (await readFile(log, "utf8")).trim().split("\n");
+    expect(calls).toContain("unset auth status --json");
+    expect(calls).not.toContain(`${join(home, ".claude")} auth status --json`);
   }, 60_000);
 });

@@ -106,7 +106,7 @@ describe("HerdrWatchStore", () => {
           return true;
         }),
       },
-      timing: { readyMs: 20, receiptMs: 20, pollMs: 1 },
+      timing: { readyMs: 20, receiptMs: 20, pollMs: 1, firstTurnMs: 10 },
       trackerDeny: () => [],
     };
     const original = createClaudeWorkerSeatAdapter(deps);

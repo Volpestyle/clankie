@@ -231,7 +231,7 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
     agent: agentRead,
     transcript,
     mailbox: { bound: () => bound, deliver },
-    timing: { readyMs: 200, receiptMs: 200, pollMs: 10 },
+    timing: { readyMs: 200, receiptMs: 200, pollMs: 10, firstTurnMs: 50 },
     trackerDeny: () => [],
   };
   const adapter = createClaudeWorkerSeatAdapter(deps);
@@ -445,7 +445,7 @@ it.each(["string", "blocks"])(
       agent: async () => agent,
       transcript: () => runner.transcript!(agent),
       mailbox: { bound: () => true, deliver },
-      timing: { readyMs: 20, receiptMs: 20, pollMs: 1 },
+      timing: { readyMs: 20, receiptMs: 20, pollMs: 1, firstTurnMs: 10 },
       trackerDeny: () => [],
     });
     const start = vi.fn(async (_command: string, _args: readonly string[]) => undefined);
@@ -507,7 +507,7 @@ it("verifies the recorded 2.1.286 probe and rejects a preexisting receipt or cha
             return true;
           },
         },
-        timing: { readyMs: 10, receiptMs: 10, pollMs: 1 },
+        timing: { readyMs: 10, receiptMs: 10, pollMs: 1, firstTurnMs: 10 },
       });
       const result = await adapter.start(
         { harness: "claude", cwd: root, brief: kind === "mismatch" ? brief + " altered" : brief },
@@ -608,6 +608,45 @@ it("messages have transcript receipts, while Stop text remains separate from mes
     deliveryStage: "unavailable",
   });
   expect(await control.settled()).toMatchObject({ type: "blocked" });
+});
+
+it("a brief whose turn Claude refuses for its sign-in fails the hire typed, not started (VUH-2241)", async () => {
+  const f = await fixture();
+  f.deliver.mockImplementationOnce(async (_seat, text) => {
+    f.entries.push({ type: "message", id: "brief-receipt", role: "operator", text: channel(text) });
+    // The live shape: Claude takes the brief, then its StopFailure arrives
+    // about a second later (Sable and Quill, 2026-10-14).
+    setTimeout(
+      () =>
+        f.hooks.record("w1:p1", {
+          schemaVersion: 1,
+          event: "StopFailure",
+          sessionId: SESSION,
+          error: "authentication_failed",
+          lastMessage: "Login expired · Please run /login",
+        }),
+      20,
+    );
+    return true;
+  });
+  const failed = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "brief" }, f.view);
+  expect(failed).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+  expect((failed as { detail: string }).detail).toMatch(/^sign_in_failed: .*Login expired/u);
+  // Any other first-turn ending, or none within the window, is a started worker.
+  const other = await fixture();
+  other.deliver.mockImplementationOnce(async (_seat, text) => {
+    other.entries.push({ type: "message", id: "brief-receipt", role: "operator", text: channel(text) });
+    other.hooks.record("w1:p1", {
+      schemaVersion: 1,
+      event: "StopFailure",
+      sessionId: SESSION,
+      error: "rate_limit",
+    });
+    return true;
+  });
+  expect(
+    (await other.adapter.start({ harness: "claude", cwd: "/w", brief: "brief" }, other.view)).outcome,
+  ).toBe("started");
 });
 
 it("rechecks the hiring source after readiness before delivering its initial brief", async () => {

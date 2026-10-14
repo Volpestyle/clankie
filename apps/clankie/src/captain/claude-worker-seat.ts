@@ -77,7 +77,13 @@ export interface ClaudeWorkerSeatDeps {
       recipientBinding?: string,
     ): Promise<boolean | Extract<SeatDelivery, { readonly outcome: "unconfirmed" | "accepted" }>>;
   };
-  readonly timing?: { readonly readyMs?: number; readonly receiptMs?: number; readonly pollMs?: number };
+  readonly timing?: {
+    readonly readyMs?: number;
+    readonly receiptMs?: number;
+    readonly pollMs?: number;
+    /** How long a hire watches the brief's turn for a sign-in refusal before reporting it started. */
+    readonly firstTurnMs?: number;
+  };
   /** Deny rules for the tracker connectors a session in `cwd` would inherit. */
   readonly trackerDeny?: (
     cwd: string,
@@ -94,6 +100,8 @@ export interface ClaudeWorkerSeatDeps {
 const READY_MS = 30_000;
 const RECEIPT_MS = 15_000;
 const POLL_MS = 250;
+/** Claude answers an expired sign-in with a StopFailure about a second after the brief (VUH-2241). */
+const FIRST_TURN_MS = 10_000;
 const SESSION_LIMIT = 256;
 /** Claude Code's machine policy: macOS, or Linux (the hosted image writes it, VUH-1767). */
 const CLAUDE_MANAGED_SETTINGS =
@@ -820,6 +828,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
   const readyMs = deps.timing?.readyMs ?? READY_MS;
   const receiptMs = deps.timing?.receiptMs ?? RECEIPT_MS;
   const pollMs = deps.timing?.pollMs ?? POLL_MS;
+  const firstTurnMs = deps.timing?.firstTurnMs ?? FIRST_TURN_MS;
   return {
     harness: "claude",
     async start(launch, view): Promise<SeatStartResult> {
@@ -895,13 +904,33 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
       const control = new ClaudeWorkerSeatControl(ref, deps, agent.terminalId);
       if (launch.brief.length > 0) {
         await view.guard?.();
-        const delivery = await control.send(launch.brief, { timeoutMs: receiptMs });
-        if (delivery.outcome !== "accepted")
-          return {
-            outcome: "failed",
-            reason: "not_ready",
-            detail: `brief_delivery_unverified: ${JSON.stringify(delivery)}`,
-          };
+        // Watch from before the send, so a refusal that lands with the receipt is not missed.
+        const watch = new AbortController();
+        const firstStop = deps.hooks.next(sessionId, watch.signal);
+        firstStop.catch(() => undefined);
+        try {
+          const delivery = await control.send(launch.brief, { timeoutMs: receiptMs });
+          if (delivery.outcome !== "accepted")
+            return {
+              outcome: "failed",
+              reason: "not_ready",
+              detail: `brief_delivery_unverified: ${JSON.stringify(delivery)}`,
+            };
+          // A signed-out or expired credential lets Claude start and take the
+          // brief, then refuses its first turn. That is a failed hire, not a worker.
+          const stop = await Promise.race([
+            firstStop,
+            sleep(firstTurnMs, watch.signal).catch(() => undefined),
+          ]);
+          if (stop?.type === "turn_completed" && !stop.ok && stop.stopReason === "authentication_failed")
+            return {
+              outcome: "failed",
+              reason: "harness_unavailable",
+              detail: `sign_in_failed: Claude refused the brief's turn${stop.text === undefined ? "" : ` (${stop.text})`}. Sign in the account it launched with, then hire again; the brief was not worked.`,
+            };
+        } finally {
+          watch.abort();
+        }
       }
       try {
         deps.hooks.record(view.paneId, { schemaVersion: 1, event: "SessionStart", sessionId });
