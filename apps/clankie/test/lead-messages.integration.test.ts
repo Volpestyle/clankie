@@ -68,6 +68,21 @@ it("VUH-2196: a local lead's seat confirms a lead message in time while another 
   expect(workChannel).toHaveBeenCalledOnce();
 }, 30_000);
 
+it("VUH-2196: a local lead's polls do not each wait on an unreachable machine's inventory", async () => {
+  const f = await leadChatFixture(false, cleanup, { slowFleetMs: 2_500 });
+  const work = f.leads[1]!;
+  const poll = async () => {
+    const started = Date.now();
+    expect(await f.captain.pollSeatEvents(0, undefined, work, capabilities)).toEqual([]);
+    return Date.now() - started;
+  };
+  // The first source proof still asks every machine and learns one cannot answer.
+  expect(await poll()).toBeGreaterThanOrEqual(2_000);
+  // Later polls get that same answer at once instead of waiting it out again.
+  expect(await poll()).toBeLessThan(1_000);
+  expect(await poll()).toBeLessThan(1_000);
+}, 30_000);
+
 it("VUH-2174: a disconnected remote-only lead still refuses without a local queue", async () => {
   const f = await fixture(true);
   await f.captain.close();

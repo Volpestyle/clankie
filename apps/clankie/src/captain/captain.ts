@@ -4766,6 +4766,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     };
   }
 
+  // A complete inventory that could not answer (an unreachable machine waits out
+  // its ssh timeout, ~10s) resolves no source. Remember that briefly per source
+  // so every head poll and ack does not wait for the same answer (VUH-2196).
+  const unprovenSources = new Map<string, { key: string; until: number }>();
+  const UNPROVEN_SOURCE_RETRY_MS = 60_000;
   async function operatorNativeSource(conversationId: string): Promise<HerdrAgentSnapshot | undefined> {
     const fleet = await observeFleet(true);
     const occupants = [...(fleet.head === undefined ? [] : [fleet.head]), ...fleet.seats];
@@ -4779,10 +4784,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // cannot prove uniqueness: require every registered inventory to answer.
       const sessionId = nativeSessionId(source);
       let inventory: HerdrAgentSnapshot[];
+      let unproven: string | undefined;
       try {
         if (herdrRunner.list === undefined) return undefined;
         await refreshFleets();
         const identities = JSON.stringify([...fleetIdentities]);
+        unproven = JSON.stringify([inboundBinding(source), identities]);
+        const remembered = unprovenSources.get(conversationId);
+        if (remembered?.key === unproven && Date.now() < remembered.until) return undefined;
         inventory = (
           await Promise.all([
             herdrRunner.list(),
@@ -4792,8 +4801,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         await refreshFleets();
         if (JSON.stringify([...fleetIdentities]) !== identities) return undefined;
       } catch {
+        if (unproven !== undefined)
+          unprovenSources.set(conversationId, {
+            key: unproven,
+            until: Date.now() + UNPROVEN_SOURCE_RETRY_MS,
+          });
         return undefined;
       }
+      unprovenSources.delete(conversationId);
       if (
         inventory.some(
           (candidate) =>
