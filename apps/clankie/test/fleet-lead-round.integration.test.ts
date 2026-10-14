@@ -65,7 +65,7 @@ async function fixture(
   bind = true,
   deployHolds?: CaptainDeps["deployHolds"],
   resourceFixture?: (root: string) => Promise<FleetResourceRuntime>,
-  remote?: Pick<CaptainDeps, "fleets"> & { fleetEfficiencyDeadlineMs?: number },
+  remote?: Pick<CaptainDeps, "fleets"> & { fleetEfficiencyDeadlineMs?: number; fleetProbeMinMs?: number },
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-lead-round-"));
   const conversations = new ConversationStore(join(root, "conversations"), async () => {});
@@ -213,6 +213,7 @@ async function fixture(
       ...(remote?.fleetEfficiencyDeadlineMs === undefined
         ? {}
         : { fleetEfficiencyDeadlineMs: remote.fleetEfficiencyDeadlineMs }),
+      ...(remote?.fleetProbeMinMs === undefined ? {} : { fleetProbeMinMs: remote.fleetProbeMinMs }),
     },
   );
   fixtures.push({ root, captain });
@@ -975,7 +976,8 @@ it("an admitted lead can record a scope finding, and another lead cannot change 
 // names the silent fleet, and a review that cannot prove ownership in time
 // is refused and never written later.
 it("answers efficiency reviews inside the deadline while a linked fleet stays silent", async () => {
-  let transportMs = 1_200;
+  const transportMs = 1_200;
+  let kh2Silent = false;
   const held = new Set<() => void>();
   const f = await fixture(
     undefined,
@@ -991,17 +993,23 @@ it("answers efficiency reviews inside the deadline while a linked fleet stays si
     {
       fleetEfficiencyDeadlineMs: 3_500,
       fleets: {
-        list: [{ id: "pc", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } }],
+        list: [
+          { id: "pc", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } },
+          { id: "kh2", session: "default", ssh: { host: "kh2.invalid", shell: "posix" } },
+        ],
         // ssh to a sleeping machine: no answer until the transport deadline.
-        run: () => () =>
-          new Promise<string>((_resolve, reject) => {
-            const fail = () => {
-              held.delete(fail);
-              reject(new Error("ssh: connect to host fixture.invalid port 22: Operation timed out"));
-            };
-            held.add(fail);
-            setTimeout(fail, transportMs);
-          }),
+        // kh2 answers until the second phase; pc is already known silent by then.
+        run: (fleet) => () =>
+          fleet.id === "kh2" && !kh2Silent
+            ? Promise.resolve(JSON.stringify({ result: { snapshot: { agents: [] } } }))
+            : new Promise<string>((_resolve, reject) => {
+                const fail = () => {
+                  held.delete(fail);
+                  reject(new Error("ssh: connect to host fixture.invalid port 22: Operation timed out"));
+                };
+                held.add(fail);
+                setTimeout(fail, fleet.id === "kh2" ? 60_000 : transportMs);
+              }),
         remoteWorkspace: async () => false,
       },
     },
@@ -1027,13 +1035,13 @@ it("answers efficiency reviews inside the deadline while a linked fleet stays si
     reviewedAt,
   });
 
-  // The PC now outlasts the whole deadline: show answers with what it last
-  // saw, and the review is refused rather than left to land after the caller gave up.
-  transportMs = 60_000;
+  // A second fleet now outlasts the whole deadline: show answers with what it
+  // last saw, and the review is refused rather than left to land after the caller gave up.
+  kh2Silent = true;
   const shown = await f.captain.fleetEfficiency!("global-default");
   expect(shown.seats.map((seat) => seat.seatId)).toEqual(["term_1", "term_2"]);
   expect(shown.readWarnings).toEqual(
-    expect.arrayContaining([expect.objectContaining({ source: "herdr:pc", reason: "timeout" })]),
+    expect.arrayContaining([expect.objectContaining({ source: "herdr:kh2", reason: "timeout" })]),
   );
   await expect(
     f.captain.fleetEfficiency!("global-default", {
@@ -1042,8 +1050,8 @@ it("answers efficiency reviews inside the deadline while a linked fleet stays si
       evidence: "Resumed after owner approval",
     }),
   ).rejects.toThrow(/Review not recorded; nothing was written/u);
+  kh2Silent = false;
   for (const fail of held) fail();
-  transportMs = 1;
   // The late census completes; the refused review still never landed: the
   // working seat is still paused (off-scope) under the first review's receipt.
   const after = await f.captain.fleetEfficiency!("global-default");
@@ -1051,6 +1059,74 @@ it("answers efficiency reviews inside the deadline while a linked fleet stays si
     flags: expect.arrayContaining(["off-scope"]),
     reviewedAt,
   });
+}, 30_000);
+
+// A census that just found a linked fleet silent must not cost the next one
+// its transport deadline again: the fleet is skipped as unknown, reprobed in
+// the background, and read again as soon as it answers.
+it("skips a linked fleet whose census just failed until a background probe hears it again", async () => {
+  let answering = false;
+  const calls: string[][] = [];
+  const held = new Set<() => void>();
+  const f = await fixture(
+    undefined,
+    undefined,
+    false,
+    false,
+    undefined,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    {
+      fleetProbeMinMs: 400,
+      fleets: {
+        list: [{ id: "pc", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } }],
+        run: () => (args) => {
+          calls.push([...args]);
+          if (answering) return Promise.resolve(JSON.stringify({ result: { snapshot: { agents: [] } } }));
+          // ssh to a sleeping machine: no answer until the transport deadline.
+          return new Promise<string>((_resolve, reject) => {
+            const fail = () => {
+              held.delete(fail);
+              reject(new Error("ssh: connect to host fixture.invalid port 22: Operation timed out"));
+            };
+            held.add(fail);
+            setTimeout(fail, 1_500);
+          });
+        },
+        remoteWorkspace: async () => false,
+      },
+    },
+  );
+  resources.push(async () => {
+    for (const fail of held) fail();
+  });
+
+  // The census that discovers the silence still waits out the transport.
+  const first = await f.captain.fleetEfficiency!("global-default");
+  expect(first.readWarnings).toEqual([
+    expect.objectContaining({ source: "herdr:pc", reason: "unavailable" }),
+  ]);
+  const asked = calls.length;
+
+  // The next census answers at once, still naming the fleet unknown rather than absent.
+  const started = performance.now();
+  const second = await f.captain.fleetEfficiency!("global-default");
+  expect(performance.now() - started).toBeLessThan(1_000);
+  expect(second.readWarnings).toEqual([
+    expect.objectContaining({ source: "herdr:pc", reason: "unavailable" }),
+  ]);
+  expect(second.seats.map((seat) => seat.seatId)).toEqual(["term_1", "term_2"]);
+  expect(calls.length).toBe(asked);
+
+  // The link returns: the background probe hears it and the next census reads it again.
+  answering = true;
+  await expect.poll(() => calls.length, { timeout: 5_000 }).toBeGreaterThan(asked);
+  await expect
+    .poll(async () => (await f.captain.fleetEfficiency!("global-default")).readWarnings, { timeout: 5_000 })
+    .toBeUndefined();
 }, 30_000);
 
 it("large native objectives stay available in the roster while the wake carries bounded untrusted summaries", async () => {

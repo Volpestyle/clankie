@@ -4608,6 +4608,10 @@ change tracker state, harness settings, ownership or report receipts.
 Both forms answer within 25 seconds, under the CLI's 30-second abort, from one
 fresh census. A fleet that misses that deadline or fails its census is named in
 `readWarnings` (`timeout` or `unavailable`): its seats are unknown, not absent.
+A linked fleet whose census just failed is skipped (still `unavailable`) by
+later censuses instead of costing each its transport deadline again; Clankie
+reprobes it in the background, backing off from 5 to 30 seconds, and reads it
+again once it answers or its connection changes.
 When the census misses the deadline, `show` returns the last completed
 projection with that warning, and a review is refused with `Review not
 recorded; nothing was written` and never applied later. A recorded review

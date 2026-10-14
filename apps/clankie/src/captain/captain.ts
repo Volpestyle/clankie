@@ -212,6 +212,7 @@ import {
   type ObservedFleetSeat,
 } from "./herdr-census.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
+import { FleetCensusBreaker } from "./fleet-census-breaker.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
 import { HerdrParentEdges } from "./herdr-parent-edges.ts";
 import {
@@ -415,12 +416,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     fleet: async (id) => (await refreshFleets()).find((entry) => entry.id === id),
     ...(deps.fleets?.shell === undefined ? {} : { shell: deps.fleets.shell }),
   });
+  // A linked fleet that just failed its census is skipped (reported unknown)
+  // until a background probe answers, rather than costing every census its
+  // transport deadline again.
+  const censusBreaker = new FleetCensusBreaker({
+    ...(options.fleetProbeMinMs === undefined ? {} : { probeMinMs: options.fleetProbeMinMs }),
+    recovered: () => fleetChanges.touch(),
+  });
   const censusFleets = async (): Promise<readonly HerdrCensusFleet[]> => [
     ...(await refreshFleets()).map((fleet) => ({
       id: fleet.id,
       session: fleet.session,
       host: fleet.ssh.host,
-      run: (args: readonly string[]) => deps.fleets!.run(fleet)(args),
+      run: (args: readonly string[]) =>
+        censusBreaker.run(
+          fleet.id,
+          JSON.stringify(fleet),
+          () => deps.fleets!.run(fleet)(args),
+          () => deps.fleets!.run(fleet)(["api", "snapshot"]),
+        ),
     })),
     ...namedLocal.map((entry) => ({
       id: entry.id,
@@ -522,6 +536,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return remoteFleets;
   }
   const unsubscribeFleets = deps.runtimes?.onChange(async () => {
+    // A connection change retries every fleet's census at once.
+    censusBreaker.reset();
     await refreshFleets();
   });
   options.fleetResources?.bindSeats({
@@ -7065,6 +7081,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       stopFleetRounds();
       stopAutoRounds();
       unsubscribeFleets?.();
+      censusBreaker.close();
       evaluator.close();
       for (const mailbox of fleetMailboxes.values()) mailbox.close();
       fleetMailboxes.clear();

@@ -86,6 +86,8 @@ export interface CaptainOptions {
   readonly headBoundGraceMs?: number;
   /** The fleet efficiency show/review answer deadline; defaults to 25s, under the CLI's 30s abort. */
   readonly fleetEfficiencyDeadlineMs?: number;
+  /** First background reprobe of a linked fleet whose census failed; doubles to 30s. Defaults to 5s. */
+  readonly fleetProbeMinMs?: number;
   readonly localCodexProcess?: (pid: number, pane: string) => LocalCodexRegistration;
   readonly localCodexSocket?: () => string | undefined;
   readonly remoteCodexProcess?: (launch: RemoteCodexLaunch) => RemoteCodexRegistration;
