@@ -692,6 +692,7 @@ export class EvidenceStore {
   /**
    * A small look at recorded bytes for a paired device: a safe raster image as
    * base64, or UTF-8 text. Never a link to this origin, never partial images.
+   * A PNG over the cap gets a complete downscaled rendition (VUH-1954).
    */
   async devicePreview(sha256: string): Promise<EvidenceDevicePreview> {
     await this.fetch({ sha256 });
@@ -699,7 +700,8 @@ export class EvidenceStore {
     if (!blob) throw new EvidenceRefusal(404, "unknown_object");
     if (blob.size > EVIDENCE_PREVIEW_MAX_BYTES) {
       await blob.body.cancel();
-      return { sha256, available: false, reason: "too_large" };
+      const { evidenceThumbnails } = await import("./evidence-thumbnail.ts");
+      return evidenceThumbnails.preview(sha256, blob.size, () => this.blobs.open(sha256));
     }
     const bytes = Buffer.from(await new Response(blob.body).arrayBuffer());
     const image = rasterType(bytes);
