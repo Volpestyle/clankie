@@ -43,10 +43,11 @@ export class S3EvidenceBlobs implements EvidenceBlobStore {
     return error instanceof Error && (error.name === "NotFound" || error.name === "NoSuchKey");
   }
 
-  private async head(sha256: string) {
+  private async head(sha256: string, abortSignal?: AbortSignal) {
     try {
       const result = await this.client.send(
         new HeadObjectCommand({ Bucket: this.bucket, Key: this.key(sha256) }),
+        abortSignal ? { abortSignal } : undefined,
       );
       if (
         !Number.isSafeInteger(result.ContentLength) ||
@@ -174,16 +175,81 @@ export class S3EvidenceBlobs implements EvidenceBlobStore {
     return { size: blob.size, url, expiresAt };
   }
 
-  async open(sha256: string) {
-    const blob = await this.head(sha256);
-    if (!blob) return undefined;
+  async open(sha256: string, abortSignal?: AbortSignal) {
     try {
+      abortSignal?.throwIfAborted();
+      const blob = await this.head(sha256, abortSignal);
+      abortSignal?.throwIfAborted();
+      if (!blob) return undefined;
       const result = await this.client.send(
         new GetObjectCommand({ Bucket: this.bucket, Key: this.key(sha256) }),
+        abortSignal ? { abortSignal } : undefined,
       );
-      if (!result.Body || result.ContentLength !== blob.size) throw new Error("evidence_s3_object_invalid");
-      return { size: blob.size, body: result.Body.transformToWebStream() };
+      if (!result.Body || result.ContentLength !== blob.size) {
+        await result.Body?.transformToWebStream().cancel();
+        throw new Error("evidence_s3_object_invalid");
+      }
+      const source = result.Body.transformToWebStream();
+      if (!abortSignal) return { size: blob.size, body: source };
+      if (abortSignal.aborted) {
+        await source.cancel(abortSignal.reason);
+        abortSignal.throwIfAborted();
+      }
+      const reader = source.getReader();
+      let finished = false;
+      let released = false;
+      let controller: ReadableStreamDefaultController<Uint8Array>;
+      const cleanup = () => {
+        if (released) return;
+        released = true;
+        abortSignal.removeEventListener("abort", onAbort);
+        reader.releaseLock();
+      };
+      const onAbort = () => {
+        if (finished) return;
+        finished = true;
+        controller.error(abortSignal.reason);
+        void reader
+          .cancel(abortSignal.reason)
+          .catch(() => {})
+          .finally(cleanup);
+      };
+      const body = new ReadableStream<Uint8Array>({
+        start(output) {
+          controller = output;
+          abortSignal.addEventListener("abort", onAbort, { once: true });
+          if (abortSignal.aborted) onAbort();
+        },
+        async pull(output) {
+          try {
+            const part = await reader.read();
+            if (finished) return;
+            if (part.done) {
+              finished = true;
+              output.close();
+              cleanup();
+            } else output.enqueue(part.value);
+          } catch (error) {
+            if (finished) return;
+            finished = true;
+            output.error(error);
+            cleanup();
+          }
+        },
+        async cancel(reason) {
+          if (finished) return;
+          finished = true;
+          try {
+            await reader.cancel(reason);
+          } finally {
+            cleanup();
+          }
+        },
+      });
+      return { size: blob.size, body };
     } catch (error) {
+      // Caller cancellation must not be mistaken for a missing object, even with a custom reason.
+      abortSignal?.throwIfAborted();
       if (S3EvidenceBlobs.missing(error)) return undefined;
       throw error;
     }

@@ -61,7 +61,10 @@ export interface EvidenceBlobStore {
     offset: number,
     length: number,
   ): Promise<{ size: number; bytes: Uint8Array } | undefined>;
-  open(sha256: string): Promise<{ size: number; body: ReadableStream<Uint8Array> } | undefined>;
+  open(
+    sha256: string,
+    abortSignal?: AbortSignal,
+  ): Promise<{ size: number; body: ReadableStream<Uint8Array> } | undefined>;
 }
 
 export interface EvidenceUploadRow {
