@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Project, ProjectStatus } from "@clankie/protocol/projects";
+import { originDefaultBranch } from "./repository-churn.ts";
 
 const run = promisify(execFile);
 
@@ -94,17 +95,16 @@ async function landedSince(project: Project, since: Date): Promise<number | unde
   let read = false;
   for (const workspace of project.workspaces) {
     if (workspace.machineId !== "local") continue;
-    for (const ref of ["origin/HEAD", "origin/main"]) {
-      const listed = await run(
-        "git",
-        ["-C", workspace.path, "rev-list", `--since=${since.toISOString()}`, ref, "--"],
-        { timeout: 5_000, maxBuffer: 4 * 1024 * 1024 },
-      ).catch(() => undefined);
-      if (listed === undefined) continue;
-      read = true;
-      for (const commit of listed.stdout.split("\n")) if (commit) commits.add(commit);
-      break;
-    }
+    const branch = await originDefaultBranch(workspace.path);
+    if ("reason" in branch) continue;
+    const listed = await run(
+      "git",
+      ["-C", workspace.path, "rev-list", `--since=${since.toISOString()}`, branch.head, "--"],
+      { timeout: 5_000, maxBuffer: 4 * 1024 * 1024 },
+    ).catch(() => undefined);
+    if (listed === undefined) continue;
+    read = true;
+    for (const commit of listed.stdout.split("\n")) if (commit) commits.add(commit);
   }
   return read ? commits.size : undefined;
 }
