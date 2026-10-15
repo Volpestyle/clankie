@@ -166,8 +166,14 @@ export function autoRoundDue(
   return last === undefined || last.fingerprint !== fingerprint || now - last.at >= idleRewakeMs;
 }
 
-/** The wake text. Names and focus lines are owner-authored settings, so they read as the owner's. */
-export function autoRoundPrompt(states: readonly AutoProjectState[]): string {
+/**
+ * The wake text. Names and focus lines are owner-authored settings, so they read as the owner's;
+ * velocity lines are the service's own measurements (ADR 0270).
+ */
+export function autoRoundPrompt(
+  states: readonly AutoProjectState[],
+  velocity: readonly string[] = [],
+): string {
   return [
     "Auto round. The owner put these projects on Auto: work their backlogs without being asked.",
     "For each one, read its tracker with the linear_* tools, take the next ready work in priority order, plan it into issues where it needs planning, and staff it within the project's worker cap and the machine and account limits. Land finished work and close it with evidence, and file what you find along the way.",
@@ -179,5 +185,12 @@ export function autoRoundPrompt(states: readonly AutoProjectState[]): string {
       (state) =>
         `- ${state.name} (${state.id}): ${state.focus === undefined ? "no focus set" : `focus: ${state.focus}`}; built-in tracker project: ${state.trackerProjectId ?? "none bound"}; Linear project: ${state.linearProjectBinding?.projectId ?? "none bound"}; workers in its workspaces now: ${state.workers}`,
     ),
+    ...(velocity.length
+      ? [
+          "",
+          "Velocity since each project's last milestone (measured by the service):",
+          ...velocity.map((line) => `- ${line}`),
+        ]
+      : []),
   ].join("\n");
 }

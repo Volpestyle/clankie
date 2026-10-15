@@ -478,6 +478,14 @@ configured lead chats. An explicit built-in tracker or connected Linear project 
 a workspace match is eligible only for a lead with no configured projects.
 Unbound or ambiguous ownership falls back to the global head. Each lead hears only its projects,
 focus and live workers; unchanged evidence rewakes that lead after two hours.
+Each round also measures every project it carries ([ADR 0270](adr/0270-auto-rounds-measure-outcomes-and-name-drift.md)):
+closures since its last milestone split owner-facing, tooling and unlinked, started
+issues (no WIP cap yet), and churn by bucket per working day, from the backend its
+workers write to ([tracker outcomes](../apps/clankie/src/project-outcomes.ts)) and its
+origin history. The [measurement](../apps/clankie/src/captain/auto-velocity.ts) adds
+one velocity line per project to the wake, reads `unknown` for any part it cannot
+measure, and is kept in the [round record](../apps/clankie/src/captain/auto-rounds.ts)
+under `<state>/captain/auto-rounds/` with whether the wake was delivered.
 Pending rounds and accepted fingerprints are tracked independently per lead;
 before admission the service rechecks the switches and the group's evidence. A due self-wake queues one turn with Clankie's
 recorded reason and may be replaced by another. Both are ordinary internal turns

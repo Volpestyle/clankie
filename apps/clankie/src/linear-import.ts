@@ -12,7 +12,11 @@ import {
   type LinearRecord,
 } from "@clankie/work-items";
 import { executeLinearGraphql, linearGraphqlCredential, planLinearGraphql } from "./linear-graphql.ts";
-import { withLinearRequestInvocation, type LinearRequestBudget } from "./linear-request-budget.ts";
+import {
+  withinLinearRequestInvocation,
+  withLinearRequestInvocation,
+  type LinearRequestBudget,
+} from "./linear-request-budget.ts";
 import type { EvidenceStore } from "./evidence-store.ts";
 
 export interface LinearImportOptions {
@@ -128,7 +132,8 @@ export async function connectedLinearSession(
       throw new Error("Linear account changed during import");
     const plan = planLinearGraphql({ query, variables });
     if (plan.mutation) throw new Error("Linear import cannot mutate its source");
-    const result = await withLinearRequestInvocation("background", () =>
+    // A caller's background read (an Auto round's outcomes) is one admission across its pages.
+    const result = await withinLinearRequestInvocation("background", () =>
       executeLinearGraphql({
         plan,
         ...selected,

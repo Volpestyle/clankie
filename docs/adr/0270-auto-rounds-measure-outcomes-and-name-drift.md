@@ -155,3 +155,32 @@ flowchart LR
   `over_wip` never fires and milestone reports are the only owner-facing post.
 - `apps/clankie` gains its first lines-changed measurement; anything else that
   needs churn should reuse it.
+
+## Amendment: windows and classification range (VUH-2283, 2026-10-15)
+
+Approved by the lead for VUH-2283, so VUH-2284 builds on the same rules.
+
+- **Window start without a recorded milestone.** Each round reads the tracker over
+  a 14-day lookback (or back to the recorded milestone, at most 30 days). The
+  latest closed parent issue or complete tracker milestone in that range is the
+  last milestone; with none, the window starts at the lookback start. The
+  per-project state file keeps the last milestone, so a later round starts
+  there. The parent issue that is the milestone counts in the window it closed,
+  not the one it opens.
+- **Days outlive the window.** The record keeps velocity totals since the last
+  milestone and per-day facts (churn by bucket, closures by kind, state changes,
+  working or not) for the window and the last seven local days, so drift
+  detection always has a streak right after a milestone.
+- **Classification range.** A closure's commits can predate the window, so
+  classification reads default-branch commits from 14 days before the earliest
+  recorded day.
+- **Working days.** A working day has a landing or an issue state change (any
+  state span after an issue's first). Auto history is not recorded, so a
+  project counts as on Auto when it is on Auto at round time; the record says so.
+- **Record shape.** `rounds.jsonl` holds one `measurement` line per project per
+  round, written before the wake, and one `delivery` line per round once the
+  wake settles, so a restart mid-wake leaves the measurement without a delivery
+  instead of losing it. `projects/<id>.json` holds the last milestone. Each
+  part of a measurement (tracker, churn) fails on its own as `unknown` with a
+  reason, and a project's measurement is bounded at two minutes, so a round is
+  never blocked.

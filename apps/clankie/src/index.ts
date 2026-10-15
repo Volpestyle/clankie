@@ -1,6 +1,7 @@
 import { createDeliverableProjectReader } from "./fleet-project-deliverable.ts";
 import { MachineJoins } from "./machine-joins.ts";
 import { connectedLinearSession, importConnectedLinear, importLinearMedia } from "./linear-import.ts";
+import { readProjectOutcomes } from "./project-outcomes.ts";
 import { LinearMirrors } from "./linear-mirror.ts";
 import { LinearCutover } from "./linear-cutover.ts";
 import { linearGraphqlCredential } from "./linear-graphql.ts";
@@ -1537,6 +1538,20 @@ const captain = createCaptain(
     remoteCodexProcess: (launch) =>
       remoteCodexSeats.register(launch, proofFleetLinks?.lifetime(launch.fleet) ?? (() => false)),
     remoteOrigin: createRemoteOriginReader(remoteProofOptions),
+    // Auto round velocity reads the backend the project's workers write to (ADR 0270).
+    projectOutcomes: (project, input) =>
+      readProjectOutcomes(project, input, {
+        route: (projectId) => workItems.trackerRepoForProject(projectId),
+        linearQuery: async () =>
+          (
+            await connectedLinearSession({
+              credentials: operatorCredentialStore,
+              budget: linearRequestBudget,
+              assertCurrent: async () => {},
+            })
+          ).query,
+        builtIn: builtInTracker,
+      }),
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
     grokNative,

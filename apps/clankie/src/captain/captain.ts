@@ -130,6 +130,9 @@ import {
   projectStatuses,
 } from "./auto-projects.ts";
 import { ProjectMirrors } from "./project-mirrors.ts";
+import { AutoRoundRecord } from "./auto-rounds.ts";
+import { measureVelocityWithin, velocityLine, type VelocityDeps } from "./auto-velocity.ts";
+import { readRepositoryChurn } from "./repository-churn.ts";
 import { RoutineError, RoutineStore } from "./routines.ts";
 import { createRoutineRunner, serviceLauncher } from "./routine-runner.ts";
 import { createConversationRunner, runAutonomyTurn } from "./captain-conversation-runner.ts";
@@ -4675,6 +4678,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return await options.remoteOrigin(workspace);
   });
   const lastAutoRounds = new Map<string, { fingerprint: string; at: number }>();
+  const autoRoundRecord = new AutoRoundRecord(join(options.stateDir, "auto-rounds"));
+  const velocityDeps: VelocityDeps = {
+    outcomes:
+      options.projectOutcomes ??
+      (async () => ({ state: "unavailable" as const, reason: "no tracker outcome reader in this service" })),
+    history: (project) => projectMirrors.history(project),
+    churn: readRepositoryChurn,
+  };
+  const settleAutoRound = (roundId: string | undefined, delivered: boolean, reason?: string) => {
+    if (roundId === undefined) return;
+    try {
+      autoRoundRecord.settled(roundId, delivered, reason);
+    } catch (error) {
+      console.warn("Auto round record unavailable", roundId, String(error));
+    }
+  };
   const readAutoRounds = async () => {
     const current = await settings();
     return autoProjectRounds(
@@ -4701,24 +4720,44 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       )
         continue;
       pendingAutoRounds.add(conversationId);
-      void wakeConversation(
-        { conversationId },
-        autoRoundPrompt(states),
-        async () => {
-          if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
-          const current = (await readAutoRounds()).get(conversationId);
-          if (!current || autoRoundFingerprint(current) !== fingerprint)
-            throw new Error("Projects on Auto changed before delivery");
-        },
-        "machine",
-        true,
-        false,
-      )
+      let roundId: string | undefined;
+      void (async () => {
+        // Velocity (ADR 0270): measured per project, recorded before the wake, never blocking it.
+        const projects = (await settings()).projects.projects;
+        const velocities = await Promise.all(
+          states.flatMap((state) => {
+            const project = projects.find((entry) => entry.id === state.id);
+            return project === undefined
+              ? []
+              : [measureVelocityWithin(project, autoRoundRecord.lastMilestone(project.id), velocityDeps)];
+          }),
+        );
+        try {
+          roundId = autoRoundRecord.measured(conversationId, velocities);
+        } catch (error) {
+          console.warn("Auto round record unavailable", conversationId, String(error));
+        }
+        return wakeConversation(
+          { conversationId },
+          autoRoundPrompt(states, velocities.map(velocityLine)),
+          async () => {
+            if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
+            const current = (await readAutoRounds()).get(conversationId);
+            if (!current || autoRoundFingerprint(current) !== fingerprint)
+              throw new Error("Projects on Auto changed before delivery");
+          },
+          "machine",
+          true,
+          false,
+        );
+      })()
         .then((accepted) => {
+          settleAutoRound(roundId, accepted, accepted ? undefined : "not delivered");
           if (accepted) lastAutoRounds.set(conversationId, { fingerprint, at: Date.now() });
           else console.warn("Auto round was not delivered", conversationId);
         })
         .catch((error: unknown) => {
+          settleAutoRound(roundId, false, String(error));
           if (!shutdown.signal.aborted) console.warn("Auto round unavailable", conversationId, String(error));
         })
         .finally(() => pendingAutoRounds.delete(conversationId));
