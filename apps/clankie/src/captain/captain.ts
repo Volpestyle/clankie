@@ -1450,6 +1450,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ...(bridge?.lastSeenAt === undefined ? {} : { lastBridgeSeenAt: bridge.lastSeenAt }),
         messageSeat: id,
         messageAvailable: bridge?.state === "current" || localServiceLead(id),
+        ...(bridge?.usageLimit === undefined ? {} : { usageLimit: bridge.usageLimit }),
       });
     }
     return chats;

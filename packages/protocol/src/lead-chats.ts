@@ -20,6 +20,8 @@ export const LeadChatSchema = z
     lastBridgeSeenAt: z.string().optional(),
     messageSeat: z.string(),
     messageAvailable: z.boolean(),
+    /** The native seat is usage-limited; until then this chat runs on the service lane (VUH-2273). */
+    usageLimit: OperatorSeatBridgeStatusSchema.shape.usageLimit,
   })
   .strict();
 export type LeadChat = z.infer<typeof LeadChatSchema>;

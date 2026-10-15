@@ -436,6 +436,7 @@ export class SeatOutbox {
       capabilities.eventKinds.includes("turn") &&
       LEGACY_OPERATOR_SEAT_EVENT_KINDS.every((kind) => capabilities.eventKinds.includes(kind));
     const bound = this.bound();
+    const limited = this.usageLimited();
     const reconnecting =
       !this.closed &&
       this.pollers.size === 0 &&
@@ -452,13 +453,18 @@ export class SeatOutbox {
       ...(this.lastBridgePollAt === undefined
         ? {}
         : { lastSeenAt: new Date(this.lastBridgePollAt).toISOString() }),
-      detail: reconnecting
-        ? "Seat bridge is reconnecting; only the original native session and chat may attach again."
-        : !bound
-          ? "Seat bridge is disconnected; reconnect with /mcp if this conversation uses a native head."
-          : current
-            ? "Seat bridge supports owner turns."
-            : "Clankie's seat needs a reconnect: /mcp. The bridge does not declare the current seat protocol; owner turns use a compatible wire format when supported.",
+      ...(limited === undefined
+        ? {}
+        : { usageLimit: { window: limited.window, until: new Date(limited.until).toISOString() } }),
+      detail: limited
+        ? `The native seat hit its ${limited.window === "other" ? "usage" : limited.window} limit; until ${new Date(limited.until).toISOString()} its wakes and rounds run on Clankie's service lane.`
+        : reconnecting
+          ? "Seat bridge is reconnecting; only the original native session and chat may attach again."
+          : !bound
+            ? "Seat bridge is disconnected; reconnect with /mcp if this conversation uses a native head."
+            : current
+              ? "Seat bridge supports owner turns."
+              : "Clankie's seat needs a reconnect: /mcp. The bridge does not declare the current seat protocol; owner turns use a compatible wire format when supported.",
     };
   }
 

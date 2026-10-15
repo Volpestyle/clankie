@@ -55,6 +55,14 @@ export const OperatorSeatBridgeStatusSchema = z
     lastSeenAt: z.string().optional(),
     sourceHash: z.string().optional(),
     detail: z.string(),
+    /** The native seat refused turns on a usage limit; until then its input runs on the service lane (VUH-2273). */
+    usageLimit: z
+      .object({
+        window: z.enum(["session", "weekly", "other"]),
+        until: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type OperatorSeatBridgeStatus = z.infer<typeof OperatorSeatBridgeStatusSchema>;

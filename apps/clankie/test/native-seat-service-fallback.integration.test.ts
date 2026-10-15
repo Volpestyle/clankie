@@ -921,9 +921,15 @@ it("runs wakes on the service lane while the native seat is usage-limited, then 
   await settled(f, wakeA.runId);
   expect(f.sessions[0]!.prompts).toEqual([expect.stringContaining("Wake A overnight round")]);
   expect(await parked).toEqual([]);
+  // Status names the limit, when it resets and where the conversation runs meanwhile.
+  expect(f.outbox(ID).bridgeStatus(ID)).toMatchObject({
+    usageLimit: { window: "weekly", until: "2026-10-14T01:00:00.000Z" },
+    detail: expect.stringContaining("run on Clankie's service lane"),
+  });
 
   // After the reset the seat is offered the service's turns, and the next wake goes to it.
   vi.setSystemTime(new Date("2026-10-14T01:00:01Z"));
+  expect(f.outbox(ID).bridgeStatus(ID).usageLimit).toBeUndefined();
   const [handoff] = (await f.pollSeat(ID, 60_000)).map((event) => OperatorSeatEventSchema.parse(event));
   expect(handoff!.source).toBe("service-handoff");
   expect(handoff!.content).toContain("Wake A overnight round");
