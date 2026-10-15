@@ -88,7 +88,10 @@ export const ProductPathsSchema = z
           !path.startsWith("/") &&
           !/^[a-z]:/iu.test(path) &&
           !path.includes("..") &&
-          !/[\\\x00-\x1f\x7f]/u.test(path),
+          !path.includes("\\") &&
+          !Array.from(path).some(
+            (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+          ),
         "Use repository-relative globs without absolute paths, backslashes or ..",
       ),
   )
