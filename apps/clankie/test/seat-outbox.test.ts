@@ -324,3 +324,19 @@ describe("seat outbox", () => {
     expect(firstPage[0]!.id).not.toBe(secondPage[0]!.id);
   });
 });
+
+// VUH-2273 with VUH-2274: a bound, idle seat lets routine reports wait for its
+// round, but a usage-limited one never does; they go straight to the service lane.
+it("holds report rounds only for a bound, idle seat that is not usage-limited", async () => {
+  let now = Date.parse("2026-10-13T22:30:00Z");
+  const outbox = new SeatOutbox({ now: () => now });
+  expect(outbox.takesReportRound()).toBe(false);
+  const parked = outbox.poll(60_000);
+  expect(outbox.takesReportRound()).toBe(true);
+  outbox.limitUntil({ window: "weekly", until: Date.parse("2026-10-14T01:00:00Z") });
+  expect(outbox.takesReportRound()).toBe(false);
+  now = Date.parse("2026-10-14T01:00:01Z");
+  expect(outbox.takesReportRound()).toBe(true);
+  outbox.close();
+  await parked.catch(() => undefined);
+});

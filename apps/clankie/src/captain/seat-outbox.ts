@@ -300,6 +300,15 @@ export class SeatOutbox {
     return !this.closed && this.turnHolds();
   }
 
+  /**
+   * Whether routine reports may wait for this seat's next round (VUH-2274): it
+   * is bound and idle. A usage-limited seat never holds them; they go straight
+   * to the service lane (VUH-2273).
+   */
+  public takesReportRound(): boolean {
+    return this.bound() && !this.responding() && this.usageLimited() === undefined;
+  }
+
   /** Authenticated seat-sync activity; an unrelated session cannot release a hold. */
   public observeTurn(sessionId: string, activity: "responding" | "waiting", onlyIfUnknown = false): boolean {
     if (this.closed) return false;

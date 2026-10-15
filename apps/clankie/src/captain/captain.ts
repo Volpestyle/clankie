@@ -2079,9 +2079,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // reports for free, and the service lane is not woken per report.
   conversations.reportRoundMs = (id) => {
     const outbox = seatOutboxes.get(id);
-    return outbox?.bound() === true &&
-      !outbox.responding() &&
-      conversations.conversation(id)?.scope.kind !== "room"
+    return outbox?.takesReportRound() === true && conversations.conversation(id)?.scope.kind !== "room"
       ? options.reportRoundMs
       : undefined;
   };
