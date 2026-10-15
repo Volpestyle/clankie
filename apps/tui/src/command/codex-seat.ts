@@ -17,6 +17,9 @@ import { codexTrackerOverrides } from "../../../clankie/src/captain/tracker-isol
 import { fleetSeatToolCatalogPath } from "@clankie/protocol/tool-catalog";
 
 const PLUGIN = "clankie@clankie-seat";
+// Fleet panes' worker package, installed for the whole Codex profile; the
+// lead's own pane must not load it as a worker seat too.
+const WORKER_PLUGIN = "clankie-worker@clankie-fleet";
 const exec = promisify(execFileCallback);
 type Flags = {
   resume: boolean;
@@ -130,6 +133,8 @@ async function planSelectedCodexSeat(
       `marketplaces.clankie-seat={source_type="local",source=${JSON.stringify(source)}}`,
       "-c",
       `plugins.${JSON.stringify(PLUGIN)}.enabled=true`,
+      "-c",
+      `plugins.${JSON.stringify(WORKER_PLUGIN)}.enabled=false`,
       // `--dangerously-bypass-approvals-and-sandbox`, as config both server and view take.
       ...(trust.enabled ? MAXIMUM_TRUST_CODEX_CONFIG.flatMap((setting) => ["-c", setting]) : []),
     ],

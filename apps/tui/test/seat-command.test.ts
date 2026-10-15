@@ -103,7 +103,11 @@ describe("clankie seat", () => {
     expect(plan.channel).toBe(true);
     expect(plan.args).toContain("plugin:clankie@inline");
     const settings = JSON.parse(plan.args[plan.args.indexOf("--settings") + 1]!);
-    expect(settings.enabledPlugins).toEqual({ [SEAT_PLUGIN_ID]: false, "clankie@inline": true });
+    expect(settings.enabledPlugins).toEqual({
+      [SEAT_PLUGIN_ID]: false,
+      "clankie-worker@clankie": false,
+      "clankie@inline": true,
+    });
     expect(settings.permissions).toEqual({
       allow: ["Bash(clankie)", "Bash(clankie *)", "mcp__plugin_clankie_lead", "mcp__plugin_clankie_clankie"],
       deny: ["mcp__linear-server", "mcp__claude_ai_Linear"],

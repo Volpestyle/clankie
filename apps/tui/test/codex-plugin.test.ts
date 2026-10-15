@@ -259,6 +259,7 @@ test("the launcher waits for trusted hooks then routes the selected outbox throu
       startImpl: async (options) => {
         bindingPath = options.env!.CLANKIE_CODEX_SEAT_BINDING!;
         expect(options.config).toContain('plugins."clankie@clankie-seat".enabled=true');
+        expect(options.config).toContain('plugins."clankie-worker@clankie-fleet".enabled=false');
         await options.startView(["--remote", "unix:///owned.sock"]);
         started();
         return {

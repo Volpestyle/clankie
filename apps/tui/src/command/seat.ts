@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import { readHerdrBinding } from "../session/herdr-connection.ts";
 import { clankieStateHome } from "../state-home.ts";
 import type { CredentialStore } from "@clankie/credential-broker";
+import { CLAUDE_WORKER_PLUGIN_ID } from "@clankie/protocol";
 import {
   MAXIMUM_TRUST_HARNESS_ARGS,
   MAXIMUM_TRUST_MODE_PATH,
@@ -55,7 +56,9 @@ const SEAT_PERMISSIONS = {
  */
 const SEAT_SETTINGS = {
   ...SEAT_PERMISSIONS,
-  enabledPlugins: { [SEAT_PLUGIN_ID]: false, "clankie@inline": true },
+  // The worker plugin, often enabled at user scope for fleet panes, would
+  // otherwise also load here and treat the lead's pane as a worker seat.
+  enabledPlugins: { [SEAT_PLUGIN_ID]: false, [CLAUDE_WORKER_PLUGIN_ID]: false, "clankie@inline": true },
   // His notes live in the service's `memory`, which every harness and room
   // reads; Claude Code's own memory would be a second copy only this seat sees.
   autoMemoryEnabled: false,
