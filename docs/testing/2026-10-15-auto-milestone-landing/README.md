@@ -2,7 +2,7 @@
 
 Tracks: https://linear.app/vuhlp/issue/VUH-2286
 
-Code: `10d3cde9e` + `36b12ccb7`, based on `8dce245f65df689de7100a2bb96006896cf6a775`.
+Code: `c415d25bf` + `c5786bcac`, finally rebased onto `b482637c93c360eef650d59e56760e6cdca02a7c`.
 The earlier request/link and KH2 replay capture is in [the feature proof](../2026-10-15-auto-milestone-reports/README.md).
 
 ## Full-gate result
@@ -44,6 +44,14 @@ velocity windows, and a running captain's native-channel / tracker / HTTP reques
 Native independent review found two bugs (uncertain delivery and tracker rebinding);
 both were corrected and the reviewer reported no remaining blockers. The overlapping
 VUH-2310 capacity prompt was independently reviewed after the earlier rebase.
+
+The first push was rejected when VUH-2300's native cwd census fix `b482637c9`
+advanced main. After another clean rebase, the focused suites passed **12/12**
+again (exit 0, 10.20 seconds). Revalidation again refused the historical non-green
+gate. No full root gate was repeated under the lead's instruction. The failed main
+comparison above predates `b482637c9`; this record does not claim that VUH-2306
+still fails with that fix. `post-2300-focused.log` retains the final source heads,
+focused results, native request/link capture and revalidation.
 
 ## Gaps and limits
 

@@ -6,6 +6,12 @@
       "size": 7412359,
       "sha256": "7da3bacf44f1ac0a55003f0e3d06657eb84abdf8d61de929d549b8be302e236e",
       "url": "clankie://evidence/sha256/7da3bacf44f1ac0a55003f0e3d06657eb84abdf8d61de929d549b8be302e236e"
+    },
+    {
+      "path": "post-2300-focused.log",
+      "size": 35942,
+      "sha256": "4a5b811fe8e59a9ec4631e33b7da6a400a510df2c389d97eb46728ce9d1aeade",
+      "url": "clankie://evidence/sha256/4a5b811fe8e59a9ec4631e33b7da6a400a510df2c389d97eb46728ce9d1aeade"
     }
   ]
 }
