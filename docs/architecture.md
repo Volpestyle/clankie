@@ -65,7 +65,9 @@ pairing; hosted shell enforcement belongs to private `clankie-ops`.
 
 Hosted account tickets bind the exact command, account, tenant, installation,
 browser key and nonce. The body durably fences replay before executing and seals
-the response. Neither account metadata nor captain authority creates a grant.
+the response. The gateway connector forwards these signed support exchanges to
+the body's verifier, just as it forwards signed pairing offers. Neither account
+metadata nor captain authority creates a grant.
 Support audit uses keyed device references and a separate durable spool;
 disclosure fails closed without it. Independent sink acknowledgements govern
 spool pruning, regardless of diagnostic consent. Public/private artifacts and

@@ -6,7 +6,7 @@ import { getRequestListener } from "@hono/node-server";
 import { MachineJoins } from "../src/machine-joins.ts";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
-import { randomBytes, randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,6 +39,10 @@ import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
 import { sealGatewayValue, openGatewayValue } from "../src/gateway-encryption.ts";
+import { HOSTED_SUPPORT_PATH } from "@clankie/protocol/support-access";
+import { HostedBodyClient } from "../src/hosted-body.ts";
+import { HostedPairing } from "../src/hosted-pairing.ts";
+import { hostedFixture } from "./fixtures/hosted-body.ts";
 
 const hostId = "mac_james_12345678";
 const hostToken = "gateway-host-token-that-is-longer-than-thirty-two-characters";
@@ -427,6 +431,68 @@ describe("public gateway Mac connector", () => {
     expect(
       (await exchange("/v1/joined-machines/challenge", { machineId: lease.machineId })).start,
     ).toMatchObject({ status: 403 });
+  });
+
+  it("forwards fleet-signed support exchanges to the body verifier without granting unsigned access", async () => {
+    const fixture = hostedFixture(Math.floor(Date.now() / 1000) * 1000);
+    const client = new HostedBodyClient(fixture.bootstrap, { clock: () => fixture.now });
+    const app = await createClankieApp({
+      captain: createStubCaptain(),
+      hostedPairing: new HostedPairing(client, generateKeyPairSync("ed25519").privateKey, {
+        clock: () => fixture.now,
+      }),
+    });
+    apps.push(app);
+    const control = await listen(createServer(getRequestListener(app.app.fetch)));
+    const gateway = await fakeGateway();
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId: fixture.hostId,
+      hostToken,
+      controlPlaneUrl: control,
+      relayUrl: control,
+    });
+    connectors.push(connector);
+    connector.start();
+    const connection = await gateway.nextConnection();
+    const command = { action: "list" } as const;
+    for (const [supportTicket, status] of [
+      ["invalid-ticket", 401],
+      [fixture.support(command, fixture.browserPublicKey, fixture.nonce), 200],
+    ] as const) {
+      connection.send({
+        schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+        kind: "request",
+        requestId: `support_${status}_request`,
+        target: "control",
+        method: "POST",
+        path: HOSTED_SUPPORT_PATH,
+        headers: [{ name: "content-type", value: "application/json" }],
+        bodyBase64: Buffer.from(
+          JSON.stringify({
+            version: 1,
+            command,
+            supportTicket,
+            browserPublicKey: fixture.browserPublicKey,
+            nonce: fixture.nonce,
+          }),
+        ).toString("base64"),
+      });
+      const frames = await connection.framesThrough("response_end");
+      expect(frames[0]).toMatchObject({ kind: "response_start", status });
+      const body = JSON.parse(
+        frames
+          .filter((frame): frame is PublicGatewayResponseChunkFrame => frame.kind === "response_chunk")
+          .map((frame) => Buffer.from(frame.bodyBase64, "base64").toString())
+          .join(""),
+      );
+      expect(body).toMatchObject(
+        status === 401
+          ? { error: "unauthorized" }
+          : { version: 2, ciphertext: expect.any(String), signature: expect.any(String) },
+      );
+      expect(body).not.toHaveProperty("grants");
+    }
   });
 
   it("registers hashed offers and refuses plaintext application forwarding", async () => {
