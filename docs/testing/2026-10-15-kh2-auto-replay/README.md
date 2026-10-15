@@ -103,7 +103,28 @@ checks unchanged tracker bytes and zero wakes; the live request is read-only.
 
 ## Normal live round
 
-Pending the next natural KH2 Auto round. No forced wake. Per the lead, allow
-45 minutes after the healthy deploy, until **21:55:31Z**. VUH-2312 preserves
-cadence across deploys. If no new round is recorded by then, use the expressly
-authorized 19:38Z record with its age caveat; do not present it as post-deploy.
+**Fresh natural round observed; no forced wake and no age fallback.**
+
+- Round: `5da1ecfe-4db9-4310-b1b0-1f60eb697c4b`, recorded
+  **2026-10-15 21:11:52.058Z**, 81 seconds after the healthy deploy notice.
+- Measured at 21:11:42.453Z, since the Shared world milestone at
+  01:44:38.451Z: 15 owner-facing closures, 2 tooling, 2 unlinked; 2 started
+  issues, `cap: null`; 3357 product / 4840 tooling / 502 docs lines, 31 commits.
+- The round carries `tooling_lead` for October 14, with the declared-path
+  October 13 context of 777 product / 1592 tooling / 378 docs lines.
+- Delivery is explicitly **false**, settled at 21:12:00.349Z, reason
+  `not delivered`. This proves live measurement and detection, not a delivered
+  wake, lead correction or milestone post. The reporting section requests the
+  Shared world milestone, with no observed updates in this captured record.
+
+The [tracked live-round capture](live-round-capture.txt) retains the before/after replay
+journal reads and the fresh normal record. The fresh record arrived within the
+lead's 45-minute window ending 21:55:31Z, so the older 19:38Z fallback is unused.
+
+## Remaining gap
+
+The only unsupported requested signal is `over_wip`, because no per-project
+WIP cap exists yet (VUH-2256). The four historical started counts are measured,
+and the existing cap-null contract is preserved. Drift slice 2 remains on hold.
+No evals ran. Temporary test listeners closed; the worker did not restart the
+service or force an Auto wake.
