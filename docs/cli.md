@@ -3843,6 +3843,13 @@ service measured before waking the lead, and whether that wake was delivered
 - `days`: per local day for the window and the last seven days, whether it was a
   working day (a landing or an issue state change), its churn, closures and state changes.
 
+- `drift`: the signals the round named (VUH-2284): `tooling_lead` (tooling plus docs
+  churn above product on the last two completed working days), `nothing_closed`
+  (the last completed working day closed nothing owner-facing) and `over_wip` (more
+  started issues than the WIP cap, once one exists), each with its day and numbers.
+  `carried: true` marks a detection from an earlier round whose wake was not
+  delivered; a detection clears only once a round carrying it is delivered.
+
 A part the service could not read is `{"state":"unknown","reason":…}`, never zero.
 The wake carries the same numbers as one line per project. The record lives in
 `~/.clankie/captain/auto-rounds/` (`rounds.jsonl`, append-only, and

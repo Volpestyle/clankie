@@ -33,6 +33,18 @@ const VelocityDaySchema = z
   })
   .strict();
 
+/** A drift signal a round detected (ADR 0270). `day` is the local day it refers to. */
+export const DriftDetectionSchema = z
+  .object({
+    signal: z.enum(["tooling_lead", "nothing_closed", "over_wip"]),
+    day: z.string(),
+    numbers: z.record(z.string(), z.number()),
+    /** Detected by an earlier round whose wake was not delivered; carried until one is. */
+    carried: z.boolean().optional(),
+  })
+  .strict();
+export type DriftDetection = z.infer<typeof DriftDetectionSchema>;
+
 /** One project's outcomes for one Auto round. Unreadable parts are `unknown`, never zero. */
 export const ProjectVelocitySchema = z
   .object({
@@ -80,6 +92,8 @@ export const ProjectVelocitySchema = z
     ]),
     days: z.array(VelocityDaySchema),
     caveats: z.array(z.string()),
+    /** Absent on rounds recorded before drift detection (VUH-2284). */
+    drift: z.array(DriftDetectionSchema).optional(),
   })
   .strict();
 export type ProjectVelocity = z.infer<typeof ProjectVelocitySchema>;

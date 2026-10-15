@@ -144,8 +144,15 @@ export async function projectStatuses(
   return statuses;
 }
 
-/** What changes the round's evidence; an unchanged round waits out the idle rewake. */
-export function autoRoundFingerprint(states: readonly AutoProjectState[]): string {
+/**
+ * What changes the round's evidence; an unchanged round waits out the idle rewake. Drift
+ * contributes its signal set per project, not counts, so new drift wakes the lead promptly
+ * and unchanged drift costs no extra turns (ADR 0270).
+ */
+export function autoRoundFingerprint(
+  states: readonly AutoProjectState[],
+  driftSignals: (projectId: string) => readonly string[] = () => [],
+): string {
   return JSON.stringify(
     states.map((state) => [
       state.id,
@@ -153,6 +160,7 @@ export function autoRoundFingerprint(states: readonly AutoProjectState[]): strin
       state.workers,
       state.trackerProjectId ?? "",
       state.linearProjectBinding?.projectId ?? "",
+      ...(driftSignals(state.id).length ? [driftSignals(state.id)] : []),
     ]),
   );
 }
@@ -173,6 +181,7 @@ export function autoRoundDue(
 export function autoRoundPrompt(
   states: readonly AutoProjectState[],
   velocity: readonly string[] = [],
+  drift: readonly string[] = [],
 ): string {
   return [
     "Auto round. The owner put these projects on Auto: work their backlogs without being asked.",
@@ -192,5 +201,6 @@ export function autoRoundPrompt(
           ...velocity.map((line) => `- ${line}`),
         ]
       : []),
+    ...drift,
   ].join("\n");
 }

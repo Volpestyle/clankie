@@ -184,3 +184,23 @@ Approved by the lead for VUH-2283, so VUH-2284 builds on the same rules.
   part of a measurement (tracker, churn) fails on its own as `unknown` with a
   reason, and a project's measurement is bounded at two minutes, so a round is
   never blocked.
+
+## Amendment: drift detection details (VUH-2284, 2026-10-15)
+
+Lead decisions for VUH-2284:
+
+- **Measured every tick.** Each Auto tick measures every project on Auto, reusing a
+  measurement younger than the tick, so new drift reaches the fingerprint without
+  waiting for another change. Only rounds that wake are recorded.
+- **Completed working days only.** Today is partial and never counts. Days whose
+  sources were unreadable are skipped like idle days: they neither fire a signal
+  nor break a streak. `nothing_closed` reads the last completed working day;
+  `tooling_lead` the last two.
+- **Fingerprint by signal name.** The fingerprint takes each project's signal
+  names, not days or numbers, so drift that persists across days follows the
+  idle rewake rather than waking the lead daily.
+- **Carry until delivered.** A detection stays pending in the project's state
+  file until a round carrying it is delivered; later rounds carry it, marked
+  `carried`, alongside what they detect.
+- **Status line by capability.** The projects status line shows signals only to
+  clients that advertise support, so released app builds keep parsing it.

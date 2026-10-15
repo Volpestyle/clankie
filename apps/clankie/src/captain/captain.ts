@@ -128,10 +128,13 @@ import {
   autoRoundFingerprint,
   autoRoundPrompt,
   projectStatuses,
+  type AutoProjectState,
 } from "./auto-projects.ts";
 import { ProjectMirrors } from "./project-mirrors.ts";
 import { AutoRoundRecord } from "./auto-rounds.ts";
 import { measureVelocityWithin, velocityLine, type VelocityDeps } from "./auto-velocity.ts";
+import { driftSection, driftSignals, withDrift } from "./auto-drift.ts";
+import type { ProjectVelocity } from "@clankie/protocol/auto-rounds";
 import { readRepositoryChurn } from "./repository-churn.ts";
 import { RoutineError, RoutineStore } from "./routines.ts";
 import { createRoutineRunner, serviceLauncher } from "./routine-runner.ts";
@@ -4705,6 +4708,30 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       conversations.defaultGlobalConversationId(),
     );
   };
+  const autoRoundIntervalMs = options.autoRoundIntervalMs ?? options.fleetRoundIntervalMs ?? 30 * 60_000;
+  /** Each Auto project's latest measurement; reused while younger than a tick (VUH-2284). */
+  const autoMeasurements = new Map<string, ProjectVelocity>();
+  const measureAutoProjects = async (projectIds: ReadonlySet<string>) => {
+    for (const id of autoMeasurements.keys()) if (!projectIds.has(id)) autoMeasurements.delete(id);
+    const projects = (await settings()).projects.projects;
+    await Promise.all(
+      projects
+        .filter((project) => projectIds.has(project.id))
+        .map(async (project) => {
+          const last = autoMeasurements.get(project.id);
+          // A little slack, so a tick's own jitter never skips a measurement.
+          if (last && Date.now() - Date.parse(last.measuredAt) < autoRoundIntervalMs * 0.9) return;
+          const velocity = await measureVelocityWithin(
+            project,
+            autoRoundRecord.lastMilestone(project.id),
+            velocityDeps,
+          );
+          autoMeasurements.set(project.id, withDrift(velocity, autoRoundRecord.pendingDrift(project.id)));
+        }),
+    );
+  };
+  const autoFingerprint = (states: readonly AutoProjectState[]) =>
+    autoRoundFingerprint(states, (id) => driftSignals(autoMeasurements.get(id)));
   const stopAutoRounds = startFleetRounds(async () => {
     if (shutdown.signal.aborted || !autonomy.enabled) return;
     await projectMirrors
@@ -4712,9 +4739,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       .catch((error: unknown) => console.warn("Project mirrors unavailable", String(error)));
     const rounds = await readAutoRounds();
     for (const id of lastAutoRounds.keys()) if (!rounds.has(id)) lastAutoRounds.delete(id);
+    // Velocity and drift (ADR 0270): measured every tick, so new drift changes the fingerprint.
+    await measureAutoProjects(new Set([...rounds.values()].flat().map((state) => state.id)));
     for (const [conversationId, states] of rounds) {
       if (pendingAutoRounds.has(conversationId)) continue;
-      const fingerprint = autoRoundFingerprint(states);
+      const fingerprint = autoFingerprint(states);
       if (
         !autoRoundDue(fingerprint, lastAutoRounds.get(conversationId), Date.now(), options.autoIdleRewakeMs)
       )
@@ -4722,16 +4751,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       pendingAutoRounds.add(conversationId);
       let roundId: string | undefined;
       void (async () => {
-        // Velocity (ADR 0270): measured per project, recorded before the wake, never blocking it.
-        const projects = (await settings()).projects.projects;
-        const velocities = await Promise.all(
-          states.flatMap((state) => {
-            const project = projects.find((entry) => entry.id === state.id);
-            return project === undefined
-              ? []
-              : [measureVelocityWithin(project, autoRoundRecord.lastMilestone(project.id), velocityDeps)];
-          }),
-        );
+        const velocities = states.flatMap((state) => {
+          const velocity = autoMeasurements.get(state.id);
+          return velocity === undefined ? [] : [velocity];
+        });
         try {
           roundId = autoRoundRecord.measured(conversationId, velocities);
         } catch (error) {
@@ -4739,11 +4762,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }
         return wakeConversation(
           { conversationId },
-          autoRoundPrompt(states, velocities.map(velocityLine)),
+          autoRoundPrompt(states, velocities.map(velocityLine), driftSection(velocities)),
           async () => {
             if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
             const current = (await readAutoRounds()).get(conversationId);
-            if (!current || autoRoundFingerprint(current) !== fingerprint)
+            if (!current || autoFingerprint(current) !== fingerprint)
               throw new Error("Projects on Auto changed before delivery");
           },
           "machine",
@@ -4762,7 +4785,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         })
         .finally(() => pendingAutoRounds.delete(conversationId));
     }
-  }, options.autoRoundIntervalMs ?? options.fleetRoundIntervalMs);
+  }, autoRoundIntervalMs);
   // ADR 0271: the default lead seat restarts fresh in its own pane instead of
   // compacting for days. VUH-2273 moves a usage-limited seat with the same call.
   const leadSeats = createLeadSeatRelaunch({

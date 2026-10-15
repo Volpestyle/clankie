@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AutoRound, ProjectVelocity, VelocityMilestone } from "@clankie/protocol/auto-rounds";
+import type {
+  AutoRound,
+  DriftDetection,
+  ProjectVelocity,
+  VelocityMilestone,
+} from "@clankie/protocol/auto-rounds";
 
 /** One project measured in one round; `delivery` lines settle the round later. */
 interface MeasurementLine {
@@ -19,51 +24,65 @@ interface DeliveryLine {
   readonly reason?: string;
 }
 
+interface ProjectState {
+  lastMilestone?: VelocityMilestone | null;
+  /** Detections no delivered round has carried yet (VUH-2284). */
+  pendingDrift?: DriftDetection[];
+}
+
+const sameDetection = (a: DriftDetection, b: DriftDetection) => a.signal === b.signal && a.day === b.day;
+
 /**
  * The durable Auto round record (ADR 0270): `rounds.jsonl` is append-only, one measurement
  * line per project per round and one delivery line per round once its wake settles, so a
  * restart mid-wake leaves a measured round with no delivery rather than losing it. Each
- * project's state file keeps its last milestone, which starts the next velocity window.
+ * project's state file keeps its last milestone, which starts the next velocity window, and
+ * the drift detections still waiting for a delivered round.
  */
 export class AutoRoundRecord {
   private readonly directory: string;
   private readonly roundsPath: string;
+  /** What each unsettled round carried, so only a delivered round clears it. */
+  private readonly carried = new Map<string, Map<string, DriftDetection[]>>();
   constructor(directory: string) {
     this.directory = directory;
     this.roundsPath = join(directory, "rounds.jsonl");
   }
 
   lastMilestone(projectId: string): VelocityMilestone | null {
-    try {
-      const state = JSON.parse(readFileSync(this.statePath(projectId), "utf8")) as {
-        lastMilestone?: VelocityMilestone | null;
-      };
-      return state.lastMilestone ?? null;
-    } catch {
-      return null;
-    }
+    return this.state(projectId).lastMilestone ?? null;
+  }
+
+  pendingDrift(projectId: string): DriftDetection[] {
+    return this.state(projectId).pendingDrift ?? [];
   }
 
   /** Records a round's measurements before its wake is sent; returns the round id. */
   measured(conversationId: string, velocities: readonly ProjectVelocity[], at = new Date()): string {
     const roundId = randomUUID();
-    mkdirSync(join(this.directory, "projects"), { recursive: true, mode: 0o700 });
+    const carried = new Map<string, DriftDetection[]>();
     for (const velocity of velocities) {
       this.append({ type: "measurement", roundId, conversationId, at: at.toISOString(), velocity });
-      if (
-        velocity.lastMilestone !== null &&
-        velocity.lastMilestone.at !== this.lastMilestone(velocity.projectId)?.at
-      ) {
-        const path = this.statePath(velocity.projectId);
-        writeFileSync(`${path}.tmp`, `${JSON.stringify({ lastMilestone: velocity.lastMilestone })}\n`, {
-          mode: 0o600,
-        });
-        renameSync(`${path}.tmp`, path);
-      }
+      const state = this.state(velocity.projectId);
+      const drift = (velocity.drift ?? []).map(({ carried: _carried, ...detection }) => detection);
+      const pending = [
+        ...(state.pendingDrift ?? []).filter(
+          (entry) => !drift.some((detection) => sameDetection(entry, detection)),
+        ),
+        ...drift,
+      ];
+      carried.set(velocity.projectId, drift);
+      this.writeState(velocity.projectId, {
+        ...state,
+        ...(velocity.lastMilestone === null ? {} : { lastMilestone: velocity.lastMilestone }),
+        pendingDrift: pending,
+      });
     }
+    this.carried.set(roundId, carried);
     return roundId;
   }
 
+  /** A delivered round clears exactly the detections it carried; a refused one leaves them pending. */
   settled(roundId: string, delivered: boolean, reason?: string, at = new Date()): void {
     this.append({
       type: "delivery",
@@ -72,6 +91,19 @@ export class AutoRoundRecord {
       delivered,
       ...(reason === undefined ? {} : { reason }),
     });
+    const carried = this.carried.get(roundId);
+    this.carried.delete(roundId);
+    if (!delivered || carried === undefined) return;
+    for (const [projectId, drift] of carried) {
+      if (!drift.length) continue;
+      const state = this.state(projectId);
+      this.writeState(projectId, {
+        ...state,
+        pendingDrift: (state.pendingDrift ?? []).filter(
+          (entry) => !drift.some((detection) => sameDetection(entry, detection)),
+        ),
+      });
+    }
   }
 
   /** Rounds newest first, each with its delivery (null when it never settled). */
@@ -127,6 +159,21 @@ export class AutoRoundRecord {
   private append(line: MeasurementLine | DeliveryLine): void {
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     appendFileSync(this.roundsPath, `${JSON.stringify(line)}\n`, { mode: 0o600 });
+  }
+
+  private state(projectId: string): ProjectState {
+    try {
+      return JSON.parse(readFileSync(this.statePath(projectId), "utf8")) as ProjectState;
+    } catch {
+      return {};
+    }
+  }
+
+  private writeState(projectId: string, state: ProjectState): void {
+    mkdirSync(join(this.directory, "projects"), { recursive: true, mode: 0o700 });
+    const path = this.statePath(projectId);
+    writeFileSync(`${path}.tmp`, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    renameSync(`${path}.tmp`, path);
   }
 
   private statePath(projectId: string): string {

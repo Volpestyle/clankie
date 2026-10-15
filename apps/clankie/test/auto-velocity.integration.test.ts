@@ -13,7 +13,12 @@ import { runConversationsCommand } from "../../tui/src/command/conversations.ts"
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { AutoRoundRecord } from "../src/captain/auto-rounds.ts";
-import { autoRoundPrompt } from "../src/captain/auto-projects.ts";
+import {
+  autoRoundFingerprint,
+  autoRoundPrompt,
+  type AutoProjectState,
+} from "../src/captain/auto-projects.ts";
+import { driftSection, driftSignals, withDrift } from "../src/captain/auto-drift.ts";
 import { measureVelocity, velocityLine } from "../src/captain/auto-velocity.ts";
 import { ProjectMirrors } from "../src/captain/project-mirrors.ts";
 import { readRepositoryChurn } from "../src/captain/repository-churn.ts";
@@ -27,7 +32,8 @@ afterEach(async () => {
 const lead: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
 const owner: TrackerActor = { ...TRACKER_OWNER, onBehalfOf: [] };
 
-it("measures a project's velocity from its built-in tracker and origin, and keeps the round record", async () => {
+/** A real built-in tracker and origin: a parent milestone on 10-11, then product, tooling and unlinked closures. */
+async function measuredProject() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "auto-velocity-")));
   roots.push(root);
 
@@ -146,6 +152,12 @@ it("measures a project's velocity from its built-in tracker and origin, and keep
     churn: readRepositoryChurn,
     timeZone: "America/Chicago",
   };
+  return { project, deps, routes, parent, product, rig, quiet, commit, git };
+}
+
+it("measures a project's velocity from its built-in tracker and origin, and keeps the round record", async () => {
+  const { project, deps, routes, parent, product, rig, quiet } = await measuredProject();
+  const root = roots.at(-1)!;
   const now = new Date("2026-10-14T03:00:00.000Z");
   const velocity = await measureVelocity(project, null, deps, now);
 
@@ -292,4 +304,76 @@ it("serves the round record through the operator route and `clankie auto rounds`
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+it("names drift from completed working days, carries it until a round is delivered, and fingerprints the signal set", async () => {
+  const { project, deps, product, commit, git } = await measuredProject();
+  const root = roots.at(-1)!;
+  // 10-12 also lands tests heavier than its product change, so tooling leads two working days running.
+  await commit("2026-10-12T16:00:00Z", `Menu tests (${product.identifier})`, { "tests/menu.test.ts": 20 });
+  await git("2026-10-13T18:30:00Z", "push", "-q", "origin", "main");
+  await git("2026-10-13T18:30:00Z", "fetch", "-q", "origin");
+  const record = new AutoRoundRecord(join(root, "auto-rounds"));
+
+  // Late on 10-13 (CDT): 10-12 is the last completed working day; it closed nothing owner-facing.
+  const evening = withDrift(
+    await measureVelocity(project, null, deps, new Date("2026-10-14T03:00:00.000Z")),
+    [],
+  );
+  expect(evening.drift).toEqual([
+    { signal: "nothing_closed", day: "2026-10-12", numbers: { tooling: 0, stateChanges: 1 } },
+  ]);
+  // Its wake is refused (a limited lead seat), so the detection stays pending.
+  record.settled(record.measured("lead", [evening]), false, "lead seat limited");
+  expect(record.pendingDrift("mod")).toEqual(evening.drift);
+
+  // 10-14: 10-12 and 10-13 both led with tooling; 10-13 closed owner-facing work. The undelivered
+  // nothing_closed rides along, marked carried.
+  const next = withDrift(
+    await measureVelocity(project, record.lastMilestone("mod"), deps, new Date("2026-10-14T18:00:00.000Z")),
+    record.pendingDrift("mod"),
+  );
+  expect(next.drift).toEqual([
+    {
+      signal: "tooling_lead",
+      day: "2026-10-13",
+      numbers: {
+        product: 0,
+        tooling: 35,
+        docs: 4,
+        previousProduct: 10,
+        previousTooling: 20,
+        previousDocs: 0,
+      },
+    },
+    { signal: "nothing_closed", day: "2026-10-12", numbers: { tooling: 0, stateChanges: 1 }, carried: true },
+  ]);
+  // over_wip needs a WIP cap; none exists until VUH-2256.
+  expect(next.drift!.some((detection) => detection.signal === "over_wip")).toBe(false);
+
+  const section = driftSection([next]).join("\n");
+  expect(section).toContain(
+    "Mod: tooling_lead. Tooling and docs churn outran product on the last two working days",
+  );
+  expect(section).toContain(
+    "Stop starting tooling work on this project, then pick the next milestone feature and staff it.",
+  );
+  expect(section).toContain("Mod: nothing_closed (carried from an undelivered round). 2026-10-12");
+  const state: AutoProjectState = { id: "mod", name: "Mod", workers: 0 };
+  expect(autoRoundPrompt([state], [], driftSection([next]))).toContain(section);
+
+  // New drift changes the fingerprint; the same signals with other numbers do not.
+  const quiet = autoRoundFingerprint([state]);
+  const drifting = autoRoundFingerprint([state], () => driftSignals(next));
+  expect(drifting).not.toBe(quiet);
+  const sameSignals = { ...next, drift: next.drift!.map((detection) => ({ ...detection, numbers: {} })) };
+  expect(autoRoundFingerprint([state], () => driftSignals(sameSignals))).toBe(drifting);
+
+  // A delivered round clears exactly what it carried.
+  record.settled(record.measured("lead", [next]), true);
+  expect(record.pendingDrift("mod")).toEqual([]);
+  expect(
+    new AutoRoundRecord(join(root, "auto-rounds")).read({ projectId: "mod", limit: 1 })[0]!.projects[0]!
+      .drift,
+  ).toEqual(next.drift);
 });
