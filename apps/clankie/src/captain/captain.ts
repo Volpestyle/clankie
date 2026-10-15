@@ -4735,10 +4735,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       conversations.defaultGlobalConversationId(),
     );
   };
-  async function recordDriftCorrection(
-    authority: ConversationAuthority,
-    input: DriftCorrectionInput,
-  ) {
+  async function recordDriftCorrection(authority: ConversationAuthority, input: DriftCorrectionInput) {
     await assertConversationAuthority(authority);
     const rounds = await readAutoRounds();
     if (!rounds.get(authority.owner.conversationId)?.some((project) => project.id === input.projectId))
