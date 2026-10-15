@@ -812,7 +812,16 @@ export function createOperatorService(
         request.brief,
         {
           owner: { conversationId },
-          ...(ownerWork ? { ownerHire: ownerWork } : {}),
+          ...(ownerWork
+            ? {
+                ownerHire: {
+                  surface: ownerWork.surface,
+                  ...(ownerWork.overrideUsage === undefined
+                    ? {}
+                    : { overrideUsage: ownerWork.overrideUsage }),
+                },
+              }
+            : {}),
           current: () =>
             ctx.conversations.runsCaptainTurns(conversationId) &&
             (!ownerWork || authority?.current() === true),

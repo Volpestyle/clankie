@@ -4,8 +4,8 @@ import { accountTier, allocateAccounts } from "./account-allocation.ts";
 import type { MachineWorkerAccounts, WorkerAccountStatus } from "./harness-accounts.ts";
 
 /** A reserve for already-running work; reaching it stops new subscription hires. */
-export const HIRE_PLAN_RESERVE = 0.1;
-export function hirePlanKey(account: WorkerAccountStatus): string | undefined {
+const HIRE_PLAN_RESERVE = 0.1;
+function hirePlanKey(account: WorkerAccountStatus): string | undefined {
   const tier = accountTier(account);
   return tier === undefined ? undefined : `${account.harness}:${tier}`;
 }
@@ -130,9 +130,11 @@ export function hireAdmissionChoice(
 
 type Admission = NonNullable<Extract<OperatorSeatSpawnResult, { outcome: "failed" }>["admission"]>;
 export class HireAdmissionError extends Error {
-  constructor(readonly admission: Admission) {
+  readonly admission: Admission;
+  constructor(admission: Admission) {
     super(
       `No observed plan can take this hire: ${admission.accounts.map((account) => `${account.plan}/${account.account}: ${account.remaining === null ? "remaining unknown" : `${Math.round(account.remaining * 100)}% remaining`}${account.resetsAt ? `, resets ${account.resetsAt}` : ""}; ${account.reason}`).join("; ")}`,
     );
+    this.admission = admission;
   }
 }
