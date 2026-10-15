@@ -1095,6 +1095,10 @@ scratch files do not prevent cleanup. A partially removed checkout missing its
 batch record agree. Passed, held and partial batches remain available for push.
 Aliased, locked, unverified or live-process directories stay retained; incomplete
 cwd observations defer cleanup. A five-minute sweep retries deferred removals.
+On macOS, each fresh cwd census reads kernel vnode paths through the native
+process helper, including a complete account inventory. It avoids repeated
+`lsof` filesystem scans while retaining the live-process recheck before every
+removal; no cwd snapshot is reused across deletions.
 Restore reads a reclaimed pushed batch's retained commit store.
 Recursive scratch and cache deletion runs in an awaited child process, so large
 installs do not occupy the live service's filesystem threadpool. The same

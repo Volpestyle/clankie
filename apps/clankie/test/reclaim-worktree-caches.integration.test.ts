@@ -9,11 +9,15 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { expect, it } from "vitest";
+import { beforeAll, expect, it } from "vitest";
 import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { reclaimWorktreeCaches } from "../src/captain/reclaim-worktree-caches.ts";
 
 const exec = promisify(execFile);
+beforeAll(async () => {
+  if (process.platform === "darwin")
+    await exec(process.execPath, [join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs")]);
+});
 it.runIf(
   process.platform === "darwin" && existsSync(join(userInfo().homedir, ".config", "herdr", "herdr.sock")),
 )(

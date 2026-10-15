@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { afterEach, aroundEach, expect, it } from "vitest";
+import { afterEach, aroundEach, beforeAll, expect, it } from "vitest";
 import { IntegrationRunSchema } from "@clankie/protocol/integrate";
 import { DeployHolds, durableJson, withDirectoryLock } from "../src/deploy-holds.ts";
 import { IntegrationQueue, integrationSources } from "../src/integrate.ts";
@@ -35,6 +35,12 @@ import { fixtureWork, withFixtureWork } from "../../../scripts/testing/fixture-w
 
 aroundEach(withFixtureWork);
 const nativeExecute = promisify(execFile);
+beforeAll(async () => {
+  if (process.platform === "darwin")
+    await nativeExecute(process.execPath, [
+      join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs"),
+    ]);
+});
 const execute = (file: string, args: string[], options: ExecFileOptions = {}) => {
   const work = fixtureWork();
   return work.run(() => nativeExecute(file, args, { ...options, encoding: "utf8", signal: work.signal }));
@@ -1953,7 +1959,7 @@ it.runIf(process.platform === "darwin")(
       else protectedTrees.push(tree);
     }
     const result = await f.queue.reclaimWorktrees();
-    expect(result.reclaimed.sort()).toEqual(reclaimable.sort());
+    expect(result.reclaimed.sort(), JSON.stringify(result.kept)).toEqual(reclaimable.sort());
     expect(result.freedBytes).toBeGreaterThan(0);
     for (const tree of reclaimable) expect(existsSync(tree)).toBe(false);
     for (const tree of protectedTrees) expect(existsSync(tree)).toBe(true);

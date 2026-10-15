@@ -221,6 +221,25 @@ is unchanged. Four serial `lsof` reads could consume roughly ten seconds under
 load (VUH-2299); this narrower kernel observation removes that setup cost while
 retaining fresh cwd reads at both checkpoints. Cwd alone grants no authority.
 
+## Cleanup cwd census (Darwin)
+
+```sh
+native-process-proof --cwds [--diagnostics]
+```
+
+Cleanup reads a fresh bounded kernel process inventory and vnode cwd paths,
+returning `{schemaVersion:1,uid,cwds}`. Every live process in the effective-user
+inventory must be observed; readable other-user paths are included too. Each
+path is bracketed by matching process lifetimes, and a second account inventory
+detects new or unobserved live processes. Churn retries within the existing
+200ms attempt / 600ms total budget. Inaccessible account processes, incomplete
+inventories and oversized output refuse the census.
+
+Integration and worktree-cache reclamation request this census again before
+each removal. No snapshot is cached across removals. This replaces repeated
+`lsof` filesystem setup without relaxing live-process protection. Linux keeps
+its existing `/proc` cleanup observer.
+
 ## Reattached Codex server observation
 
 ```sh

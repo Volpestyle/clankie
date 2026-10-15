@@ -321,6 +321,26 @@ static int contains(const pid_t *pids, int count, pid_t pid) {
   return bsearch(&pid, pids, (size_t)count, sizeof(pid), compare_pid) != NULL;
 }
 
+/* Reconcile the kernel lists by inspecting their bounded union. A process born
+ * between list calls is another candidate to inspect, not a reason to discard
+ * every completed observation. No live same-user candidate is omitted. */
+static int merge_pids(pid_t *all, int *count, const pid_t *extra, int extra_count) {
+  pid_t merged[MAX_PIDS];
+  int i = 0, j = 0, size = 0;
+  while (i < *count || j < extra_count) {
+    pid_t next;
+    if (j >= extra_count || (i < *count && all[i] < extra[j])) next = all[i++];
+    else if (i >= *count || extra[j] < all[i]) next = extra[j++];
+    else { next = all[i++]; ++j; }
+    if (next <= 1 || (size > 0 && merged[size - 1] == next)) continue;
+    if (size >= MAX_PIDS - 1) { errno = EOVERFLOW; return 0; }
+    merged[size++] = next;
+  }
+  memcpy(all, merged, (size_t)size * sizeof(*all));
+  *count = size;
+  return 1;
+}
+
 struct fd_table {
   struct proc_fdinfo *items;
   int capacity;
@@ -705,6 +725,89 @@ static int prove_cwd(int argc, char **argv) {
   return 0;
 }
 
+/* Cleanup needs a complete fresh account census before each removal. Reading
+ * vnode paths directly avoids lsof's repeated machine-wide filesystem setup.
+ * Keep readable other-user paths too; an inaccessible live account PID refuses
+ * the entire observation, never authorizes deletion. */
+static int prove_cwds(int argc) {
+  if (argc != 2) return refuse_at("arguments", "invalid_arguments", 0);
+  pid_t all[MAX_PIDS], account[MAX_PIDS], after[MAX_PIDS];
+  int count, account_count, after_count;
+  if (!list_pids(PROC_ALL_PIDS, all, &count) ||
+      !list_pids(PROC_UID_ONLY, account, &account_count) ||
+      !merge_pids(all, &count, account, account_count))
+    return refuse_at("census", "process_census_unavailable", errno);
+  struct cwd_record { struct identity process; char path[MAXPATHLEN]; };
+  struct cwd_record *records = calloc((size_t)count, sizeof(*records));
+  if (records == NULL) return refuse_at("census", "allocation_failed", errno);
+  int result = 0;
+  for (int i = 0; i < count; ++i) {
+    pid_t pid = all[i];
+    if (pid <= 1) continue;
+    if (!within_budget()) { result = refuse(); break; }
+    struct identity first, second;
+    int observed = observe(pid, &first);
+    if (observed == 0) continue;
+    int required = contains(account, account_count, pid);
+    if (observed != 1) {
+      int error = errno;
+      if (!required && protected_other_user(pid)) continue;
+      int retry = error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN;
+      diagnostic("census", "process_census_unavailable", error, retry);
+      result = retry ? 2 : refuse();
+      break;
+    }
+    required = required || first.uid == getuid();
+    result = cwd_path(pid, records[i].path, sizeof(records[i].path));
+    if (result != 0) {
+      int error = errno;
+      if (exited(pid) || (!required && (error == EPERM || error == EACCES))) {
+        result = 0;
+        continue;
+      }
+      if (error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN) {
+        diagnostic("census", "process_census_changed", error, 1);
+        result = 2;
+      }
+      break;
+    }
+    observed = observe(pid, &second);
+    if (observed == 0) continue;
+    if (observed != 1 || !same_lifetime(&first, &second)) {
+      diagnostic("census", "process_census_changed", 0, 1);
+      result = 2;
+      break;
+    }
+    records[i].process = second;
+  }
+  if (result == 0 && !list_pids(PROC_UID_ONLY, after, &after_count))
+    result = refuse_at("census", "process_census_unavailable", errno);
+  for (int i = 0; result == 0 && i < after_count; ++i) {
+    pid_t pid = after[i];
+    if (pid <= 1) continue;
+    const pid_t *found = bsearch(&pid, all, (size_t)count, sizeof(pid), compare_pid);
+    if (found != NULL && records[found - all].process.pid == pid &&
+        records[found - all].process.uid == getuid()) continue;
+    if (exited(pid)) continue;
+    diagnostic("census", "process_census_changed", 0, 1);
+    result = 2;
+  }
+  if (result == 0 && !within_budget()) result = refuse();
+  if (result == 0) {
+    fprintf(proof_output, "{\"schemaVersion\":1,\"uid\":%u,\"cwds\":[", getuid());
+    int emitted = 0;
+    for (int i = 0; i < count; ++i) {
+      if (records[i].process.pid == 0) continue;
+      if (emitted++) fputc(',', proof_output);
+      print_string(proof_output, records[i].path);
+    }
+    fputs("]}\n", proof_output);
+  }
+  erase_buffer(records, (size_t)count * sizeof(*records));
+  free(records);
+  return result;
+}
+
 /* The hex framing carries no authority; decoded values are compared only to
  * current kernel observations. Neither value is emitted or logged. */
 static int hex_path(const char *hex, char *out, size_t capacity) {
@@ -846,25 +949,6 @@ static int prove_codex_server(int argc, char **argv) {
   return 0;
 }
 
-/* Reconcile the kernel lists by inspecting their bounded union. A process born
- * between list calls is another candidate to inspect, not a reason to discard
- * every completed observation. No live same-user candidate is omitted. */
-static int merge_pids(pid_t *all, int *count, const pid_t *extra, int extra_count) {
-  pid_t merged[MAX_PIDS];
-  int i = 0, j = 0, size = 0;
-  while (i < *count || j < extra_count) {
-    pid_t next;
-    if (j >= extra_count || (i < *count && all[i] < extra[j])) next = all[i++];
-    else if (i >= *count || extra[j] < all[i]) next = extra[j++];
-    else { next = all[i++]; ++j; }
-    if (next <= 1 || (size > 0 && merged[size - 1] == next)) continue;
-    if (size >= MAX_PIDS - 1) { errno = EOVERFLOW; return 0; }
-    merged[size++] = next;
-  }
-  memcpy(all, merged, (size_t)size * sizeof(*all));
-  *count = size;
-  return 1;
-}
 
 /* One PID-local transaction. Only a stable before/after lifetime contributes
  * an owner. Unrelated churn retries this PID. Once a target socket was seen,
@@ -1121,6 +1205,7 @@ static int execute_proof(int argc, char **argv) {
     if (argc > 1 && (strcmp(argv[1], "--processes") == 0 || strcmp(argv[1], "--claude-processes") == 0)) result = prove_processes(argc, argv);
     else if (argc > 1 && strcmp(argv[1], "--birth") == 0) result = prove_birth(argc, argv);
     else if (argc > 1 && strcmp(argv[1], "--cwd") == 0) result = prove_cwd(argc, argv);
+    else if (argc > 1 && strcmp(argv[1], "--cwds") == 0) result = prove_cwds(argc);
     else if (argc > 1 && strcmp(argv[1], "--codex-server") == 0) result = prove_codex_server(argc, argv);
     else result = prove(argc, argv);
     if (result == 0) return 0;
