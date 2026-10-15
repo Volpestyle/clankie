@@ -19,6 +19,14 @@ import {
 } from "./linear-import.ts";
 import type { LinearMirrorRemoval, LinearMirrorView } from "./linear-mirror.ts";
 import {
+  summarizeOutcomes,
+  type OutcomeHistory,
+  type OutcomeIssue,
+  type OutcomeStateSpan,
+  type OutcomeWindow,
+  type TrackerOutcomes,
+} from "./outcomes.ts";
+import {
   applyTrackerDescriptionPatch,
   DELIVERY_STAGES,
   TRACKER_LEAD,
@@ -350,6 +358,12 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
    * a host operation, not a tool, so no caller can type a release's items.
    */
   syncReleases(history: ReleaseHistory, options?: TrackerToolCallOptions): Promise<ReleaseSyncResult>;
+  /** Host-only read of one project's outcome facts for Auto rounds (ADR 0270). */
+  readOutcomes(input: {
+    readonly projectId: string;
+    readonly window: OutcomeWindow;
+    readonly history?: boolean;
+  }): Promise<TrackerOutcomes>;
 }
 
 export interface ReleaseSyncResult {
@@ -705,7 +719,16 @@ function appendEvent(
     Partial<
       Pick<
         TrackerItemEvent,
-        "body" | "from" | "to" | "commentId" | "bundleId" | "runId" | "requestId" | "gate" | "purpose"
+        | "body"
+        | "from"
+        | "to"
+        | "status"
+        | "commentId"
+        | "bundleId"
+        | "runId"
+        | "requestId"
+        | "gate"
+        | "purpose"
       >
     >,
 ): void {
@@ -766,6 +789,7 @@ function moveStage(
     type: target === "owner-verified" ? "verified" : back ? "reopened" : "stage",
     from: current,
     to: target,
+    status: store.issueStatuses.find((status) => status.id === issue.statusId)!.name,
     ...(body === undefined ? {} : { body }),
   });
 }
@@ -846,7 +870,11 @@ async function recordIssueChanges(
           "create the item and attach a checked bundle before setting a status past landed",
         );
       issue.stage = "reported";
-      appendEvent(store, context, now, issue, { type: "created", to: stageOf(issue) });
+      appendEvent(store, context, now, issue, {
+        type: "created",
+        to: stageOf(issue),
+        status: store.issueStatuses.find((status) => status.id === issue.statusId)!.name,
+      });
     } else if (previous.statusId !== issue.statusId) {
       const from = before.issueStatuses.find((status) => status.id === previous.statusId)?.name;
       const to = store.issueStatuses.find((status) => status.id === issue.statusId)!.name;
@@ -2954,6 +2982,129 @@ function appendSync(
 const eventListeners = new Map<string, Set<TrackerEventListener>>();
 
 /** Durable local Linear-shaped tracker, also used as ancillary storage for repo backends. */
+/**
+ * An item's status spans, replayed from its event stream. State events name their
+ * status; created and stage-family events carry it since VUH-2282, and older ones
+ * fall back to the status their stage maps to.
+ */
+function statusSpans(store: Store, issue: Issue): OutcomeStateSpan[] {
+  const byName = (name: string) => store.issueStatuses.find((status) => status.name === name);
+  const changes: { at: string; status: Status | undefined }[] = [];
+  let initial: Status | undefined;
+  let leadClosed = false;
+  // Imported history is appended in provider order; replay in time order (seq breaks ties).
+  const events = (store.events ?? [])
+    .filter((event) => event.issueId === issue.id)
+    .sort((a, b) => a.at.localeCompare(b.at) || a.seq - b.seq);
+  for (const event of events) {
+    if (event.type === "created") {
+      if (event.status !== undefined) initial = byName(event.status);
+    } else if (event.type === "state" && event.to !== undefined) {
+      if (changes.length === 0 && initial === undefined && event.from) initial = byName(event.from);
+      if (event.bundleId !== undefined) leadClosed = true;
+      changes.push({ at: event.at, status: byName(event.to) });
+    } else if (event.type === "stage" || event.type === "verified" || event.type === "reopened") {
+      // A forward stage after lead closure leaves the completed status in place.
+      if (event.status !== undefined) changes.push({ at: event.at, status: byName(event.status) });
+      else if (event.type !== "stage" || !leadClosed)
+        changes.push({ at: event.at, status: statusForStage(store, event.to as DeliveryStage) });
+      if (event.type !== "stage") leadClosed = false;
+    }
+  }
+  const current = store.issueStatuses.find((status) => status.id === issue.statusId)!;
+  initial ??= changes.length === 0 ? current : statusForStage(store, "reported");
+  const spans: { state: { name: string; type: string }; startedAt: string; endedAt: string | null }[] = [];
+  for (const change of [{ at: issue.createdAt, status: initial }, ...changes]) {
+    const status = change.status ?? current;
+    // A change at the same instant (an import's first span) replaces what it follows.
+    while (spans.length > 0 && spans.at(-1)!.startedAt >= change.at) spans.pop();
+    const last = spans.at(-1);
+    if (last?.state.name === status.name) {
+      last.endedAt = null;
+      continue;
+    }
+    if (last) last.endedAt = change.at;
+    spans.push({ state: { name: status.name, type: status.type }, startedAt: change.at, endedAt: null });
+  }
+  return spans;
+}
+
+function builtInOutcomes(
+  store: Store,
+  input: { projectId: string; window: OutcomeWindow; history?: boolean },
+  readAt: string,
+): TrackerOutcomes {
+  findProject(store, input.projectId);
+  const members = store.issues.filter((issue) => issue.projectId === input.projectId);
+  const spans = new Map(members.map((issue) => [issue.id, statusSpans(store, issue)]));
+  const issues = members.map((issue): OutcomeIssue => {
+    const status = store.issueStatuses.find((entry) => entry.id === issue.statusId)!;
+    const last = spans.get(issue.id)!.at(-1);
+    // An imported parent outside the project keeps its provider identifier in the mirror record.
+    const parent =
+      issue.parentId === null
+        ? undefined
+        : (store.issues.find((entry) => entry.id === issue.parentId) ??
+          (store.linearMirror?.records.issues ?? [])
+            .map((record) => linearRow(record.parent))
+            .find((record) => record.id === issue.parentId));
+    return {
+      id: issue.id,
+      identifier: issue.identifier,
+      title: issue.title,
+      state: { name: status.name, type: status.type },
+      completedAt: status.type === "completed" && last?.state.type === "completed" ? last.startedAt : null,
+      parent:
+        issue.parentId === null
+          ? null
+          : { id: issue.parentId, identifier: String(parent?.identifier ?? issue.parentId) },
+      hasChildren: store.issues.some((entry) => entry.parentId === issue.id),
+      milestoneId: issue.milestoneId ?? null,
+    };
+  });
+  const history: OutcomeHistory[] | undefined = input.history
+    ? members
+        .filter(
+          (issue) =>
+            issue.updatedAt >= input.window.since ||
+            store.issueStatuses.find((status) => status.id === issue.statusId)?.type === "started",
+        )
+        .map((issue) => ({ id: issue.id, identifier: issue.identifier, spans: spans.get(issue.id)! }))
+    : undefined;
+  return summarizeOutcomes({
+    tracker: "built-in",
+    projectId: input.projectId,
+    window: input.window,
+    readAt,
+    issues,
+    milestones: (store.milestones ?? [])
+      .filter((entry) => linearId(entry.project) === input.projectId || entry.projectId === input.projectId)
+      .map((entry) => ({ id: entry.id, name: String(entry.name) })),
+    milestoneIssues: issues,
+    statusUpdates: store.statusUpdates
+      .filter((update) => update.projectId === input.projectId)
+      .map((update) => ({
+        id: update.id,
+        createdAt: update.createdAt,
+        url: localUrl("status-update", update.id),
+        health: update.health,
+      })),
+    ...(history === undefined ? {} : { history }),
+    caveats: [
+      "Project membership is current: an issue that moved projects counts where it sits now.",
+      ...(members.some((issue) =>
+        (store.events ?? []).some(
+          (event) => event.issueId === issue.id && event.type === "created" && event.status === undefined,
+        ),
+      )
+        ? [
+            "Items created before VUH-2282 start in the status their first recorded change left, or the reported stage's status.",
+          ]
+        : []),
+    ],
+  });
+}
+
 export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBackend {
   const directory = resolve(options.directory);
   const path = join(directory, "tracker.json");
@@ -3701,6 +3852,10 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         publish(store.events?.slice(firstEvent - 1) ?? []);
         return report;
       });
+    },
+    async readOutcomes(input) {
+      const { store, clock } = await load({ mutable: false });
+      return builtInOutcomes(store, input, clock);
     },
     async storeId() {
       const { store } = await load({ mutable: false });

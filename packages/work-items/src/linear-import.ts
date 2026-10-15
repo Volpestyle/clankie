@@ -48,7 +48,10 @@ const STATUS_UPDATE = `id body health createdAt updatedAt archivedAt url user { 
 const RELATION =
   "id type createdAt updatedAt archivedAt issue { id identifier title } relatedIssue { id identifier title }";
 
-type LinearQuery = (query: string, variables: Record<string, unknown>) => Promise<Record<string, unknown>>;
+export type LinearQuery = (
+  query: string,
+  variables: Record<string, unknown>,
+) => Promise<Record<string, unknown>>;
 type LinearPage = (owner: string, id: string, field: string, fields: string) => Promise<LinearRecord[]>;
 
 function linearPager(q: LinearQuery): LinearPage {

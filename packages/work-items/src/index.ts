@@ -6,6 +6,7 @@ export * from "./tracker-tools.ts";
 export * from "./tracker-local.ts";
 export * from "./linear-import.ts";
 export * from "./linear-mirror.ts";
+export * from "./outcomes.ts";
 export { createFilesBackend } from "./backends/files.ts";
 export {
   createGithubBackend,

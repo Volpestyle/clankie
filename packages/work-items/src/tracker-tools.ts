@@ -115,6 +115,8 @@ export interface TrackerItemEvent {
   readonly body?: string;
   readonly from?: string;
   readonly to?: string;
+  /** The status name the item holds after a created or stage-family event (VUH-2282); absent before. */
+  readonly status?: string;
   readonly commentId?: string;
   readonly bundleId?: string;
   readonly runId?: string;

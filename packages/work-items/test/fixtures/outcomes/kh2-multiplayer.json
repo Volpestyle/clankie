@@ -1,0 +1,2652 @@
+{
+  "source": "Linear GraphQL responses captured live through the connected Clankie app (linear_graphql) on 2026-10-15 ~02:50Z for KH2 Multiplayer, each exactly the query collectLinearOutcomes sent (VUH-2282). Issue titles are blanked; everything else is verbatim.",
+  "calls": [
+    {
+      "query": "query($id:String!, $after:String) { project(id:$id) { issues(first:50, after:$after, includeArchived:true, filter:{ state: { type: { eq: \"started\" } } }) { nodes { id identifier title updatedAt completedAt state { name type } parent { id identifier } children(first:1) { nodes { id } } projectMilestone { id } stateHistory(first:25) { nodes { startedAt endedAt state { name type } } pageInfo { hasNextPage } } } pageInfo { hasNextPage endCursor } } } }",
+      "variables": { "id": "b701962e-89aa-4685-a574-ebda25706d64", "after": null },
+      "data": {
+        "project": {
+          "issues": {
+            "nodes": [
+              {
+                "id": "def6ec71-f65f-4521-aa36-daf48aa964b6",
+                "identifier": "VUH-2276",
+                "title": "",
+                "updatedAt": "2026-10-15T02:29:00.124Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:12:15.924Z",
+                      "endedAt": "2026-10-15T02:29:00.117Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:29:00.117Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "01a29d99-77b9-4ae5-872c-a296721042ca",
+                "identifier": "VUH-2272",
+                "title": "",
+                "updatedAt": "2026-10-15T02:33:36.604Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:05:26.342Z",
+                      "endedAt": "2026-10-15T02:14:31.141Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:14:31.141Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "0140298f-6e18-40a5-85a5-12f33ce1cb91",
+                "identifier": "VUH-2270",
+                "title": "",
+                "updatedAt": "2026-10-15T02:23:15.258Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:02:08.632Z",
+                      "endedAt": "2026-10-15T02:23:15.253Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:23:15.253Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "203c4291-28b6-4820-b06c-55b4b4104ff3",
+                "identifier": "VUH-2269",
+                "title": "",
+                "updatedAt": "2026-10-15T02:11:43.066Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:02:02.733Z",
+                      "endedAt": "2026-10-15T02:11:43.058Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:11:43.058Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "ecf3a535-549a-4d56-bdb3-ef0c1bac1672",
+                "identifier": "VUH-2268",
+                "title": "",
+                "updatedAt": "2026-10-15T02:38:27.381Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:01:36.379Z",
+                      "endedAt": "2026-10-15T02:17:33.877Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:17:33.877Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "84486867-f8b7-4040-b0e0-d63f5d0d2bb2",
+                "identifier": "VUH-2252",
+                "title": "",
+                "updatedAt": "2026-10-15T01:48:36.458Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T00:42:22.752Z",
+                      "endedAt": "2026-10-15T01:48:36.451Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:48:36.451Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a",
+                "identifier": "VUH-2250",
+                "title": "",
+                "updatedAt": "2026-10-15T02:38:26.920Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": null,
+                "children": { "nodes": [{ "id": "9c8ef67c-68c4-4c8f-922c-dec8f2b14f33" }] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T00:41:53.554Z",
+                      "endedAt": "2026-10-15T01:13:59.846Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:13:59.846Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              }
+            ],
+            "pageInfo": { "hasNextPage": false, "endCursor": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a" }
+          }
+        }
+      }
+    },
+    {
+      "query": "query($id:String!, $after:String) { project(id:$id) { issues(first:50, after:$after, includeArchived:true, filter:{ updatedAt: { gte: \"2026-10-06T05:00:00.000Z\" } }) { nodes { id identifier title updatedAt completedAt state { name type } parent { id identifier } children(first:1) { nodes { id } } projectMilestone { id } stateHistory(first:25) { nodes { startedAt endedAt state { name type } } pageInfo { hasNextPage } } } pageInfo { hasNextPage endCursor } } } }",
+      "variables": { "id": "b701962e-89aa-4685-a574-ebda25706d64", "after": null },
+      "data": {
+        "project": {
+          "issues": {
+            "nodes": [
+              {
+                "id": "9c8ef67c-68c4-4c8f-922c-dec8f2b14f33",
+                "identifier": "VUH-2289",
+                "title": "",
+                "updatedAt": "2026-10-15T02:49:12.072Z",
+                "completedAt": null,
+                "state": { "name": "Todo", "type": "unstarted" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:38:26.920Z",
+                      "endedAt": null,
+                      "state": { "name": "Todo", "type": "unstarted" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "def6ec71-f65f-4521-aa36-daf48aa964b6",
+                "identifier": "VUH-2276",
+                "title": "",
+                "updatedAt": "2026-10-15T02:29:00.124Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:12:15.924Z",
+                      "endedAt": "2026-10-15T02:29:00.117Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:29:00.117Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "636534e3-e449-407f-943d-458b02f6e4d0",
+                "identifier": "VUH-2275",
+                "title": "",
+                "updatedAt": "2026-10-15T02:10:17.618Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:10:17.618Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "01a29d99-77b9-4ae5-872c-a296721042ca",
+                "identifier": "VUH-2272",
+                "title": "",
+                "updatedAt": "2026-10-15T02:33:36.604Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:05:26.342Z",
+                      "endedAt": "2026-10-15T02:14:31.141Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:14:31.141Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "0140298f-6e18-40a5-85a5-12f33ce1cb91",
+                "identifier": "VUH-2270",
+                "title": "",
+                "updatedAt": "2026-10-15T02:23:15.258Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:02:08.632Z",
+                      "endedAt": "2026-10-15T02:23:15.253Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:23:15.253Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "203c4291-28b6-4820-b06c-55b4b4104ff3",
+                "identifier": "VUH-2269",
+                "title": "",
+                "updatedAt": "2026-10-15T02:11:43.066Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:02:02.733Z",
+                      "endedAt": "2026-10-15T02:11:43.058Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:11:43.058Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "ecf3a535-549a-4d56-bdb3-ef0c1bac1672",
+                "identifier": "VUH-2268",
+                "title": "",
+                "updatedAt": "2026-10-15T02:38:27.381Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T02:01:36.379Z",
+                      "endedAt": "2026-10-15T02:17:33.877Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:17:33.877Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "93a28726-daa9-47b9-abc9-7fedac399fdf",
+                "identifier": "VUH-2267",
+                "title": "",
+                "updatedAt": "2026-10-15T01:43:11.469Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T01:43:11.469Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "ee2b51c3-cf30-4ced-b660-62361050a098",
+                "identifier": "VUH-2266",
+                "title": "",
+                "updatedAt": "2026-10-15T02:02:03.066Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T01:43:07.804Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "781dfd26-ce61-469b-a365-7d01f6b6d7e9",
+                "identifier": "VUH-2265",
+                "title": "",
+                "updatedAt": "2026-10-15T01:43:03.760Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T01:43:03.760Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "2fd5fdf5-8f9d-4ec9-9743-dd4b517f10dd",
+                "identifier": "VUH-2264",
+                "title": "",
+                "updatedAt": "2026-10-15T01:42:59.152Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T01:42:59.152Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "0cfcdd19-3b82-4af9-aa8b-0931f6dad4d0",
+                "identifier": "VUH-2263",
+                "title": "",
+                "updatedAt": "2026-10-15T01:42:56.120Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T01:42:56.120Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "24d18a27-e3f1-40b7-ada0-f966b415dce6",
+                "identifier": "VUH-2262",
+                "title": "",
+                "updatedAt": "2026-10-15T01:42:52.666Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T01:42:52.666Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "5b35ef6b-ae7e-4322-bf2b-f49580d04437",
+                "identifier": "VUH-2261",
+                "title": "",
+                "updatedAt": "2026-10-15T01:42:49.412Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T01:42:49.412Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "fc0371cf-ec7a-4d9f-9d4b-86c55e4e94d6",
+                "identifier": "VUH-2260",
+                "title": "",
+                "updatedAt": "2026-10-15T01:42:44.754Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T01:42:44.754Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "2c9f6dd7-3168-4075-b48d-f06094ef503c",
+                "identifier": "VUH-2259",
+                "title": "",
+                "updatedAt": "2026-10-15T01:42:35.663Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T01:42:35.663Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "4d912818-0073-4c98-9f33-821b63718b86",
+                "identifier": "VUH-2254",
+                "title": "",
+                "updatedAt": "2026-10-15T01:47:38.836Z",
+                "completedAt": "2026-10-15T01:47:26.721Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T00:42:28.248Z",
+                      "endedAt": "2026-10-15T01:13:58.170Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:13:58.170Z",
+                      "endedAt": "2026-10-15T01:47:26.754Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:47:26.754Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "2e82c705-7d81-4e7c-91c6-ea47321f66ae",
+                "identifier": "VUH-2253",
+                "title": "",
+                "updatedAt": "2026-10-15T02:09:59.837Z",
+                "completedAt": "2026-10-15T02:09:59.816Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T00:42:25.676Z",
+                      "endedAt": "2026-10-15T01:13:55.869Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:13:55.869Z",
+                      "endedAt": "2026-10-15T02:09:59.831Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:09:59.831Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "84486867-f8b7-4040-b0e0-d63f5d0d2bb2",
+                "identifier": "VUH-2252",
+                "title": "",
+                "updatedAt": "2026-10-15T01:48:36.458Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T00:42:22.752Z",
+                      "endedAt": "2026-10-15T01:48:36.451Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:48:36.451Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "bee5d7eb-1320-4b73-8d95-b8027602ae8c",
+                "identifier": "VUH-2251",
+                "title": "",
+                "updatedAt": "2026-10-15T02:12:10.814Z",
+                "completedAt": "2026-10-15T02:12:10.789Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": { "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a", "identifier": "VUH-2250" },
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T00:42:20.047Z",
+                      "endedAt": "2026-10-15T01:13:54.251Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:13:54.251Z",
+                      "endedAt": "2026-10-15T02:12:10.805Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T02:12:10.805Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "4aa7113e-7bd3-43d0-8c68-4075b13efe1a",
+                "identifier": "VUH-2250",
+                "title": "",
+                "updatedAt": "2026-10-15T02:38:26.920Z",
+                "completedAt": null,
+                "state": { "name": "In Progress", "type": "started" },
+                "parent": null,
+                "children": { "nodes": [{ "id": "9c8ef67c-68c4-4c8f-922c-dec8f2b14f33" }] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-15T00:41:53.554Z",
+                      "endedAt": "2026-10-15T01:13:59.846Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:13:59.846Z",
+                      "endedAt": null,
+                      "state": { "name": "In Progress", "type": "started" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "ee50d936-fa66-42c9-82de-96f2b15195ba",
+                "identifier": "VUH-2239",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:21.197Z",
+                "completedAt": "2026-10-13T18:02:47.294Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-13T17:21:03.848Z",
+                      "endedAt": "2026-10-13T18:02:47.349Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T18:02:47.349Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "b3730876-c1bd-4505-8869-0e70adee1cbe",
+                "identifier": "VUH-2234",
+                "title": "",
+                "updatedAt": "2026-10-13T15:24:23.204Z",
+                "completedAt": "2026-10-13T15:24:23.143Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-13T14:01:31.089Z",
+                      "endedAt": "2026-10-13T15:24:23.192Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T15:24:23.192Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "15790b19-5296-4ff6-a26e-0e8fe9017d21",
+                "identifier": "VUH-2212",
+                "title": "",
+                "updatedAt": "2026-10-13T17:21:04.274Z",
+                "completedAt": "2026-10-13T07:13:02.863Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-13T06:33:55.195Z",
+                      "endedAt": "2026-10-13T07:13:02.878Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T07:13:02.878Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "39c20c2b-a617-4e63-a59d-a2c6cb725c8e",
+                "identifier": "VUH-2197",
+                "title": "",
+                "updatedAt": "2026-10-13T06:54:01.899Z",
+                "completedAt": "2026-10-13T06:54:01.857Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-13T01:49:11.943Z",
+                      "endedAt": "2026-10-13T06:54:01.884Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T06:54:01.884Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "2e520307-7059-4a06-9952-e05c36bb2771",
+                "identifier": "VUH-2194",
+                "title": "",
+                "updatedAt": "2026-10-13T14:01:31.490Z",
+                "completedAt": "2026-10-13T06:40:00.280Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-13T01:03:05.745Z",
+                      "endedAt": "2026-10-13T04:15:13.627Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T04:15:13.627Z",
+                      "endedAt": "2026-10-13T06:40:00.291Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T06:40:00.291Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "19220a1e-a061-406a-8088-af69ddf377d7",
+                "identifier": "VUH-2193",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:24.722Z",
+                "completedAt": "2026-10-13T01:29:46.144Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-13T00:58:08.659Z",
+                      "endedAt": "2026-10-13T01:29:46.154Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T01:29:46.154Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "772f4337-41cd-48e0-84ec-f83a7bf9fa42",
+                "identifier": "VUH-1827",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:07.107Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-08T03:56:20.317Z",
+                      "endedAt": "2026-10-08T03:56:30.816Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-08T03:56:30.816Z",
+                      "endedAt": "2026-10-10T02:43:41.080Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:43:41.080Z",
+                      "endedAt": "2026-10-15T01:46:07.098Z",
+                      "state": { "name": "Verifying", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:46:07.098Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "b949a622-3ba2-46f1-90fe-fabee3c8d0af",
+                "identifier": "VUH-1819",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:51.057Z",
+                "completedAt": "2026-10-15T01:44:51.038Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-08T01:06:52.836Z",
+                      "endedAt": "2026-10-08T03:56:42.458Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-08T03:56:42.458Z",
+                      "endedAt": "2026-10-10T02:46:22.142Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:46:22.142Z",
+                      "endedAt": "2026-10-15T01:44:51.051Z",
+                      "state": { "name": "Verifying", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:51.051Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "7e4c16ae-050e-4b43-8206-22a809506956",
+                "identifier": "VUH-1808",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:30.808Z",
+                "completedAt": "2026-10-15T01:44:30.764Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T17:23:29.745Z",
+                      "endedAt": "2026-10-10T01:38:21.967Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T01:38:21.967Z",
+                      "endedAt": "2026-10-11T10:36:59.272Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-11T10:36:59.272Z",
+                      "endedAt": "2026-10-15T01:44:30.796Z",
+                      "state": { "name": "Verifying", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:30.796Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "88389bb2-0cde-4bee-8121-0bd8a029a7da",
+                "identifier": "VUH-1806",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:24.850Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T16:33:01.986Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "cf8b2b48-073b-41bc-b329-dd3976a25cd2",
+                "identifier": "VUH-1789",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:21.207Z",
+                "completedAt": null,
+                "state": { "name": "Duplicate", "type": "duplicate" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T13:38:01.030Z",
+                      "endedAt": "2026-10-13T08:38:00.116Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T08:38:00.116Z",
+                      "endedAt": "2026-10-15T01:46:19.551Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:46:19.551Z",
+                      "endedAt": null,
+                      "state": { "name": "Duplicate", "type": "duplicate" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "939d1c6b-ee01-45c2-9756-d084532471af",
+                "identifier": "VUH-1788",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:25.297Z",
+                "completedAt": "2026-10-13T01:49:31.311Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T10:19:48.067Z",
+                      "endedAt": "2026-10-13T01:49:31.323Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T01:49:31.323Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "f042226d-9156-4db3-8b03-61bc467bc99e",
+                "identifier": "VUH-1787",
+                "title": "",
+                "updatedAt": "2026-10-13T10:40:57.318Z",
+                "completedAt": "2026-10-13T10:40:57.290Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T09:48:36.227Z",
+                      "endedAt": "2026-10-13T10:40:57.309Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T10:40:57.309Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "08723aa1-6f68-4640-b600-659639d6ac6c",
+                "identifier": "VUH-1786",
+                "title": "",
+                "updatedAt": "2026-10-07T12:04:27.995Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T08:32:51.101Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "fc5daa9c-31de-4e24-9955-281f308d9d4f",
+                "identifier": "VUH-1776",
+                "title": "",
+                "updatedAt": "2026-10-07T02:20:39.762Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T02:20:17.562Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "6b44f837-b16c-4fe7-a589-bc2fd9b188f9",
+                "identifier": "VUH-1775",
+                "title": "",
+                "updatedAt": "2026-10-07T02:20:32.084Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T02:20:06.664Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "d2fb19b5-aacf-430e-abee-bfda592c302f",
+                "identifier": "VUH-1774",
+                "title": "",
+                "updatedAt": "2026-10-07T02:20:04.479Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T02:20:04.479Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "49965357-459e-4992-8084-187934c41379",
+                "identifier": "VUH-1773",
+                "title": "",
+                "updatedAt": "2026-10-07T02:20:32.067Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T02:20:00.364Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "30e89dbe-13e8-44c9-bfd1-3ec8ea7b74f5",
+                "identifier": "VUH-1772",
+                "title": "",
+                "updatedAt": "2026-10-07T01:50:49.195Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T01:50:49.195Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "cf96ef53-946d-4791-b5d3-cf025b9cf61b",
+                "identifier": "VUH-1771",
+                "title": "",
+                "updatedAt": "2026-10-07T01:50:46.049Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T01:50:46.049Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "c6f2c2f5-51aa-43c1-9813-952c0b4a5d58",
+                "identifier": "VUH-1770",
+                "title": "",
+                "updatedAt": "2026-10-07T01:50:43.293Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T01:50:43.293Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "b3e4fcc7-d9c1-4976-b2a8-3df6ea833f9c",
+                "identifier": "VUH-1769",
+                "title": "",
+                "updatedAt": "2026-10-07T01:50:40.679Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T01:50:40.679Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "243e6b70-b4b6-4528-a9f8-599a7a7e5c08",
+                "identifier": "VUH-1768",
+                "title": "",
+                "updatedAt": "2026-10-07T01:50:37.744Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-07T01:50:37.744Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "17f89230-2767-4085-b556-eb52395a91b3",
+                "identifier": "VUH-1759",
+                "title": "",
+                "updatedAt": "2026-10-15T01:45:56.871Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-06T21:40:41.762Z",
+                      "endedAt": "2026-10-10T02:49:25.542Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:49:25.542Z",
+                      "endedAt": "2026-10-15T01:45:56.861Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:45:56.861Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "ee5dd265-d667-43bf-a68b-879ce6c31240",
+                "identifier": "VUH-1758",
+                "title": "",
+                "updatedAt": "2026-10-06T21:40:38.098Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-06T21:40:38.098Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "e7874a8a-6da8-486f-bd96-c0706069b141",
+                "identifier": "VUH-1700",
+                "title": "",
+                "updatedAt": "2026-10-06T09:42:09.478Z",
+                "completedAt": "2026-10-06T09:42:09.443Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": null,
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-05T23:27:59.982Z",
+                      "endedAt": "2026-10-06T09:42:09.478Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-06T09:42:09.478Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "e991975d-4846-48da-8984-a06502ca0a8b",
+                "identifier": "VUH-1519",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:26.614Z",
+                "completedAt": "2026-10-15T01:44:26.595Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "dacf3cf4-1911-4842-b937-4002b95fa607" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T17:33:39.359Z",
+                      "endedAt": "2026-10-07T01:49:43.705Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-07T01:49:43.705Z",
+                      "endedAt": "2026-10-10T02:48:32.178Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:48:32.178Z",
+                      "endedAt": "2026-10-15T01:44:26.606Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:26.606Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "ab305974-db99-4e43-85db-46b61d73141f",
+                "identifier": "VUH-1515",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:25.314Z",
+                "completedAt": null,
+                "state": { "name": "Duplicate", "type": "duplicate" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "6a5ef5b5-7f57-4254-bad2-613ebb54af5b" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T03:03:46.798Z",
+                      "endedAt": "2026-10-12T18:11:04.513Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-12T18:11:04.513Z",
+                      "endedAt": "2026-10-15T01:46:23.528Z",
+                      "state": { "name": "Verifying", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:46:23.528Z",
+                      "endedAt": null,
+                      "state": { "name": "Duplicate", "type": "duplicate" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "bb39887f-9c62-4a5b-b88d-e85f8bea5ede",
+                "identifier": "VUH-1514",
+                "title": "",
+                "updatedAt": "2026-10-15T01:45:53.025Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "3efc985e-24a3-4324-a430-7c09247a1f62" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:04:38.205Z",
+                      "endedAt": "2026-10-07T01:48:25.847Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-07T01:48:25.847Z",
+                      "endedAt": "2026-10-10T02:48:41.325Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:48:41.325Z",
+                      "endedAt": "2026-10-15T01:45:53.016Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:45:53.016Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              }
+            ],
+            "pageInfo": { "hasNextPage": true, "endCursor": "bb39887f-9c62-4a5b-b88d-e85f8bea5ede" }
+          }
+        }
+      }
+    },
+    {
+      "query": "query($id:String!, $after:String) { project(id:$id) { issues(first:50, after:$after, includeArchived:true, filter:{ updatedAt: { gte: \"2026-10-06T05:00:00.000Z\" } }) { nodes { id identifier title updatedAt completedAt state { name type } parent { id identifier } children(first:1) { nodes { id } } projectMilestone { id } stateHistory(first:25) { nodes { startedAt endedAt state { name type } } pageInfo { hasNextPage } } } pageInfo { hasNextPage endCursor } } } }",
+      "variables": {
+        "id": "b701962e-89aa-4685-a574-ebda25706d64",
+        "after": "bb39887f-9c62-4a5b-b88d-e85f8bea5ede"
+      },
+      "data": {
+        "project": {
+          "issues": {
+            "nodes": [
+              {
+                "id": "d3ea78eb-72d0-4859-b7c7-700c3e0a582d",
+                "identifier": "VUH-1513",
+                "title": "",
+                "updatedAt": "2026-10-11T23:40:10.013Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "3efc985e-24a3-4324-a430-7c09247a1f62" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:04:35.160Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "68910748-ba77-4df8-b153-2996c5aaab75",
+                "identifier": "VUH-1510",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:20.278Z",
+                "completedAt": "2026-10-15T01:44:20.248Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "dacf3cf4-1911-4842-b937-4002b95fa607" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:04:12.299Z",
+                      "endedAt": "2026-10-06T21:40:44.636Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-06T21:40:44.636Z",
+                      "endedAt": "2026-10-10T02:44:11.731Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:44:11.731Z",
+                      "endedAt": "2026-10-15T01:44:20.270Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:20.270Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "83ae1402-13c6-47a2-a341-bfd3050b819e",
+                "identifier": "VUH-1509",
+                "title": "",
+                "updatedAt": "2026-10-08T03:56:20.547Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "dacf3cf4-1911-4842-b937-4002b95fa607" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:04:10.708Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "245f0087-ba93-44d4-a16e-f7df3d5153e7",
+                "identifier": "VUH-1508",
+                "title": "",
+                "updatedAt": "2026-10-15T02:02:09.123Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "dacf3cf4-1911-4842-b937-4002b95fa607" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:04:09.356Z",
+                      "endedAt": "2026-10-03T04:44:37.466Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-03T04:44:37.466Z",
+                      "endedAt": "2026-10-10T02:48:01.129Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:48:01.129Z",
+                      "endedAt": "2026-10-15T01:45:39.030Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:45:39.030Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "908960c3-9b47-43d2-96d8-10b5e57276d8",
+                "identifier": "VUH-1507",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:15.583Z",
+                "completedAt": "2026-10-15T01:44:15.558Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "dacf3cf4-1911-4842-b937-4002b95fa607" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:04:07.990Z",
+                      "endedAt": "2026-10-05T19:16:35.006Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-05T19:16:35.006Z",
+                      "endedAt": "2026-10-10T02:47:34.583Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:47:34.583Z",
+                      "endedAt": "2026-10-15T01:44:15.576Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:15.576Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "e31d106e-e625-460d-bc83-4c7395d83c6f",
+                "identifier": "VUH-1506",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:24.347Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "6a5ef5b5-7f57-4254-bad2-613ebb54af5b" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:03:53.060Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "fe00318c-2327-4e15-88d2-ab9725fb89cb",
+                "identifier": "VUH-1505",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:24.258Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "6a5ef5b5-7f57-4254-bad2-613ebb54af5b" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:03:51.731Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "da445a8e-7bef-4341-a89c-d20b06c1728c",
+                "identifier": "VUH-1504",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:47.390Z",
+                "completedAt": "2026-10-15T01:44:47.372Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "6a5ef5b5-7f57-4254-bad2-613ebb54af5b" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:03:43.297Z",
+                      "endedAt": "2026-10-07T01:49:38.108Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-07T01:49:38.108Z",
+                      "endedAt": "2026-10-10T02:46:31.408Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:46:31.408Z",
+                      "endedAt": "2026-10-15T01:44:47.385Z",
+                      "state": { "name": "Verifying", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:47.385Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "2d2dcfcb-8b76-4cdc-9291-c3e401054e39",
+                "identifier": "VUH-1503",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:03.511Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "6a5ef5b5-7f57-4254-bad2-613ebb54af5b" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:03:38.489Z",
+                      "endedAt": "2026-10-03T04:44:31.948Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-03T04:44:31.948Z",
+                      "endedAt": "2026-10-15T01:46:03.503Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:46:03.503Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "5a40510b-0332-4ce5-9169-4c9223d8f0b7",
+                "identifier": "VUH-1502",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:24.603Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "6a5ef5b5-7f57-4254-bad2-613ebb54af5b" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:03:27.660Z",
+                      "endedAt": "2026-10-03T04:44:34.520Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-03T04:44:34.520Z",
+                      "endedAt": "2026-10-10T02:47:25.279Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:47:25.279Z",
+                      "endedAt": "2026-10-15T01:45:59.925Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:45:59.925Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "0b5616df-921a-4e32-8348-70de29c54c12",
+                "identifier": "VUH-1501",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:09.440Z",
+                "completedAt": "2026-10-15T01:44:09.421Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "6a5ef5b5-7f57-4254-bad2-613ebb54af5b" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:03:21.669Z",
+                      "endedAt": "2026-10-02T09:54:18.392Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-02T09:54:18.392Z",
+                      "endedAt": "2026-10-10T02:48:22.238Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:48:22.238Z",
+                      "endedAt": "2026-10-15T01:44:09.433Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:09.433Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "01db57d3-d60d-4453-9961-3a6af4373565",
+                "identifier": "VUH-1500",
+                "title": "",
+                "updatedAt": "2026-10-15T01:46:24.448Z",
+                "completedAt": "2026-10-10T02:47:02.829Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "6a5ef5b5-7f57-4254-bad2-613ebb54af5b" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:03:20.124Z",
+                      "endedAt": "2026-10-07T01:48:57.149Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-07T01:48:57.149Z",
+                      "endedAt": "2026-10-10T02:47:02.843Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:47:02.843Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "bcf77c36-28fc-4984-bbce-219f08489d0e",
+                "identifier": "VUH-1498",
+                "title": "",
+                "updatedAt": "2026-10-13T11:48:43.948Z",
+                "completedAt": "2026-10-13T11:48:43.919Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "f8bef0a3-1897-432b-b94e-28ee08032db2" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:03:16.549Z",
+                      "endedAt": "2026-10-05T19:16:21.197Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-05T19:16:21.197Z",
+                      "endedAt": "2026-10-10T02:48:12.177Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:48:12.177Z",
+                      "endedAt": "2026-10-13T11:48:43.939Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-13T11:48:43.939Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "0a4072b4-7c98-4ac4-9fad-b8bae14ca3f3",
+                "identifier": "VUH-1497",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:04.865Z",
+                "completedAt": "2026-10-15T01:44:04.835Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "f8bef0a3-1897-432b-b94e-28ee08032db2" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:03:01.488Z",
+                      "endedAt": "2026-10-05T19:16:08.789Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-05T19:16:08.789Z",
+                      "endedAt": "2026-10-10T02:47:15.977Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:47:15.977Z",
+                      "endedAt": "2026-10-15T01:44:04.852Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:04.852Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "a90a8aaf-0fa3-4cae-9082-cf8a4fdfe3a9",
+                "identifier": "VUH-1496",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:38.462Z",
+                "completedAt": "2026-10-15T01:44:38.366Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "f8bef0a3-1897-432b-b94e-28ee08032db2" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:02:59.263Z",
+                      "endedAt": "2026-10-02T20:13:39.635Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-02T20:13:39.635Z",
+                      "endedAt": "2026-10-10T02:46:09.684Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:46:09.684Z",
+                      "endedAt": "2026-10-15T01:44:38.451Z",
+                      "state": { "name": "Verifying", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:38.451Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "d74bc2f7-12fc-4fdf-af2b-057a0cdaedf8",
+                "identifier": "VUH-1495",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:12.234Z",
+                "completedAt": "2026-10-15T01:44:12.206Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "f8bef0a3-1897-432b-b94e-28ee08032db2" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:02:50.611Z",
+                      "endedAt": "2026-10-03T23:15:21.705Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-03T23:15:21.705Z",
+                      "endedAt": "2026-10-10T02:47:44.678Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:47:44.678Z",
+                      "endedAt": "2026-10-15T01:44:12.222Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:12.222Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "efc83b9f-b575-4a2e-ad3e-4c7420280b09",
+                "identifier": "VUH-1494",
+                "title": "",
+                "updatedAt": "2026-10-07T01:50:07.229Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "c092e30e-4714-4d24-b1d1-d75a0ec924d9" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:02:48.481Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "3809aaa7-1595-4df9-81fe-73edd80906dc",
+                "identifier": "VUH-1493",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:35.163Z",
+                "completedAt": "2026-10-15T01:44:35.139Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "c092e30e-4714-4d24-b1d1-d75a0ec924d9" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:02:37.004Z",
+                      "endedAt": "2026-10-05T02:48:10.711Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-05T02:48:10.711Z",
+                      "endedAt": "2026-10-10T02:46:00.972Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:46:00.972Z",
+                      "endedAt": "2026-10-15T01:44:35.155Z",
+                      "state": { "name": "Verifying", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:35.155Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "2ced35aa-eeab-459f-9d50-0737fff0124f",
+                "identifier": "VUH-1492",
+                "title": "",
+                "updatedAt": "2026-10-08T03:57:01.271Z",
+                "completedAt": "2026-10-02T14:50:06.969Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "c092e30e-4714-4d24-b1d1-d75a0ec924d9" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:02:31.077Z",
+                      "endedAt": "2026-10-02T14:50:06.985Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-02T14:50:06.985Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "7c7a4d35-b252-4c19-a032-3e7c7d79d763",
+                "identifier": "VUH-1490",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:43.914Z",
+                "completedAt": "2026-10-15T01:44:43.894Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "c092e30e-4714-4d24-b1d1-d75a0ec924d9" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:02:17.869Z",
+                      "endedAt": "2026-10-02T06:08:43.647Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-02T06:08:43.647Z",
+                      "endedAt": "2026-10-10T02:46:44.206Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:46:44.206Z",
+                      "endedAt": "2026-10-15T01:44:43.907Z",
+                      "state": { "name": "Verifying", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:43.907Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "3186c885-0249-4fa5-8964-6db92ff45e99",
+                "identifier": "VUH-1489",
+                "title": "",
+                "updatedAt": "2026-10-10T02:51:58.083Z",
+                "completedAt": "2026-10-10T02:46:53.470Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "c092e30e-4714-4d24-b1d1-d75a0ec924d9" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:02:16.505Z",
+                      "endedAt": "2026-10-02T09:05:00.268Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-02T09:05:00.268Z",
+                      "endedAt": "2026-10-10T02:46:53.480Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:46:53.480Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "1bbef066-6258-469a-8d0d-7f20b94048ae",
+                "identifier": "VUH-1487",
+                "title": "",
+                "updatedAt": "2026-10-15T01:45:47.082Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "345ffa61-951f-409b-b67b-ed8aec8658f0" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:01:00.089Z",
+                      "endedAt": "2026-10-04T18:44:48.327Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-04T18:44:48.327Z",
+                      "endedAt": "2026-10-10T02:48:51.289Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:48:51.289Z",
+                      "endedAt": "2026-10-15T01:45:47.078Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:45:47.078Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "b6246811-1487-4068-995a-03c41d3dde71",
+                "identifier": "VUH-1484",
+                "title": "",
+                "updatedAt": "2026-10-15T01:44:23.516Z",
+                "completedAt": "2026-10-15T01:44:23.482Z",
+                "state": { "name": "Done", "type": "completed" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "345ffa61-951f-409b-b67b-ed8aec8658f0" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:00:43.553Z",
+                      "endedAt": "2026-10-02T04:37:11.805Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-02T04:37:11.805Z",
+                      "endedAt": "2026-10-10T02:49:01.886Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:49:01.886Z",
+                      "endedAt": "2026-10-15T01:44:23.495Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:44:23.495Z",
+                      "endedAt": null,
+                      "state": { "name": "Done", "type": "completed" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "3dfa960c-a62c-41cf-8ae4-00c81131feee",
+                "identifier": "VUH-1482",
+                "title": "",
+                "updatedAt": "2026-10-15T01:45:43.183Z",
+                "completedAt": null,
+                "state": { "name": "Backlog", "type": "backlog" },
+                "parent": null,
+                "children": { "nodes": [] },
+                "projectMilestone": { "id": "345ffa61-951f-409b-b67b-ed8aec8658f0" },
+                "stateHistory": {
+                  "nodes": [
+                    {
+                      "startedAt": "2026-10-02T00:00:13.904Z",
+                      "endedAt": "2026-10-05T03:52:05.701Z",
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    },
+                    {
+                      "startedAt": "2026-10-05T03:52:05.701Z",
+                      "endedAt": "2026-10-10T02:49:13.903Z",
+                      "state": { "name": "In Progress", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-10T02:49:13.903Z",
+                      "endedAt": "2026-10-15T01:45:43.139Z",
+                      "state": { "name": "Paused", "type": "started" }
+                    },
+                    {
+                      "startedAt": "2026-10-15T01:45:43.139Z",
+                      "endedAt": null,
+                      "state": { "name": "Backlog", "type": "backlog" }
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              }
+            ],
+            "pageInfo": { "hasNextPage": false, "endCursor": "3dfa960c-a62c-41cf-8ae4-00c81131feee" }
+          }
+        }
+      }
+    },
+    {
+      "query": "query($id:String!, $after:String) { project(id:$id) { projectMilestones(first:25, after:$after) { nodes { id name issues(first:50) { nodes { id state { name type } completedAt } pageInfo { hasNextPage } } } pageInfo { hasNextPage endCursor } } } }",
+      "variables": { "id": "b701962e-89aa-4685-a574-ebda25706d64", "after": null },
+      "data": {
+        "project": {
+          "projectMilestones": {
+            "nodes": [
+              {
+                "id": "0b2b1950-82f3-4582-bd1f-e721d1777e25",
+                "name": "PvP (after co-op)",
+                "issues": { "nodes": [], "pageInfo": { "hasNextPage": false } }
+              },
+              {
+                "id": "f7ed3ea2-9522-4172-b312-712686de5c4d",
+                "name": "Realm (after co-op)",
+                "issues": { "nodes": [], "pageInfo": { "hasNextPage": false } }
+              },
+              {
+                "id": "3efc985e-24a3-4324-a430-7c09247a1f62",
+                "name": "Roster",
+                "issues": {
+                  "nodes": [
+                    {
+                      "id": "bb39887f-9c62-4a5b-b88d-e85f8bea5ede",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "d3ea78eb-72d0-4859-b7c7-700c3e0a582d",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "f9852cc9-2ba5-44d5-8bfd-01ce61d65384",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "dacf3cf4-1911-4842-b937-4002b95fa607",
+                "name": "Playable sessions",
+                "issues": {
+                  "nodes": [
+                    {
+                      "id": "7e6fcc33-d0c8-45e5-9331-4de0d9c9b480",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-05T07:58:01.236Z"
+                    },
+                    {
+                      "id": "e991975d-4846-48da-8984-a06502ca0a8b",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:26.595Z"
+                    },
+                    {
+                      "id": "d71b0567-913b-4b01-868b-f89371089a3d",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "68910748-ba77-4df8-b153-2996c5aaab75",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:20.248Z"
+                    },
+                    {
+                      "id": "83ae1402-13c6-47a2-a341-bfd3050b819e",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "245f0087-ba93-44d4-a16e-f7df3d5153e7",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "908960c3-9b47-43d2-96d8-10b5e57276d8",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:15.558Z"
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "6a5ef5b5-7f57-4254-bad2-613ebb54af5b",
+                "name": "Shared combat",
+                "issues": {
+                  "nodes": [
+                    {
+                      "id": "241deb51-70b3-4e07-bc6f-14edb5ffeef8",
+                      "state": { "name": "Canceled", "type": "canceled" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "ab305974-db99-4e43-85db-46b61d73141f",
+                      "state": { "name": "Duplicate", "type": "duplicate" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "e31d106e-e625-460d-bc83-4c7395d83c6f",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "fe00318c-2327-4e15-88d2-ab9725fb89cb",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "da445a8e-7bef-4341-a89c-d20b06c1728c",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:47.372Z"
+                    },
+                    {
+                      "id": "2d2dcfcb-8b76-4cdc-9291-c3e401054e39",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "5a40510b-0332-4ce5-9169-4c9223d8f0b7",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "0b5616df-921a-4e32-8348-70de29c54c12",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:09.421Z"
+                    },
+                    {
+                      "id": "01db57d3-d60d-4453-9961-3a6af4373565",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-10T02:47:02.829Z"
+                    },
+                    {
+                      "id": "1c2edc49-ed76-49e1-8276-b1f91e06a20c",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-02T16:50:22.826Z"
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "f8bef0a3-1897-432b-b94e-28ee08032db2",
+                "name": "Shared world",
+                "issues": {
+                  "nodes": [
+                    {
+                      "id": "bcf77c36-28fc-4984-bbce-219f08489d0e",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-13T11:48:43.919Z"
+                    },
+                    {
+                      "id": "0a4072b4-7c98-4ac4-9fad-b8bae14ca3f3",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:04.835Z"
+                    },
+                    {
+                      "id": "a90a8aaf-0fa3-4cae-9082-cf8a4fdfe3a9",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:38.366Z"
+                    },
+                    {
+                      "id": "d74bc2f7-12fc-4fdf-af2b-057a0cdaedf8",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:12.206Z"
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "c092e30e-4714-4d24-b1d1-d75a0ec924d9",
+                "name": "Ghost co-op",
+                "issues": {
+                  "nodes": [
+                    {
+                      "id": "efc83b9f-b575-4a2e-ad3e-4c7420280b09",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "3809aaa7-1595-4df9-81fe-73edd80906dc",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:35.139Z"
+                    },
+                    {
+                      "id": "2ced35aa-eeab-459f-9d50-0737fff0124f",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-02T14:50:06.969Z"
+                    },
+                    {
+                      "id": "f9e5d612-116a-44a4-8435-a37c24c10c5e",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-02T08:53:38.891Z"
+                    },
+                    {
+                      "id": "7c7a4d35-b252-4c19-a032-3e7c7d79d763",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:43.894Z"
+                    },
+                    {
+                      "id": "3186c885-0249-4fa5-8964-6db92ff45e99",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-10T02:46:53.470Z"
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              },
+              {
+                "id": "345ffa61-951f-409b-b67b-ed8aec8658f0",
+                "name": "Autonomy rig",
+                "issues": {
+                  "nodes": [
+                    {
+                      "id": "c20f7f96-5201-432a-b5b8-1da5a2294919",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-04T23:40:27.556Z"
+                    },
+                    {
+                      "id": "1bbef066-6258-469a-8d0d-7f20b94048ae",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    },
+                    {
+                      "id": "e882cf77-12cb-4e44-98d2-76e660cf2a87",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-02T07:03:04.285Z"
+                    },
+                    {
+                      "id": "c9480273-e65e-4034-a9d3-9fa3e5d4b056",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-02T05:23:21.676Z"
+                    },
+                    {
+                      "id": "b6246811-1487-4068-995a-03c41d3dde71",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-15T01:44:23.482Z"
+                    },
+                    {
+                      "id": "3664a3c7-022a-4d05-b8e6-20a24e74f8e7",
+                      "state": { "name": "Done", "type": "completed" },
+                      "completedAt": "2026-10-02T04:05:24.364Z"
+                    },
+                    {
+                      "id": "3dfa960c-a62c-41cf-8ae4-00c81131feee",
+                      "state": { "name": "Backlog", "type": "backlog" },
+                      "completedAt": null
+                    }
+                  ],
+                  "pageInfo": { "hasNextPage": false }
+                }
+              }
+            ],
+            "pageInfo": { "hasNextPage": false, "endCursor": "345ffa61-951f-409b-b67b-ed8aec8658f0" }
+          }
+        }
+      }
+    },
+    {
+      "query": "query($id:String!, $after:String) { project(id:$id) { projectUpdates(first:50, after:$after, orderBy: createdAt) { nodes { id createdAt url health } pageInfo { hasNextPage endCursor } } } }",
+      "variables": { "id": "b701962e-89aa-4685-a574-ebda25706d64", "after": null },
+      "data": {
+        "project": {
+          "projectUpdates": {
+            "nodes": [
+              {
+                "id": "7ab77784-d4dc-4625-94d3-63acd4b44cdf",
+                "createdAt": "2026-10-11T22:28:35.135Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-7ab77784",
+                "health": "onTrack"
+              },
+              {
+                "id": "cdb486c0-d0f8-41d9-916c-a2699328b3bc",
+                "createdAt": "2026-10-08T00:46:22.790Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-cdb486c0",
+                "health": "onTrack"
+              },
+              {
+                "id": "851259a9-2c17-48b9-993a-0e50deda7584",
+                "createdAt": "2026-10-07T01:51:14.973Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-851259a9",
+                "health": "onTrack"
+              },
+              {
+                "id": "624057dd-4a1f-4b31-b44f-c02bdec1e1a4",
+                "createdAt": "2026-10-06T21:46:12.500Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-624057dd",
+                "health": "onTrack"
+              },
+              {
+                "id": "87920b6a-c8a7-4ba7-8c15-abab8ea93c60",
+                "createdAt": "2026-10-06T21:10:12.554Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-87920b6a",
+                "health": "onTrack"
+              },
+              {
+                "id": "d90525e4-aa8d-4d61-b818-35dbe178af34",
+                "createdAt": "2026-10-06T18:18:21.144Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-d90525e4",
+                "health": "onTrack"
+              },
+              {
+                "id": "ba351a56-1ac1-4259-b108-6ddbf98cfc30",
+                "createdAt": "2026-10-06T15:22:57.922Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-ba351a56",
+                "health": "onTrack"
+              },
+              {
+                "id": "500671e6-f7ab-4da4-be34-af693a8635d5",
+                "createdAt": "2026-10-05T19:15:16.627Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-500671e6",
+                "health": "onTrack"
+              },
+              {
+                "id": "34e25952-eab1-412d-affc-d5095d49f460",
+                "createdAt": "2026-10-05T07:58:07.231Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-34e25952",
+                "health": "onTrack"
+              },
+              {
+                "id": "4ca0e5bf-f9af-4563-8a6a-9ccf3ab04bdf",
+                "createdAt": "2026-10-05T03:45:16.589Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-4ca0e5bf",
+                "health": "onTrack"
+              },
+              {
+                "id": "9332f952-f5a8-4003-a6f7-858ffe47e13d",
+                "createdAt": "2026-10-05T02:48:34.683Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-9332f952",
+                "health": "onTrack"
+              },
+              {
+                "id": "d9b90f52-0b0e-463d-a1e9-9457d250592c",
+                "createdAt": "2026-10-04T18:45:20.691Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-d9b90f52",
+                "health": "atRisk"
+              },
+              {
+                "id": "9ef1681f-e1d9-451c-aed4-38c8137215ae",
+                "createdAt": "2026-10-04T14:07:36.851Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-9ef1681f",
+                "health": "atRisk"
+              },
+              {
+                "id": "db3a75e0-b971-4ff8-ac91-a27fff5d0479",
+                "createdAt": "2026-10-04T03:43:25.814Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-db3a75e0",
+                "health": "atRisk"
+              },
+              {
+                "id": "4a43f775-2fe1-4ca8-b0c2-0897ce19ff4c",
+                "createdAt": "2026-10-03T21:57:06.705Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-4a43f775",
+                "health": "atRisk"
+              },
+              {
+                "id": "d68f31e1-c2b9-4519-a5d7-d4c57e1429ea",
+                "createdAt": "2026-10-03T13:58:10.436Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-d68f31e1",
+                "health": "atRisk"
+              },
+              {
+                "id": "d3020243-a9f3-4697-ac05-a81a1666c844",
+                "createdAt": "2026-10-03T04:45:33.020Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-d3020243",
+                "health": "atRisk"
+              },
+              {
+                "id": "707f963e-9659-4410-8568-fc8ae40ba925",
+                "createdAt": "2026-10-02T14:21:35.938Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-707f963e",
+                "health": "onTrack"
+              },
+              {
+                "id": "60c0d38a-9aed-4d4d-818c-e071d33e9b9d",
+                "createdAt": "2026-10-02T03:06:52.271Z",
+                "url": "https://linear.app/vuhlp/project/kh2-multiplayer-104d50e05485/activity#project-update-60c0d38a",
+                "health": "onTrack"
+              }
+            ],
+            "pageInfo": { "hasNextPage": false, "endCursor": "60c0d38a-9aed-4d4d-818c-e071d33e9b9d" }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -64,6 +64,16 @@ refuse explicitly. Description patches reread the stored body but cannot provide
 provider-wide compare-and-set; media-bearing description edits refuse, so add
 evidence in a comment instead.
 
+Outcome reads for Auto rounds ([ADR 0270](../../docs/adr/0270-auto-rounds-measure-outcomes-and-name-drift.md))
+live in `outcomes.ts`: closures in a window, started issues now, milestones and
+status updates, and optionally state history. `collectLinearOutcomes` reads a
+connected Linear project through the caller's query function with server-side
+filters; the local tracker's `readOutcomes` rebuilds the same shape from its
+event stream, where created and stage-family events carry the resulting
+`status` name. `localDays` and `startedAtDayEnds` turn history into per-day
+started counts in an IANA zone. Membership is current, which the result's
+`caveats` state.
+
 Priority is native Linear `0..4`, Markdown `priority:` front matter and reserved
 GitHub priority labels. Open-work listing sorts Urgent→High→Medium→Low→none
 before limits and pagination. CLI create/update accept `--priority 0..4`.
