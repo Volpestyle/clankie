@@ -377,3 +377,22 @@ it("names drift from completed working days, carries it until a round is deliver
       .drift,
   ).toEqual(next.drift);
 });
+
+it("uses declared product paths for both churn and closure classification", async () => {
+  const { project, deps, product, rig } = await measuredProject();
+  const velocity = await measureVelocity(
+    { ...project, productPaths: ["tools/"] },
+    null,
+    deps,
+    new Date("2026-10-14T03:00:00.000Z"),
+  );
+  expect(velocity.closures).toMatchObject({
+    state: "known",
+    ownerFacing: [rig.identifier],
+    tooling: [product.identifier],
+  });
+  expect(velocity.churn).toMatchObject({
+    state: "known",
+    lines: { product: 30, tooling: 15, docs: 4, excluded: 0 },
+  });
+});

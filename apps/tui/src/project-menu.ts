@@ -6,6 +6,7 @@
  */
 import {
   ProjectIdSchema,
+  ProductPathsSchema,
   ProjectsSnapshotSchema,
   type Project,
   type ProjectStatus,
@@ -189,6 +190,15 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
               { value: "focus", label: "Focus", hint: project.focus ?? "none" },
             ]
           : []),
+        ...(snapshot.productPaths === true
+          ? [
+              {
+                value: "product-paths",
+                label: "Product paths",
+                hint: project.productPaths?.join(", ") ?? "default classification",
+              },
+            ]
+          : []),
         {
           value: "tracker-project",
           label: "Built-in tracker project",
@@ -267,6 +277,26 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
         await update(
           { focus: focus.trim() === "" ? null : focus.trim() },
           focus.trim() === "" ? "Focus cleared." : "Focus saved.",
+        );
+    } else if (choice === "product-paths") {
+      const paths = await flow.readText({
+        message: "Product paths (JSON list of repository-relative globs; empty restores default)",
+        ...(project.productPaths === undefined ? {} : { defaultValue: JSON.stringify(project.productPaths) }),
+        allowBack: true,
+        validate: (value) => {
+          if (value.trim() === "") return undefined;
+          try {
+            ProductPathsSchema.parse(JSON.parse(value));
+            return undefined;
+          } catch {
+            return "Use a JSON list of 1–32 relative globs, at most 256 characters each, without .. or backslashes.";
+          }
+        },
+      });
+      if (paths !== undefined)
+        await update(
+          { productPaths: paths.trim() === "" ? null : ProductPathsSchema.parse(JSON.parse(paths)) },
+          paths.trim() === "" ? "Default product classification restored." : "Product paths saved.",
         );
     } else if (choice === "tracker-project") {
       const projectId = await flow.readText({

@@ -6591,7 +6591,7 @@ reviewed changes for an existing project through the authenticated service API.
 The console exposes the same verbs through `/project`.
 
 The changes file may contain `name`, `roles`, `workerCap`, `trackerRef`,
-`trackerProjectId`, `linearProjectBinding`, `autonomy`, `auto` and `focus`.
+`trackerProjectId`, `linearProjectBinding`, `autonomy`, `auto`, `focus` and `productPaths`.
 Omitted fields remain unchanged; `null` removes a worker cap, tracker binding
 or focus. `auto: true` puts the project on Auto: Clankie works its backlog
 unprompted while [`auto`](#auto-switch) is on, and starts nothing new on it
@@ -6604,6 +6604,30 @@ worktree roots), `landedToday` (commits on each local workspace's fetched
 `origin` default branch since local midnight, absent without one) and `needsYou`
 (pending owner questions raised in its workspaces), plus a top-level `needsYou`
 counting every pending owner question.
+`productPaths` is an optional list of 1–32 repository-relative POSIX globs,
+each at most 256 characters. Absolute paths, backslashes, `..` and control
+characters are refused. A directory such as `inject/` includes its descendants;
+patterns such as `src/**/*.ts` are also accepted. Only matching paths count as
+product; other paths count as docs (`docs/` or Markdown) or tooling. Lockfiles,
+generated files and binaries are always excluded. With no declaration, test,
+fixture, rig, script, tool and CI paths are tooling, docs and Markdown are docs,
+and everything else is product. Set `productPaths` to `null` to restore that
+default; an empty list is refused.
+
+```sh
+clankie project list
+# Use the returned revision with a changes file containing, for example:
+# {"productPaths":["inject/","common/","server/","runtime/","tools/launcher/","tools/packaging/","content/"]}
+clankie project update PROJECT --changes product-paths.json --revision REVISION
+clankie project list
+```
+
+The CLI requests the autonomy-aware view by default. That view advertises
+`productPaths: true` and includes each project's declaration; the plain API view
+omits both for older strict clients. In the TUI, `/project` → project →
+**Product paths** edits the same list (JSON; empty input restores the default),
+using the same revision fence.
+
 `trackerProjectId` binds the project to one built-in tracker project by its UUID
 (from `work sync` bootstrap or `work owner get_project`); the service refuses a
 UUID the tracker does not hold (`tracker_project_not_found`) or one already bound

@@ -45,11 +45,19 @@ it("edits and creates projects from the modal through the revision-bearing proje
       operatorCredentialStore: store,
       host: "http://clankie.test",
       fetchImpl: (async (url: RequestInfo | URL, init?: RequestInit) =>
-        routes.request(new URL(String(url)).pathname, init)) as typeof fetch,
+        routes.request(String(url), init)) as typeof fetch,
     };
 
-    const choices: (string | undefined)[] = ["project:garden", "cap", "name", undefined, "create", undefined];
-    const texts = ["3", "Garden Path", "orchard", "Orchard", orchard];
+    const choices: (string | undefined)[] = [
+      "project:garden",
+      "cap",
+      "name",
+      "product-paths",
+      undefined,
+      "create",
+      undefined,
+    ];
+    const texts = ["3", "Garden Path", '["src/","tools/launcher/"]', "orchard", "Orchard", orchard];
     const readSelect = vi.fn(async (_options: unknown) => choices.shift());
     const renderLine = vi.fn();
     const shell = {
@@ -71,7 +79,11 @@ it("edits and creates projects from the modal through the revision-bearing proje
 
     expect(renderLine.mock.calls.filter(([, tone]) => tone === "error")).toEqual([]);
     const saved = (await settings.load()).projects.projects;
-    expect(saved.find((p) => p.id === "garden")).toMatchObject({ name: "Garden Path", workerCap: 3 });
+    expect(saved.find((p) => p.id === "garden")).toMatchObject({
+      name: "Garden Path",
+      workerCap: 3,
+      productPaths: ["src/", "tools/launcher/"],
+    });
     expect(saved.find((p) => p.id === "orchard")).toMatchObject({
       name: "Orchard",
       workspaces: [{ path: orchard }],

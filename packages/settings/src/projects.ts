@@ -66,6 +66,8 @@ export function updateProjectSettings(
   else if (input.changes.auto === true) project.auto = true;
   if (input.changes.focus === null) delete project.focus;
   else if (input.changes.focus !== undefined) project.focus = input.changes.focus;
+  if (input.changes.productPaths === null) delete project.productPaths;
+  else if (input.changes.productPaths !== undefined) project.productPaths = input.changes.productPaths;
   if (input.changes.autonomy !== undefined) {
     const fleet = applyFleetAutonomyPatch(project.autonomy?.fleet, input.changes.autonomy.fleet);
     const autonomy = { ...project.autonomy };

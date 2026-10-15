@@ -65,7 +65,10 @@ async function readCommits(
   const commits = new Map<string, ChurnCommit>();
   const reasons: string[] = [];
   for (const repository of history.repositories) {
-    const churn = await deps.churn(repository, window);
+    const churn = await deps.churn(repository, {
+      ...window,
+      ...(project.productPaths === undefined ? {} : { productPaths: project.productPaths }),
+    });
     if (churn.state === "unknown") reasons.push(churn.reason);
     else for (const commit of churn.commits) commits.set(commit.sha, commit);
   }

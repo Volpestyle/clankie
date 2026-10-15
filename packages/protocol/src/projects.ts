@@ -75,6 +75,26 @@ export const LinearProjectBindingSchema = z
     projectId: z.string().uuid(),
   })
   .strict();
+/** Repository-relative POSIX globs; a trailing slash includes the directory's descendants. */
+export const ProductPathsSchema = z
+  .array(
+    z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .refine(
+        (path) =>
+          !path.startsWith("/") &&
+          !/^[a-z]:/iu.test(path) &&
+          !path.includes("..") &&
+          !/[\\\x00-\x1f\x7f]/u.test(path),
+        "Use repository-relative globs without absolute paths, backslashes or ..",
+      ),
+  )
+  .min(1)
+  .max(32);
+
 export const ProjectFocusSchema = z.string().trim().min(1).max(280);
 
 /** A project's status line in the projects view (ADR 0264), read live on each request. */
@@ -112,6 +132,7 @@ export const ProjectSchema = z
     auto: z.boolean().optional(),
     /** One line on what matters now; it steers Auto work and replaces a goal's objective. */
     focus: ProjectFocusSchema.optional(),
+    productPaths: ProductPathsSchema.optional(),
     fleet: z
       .object({
         size: z.enum(["max", "large", "small", "solo"]).optional(),
@@ -228,6 +249,7 @@ export const ProjectsSnapshotSchema = z
     fleetGates: z.literal(true).optional(),
     /** Advertises project Auto and focus (ADR 0264); absent on an older service. */
     projectsAuto: z.literal(true).optional(),
+    productPaths: z.literal(true).optional(),
     linearProjectBindings: z.literal(true).optional(),
     /** Each project's status line by project ID, in the autonomy-aware view of a current service. */
     projectStatus: z.record(z.string(), ProjectStatusSchema).optional(),
@@ -405,6 +427,8 @@ export const UpdateProjectSettingsSchema = z
         auto: z.boolean().optional(),
         /** null clears the focus. */
         focus: ProjectFocusSchema.nullable().optional(),
+        /** null restores default product classification. */
+        productPaths: ProductPathsSchema.nullable().optional(),
       })
       .strict()
       .refine(

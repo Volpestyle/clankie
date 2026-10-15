@@ -300,6 +300,15 @@ receipt first, and never fall back to typing into a terminal.
 
 ## Long-horizon work
 
+Projects can declare `productPaths` through `clankie project update PROJECT
+--changes FILE.json --revision REVISION`, using the revision from `project list`.
+The list holds 1–32 repository-relative globs (256 characters each, no absolute
+paths, backslashes or `..`); directory entries include descendants. Only matching
+paths count as product; docs/Markdown stay docs and the rest is tooling, with
+lockfiles/generated/binary files excluded first. `null` restores the default:
+tests, fixtures, rigs, scripts, tools and CI are tooling, docs/Markdown are docs,
+and the rest is product. `/project` → Product paths edits the same setting.
+
 Standing work comes from projects on Auto (ADR 0264). Auto rounds go to the
 existing configured lead chat owning the bound tracker project, even when that
 chat uses a different workspace. A lead assigned to another project never takes

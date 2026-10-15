@@ -46,6 +46,7 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
               linearProjectBinding: _linearProjectBinding,
               auto: _auto,
               focus: _focus,
+              productPaths: _productPaths,
               ...project
             }) => project,
           ),
@@ -53,7 +54,13 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
     ...(current.fleet.hire ? { hireDefaults: current.fleet.hire } : {}),
     ...(includeAutonomy ? { autonomyDefaults: current.autonomy } : {}),
     ...(includeAutonomy
-      ? { workingPreferences: true, fleetGates: true, projectsAuto: true, linearProjectBindings: true }
+      ? {
+          workingPreferences: true,
+          fleetGates: true,
+          projectsAuto: true,
+          productPaths: true,
+          linearProjectBindings: true,
+        }
       : {}),
     revision: projectsRevision(current.projects),
   };

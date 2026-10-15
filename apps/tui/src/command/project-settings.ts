@@ -124,7 +124,7 @@ export async function runProjectSettingsCommand(
   }
   const response = await (options.fetchImpl ?? fetch)(
     new URL(
-      `${list ? PROJECTS_PATH : create ? PROJECT_CREATE_SETTINGS_PATH : PROJECT_UPDATE_SETTINGS_PATH}${options.includeAutonomy ? "?includeAutonomy=true" : ""}`,
+      `${list ? PROJECTS_PATH : create ? PROJECT_CREATE_SETTINGS_PATH : PROJECT_UPDATE_SETTINGS_PATH}${(options.includeAutonomy ?? true) ? "?includeAutonomy=true" : ""}`,
       commandHost(options),
     ),
     {

@@ -116,6 +116,13 @@ you. From a script:
 clankie project settings garden --auto on --focus "Ship offline mode"
 ```
 
+In `/project`, **Product paths** declares which repository paths count as your
+product when Auto measures progress. Without a declaration, tests, fixtures,
+rigs, scripts, tools and CI count as tooling, docs and Markdown as docs, and the
+rest as product; lockfiles, generated files and binaries are excluded. See the
+[project settings reference](/cli/#project-list-project-settings-and-project-update)
+for globs and CLI updates.
+
 With Auto on, he works the project's backlog without being asked. He takes the
 next ready work from its tracker, staffs it within the project's worker cap and
 your machine and account limits, lands it and closes it with evidence. He
