@@ -20,7 +20,9 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { milestoneSignals, reportingSection } from "../src/captain/auto-reporting.ts";
 import { AutoRoundRecord } from "../src/captain/auto-rounds.ts";
+import { AutoRoundCadence } from "../src/captain/auto-cadence.ts";
 import {
+  autoRoundDue,
   autoRoundFingerprint,
   autoRoundPrompt,
   type AutoProjectState,
@@ -230,6 +232,41 @@ it("measures a project's velocity from its built-in tracker and origin, and keep
   expect(unknown.closures.state).toBe("unknown");
   expect(unknown.churn.state).toBe("unknown");
   expect(velocityLine(unknown)).toContain("closures unknown (");
+});
+
+it("recovers delivery fences from the durable round journal after interrupted settlement", async () => {
+  const { project, deps } = await measuredProject();
+  const root = roots.at(-1)!;
+  const record = new AutoRoundRecord(join(root, "rounds"));
+  const velocity = await measureVelocity(project, null, deps, new Date("2026-10-15T05:00:00Z"));
+  const open = () => new AutoRoundCadence(join(root, "rounds"), 30 * 60_000, () => record.read());
+  const now = Date.now();
+  const fingerprint = "unchanged-evidence";
+  const original = open();
+  const pending = record.measured("lead", [velocity]);
+  original.claim("lead", pending, fingerprint, now);
+  // A native send with unknown acceptance must not be sent again on a quick restart.
+  const restarted = open();
+  let stop = restarted.start(async () => {});
+  expect(autoRoundDue(fingerprint, restarted.last("lead"), now + 1_000)).toBe(false);
+  expect(autoRoundDue(fingerprint, restarted.last("lead"), now + 2 * 60 * 60_000)).toBe(true);
+  stop();
+  // The journal may settle before the runtime manages to save its accepted fingerprint.
+  record.settled(pending, true, undefined, new Date(now + 100));
+  const recovered = open();
+  stop = recovered.start(async () => {});
+  expect(recovered.last("lead")).toEqual({ fingerprint, at: now + 100 });
+  stop();
+  const next = record.measured("lead", [velocity]);
+  recovered.claim("lead", next, "changed-evidence", now + 200);
+  original.settled("lead", pending, false);
+  expect(open().last("lead")).toMatchObject({ fingerprint: "changed-evidence", at: now + 200 });
+  record.settled(next, false);
+  const refused = open();
+  stop = refused.start(async () => {});
+  expect(refused.last("lead")).toEqual({ fingerprint, at: now + 100 });
+  expect(autoRoundDue("changed-evidence", refused.last("lead"), now + 300)).toBe(true);
+  stop();
 });
 
 it("serves the round record through the operator route and `clankie auto rounds`", async () => {

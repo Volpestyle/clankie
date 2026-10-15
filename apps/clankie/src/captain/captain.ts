@@ -134,6 +134,7 @@ import {
 import { ProjectMirrors } from "./project-mirrors.ts";
 import { replayAutoRounds, AutoReplayInputError } from "./auto-replay.ts";
 import { AutoRoundRecord } from "./auto-rounds.ts";
+import { AutoRoundCadence } from "./auto-cadence.ts";
 import { milestoneSignals, reportingSection } from "./auto-reporting.ts";
 import { measureVelocityWithin, velocityLine, type VelocityDeps } from "./auto-velocity.ts";
 import { driftSection, driftSignals, withDrift } from "./auto-drift.ts";
@@ -4694,7 +4695,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (!options.remoteOrigin) throw new Error("no remote command channel");
     return await options.remoteOrigin(workspace);
   });
-  const lastAutoRounds = new Map<string, { fingerprint: string; at: number }>();
   const autoRoundRecord = new AutoRoundRecord(join(options.stateDir, "auto-rounds"));
   const velocityDeps: VelocityDeps = {
     outcomes:
@@ -4703,12 +4703,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     history: (project) => projectMirrors.history(project),
     churn: readRepositoryChurn,
   };
-  const settleAutoRound = (roundId: string | undefined, delivered: boolean, reason?: string) => {
+  const settleAutoRound = (
+    conversationId: string,
+    roundId: string | undefined,
+    delivered: boolean,
+    reason?: string,
+  ) => {
     if (roundId === undefined) return;
     try {
       autoRoundRecord.settled(roundId, delivered, reason);
     } catch (error) {
       console.warn("Auto round record unavailable", roundId, String(error));
+    }
+    try {
+      autoCadence.settled(conversationId, roundId, delivered);
+    } catch (error) {
+      console.warn("Auto cadence settlement unavailable", roundId, String(error));
     }
   };
   const readAutoRounds = async () => {
@@ -4723,6 +4733,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
   };
   const autoRoundIntervalMs = options.autoRoundIntervalMs ?? options.fleetRoundIntervalMs ?? 30 * 60_000;
+  const autoCadence = new AutoRoundCadence(join(options.stateDir, "auto-rounds"), autoRoundIntervalMs, () =>
+    autoRoundRecord.read({ limit: Number.MAX_SAFE_INTEGER }),
+  );
   /** Each Auto project's latest measurement; reused while younger than a tick (VUH-2284). */
   const autoMeasurements = new Map<string, ProjectVelocity>();
   const measureAutoProjects = async (projectIds: ReadonlySet<string>) => {
@@ -4754,21 +4767,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (id) => driftSignals(autoMeasurements.get(id)),
       (id) => milestoneSignals(autoMeasurements.get(id)),
     );
-  const stopAutoRounds = startFleetRounds(async () => {
+  const stopAutoRounds = autoCadence.start(async () => {
     if (shutdown.signal.aborted || !autonomy.enabled) return;
     await projectMirrors
       .refresh((await settings()).projects.projects)
       .catch((error: unknown) => console.warn("Project mirrors unavailable", String(error)));
     const rounds = await readAutoRounds();
-    for (const id of lastAutoRounds.keys()) if (!rounds.has(id)) lastAutoRounds.delete(id);
+    autoCadence.retain(new Set(rounds.keys()));
     // Velocity and drift (ADR 0270): measured every tick, so new drift changes the fingerprint.
     await measureAutoProjects(new Set([...rounds.values()].flat().map((state) => state.id)));
     for (const [conversationId, states] of rounds) {
       if (pendingAutoRounds.has(conversationId)) continue;
       const fingerprint = autoFingerprint(states);
-      if (
-        !autoRoundDue(fingerprint, lastAutoRounds.get(conversationId), Date.now(), options.autoIdleRewakeMs)
-      )
+      if (!autoRoundDue(fingerprint, autoCadence.last(conversationId), Date.now(), options.autoIdleRewakeMs))
         continue;
       pendingAutoRounds.add(conversationId);
       let roundId: string | undefined;
@@ -4780,6 +4791,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         });
         try {
           roundId = autoRoundRecord.measured(conversationId, velocities);
+          autoCadence.claim(conversationId, roundId, fingerprint);
         } catch (error) {
           console.warn("Auto round record unavailable", conversationId, String(error));
           // A milestone request must be durably claimed before it can be dispatched.
@@ -4809,19 +4821,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         );
       })()
         .then((accepted) => {
-          settleAutoRound(roundId, accepted, accepted ? undefined : "not delivered");
-          if (accepted) lastAutoRounds.set(conversationId, { fingerprint, at: Date.now() });
-          else console.warn("Auto round was not delivered", conversationId);
+          settleAutoRound(conversationId, roundId, accepted, accepted ? undefined : "not delivered");
+          if (!accepted) console.warn("Auto round was not delivered", conversationId);
         })
         .catch((error: unknown) => {
           // Once dispatch could have begun, an exception proves no refusal. Keep the
           // journal claim unsettled across restart instead of asking for a second post.
-          if (!passedDeliveryGuard) settleAutoRound(roundId, false, String(error));
+          if (!passedDeliveryGuard) {
+            settleAutoRound(conversationId, roundId, false, String(error));
+          }
           if (!shutdown.signal.aborted) console.warn("Auto round unavailable", conversationId, String(error));
         })
         .finally(() => pendingAutoRounds.delete(conversationId));
     }
-  }, autoRoundIntervalMs);
+  });
   // ADR 0271: the default lead seat restarts fresh in its own pane instead of
   // compacting for days. VUH-2273 moves a usage-limited seat with the same call.
   const leadSeats = createLeadSeatRelaunch({

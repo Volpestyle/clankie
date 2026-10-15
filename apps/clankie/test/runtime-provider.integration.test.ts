@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
@@ -42,6 +43,7 @@ async function fixture(
     projectId: string;
     read: NonNullable<Parameters<typeof createCaptain>[1]["projectOutcomes"]>;
   },
+  cadenceProof?: { intervalMs: number },
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-runtime-provider-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
@@ -160,15 +162,16 @@ async function fixture(
       forgetMemory: unavailable,
     },
   };
-  const captain = createCaptain(deps, {
+  const captainOptions: Parameters<typeof createCaptain>[1] = {
     repoRoot: root,
     stateDir: state,
     workingDirectory: root,
     settings,
-    ...(autoRounds ? { autoRoundIntervalMs: 100 } : {}),
+    ...(autoRounds ? { autoRoundIntervalMs: cadenceProof?.intervalMs ?? 100 } : {}),
     ...(outcomeProof ? { projectOutcomes: outcomeProof.read } : {}),
     ...(provider === undefined ? {} : { runtimeProvider: provider }),
-  });
+  };
+  let captain = createCaptain(deps, captainOptions);
   cleanups.push(() => captain.close());
   const ownerCaptain = createBearerAuthenticator("fixture-owner", {
     captainId: "fixture-captain",
@@ -223,7 +226,26 @@ async function fixture(
   await attach(roomId);
   if (projectLead) await attach(projectLead);
   const journal = new ConversationJournal(join(state, "conversations"));
-  return { captain, roomId, projectLead, command, request, journal, attach };
+  return {
+    get captain() {
+      return captain;
+    },
+    roomId,
+    projectLead,
+    command,
+    request,
+    journal,
+    attach,
+    state,
+    settings,
+    // Restart the real runtime and its native endpoints over the same durable stores.
+    // The original HTTP app is unused after restart; commands use the native service port.
+    restart: async () => {
+      await captain.close();
+      captain = createCaptain(deps, captainOptions);
+      await Promise.all(["global-default", roomId, ...(projectLead ? [projectLead] : [])].map(attach));
+    },
+  };
 }
 
 it("the default public app has no quota routes and native captain turns still complete", async () => {
@@ -616,4 +638,78 @@ it("a live tracker parent closure wakes its Auto lead once and links the post in
     conversationId: "global-default",
     command: { action: "set_enabled", enabled: false },
   });
+});
+
+it("Auto reaches native delivery despite repeated early restarts, then preserves idle suppression on overdue restart", async () => {
+  const intervalMs = 5_000;
+  const f = await fixture(undefined, true, undefined, { intervalMs });
+  const lead = f.projectLead!;
+  const cadence = async () =>
+    JSON.parse(await readFile(join(f.state, "auto-rounds", "cadence.json"), "utf8")) as {
+      nextTickAt: number;
+      leads: Record<string, { accepted?: { fingerprint: string; at: number } }>;
+    };
+  const initialDeadline = (await cadence()).nextTickAt;
+  const ownerCommand = (enabled: boolean) =>
+    f.captain.serveOperatorConversation(
+      {
+        schemaVersion: 1,
+        op: "autonomy",
+        conversationId: "global-default",
+        command: { action: "set_enabled", enabled },
+      },
+      {
+        principal: { kind: "operator", id: "fixture-owner" },
+        authorize: async () => true,
+        current: () => true,
+      },
+    );
+  await ownerCommand(true);
+  for (let restart = 0; restart < 3; restart++) {
+    await delay(100);
+    await f.restart();
+    expect((await cadence()).nextTickAt).toBe(initialDeadline);
+  }
+  expect(Date.now()).toBeLessThan(initialDeadline);
+  await f.captain.close();
+  await delay(Math.max(0, initialDeadline - Date.now()) + 30);
+  await f.restart();
+  await expect.poll(async () => (await cadence()).nextTickAt).toBeGreaterThan(initialDeadline);
+  const receive = async (conversationId: string) => {
+    const event = (await f.captain.pollSeatEvents(8_000, undefined, conversationId)).find((entry) =>
+      entry.content.startsWith("Auto round."),
+    );
+    expect(event).toBeDefined();
+    expect(await f.captain.acknowledgeSeatEvent(event!.id, conversationId)).toBe(true);
+    return event!;
+  };
+  await Promise.all([receive(lead), receive("global-default")]);
+  await expect.poll(async () => (await cadence()).leads[lead]?.accepted).toBeDefined();
+  const accepted = (await cadence()).leads[lead]!.accepted!;
+  const record = new AutoRoundRecord(join(f.state, "auto-rounds"));
+  expect(
+    record.read().filter((round) => round.conversationId === lead && round.delivery?.delivered),
+  ).toHaveLength(1);
+  // Restart while stopped past the next tick, but well within the two-hour idle window.
+  await f.captain.close();
+  const stoppedDeadline = (await cadence()).nextTickAt;
+  await delay(Math.max(0, stoppedDeadline - Date.now()) + 30);
+  await f.restart();
+  await expect.poll(async () => (await cadence()).nextTickAt).toBeGreaterThan(stoppedDeadline);
+  expect(await f.captain.pollSeatEvents(250, undefined, lead)).toEqual([]);
+  expect((await cadence()).leads[lead]!.accepted).toEqual(accepted);
+  expect(record.read().filter((round) => round.conversationId === lead)).toHaveLength(1);
+  // An overdue startup while paused still consumes its tick without dispatching work.
+  await ownerCommand(false);
+  await f.captain.close();
+  const pausedDeadline = (await cadence()).nextTickAt;
+  await delay(Math.max(0, pausedDeadline - Date.now()) + 30);
+  await f.restart();
+  await expect.poll(async () => (await cadence()).nextTickAt).toBeGreaterThan(pausedDeadline);
+  expect(await f.captain.pollSeatEvents(200, undefined, lead)).toEqual([]);
+  expect(record.read().filter((round) => round.conversationId === lead)).toHaveLength(1);
+  console.info(
+    "Restart Auto cadence proof",
+    JSON.stringify({ intervalMs, initialDeadline, accepted, final: await cadence(), rounds: record.read() }),
+  );
 });

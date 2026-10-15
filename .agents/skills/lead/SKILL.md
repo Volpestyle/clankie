@@ -405,6 +405,10 @@ state is a project status update, never a lead-only file. Sizing records, Linear
 
 ## Auto milestone reports
 
+Auto's check deadline and each lead's delivery fence survive service restarts.
+An overdue startup checks once promptly; it does not replay missed intervals or
+reset the two-hour idle rewake window. A paused master switch still prevents work.
+
 On an Auto round, follow the service's project status-update section. A newly
 completed parent issue or declared tracker milestone asks for exactly one project
 update with media and evidence links; cover milestones found together in that one

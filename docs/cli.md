@@ -3825,7 +3825,12 @@ work. Prints `{"auto":"on"|"off"}`. The console's `/auto on|off` is the same
 switch.
 
 Each fleet-round interval (30 minutes by default) the service checks the
-projects on Auto. An explicit bound tracker project matching a configured lead's
+projects on Auto. The next check deadline survives service restarts; an overdue
+startup checks promptly once, without replaying every missed interval. Accepted
+and pending delivery fingerprints survive too, preserving the two-hour idle
+rewake window. This state lives in `~/.clankie/captain/auto-rounds/cadence.json`;
+the ordinary round record below shows actual wake attempts.
+An explicit bound tracker project matching a configured lead's
 project route wins, even when that lead's chat uses another workspace. A lead
 with configured project ownership never receives another project through a
 workspace match. Only an unassigned lead may match by exact workspace and

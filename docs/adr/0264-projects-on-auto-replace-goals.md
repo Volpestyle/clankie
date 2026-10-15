@@ -118,3 +118,22 @@ routing. A configured lead cannot fall back to another project's folder, and
 multiple owned projects require an explicit `projectId`. Destination membership,
 native identity, role and cap checks, machine and account governors remain in
 force; saved ownership is re-read before native effects.
+
+### Restart-stable cadence, 2026-10-15
+
+VUH-2312 found that deployments inside the 30-minute interval repeatedly reset
+Auto's first check. Persist the next check deadline and per-lead accepted and
+pending delivery fingerprints in `auto-rounds/cadence.json`. An overdue startup
+checks promptly once, reserving the next interval before asynchronous work;
+missed intervals coalesce instead of producing a burst. Eligibility, the master
+switch and the two-hour idle rewake rule still apply. Save a delivery reservation
+before preparing a wake, reconcile settled reservations from the round journal
+on startup, and keep unknown acceptance fenced for the ordinary idle window.
+The service's existing exclusive body process lease protects this file across
+runtime replacement. Writes use atomic rename; unreadable state prevents Auto
+checks instead of discarding delivery fences.
+
+On first upgrade, initialize the deadline from the latest retained round, or
+save a first deadline for a new store. Older rounds have no fingerprint, so the
+first upgrade may wake an unchanged lead once; subsequent restarts preserve its
+accepted fingerprint. Milestone report claims remain in the existing journal.

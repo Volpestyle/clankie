@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "focused-restarts.log",
+      "size": 50014,
+      "sha256": "31b93608e00e80839d25927a3043c18c9701196480d06b964f0721e00854b44c",
+      "url": "clankie://evidence/sha256/31b93608e00e80839d25927a3043c18c9701196480d06b964f0721e00854b44c"
+    }
+  ]
+}

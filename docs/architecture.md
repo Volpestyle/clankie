@@ -478,6 +478,12 @@ configured lead chats. An explicit built-in tracker or connected Linear project 
 a workspace match is eligible only for a lead with no configured projects.
 Unbound or ambiguous ownership falls back to the global head. Each lead hears only its projects,
 focus and live workers; unchanged evidence rewakes that lead after two hours.
+The [cadence store](../apps/clankie/src/captain/auto-cadence.ts) persists the next
+check deadline and each lead's accepted or pending delivery fingerprint in
+`auto-rounds/cadence.json`. Restarts keep that deadline; an overdue startup runs
+one check promptly and reserves the next interval, coalescing missed checks.
+Pending deliveries retain the normal idle fence, and the round journal recovers
+settled acceptance or refusal. Paused or ineligible projects still receive no wake.
 Each round also measures every project it carries ([ADR 0270](adr/0270-auto-rounds-measure-outcomes-and-name-drift.md)):
 closures since its last milestone split owner-facing, tooling and unlinked, started
 issues (no WIP cap yet), and churn by bucket per working day, from the backend its
