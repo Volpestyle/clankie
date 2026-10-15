@@ -113,6 +113,12 @@ not prove nothing was sent. Reconcile an uncertain original through
 `message_clankie` rather than starting another send. The CLI equivalent in your
 native pane is `clankie agents message-status DELIVERY_ID`.
 
+Set `urgent: true` when you are blocked, something failed, or you need a
+decision: your lead hears it at once. Leave it off for progress and finished-work
+reports. While a native lead seat is idle it hears those together with its next
+round, within about ten minutes, or sooner when anything else reaches it. A
+report waiting for its round still reads `stored`.
+
 Claude seats forward native questions to their exact hiring conversation. An
 operator or lead seat with no such conversation keeps `AskUserQuestion` in its
 own pane's native prompt; this does not create an app ask or supply an answer.
@@ -131,8 +137,8 @@ event does not mark your report read by the lead.
 
 Never wait silently. When something only your lead or the owner can unblock
 stops you (a decision, a refused or broken tool, a failing check outside your
-change, missing access), tell your lead that same turn with `message_clankie`:
-what blocks you, what you tried, what you need and your recommendation. If the
+change, missing access), tell your lead that same turn with `message_clankie`
+and `urgent: true`: what blocks you, what you tried, what you need and your recommendation. If the
 send returns uncertain, unconfirmed or `not_sent`, post the same blocker on your
 work item, which reaches the lead through the tracker, and check
 `message_clankie_status` again before your turn ends. Keep doing any unblocked

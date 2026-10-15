@@ -79,7 +79,14 @@ const MESSAGE_TOOL = {
     "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
   inputSchema: {
     type: "object",
-    properties: { text: { type: "string", description: "What to tell him." } },
+    properties: {
+      text: { type: "string", description: "What to tell him." },
+      urgent: {
+        type: "boolean",
+        description:
+          "True when you are blocked, something failed, or you need a decision: he hears it at once. Leave it off for progress and finished-work reports; while he is idle he hears those with his next round of reports, within about ten minutes.",
+      },
+    },
     required: ["text"],
     additionalProperties: false,
   },
@@ -970,12 +977,13 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     })();
     return refreshReconciliation;
   }
-  async function messageClankie(text) {
+  async function messageClankie(text, urgent) {
     if (!paneId) return { isError: true, text: "This session is not in a Herdr pane Clankie can answer." };
     const body = String(text ?? "").trim();
     if (!body) return { isError: true, text: "Say what to tell him." };
     await reconcileRefresh();
-    const receipt = retainedInbound ?? (await sendInbound(body.slice(0, TEXT_MAX)));
+    const receipt =
+      retainedInbound ?? (await sendInbound(body.slice(0, TEXT_MAX), { urgent: urgent === true }));
     retainedInbound = undefined;
     return { isError: !receipt.received, text: JSON.stringify(receipt) };
   }
@@ -1129,7 +1137,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         }
       }
       if (params?.name === MESSAGE_TOOL.name) {
-        const result = await messageClankie(params?.arguments?.text);
+        const result = await messageClankie(params?.arguments?.text, params?.arguments?.urgent);
         return send({
           id,
           result: { content: [{ type: "text", text: result.text }], isError: result.isError },

@@ -84,6 +84,8 @@ export const InboundAcceptanceSchema = z
     workerReportRouting: WorkerReportRoutingSchema.optional(),
     leadMessageFrom: z.string().min(1).optional(),
     recipient: InboundReportRecipientSchema.optional(),
+    /** Delivered at once instead of with the lead seat's next round (VUH-2274). */
+    urgent: z.literal(true).optional(),
     acceptedAt: z.string().datetime().optional(),
     reportDelivery: InboundReportDeliverySchema.optional(),
   })

@@ -4024,7 +4024,7 @@ same approved folder, using the bounded workers adapter in the running `join`
 channel. Supply `title`, `brief`, optional `model`/`effort`; `harness` can only be
 `claude`, and an optional `workingDirectory` must equal the lead's folder. The
 adapter observes the exact native session before admission. The worker gets
-only `message_clankie` (text plus a caller-chosen UUID `deliveryId`) and
+only `message_clankie` (text, a caller-chosen UUID `deliveryId` and optional `urgent`) and
 `message_clankie_status` (`deliveryId`). Reports are durable in its lead chat;
 the lead reads and acknowledges them through `worker_reports` and
 `acknowledge_worker_reports`. `message_seat` with the returned `seat` and
@@ -6010,7 +6010,13 @@ An installed update affects newly loaded bridges; recovery of an existing
 stopped receiver must preserve its original harness session and delivery fences.
 
 Worker `message_clankie` reports project as `kind="message"`, framed as
-untrusted agent output, never an owner instruction. Completion harvests remain
+untrusted agent output, never an owner instruction. A report without
+`urgent: true` that is bound for an idle native lead seat waits for that seat's
+next round: the seat's next turn, any other delivery to its conversation, or at
+most ten minutes. Many reports then cost the seat one turn instead of one turn
+each (VUH-2274). An urgent report, an owner turn or a lead message from another
+conversation is delivered at once and brings the waiting reports with it. A
+waiting report stays `stored`; restarts deliver it in the next round. Completion harvests remain
 `kind="watch"`, and self-wakes remain `kind="wake"`. These tags do not change
 the service-owned lead route or delivery receipts. A room-owned worker message
 still uses `reply` with its `event_id` for the correlated room reply; the original

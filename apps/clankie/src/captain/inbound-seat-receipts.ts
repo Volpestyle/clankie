@@ -322,6 +322,8 @@ export class InboundSeatReceipts {
     workerReportRouting?: WorkerReportRouting,
     /** Host-captured original destination; used only after renewed authority checks. */
     recipient?: InboundReportRecipient,
+    /** The sender asked to be heard at once rather than in the lead's next round. */
+    urgent = false,
   ): FleetSeatMessageReceipt {
     const fingerprint = deliveryFingerprint(text);
     const previous = this.reconcile(paneId, delivery, fingerprint);
@@ -382,6 +384,7 @@ export class InboundSeatReceipts {
           text,
           ...(workerReportRouting === undefined ? {} : { workerReportRouting }),
           ...(recipient === undefined ? {} : { recipient }),
+          ...(urgent ? { urgent: true as const } : {}),
         },
         conversationId,
         runner,

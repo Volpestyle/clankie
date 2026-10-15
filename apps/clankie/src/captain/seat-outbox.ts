@@ -225,6 +225,11 @@ export class SeatOutbox {
   private turnObservedAt = 0;
   private readonly turnHoldStaleMs: number;
 
+  /** The seat reported a turn in progress that has not gone quiet. */
+  public responding(): boolean {
+    return !this.closed && this.turnHolds();
+  }
+
   /** Authenticated seat-sync activity; an unrelated session cannot release a hold. */
   public observeTurn(sessionId: string, activity: "responding" | "waiting", onlyIfUnknown = false): boolean {
     if (this.closed) return false;

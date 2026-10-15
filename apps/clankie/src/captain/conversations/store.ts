@@ -260,7 +260,22 @@ export class ConversationStore {
   public reportBoundary?: (conversationId: string, text: string, at: string) => void;
   /** Roster/inbox observers see progress independently of a worker's pane lifetime. */
   public onInboundReportChange?: () => void;
+  /**
+   * How long a routine worker report may wait for this conversation's next
+   * round, or undefined to deliver it now (VUH-2274). The host answers from the
+   * live seat: only an idle native seat gains anything from waiting.
+   */
+  public reportRoundMs?: (conversationId: string) => number | undefined;
   private readonly metas = new Map<string, ConversationMeta>();
+  /**
+   * Routine reports waiting for one wake of an idle native seat. Anything else
+   * that reaches the conversation, the seat starting a turn, or the round's
+   * timer releases them together, so many reports cost the seat one turn.
+   */
+  private readonly reportRounds = new Map<
+    string,
+    { readonly held: Promise<void>; readonly release: () => void; readonly timer: NodeJS.Timeout }
+  >();
   /**
    * Live durable-message observers, for delivery that happens outside the
    * conversation (push wakes, ADR 0159). Per store: a second store — another
@@ -1890,6 +1905,31 @@ export class ConversationStore {
     return retryInboundReport(this, deliveryId, admittedRunner);
   }
 
+  /** Deliver every report waiting for this conversation's round now. */
+  public releaseReportRound(conversationId: string): void {
+    const round = this.reportRounds.get(conversationId);
+    if (round === undefined) return;
+    this.reportRounds.delete(conversationId);
+    clearTimeout(round.timer);
+    round.release();
+  }
+
+  /** The round a routine report waits on; undefined when it should go now. */
+  private joinReportRound(conversationId: string): Promise<void> | undefined {
+    const existing = this.reportRounds.get(conversationId);
+    if (existing !== undefined) return existing.held;
+    const ms = this.reportRoundMs?.(conversationId);
+    if (ms === undefined || !(ms > 0)) return undefined;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const timer = setTimeout(() => this.releaseReportRound(conversationId), ms);
+    timer.unref?.();
+    this.reportRounds.set(conversationId, { held, release, timer });
+    return held;
+  }
+
   /** Read actual on-disk acceptance, never an in-memory success guess. */
   public inboundAcceptance(id: string): InboundAcceptance | undefined {
     let receipt: InboundAcceptance | undefined;
@@ -1935,6 +1975,7 @@ export class ConversationStore {
   }
 
   public async close(): Promise<void> {
+    for (const conversationId of this.reportRounds.keys()) this.releaseReportRound(conversationId);
     await this.nativeMessages?.close();
     this.tailShutdown.abort(new DOMException("Conversation tails are closed", "AbortError"));
     for (const conversationId of this.tailListeners.keys()) this.wakeTails(conversationId);
@@ -2807,10 +2848,32 @@ export class ConversationStore {
           ? (this.activeInvocations.get(conversationId) ?? 0) > 0
           : provenance.delivery !== "queue" && (this.internalRuns.get(conversationId) ?? 0) > 0));
 
+    // A routine report joins the seat's next round; anything else is heard now
+    // and takes the waiting reports with it (VUH-2274). A lead's message to
+    // another lead is never held: its sender has no way to mark it urgent.
+    const routine =
+      provenance.inboundReceipt !== undefined &&
+      provenance.inboundReceipt.urgent !== true &&
+      provenance.inboundReceipt.leadMessageFrom === undefined;
+    if (!routine) this.releaseReportRound(conversationId);
+    const round = routine ? this.joinReportRound(conversationId) : undefined;
     const previous = this.chains.get(conversationId) ?? Promise.resolve();
     let invoked = false;
     let deliveryStage: DeliveryStage | undefined;
     const invoke = async (): Promise<void> => {
+      if (round !== undefined) {
+        // The seat may have started a turn or gone away since this report
+        // arrived; then waiting saves nothing.
+        if (this.reportRoundMs?.(conversationId) === undefined) this.releaseReportRound(conversationId);
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            controller.signal.removeEventListener("abort", done);
+            resolve();
+          };
+          controller.signal.addEventListener("abort", done, { once: true });
+          void round.then(done);
+        });
+      }
       if (provenance.questionAnswer) {
         const preparation = new ConversationServiceRun(controller.signal);
         try {

@@ -1011,7 +1011,14 @@ const MESSAGE_CLANKIE_TOOL = {
     "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
   inputSchema: {
     type: "object" as const,
-    properties: { text: { type: "string", description: "What to tell him." } },
+    properties: {
+      text: { type: "string", description: "What to tell him." },
+      urgent: {
+        type: "boolean",
+        description:
+          "True when you are blocked, something failed, or you need a decision: he hears it at once. Leave it off for progress and finished-work reports; while he is idle he hears those with his next round of reports, within about ten minutes.",
+      },
+    },
     required: ["text"],
     additionalProperties: false,
   },
@@ -1025,6 +1032,7 @@ const MESSAGE_CLANKIE_TOOL = {
 export function createFleetSeatBridge(
   send?: (
     text: string,
+    options?: { urgent?: boolean },
   ) => Promise<
     boolean | { received: boolean; deliveryStage: "stored" | "unavailable" | "rejected" | "uncertain" }
   >,
@@ -1060,7 +1068,8 @@ export function createFleetSeatBridge(
       }
       if (request.params.name !== MESSAGE_CLANKIE_TOOL.name)
         return { content: [{ type: "text", text: `Unknown tool ${request.params.name}` }], isError: true };
-      const text = String((request.params.arguments as { text?: unknown } | undefined)?.text ?? "").trim();
+      const args = request.params.arguments as { text?: unknown; urgent?: unknown } | undefined;
+      const text = String(args?.text ?? "").trim();
       if (text === "") return { content: [{ type: "text", text: "Say what to tell him." }], isError: true };
       if (uncertain && !durable)
         return readableMcpResult({
@@ -1076,7 +1085,9 @@ export function createFleetSeatBridge(
           ],
           isError: true,
         });
-      const sent = await send(text.slice(0, OPERATOR_CONVERSATION_TEXT_MAX)).catch(() => {
+      const sent = await send(text.slice(0, OPERATOR_CONVERSATION_TEXT_MAX), {
+        urgent: args?.urgent === true,
+      }).catch(() => {
         uncertain = true;
         return { received: false, deliveryStage: "uncertain" as const };
       });

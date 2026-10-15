@@ -179,6 +179,12 @@ export const FleetSeatMessageSchema = z
     text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
     /** Optional on decode for legacy clients; current HTTP writes require it. */
     delivery: FleetSeatMessageDeliverySchema.optional(),
+    /**
+     * The sender is blocked, something failed, or it needs a decision: the lead
+     * hears it at once. Otherwise an idle native lead seat hears it with its
+     * next round of reports (VUH-2274).
+     */
+    urgent: z.boolean().optional(),
   })
   .strict();
 export type FleetSeatMessage = z.infer<typeof FleetSeatMessageSchema>;

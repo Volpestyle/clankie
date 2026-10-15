@@ -134,7 +134,7 @@ import { HostedWorldSession } from "@clankie/pokemon/world/session";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
-import { createCaptain } from "./captain/captain.ts";
+import { createCaptain, REPORT_ROUND_MS } from "./captain/captain.ts";
 import { FleetHarnessProcesses } from "./fleet-harness-processes.ts";
 import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
 import { parseHerdrPaneList } from "./captain/herdr-watch.ts";
@@ -1560,6 +1560,7 @@ const captain = createCaptain(
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
     settings: settingsStore,
+    reportRoundMs: REPORT_ROUND_MS,
     requireMachineAccess: (fleet, required) => runtimes.requireAccess(fleet, required),
     personaImages,
     linearFollowing,

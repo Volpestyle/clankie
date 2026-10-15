@@ -488,6 +488,7 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       parsed.data.text,
       parsed.data.delivery,
       request,
+      parsed.data.urgent === true ? { urgent: true } : undefined,
     );
     if (typeof received !== "boolean") return context.json(FleetSeatMessageReceiptSchema.parse(received));
     return received

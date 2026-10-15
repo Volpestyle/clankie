@@ -65,7 +65,11 @@ async function fixture(
   bind = true,
   deployHolds?: CaptainDeps["deployHolds"],
   resourceFixture?: (root: string) => Promise<FleetResourceRuntime>,
-  remote?: Pick<CaptainDeps, "fleets"> & { fleetEfficiencyDeadlineMs?: number; fleetProbeMinMs?: number },
+  remote?: Pick<CaptainDeps, "fleets"> & {
+    fleetEfficiencyDeadlineMs?: number;
+    fleetProbeMinMs?: number;
+    reportRoundMs?: number;
+  },
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-lead-round-"));
   const conversations = new ConversationStore(join(root, "conversations"), async () => {});
@@ -214,6 +218,7 @@ async function fixture(
         ? {}
         : { fleetEfficiencyDeadlineMs: remote.fleetEfficiencyDeadlineMs }),
       ...(remote?.fleetProbeMinMs === undefined ? {} : { fleetProbeMinMs: remote.fleetProbeMinMs }),
+      ...(remote?.reportRoundMs === undefined ? {} : { reportRoundMs: remote.reportRoundMs }),
     },
   );
   fixtures.push({ root, captain });
@@ -517,6 +522,57 @@ it("keeps an idle reporter parked through its report receipts and delivers them 
   expect(events.slice(1).every((event) => event.source === "worker-report-receipt")).toBe(true);
   for (const event of events) expect(await f.captain.acknowledgeFleetSeatEvent("w1:p1", event.id)).toBe(true);
   expect(await alert).toBe(true);
+});
+
+// VUH-2274: every report woke an idle lead seat for its own turn (365 of the
+// global-default seat's 828 turns on 2026-10-13). Routine reports now wait for
+// the seat's next round; an urgent one is heard at once and brings them along.
+it("holds routine reports for an idle lead seat's round and delivers an urgent one at once with them", async () => {
+  const f = await fixture(60 * 60_000, undefined, false, true, undefined, undefined, true, true, undefined, undefined, {
+    reportRoundMs: 1_500,
+  });
+  const report = async (index: number, text: string, urgent?: true) => {
+    const row = f.rows[index]!;
+    const binding = deliveryFingerprint(
+      JSON.stringify([row.pane_id, row.terminal_id, row.agent, row.agent_session]),
+    );
+    const id = randomUUID();
+    const sent = await f.captain.receiveFleetSeatMessage(
+      row.pane_id,
+      text,
+      { id, binding },
+      undefined,
+      urgent ? { urgent } : undefined,
+    );
+    expect(sent).toMatchObject({ received: true, deliveryStage: "stored" });
+    return id;
+  };
+
+  // A routine report waits while the seat is parked and idle, and stays stored.
+  const routine = await report(0, "Progress: VUH-1701 tests written.");
+  expect(await f.captain.pollSeatEvents(600, undefined, "global-default")).toEqual([]);
+  expect(await f.captain.fleetSeatMessageStatus("w1:p1", routine)).toMatchObject({ deliveryStage: "stored" });
+
+  // An urgent report releases the round: the held report reaches the seat first,
+  // and the urgent one follows on the bridge's next poll, inside the same turn.
+  const parked = f.captain.pollSeatEvents(3000, undefined, "global-default");
+  const urgent = await report(1, "Blocked: VUH-1702 needs a decision on the schema.", true);
+  const [first] = await parked;
+  expect(first).toMatchObject({ source: "worker-report" });
+  expect(first!.content).toContain(`Worker report ${routine}`);
+  expect(await f.captain.acknowledgeSeatEvent(first!.id, "global-default")).toBe(true);
+  const [second] = await f.captain.pollSeatEvents(3000, undefined, "global-default");
+  expect(second!.content).toContain(`Worker report ${urgent}`);
+  await f.finish(second!.id);
+
+  // With nothing else arriving, the round's own deadline delivers a held report.
+  const sentAt = performance.now();
+  const late = await report(0, "Final report: VUH-1701 landed.");
+  expect(await f.captain.pollSeatEvents(500, undefined, "global-default")).toEqual([]);
+  const [timed] = await f.captain.pollSeatEvents(3000, undefined, "global-default");
+  expect(timed!.content).toContain(`Worker report ${late}`);
+  expect(performance.now() - sentAt).toBeGreaterThanOrEqual(1_400);
+  await f.finish(timed!.id);
 });
 
 it("does not accept an older identical native control receipt as a fresh health dispatch", async () => {

@@ -443,7 +443,14 @@ export interface CaptainPort {
   readonly huddles?: HuddleService;
   /** Home-admitted joined native worker; target and binding come only from its lead grant. */
   receiveJoinedWorkerReport?(
-    input: { paneId: string; binding: string; conversationId: string; text: string; deliveryId: string },
+    input: {
+      paneId: string;
+      binding: string;
+      conversationId: string;
+      text: string;
+      deliveryId: string;
+      urgent?: boolean;
+    },
     authority: import("./conversation-owner.ts").ConversationAuthority,
   ): Promise<FleetSeatMessageReceipt>;
   recordJoinedWorkerReply?(conversationId: string, paneId: string, binding: string): void;
@@ -458,6 +465,8 @@ export interface CaptainPort {
     delivery?: FleetSeatMessageDelivery,
     /** Host request budget/cancellation, never worker-supplied authority. */
     request?: InboundSeatRequest,
+    /** The sender's delivery hint: urgent reports skip the lead's round (VUH-2274). */
+    options?: { readonly urgent?: boolean },
   ): Promise<boolean | FleetSeatMessageReceipt>;
   listFleetPeerSeats(authority: PeerSeatAuthority): Promise<FleetPeerSeats | undefined>;
   sendFleetPeerMessage(authority: PeerSeatAuthority, input: FleetPeerMessage): Promise<FleetPeerReceipt>;

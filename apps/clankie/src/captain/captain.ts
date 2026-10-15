@@ -317,6 +317,12 @@ const BENIGN_COMPACTION_REFUSALS = new Set(["Already compacted", "Nothing to com
 const HEAD_BOUND_GRACE_MS = 30_000;
 /** Unchanged from the outbox default: a taken event's exact acknowledgment window. */
 const HEAD_ACK_TIMEOUT_MS = 2_000;
+/**
+ * The longest a routine worker report or completion waits for an idle native
+ * lead seat's next round. On 2026-10-13 replaying the seat's own events at 10
+ * minutes halved the turns that woke it from idle (VUH-2274).
+ */
+export const REPORT_ROUND_MS = 10 * 60_000;
 
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const settingsStore = options.settings ?? new SettingsStore();
@@ -2048,6 +2054,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   };
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
+  // Only an idle native seat gains from waiting: a turn already running hears
+  // reports for free, and the service lane is not woken per report.
+  conversations.reportRoundMs = (id) => {
+    const outbox = seatOutboxes.get(id);
+    return outbox?.bound() === true &&
+      !outbox.responding() &&
+      conversations.conversation(id)?.scope.kind !== "room"
+      ? options.reportRoundMs
+      : undefined;
+  };
   conversations.projectOnboarding = projectOnboarding(settingsStore, () => options.fleetResources?.status());
   // Legacy workspace preferences/project proposals retain their native-seat fence.
   // Semantic surface asks use their independently admitted source binding.
@@ -6049,8 +6065,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (
         transcript.activity !== undefined &&
         seatOutbox(id).observeTurn(transcript.sessionId, transcript.activity)
-      )
+      ) {
         conversations.syncNativeSeatTranscript(id, transcript.sessionId, [], transcript.activity);
+        // Reports waiting for the seat's round ride the turn it just started.
+        if (transcript.activity === "responding") conversations.releaseReportRound(id);
+      }
       return true;
     },
 
@@ -6630,6 +6649,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           conversationReportRunner(authority.owner, delivery.id),
           undefined,
           { kind: "conversation", owner: authority.owner },
+          input.urgent === true,
         );
       });
     },
@@ -6641,7 +6661,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return inboundReceipts.status(paneId, binding, deliveryId);
     },
 
-    async receiveFleetSeatMessage(paneId, text, delivery, request) {
+    async receiveFleetSeatMessage(paneId, text, delivery, request, options) {
       if (!delivery) return false;
       return inboundReceipts.trackAttempt(
         paneId,
@@ -6902,6 +6922,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               conversationId: target.conversationId,
             },
             route.native ?? { kind: "conversation", owner: target },
+            options?.urgent === true,
           );
           if (accepted.received) {
             try {

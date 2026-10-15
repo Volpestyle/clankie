@@ -87,6 +87,12 @@ export interface CaptainOptions {
   readonly remoteOrigin?: RemoteOriginReader;
   /** How long an operator head stays held after a completed poll; defaults to 30s (VUH-2045). */
   readonly headBoundGraceMs?: number;
+  /**
+   * How long a routine worker report or completion waits for an idle native
+   * lead's next round (VUH-2274). The service passes `REPORT_ROUND_MS`;
+   * absent, each is delivered at once.
+   */
+  readonly reportRoundMs?: number;
   /** The fleet efficiency show/review answer deadline; defaults to 25s, under the CLI's 30s abort. */
   readonly fleetEfficiencyDeadlineMs?: number;
   /** First background reprobe of a linked fleet whose census failed; doubles to 30s. Defaults to 5s. */

@@ -220,7 +220,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       "stored",
     );
   };
-  const send = async (text) => {
+  const send = async (text, options) => {
     let record;
     let phase = "local";
     try {
@@ -287,7 +287,13 @@ export function createInboundSender({ directory, scope, request, onObservation, 
           // A redirect could follow an accepted original with another failed
           // connection. Never let fetch silently dispatch a second POST.
           redirect: "error",
-          body: JSON.stringify({ schemaVersion: 1, text, delivery: { id: record.deliveryId, binding } }),
+          body: JSON.stringify({
+            schemaVersion: 1,
+            text,
+            delivery: { id: record.deliveryId, binding },
+            // A delivery hint only: it is not part of the original's fingerprint (VUH-2274).
+            ...(options?.urgent === true ? { urgent: true } : {}),
+          }),
         });
       } catch (error) {
         if (!refusedConnection(error)) throw error;

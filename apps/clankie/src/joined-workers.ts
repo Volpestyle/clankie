@@ -21,7 +21,16 @@ const Hire = z.strictObject({
   model: z.string().min(1).max(128).optional(),
   effort: z.enum(["low", "medium", "high", "max"]).optional(),
 });
-const Message = z.strictObject({ text: z.string().min(1).max(16_384), deliveryId: z.uuid() });
+const Message = z.strictObject({
+  text: z.string().min(1).max(16_384),
+  deliveryId: z.uuid(),
+  urgent: z
+    .boolean()
+    .optional()
+    .describe(
+      "True when you are blocked, something failed, or you need a decision: your lead hears it at once. Otherwise it reaches an idle lead with its next round of reports.",
+    ),
+});
 const Status = z.strictObject({ deliveryId: z.uuid() });
 const reply = (body: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(body) }] });
 const tool = (name: string, description: string, schema: z.ZodType, call: LaneTool["call"]): LaneTool => ({
@@ -144,6 +153,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
                           conversationId: worker.binding.conversationId,
                           text: message.text,
                           deliveryId: message.deliveryId,
+                          ...(message.urgent === true ? { urgent: true } : {}),
                         },
                         {
                           owner: { conversationId: worker.binding.conversationId },
