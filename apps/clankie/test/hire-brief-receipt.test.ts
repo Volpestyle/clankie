@@ -109,6 +109,27 @@ test("a remote Codex hire is briefed and messaged through its fleet's own adapte
   };
   const store = new HerdrWatchStore(join(root, "watches.json"), {
     remoteWorkspace: async () => true,
+    workerAccountsReport: async () => ({
+      machine: "pc",
+      shell: "powershell",
+      observedAt: new Date().toISOString(),
+      accounts: [
+        {
+          harness: "codex",
+          label: "fixture",
+          home: "C:\\fixture",
+          signedIn: true,
+          usable: true,
+          plan: "pro",
+          headroom: 0.8,
+          usage: {
+            source: "codex-rate-limits",
+            observedAt: new Date().toISOString(),
+            windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+          },
+        },
+      ],
+    }),
     remoteSeatAdapters,
     runner,
   });
@@ -118,6 +139,8 @@ test("a remote Codex hire is briefed and messaged through its fleet's own adapte
         {
           schemaVersion: 1,
           harness: "codex",
+          effort: "low",
+          effortReason: "Check first-brief and follow-up delivery through the exact remote adapter.",
           title: "Remote",
           workingDirectory: "C:\\src\\app",
           fleet: "pc",

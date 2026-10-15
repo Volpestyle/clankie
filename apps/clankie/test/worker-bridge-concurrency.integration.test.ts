@@ -441,6 +441,27 @@ async function fixture(
   const store = new HerdrWatchStore(join(root, "watches.json"), {
     runner,
     codexAccounts: async () => [{ label: "fixture", home: root }],
+    workerAccountsReport: async () => ({
+      machine: "local",
+      shell: "posix",
+      observedAt: new Date().toISOString(),
+      accounts: [
+        {
+          harness: "codex",
+          label: "fixture",
+          home: root,
+          signedIn: true,
+          usable: true,
+          plan: "pro",
+          headroom: 0.8,
+          usage: {
+            source: "codex-rate-limits",
+            observedAt: new Date().toISOString(),
+            windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+          },
+        },
+      ],
+    }),
     seatAdapters: [adapter],
     fleetHireTools: () => worker.expectedFleetToolNames(),
     projectHirePolicy: {
@@ -480,6 +501,8 @@ async function fixture(
               title: `Concurrent worker ${i}`,
               role: "Engineer",
               deliverable: `VUH-fixture-${i}`,
+              effort: "low",
+              effortReason: "Read the assigned fixed tracker fixture through the connected bridge.",
             },
             undefined,
             "Read your assigned issue through Clankie's connected tracker.",

@@ -123,6 +123,8 @@ for (const scenario of scenarios) {
           schemaVersion: 1,
           harness: "pi",
           title: "Mira",
+          effort: "low",
+          effortReason: "Check a fixed hosted model selection before native preparation.",
           workingDirectory: dir,
           ...(scenario.requested === undefined ? {} : { model: scenario.requested }),
           ...(scenario.chrome ? { chrome: true } : {}),

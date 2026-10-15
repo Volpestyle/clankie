@@ -57,6 +57,27 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
   let nextWake: { entered: () => void; release: Promise<void> } | undefined;
   const watchPath = join(directory, "watches.json");
   const storeOptions = {
+    workerAccountsReport: async () => ({
+      machine: "local",
+      shell: "posix",
+      observedAt: new Date().toISOString(),
+      accounts: [
+        {
+          harness: "codex",
+          label: "protocol-fixture",
+          home: directory,
+          signedIn: true,
+          usable: true,
+          plan: "pro",
+          headroom: 0.8,
+          usage: {
+            source: "codex-rate-limits",
+            observedAt: new Date().toISOString(),
+            windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+          },
+        },
+      ],
+    }),
     seatAdapters: [adapter],
     remoteSeatAdapters: () => [adapter],
     summariesPath: join(directory, "summaries.json"),
@@ -146,7 +167,14 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
   };
   try {
     const hire = await store.spawnSeat(
-      { schemaVersion: 1, harness: "codex", title: "Protocol hire", workingDirectory: directory },
+      {
+        schemaVersion: 1,
+        harness: "codex",
+        title: "Protocol hire",
+        workingDirectory: directory,
+        effort: "low",
+        effortReason: "Exercise the fixed native protocol transcript and question routing.",
+      },
       undefined,
       "Initial brief",
       undefined,

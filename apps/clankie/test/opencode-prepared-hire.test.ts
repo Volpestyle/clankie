@@ -132,6 +132,7 @@ async function fixture() {
     role: "Engineer",
     model: "fixture/native",
     effort: "high" as const,
+    effortReason: "Verify the role-required native profile and launch proof at the process boundary.",
   };
   return {
     directory,

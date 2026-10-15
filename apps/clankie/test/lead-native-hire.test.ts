@@ -348,6 +348,27 @@ async function fixture() {
     seatAdapters: fleet.captainOptions.seatAdapters,
     nativeLaunchPolicy: fleet.captainOptions.nativeLaunchPolicy,
     codexAccounts: accounts,
+    workerAccountsReport: async () => ({
+      machine: "local",
+      shell: "posix",
+      observedAt: new Date().toISOString(),
+      accounts: [
+        {
+          harness: "codex",
+          label: "fixture",
+          home: accountHome,
+          signedIn: true,
+          usable: true,
+          plan: "pro",
+          headroom: 0.99,
+          usage: {
+            source: "codex-rate-limits",
+            observedAt: new Date().toISOString(),
+            windows: [{ id: "week", label: "Week", usedPercent: 1 }],
+          },
+        },
+      ],
+    }),
   });
   cleanup.push(() => store.close());
   return {
@@ -377,6 +398,7 @@ async function fixture() {
           account: "fixture",
           model,
           effort: "medium",
+          effortReason: "Verify the exact configured native profile and first-brief authority boundary.",
         },
         undefined,
         "Implement the fixture task",
