@@ -407,8 +407,8 @@ async function fixture(
     }),
     hire: async (request, brief, source) => {
       hires.push(request);
-      if (options.reload)
-        return watch.spawnSeat(
+      if (options.reload) {
+        const result = await watch.spawnSeat(
           request,
           undefined,
           brief,
@@ -421,6 +421,11 @@ async function fixture(
           },
           source,
         );
+        // The ordinary public hire boundary binds a persona after native launch.
+        return result.outcome === "spawned"
+          ? { ...result, seat: { ...result.seat, personaId: "pip" } }
+          : result;
+      }
       return hireResult();
     },
   };
