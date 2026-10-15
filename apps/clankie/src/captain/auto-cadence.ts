@@ -25,12 +25,12 @@ type Cadence = z.infer<typeof CadenceSchema>;
  */
 export class AutoRoundCadence {
   private readonly path: string;
-  constructor(
-    directory: string,
-    private readonly intervalMs: number,
-    private readonly history: () => readonly AutoRound[],
-  ) {
+  private readonly intervalMs: number;
+  private readonly history: () => readonly AutoRound[];
+  constructor(directory: string, intervalMs: number, history: () => readonly AutoRound[]) {
     this.path = join(directory, "cadence.json");
+    this.intervalMs = intervalMs;
+    this.history = history;
   }
 
   last(conversationId: string): z.infer<typeof LastRoundSchema> | undefined {
