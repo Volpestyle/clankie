@@ -171,9 +171,9 @@ it("retains exact saved retired preferences in a durable, idempotent migration r
       new SettingsStore(path),
     );
     const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
-    const snapshot = await fleetRoutes
-      .request("/v1/operator/fleet-settings?includeWorkPolicy=true", { headers })
-      .then((response) => response.json());
+    const snapshot = await (
+      await fleetRoutes.request("/v1/operator/fleet-settings?includeWorkPolicy=true", { headers })
+    ).json();
     expect(snapshot.retiredWorkingPreferences).toEqual(migrated.retiredWorkingPreferences);
     for (const changes of [
       { size: "large" },
@@ -189,9 +189,7 @@ it("retains exact saved retired preferences in a durable, idempotent migration r
       });
       expect(response.status).toBe(400);
     }
-    const hire = await fleetRoutes
-      .request("/v1/operator/fleet-settings/hire", { headers })
-      .then((response) => response.json());
+    const hire = await (await fleetRoutes.request("/v1/operator/fleet-settings/hire", { headers })).json();
     const refused = await fleetRoutes.request("/v1/operator/fleet-settings/hire", {
       method: "POST",
       headers,

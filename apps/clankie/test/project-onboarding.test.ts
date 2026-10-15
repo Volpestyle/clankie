@@ -134,7 +134,6 @@ it("proposal tool persists one immutable artifact; explicit create preserves cap
   const f = await fixture({
     workerCap: 0,
     roles: [{ role: "Builder", concurrencyCap: null, model: "gpt-6-astra", effort: "high" }],
-    fleet: { size: "large", models: "efficient" },
   });
   expect(f.update).not.toHaveBeenCalled();
   expect(f.initial.status).toBe("pending");
@@ -148,10 +147,7 @@ it("proposal tool persists one immutable artifact; explicit create preserves cap
   expect(await f.read(fresh)).toEqual(result);
   expect(await f.confirm({}, fresh)).toEqual(result);
   expect(f.update).toHaveBeenCalledTimes(1);
-  expect((await f.settings.load()).projects.projects[0]!.fleet).toEqual({
-    size: "large",
-    models: "efficient",
-  });
+  expect((await f.settings.load()).projects.projects[0]!.fleet).toBeUndefined();
 });
 
 it.each([
@@ -171,7 +167,6 @@ it.each([
       trackerSetup,
       trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
       roles: [{ role: "researcher", concurrencyCap: 0 }],
-      fleet: { size: "solo" },
     });
     const path = join(f.workspace, ".clankie/tracking.json");
     expect(fs.existsSync(path)).toBe(false);
@@ -191,7 +186,6 @@ it.each([
     expect(project).toMatchObject({
       trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
       roles: [{ role: "researcher", concurrencyCap: 0 }],
-      fleet: { size: "solo" },
     });
     expect((await f.confirm()).status).toBe("created");
     expect(fs.readFileSync(path, "utf8")).toBe(saved);
