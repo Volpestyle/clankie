@@ -35,9 +35,65 @@ import { createClankieApp } from "../../clankie/src/app.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { text } from "node:stream/consumers";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const roots: string[] = [];
-afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+/**
+ * Cases that start detached launcher services from a temp root. A timeout or
+ * failure skips their own cleanup, and the orphans look like Clankie's services
+ * to every real launcher on the Mac: on 2026-10-15 they blocked two deploys and
+ * `clankie start` (VUH-2293, VUH-2295). After a case, refuse its further launcher
+ * calls and reap everything running from its root until it settles.
+ */
+const launcherCases = new Set<{ abandoned: boolean; settled: Promise<unknown> }>();
+/** Kills everything running from `root`; how many it found, or -1 when the process table was unreadable. */
+function killRoot(root: string): number {
+  let table: string;
+  try {
+    // A loaded Mac's table passes execFileSync's 1 MB default; a short read must not look empty.
+    table = execFileSync("ps", ["-Ao", "pid=,command="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  } catch {
+    return -1;
+  }
+  const running = table
+    .split("\n")
+    .map((line) => /^\s*(\d+)\s+(.*)$/u.exec(line))
+    .filter((match) => match !== null && Number(match[1]) !== process.pid && match[2]!.includes(`${root}/`))
+    .map((match) => Number(match![1]));
+  for (const pid of running) {
+    for (const target of [-pid, pid]) {
+      try {
+        process.kill(target, "SIGKILL");
+      } catch {
+        // Not a group leader, or already gone.
+      }
+    }
+  }
+  return running.length;
+}
+afterEach(async () => {
+  for (const run of launcherCases) run.abandoned = true;
+  let settled = false;
+  const cases = Promise.allSettled([...launcherCases].map((run) => run.settled)).then(() => {
+    settled = true;
+  });
+  // Keep the roots until every case settles, so a late spawn finds them and is reaped.
+  while (!settled) {
+    roots.forEach(killRoot);
+    await Promise.race([cases, sleep(200)]);
+  }
+  launcherCases.clear();
+  for (const root of roots.splice(0)) {
+    const deadline = Date.now() + 10_000;
+    let found = killRoot(root);
+    while (found !== 0 && Date.now() < deadline) {
+      await sleep(100);
+      found = killRoot(root);
+    }
+    rmSync(root, { recursive: true, force: true });
+    if (found !== 0) throw new Error(`Could not reap the processes running from ${root}`);
+  }
+}, 120_000);
 const authority = {
   guard: async () => {},
   current: () => true,
@@ -347,7 +403,9 @@ it("cuts over isolated launcher services while a real unowned activity tunnel su
     stderr: { write() {} },
     listProcessCommandsImpl: () => listProcessCommands().filter(([, command]) => command.includes(root)),
   };
+  const run = { abandoned: false, settled: Promise.resolve() as Promise<unknown> };
   const cli = async (_runtime: string, args: readonly string[]) => {
+    if (run.abandoned) throw new Error("Cutover case abandoned");
     if (args[0] === "update")
       return {
         runtime: {
@@ -370,31 +428,44 @@ it("cuts over isolated launcher services while a real unowned activity tunnel su
     else await runRestartCommand(args.slice(1), commandOptions);
     return JSON.parse(output);
   };
-  try {
-    expect((await inspectService(managedService("tunnel"), options)).owned).toBe(false);
-    expect(await stopTarget("tunnel", options)).toMatchObject([
-      { id: "tunnel", ok: false, error: expect.stringContaining("was not started by the clankie launcher") },
-    ]);
-    expect((await runtimeUpdateServices(root, "down", cli, env)).ok).toBe(true);
-    const result = await runtimeUpdateServices(root, "restart", cli, env);
-    expect(result.ok).toBe(true);
-    expect(result.services.map((entry) => entry.id)).not.toContain("tunnel");
-    expect((await runtimeUpdateServices(root, "down", cli, env)).ok).toBe(true);
-    env.CLANKIE_SERVICES = "clankie,relay";
-    const limited = await runtimeUpdateServices(root, "restart", cli, env);
-    expect(limited.ok).toBe(true);
-    expect(limited.services.map((entry) => entry.id)).toEqual(["clankie", "relay"]);
-    expect((await runtimeUpdateServices(root, "down", cli, env)).ok).toBe(true);
-    expect(tunnel.exitCode).toBeNull();
-    process.kill(tunnel.pid!, 0);
-  } finally {
-    await stopTarget("activity", options);
-    await stopTarget("relay", options);
-    await stopTarget("discord-bridge", options);
-    await stopTarget("clankie", options);
-    tunnel.kill("SIGTERM");
-    await new Promise<void>((resolve) => tunnel.once("exit", () => resolve()));
-  }
+  const body = async () => {
+    try {
+      expect((await inspectService(managedService("tunnel"), options)).owned).toBe(false);
+      expect(await stopTarget("tunnel", options)).toMatchObject([
+        {
+          id: "tunnel",
+          ok: false,
+          error: expect.stringContaining("was not started by the clankie launcher"),
+        },
+      ]);
+      expect((await runtimeUpdateServices(root, "down", cli, env)).ok).toBe(true);
+      const result = await runtimeUpdateServices(root, "restart", cli, env);
+      expect(result.ok).toBe(true);
+      expect(result.services.map((entry) => entry.id)).not.toContain("tunnel");
+      expect((await runtimeUpdateServices(root, "down", cli, env)).ok).toBe(true);
+      env.CLANKIE_SERVICES = "clankie,relay";
+      const limited = await runtimeUpdateServices(root, "restart", cli, env);
+      expect(limited.ok).toBe(true);
+      expect(limited.services.map((entry) => entry.id)).toEqual(["clankie", "relay"]);
+      expect((await runtimeUpdateServices(root, "down", cli, env)).ok).toBe(true);
+      expect(tunnel.exitCode).toBeNull();
+      process.kill(tunnel.pid!, 0);
+    } finally {
+      await stopTarget("activity", options);
+      await stopTarget("relay", options);
+      await stopTarget("discord-bridge", options);
+      await stopTarget("clankie", options);
+      // The reaper may already have ended it.
+      if (tunnel.exitCode === null && tunnel.signalCode === null) {
+        const exited = new Promise<void>((resolve) => tunnel.once("exit", () => resolve()));
+        tunnel.kill("SIGTERM");
+        await exited;
+      }
+    }
+  };
+  run.settled = body();
+  launcherCases.add(run);
+  await run.settled;
 }, 30_000);
 
 it("an uncertain ending retires itself once its helper finished and this service runs the clean pin", async () => {
