@@ -4741,6 +4741,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (!rounds.get(authority.owner.conversationId)?.some((project) => project.id === input.projectId))
       throw new Error("Auto project is not owned by this lead conversation");
     await assertConversationAuthority(authority);
+    shutdown.signal.throwIfAborted();
     return autoRoundRecord.recordCorrection(authority.owner.conversationId, input);
   }
   const autoRoundIntervalMs = options.autoRoundIntervalMs ?? options.fleetRoundIntervalMs ?? 30 * 60_000;
@@ -4786,6 +4787,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       .refresh((await settings()).projects.projects)
       .catch((error: unknown) => console.warn("Project mirrors unavailable", String(error)));
     const rounds = await readAutoRounds();
+    if (shutdown.signal.aborted) return;
     autoCadence.retain(new Set(rounds.keys()));
     // Velocity and drift (ADR 0270): measured every tick, so new drift changes the fingerprint.
     await measureAutoProjects(new Set([...rounds.values()].flat().map((state) => state.id)));
