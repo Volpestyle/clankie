@@ -338,7 +338,14 @@ async function fixture(
           validateOwner: async () => true,
           remoteWorkspace: async (fleet: string, directory: string) =>
             fleet === "pc" && directory === options.cwd,
-          nativeLaunchPolicy: { admit: async () => {}, prepare: async () => ({ args: [], env: {} }) },
+          nativeLaunchPolicy: {
+            admit: async () => {},
+            prepare: async () => ({
+              account: { label: "fixture", home: root },
+              args: [],
+              env: { CODEX_HOME: root },
+            }),
+          },
         }
       : {}),
     ...(options.projectHire
