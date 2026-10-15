@@ -1673,6 +1673,13 @@ export type ConversationQuestionAnswer = z.infer<typeof ConversationQuestionAnsw
 const QuestionResolutionActorSchema = z
   .object({ kind: z.enum(["operator", "device", "service"]), id: z.string().min(1).max(256) })
   .strict();
+/** Decision defaults are instructions to the lead, never owner answers or gate authority. */
+export const ConversationDecisionPolicySchema = z
+  .object({
+    defaultAction: z.string().trim().min(1).max(1900),
+    deadlineAt: z.string().datetime(),
+  })
+  .strict();
 export const ConversationQuestionSchema = z
   .object({
     requestId: z.string().uuid(),

@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   MailIssueReferenceSchema,
   ConversationQuestionSchema,
+  ConversationDecisionPolicySchema,
   ConversationQuestionAnswerSchema,
   type ConversationQuestion,
   type ConversationQuestionAnswer,
@@ -17,6 +18,9 @@ import {
   observeLocalProjectGitWorktree,
 } from "@clankie/settings";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
+
+export const SAFE_DECISION_DEFAULT =
+  "Leave the requested change pending and continue other authorized work; do not cross any owner gate.";
 
 /** Host-only. An eligible owner on this service may answer another owner's question. */
 export interface QuestionAuthority {
@@ -36,6 +40,8 @@ export const QuestionDraftSchema = z
       .default("preference"),
     issue: MailIssueReferenceSchema.optional(),
     recommendation: z.string().trim().min(1).max(2000).optional(),
+    defaultAction: ConversationDecisionPolicySchema.shape.defaultAction.optional(),
+    deadlineAt: ConversationDecisionPolicySchema.shape.deadlineAt.optional(),
     waitingOn: z.string().trim().min(1).max(2000).optional(),
     steps: z.array(z.string().trim().min(1).max(2000)).min(1).max(20).optional(),
     gate: z.string().trim().min(1).max(200).optional(),
@@ -59,6 +65,10 @@ export const QuestionDraftSchema = z
   })
   .strict()
   .superRefine((v, ctx) => {
+    if ((v.defaultAction === undefined) !== (v.deadlineAt === undefined))
+      ctx.addIssue({ code: "custom", message: "Default action and deadline must be supplied together" });
+    if (v.defaultAction !== undefined && (v.purpose !== "decision" || v.workerQuestion || v.gate))
+      ctx.addIssue({ code: "custom", message: "Only a lead decision without an owner gate can default" });
     if ((v.kind === "text" && v.options.length !== 0) || (v.kind === "choice" && v.options.length < 2))
       ctx.addIssue({ code: "custom", message: "Text has no options; choice needs 2–8 options" });
     if (v.purpose !== "preference" && !v.waitingOn)
@@ -97,6 +107,7 @@ export function sameQuestionWorkspace(path: string, binding: QuestionWorkspace):
 const RecordSchema = z
   .object({
     question: ConversationQuestionSchema,
+    decisionPolicy: ConversationDecisionPolicySchema.optional(),
     projectCreation: ProjectCreationSchema.optional(),
     issuer: z
       .object({ kind: z.enum(["operator", "device"]), id: z.string().min(1).max(256) })
@@ -122,6 +133,16 @@ const RecordSchema = z
   .superRefine((r, ctx) => {
     const q = r.question;
     const artifact = r.projectCreation?.immutable;
+    if (
+      r.decisionPolicy &&
+      (q.purpose !== "decision" ||
+        q.workerQuestion ||
+        q.gate ||
+        r.projectCreation ||
+        q.steps?.at(-2) !== `Default if unanswered: ${r.decisionPolicy.defaultAction}` ||
+        q.steps?.at(-1) !== `Deadline: ${r.decisionPolicy.deadlineAt}`)
+    )
+      ctx.addIssue({ code: "custom", message: "Decision default lost its immutable ask binding" });
     if (
       artifact &&
       (artifact.requestId !== q.requestId ||

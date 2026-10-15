@@ -284,6 +284,7 @@ export {
   ConversationQuestionAnswerSchema,
   type ConversationQuestionAnswer,
   ConversationQuestionSchema,
+  ConversationDecisionPolicySchema,
   type ConversationQuestion,
   ConversationQuestionTargetSchema,
   type ConversationQuestionTarget,

@@ -73,6 +73,7 @@ import {
   answerTranscript,
   newQuestionState,
   QuestionStateSchema,
+  SAFE_DECISION_DEFAULT,
   questionWorkspace,
   type QuestionAuthority,
   type QuestionDraft,
@@ -185,6 +186,7 @@ import {
   proposeProjectDefaults,
   publishQuestionResolution,
   questionOperation,
+  expireDecisionQuestions,
   questionResult,
   requestQuestion,
   saveQuestionMeta,
@@ -298,6 +300,8 @@ export class ConversationStore {
    */
   private readonly durableMessageListeners = new Set<(notice: DurableMessageNotice) => void>();
   private readonly questionResolutionListeners = new Set<(question: ConversationQuestion) => void>();
+  private decisionDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  private decisionDeadlinesClosed = false;
   /** Live owner-facing activity only; never rebuilt by scanning retained transcripts. */
   private recentPresenceMessage: number | undefined;
   private recentPresenceError: { conversationId: string; at: number } | undefined;
@@ -559,6 +563,23 @@ export class ConversationStore {
             const cancelledQuestions: QuestionRecord[] = [];
             for (const record of meta.questions.records) {
               const q = record.question;
+              if (
+                q.status === "pending" &&
+                q.purpose === "decision" &&
+                !q.workerQuestion &&
+                !q.gate &&
+                !record.decisionPolicy
+              ) {
+                record.decisionPolicy = {
+                  defaultAction: SAFE_DECISION_DEFAULT,
+                  deadlineAt: new Date(Date.parse(q.createdAt) + 24 * 60 * 60 * 1000).toISOString(),
+                };
+                q.steps = [
+                  ...(q.steps ?? []),
+                  `Default if unanswered: ${record.decisionPolicy.defaultAction}`,
+                  `Deadline: ${record.decisionPolicy.deadlineAt}`,
+                ];
+              }
               if (q.status === "pending" && (record.projectCreation || q.purpose === "preference")) {
                 q.status = "cancelled";
                 q.resolvedAt = new Date().toISOString();
@@ -610,6 +631,37 @@ export class ConversationStore {
         this.freshLinearEvents(meta.conversationId).length
       )
         this.queueLinearActivity(meta.conversationId);
+    this.scheduleDecisionDeadlines();
+  }
+
+  private scheduleDecisionDeadlines(minimumDelay = 0): void {
+    if (this.decisionDeadlineTimer) clearTimeout(this.decisionDeadlineTimer);
+    this.decisionDeadlineTimer = undefined;
+    if (this.decisionDeadlinesClosed) return;
+    const deadlines = [...this.metas.values()].flatMap((meta) =>
+      this.corruptQuestions.has(meta.conversationId)
+        ? []
+        : (meta.questions?.records ?? []).flatMap((record) =>
+            record.decisionPolicy && record.question.status === "pending" && !record.persistenceUncertain
+              ? [Date.parse(record.decisionPolicy.deadlineAt)]
+              : [],
+          ),
+    );
+    if (!deadlines.length) return;
+    this.decisionDeadlineTimer = setTimeout(
+      () => {
+        this.decisionDeadlineTimer = undefined;
+        try {
+          expireDecisionQuestions(this);
+        } catch {
+          // Retain the pending ask when durable mail or acceptance cannot commit.
+          // Reads expose that failure; the timer retries without a tight loop.
+        }
+        this.scheduleDecisionDeadlines(1000);
+      },
+      Math.max(minimumDelay, Math.min(2_147_483_647, Math.min(...deadlines) - Date.now())),
+    );
+    this.decisionDeadlineTimer.unref();
   }
 
   private loadLinearEventReceipts(): void {
@@ -733,6 +785,7 @@ export class ConversationStore {
       }
       case "input_list": {
         await authorizeQuestion(authority);
+        expireDecisionQuestions(this, request.conversationId);
         for (const meta of this.metas.values()) {
           if (request.conversationId && request.conversationId !== meta.conversationId) continue;
           this.validQuestionState(meta);
@@ -2010,6 +2063,8 @@ export class ConversationStore {
   }
 
   public async close(): Promise<void> {
+    this.decisionDeadlinesClosed = true;
+    if (this.decisionDeadlineTimer) clearTimeout(this.decisionDeadlineTimer);
     for (const conversationId of this.reportRounds.keys()) this.releaseReportRound(conversationId);
     await this.nativeMessages?.close();
     this.tailShutdown.abort(new DOMException("Conversation tails are closed", "AbortError"));
@@ -2753,6 +2808,7 @@ export class ConversationStore {
         readonly answer: ConversationQuestionAnswer;
         readonly authority: QuestionAuthority;
       };
+      questionDefault?: QuestionRecord;
       delivery?: SubmitOperatorConversationTurn["delivery"];
       inboundReceipt?: InboundReceiptInput;
     } = {},
@@ -2761,7 +2817,8 @@ export class ConversationStore {
       throw new Error("project_confirmation_consumed");
     const workspace = workspaceOf(meta.scope);
     const safeCursor = this.lastCursor(meta);
-    const questionBefore = provenance.questionAnswer ? structuredClone(meta) : undefined;
+    const questionBefore =
+      provenance.questionAnswer || provenance.questionDefault ? structuredClone(meta) : undefined;
     meta.revision += 1;
     meta.sessionState = "active";
     meta.updatedAt = new Date().toISOString();
@@ -2778,6 +2835,16 @@ export class ConversationStore {
       };
       record.responder = { ...authority.principal };
       record.message = message;
+    }
+    if (provenance.questionDefault) {
+      provenance.questionDefault.question = {
+        ...provenance.questionDefault.question,
+        status: "cancelled",
+        resolvedAt: new Date().toISOString(),
+        resolvedBy: { kind: "service", id: "clankie" },
+        reason: "decision_deadline_elapsed",
+        continuation: { runId, state: "accepted" },
+      };
     }
     const previousAcceptances = meta.inboundAcceptances;
     if (provenance.inboundReceipt) {
@@ -2802,7 +2869,7 @@ export class ConversationStore {
       };
     }
     try {
-      if (provenance.questionAnswer) this.saveQuestionMeta(meta);
+      if (provenance.questionAnswer || provenance.questionDefault) this.saveQuestionMeta(meta);
       else this.saveMeta(meta);
     } catch (error) {
       if (questionBefore && !(error instanceof QuestionCommitError && error.committed)) {
@@ -2814,6 +2881,7 @@ export class ConversationStore {
     }
     if (provenance.inboundReceipt) this.notifyInboundReportChange();
     if (provenance.questionAnswer) this.publishQuestionResolution(meta, provenance.questionAnswer.record);
+    if (provenance.questionDefault) this.publishQuestionResolution(meta, provenance.questionDefault);
     if (publishOperatorMessage) {
       this.append(meta, {
         type: "message",
