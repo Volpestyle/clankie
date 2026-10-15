@@ -133,6 +133,7 @@ import {
 } from "./auto-projects.ts";
 import { ProjectMirrors } from "./project-mirrors.ts";
 import { AutoRoundRecord } from "./auto-rounds.ts";
+import { milestoneSignals, reportingSection } from "./auto-reporting.ts";
 import { measureVelocityWithin, velocityLine, type VelocityDeps } from "./auto-velocity.ts";
 import { driftSection, driftSignals, withDrift } from "./auto-drift.ts";
 import type { ProjectVelocity } from "@clankie/protocol/auto-rounds";
@@ -4738,12 +4739,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             autoRoundRecord.lastMilestone(project.id),
             velocityDeps,
           );
-          autoMeasurements.set(project.id, withDrift(velocity, autoRoundRecord.pendingDrift(project.id)));
+          autoRoundRecord.observeUpdates(velocity);
+          autoMeasurements.set(
+            project.id,
+            autoRoundRecord.withReporting(withDrift(velocity, autoRoundRecord.pendingDrift(project.id))),
+          );
         }),
     );
   };
   const autoFingerprint = (states: readonly AutoProjectState[]) =>
-    autoRoundFingerprint(states, (id) => driftSignals(autoMeasurements.get(id)));
+    autoRoundFingerprint(
+      states,
+      (id) => driftSignals(autoMeasurements.get(id)),
+      (id) => milestoneSignals(autoMeasurements.get(id)),
+    );
   const stopAutoRounds = startFleetRounds(async () => {
     if (shutdown.signal.aborted || !autonomy.enabled) return;
     await projectMirrors
@@ -4762,26 +4771,36 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         continue;
       pendingAutoRounds.add(conversationId);
       let roundId: string | undefined;
+      let passedDeliveryGuard = false;
       void (async () => {
         const velocities = states.flatMap((state) => {
           const velocity = autoMeasurements.get(state.id);
-          return velocity === undefined ? [] : [velocity];
+          return velocity === undefined ? [] : [autoRoundRecord.withReporting(velocity)];
         });
         try {
           roundId = autoRoundRecord.measured(conversationId, velocities);
         } catch (error) {
           console.warn("Auto round record unavailable", conversationId, String(error));
+          // A milestone request must be durably claimed before it can be dispatched.
+          throw error;
         }
         const report = await readWorkerAccounts(undefined, ["claude", "codex"]);
         const capacity = accountCapacityLines(report);
         return wakeConversation(
           { conversationId },
-          autoRoundPrompt(states, velocities.map(velocityLine), driftSection(velocities), capacity),
+          autoRoundPrompt(
+            states,
+            velocities.map(velocityLine),
+            driftSection(velocities),
+            capacity,
+            reportingSection(velocities),
+          ),
           async () => {
             if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
             const current = (await readAutoRounds()).get(conversationId);
             if (!current || autoFingerprint(current) !== fingerprint)
               throw new Error("Projects on Auto changed before delivery");
+            passedDeliveryGuard = true;
           },
           "machine",
           true,
@@ -4794,7 +4813,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           else console.warn("Auto round was not delivered", conversationId);
         })
         .catch((error: unknown) => {
-          settleAutoRound(roundId, false, String(error));
+          // Once dispatch could have begun, an exception proves no refusal. Keep the
+          // journal claim unsettled across restart instead of asking for a second post.
+          if (!passedDeliveryGuard) settleAutoRound(roundId, false, String(error));
           if (!shutdown.signal.aborted) console.warn("Auto round unavailable", conversationId, String(error));
         })
         .finally(() => pendingAutoRounds.delete(conversationId));

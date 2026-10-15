@@ -403,6 +403,19 @@ should have happened; `failed` and `interrupted` runs are yours to follow up.
 Where each kind of state lives is the handoff protocol in `work-items`; fleet-wide
 state is a project status update, never a lead-only file. Sizing records, Linear mapping and cutovers: [trackers](reference/trackers.md).
 
+## Auto milestone reports
+
+On an Auto round, follow the service's project status-update section. A newly
+completed parent issue or declared tracker milestone asks for exactly one project
+update with media and evidence links; cover milestones found together in that one
+post. Read the previous update, show useful media, and link completed issues and
+their retained evidence. Routine rounds request no project update. Keep routine
+progress on the issue rather than publishing a round summary. Reconcile uncertain
+status-update writes; a missing reply never authorizes another post. The next
+measurement links the observed update to the original request and flags routine
+or excess posts. A service restart preserves the request; an unsettled round is
+not permission to repeat it. The round record is readable with `clankie auto rounds`.
+
 ## Preserve ownership and live work
 
 - Give writers owned worktrees where the repo requires them; in a shared

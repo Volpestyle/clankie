@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { ProjectSchema } from "@clankie/protocol/projects";
-import { createLocalTracker, TRACKER_LEAD, TRACKER_OWNER, type TrackerActor } from "@clankie/work-items";
+import {
+  collectLinearOutcomes,
+  createLocalTracker,
+  TRACKER_LEAD,
+  TRACKER_OWNER,
+  type TrackerActor,
+} from "@clankie/work-items";
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
@@ -12,6 +18,7 @@ import { afterEach, expect, it } from "vitest";
 import { runConversationsCommand } from "../../tui/src/command/conversations.ts";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
+import { milestoneSignals, reportingSection } from "../src/captain/auto-reporting.ts";
 import { AutoRoundRecord } from "../src/captain/auto-rounds.ts";
 import {
   autoRoundFingerprint,
@@ -152,7 +159,7 @@ async function measuredProject() {
     churn: readRepositoryChurn,
     timeZone: "America/Chicago",
   };
-  return { project, deps, routes, parent, product, rig, quiet, commit, git };
+  return { project, deps, routes, parent, product, rig, quiet, commit, git, call, at, trackerProject };
 }
 
 it("measures a project's velocity from its built-in tracker and origin, and keeps the round record", async () => {
@@ -395,4 +402,166 @@ it("uses declared product paths for both churn and closure classification", asyn
     state: "known",
     lines: { product: 30, tooling: 15, docs: 4, excluded: 0 },
   });
+});
+
+it("requests one milestone post, links the real tracker update after restart, and flags routine extras", async () => {
+  const { project, deps, call, at, trackerProject, parent } = await measuredProject();
+  const directory = join(roots.at(-1)!, "reporting");
+  let record = new AutoRoundRecord(directory);
+  const now = new Date("2026-10-14T03:00:00.000Z");
+  const velocity = await measureVelocity(project, null, deps, now);
+  const first = record.withReporting(velocity);
+  expect(first.report!.milestones).toMatchObject([{ kind: "parent", ref: parent.identifier }]);
+  expect(reportingSection([first]).join("\n")).toContain("Post exactly one project status update");
+  expect(reportingSection([first]).join("\n")).toContain("with media and evidence links");
+  const roundId = record.measured("lead", [first], now);
+  record.settled(roundId, true, undefined, now);
+  record = new AutoRoundRecord(directory);
+  const routine = record.withReporting(
+    await measureVelocity(project, record.lastMilestone(project.id), deps, new Date("2026-10-14T04:00:00Z")),
+  );
+  expect(routine.report!.milestones).toEqual([]);
+  expect(reportingSection([routine]).join("\n")).toContain("Do not post a project status update");
+  const routineId = record.measured("lead", [routine], new Date("2026-10-14T04:00:00Z"));
+  record.settled(routineId, true);
+  const update = (await at("2026-10-14T04:01:00Z", () =>
+    call("save_status_update", {
+      type: "project",
+      project: trackerProject.id,
+      body: "Playable route milestone. ![route](https://example.invalid/route.png) [Evidence](clankie://evidence/sha256/fixture)",
+    }),
+  )) as { id: string };
+  const extra = (await at("2026-10-14T04:02:00Z", () =>
+    call("save_status_update", {
+      type: "project",
+      project: trackerProject.id,
+      body: "Unrequested routine update",
+    }),
+  )) as { id: string };
+  const after = await measureVelocity(
+    project,
+    record.lastMilestone(project.id),
+    deps,
+    new Date("2026-10-14T05:00:00Z"),
+  );
+  record.observeUpdates(after);
+  record = new AutoRoundRecord(directory);
+  record.observeUpdates(after); // A restart and a repeated snapshot do not append duplicates.
+  const rounds = AutoRoundsResponseSchema.parse({ schemaVersion: 1, rounds: record.read() }).rounds;
+  expect(rounds.find((round) => round.roundId === roundId)!.projects[0]!.report!.updates).toMatchObject([
+    { id: update.id, unexpected: false },
+  ]);
+  expect(rounds.find((round) => round.roundId === routineId)!.projects[0]!.report!.updates).toMatchObject([
+    { id: extra.id, unexpected: true },
+  ]);
+  expect(record.withReporting(after).report!.milestones).toEqual([]);
+  expect(after.window.since).toBe(first.lastMilestone!.at);
+});
+
+it("retries a definite refusal, but never repeats a milestone request left unsettled by a restart", async () => {
+  const { project, deps, at, call } = await measuredProject();
+  const directory = join(roots.at(-1)!, "reporting");
+  let record = new AutoRoundRecord(directory);
+  const velocity = await measureVelocity(project, null, deps, new Date("2026-10-14T03:00:00Z"));
+  const first = record.withReporting(velocity);
+  record.settled(record.measured("lead", [first]), false, "not delivered");
+  record = new AutoRoundRecord(directory);
+  expect(record.withReporting(velocity).report!.milestones).toHaveLength(1);
+  record.measured("lead", [record.withReporting(velocity)]); // Stopped between claim and wake settlement.
+  record = new AutoRoundRecord(directory);
+  expect(record.withReporting(velocity).report!.milestones).toEqual([]);
+  const rebound = { ...velocity, tracker: { kind: "built-in" as const, projectId: "other-tracker" } };
+  expect(record.withReporting(rebound).report!.milestones).toHaveLength(1);
+  // Milestone identity, rather than its name or completion timestamp, is claimed.
+  const renamed = {
+    ...velocity,
+    milestones: velocity.milestones.map((entry) => ({
+      ...entry,
+      ref: "Renamed",
+      at: "2026-10-15T00:00:00Z",
+    })),
+  };
+  expect(record.withReporting(renamed).report!.milestones).toEqual([]);
+  const other = (await at("2026-10-14T04:00:00Z", () =>
+    call("save_project", { name: "Rebound", addTeams: ["LOCAL"] }),
+  )) as { id: string };
+  const newSource = { ...project, trackerProjectId: other.id };
+  const reboundVelocity = record.withReporting(
+    await measureVelocity(newSource, null, deps, new Date("2026-10-14T04:01:00Z")),
+  );
+  const routineId = record.measured("lead", [reboundVelocity], new Date("2026-10-14T04:01:00Z"));
+  record.settled(routineId, true);
+  const update = (await at("2026-10-14T04:02:00Z", () =>
+    call("save_status_update", { type: "project", project: other.id, body: "Routine post on new tracker" }),
+  )) as { id: string };
+  record.observeUpdates(await measureVelocity(newSource, null, deps, new Date("2026-10-14T05:00:00Z")));
+  expect(
+    record.read().find((round) => round.roundId === routineId)!.projects[0]!.report!.updates,
+  ).toMatchObject([{ id: update.id, unexpected: true }]);
+});
+
+it("replays KH2 Shared world as one due post despite its 16-issue cleanup batch", async () => {
+  const fixture = JSON.parse(
+    await readFile(
+      new URL("../../../packages/work-items/test/fixtures/outcomes/kh2-multiplayer.json", import.meta.url),
+      "utf8",
+    ),
+  ) as {
+    calls: { query: string; variables: Record<string, unknown>; data: Record<string, unknown> }[];
+  };
+  const outcomes = await collectLinearOutcomes({
+    projectId: "b701962e-89aa-4685-a574-ebda25706d64",
+    query: async (query, variables) => {
+      const call = fixture.calls.find(
+        (entry) => entry.query === query && JSON.stringify(entry.variables) === JSON.stringify(variables),
+      );
+      if (!call) throw new Error("Unrecorded KH2 query");
+      return call.data;
+    },
+    window: { since: "2026-10-06T05:00:00.000Z", until: "2026-10-15T05:00:00.000Z" },
+    history: true,
+    now: () => new Date("2026-10-15T02:50:00Z"),
+  });
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kh2-reporting-")));
+  roots.push(root);
+  const record = new AutoRoundRecord(root);
+  const velocity = await measureVelocity(
+    ProjectSchema.parse({ id: "kh2", name: "KH2", auto: true, workspaces: [] }),
+    null,
+    {
+      outcomes: async () => ({ state: "read", outcomes }),
+      history: async () => ({ state: "unknown", reason: "tracker-only replay" }),
+      churn: readRepositoryChurn,
+    },
+    new Date("2026-10-15T05:00:00Z"),
+  );
+  const report = record.withReporting(velocity);
+  expect(outcomes.closed.filter((issue) => issue.completedAt! >= "2026-10-14T05:00:00.000Z")).toHaveLength(
+    16,
+  );
+  expect(report.report!.milestones).toMatchObject([
+    { kind: "milestone", ref: "Shared world", at: "2026-10-15T01:44:38.451Z" },
+  ]);
+  record.settled(record.measured("lead", [report]), true);
+  expect(new AutoRoundRecord(root).withReporting(velocity).report!.milestones).toEqual([]);
+  // More than one newly complete milestone in a round still earns one combined post.
+  const batch = record.withReporting({
+    ...velocity,
+    milestones: [
+      { kind: "parent", ref: "VUH-new-parent", at: "2026-10-15T04:00:00Z" },
+      { kind: "milestone", ref: "New world", id: "new-world", at: "2026-10-15T04:00:00Z" },
+    ],
+  });
+  expect(batch.report!.milestones).toHaveLength(2);
+  expect(
+    reportingSection([batch])
+      .join("\n")
+      .match(/Post exactly one/g),
+  ).toHaveLength(1);
+  const state: AutoProjectState = { id: "kh2", name: "KH2", workers: 0 };
+  expect(autoRoundFingerprint([state], undefined, () => milestoneSignals(report))).not.toBe(
+    autoRoundFingerprint([state]),
+  );
+  // Claiming a post changes no milestone fingerprint, so it does not cause an extra wake.
+  expect(milestoneSignals(record.withReporting(velocity))).toEqual(milestoneSignals(report));
 });

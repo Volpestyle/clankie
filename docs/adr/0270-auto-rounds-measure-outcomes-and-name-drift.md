@@ -204,3 +204,22 @@ Lead decisions for VUH-2284:
   `carried`, alongside what they detect.
 - **Status line by capability.** The projects status line shows signals only to
   clients that advertise support, so released app builds keep parsing it.
+
+## Amendment: milestone reporting claims (VUH-2286, 2026-10-15)
+
+- A round combines every newly seen milestone for one project into one update
+  request. Native tracker ids identify milestones across renames and reopen/close
+  cycles; completion dates still define velocity windows. Historical measurements
+  without reporting fields did not request posts and therefore claim nothing.
+- The append-only measurement claims the request before dispatch. A definite
+  refusal permits another attempt; a wake left uncertain or interrupted after its
+  delivery guard stays claimed across restart, avoiding a duplicate ask. Such a
+  round stays visibly unsettled; there is no automatic resend on uncertainty.
+- Each measured tick reconciles tracker status updates, including ticks without a
+  wake. The first subsequent update satisfies an outstanding request; further or
+  routine updates are flagged. A delayed update can satisfy its original request
+  after routine rounds. Attribution uses the same tracker identity and creation
+  time, and does not prove who authored it or inspect its media/evidence body.
+- Milestone identities, rather than request state or counts, join the fingerprint.
+  Recording a claim therefore causes no extra wake. Routine rounds ask for no
+  project post. VUH-2256's cadence preference remains a future integration.

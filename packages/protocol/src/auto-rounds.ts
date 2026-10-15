@@ -13,7 +13,12 @@ const ChurnLinesSchema = z
   })
   .strict();
 export const VelocityMilestoneSchema = z
-  .object({ kind: z.enum(["parent", "milestone"]), ref: z.string(), at: z.string() })
+  .object({
+    kind: z.enum(["parent", "milestone"]),
+    ref: z.string(),
+    at: z.string(),
+    id: z.string().optional(),
+  })
   .strict();
 const VelocityDaySchema = z
   .object({
@@ -45,10 +50,31 @@ export const DriftDetectionSchema = z
   .strict();
 export type DriftDetection = z.infer<typeof DriftDetectionSchema>;
 
+const ProjectStatusUpdateSchema = z
+  .object({
+    id: z.string(),
+    createdAt: z.string(),
+    url: z.string().nullable(),
+    health: z.string().nullable(),
+  })
+  .strict();
+export const MilestoneReportSchema = z
+  .object({
+    /** Exactly one update is requested for these newly seen milestones together. */
+    milestones: z.array(VelocityMilestoneSchema),
+    updates: z.array(ProjectStatusUpdateSchema.extend({ unexpected: z.boolean() })),
+  })
+  .strict();
+export type MilestoneReport = z.infer<typeof MilestoneReportSchema>;
+
 /** One project's outcomes for one Auto round. Unreadable parts are `unknown`, never zero. */
 export const ProjectVelocitySchema = z
   .object({
     projectId: z.string(),
+    tracker: z
+      .object({ kind: z.enum(["linear", "built-in"]), projectId: z.string() })
+      .strict()
+      .optional(),
     name: z.string(),
     measuredAt: z.string(),
     timeZone: z.string(),
@@ -57,6 +83,15 @@ export const ProjectVelocitySchema = z
       .strict(),
     lastMilestone: VelocityMilestoneSchema.nullable(),
     milestones: z.array(VelocityMilestoneSchema),
+    /** Tracker updates observed at measurement time; unknown never means an empty feed. */
+    statusUpdates: z
+      .union([
+        z.object({ state: z.literal("known"), updates: z.array(ProjectStatusUpdateSchema) }).strict(),
+        Unknown,
+      ])
+      .optional(),
+    /** Absent on historical rounds before VUH-2286. Updates are reconciled on later ticks. */
+    report: MilestoneReportSchema.optional(),
     closures: z.union([
       z
         .object({

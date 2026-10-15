@@ -3877,6 +3877,21 @@ service measured before waking the lead, and whether that wake was delivered
   `carried: true` marks a detection from an earlier round whose wake was not
   delivered; a detection clears only once a round carrying it is delivered.
 
+- `report`: newly seen `milestones` requesting one combined project status update,
+  and the later `updates` linked back to that request. Each update carries its id,
+  URL, creation time and `unexpected`: true for routine posts or extra posts after
+  a request was already fulfilled. Updates are reconciled every measured tick,
+  even when no wake is due; association is by tracker identity and time, not proof
+  of authorship or of the update body's media and evidence.
+
+A closed parent or a nonempty tracker milestone with all counted issues completed
+asks the lead for exactly one update with media and evidence links. Routine rounds
+explicitly ask for none. Claims use stable tracker ids, survive renames and service
+restarts, and are recorded before dispatch. A definite delivery refusal can retry;
+an uncertain delivery stays claimed and unsettled to prevent duplicate requests.
+Historical velocity-only rounds claim no posts. Milestone cadence is the default;
+VUH-2256's owner-loop preference is not implemented yet.
+
 A part the service could not read is `{"state":"unknown","reason":…}`, never zero.
 The wake carries the same numbers as one line per project. The record lives in
 `~/.clankie/captain/auto-rounds/` (`rounds.jsonl`, append-only, and

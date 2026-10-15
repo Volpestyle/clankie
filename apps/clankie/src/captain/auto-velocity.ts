@@ -41,7 +41,12 @@ function trackerMilestones(outcomes: TrackerOutcomes): VelocityMilestone[] {
   return [
     ...outcomes.closed
       .filter((issue) => issue.hasChildren)
-      .map((issue) => ({ kind: "parent" as const, ref: issue.identifier, at: issue.completedAt! })),
+      .map((issue) => ({
+        kind: "parent" as const,
+        ref: issue.identifier,
+        at: issue.completedAt!,
+        id: issue.id,
+      })),
     ...outcomes.milestones
       .filter(
         (milestone) =>
@@ -50,7 +55,12 @@ function trackerMilestones(outcomes: TrackerOutcomes): VelocityMilestone[] {
           milestone.completedAt >= outcomes.window.since &&
           milestone.completedAt < outcomes.window.until,
       )
-      .map((milestone) => ({ kind: "milestone" as const, ref: milestone.name, at: milestone.completedAt! })),
+      .map((milestone) => ({
+        kind: "milestone" as const,
+        ref: milestone.name,
+        at: milestone.completedAt!,
+        id: milestone.id,
+      })),
   ].sort((a, b) => a.at.localeCompare(b.at));
 }
 
@@ -214,6 +224,8 @@ export async function measureVelocity(
     window: { since, until, from: lastMilestone === null ? "lookback" : "milestone" },
     lastMilestone,
     milestones: found,
+    ...("state" in outcomes ? {} : { tracker: { kind: outcomes.tracker, projectId: outcomes.projectId } }),
+    statusUpdates: "state" in outcomes ? outcomes : { state: "known", updates: [...outcomes.statusUpdates] },
     closures:
       classified === undefined
         ? (outcomes as Unknown)
@@ -261,6 +273,7 @@ export async function measureVelocityWithin(
     },
     lastMilestone: previous,
     milestones: [],
+    statusUpdates: { state: "unknown", reason },
     closures: { state: "unknown", reason },
     started: { state: "unknown", reason },
     churn: { state: "unknown", reason },

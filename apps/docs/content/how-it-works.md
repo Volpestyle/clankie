@@ -57,7 +57,9 @@ Clankie, several at once, and the answer returns to the room that asked.
 
 Memory recall is filtered by who is asking: private operator notes never reach
 a social Discord room. Auto rounds and self-wakes use the conversation's existing
-permissions. See [memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md).
+permissions. Completed project milestones ask for one status update with media and
+evidence; routine rounds request none ([round record](/cli/)).
+See [memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md).
 
 ## Models, skills, and tools
 

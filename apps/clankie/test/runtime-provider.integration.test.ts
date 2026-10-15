@@ -18,6 +18,10 @@ import { SettingsStore } from "@clankie/settings";
 import { afterEach, expect, it } from "vitest";
 import { createBearerAuthenticator, createClankieApp } from "../src/app.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
+import { createLocalTracker, TRACKER_LEAD, TRACKER_OWNER, type TrackerActor } from "@clankie/work-items";
+import { AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
+import { AutoRoundRecord } from "../src/captain/auto-rounds.ts";
+import { readProjectOutcomes } from "../src/project-outcomes.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { ConversationStore, type ConversationTurnContext } from "../src/captain/conversations.ts";
@@ -31,7 +35,14 @@ afterEach(async () => {
 
 // Real app, captain, native channel, HTTP and durable stores; no model calls.
 // Unconnected capabilities fail if this fixture ever falls through to Pi.
-async function fixture(provider?: RuntimeProvider, autoRounds: boolean | "captured-ownership" = false) {
+async function fixture(
+  provider?: RuntimeProvider,
+  autoRounds: boolean | "captured-ownership" = false,
+  outcomeProof?: {
+    projectId: string;
+    read: NonNullable<Parameters<typeof createCaptain>[1]>["projectOutcomes"];
+  },
+) {
   const root = await mkdtemp(join(tmpdir(), "clankie-runtime-provider-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const state = join(root, "state");
@@ -91,10 +102,14 @@ async function fixture(provider?: RuntimeProvider, autoRounds: boolean | "captur
                 name: "Led project",
                 auto: true,
                 focus: "Lead backlog",
-                linearProjectBinding: {
-                  provider: "linear",
-                  projectId: "11111111-1111-4111-8111-111111111111",
-                },
+                ...(outcomeProof
+                  ? { trackerProjectId: outcomeProof.projectId }
+                  : {
+                      linearProjectBinding: {
+                        provider: "linear",
+                        projectId: "11111111-1111-4111-8111-111111111111",
+                      },
+                    }),
                 workspaces: [
                   { id: "repo", machineId: "local", platform: "posix", path: join(root, "project") },
                 ],
@@ -108,7 +123,7 @@ async function fixture(provider?: RuntimeProvider, autoRounds: boolean | "captur
           {
             projectId: captured
               ? "cbd205ab-cad4-48b8-9724-7109410fc921"
-              : "11111111-1111-4111-8111-111111111111",
+              : (outcomeProof?.projectId ?? "11111111-1111-4111-8111-111111111111"),
             name: "Lead project",
             conversationId: projectLead!,
           },
@@ -151,6 +166,7 @@ async function fixture(provider?: RuntimeProvider, autoRounds: boolean | "captur
     workingDirectory: root,
     settings,
     ...(autoRounds ? { autoRoundIntervalMs: 100 } : {}),
+    ...(outcomeProof ? { projectOutcomes: outcomeProof.read } : {}),
     ...(provider === undefined ? {} : { runtimeProvider: provider }),
   });
   cleanups.push(() => captain.close());
@@ -165,6 +181,7 @@ async function fixture(provider?: RuntimeProvider, autoRounds: boolean | "captur
   const service = await createClankieApp({
     captain,
     settings,
+    autoRounds: new AutoRoundRecord(join(state, "auto-rounds")),
     deviceSessionKey: randomBytes(32),
     eventLogPath: join(root, "events.jsonl"),
     authenticateOperator: createBearerAuthenticator("fixture-owner", { operatorId: "owner" }),
@@ -498,4 +515,105 @@ it("keeps clankie Auto at the global head when another project owns the matching
   expect(round?.content).not.toContain("clankie (clankie)");
   expect(await f.captain.acknowledgeSeatEvent(round!.id, lead)).toBe(true);
   expect(await f.captain.pollSeatEvents(350, undefined, "global-default")).toEqual([]);
+});
+
+it("a live tracker parent closure wakes its Auto lead once and links the post in the operator round record", async () => {
+  const trackerRoot = await mkdtemp(join(tmpdir(), "auto-milestone-live-"));
+  cleanups.push(() => rm(trackerRoot, { recursive: true, force: true }));
+  const actor: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
+  const tracker = createLocalTracker({ directory: trackerRoot, validateEvidence: async () => {} });
+  const call = (name: string, args: Record<string, unknown>) => tracker.call(name, args, { actor });
+  const project = (await call("save_project", { name: "Milestone proof", addTeams: ["LOCAL"] })) as {
+    id: string;
+  };
+  const parent = (await call("save_issue", {
+    title: "Playable route",
+    team: "LOCAL",
+    project: project.id,
+  })) as { id: string; identifier: string };
+  await call("save_issue", { title: "Route child", team: "LOCAL", project: project.id, parentId: parent.id });
+  const f = await fixture(undefined, true, {
+    projectId: project.id,
+    read: (target, input) =>
+      readProjectOutcomes(target, input, {
+        route: async () => "project:led",
+        builtIn: tracker,
+        linearQuery: async () => {
+          throw new Error("Not a Linear proof");
+        },
+      }),
+  });
+  const lead = f.projectLead!;
+  const accept = async (id: string) => {
+    const event = (await f.captain.pollSeatEvents(5_000, undefined, id)).find((entry) =>
+      entry.content.startsWith("Auto round."),
+    );
+    expect(event).toBeDefined();
+    expect(await f.captain.acknowledgeSeatEvent(event!.id, id)).toBe(true);
+    return event!;
+  };
+  await f.command({
+    schemaVersion: 1,
+    op: "autonomy",
+    conversationId: "global-default",
+    command: { action: "set_enabled", enabled: true },
+  });
+  const [routine] = await Promise.all([accept(lead), accept("global-default")]);
+  expect(routine.content).toContain("Do not post a project status update");
+  const rounds = async () =>
+    AutoRoundsResponseSchema.parse(
+      await (await f.request("/v1/auto/rounds?project=led", "fixture-owner")).json(),
+    ).rounds;
+  await expect.poll(async () => (await rounds()).some((round) => round.delivery?.delivered)).toBe(true);
+  await call("post_issue_event", { issueId: parent.id, type: "result", stage: "landed" });
+  await call("save_evidence_bundle", {
+    issueId: parent.id,
+    references: [
+      {
+        recordId: "fixture",
+        sha256: "0".repeat(64),
+        url: `clankie://evidence/sha256/${"0".repeat(64)}`,
+        type: "log",
+      },
+    ],
+    gaps: [],
+  });
+  await tracker.call(
+    "save_issue",
+    { id: parent.id, state: "Done" },
+    { actor: { ...TRACKER_OWNER, onBehalfOf: [] } },
+  );
+  const milestone = await accept(lead);
+  expect(milestone.content).toContain(parent.identifier);
+  expect(milestone.content).toContain("Post exactly one project status update");
+  expect(milestone.content).toContain("with media and evidence links");
+  const update = (await call("save_status_update", {
+    type: "project",
+    project: project.id,
+    body: "Playable route complete; native-channel proof. [Evidence](clankie://evidence/sha256/fixture)",
+  })) as { id: string };
+  await expect
+    .poll(async () =>
+      (await rounds())
+        .flatMap((round) => round.projects)
+        .flatMap((entry) => entry.report?.updates ?? [])
+        .some((entry) => entry.id === update.id && !entry.unexpected),
+    )
+    .toBe(true);
+  expect(await f.captain.pollSeatEvents(300, undefined, lead)).toEqual([]);
+  console.info(
+    "Live Auto milestone proof",
+    JSON.stringify({
+      routine: routine.content,
+      milestone: milestone.content,
+      updateId: update.id,
+      rounds: await rounds(),
+    }),
+  );
+  await f.command({
+    schemaVersion: 1,
+    op: "autonomy",
+    conversationId: "global-default",
+    command: { action: "set_enabled", enabled: false },
+  });
 });

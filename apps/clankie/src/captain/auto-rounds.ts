@@ -4,9 +4,11 @@ import { join } from "node:path";
 import type {
   AutoRound,
   DriftDetection,
+  MilestoneReport,
   ProjectVelocity,
   VelocityMilestone,
 } from "@clankie/protocol/auto-rounds";
+import { milestoneKey } from "./auto-reporting.ts";
 
 /** One project measured in one round; `delivery` lines settle the round later. */
 interface MeasurementLine {
@@ -23,12 +25,24 @@ interface DeliveryLine {
   readonly delivered: boolean;
   readonly reason?: string;
 }
+interface UpdateLine {
+  readonly type: "status-update";
+  readonly roundId: string;
+  readonly projectId: string;
+  readonly update: MilestoneReport["updates"][number];
+}
 
 interface ProjectState {
   lastMilestone?: VelocityMilestone | null;
   /** Detections no delivered round has carried yet (VUH-2284). */
   pendingDrift?: DriftDetection[];
 }
+
+const sameTracker = (a: ProjectVelocity, b: ProjectVelocity) =>
+  a.tracker !== undefined &&
+  b.tracker !== undefined &&
+  a.tracker.kind === b.tracker.kind &&
+  a.tracker.projectId === b.tracker.projectId;
 
 const sameDetection = (a: DriftDetection, b: DriftDetection) => a.signal === b.signal && a.day === b.day;
 
@@ -55,6 +69,67 @@ export class AutoRoundRecord {
 
   pendingDrift(projectId: string): DriftDetection[] {
     return this.state(projectId).pendingDrift ?? [];
+  }
+
+  /**
+   * Reconcile tracker updates even on ticks that do not wake the lead. A pending request
+   * gets the first subsequent update; extras and routine updates are explicitly flagged.
+   * Association is by time, not proof of authorship or of media/evidence in the body.
+   */
+  observeUpdates(velocity: ProjectVelocity): void {
+    if (velocity.statusUpdates?.state !== "known") return;
+    const rounds = this.read({ projectId: velocity.projectId, limit: Number.MAX_SAFE_INTEGER })
+      .filter((round) => sameTracker(round.projects[0]!, velocity))
+      .reverse();
+    const observed = new Set(
+      rounds.flatMap((round) => round.projects[0]?.report?.updates.map((update) => update.id) ?? []),
+    );
+    for (const update of velocity.statusUpdates.updates) {
+      if (observed.has(update.id)) continue;
+      const eligible = rounds.filter(
+        (round) => round.at <= update.createdAt && round.projects[0]?.report !== undefined,
+      );
+      const requested = eligible.find(
+        (round) =>
+          round.delivery?.delivered !== false &&
+          round.projects[0]!.report!.milestones.length > 0 &&
+          !round.projects[0]!.report!.updates.some((entry) => !entry.unexpected),
+      );
+      const target = requested ?? eligible.at(-1);
+      if (target === undefined) continue; // Never attribute an update from before recording began.
+      const entry = { ...update, unexpected: requested === undefined };
+      this.append({
+        type: "status-update",
+        roundId: target.roundId,
+        projectId: velocity.projectId,
+        update: entry,
+      });
+      target.projects[0]!.report!.updates.push(entry);
+      observed.add(update.id);
+    }
+  }
+
+  /**
+   * The journal itself is the durable claim: recorded before dispatch. A definite refusal
+   * permits retry; an unsettled wake after a crash stays claimed to avoid a duplicate ask.
+   * Historical velocity-only measurements did not request a post and claim nothing.
+   */
+  withReporting(velocity: ProjectVelocity): ProjectVelocity {
+    const claimed = new Set(
+      this.read({ projectId: velocity.projectId, limit: Number.MAX_SAFE_INTEGER })
+        .filter((round) => round.delivery?.delivered !== false && sameTracker(round.projects[0]!, velocity))
+        .flatMap((round) => (round.projects[0]?.report?.milestones ?? []).map(milestoneKey)),
+    );
+    return {
+      ...velocity,
+      report: {
+        milestones:
+          velocity.tracker === undefined
+            ? []
+            : velocity.milestones.filter((milestone) => !claimed.has(milestoneKey(milestone))),
+        updates: [],
+      },
+    };
   }
 
   /** Records a round's measurements before its wake is sent; returns the round id. */
@@ -111,18 +186,24 @@ export class AutoRoundRecord {
     let raw: string;
     try {
       raw = readFileSync(this.roundsPath, "utf8");
-    } catch {
-      return [];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error; // Unreadable history must never be mistaken for an empty claim ledger.
     }
     const rounds = new Map<string, AutoRound>();
     const deliveries = new Map<string, AutoRound["delivery"]>();
+    const updates: UpdateLine[] = [];
     for (const text of raw.split("\n")) {
       if (!text) continue;
-      let line: MeasurementLine | DeliveryLine;
+      let line: MeasurementLine | DeliveryLine | UpdateLine;
       try {
-        line = JSON.parse(text) as MeasurementLine | DeliveryLine;
+        line = JSON.parse(text) as MeasurementLine | DeliveryLine | UpdateLine;
       } catch {
         continue; // A torn final append from a crash is skipped, not fatal.
+      }
+      if (line.type === "status-update") {
+        updates.push(line);
+        continue;
       }
       if (line.type === "delivery") {
         deliveries.set(line.roundId, {
@@ -142,6 +223,13 @@ export class AutoRoundRecord {
       round.projects.push(line.velocity);
       rounds.set(line.roundId, round);
     }
+    for (const line of updates) {
+      const report = rounds
+        .get(line.roundId)
+        ?.projects.find((project) => project.projectId === line.projectId)?.report;
+      if (report && !report.updates.some((update) => update.id === line.update.id))
+        report.updates.push(line.update);
+    }
     return [...rounds.values()]
       .map((round) => ({
         ...round,
@@ -156,7 +244,7 @@ export class AutoRoundRecord {
       .slice(0, query.limit ?? 20);
   }
 
-  private append(line: MeasurementLine | DeliveryLine): void {
+  private append(line: MeasurementLine | DeliveryLine | UpdateLine): void {
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     appendFileSync(this.roundsPath, `${JSON.stringify(line)}\n`, { mode: 0o600 });
   }

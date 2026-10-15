@@ -393,6 +393,9 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
                   }),
             });
             if (delivery.outcome === "unbound") return { handled: false as const };
+            // Unknown native acceptance is not a refusal that authorizes a replacement wake.
+            if (original === undefined && delivery.outcome === "unconfirmed")
+              throw new SeatLinkInterruptedError(delivery);
             return { handled: true as const, result: delivery.outcome === "delivered" };
           },
         };

@@ -152,6 +152,7 @@ export async function projectStatuses(
 export function autoRoundFingerprint(
   states: readonly AutoProjectState[],
   driftSignals: (projectId: string) => readonly string[] = () => [],
+  milestoneSignals: (projectId: string) => readonly string[] = () => [],
 ): string {
   return JSON.stringify(
     states.map((state) => [
@@ -161,6 +162,7 @@ export function autoRoundFingerprint(
       state.trackerProjectId ?? "",
       state.linearProjectBinding?.projectId ?? "",
       ...(driftSignals(state.id).length ? [driftSignals(state.id)] : []),
+      ...(milestoneSignals(state.id).length ? [milestoneSignals(state.id)] : []),
     ]),
   );
 }
@@ -183,6 +185,7 @@ export function autoRoundPrompt(
   velocity: readonly string[] = [],
   drift: readonly string[] = [],
   capacity: readonly string[] = [],
+  reporting: readonly string[] = [],
 ): string {
   return [
     "Auto round. The owner put these projects on Auto: work their backlogs without being asked.",
@@ -208,5 +211,6 @@ export function autoRoundPrompt(
     ...(capacity.length
       ? capacity.map((line) => `- ${line}`)
       : ["- Capacity unknown; read worker_accounts before deciding staffing."]),
+    ...reporting,
   ].join("\n");
 }

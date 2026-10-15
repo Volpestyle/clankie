@@ -490,6 +490,13 @@ under `<state>/captain/auto-rounds/` with whether the wake was delivered;
 Auto tick (reused while younger than one); a [drift signal](../apps/clankie/src/captain/auto-drift.ts)
 adds a section to that lead's round and its name to the round fingerprint, and stays
 pending in the record until a round carrying it is delivered. The owner is not told.
+New completed parents and tracker milestones add their stable identities to the
+fingerprint and request one combined project status update with media and evidence
+links; routine rounds ask for none. The append-only measurement claims that request
+before dispatch, so a restart or uncertain native delivery cannot duplicate it.
+Only definite refusal releases the claim. Later tracker reads append update links
+to the original request, flag routine or excess updates, and keep tracker bindings
+separate. This is temporal association, not validation of authorship or update media.
 Pending rounds and accepted fingerprints are tracked independently per lead;
 before admission the service rechecks the switches and the group's evidence. A due self-wake queues one turn with Clankie's
 recorded reason and may be replaced by another. Both are ordinary internal turns
