@@ -987,7 +987,10 @@ original selection; recovery requires complete accounted results and every
 rerun passing. Non-test failures, repeated failures, interruptions and changed
 sources still block. `status UUID` includes `repos[].gate.testRecovery` with
 the flaky files, first failure and rerun receipts. The direct root gate uses
-this policy only with `pnpm check:landing --retry-failed-tests`.
+this policy only with `pnpm check:landing --retry-failed-tests`. An app
+`check:landing` receives the same flag only when the composed app tree's
+`package.json` declares `clankie.landingGate.retryFailedTests: true`; the app
+gate then applies its own per-package equivalent (VUH-2166).
 
 ```bash
 clankie integrate CORE_SHA... [--app APP_SHA]... [--push] [--id UUID] [--no-wait]

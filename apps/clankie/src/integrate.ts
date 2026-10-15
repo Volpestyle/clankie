@@ -108,11 +108,19 @@ const attested = (repo: IntegrationRepo) =>
  * Landing runs the repository's fast, change-scoped `check:landing` when it
  * defines one; the full `check` stays for releases and manual runs.
  */
-async function landingGateScript(directory: string): Promise<"check:landing" | "check"> {
+async function landingGateScript(
+  directory: string,
+): Promise<{ script: "check:landing" | "check"; retryFailedTests: boolean }> {
   const manifest = JSON.parse(await readFile(join(directory, "package.json"), "utf8")) as {
     scripts?: Record<string, unknown>;
+    clankie?: { landingGate?: { retryFailedTests?: unknown } };
   };
-  return typeof manifest.scripts?.["check:landing"] === "string" ? "check:landing" : "check";
+  return {
+    script: typeof manifest.scripts?.["check:landing"] === "string" ? "check:landing" : "check",
+    // The private app's gate parses its own options; it receives the retry
+    // flag only once its own tree declares the contract (VUH-2166).
+    retryFailedTests: manifest.clankie?.landingGate?.retryFailedTests === true,
+  };
 }
 
 export async function integrationSources(runtimeRoot: string): Promise<{ core: string; app: string }> {
@@ -943,7 +951,8 @@ export class IntegrationQueue {
     );
     const startedAt = now();
     const head = await this.head(repo);
-    const gateScript = name === "install" ? "check" : await landingGateScript(repo.directory);
+    const landing = name === "install" ? undefined : await landingGateScript(repo.directory);
+    const gateScript = landing?.script ?? "check";
     const batchId = basename(evidence);
     let remoteError: string | undefined;
     const result = await new Promise<{ exitCode: number | null; signal: string | null }>(
@@ -973,7 +982,9 @@ export class IntegrationQueue {
             : name === "gate"
               ? [
                   gateScript,
-                  ...(repo.name === "core" && gateScript === "check:landing" ? ["--retry-failed-tests"] : []),
+                  ...(gateScript === "check:landing" && (repo.name === "core" || landing?.retryFailedTests)
+                    ? ["--retry-failed-tests"]
+                    : []),
                 ]
               : [gateScript, "--revalidate"];
         const child = spawn("pnpm", args, {
@@ -1298,7 +1309,7 @@ export class IntegrationQueue {
     }
     for (const repo of batch.repos) {
       if (repo.gateReuse) continue;
-      const script = await landingGateScript(repo.directory);
+      const { script, retryFailedTests } = await landingGateScript(repo.directory);
       phases.push({
         repo: repo.name,
         name: "gate" as const,
@@ -1309,7 +1320,9 @@ export class IntegrationQueue {
         },
         args: [
           script,
-          ...(repo.name === "core" && script === "check:landing" ? ["--retry-failed-tests"] : []),
+          ...(script === "check:landing" && (repo.name === "core" || retryFailedTests)
+            ? ["--retry-failed-tests"]
+            : []),
         ],
         log: join(root, `${repo.name}-gate.log`),
       });
@@ -1548,7 +1561,7 @@ export class IntegrationQueue {
     (repo.revalidations ??= []).push(record);
     await this.save(batch);
     let reason: string | undefined;
-    if ((await landingGateScript(repo.directory)) !== "check:landing")
+    if ((await landingGateScript(repo.directory)).script !== "check:landing")
       reason = "its gate records no selection to revalidate";
     else if ((await this.git(repo.directory, ["merge-base", repo.base, to])) !== repo.base)
       reason = `origin/main no longer contains the gated base ${repo.base}`;

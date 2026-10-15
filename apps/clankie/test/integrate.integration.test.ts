@@ -79,6 +79,7 @@ function fixture(
   withApp = false,
   appGateExtra: string | ((root: string) => string) = "",
   landingGate = false,
+  appDeclaresRetry = false,
 ) {
   return fixtureWork().run(async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-integrate-")));
@@ -99,6 +100,9 @@ function fixture(
           private: true,
           scripts: { check: "node gate.mjs", ...(landingGate ? { "check:landing": "node gate.mjs" } : {}) },
           packageManager: "pnpm@11.11.0",
+          ...(name === "app" && appDeclaresRetry
+            ? { clankie: { landingGate: { retryFailedTests: true } } }
+            : {}),
         }),
       );
       await writeFile(join(source, ".gitignore"), "node_modules/\n");
@@ -225,6 +229,31 @@ it("composes in order on fresh origin, installs real siblings, gates privately a
   });
   for (const repo of batch.repos)
     expect(await git(repo.source, "ls-remote", "origin", "refs/heads/main")).toContain(repo.head);
+});
+
+// VUH-2166: the app's own gate parses its options strictly, so the queue
+// passes it the failed-file retry flag only once its composed tree declares it.
+it("passes the failed-test retry flag to an app landing gate that declares the contract", async () => {
+  const f = await fixture(
+    "assert.ok(process.argv.includes('--retry-failed-tests'));",
+    true,
+    "assert.ok(process.argv.includes('--retry-failed-tests'));",
+    true,
+    true,
+  );
+  const request = IntegrationRunSchema.parse({
+    action: "run",
+    id: randomUUID(),
+    core: [await commit(f.core.source, "first", "one")],
+    app: [await commit(f.app!.source, "feature", "app")],
+  });
+  await f.queue.start(request, guard);
+  await f.queue.wait();
+  const batch = await new IntegrationQueue(f.queue.options).status(request.id);
+  expect(batch.repos.map((repo) => [repo.name, repo.gate?.exitCode])).toEqual([
+    ["core", 0],
+    ["app", 0],
+  ]);
 });
 
 it("attributes a conflict to its input commit and blocks subsequent commits without touching source", async () => {
