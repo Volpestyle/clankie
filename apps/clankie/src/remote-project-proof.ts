@@ -6,13 +6,20 @@ import { isDeepStrictEqual } from "node:util";
 import { win32 } from "node:path";
 import { RemoteObservationError } from "./remote-fleet-relay.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
-import { splitFleetQualified, type FleetShellRun, type HerdrFleet } from "./herdr-fleet.ts";
+import {
+  posixQuote,
+  posixScriptCommand,
+  splitFleetQualified,
+  type FleetShellRun,
+  type HerdrFleet,
+} from "./herdr-fleet.ts";
 import { parseHerdrAgentResult } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
 import {
   windowsCanonicalCommand,
   windowsProcessCommand,
   windowsGitWorktreeCommand,
+  windowsOriginUrlCommand,
   windowsWorktreeRootCommand,
 } from "./windows-process-probe.ts";
 
@@ -707,5 +714,26 @@ export function createRemoteWorktreeRootObserver(options: Options) {
     } catch {
       return undefined;
     }
+  };
+}
+
+/** A remote workspace's origin URL over the linked machine's command channel; read-only. */
+export function createRemoteOriginReader(options: Options) {
+  return async (workspace: { machineId: string; path: string }): Promise<string> => {
+    const fleet = await options.fleet(workspace.machineId);
+    if (!fleet || fleet.id !== workspace.machineId)
+      throw new Error(`machine ${workspace.machineId} is not linked`);
+    if (fleet.ssh.shell === "posix") {
+      return await options.shell(fleet)(
+        posixScriptCommand(`git -C ${posixQuote(workspace.path)} remote get-url origin`),
+        15_000,
+      );
+    }
+    if (!win32.isAbsolute(workspace.path)) throw new Error("workspace path is not absolute");
+    const url: unknown = JSON.parse(
+      await options.shell(fleet)(windowsOriginUrlCommand(workspace.path), 15_000),
+    );
+    if (typeof url !== "string") throw new Error("origin URL unreadable");
+    return url;
   };
 }

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Project, ProjectStatus } from "@clankie/protocol/projects";
+import type { ProjectMirrors } from "./project-mirrors.ts";
 import { originDefaultBranch } from "./repository-churn.ts";
 
 const run = promisify(execFile);
@@ -87,19 +88,18 @@ export function autoProjectRounds(
 }
 
 /**
- * Commits that reached each local workspace's origin default branch since `since`,
- * as last fetched; shared history counts once. Undefined when no workspace has one.
+ * Commits that reached each repository's origin default branch since `since`, as
+ * last fetched; shared history counts once. Undefined when no repository has one.
  */
-async function landedSince(project: Project, since: Date): Promise<number | undefined> {
+async function landedSince(repositories: readonly string[], since: Date): Promise<number | undefined> {
   const commits = new Set<string>();
   let read = false;
-  for (const workspace of project.workspaces) {
-    if (workspace.machineId !== "local") continue;
-    const branch = await originDefaultBranch(workspace.path);
+  for (const repository of repositories) {
+    const branch = await originDefaultBranch(repository);
     if ("reason" in branch) continue;
     const listed = await run(
       "git",
-      ["-C", workspace.path, "rev-list", `--since=${since.toISOString()}`, branch.head, "--"],
+      ["-C", repository, "rev-list", `--since=${since.toISOString()}`, branch.head, "--"],
       { timeout: 5_000, maxBuffer: 4 * 1024 * 1024 },
     ).catch(() => undefined);
     if (listed === undefined) continue;
@@ -109,18 +109,32 @@ async function landedSince(project: Project, since: Date): Promise<number | unde
   return read ? commits.size : undefined;
 }
 
-/** Every project's status line; `questionWorkspaces` holds one entry per pending owner question. */
+/**
+ * Every project's status line; `questionWorkspaces` holds one entry per pending owner question.
+ * Landings come from the local workspaces, or a remote-only project's mirror as last fetched.
+ */
 export async function projectStatuses(
   projects: readonly Project[],
   seatDirectories: readonly string[],
   questionWorkspaces: readonly (string | undefined)[],
   now = new Date(),
+  mirrors?: Pick<ProjectMirrors, "history">,
 ): Promise<Record<string, ProjectStatus>> {
   const midnight = new Date(now);
   midnight.setHours(0, 0, 0, 0);
   const statuses: Record<string, ProjectStatus> = {};
   for (const project of projects) {
-    const landedToday = await landedSince(project, midnight);
+    const history = mirrors
+      ? await mirrors.history(project)
+      : ({
+          state: "readable",
+          source: "workspace",
+          repositories: project.workspaces
+            .filter((workspace) => workspace.machineId === "local")
+            .map((workspace) => workspace.path),
+        } as const);
+    const landedToday =
+      history.state === "readable" ? await landedSince(history.repositories, midnight) : undefined;
     statuses[project.id] = {
       agentsWorking: countInside(project, seatDirectories),
       ...(landedToday === undefined ? {} : { landedToday }),

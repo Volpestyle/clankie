@@ -123,6 +123,7 @@ import {
   autoRoundPrompt,
   projectStatuses,
 } from "./auto-projects.ts";
+import { ProjectMirrors } from "./project-mirrors.ts";
 import { RoutineError, RoutineStore } from "./routines.ts";
 import { createRoutineRunner, serviceLauncher } from "./routine-runner.ts";
 import { createConversationRunner, runAutonomyTurn } from "./captain-conversation-runner.ts";
@@ -4615,6 +4616,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // Projects on Auto (ADR 0264): each configured project lead hears its own
   // projects; projects without an unambiguous lead go to the global head.
   const pendingAutoRounds = new Set<string>();
+  const projectMirrors = new ProjectMirrors(join(options.stateDir, "project-mirrors"), async (workspace) => {
+    if (!options.remoteOrigin) throw new Error("no remote command channel");
+    return await options.remoteOrigin(workspace);
+  });
   const lastAutoRounds = new Map<string, { fingerprint: string; at: number }>();
   const readAutoRounds = async () => {
     const current = await settings();
@@ -4629,6 +4634,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   const stopAutoRounds = startFleetRounds(async () => {
     if (shutdown.signal.aborted || !autonomy.enabled) return;
+    await projectMirrors
+      .refresh((await settings()).projects.projects)
+      .catch((error: unknown) => console.warn("Project mirrors unavailable", String(error)));
     const rounds = await readAutoRounds();
     for (const id of lastAutoRounds.keys()) if (!rounds.has(id)) lastAutoRounds.delete(id);
     for (const [conversationId, states] of rounds) {
@@ -6117,7 +6125,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const seats = (await refreshFleet())
         .filter((seat) => seat.fleet === undefined && seat.workingDirectory !== undefined)
         .map((seat) => seat.workingDirectory!);
-      return { projects: await projectStatuses(projects, seats, questions), needsYou: questions.length };
+      return {
+        projects: await projectStatuses(projects, seats, questions, new Date(), projectMirrors),
+        needsYou: questions.length,
+      };
     },
     leadHireMembershipProject: async (_fleet, pane, seat, occupant) => {
       const owner = herdrWatches.leadHireMembershipOwner(pane, seat, occupant);

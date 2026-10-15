@@ -705,6 +705,13 @@ $registered = @(foreach ($field in $ledger.Split([char]0)) {
 `);
 }
 
+/** Reads a workspace's origin URL; read-only, nothing is written on the machine. */
+export function windowsOriginUrlCommand(path: string): string {
+  return probeCommand(`${gitReader}
+(Read-ClankieGit ${powershellLiteral(path)} @('remote','get-url','origin')).Trim() | ConvertTo-Json -Compress
+`);
+}
+
 export function windowsWorktreeRootCommand(path: string, repoPath: string): string {
   return probeCommand(`${native}\n${gitReader}
 $root = [ClankieProcess]::DirectoryCanonical(${powershellLiteral(path)})

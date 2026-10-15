@@ -1,4 +1,5 @@
 import type { NativeRoomHandoffExecutor } from "./native-room-handoffs.ts";
+import type { RemoteOriginReader } from "./project-mirrors.ts";
 import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import { type ModelPurpose } from "@clankie/model-provider";
 import { SettingsStore } from "@clankie/settings";
@@ -82,6 +83,8 @@ export interface CaptainOptions {
   readonly autoRoundIntervalMs?: number;
   /** How long an unchanged Auto round waits before waking again. */
   readonly autoIdleRewakeMs?: number;
+  /** Reads a remote-only project's origin URL for its Mac-side mirror (ADR 0270). */
+  readonly remoteOrigin?: RemoteOriginReader;
   /** How long an operator head stays held after a completed poll; defaults to 30s (VUH-2045). */
   readonly headBoundGraceMs?: number;
   /** The fleet efficiency show/review answer deadline; defaults to 25s, under the CLI's 30s abort. */

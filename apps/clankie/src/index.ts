@@ -162,6 +162,7 @@ import {
   createRemoteProjectObserver,
   createRemoteWorkspaceCanonical,
   createRemoteGitWorktreeObserver,
+  createRemoteOriginReader,
   createRemoteWorktreeRootObserver,
 } from "./remote-project-proof.ts";
 import { localFleetAdmissionProof, localProjectProof } from "./local-fleet-proof.ts";
@@ -1535,6 +1536,7 @@ const captain = createCaptain(
     }),
     remoteCodexProcess: (launch) =>
       remoteCodexSeats.register(launch, proofFleetLinks?.lifetime(launch.fleet) ?? (() => false)),
+    remoteOrigin: createRemoteOriginReader(remoteProofOptions),
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
     grokNative,
