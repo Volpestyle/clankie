@@ -4764,6 +4764,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             ...velocityDeps,
             ...(correction ? { correction } : {}),
           });
+          // A stopped runtime must not append after its state directory is handed over.
+          if (shutdown.signal.aborted) return;
           autoRoundRecord.observeUpdates(velocity);
           autoMeasurements.set(
             project.id,
@@ -4787,6 +4789,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     autoCadence.retain(new Set(rounds.keys()));
     // Velocity and drift (ADR 0270): measured every tick, so new drift changes the fingerprint.
     await measureAutoProjects(new Set([...rounds.values()].flat().map((state) => state.id)));
+    if (shutdown.signal.aborted) return;
     for (const [conversationId, states] of rounds) {
       if (pendingAutoRounds.has(conversationId)) continue;
       const fingerprint = autoFingerprint(states);
