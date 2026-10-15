@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "kh2-replay-live.json",
+      "size": 32382,
+      "sha256": "ecdcda2ef4e40a5c09d21cf5ddfebb0b1effdfe7ab094b5692c23103ef243ad0",
+      "url": "clankie://evidence/sha256/ecdcda2ef4e40a5c09d21cf5ddfebb0b1effdfe7ab094b5692c23103ef243ad0"
+    },
+    {
+      "path": "landing-gate-incomplete.json",
+      "size": 192674,
+      "sha256": "7bf685bc4147f23d9ef3b88f1f49dfdc10363d6c34e4e94107935556e3cabdcf",
+      "url": "clankie://evidence/sha256/7bf685bc4147f23d9ef3b88f1f49dfdc10363d6c34e4e94107935556e3cabdcf"
+    },
+    {
+      "path": "validation.txt",
+      "size": 1588206,
+      "sha256": "a28b563f357bff176e55cbff254f234c8473296e1b31fbbbe0e7d80f733387ae",
+      "url": "clankie://evidence/sha256/a28b563f357bff176e55cbff254f234c8473296e1b31fbbbe0e7d80f733387ae"
+    }
+  ]
+}
