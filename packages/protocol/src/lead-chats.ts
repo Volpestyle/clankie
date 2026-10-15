@@ -22,6 +22,17 @@ export const LeadChatSchema = z
     messageAvailable: z.boolean(),
     /** The native seat is usage-limited; until then this chat runs on the service lane (VUH-2273). */
     usageLimit: OperatorSeatBridgeStatusSchema.shape.usageLimit,
+    /** The native seat was moved to another account or harness for a usage limit, and moves back after it resets (VUH-2273). */
+    seatMove: z
+      .object({
+        from: z.string(),
+        to: z.string(),
+        window: z.enum(["session", "weekly", "other"]),
+        until: z.string().datetime(),
+        uncertain: z.string().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type LeadChat = z.infer<typeof LeadChatSchema>;

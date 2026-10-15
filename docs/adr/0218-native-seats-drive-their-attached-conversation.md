@@ -477,5 +477,15 @@ one service notice. A real reply from the seat releases it early. Once the reset
 passes, the next poll delivers the usual service handoff. A refusal without a
 reset time parks the seat for an hour from when it happened. A remote project
 head has no local fallback, so its runs fail with the existing refusal instead of
-reaching the limited seat; failing over to another account or harness is the
-next slice of VUH-2273.
+reaching the limited seat.
+
+A local lead seat then moves, in its own pane, through the same launcher as a
+fresh restart ([ADR 0271](0271-the-lead-seat-restarts-fresh-in-its-own-pane.md)). It goes to the
+signed-in account with the most headroom: another Claude account first, then
+Codex, never the limited one. A hard limit leaves only the unsent-draft guard.
+After the reset, the seat moves back to its original launch with the usual
+quiet-owner and idle guards; a refused return is tried again on the next check.
+With no account that has room, a refused move or an unknown original launch,
+the service lane keeps running the conversation. An unconfirmed move or return
+is reported and never retried. Each move posts a notice, and the lead chat
+roster shows the current move (`seatMove`).

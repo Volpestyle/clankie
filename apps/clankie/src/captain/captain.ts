@@ -71,6 +71,7 @@ import {
   resolveHerdrSeatTranscriptPathAsync,
 } from "@clankie/agent-transcript";
 import { createLeadSeatRelaunch, readClaudeSessionUsage } from "./lead-seat-relaunch.ts";
+import { createLeadSeatFailover } from "./lead-seat-failover.ts";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
 import {
@@ -1451,6 +1452,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         messageSeat: id,
         messageAvailable: bridge?.state === "current" || localServiceLead(id),
         ...(bridge?.usageLimit === undefined ? {} : { usageLimit: bridge.usageLimit }),
+        ...(leadFailover.status(id) === undefined ? {} : { seatMove: leadFailover.status(id)! }),
       });
     }
     return chats;
@@ -4476,11 +4478,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const limited = seatOutbox(conversationId).observeAgentMessages(
       entries.flatMap((entry) => (entry.type === "message" && entry.role === "agent" ? [entry] : [])),
     );
-    if (limited)
-      conversations.recordServiceNotice(
-        conversationId,
-        `Your native seat hit its ${limited.window === "other" ? "usage" : limited.window} limit (resets ${new Date(limited.until).toISOString()}). Until then, wakes and rounds run on Clankie's service lane instead of being sent into it.`,
-      );
+    if (!limited) return;
+    conversations.recordServiceNotice(
+      conversationId,
+      `Your native seat hit its ${limited.window === "other" ? "usage" : limited.window} limit (resets ${new Date(limited.until).toISOString()}). Until then, wakes and rounds run on Clankie's service lane instead of being sent into it.`,
+    );
+    // A local lead moves to the account with the most headroom; a remote head has no local launcher.
+    if (conversations.runsCaptainTurns(conversationId))
+      void leadFailover
+        .limited(conversationId, limited)
+        .catch((error: unknown) => console.warn("Lead seat failover failed", conversationId, String(error)));
   }
 
   const efficiencyActions = {
@@ -4832,6 +4839,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ).outcome === "delivered",
     notice: (conversationId, text) => conversations.recordServiceNotice(conversationId, text),
   });
+  const leadFailover = createLeadSeatFailover({
+    statePath: join(options.stateDir, "lead-seat-failover.json"),
+    launcher: leadSeats,
+    accounts: () => readWorkerAccounts(undefined, ["claude", "codex"]),
+    released: (conversationId) => seatOutboxes.get(conversationId)?.clearUsageLimit(),
+    notice: (conversationId, text) => conversations.recordServiceNotice(conversationId, text),
+  });
+  const stopLeadFailbacks = startFleetRounds(
+    () => leadFailover.failBack(),
+    options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS,
+  );
   let leadRestartAskedAt: number | undefined;
   const stopLeadRestarts = startFleetRounds(async () => {
     const conversationId = conversations.defaultGlobalConversationId();
@@ -7283,6 +7301,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       stopFleetRounds();
       stopAutoRounds();
       stopLeadRestarts();
+      stopLeadFailbacks();
       unsubscribeFleets?.();
       censusBreaker.close();
       evaluator.close();
