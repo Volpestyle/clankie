@@ -57,7 +57,9 @@ async function listen(fetch: (request: Request) => Promise<Response>) {
 }
 
 /** Real worker/host/SDK HTTP path; the isolated tracker owns one controlled issue. */
-async function fixture(options: { local?: boolean; api?: boolean; requestTimeoutMs?: number } = {}) {
+async function fixture(
+  options: { local?: boolean; api?: boolean; manual?: boolean; requestTimeoutMs?: number } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-call-receipts-"));
   const admitted = gate();
   const release = gate();
@@ -195,10 +197,38 @@ async function fixture(options: { local?: boolean; api?: boolean; requestTimeout
   let valid = true;
   let authenticationFailure: Error | undefined;
   let heldFence: { entered: ReturnType<typeof gate>; release: ReturnType<typeof gate> } | undefined;
+  let heldCommit:
+    | { entered: ReturnType<typeof gate>; release: ReturnType<typeof gate>; settled: ReturnType<typeof gate> }
+    | undefined;
+  const hostResults: Awaited<ReturnType<typeof host.call>>[] = [];
   const workerOptions = {
     directory: join(root, "grants"),
     credentials,
-    host,
+    host: options.manual
+      ? {
+          ...host,
+          // Pause the real host after async admission, before its final account read
+          // and synchronous dispatch check. Neither admission nor the provider is mocked.
+          call: async (input: Parameters<typeof host.call>[0]) => {
+            const held = heldCommit;
+            heldCommit = undefined;
+            const result = await host.call({
+              ...input,
+              fence: async () => {
+                const commit = await input.fence?.();
+                if (held) {
+                  held.entered.release();
+                  await held.release.promise;
+                }
+                return commit;
+              },
+            });
+            hostResults.push(result);
+            held?.settled.release();
+            return result;
+          },
+        }
+      : host,
     // Receipt/authority tests use the production deadline, not a latency assertion.
     // Only tests whose contract is expiry opt into a short budget.
     ...(options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: options.requestTimeoutMs }),
@@ -215,6 +245,15 @@ async function fixture(options: { local?: boolean; api?: boolean; requestTimeout
     },
   };
   let worker = new WorkerMcp(workerOptions);
+  const manual = options.manual
+    ? await worker.issue({
+        principalId: "manual-worker",
+        workId: "VUH-FIXTURE",
+        server: "linear",
+        tools: [{ name: "save_issue", arguments: { id: "VUH-FIXTURE" }, forbiddenArguments: [] }],
+        ttlSeconds: 900,
+      })
+    : undefined;
   const identity = (pane = "w1:p1"): LocalFleetIdentity => ({
     fleet: "default",
     pane,
@@ -225,11 +264,14 @@ async function fixture(options: { local?: boolean; api?: boolean; requestTimeout
     },
   });
   const service = await listen((request) =>
-    worker.handleLocalFleet(request, identity(request.headers.get("x-fixture-pane") ?? "w1:p1")),
+    manual
+      ? worker.handle(request)
+      : worker.handleLocalFleet(request, identity(request.headers.get("x-fixture-pane") ?? "w1:p1")),
   );
   let sequence = 0;
   const bridgeId = randomUUID();
   const headers = (session?: string, pane = "w1:p1") => ({
+    ...(manual ? { authorization: `Bearer ${manual.token}` } : {}),
     "content-type": "application/json",
     accept: "application/json, text/event-stream",
     "x-clankie-bridge-id": bridgeId,
@@ -269,12 +311,17 @@ async function fixture(options: { local?: boolean; api?: boolean; requestTimeout
     expect(initialized.status).toBe(202);
     return session;
   };
-  const call = async (args: unknown, session: string, pane?: string, receiptId?: string) => {
+  const call = async (
+    args: { name?: string; arguments?: unknown; receiptId?: string },
+    session: string,
+    pane?: string,
+    receiptId?: string,
+  ) => {
     const response = await post(
       "tools/call",
       {
-        name: "clankie_call",
-        arguments: args,
+        name: manual ? args.name : "clankie_call",
+        arguments: manual ? args.arguments : args,
         ...(receiptId === undefined ? {} : { _meta: { clankieReceiptId: receiptId } }),
       },
       session,
@@ -287,6 +334,7 @@ async function fixture(options: { local?: boolean; api?: boolean; requestTimeout
   cleanup.push(async () => {
     release.release();
     heldFence?.release.release();
+    heldCommit?.release.release();
     await worker.close();
     await host.close();
     await service.close();
@@ -309,6 +357,16 @@ async function fixture(options: { local?: boolean; api?: boolean; requestTimeout
     settings,
     localTracker,
     apiProvider,
+    hostResults,
+    holdCommit() {
+      const held = { entered: gate(), release: gate(), settled: gate() };
+      heldCommit = held;
+      return held;
+    },
+    async revokeManual() {
+      if (!manual) throw new Error("Missing manual fixture grant");
+      return worker.revoke(manual.grant.grantId);
+    },
     holdFence() {
       const held = { entered: gate(), release: gate() };
       heldFence = held;
@@ -328,6 +386,41 @@ async function fixture(options: { local?: boolean; api?: boolean; requestTimeout
 }
 
 const invocation = { name: "linear_save_issue", arguments: { id: "VUH-FIXTURE", state: "Done" } };
+
+it("a manual grant revoked after its read recheck refuses dispatch without a provider effect", async () => {
+  const f = await fixture({ manual: true });
+  const session = await f.initialize();
+  // A live grant must really reach this provider, so zero effects cannot pass
+  // merely because the fixture's manual account/tool setup is broken.
+  f.release.release();
+  expect(await f.call(invocation, session)).toMatchObject({ outcome: "ok", toolError: false });
+  expect(f.effects).toHaveLength(1);
+  const held = f.holdCommit();
+  const controller = new AbortController();
+  const pending = f
+    .post(
+      "tools/call",
+      { name: invocation.name, arguments: invocation.arguments },
+      session,
+      undefined,
+      controller.signal,
+    )
+    .catch((error) => error);
+  try {
+    await held.entered.promise;
+    expect((await f.revokeManual()).revokedAt).toBeDefined();
+    held.release.release();
+    await held.settled.promise;
+    expect(f.hostResults.at(-1)).toMatchObject({ outcome: "refused", possiblyDispatched: false });
+    expect(f.effects).toHaveLength(1);
+  } finally {
+    held.release.release();
+    // Revoke closes the worker MCP transport. Inspect the host's actual
+    // pre-dispatch refusal above, then release this fixture's waiting HTTP read.
+    controller.abort();
+    await pending;
+  }
+});
 
 it("API-owned reads and writes retain scoped worker receipts without repeating provider calls", async () => {
   const f = await fixture({ api: true });

@@ -415,6 +415,12 @@ or loopback HTTP. Tokens expire and require explicit reissue; task-bound renewal
 and coordinator-based delivery are retired by [ADR 0213](adr/0213-clankie-retires-swarm.md).
 Saved task-bound or renewable grants remain on disk and confer no authority.
 
+Revoking a manual grant closes every MCP session using it, aborting pending
+requests. The host checks that request's abort signal at its final dispatch
+boundary, after awaited setup, so a completed revoke prevents a call that has
+not yet dispatched even if its earlier grant read succeeded. Revocation cannot
+undo an effect already dispatched to the provider.
+
 ## Projects and retained grant records
 
 Projects retain approved workspaces, explicit native hire assignments, roles,

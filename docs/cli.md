@@ -6826,6 +6826,8 @@ refused with the `project add` command to run. The fleet's own directory grant
 manage individual worker grants. The private file feeds `clankie mcp --grant FILE`,
 which serves only granted tools and loads no operator bearer or seat channel.
 Tokens expire after at most 15 minutes and require explicit reissue.
+Revoking a manual grant closes its MCP sessions and refuses pending calls at
+the final dispatch boundary; it cannot undo an already-dispatched provider effect.
 
 `access project NAME SERVER [--tool NAME]...` retains legacy project-grant records
 with no bearer delivery; they no longer gate fleet tools. `access fleet` remains
