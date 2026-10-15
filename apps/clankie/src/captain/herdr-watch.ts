@@ -2014,7 +2014,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
     authority?: HireAuthority,
     adopt?: AdoptHire,
     flushAdoption?: () => Promise<void>,
+    /** The caller captures task intent before adding service-owned standing context. */
+    taskBrief = brief !== undefined,
   ): Promise<HerdrSeatSpawnResult> {
+    const work =
+      taskBrief ||
+      inputRequest.deliverable !== undefined ||
+      inputRequest.effortReason !== undefined ||
+      authority?.ownerHire !== undefined;
     const { effort: _retiredEffort, ...defaults } = (await this.hireDefaults?.()) ?? {};
     if (inputRequest.ownerWork)
       return {
@@ -2038,13 +2045,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const unprojected = async (): Promise<SpawnOperatorSeat | HerdrSeatSpawnResult> => {
       const chosen =
         input.harness === undefined
-          ? await this.chooseHireHarness(
-              input,
-              resume,
-              undefined,
-              brief !== undefined || input.deliverable !== undefined || input.effortReason !== undefined,
-              authority?.ownerHire,
-            )
+          ? await this.chooseHireHarness(input, resume, undefined, work, authority?.ownerHire)
           : undefined;
       if (chosen !== undefined && "outcome" in chosen) return chosen;
       const seat = { ...input, harness: input.harness ?? chosen!.harness };
@@ -2069,6 +2070,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         authority,
         adopt,
         flushAdoption,
+        work,
       ).then((result) =>
         result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(seat) } : result,
       );
@@ -2103,6 +2105,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           authority,
           adopt,
           flushAdoption,
+          work,
         ).then((result) =>
           result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(seat) } : result,
         );
@@ -2126,7 +2129,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           planned,
           resume,
           projectHiring,
-          brief !== undefined || planned.deliverable !== undefined || planned.effortReason !== undefined,
+          work,
           authority?.ownerHire,
         );
         if ("outcome" in chosen) return chosen;
@@ -2190,6 +2193,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         authority,
         adopt,
         flushAdoption,
+        work,
       );
       if (result.outcome === "spawned") this.projectHires.confirmed(allocation);
       else this.projectHires.failed(allocation);
@@ -2404,11 +2408,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     authority?: HireAuthority,
     adopt?: AdoptHire,
     flushAdoption?: () => Promise<void>,
+    work = false,
   ): Promise<HerdrSeatSpawnResult> {
     try {
       input = await this.resolveHireModels(input);
-      if (brief !== undefined || input.deliverable !== undefined || input.effortReason !== undefined)
-        this.workHires.add(input);
+      if (work) this.workHires.add(input);
       const subagentModel =
         input.subagents?.model && this.resolveModel
           ? await this.resolveModel(input.harness, input.subagents.model)

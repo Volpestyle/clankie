@@ -2383,6 +2383,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     (options.linearFollowing === undefined || (await options.linearFollowing()));
   conversations.onLinearWakeReceived = options.linearWakeReceived;
   const hireSeat: HireSeat = async (request, brief, source, autonomous) => {
+    const taskBrief = brief !== undefined;
     const captured = captureConversationAuthority(source);
     // Retain the original route proof and reread owner policy at every native
     // admission boundary, including after asynchronous checkout preparation.
@@ -2561,6 +2562,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         adopted = seat;
       },
       () => personas.flushProjectRoles(),
+      taskBrief,
     );
     if (result.outcome !== "spawned") return result;
     if (adopted === undefined) throw new Error("Hired seat was not finalized under its admitted authority");

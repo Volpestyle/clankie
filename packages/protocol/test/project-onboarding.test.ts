@@ -34,7 +34,6 @@ it("strict explicit confirmation accepts immutable target only, never preference
       prompt: "review",
       workerCap: 0,
       roles: [{ role: "Builder", concurrencyCap: null }],
-      fleet: { size: "max" },
     }).success,
   ).toBe(true);
 });

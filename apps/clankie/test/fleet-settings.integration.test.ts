@@ -165,13 +165,11 @@ it("persists public fleet controls through the owner API/client and fences stale
     await f.client.updateFleetSettings({
       schemaVersion: 1,
       expectedRevision: original.revision,
-      changes: { size: "small", models: "efficient", closure: "owner", machineSetup: "owner" },
+      changes: { closure: "owner", machineSetup: "owner" },
     }),
   );
   expect(updated.fleet).toEqual({
     ...before.fleet,
-    size: "small",
-    models: "efficient",
     ...FleetAutonomySchema.parse({}),
     closure: "owner",
     machineSetup: "owner",
@@ -212,8 +210,6 @@ it("roundtrips working preferences, resolves each project override and restores 
     commit: "owner" as const,
     push: "owner" as const,
     release: { mode: "time_rule" as const, rule },
-    verification: "review_and_seal" as const,
-    reportingStyle: "One short paragraph with evidence.",
   };
   const updated = await f.client.updateFleetSettings({
     schemaVersion: 1,
@@ -225,7 +221,6 @@ it("roundtrips working preferences, resolves each project override and restores 
   const overrides = {
     commit: "lead" as const,
     release: { mode: "owner" as const },
-    reportingStyle: "Short and plain.",
   };
   const project = await f.client.updateProjectSettings({
     projectId: "garden",
@@ -254,7 +249,6 @@ it("roundtrips working preferences, resolves each project override and restores 
   expect(inherited.settings.projects[0]!.autonomy!.fleet).toEqual({
     closure: "owner",
     machineSetup: "owner",
-    reportingStyle: "Short and plain.",
   });
   expect(
     (await f.client.fleetSettingsContext({ workingDirectory: f.cwd, machine: "local" })).effective,
@@ -263,12 +257,11 @@ it("roundtrips working preferences, resolves each project override and restores 
     ...global,
     closure: "owner",
     machineSetup: "owner",
-    reportingStyle: "Short and plain.",
   });
   const reset = await f.client.updateFleetSettings({
     schemaVersion: 1,
     expectedRevision: updated.revision,
-    changes: { commit: null, push: null, release: null, verification: null, reportingStyle: null },
+    changes: { commit: null, push: null, release: null },
   });
   expect(reset.fleet).toEqual(initial.fleet);
   const persisted = await new SettingsStore(f.settings.path).load();
@@ -278,7 +271,7 @@ it("roundtrips working preferences, resolves each project override and restores 
   expect(persisted.fleet).toEqual(before.fleet);
 });
 
-it("rejects malformed release modes, rules and reporting styles without changing owner settings", async () => {
+it("rejects malformed release modes and retired preference edits without changing owner settings", async () => {
   const f = await fixture();
   const initial = await f.client.fleetSettings();
   const before = await f.settings.load();
@@ -287,6 +280,8 @@ it("rejects malformed release modes, rules and reporting styles without changing
     { release: { mode: "time_rule", rule: " " } },
     { release: { mode: "owner", rule: "hidden stale rule" } },
     { reportingStyle: " " },
+    { reportingStyle: "Valid wording on a retired control" },
+    { verification: "review_and_seal" },
     { verification: "skip_checks" },
   ]) {
     expect(
@@ -300,15 +295,14 @@ it("rejects malformed release modes, rules and reporting styles without changing
     ).toBe(400);
   }
   expect(await f.settings.load()).toEqual(before);
-  const reportingStyle = "界".repeat(2000);
   const release = { mode: "time_rule" as const, rule: "界".repeat(2000) };
   const multilingual = await f.client.updateFleetSettings({
     schemaVersion: 1,
     expectedRevision: initial.revision,
-    changes: { release, reportingStyle },
+    changes: { release },
   });
   expect(multilingual.fleet.release).toEqual(release);
-  expect(multilingual.fleet.reportingStyle).toBe(reportingStyle);
+  expect(multilingual.fleet.reportingStyle).toBe(initial.fleet.reportingStyle);
 });
 
 it("gates explicit linked refresh with canonical current source policy, per-target links and live operator authority", async () => {
@@ -892,22 +886,21 @@ it("sets hire defaults, talkativeness and worker-account holds through the owner
   const set = await f.request(FLEET_HIRE_DEFAULTS_PATH, {
     schemaVersion: 1,
     expectedRevision: hire.revision,
-    changes: { harness: "auto", model: "gpt-6", effort: "high" },
+    changes: { harness: "auto", model: "gpt-6" },
   });
   expect(set.status).toBe(200);
   const updated = FleetHireDefaultsSnapshotSchema.parse(await set.json());
-  expect(updated.hire).toEqual({ model: "gpt-6", effort: "high" });
+  expect(updated.hire).toEqual({ model: "gpt-6" });
   // No preference is never stored, and fields this route does not show are kept.
   expect((await new SettingsStore(f.settings.path).load()).fleet.hire).toEqual({
     account: "work",
     placement: "split",
     model: "gpt-6",
-    effort: "high",
   });
   const stale = await f.request(FLEET_HIRE_DEFAULTS_PATH, {
     schemaVersion: 1,
     expectedRevision: hire.revision,
-    changes: { effort: "low" },
+    changes: { model: "gpt-6-astra" },
   });
   expect(stale.status).toBe(409);
   expect(

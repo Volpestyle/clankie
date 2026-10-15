@@ -589,7 +589,7 @@ it("a live tracker parent closure wakes its Auto lead once and links the post in
   expect(routine.content).toContain("Do not post a project status update");
   const rounds = async () =>
     AutoRoundsResponseSchema.parse(
-      await (await f.request("/v1/auto/rounds?project=led", "fixture-owner")).json(),
+      await (await f.request("/v1/auto/rounds?project=led&includeWorkPolicy=true", "fixture-owner")).json(),
     ).rounds;
   await expect.poll(async () => (await rounds()).some((round) => round.delivery?.delivered)).toBe(true);
   await call("post_issue_event", { issueId: parent.id, type: "result", stage: "landed" });
@@ -784,7 +784,7 @@ it("an isolated Auto runtime records the lead's drift choice and checks started 
   };
   const rounds = async () =>
     AutoRoundsResponseSchema.parse(
-      await (await f.request("/v1/auto/rounds?project=led", "fixture-owner")).json(),
+      await (await f.request("/v1/auto/rounds?project=led&includeWorkPolicy=true", "fixture-owner")).json(),
     ).rounds;
   await f.command({
     schemaVersion: 1,

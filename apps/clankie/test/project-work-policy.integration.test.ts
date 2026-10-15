@@ -118,27 +118,30 @@ it("retains exact saved retired preferences in a durable, idempotent migration r
   const path = join(root, "settings.json");
   try {
     const store = new SettingsStore(path);
-    await store.update((current) => ({
-      ...current,
-      fleet: { ...current.fleet, size: "small", models: "efficient", hire: { effort: "xhigh" } },
-      autonomy: {
-        fleet: {
-          ...current.autonomy.fleet,
-          verification: "review_and_seal",
-          reportingStyle: "Keep this exact owner wording.",
-        },
-      },
-      projects: ProjectsSettingsSchema.parse({
-        projects: [
-          {
-            id: "kh2",
-            name: "KH2",
-            fleet: { size: "solo", models: "optimal" },
-            autonomy: { fleet: { verification: "change_run_read", reportingStyle: "Project wording." } },
+    // Actual pre-upgrade disk shape: no migration receipt and no generated defaults.
+    await writeFile(
+      path,
+      JSON.stringify({
+        schemaVersion: 1,
+        fleet: { size: "small", models: "efficient", hire: { effort: "xhigh" } },
+        autonomy: {
+          fleet: {
+            verification: "review_and_seal",
+            reportingStyle: "Keep this exact owner wording.",
           },
-        ],
+        },
+        projects: {
+          projects: [
+            {
+              id: "kh2",
+              name: "KH2",
+              fleet: { size: "solo", models: "optimal" },
+              autonomy: { fleet: { verification: "change_run_read", reportingStyle: "Project wording." } },
+            },
+          ],
+        },
       }),
-    }));
+    );
     const migrated = await new SettingsStore(path).load();
     expect(migrated.retiredWorkingPreferences).toEqual({
       schemaVersion: 1,
@@ -212,6 +215,27 @@ it("retains exact saved retired preferences in a durable, idempotent migration r
     expect(patched.status).toBe(200);
     expect((await store.load()).fleet.hire).not.toHaveProperty("effort");
     expect((await store.load()).retiredWorkingPreferences).toEqual(migrated.retiredWorkingPreferences);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("does not turn generated defaults into retired owner choices on first save or restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "fresh-working-preferences-"));
+  const path = join(root, "settings.json");
+  try {
+    const store = new SettingsStore(path);
+    const before = await store.load();
+    expect(before.retiredWorkingPreferences).toEqual({ schemaVersion: 1, fleet: {}, projects: {} });
+    const saved = await store.update((current) => ({
+      ...current,
+      fleet: { ...current.fleet, notes: "Owner notes" },
+    }));
+    expect(await new SettingsStore(path).load()).toEqual(saved);
+    expect(saved.retiredWorkingPreferences).toEqual(before.retiredWorkingPreferences);
+    expect(JSON.parse(await readFile(path, "utf8")).retiredWorkingPreferences).toEqual(
+      before.retiredWorkingPreferences,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

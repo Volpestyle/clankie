@@ -261,8 +261,6 @@ it("round-trips owner settings through real relay/device/service HTTP and persis
         commit: "owner",
         push: "owner",
         release: { mode: "time_rule", rule: "Release after the last v* tag is more than one week old." },
-        verification: "review_and_seal",
-        reportingStyle: "Short and plain.",
       },
     });
     expect(updated.fleet.closure).toBe("owner");
@@ -285,7 +283,7 @@ it("round-trips owner settings through real relay/device/service HTTP and persis
   expect(f.captainCalls()).toBe(0);
   expect((await new SettingsStore(f.settings.path).load()).autonomy.fleet.closure).toBe("owner");
   expect((await new SettingsStore(f.settings.path).load()).autonomy.fleet.verification).toBe(
-    "review_and_seal",
+    "change_run_read",
   );
 });
 
@@ -406,9 +404,9 @@ it("carries talkativeness, hire defaults and worker-account holds for a control 
   const cleared = await call(FLEET_HIRE_DEFAULTS_PATH, {
     schemaVersion: 1,
     expectedRevision: hire.revision,
-    changes: { harness: "auto", effort: "high" },
+    changes: { harness: "auto", model: "gpt-6" },
   });
-  expect(FleetHireDefaultsSnapshotSchema.parse(await cleared.json()).hire).toEqual({ effort: "high" });
+  expect(FleetHireDefaultsSnapshotSchema.parse(await cleared.json()).hire).toEqual({ model: "gpt-6" });
 
   const accounts = MachineWorkerAccountsSchema.parse(
     await (await call(workerAccountsRoute("pc-work"))).json(),
@@ -429,7 +427,7 @@ it("carries talkativeness, hire defaults and worker-account holds for a control 
 
   const saved = await new SettingsStore(f.settings.path).load();
   expect(saved.persona).toMatchObject({ chattiness: "chatty", characterNotes: "private notes" });
-  expect(saved.fleet.hire).toEqual({ account: "work", effort: "high" });
+  expect(saved.fleet.hire).toEqual({ account: "work", model: "gpt-6" });
   expect(saved.workerAccountHolds).toHaveLength(1);
   expect(f.forwarded.every((entry) => entry.token === f.tokens.control)).toBe(true);
 

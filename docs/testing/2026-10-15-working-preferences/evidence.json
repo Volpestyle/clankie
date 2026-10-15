@@ -8,6 +8,12 @@
       "url": "clankie://evidence/sha256/71028eaeb4bd5c919564e7e5e9cc2d90f7d1d9fe2ec0002f4347cc1b7d1d8ef0"
     },
     {
+      "path": "landing-repairs.zip",
+      "size": 3142988,
+      "sha256": "ff5b8157bb70967788a804e5116d18a0768e23b8ba5b40d59bd481e92694df08",
+      "url": "clankie://evidence/sha256/ff5b8157bb70967788a804e5116d18a0768e23b8ba5b40d59bd481e92694df08"
+    },
+    {
       "path": "raw/vuh2256-landing-2.log",
       "size": 18785,
       "sha256": "9ce3e50021c0e49a57311c2d2e89e2ac9d3cc208a39c0162e7a716c887b6ed17",

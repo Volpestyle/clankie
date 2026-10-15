@@ -145,6 +145,14 @@ async function fixture(
       session: { permission: () => [], question: () => [], status: () => ({ type: sessionStatus }) },
     },
     client: {
+      provider: {
+        list: async () => ({
+          data: {
+            connected: ["openai"],
+            all: [{ id: "openai", models: { "gpt-6-sol": { variants: { low: {} } } } }],
+          },
+        }),
+      },
       session: {
         async create() {
           await writeOpenCodeNativeSession(database, root, sessionId);
@@ -486,6 +494,13 @@ async function fixture(
       schemaVersion: 1,
       harness: "opencode",
       title: "Oriana Vale",
+      ...(preferencesOnly
+        ? {}
+        : {
+            model: "openai/gpt-6-sol",
+            effort: "low" as const,
+            effortReason: "Exercise the fixed native lifecycle transcript and channel ownership fences.",
+          }),
       ...(assignRole ? { role: "tester" } : {}),
       workingDirectory: root,
       ...(ssh === undefined ? {} : { fleet: ssh.fleet.id }),
@@ -613,8 +628,8 @@ test("a hire without an explicit brief delivers resolved working preferences thr
   expect(brief).toContain("Push: lead.");
   expect(brief).toContain("Release: time_rule.");
   expect(brief).toContain("After one week with changes.");
-  expect(brief).toContain("Verification: review_and_seal.");
-  expect(brief).toContain("Reporting style: Evidence links first.");
+  expect(brief).not.toContain("Verification:");
+  expect(brief).not.toContain("Reporting style:");
   expect(brief).toContain("not tool, account or machine authority");
   expect(brief).toContain("Do not run evals");
   expect(
@@ -887,6 +902,9 @@ test("the global operator seat hires on a linked machine only into a registered 
         schemaVersion: 1,
         harness: "opencode",
         title: "Remote Stranger",
+        model: "openai/gpt-6-sol",
+        effort: "low",
+        effortReason: "Verify refusal outside the registered remote project workspace.",
         workingDirectory,
         fleet: f.ssh!.fleet.id,
         ...(projectId === undefined ? {} : { projectId }),
@@ -970,6 +988,9 @@ test("history-first native hire keeps Captain admission during a prepare drop an
       schemaVersion: 1,
       harness: "opencode",
       title: "Oriana Vale",
+      model: "openai/gpt-6-sol",
+      effort: "low",
+      effortReason: "Verify lost admission during native discovery before allocation.",
       role: "tester",
       workingDirectory: f.root,
       fleet: ssh.fleet.id,

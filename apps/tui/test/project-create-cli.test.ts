@@ -29,7 +29,6 @@ async function fixture() {
     workspacePath: "/fixture/garden",
     workerCap: 0,
     roles: [{ role: "builder", concurrencyCap: null }],
-    fleet: { size: "large" },
   };
   const file = join(root, "proposal with spaces.json");
   await writeFile(file, JSON.stringify(proposal));

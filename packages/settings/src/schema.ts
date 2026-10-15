@@ -771,8 +771,12 @@ export const ClankieSettingsSchema = z
      */
     maximumTrustMode: z.boolean().default(false),
     autonomy: AutonomySettingsSchema.default(() => AutonomySettingsSchema.parse({})),
-    /** Exact legacy values, retained read-only when their editable controls retire. */
-    retiredWorkingPreferences: RetiredWorkingPreferencesSchema.optional(),
+    /** Empty marks migration complete too, so generated defaults never become owner choices. */
+    retiredWorkingPreferences: RetiredWorkingPreferencesSchema.default(() => ({
+      schemaVersion: 1 as const,
+      fleet: {},
+      projects: {},
+    })),
     projects: ProjectsSettingsSchema.default(() => ProjectsSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),

@@ -51,10 +51,33 @@ legacy hire-journal fingerprint compatibility issue; the service compiler was
 interrupted. Its gate result is incomplete, not green. No test suite ran in
 that attempt.
 
+Attempt 3 failed on test compiler errors in HTTP and onboarding fixtures. Those
+were corrected; 40 focused settings/onboarding tests passed.
+
+Attempts 4 and 5 passed all 24 selected package typechecks, then stopped on
+native consumer failures. The hire fixtures now supply per-job effort, reasons
+and observed plan inputs. Inspection also found and fixed two behavior bugs:
+service-added standing context incorrectly classified an empty manual launch as
+a task, and a fresh settings save could later archive generated defaults as
+owner choices. Fresh settings now retain an explicit empty migration receipt.
+
+A no-bail diagnostic of the gate-selected tests was stopped after identifying
+affected consumer failures, while repository integration machinery was still
+running. It is incomplete, not a green test run or landing gate. Retired-control
+write and prompt expectations were updated for the approved removal.
+
+Focused follow-up results: 88 tests across seven hire suites; 30 relay/settings/
+creation tests; 21 real native lifecycle tests, including empty manual launches
+and remote authority fences. The corrected settings/Auto/model command cases
+and focused compiler also passed. Counts overlap earlier runs. Root landing
+revalidation and deployed proof remain pending.
+
 The compatibility issue was reproduced by running main's actual prior writer:
 the new reader refused its unchanged advanced-profile journal. The fix keeps the
 legacy fingerprint when no project hiring policy is configured. A captured
 journal exercises recovery and still refuses a genuinely changed model policy.
+
+[Repair checks, nonzero gate results and incomplete diagnostic](clankie://evidence/sha256/ff5b8157bb70967788a804e5116d18a0768e23b8ba5b40d59bd481e92694df08).
 
 ## Open proof
 

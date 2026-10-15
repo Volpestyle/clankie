@@ -77,28 +77,28 @@ describe("lane prompt assembly", () => {
     expect(defaults).toContain("Machine setup: lead.");
   });
 
-  it("states the owner's budget as a target, and a non-default budget alone renders the section", () => {
+  it("omits retired budget prompts while retaining owner-authored fleet notes", () => {
     const efficient = ClankieSettingsSchema.parse({
       schemaVersion: 1,
       fleet: { size: "small", models: "efficient" },
     });
     const operator = assembleLanePrompt("operator", true, efficient);
     expect(operator).toContain("# Your fleet");
-    expect(operator).toContain("Fleet size: small.");
-    expect(operator).toContain("Models: efficient.");
-    // A target the lead sizes toward, never a cap he is held to.
-    expect(operator).toContain("not caps");
+    expect(operator).not.toContain("Fleet size:");
+    expect(operator).not.toContain("Models: efficient.");
+    expect(operator).not.toContain("not caps");
     expect(operator).not.toMatch(/\n\n\n/u);
     expect(assembleLanePrompt("discord_presence", false, efficient)).not.toContain("# Your fleet");
-    // With notes, the default budget still rides along so he knows it is unlimited.
+    // Saved free-form notes remain independent of the retired controls.
     const notesOnly = ClankieSettingsSchema.parse({
       schemaVersion: 1,
       fleet: { notes: "codex is the workhorse." },
     });
     const withNotes = assembleLanePrompt("operator", true, notesOnly);
-    expect(withNotes).toContain("Fleet size: max.");
-    expect(withNotes).toContain("No ceiling");
-    expect(withNotes.indexOf("Models: optimal.")).toBeLessThan(withNotes.indexOf("codex is the workhorse."));
+    expect(withNotes).not.toContain("Fleet size:");
+    expect(withNotes).not.toContain("No ceiling");
+    expect(withNotes).not.toContain("Models: optimal.");
+    expect(withNotes).toContain("codex is the workhorse.");
   });
 
   it("renders only the named sections, so a seat can skip the identity its output style already carries", () => {

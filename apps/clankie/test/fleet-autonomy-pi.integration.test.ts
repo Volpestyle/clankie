@@ -216,14 +216,14 @@ it("refreshes disk-backed global and project leaves on repeated native Pi starts
   }));
   const narrowed = await f.refresh();
   policy(narrowed, "owner", "lead");
-  expect(narrowed).toContain("Fleet size: small.");
-  expect(narrowed).toContain("Models: efficient.");
+  expect(narrowed).not.toContain("Fleet size:");
+  expect(narrowed).not.toContain("Models: efficient.");
   expect(narrowed).toContain("Current routing preference.");
   expect(narrowed).toContain("Commit: owner.");
   expect(narrowed).toContain("Push: lead.");
   expect(narrowed).toContain("Release: lead.");
-  expect(narrowed).toContain("Verification: review_and_seal.");
-  expect(narrowed).toContain("Reporting style: Project report.");
+  expect(narrowed).not.toContain("Verification:");
+  expect(narrowed).not.toContain("Reporting style:");
   expect(narrowed).toContain("including App Store or TestFlight, follows the resolved release preference");
   expect(narrowed).toContain("Evals require explicit owner authorization");
   await f.writer.update((current) => ({
@@ -238,7 +238,7 @@ it("refreshes disk-backed global and project leaves on repeated native Pi starts
   expect(inherited).toContain("Push: owner.");
   expect(inherited).toContain("Release: time_rule.");
   expect(inherited).toContain("After one week with user-visible changes.");
-  expect(inherited).toContain("Reporting style: Concise evidence links.");
+  expect(inherited).not.toContain("Reporting style:");
   expect(f.errors).toEqual([]);
 });
 

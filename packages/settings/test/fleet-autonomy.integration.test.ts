@@ -202,21 +202,17 @@ it("round-trips every working preference, replaces release atomically, and clear
         commit: "lead",
         push: "lead",
         release: { mode: "time_rule", rule: "Release after the project review." },
-        verification: "change_run_read",
-        reportingStyle: "Keep project reports brief.",
       },
     },
   });
   const overridden = await new SettingsStore(f.store.path).load();
   expect(effectiveFleetAutonomy(overridden.autonomy, overridden.projects.projects[0]!.autonomy)).toEqual({
-    ...FLEET_AUTONOMY_DEFAULTS,
+    ...global.fleet,
     closure: "owner",
     machineSetup: "owner",
     commit: "lead",
     push: "lead",
     release: { mode: "time_rule", rule: "Release after the project review." },
-    verification: "change_run_read",
-    reportingStyle: "Keep project reports brief.",
   });
   await f.patch({ autonomy: { fleet: { release: { mode: "lead" } } } });
   const replaced = await f.store.load();
@@ -240,7 +236,13 @@ it("round-trips every working preference, replaces release atomically, and clear
   }
   expect(await readFile(f.store.path, "utf8")).toBe(bytes);
   await f.patch({
-    autonomy: { fleet: Object.fromEntries(FLEET_AUTONOMY_FIELDS.map((field) => [field, null])) },
+    autonomy: {
+      fleet: Object.fromEntries(
+        FLEET_AUTONOMY_FIELDS.filter((field) => field !== "verification" && field !== "reportingStyle").map(
+          (field) => [field, null],
+        ),
+      ),
+    },
   });
   const restarted = await new SettingsStore(f.store.path).load();
   expect(restarted.autonomy).toEqual(global);
@@ -376,7 +378,11 @@ it("preserves older wire responses without inventing supported preferences and a
       workingPreferences: true,
     }).fleet,
   ).toEqual({ ...oldFleet, ...settings.autonomy.fleet });
-  const clears = Object.fromEntries(FLEET_AUTONOMY_FIELDS.map((field) => [field, null]));
+  const clears = Object.fromEntries(
+    FLEET_AUTONOMY_FIELDS.filter((field) => field !== "verification" && field !== "reportingStyle").map(
+      (field) => [field, null],
+    ),
+  );
   expect(
     UpdateFleetSettingsSchema.parse({ schemaVersion: 1, expectedRevision: revision, changes: clears })
       .changes,
