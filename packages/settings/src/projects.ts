@@ -68,6 +68,10 @@ export function updateProjectSettings(
   else if (input.changes.focus !== undefined) project.focus = input.changes.focus;
   if (input.changes.productPaths === null) delete project.productPaths;
   else if (input.changes.productPaths !== undefined) project.productPaths = input.changes.productPaths;
+  for (const field of ["wipCap", "ownerLoop", "hiring"] as const) {
+    if (input.changes[field] === null) delete project[field];
+    else if (input.changes[field] !== undefined) Object.assign(project, { [field]: input.changes[field] });
+  }
   if (input.changes.autonomy !== undefined) {
     const fleet = applyFleetAutonomyPatch(project.autonomy?.fleet, input.changes.autonomy.fleet);
     const autonomy = { ...project.autonomy };

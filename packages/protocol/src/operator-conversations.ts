@@ -1180,6 +1180,11 @@ export const SpawnOperatorSeatSchema = z
   .object({
     schemaVersion: z.literal(1),
     ...HireProfileSchema.shape,
+    /** Selects a launch profile, never leadership authority. */
+    hireKind: z.enum(["lead", "worker"]).optional(),
+    /** Per-job explanation of why this is the smallest effort that meets acceptance. */
+    effortReason: z.string().trim().min(1).max(600).optional(),
+
     /** Saved transcript ref (`host:sessionId`); continue it as a normal native seat. */
     resume: z.string().trim().min(1).max(128).optional(),
     /** Explicit new remote work after a settled native hire; both identities stay fenced. */

@@ -1,14 +1,4 @@
-import {
-  FLEET_MODEL_GUIDANCE,
-  FLEET_MODEL_MODES,
-  FLEET_SIZE_GUIDANCE,
-  FLEET_SIZES,
-  FLEET_CLOSURE_GUIDANCE,
-  FLEET_MACHINE_SETUP_GUIDANCE,
-  SettingsStore,
-  type FleetModelMode,
-  type FleetSize,
-} from "@clankie/settings";
+import { FLEET_CLOSURE_GUIDANCE, FLEET_MACHINE_SETUP_GUIDANCE, SettingsStore } from "@clankie/settings";
 import {
   fleetStatus,
   fleetUpdate,
@@ -26,7 +16,6 @@ import {
   FLEET_WORKING_GATE_LABELS,
   fleetGateSummary,
   matchingFleetGatePreset,
-  HireEffortSchema,
   OPERATOR_SEAT_HARNESSES,
   FleetReportingStyleSchema,
   FleetReleasePolicySchema,
@@ -39,15 +28,7 @@ export interface FleetCommandServices extends FleetCommandOptions {
   settings: SettingsStore;
 }
 
-/**
- * `/fleet` edits who Clankie reaches for and the tool and peer-message switches.
- *
- * The routing notes are free text on purpose: a role enum only covers the
- * situations someone enumerated, and the useful ones are conditional. The swarm
- * size and model mode are the one structured part — the owner's budget — and
- * they are targets he sizes toward, never caps. He reads all of it and decides,
- * the same way he reads the rest of a turn — it is a preference, not a router.
- */
+/** Edit concrete fleet authority, account/profile defaults, resources and owner routing notes. */
 export function buildFleetCommands(services: FleetCommandServices): FaceShellCommand[] {
   return [
     {
@@ -89,6 +70,9 @@ async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandSe
       `settings file: ${result.settingsFile}`,
       "",
       ...formatFleetLines(result.fleet),
+      ...(result.retiredWorkingPreferences
+        ? [`Retired preferences (saved read-only): ${JSON.stringify(result.retiredWorkingPreferences.fleet)}`]
+        : []),
       ...formatDeployHoldLines(result.deployHolds),
       "",
       ...formatWorkingPreferences(result.workingPreferences),
@@ -96,14 +80,6 @@ async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandSe
     ].join("\n"),
     "success",
   );
-}
-
-function isFleetSize(value: string): value is FleetSize {
-  return (FLEET_SIZES as readonly string[]).includes(value);
-}
-
-function isFleetModelMode(value: string): value is FleetModelMode {
-  return (FLEET_MODEL_MODES as readonly string[]).includes(value);
 }
 
 async function editFleetResources(shell: ClankieFaceShell, services: FleetCommandServices): Promise<void> {
@@ -214,26 +190,10 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     const snapshot = await fleetStatus(services);
     const current = snapshot.fleet;
     flow.renderLine(fleetGateSummary(current));
-    const size = await flow.readSelect({
-      message: "Fleet — the fleet size to aim for (a target, not a cap)",
-      options: FLEET_SIZES.map((value) => ({ value, label: value, description: FLEET_SIZE_GUIDANCE[value] })),
-      initialValue: current.size,
-      currentValue: current.size,
-      allowBack: true,
-    });
-    if (size === undefined || !isFleetSize(size)) return;
-    const models = await flow.readSelect({
-      message: "Fleet — how a model and effort are picked per job",
-      options: FLEET_MODEL_MODES.map((value) => ({
-        value,
-        label: value,
-        description: FLEET_MODEL_GUIDANCE[value],
-      })),
-      initialValue: current.models,
-      currentValue: current.models,
-      allowBack: true,
-    });
-    if (models === undefined || !isFleetModelMode(models)) return;
+    if (snapshot.retiredWorkingPreferences)
+      flow.renderLine(
+        `Retired preferences (saved read-only): ${JSON.stringify(snapshot.retiredWorkingPreferences.fleet)}`,
+      );
     const auto = { value: "auto", label: "auto", description: "He chooses per job." };
     const harness = await flow.readSelect({
       message: "Fleet — default worker harness",
@@ -251,20 +211,6 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       validate: (value: string) => (value.trim().length > 200 ? "Keep it under 200 characters." : undefined),
     });
     if (model === undefined) return;
-    const effort = await flow.readSelect({
-      message: "Fleet — default worker effort",
-      options: [
-        auto,
-        ...HireEffortSchema.options.map((value) => ({ value, label: value })),
-        ...(current.hire?.effort && !HireEffortSchema.safeParse(current.hire.effort).success
-          ? [{ value: current.hire.effort, label: current.hire.effort }]
-          : []),
-      ],
-      initialValue: current.hire?.effort ?? "auto",
-      currentValue: current.hire?.effort ?? "auto",
-      allowBack: true,
-    });
-    if (effort === undefined) return;
     const account = await flow.readText({
       message: "Fleet — default worker account label (empty: he chooses per machine by sign-in and usage)",
       defaultValue: current.hire?.account ?? "",
@@ -439,29 +385,6 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       if (rule === undefined) return;
       preference.release = FleetReleasePolicySchema.parse({ mode: release, rule });
     } else preference.release = { mode: release };
-    const verification = await flow.readSelect({
-      message: "Fleet — how completed changes are verified",
-      options: (["change_run_read", "review_and_seal"] as const).map((value) => ({
-        value,
-        label: value,
-        description: FLEET_AUTONOMY_GUIDANCE.verification[value],
-      })),
-      initialValue: current.verification,
-      currentValue: current.verification,
-      allowBack: true,
-    });
-    if (verification !== "change_run_read" && verification !== "review_and_seal") return;
-    preference.verification = verification;
-    const reportingStyle = await flow.readText({
-      message: "Fleet — progress and result reporting style",
-      defaultValue: current.reportingStyle,
-      multiline: true,
-      allowBack: true,
-      validate: (value: string) =>
-        FleetReportingStyleSchema.safeParse(value).success ? undefined : "Use 1 to 2000 nonempty characters.",
-    });
-    if (reportingStyle === undefined) return;
-    preference.reportingStyle = FleetReportingStyleSchema.parse(reportingStyle);
     const notes = await flow.readText({
       message: "Fleet — which agents you want on what, and when (empty: he decides)",
       defaultValue: current.notes,
@@ -473,8 +396,6 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     if (notes === undefined) return;
     await fleetUpdate(
       {
-        size,
-        models,
         tools,
         peerMessages,
         leadRestarts,
@@ -484,7 +405,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
         ...preference,
       },
       { ...services, expectedRevision: snapshot.revision },
-      { harness, model: model.trim() || "auto", effort, account: account.trim() || "auto" },
+      { harness, model: model.trim() || "auto", account: account.trim() || "auto" },
     );
     flow.renderLine(
       "Saved. Fleet autonomy, tool access and peer-message settings apply immediately. Run `clankie restart` to apply routing preferences.",

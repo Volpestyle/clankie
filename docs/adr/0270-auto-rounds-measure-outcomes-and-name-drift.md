@@ -223,3 +223,24 @@ Lead decisions for VUH-2284:
 - Milestone identities, rather than request state or counts, join the fingerprint.
   Recording a claim therefore causes no extra wake. Routine rounds ask for no
   project post. VUH-2256's cadence preference remains a future integration.
+
+## Amendment: enforced project work policy (VUH-2256, 2026-10-15)
+
+- Project `wipCap` bounds Started tracker issues independently of worker caps.
+  Both live measurement and replay use it; replay applies today's cap to historical
+  counts rather than claiming to reconstruct past settings.
+- `ownerLoop` defaults to `milestones`; `silent` requests no owner posts, and
+  `landings` also aggregates newly observed origin commits. The first observation
+  establishes a baseline. Existing delivery claims, definite-refusal retries and
+  status-update attribution apply to both landing and milestone requests.
+- Project lead/worker profiles and plan/model constraints apply at hire admission.
+  Subscription work hires require usage observed within five minutes and retain
+  a 10% reserve for running work. Unknown usage cannot authorize a new hire.
+  Each job names its effort rationale; fleet-wide effort no longer supplies it.
+  Receipts and the private project hire journal retain selection evidence.
+- Editable fleet size/model mode, verification mode, reporting style and global
+  hire effort are retired. Saved values are archived read-only before defaults
+  are filled; compatibility views retain old fields without accepting edits.
+- Decision asks have a default and deadline. Expiry informs the lead and owner
+  with service attribution; it never fabricates an owner answer or approves an
+  owner gate. The lead can act only within existing authority.

@@ -85,6 +85,27 @@ async function fixture(owner?: ConversationAuthority) {
   const startAgent = vi.fn(async () => undefined);
   const wake = vi.fn(async () => undefined);
   const store = new HerdrWatchStore(join(root, "watches.json"), {
+    workerAccountsReport: async () => ({
+      machine: "local",
+      shell: "posix",
+      observedAt: new Date().toISOString(),
+      accounts: [
+        {
+          harness: "codex",
+          label: "fixture",
+          home: root,
+          signedIn: true,
+          usable: true,
+          plan: "pro",
+          headroom: 0.8,
+          usage: {
+            source: "codex-rate-limits",
+            observedAt: new Date().toISOString(),
+            windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+          },
+        },
+      ],
+    }),
     seatAdapters: [adapter],
     codexAccounts: async () => [{ label: "fixture", home: root }],
     runner: {
@@ -106,7 +127,14 @@ async function fixture(owner?: ConversationAuthority) {
     await rm(root, { recursive: true, force: true });
   });
   const hired = await store.spawnSeat(
-    { schemaVersion: 1, harness: "codex", title: "Test", workingDirectory: root },
+    {
+      schemaVersion: 1,
+      effort: "medium",
+      effortReason: "Native channel delivery and question handling need boundary verification.",
+      harness: "codex",
+      title: "Test",
+      workingDirectory: root,
+    },
     undefined,
     "first brief",
     undefined,

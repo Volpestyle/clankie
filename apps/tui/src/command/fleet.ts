@@ -5,8 +5,6 @@ import {
   FleetGatesSchema,
   FLEET_GATE_PRESETS,
   FleetReleasePolicySchema,
-  FleetVerificationSchema,
-  FleetReportingStyleSchema,
   formatFleetAutonomyGuidance,
   type FleetAutonomy,
   AUTONOMY_LEVELS,
@@ -23,16 +21,10 @@ import { projectRolePolicy } from "@clankie/protocol/projects";
 import { readFile } from "node:fs/promises";
 import { HireProfileSchema, OPERATOR_SEAT_HARNESSES, type HireProfile } from "@clankie/protocol";
 import {
-  FLEET_MODEL_GUIDANCE,
-  FLEET_MODEL_MODES,
-  FLEET_SIZE_GUIDANCE,
-  FLEET_SIZES,
   FleetSettingsSchema,
   SettingsStore,
   defaultSettingsPath,
-  type FleetModelMode,
   type FleetSettings,
-  type FleetSize,
 } from "@clankie/settings";
 import { readWorkingPreferences, type WorkingPreferencesReport } from "./working-preferences.ts";
 import {
@@ -47,7 +39,7 @@ import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH]]",
-  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]`,
+  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]`,
   "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N] [--minimum-free-disk-gb N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet processes [retire]",
@@ -75,6 +67,7 @@ export interface FleetCommandResult {
     /** One line naming every unset harness, model and effort as "no preference". */
     summary: string;
   }>;
+  readonly retiredWorkingPreferences?: import("@clankie/protocol/projects").RetiredWorkingPreferences;
   readonly settingsFile: string;
   readonly restart: string;
   /** The autonomy dial read back from the leaves; absent from an older service. */
@@ -121,6 +114,7 @@ type HirePatch = { [K in "harness" | "model" | "effort" | "account"]?: string };
 
 function patchHireDefaults(current: HireProfile | undefined, patch: HirePatch): HireProfile {
   const next: Record<string, unknown> = { ...current };
+  delete next.effort;
   for (const [field, value] of Object.entries(patch))
     if (value === "auto") delete next[field];
     else next[field] = value;
@@ -147,7 +141,8 @@ function formatHireProfile(profile: HireProfile): string {
 }
 
 function formatHireDefaults(hire: HireProfile | undefined): string {
-  const fields = Object.entries(hire ?? {}).map(
+  const { effort: _retiredEffort, ...active } = hire ?? {};
+  const fields = Object.entries(active).map(
     ([key, value]) => `${key} ${typeof value === "string" ? value : JSON.stringify(value)}`,
   );
   return fields.length ? fields.join(", ") : "none (he picks harness, model, effort and account per job)";
@@ -157,8 +152,6 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
   const notes = fleet.notes.trim();
   const resources = FleetResourcePolicySchema.parse(fleet.machineResources?.local ?? fleet.resources ?? {});
   return [
-    `fleet size: ${fleet.size} — ${FLEET_SIZE_GUIDANCE[fleet.size]}`,
-    `models: ${fleet.models} — ${FLEET_MODEL_GUIDANCE[fleet.models]}`,
     `heavy capacity: ${resources.heavySlots ?? "automatic"} shared slots; simulators: ${resources.simulatorSlots ?? "automatic"}`,
     `simulator idle: ${resources.simulatorIdleMs / 1000}s; load limit: ${resources.maxLoadRatio} per core; minimum available memory: ${resources.minAvailableMemoryMb} MiB; disk floor: ${resources.minFreeDiskGb} GiB; disk warning: ${resources.warnFreeDiskGb} GiB or ${resources.warnFreeDiskPercent}%`,
     ...formatFleetAutonomyGuidance(FleetAutonomySchema.parse(fleetAutonomyFields(fleet))),
@@ -222,7 +215,12 @@ async function result(
         ? p.roles
         : ["planner", "designer", "builder", "tester", "reviewer", "researcher"].map((role) => ({ role }))
       ).map((r) => {
-        const profile = effectiveHireProfile({}, projectRolePolicy(p, r.role), fleet.hire);
+        const { effort: _retired, ...defaults } = fleet.hire ?? {};
+        const profile = effectiveHireProfile(
+          {},
+          projectRolePolicy(p, r.role),
+          effectiveHireProfile(p.hiring?.worker ?? {}, {}, defaults),
+        );
         return { projectId: p.id, role: r.role, profile, summary: formatHireProfile(profile) };
       }),
     ),
@@ -234,7 +232,10 @@ async function result(
 export async function fleetStatus(options: FleetCommandOptions = {}): Promise<FleetCommandResult> {
   const settings = store(options);
   const api = await ownerSettingsApi(options);
-  const snapshot = await api.get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
+  const snapshot = await api.get(
+    `${FLEET_SETTINGS_PATH}?includeWorkPolicy=true`,
+    FleetSettingsSnapshotSchema,
+  );
   const report = await result(
     settings,
     FleetSettingsSchema.parse(
@@ -245,6 +246,9 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
   return {
     ...report,
     revision: snapshot.revision,
+    ...(snapshot.retiredWorkingPreferences
+      ? { retiredWorkingPreferences: snapshot.retiredWorkingPreferences }
+      : {}),
     ...(snapshot.resourceMachines ? { resourceMachines: snapshot.resourceMachines } : {}),
     fleet: { ...report.fleet, ...FleetAutonomySchema.parse(fleetAutonomyFields(snapshot.fleet)) },
     ...(snapshot.autonomyLevel === undefined ? {} : { autonomyLevel: snapshot.autonomyLevel }),
@@ -264,9 +268,12 @@ export async function fleetUpdate(
     Object.entries(change).filter(([key]) => key in FleetSettingsSchema.shape),
   );
   const api = await ownerSettingsApi(options);
-  const snapshot = await api.get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
+  const snapshot = await api.get(
+    `${FLEET_SETTINGS_PATH}?includeWorkPolicy=true`,
+    FleetSettingsSnapshotSchema,
+  );
   const updated = await api.write(
-    FLEET_SETTINGS_PATH,
+    `${FLEET_SETTINGS_PATH}?includeWorkPolicy=true`,
     {
       schemaVersion: 1,
       expectedRevision: options.expectedRevision ?? snapshot.revision,
@@ -291,6 +298,9 @@ export async function fleetUpdate(
   return {
     ...report,
     revision: updated.revision,
+    ...(updated.retiredWorkingPreferences
+      ? { retiredWorkingPreferences: updated.retiredWorkingPreferences }
+      : {}),
     fleet: { ...report.fleet, ...FleetAutonomySchema.parse(fleetAutonomyFields(updated.fleet)) },
     ...(updated.autonomyLevel === undefined ? {} : { autonomyLevel: updated.autonomyLevel }),
   };
@@ -315,7 +325,10 @@ export async function runAutonomyCommand(
   const verb = args[0] ?? "status";
   if (args.length > 1) throw new Error(AUTONOMY_USAGE);
   const api = await ownerSettingsApi(options);
-  const snapshot = await api.get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
+  const snapshot = await api.get(
+    `${FLEET_SETTINGS_PATH}?includeWorkPolicy=true`,
+    FleetSettingsSnapshotSchema,
+  );
   if (snapshot.autonomyLevel === undefined)
     throw new Error("This Clankie service predates the autonomy dial. Update it, then try again.");
   let report = snapshot;
@@ -353,14 +366,6 @@ export function autonomyLevelDescription(level: AutonomyLevelReading, drift?: Au
     : `${AUTONOMY_LEVELS[level].label}: ${AUTONOMY_LEVELS[level].description}`;
 }
 
-function isSize(value: string): value is FleetSize {
-  return (FLEET_SIZES as readonly string[]).includes(value);
-}
-
-function isModelMode(value: string): value is FleetModelMode {
-  return (FLEET_MODEL_MODES as readonly string[]).includes(value);
-}
-
 /** `set` takes each flag at most once, each with a value; anything else is a usage error. */
 async function parseSet(
   flags: readonly string[],
@@ -376,6 +381,10 @@ async function parseSet(
   for (let index = 0; index < flags.length; index += 2) {
     const flag = flags[index];
     const value = flags[index + 1] ?? "";
+    if (["--size", "--models", "--verification", "--report-style", "--effort"].includes(flag ?? ""))
+      throw new Error(
+        `${flag} is retired. Saved values remain read-only; use concrete project work policy and per-hire effort.`,
+      );
     if (
       [
         "--heavy-slots",
@@ -407,12 +416,6 @@ async function parseSet(
     } else if (flag === "--notes" && change.notes === undefined) {
       if (value.length > 4_000) throw new Error("Keep --notes under 4000 characters.");
       change.notes = value;
-    } else if (flag === "--size" && change.size === undefined) {
-      if (!isSize(value)) throw new Error(`--size must be one of ${FLEET_SIZES.join(", ")}.`);
-      change.size = value;
-    } else if (flag === "--models" && change.models === undefined) {
-      if (!isModelMode(value)) throw new Error(`--models must be one of ${FLEET_MODEL_MODES.join(", ")}.`);
-      change.models = value;
     } else if (flag === "--closure" && change.closure === undefined) {
       if (value !== "lead" && value !== "owner") throw new Error("--closure must be lead or owner.");
       change.closure = value;
@@ -429,10 +432,6 @@ async function parseSet(
       releaseMode = value;
     } else if (flag === "--release-rule" && releaseRule === undefined) {
       releaseRule = value;
-    } else if (flag === "--verification" && change.verification === undefined) {
-      change.verification = FleetVerificationSchema.parse(value);
-    } else if (flag === "--report-style" && change.reportingStyle === undefined) {
-      change.reportingStyle = FleetReportingStyleSchema.parse(value);
     } else if (flag === "--gate-preset") {
       const preset = FLEET_GATE_PRESETS[value as keyof typeof FLEET_GATE_PRESETS];
       if (
@@ -509,11 +508,17 @@ export async function runFleetCommand(
       await ownerSettingsApi(options)
     ).get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
     const current = snapshot.fleet;
+    const { size: _retiredSize, models: _retiredModels, ...fleetDefaults } = FleetSettingsSchema.parse({});
+    const {
+      verification: _retiredVerification,
+      reportingStyle: _retiredStyle,
+      ...autonomyDefaults
+    } = FleetAutonomySchema.parse({});
     return await fleetUpdate(
       {
-        ...FleetSettingsSchema.parse({}),
+        ...fleetDefaults,
         hire: undefined,
-        ...FleetAutonomySchema.parse({}),
+        ...autonomyDefaults,
         ...(current.resources === undefined ? {} : { resources: FleetResourcePolicySchema.parse({}) }),
       },
       { ...options, expectedRevision: snapshot.revision },

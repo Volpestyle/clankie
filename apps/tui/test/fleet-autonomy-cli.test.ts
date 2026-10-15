@@ -88,7 +88,7 @@ async function fixture() {
 
 it("persists logical fleet autonomy leaves independently and clear restores lead defaults", async () => {
   const f = await fixture();
-  await runFleetCommand(["set", "--closure", "owner", "--size", "small"], {
+  await runFleetCommand(["set", "--closure", "owner"], {
     settings: f.settings,
     ...f.client,
   });
@@ -96,7 +96,7 @@ it("persists logical fleet autonomy leaves independently and clear restores lead
     settings: f.settings,
     ...f.client,
   });
-  expect(saved.fleet).toMatchObject({ closure: "owner", machineSetup: "owner", size: "small" });
+  expect(saved.fleet).toMatchObject({ closure: "owner", machineSetup: "owner", size: "max" });
   expect((await f.settings.load()).autonomy.fleet).toEqual(
     FleetAutonomySchema.parse({ closure: "owner", machineSetup: "owner" }),
   );
@@ -123,15 +123,11 @@ it("stores working preferences atomically and resolves an unstarted workspace th
       "time_rule",
       "--release-rule",
       "After a week with user-visible changes.",
-      "--verification",
-      "review_and_seal",
-      "--report-style",
-      "Evidence first.",
     ],
     options,
   );
   const projected = await runProjectSettingsCommand(
-    ["settings", "garden", "--push", "lead", "--release", "lead", "--report-style", "Short with links."],
+    ["settings", "garden", "--push", "lead", "--release", "lead"],
     f.client,
   );
   expect(projected).toMatchObject({
@@ -144,8 +140,8 @@ it("stores working preferences atomically and resolves an unstarted workspace th
         commit: "owner",
         push: "lead",
         release: { mode: "lead" },
-        verification: "review_and_seal",
-        reportingStyle: "Short with links.",
+        verification: "change_run_read",
+        reportingStyle: "Short and plain.",
       },
     },
   });
@@ -158,8 +154,8 @@ it("stores working preferences atomically and resolves an unstarted workspace th
       commit: "owner",
       push: "lead",
       release: { mode: "lead" },
-      verification: "review_and_seal",
-      reportingStyle: "Short with links.",
+      verification: "change_run_read",
+      reportingStyle: "Short and plain.",
     },
   });
   expect(formatWorkingPreferences(resolved.workingPreferences).join("\n")).toContain(
@@ -167,7 +163,7 @@ it("stores working preferences atomically and resolves an unstarted workspace th
   );
   expect(await readFile(f.settings.path, "utf8")).toBe(before);
   await runProjectSettingsCommand(
-    ["settings", "garden", "--push", "inherit", "--release", "inherit", "--report-style", "inherit"],
+    ["settings", "garden", "--push", "inherit", "--release", "inherit"],
     f.client,
   );
   const inherited = await runFleetCommand(["status"], options);
@@ -175,7 +171,7 @@ it("stores working preferences atomically and resolves an unstarted workspace th
     effective: {
       push: "owner",
       release: { mode: "time_rule", rule: "After a week with user-visible changes." },
-      reportingStyle: "Evidence first.",
+      reportingStyle: "Short and plain.",
     },
   });
   await expect(runFleetCommand(["set", "--release-rule", "Only a rule"], options)).rejects.toThrow();

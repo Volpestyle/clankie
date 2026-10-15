@@ -83,22 +83,7 @@ describe("clankie fleet", () => {
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
     const selects: Parameters<SetupFlow["readSelect"]>[0][] = [];
-    const picks = [
-      "small",
-      "efficient",
-      "codex",
-      "xhigh",
-      "off",
-      "off",
-      "off",
-      "owner",
-      "owner",
-      "hands-off",
-      "owner",
-      "lead",
-      "owner",
-      "review_and_seal",
-    ];
+    const picks = ["codex", "off", "off", "off", "owner", "owner", "hands-off", "owner", "lead", "owner"];
     const flow = {
       begin: () => undefined,
       end: () => undefined,
@@ -122,9 +107,6 @@ describe("clankie fleet", () => {
     } as unknown as ClankieFaceShell);
 
     expect(selects).toMatchObject([
-      { currentValue: "large" },
-      { currentValue: "optimal" },
-      { currentValue: "auto" },
       { currentValue: "auto" },
       { currentValue: "connected" },
       { currentValue: "on" },
@@ -135,19 +117,17 @@ describe("clankie fleet", () => {
       { currentValue: "lead" },
       { currentValue: "lead" },
       { currentValue: "owner" },
-      { currentValue: "change_run_read" },
     ]);
     expect(prompts).toMatchObject([
       { defaultValue: "" },
       { defaultValue: "" },
-      { defaultValue: "Short and plain.", multiline: true },
       { defaultValue: "codex is the workhorse.", multiline: true },
     ]);
     expect(read().fleet).toEqual({
       notes: "claude when it needs skills.",
-      hire: { harness: "codex", model: "gpt-6.1-sol", effort: "xhigh" },
-      size: "small",
-      models: "efficient",
+      hire: { harness: "codex", model: "gpt-6.1-sol" },
+      size: "large",
+      models: "optimal",
       tools: "off",
       peerMessages: "off",
       remoteGates: "off",
@@ -160,8 +140,6 @@ describe("clankie fleet", () => {
         hardToUndo: "lead",
         commit: "owner",
         push: "lead",
-        verification: "review_and_seal",
-        reportingStyle: "Plain evidence.",
       }),
     );
   });
@@ -175,11 +153,11 @@ describe("clankie fleet", () => {
 describe("clankie fleet budget", () => {
   it("applies the tool kill switch independently and rejects unsupported or repeated values", async () => {
     const { settings, read } = stubStore();
-    await runFleetCommand(["set", "--notes", "keep me", "--size", "small"], fleetSettingsClient(settings));
+    await runFleetCommand(["set", "--notes", "keep me"], fleetSettingsClient(settings));
     const off = await runFleetCommand(["set", "--tools", "off"], fleetSettingsClient(settings));
     expect(off.fleet).toEqual({
       notes: "keep me",
-      size: "small",
+      size: "max",
       models: "optimal",
       tools: "off",
       peerMessages: "on",
@@ -209,72 +187,19 @@ describe("clankie fleet budget", () => {
       leadRestarts: "on",
     });
     const lines = formatFleetLines(status.fleet).join("\n");
-    expect(lines).toContain("fleet size: max");
-    expect(lines).toContain("No ceiling");
-    expect(lines).toContain("models: optimal");
+    expect(lines).not.toContain("fleet size:");
+    expect(lines).not.toContain("models: optimal");
   });
 
-  it("sets size and models independently of the notes, and clear restores every default", async () => {
+  it("rejects each retired control without changing saved preferences", async () => {
     const { settings, read } = stubStore();
-    await runFleetCommand(["set", "--notes", "codex is the workhorse."], fleetSettingsClient(settings));
-    const set = await runFleetCommand(
-      ["set", "--size", "solo", "--models", "efficient"],
-      fleetSettingsClient(settings),
-    );
-    expect(set.fleet).toEqual({
-      notes: "codex is the workhorse.",
-      size: "solo",
-      models: "efficient",
-      tools: "connected",
-      peerMessages: "on",
-      remoteGates: "off",
-      leadRestarts: "on",
-      ...FleetAutonomySchema.parse({}),
-    });
-    await runFleetCommand(["set", "--models", "optimal"], fleetSettingsClient(settings));
-    expect(read().fleet).toEqual({
-      notes: "codex is the workhorse.",
-      size: "solo",
-      models: "optimal",
-      tools: "connected",
-      peerMessages: "on",
-      remoteGates: "off",
-      leadRestarts: "on",
-    });
-    expect((await runFleetCommand(["clear"], fleetSettingsClient(settings))).fleet).toEqual({
-      notes: "",
-      size: "max",
-      models: "optimal",
-      tools: "connected",
-      peerMessages: "on",
-      remoteGates: "off",
-      leadRestarts: "on",
-      ...FleetAutonomySchema.parse({}),
-    });
-  });
-
-  it("refuses unknown values, repeated flags and a flag without a value", async () => {
-    const { settings, read } = stubStore();
-    await expect(runFleetCommand(["set", "--size", "huge"], fleetSettingsClient(settings))).rejects.toThrow(
-      /--size must be one of/u,
-    );
-    await expect(
-      runFleetCommand(["set", "--models", "cheap"], fleetSettingsClient(settings)),
-    ).rejects.toThrow(/--models must be one of/u);
-    await expect(
-      runFleetCommand(["set", "--size", "max", "--size", "solo"], fleetSettingsClient(settings)),
-    ).rejects.toThrow(/Usage/u);
-    await expect(runFleetCommand(["set", "--size"], fleetSettingsClient(settings))).rejects.toThrow(/Usage/u);
-    await expect(runFleetCommand(["set"], fleetSettingsClient(settings))).rejects.toThrow(/Usage/u);
-    expect(read().fleet).toEqual({
-      notes: "",
-      size: "max",
-      models: "optimal",
-      tools: "connected",
-      peerMessages: "on",
-      remoteGates: "off",
-      leadRestarts: "on",
-    });
+    const before = structuredClone(read());
+    for (const flag of ["--size", "--models", "--verification", "--report-style", "--effort"]) {
+      await expect(runFleetCommand(["set", flag, "value"], fleetSettingsClient(settings))).rejects.toThrow(
+        "retired",
+      );
+    }
+    expect(read()).toEqual(before);
   });
 });
 
@@ -359,13 +284,12 @@ describe("fleet worker defaults persistence", () => {
         },
       }));
       await runFleetCommand(["set", "--harness", "codex"], f.options);
-      await runFleetCommand(["set", "--model", " gpt-6.1-sol ", "--effort", "xhigh"], f.options);
+      await runFleetCommand(["set", "--model", " gpt-6.1-sol "], f.options);
       const fresh = await new SettingsStore(f.settings.path).load();
       expect(fresh.fleet.hire).toEqual({
         ...advanced,
         harness: "codex",
         model: "gpt-6.1-sol",
-        effort: "xhigh",
       });
       expect(fresh.fleet.resources).toEqual(resources);
       expect(fresh.autonomy.fleet.commit).toBe("owner");
@@ -380,20 +304,19 @@ describe("fleet worker defaults persistence", () => {
           .model,
       ).toBe("explicit-model");
       expect(formatFleetLines(status.fleet).join("\n")).toContain(
-        "worker defaults: harness codex, model gpt-6.1-sol, effort xhigh",
+        "worker defaults: harness codex, model gpt-6.1-sol",
       );
       const output: string[] = [];
       await buildFleetCommands(f.options)[0]!.run("show", {
         insertCommandResult: (_command: string, text: string) => output.push(text),
       } as unknown as ClankieFaceShell);
-      expect(output.join("\n")).toContain("worker defaults: harness codex, model gpt-6.1-sol, effort xhigh");
+      expect(output.join("\n")).toContain("worker defaults: harness codex, model gpt-6.1-sol");
       await runFleetCommand(["set", "--model", "auto"], f.options);
       expect((await f.settings.load()).fleet.hire).toEqual({
         ...advanced,
         harness: "codex",
-        effort: "xhigh",
       });
-      await runFleetCommand(["set", "--harness", "auto", "--effort", "auto"], f.options);
+      await runFleetCommand(["set", "--harness", "auto"], f.options);
       expect((await f.settings.load()).fleet.hire).toEqual(advanced);
     } finally {
       await rm(f.root, { recursive: true, force: true });
@@ -405,12 +328,12 @@ describe("fleet worker defaults persistence", () => {
     try {
       const outcomes = await Promise.allSettled([
         runFleetCommand(["set", "--model", "gpt-6.1-sol"], f.options),
-        runFleetCommand(["set", "--effort", "xhigh"], f.options),
+        runFleetCommand(["set", "--model", "other-model"], f.options),
       ]);
       expect(outcomes.filter((result) => result.status === "rejected")).toHaveLength(1);
       const concurrent = (await f.settings.load()).fleet.hire;
-      expect(concurrent?.model === "gpt-6.1-sol" || concurrent?.effort === "xhigh").toBe(true);
-      const cleared = await runFleetCommand(["set", "--model", "auto", "--effort", "auto"], f.options);
+      expect(concurrent?.model === "gpt-6.1-sol" || concurrent?.model === "other-model").toBe(true);
+      const cleared = await runFleetCommand(["set", "--model", "auto"], f.options);
       expect(cleared.fleet.hire).toEqual({});
       expect(formatFleetLines(cleared.fleet).join("\n")).toContain(
         "worker defaults: none (he picks harness, model, effort and account per job)",
@@ -450,9 +373,10 @@ describe("fleet worker defaults persistence", () => {
       }
       await runFleetCommand(["set", "--hire-profile", profile], f.options);
       expect((await f.settings.load()).fleet.hire).toEqual({ account: "second", subagents: null });
-      // Top-level effort remains harness-defined, matching the current profile schema.
-      await runFleetCommand(["set", "--effort", "custom-effort"], f.options);
-      expect((await f.settings.load()).fleet.hire?.effort).toBe("custom-effort");
+      await expect(runFleetCommand(["set", "--effort", "custom-effort"], f.options)).rejects.toThrow(
+        "retired",
+      );
+      expect((await f.settings.load()).fleet.hire).not.toHaveProperty("effort");
     } finally {
       await rm(f.root, { recursive: true, force: true });
     }
@@ -489,10 +413,7 @@ describe("fleet worker defaults persistence", () => {
       await buildFleetCommands(f.options)[0]!.run("", {
         setupFlow: flow,
       } as unknown as ClankieFaceShell);
-      expect(selects.find((s) => s.message.includes("worker effort"))).toMatchObject({
-        currentValue: "custom-effort",
-        options: expect.arrayContaining([{ value: "custom-effort", label: "custom-effort" }]),
-      });
+      expect(selects.some((s) => s.message.includes("worker effort"))).toBe(false);
       expect((await new SettingsStore(f.settings.path).load()).fleet.hire).toEqual({
         account: "second",
         subagents: null,

@@ -488,7 +488,7 @@ Pending deliveries retain the normal idle fence, and the round journal recovers
 settled acceptance or refusal. Paused or ineligible projects still receive no wake.
 Each round also measures every project it carries ([ADR 0270](adr/0270-auto-rounds-measure-outcomes-and-name-drift.md)):
 closures since its last milestone split owner-facing, tooling and unlinked, started
-issues (no WIP cap yet), and churn by bucket per working day, from the backend its
+issues against the configured project WIP cap, and churn by bucket per working day, from the backend its
 workers write to ([tracker outcomes](../apps/clankie/src/project-outcomes.ts)) and its
 origin history. The [measurement](../apps/clankie/src/captain/auto-velocity.ts) adds
 one velocity line per project to the wake, reads `unknown` for any part it cannot
@@ -499,8 +499,10 @@ Auto tick (reused while younger than one); a [drift signal](../apps/clankie/src/
 adds a section to that lead's round and its name to the round fingerprint, and stays
 pending in the record until a round carrying it is delivered. The owner is not told.
 New completed parents and tracker milestones add their stable identities to the
-fingerprint and request one combined project status update with media and evidence
-links; routine rounds ask for none. The append-only measurement claims that request
+fingerprint and, at the default milestone owner-loop cadence, request one combined
+project status update with media and evidence links. Silent cadence requests none;
+landings cadence also aggregates newly observed commits after its first baseline.
+Routine rounds ask for none. The append-only measurement claims that request
 before dispatch, so a restart or uncertain native delivery cannot duplicate it.
 Only definite refusal releases the claim. Later tracker reads append update links
 to the original request, flag routine or excess updates, and keep tracker bindings

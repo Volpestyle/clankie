@@ -3689,12 +3689,12 @@ Specs live in `~/.clankie/views/views.json`. Schemas are in
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status|show]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
-which (up to 4,000 characters of free text) — and the budget he sizes the fleet
-to, plus work closure, machine setup, working preferences and the fleet connected-tool and peer-message switches. `set` takes any combination of the flags;
+which (up to 4,000 characters of free text), plus work closure, machine setup,
+working preferences and the fleet connected-tool and peer-message switches. `set` takes any combination of the flags;
 what is left out keeps its value. `clear` restores every default, including tools
 `connected`. `--tools off` stops new standing tool admissions; manual grants keep
 working. A call already past its last asynchronous check can still dispatch after
@@ -3774,10 +3774,9 @@ The same `autonomy.fleet` block holds working preferences. `--commit` and
 `--release owner` asks before official tags, packages or store submissions
 (default); `lead` permits them after relevant checks, and `time_rule` requires
 `--release-rule TEXT`. A rule is owner-authored guidance to verify against current
-evidence, not a scheduler. `--verification review_and_seal` asks for independent
-review, addressed findings and sealing the reviewed revision with evidence;
-`change_run_read` (default) asks for focused checks and reading their results.
-`--report-style TEXT` sets reporting guidance (default "Short and plain.").
+evidence, not a scheduler. Verification and reporting-style controls are retired;
+the actual work and landing contracts define verification, and project owner-loop
+cadence controls reports.
 Explicit task and integrator gates take precedence, and these preferences
 grant no additional account, tool or workspace authority.
 
@@ -3898,7 +3897,7 @@ service measured before waking the lead, and whether that wake was delivered
 - `closures`: keys closed in the window, split `ownerFacing`, `tooling` (every
   default-branch commit naming the key touched no product path), `unlinked` (no
   commit names it; counted as owner-facing) and `unclassified` (churn unreadable).
-- `started`: started-state issues now, by state; `cap` is null until a WIP cap exists.
+- `started`: started-state issues now, by state, with the configured project `wipCap` (null when unset).
 - `churn`: lines added plus deleted by bucket (product, tooling, docs, excluded) on
   the origin default branch, local or mirrored for remote-only projects.
 - `days`: per local day for the window and the last seven days, whether it was a
@@ -3938,7 +3937,8 @@ explicitly ask for none. Claims use stable tracker ids, survive renames and serv
 restarts, and are recorded before dispatch. A definite delivery refusal can retry;
 an uncertain delivery stays claimed and unsettled to prevent duplicate requests.
 Historical velocity-only rounds claim no posts. Milestone cadence is the default;
-VUH-2256's owner-loop preference is not implemented yet.
+project `ownerLoop` can suppress requests (`silent`) or include newly observed
+landings (`landings`). First landing observation establishes a baseline.
 
 A part the service could not read is `{"state":"unknown","reason":…}`, never zero.
 The wake carries the same numbers as one line per project. The record lives in
@@ -3965,10 +3965,10 @@ from the spans, including issues that closed or reopened after the selected day.
 A two-minute measurement budget bounds the replay. Unreadable measurements stay
 unknown with reasons; an exhausted overall budget refuses the request.
 
-`tooling_lead` and `nothing_closed` use the ordinary completed-day rules. WIP caps
-are unavailable until VUH-2256: replay retains `cap: null` and cannot emit
-`over_wip`. It does not substitute a worker cap or invent a historical WIP policy.
-This limitation is included in each replay's caveats. Replay requires an updated
+`tooling_lead` and `nothing_closed` use the ordinary completed-day rules. Replay
+applies today's configured `wipCap` to historical Started counts and can emit
+`over_wip`; it does not substitute a worker cap or invent historical policy.
+An unset cap remains null and is named in the replay caveats. Replay requires an updated
 service; older services refuse the query.
 
 <a id="maximum-trust-mode"></a>
@@ -4061,7 +4061,7 @@ preferences mark the migration complete; clearing that project override then
 stays cleared after restart. An unregistered project inherits global ask-first
 releases. See [ADR 0230](adr/0230-fleet-responsibility-is-owner-settings.md).
 
-`--harness`, `--model`, `--effort` and `--account` update default workers one field at a time
+`--harness`, `--model` and `--account` update default workers one field at a time
 (`fleet.hire`), preserving native subagents, delegation and placement.
 `auto` removes a field so Clankie chooses it per job. `--hire-profile FILE.json`
 replaces the whole profile; use it separately from the field flags. Explicit
@@ -4070,21 +4070,11 @@ settings affect new hires. `fleet clear` also removes worker defaults.
 The TUI status prints `worker defaults: …`, or explains that Clankie chooses
 when no fields are set.
 
-**The budget is two targets, never caps.** Nothing counts seats against them; the
-leadership skill (`lead`) and his prompt use them to aim.
-An owner who wants a thousand agents picks `max` or says so in the notes.
-
-| `--size`        | Fits                                                               | Aims for                                                                                                                                     |
-| --------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `max` (default) | several top-tier plans, e.g. four or five $200/month subscriptions | maximum bandwidth: one worker per separable deliverable plus independent reviewers, as far as the work and machines can use them; no ceiling |
-| `large`         | one or two top-tier plans                                          | around six concurrent workers, reviewers included                                                                                            |
-| `small`         | one mid-tier plan, about $100/month                                | one or two workers at a time; the rest sequenced                                                                                             |
-| `solo`          | pay-per-token API use                                              | no standing workers: he works himself or through short native subagents, and asks before a long or parallel run                              |
-
-| `--models`          | Picks per job                                                                       |
-| ------------------- | ----------------------------------------------------------------------------------- |
-| `optimal` (default) | the strongest model and the effort the job needs; cost is not a reason to downgrade |
-| `efficient`         | the smallest model and lowest effort that still meet the job's acceptance           |
+Fleet size, model mode, verification mode, reporting style and fleet-wide hire
+effort are retired controls. Exact previously saved values are retained in the
+read-only `retiredWorkingPreferences` migration receipt. Their legacy response
+fields remain for compatibility, but edits are rejected. Use numeric worker caps,
+project hiring constraints, per-job effort and owner-loop cadence instead.
 
 **The default notes are empty**, and empty means he picks a harness per job on his
 own. Nothing here ships with an opinion; this is where you add one.
@@ -4098,28 +4088,27 @@ The notes reach him as the `fleet` prompt section, and only on lanes that hold a
 shell — a room that cannot dispatch would carry the section for nothing. They are
 preference, not authority: the section says plainly that he still reads the work
 and decides, and a note here can no more widen his reach than a warmer persona
-can. The section carries the effective fleet size, model mode and autonomy policy
-on machine-authorized lanes, including the default `lead` responsibilities.
+can. The section carries effective autonomy policy on machine-authorized lanes,
+including the default `lead` responsibilities.
 
 JSON includes the global `fleet` projection and a separate workspace
 `workingPreferences` report, with either available resolved values or an
 unavailable detail. `fleet status` also reports `deployHolds`: each current
 [deploy hold](integration.md#deploy-holds) with a `summary` of its holder, how
 long it has held and the time left, or an `unavailable` detail when the service
-cannot list them. The TUI `/fleet` command opens the same editor (size, models,
-worker harness, model, effort and account, connected tools, peer messages, closure, machine setup, working preferences, then notes)
+cannot list them. The TUI `/fleet` command opens the same editor (worker
+harness, model and account, connected tools, peer messages, closure, machine setup,
+working preferences and notes), with retired saved values shown read-only
 and `/fleet status` (also `/fleet show`) prints the same values. CLI `fleet show` aliases `fleet status`.
 
 ```bash
 clankie fleet set --notes "codex is the workhorse. claude when it needs skills or long context. grok for a hostile read on work that already passed review. never codex on Swift."
-clankie fleet set --size small --models efficient
 clankie fleet set --peer-messages off
-clankie fleet set --harness codex --model gpt-6.1-sol --effort xhigh
-clankie fleet set --model auto --effort auto
+clankie fleet set --harness codex --model gpt-6.1-sol
+clankie fleet set --model auto
 clankie fleet set --account auto
 clankie fleet set --closure owner --machine-setup owner
 clankie fleet set --commit lead --push lead --release owner
-clankie fleet set --verification review_and_seal --report-style "Short and plain."
 ```
 
 <a id="runtime-setup"></a>
@@ -4546,8 +4535,8 @@ the same fields and shows unset launch fields as "no preference". A
 in a role, with the same result as omitting the field.
 
 ```sh
-clankie agents role implementer --project clankie --harness codex --model "sol 6.1" --effort xhigh --subagent-model "sol 6.1" --subagent-effort medium --delegation native-first --placement new-tab
-clankie agents role implementer --project clankie --model auto --effort auto --subagent-model auto --subagent-effort auto
+clankie agents role implementer --project clankie --harness codex --model "sol 6.1" --subagent-model "sol 6.1" --subagent-effort medium --delegation native-first --placement new-tab
+clankie agents role implementer --project clankie --model auto --subagent-model auto --subagent-effort auto
 ```
 
 Explicit hire fields expressing the owner's words win over the role, then
@@ -6623,9 +6612,9 @@ preference answers do not authorize creation.
 
 The file requires `name` and `workspacePath`; `PROJECT` and `REVISION` are explicit
 arguments and cannot be supplied or overridden by the file. Optional `roles`,
-`workerCap`, `trackerRef`, `trackerSetup` and `fleet` use the existing project policy vocabulary. Role and
-project caps may be `null` to inherit; zero stays an explicit zero. Fleet size
-and model preferences do not imply numeric caps or new hiring guidance.
+`workerCap`, `trackerRef`, `trackerSetup`, `wipCap`, `ownerLoop` and `hiring`
+use the shared project policy vocabulary. Worker caps may be `null` to inherit;
+zero stays an explicit zero. Retired fleet size/model settings cannot be created.
 
 Creation accepts one existing canonical workspace on the service's local
 machine. Its workspace ID is `primary`. Existing project IDs, path overlaps,
@@ -6655,16 +6644,16 @@ trackers or missing Linear scope produce one question. Builder and reviewer are
 the baseline; an app UI adds designer, and a test suite adds tester. Each role
 has a one-line reason in the proposal evidence.
 
-Fleet size defaults to `small` (two workers). Repos with at least 1,000 source
-files and 50 commits in the last 14 days can propose `large` (four). The numeric
-worker cap never exceeds the observed resource governor's heavy capacity;
-pressure or missing observations propose zero workers and `solo`. These are
+The default numeric worker cap is two. Repos with at least 1,000 source files
+and 50 commits in the last 14 days can propose four. The numeric worker cap never
+exceeds the observed resource governor's heavy capacity; pressure or missing
+observations propose zero workers. These are
 reviewed defaults, not resource permits; the live governor still admits hires.
 
 `project_proposal_get` returns the single proposal object and its exact target.
 `project_proposal_confirm` accepts it through the existing durable save.
 `project_proposal_tweak` takes that target plus one `change: { field, value }`,
-where `field` is `name`, `roles`, `fleet`, `workerCap`, or `tracker`. A tracker
+where `field` is `name`, `roles`, `workerCap`, or `tracker`. A tracker
 value contains `trackerRef` and optional `trackerSetup`. A tweak saves no project
 or tracker: it creates a fresh proposal/hash/revision for review. Accepting an
 old target is refused. Confirmed project roles become the station definitions;
@@ -6778,10 +6767,8 @@ and their current effective values, plus `auto` and `focus`. `--auto on|off` and
 `--focus TEXT|clear` set those in the same revision-fenced update. Add `--closure lead|owner|inherit` or
 `--machine-setup lead|owner|inherit`, `--commit lead|owner|inherit`,
 `--push lead|owner|inherit`, `--release lead|owner|time_rule|inherit`
-(with `--release-rule TEXT` for `time_rule`),
-`--verification review_and_seal|change_run_read|inherit`, or
-`--report-style TEXT|inherit` to change only that leaf through the current
-revision-bearing owner API. Missing leaves inherit the global setting independently;
+(with `--release-rule TEXT` for `time_rule`) to change only that leaf through
+the current revision-bearing owner API. Missing leaves inherit the global setting independently;
 `inherit` removes the selected override without changing its sibling. The console
 accepts the same syntax as `/project settings PROJECT ...`.
 
@@ -6791,8 +6778,40 @@ clankie project settings garden --machine-setup lead
 clankie project settings garden --closure inherit
 clankie project settings clankie --release time_rule --release-rule "Release without asking when the last v* tag is more than one week old and main has user-visible changes worth shipping."
 clankie project settings garden --commit owner --push inherit
-clankie project settings garden --report-style "Short and plain."
+clankie project settings garden --wip-cap 6 --owner-loop milestones
 ```
+
+Projects expose work policy with `projectWorkPolicy:true` when API readers use
+`?includeAutonomy=true&includeWorkPolicy=true`. Older views omit these new fields
+but retain the revision of the full settings document. The CLI and TUI use this
+opt-in automatically; unsupported hosts cannot accept the new controls.
+
+`--wip-cap 1..1000|none` caps Started tracker issues, independently of running
+workers. Above the cap, Auto measurement and read-only historical replay emit
+`over_wip`. `--owner-loop silent|milestones|landings|inherit` controls Auto owner
+reports: silent requests none; milestones (default) reports closed milestones;
+landings also aggregates newly observed origin commits. First observation is a
+baseline. Definitively refused deliveries retry; delivered or uncertain claims
+are retained across restart. Measurement and drift detection continue in silent
+mode. Auto history/replay API readers use `includeWorkPolicy=true` for numeric
+caps and cadence fields.
+
+The same JSON update accepts `hiring` with `lead` and `worker` launch profiles,
+`allowedPlans`, `excludedPlans` and `excludedModels`. Plan keys use the observed
+provider and tier, such as `claude:max_20x` or `codex:pro`; one allowed plan pins
+it. Exclusions win. Profiles can pin harness, model and account; explicit hire
+fields win over role, project profile and fleet defaults, in that order.
+`hireKind:lead` selects the lead profile without granting authority. `hiring` is
+a whole-value replacement: merge the read value before changing a nested field;
+`null` clears it, and omission preserves it. The TUI offers the same fields.
+
+Each fresh work hire supplies an effort rationale for this job; its explicit or
+project/role effort must be the smallest that meets acceptance. Fleet-wide effort
+is never applied. Claude/Codex work hires require plan usage observed within five
+minutes, preserve a 10% reserve for running work, and honor owner holds and project
+constraints even when an account is pinned. Automatic choice ranks observed spare
+plan capacity per day. Admission records plan, remaining usage, model, effort and
+rationale in the hire receipt and project journal. No existing seat is stopped.
 
 For a reviewed JSON update, `autonomy: { "fleet": { "closure": "owner" } }`
 sets one override; `autonomy: { "fleet": { "closure": null } }` clears it. No

@@ -121,7 +121,6 @@ export async function inferProjectDefaults(
   const available =
     resources?.pressure.healthy === true ? Math.max(0, Math.floor(resources.capacity.heavySlots)) : 0;
   const workerCap = Math.min(desired, available);
-  const size = workerCap <= 1 ? "solo" : workerCap >= 4 ? "large" : "small";
   const roleReasons = [
     "builder: Implement changes in this repository.",
     "reviewer: Review changes before they land.",
@@ -156,7 +155,6 @@ export async function inferProjectDefaults(
       name,
       prompt: "Here's what I picked. Accept to save the project, or tweak one field.",
       roles: roleReasons.map((reason) => ({ role: reason.split(":")[0] })),
-      fleet: { size },
       workerCap,
       trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
       ...(setup ? { trackerSetup: setup } : {}),
@@ -171,7 +169,7 @@ export async function inferProjectDefaults(
                 .slice(0, 450) || "No tracker detected; use local work records."
             }`,
         ...roleReasons,
-        `fleet: ${size}, at most ${workerCap} workers; ${sourceCount} source files, ${activity} commits in 14 days; ${resources === undefined ? "resource governor unavailable" : resources.pressure.healthy ? `governor capacity ${available}` : "resource pressure blocks hires"}.`,
+        `at most ${workerCap} workers; ${sourceCount} source files, ${activity} commits in 14 days; ${resources === undefined ? "resource governor unavailable" : resources.pressure.healthy ? `governor capacity ${available}` : "resource pressure blocks hires"}.`,
       ],
     }),
   };

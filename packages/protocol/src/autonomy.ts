@@ -347,8 +347,6 @@ export function formatFleetAutonomyGuidance(policy: FleetAutonomy): string[] {
     `Commit: ${fleet.commit}. ${FLEET_AUTONOMY_GUIDANCE.commit[fleet.commit]}`,
     `Push: ${fleet.push}. ${FLEET_AUTONOMY_GUIDANCE.push[fleet.push]}`,
     `Release: ${fleet.release.mode}. ${FLEET_AUTONOMY_GUIDANCE.release[fleet.release.mode]}${fleet.release.mode === "time_rule" ? ` Rule: ${fleet.release.rule}` : ""}`,
-    `Verification: ${fleet.verification}. ${FLEET_AUTONOMY_GUIDANCE.verification[fleet.verification]}`,
-    `Reporting style: ${fleet.reportingStyle}`,
     `Worker gates: ${fleetGateSummary(fleet)}`,
     ...FLEET_GATE_CATEGORIES.map(
       (category) =>

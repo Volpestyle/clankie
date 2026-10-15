@@ -2741,15 +2741,40 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const roundsView = (value: unknown) => {
+      const response = AutoRoundsResponseSchema.parse(value);
+      if (context.req.query("includeWorkPolicy") === "true") return response;
+      return {
+        ...response,
+        rounds: response.rounds.map((round) => ({
+          ...round,
+          projects: round.projects.map(({ ownerLoop, landings: _landings, report, ...velocity }) => ({
+            ...velocity,
+            started:
+              velocity.started.state === "known" ? { ...velocity.started, cap: null } : velocity.started,
+            ...(report === undefined
+              ? {}
+              : { report: { milestones: report.milestones, updates: report.updates } }),
+            caveats: [
+              ...velocity.caveats,
+              ...(ownerLoop === undefined &&
+              (velocity.started.state !== "known" || velocity.started.cap === null)
+                ? []
+                : [
+                    "Work-policy fields are omitted in this compatibility view; request includeWorkPolicy=true.",
+                  ]),
+            ],
+          })),
+        })),
+      };
+    };
     if (context.req.query("replay") !== undefined) {
       const input = AutoReplayQuerySchema.safeParse(context.req.query());
       if (!input.success) return context.json({ error: "invalid_query" }, 400);
       if (!dependencies.captain.replayAutoRounds)
         return context.json({ error: "auto_replay_unavailable" }, 503);
       try {
-        return context.json(
-          AutoRoundsResponseSchema.parse(await dependencies.captain.replayAutoRounds(input.data)),
-        );
+        return context.json(roundsView(await dependencies.captain.replayAutoRounds(input.data)));
       } catch (error) {
         return context.json(
           {
@@ -2765,12 +2790,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       .object({
         project: ProjectIdSchema.optional(),
         limit: z.coerce.number().int().min(1).max(200).optional(),
+        includeWorkPolicy: z.literal("true").optional(),
       })
       .strict()
       .safeParse(context.req.query());
     if (!query.success) return context.json({ error: "invalid_query" }, 400);
     return context.json(
-      AutoRoundsResponseSchema.parse({
+      roundsView({
         schemaVersion: 1,
         rounds: dependencies.autoRounds.read({
           ...(query.data.project === undefined ? {} : { projectId: query.data.project }),

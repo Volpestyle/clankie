@@ -84,12 +84,40 @@ async function fixture(
   } satisfies HerdrWatchRunner;
   const store = new HerdrWatchStore(join(root, "watches.json"), {
     runner,
+    workerAccountsReport: async () => ({
+      machine: "local",
+      shell: "posix",
+      observedAt: new Date().toISOString(),
+      accounts: [
+        {
+          harness: "claude",
+          label: "fixture",
+          home: root,
+          signedIn: true,
+          usable: true,
+          plan: "pro",
+          headroom: 0.8,
+          usage: {
+            source: "claude-usage",
+            observedAt: new Date().toISOString(),
+            windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+          },
+        },
+      ],
+    }),
     seatAdapters: [adapter],
     ...options,
   });
   const hire = (brief?: string) =>
     store.spawnSeat(
-      { schemaVersion: 1, harness: "claude", title: "worker", workingDirectory: root },
+      {
+        schemaVersion: 1,
+        effort: "medium",
+        effortReason: "Native channel delivery and question handling need boundary verification.",
+        harness: "claude",
+        title: "worker",
+        workingDirectory: root,
+      },
       undefined,
       brief,
     );
@@ -183,7 +211,14 @@ it("retains a proven unsent brief and native launch across hire retries", async 
   const recovered = new HerdrWatchStore(join(root, "watches.json"), { runner, seatAdapters: [adapter] });
   expect(
     await recovered.spawnSeat(
-      { schemaVersion: 1, harness: "claude", title: "worker", workingDirectory: root },
+      {
+        schemaVersion: 1,
+        effort: "medium",
+        effortReason: "Native channel delivery and question handling need boundary verification.",
+        harness: "claude",
+        title: "worker",
+        workingDirectory: root,
+      },
       undefined,
       "the brief",
     ),
@@ -258,12 +293,41 @@ it.each([
     });
     const store = new HerdrWatchStore(join(root, "routed.json"), {
       runner: { ...routed, read },
+      workerAccountsReport: async () => ({
+        machine: "local",
+        shell: "posix",
+        observedAt: new Date().toISOString(),
+        accounts: [
+          {
+            harness: "claude",
+            label: "fixture",
+            home: root,
+            signedIn: true,
+            usable: true,
+            plan: "pro",
+            headroom: 0.8,
+            usage: {
+              source: "claude-usage",
+              observedAt: new Date().toISOString(),
+              windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+            },
+          },
+        ],
+      }),
       seatAdapters: [adapter],
     });
     const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
     try {
       const result = await store.spawnSeat(
-        { schemaVersion: 1, harness: "claude", title: "probe", workingDirectory: root, model: "haiku" },
+        {
+          schemaVersion: 1,
+          effort: "medium",
+          effortReason: "Native channel delivery and question handling need boundary verification.",
+          harness: "claude",
+          title: "probe",
+          workingDirectory: root,
+          model: "haiku",
+        },
         undefined,
         "the brief",
       );
@@ -307,7 +371,14 @@ it("missing runner capability and missing adapters refuse briefs before creating
     const store = new HerdrWatchStore(join(root, `${reason}.json`), { runner: runtime });
     expect(
       await store.spawnSeat(
-        { schemaVersion: 1, harness: "claude", title: "worker", workingDirectory: root },
+        {
+          schemaVersion: 1,
+          effort: "medium",
+          effortReason: "Native channel delivery and question handling need boundary verification.",
+          harness: "claude",
+          title: "worker",
+          workingDirectory: root,
+        },
         undefined,
         "the brief",
       ),

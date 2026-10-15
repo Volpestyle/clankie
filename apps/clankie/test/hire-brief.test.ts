@@ -62,6 +62,8 @@ test.each(["pi", "claude", "codex"])(
       expect(
         await call(bank, "hire_agent", {
           harness,
+          effort: "medium",
+          effortReason: "Implementing the spec needs code and acceptance verification.",
           title: "Noor",
           role: "builder",
           workingDirectory: root,

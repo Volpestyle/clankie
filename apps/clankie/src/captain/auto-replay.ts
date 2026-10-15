@@ -12,6 +12,7 @@ export const AutoReplayQuerySchema = z
     project: ProjectIdSchema,
     since: z.iso.datetime({ offset: true }),
     until: z.iso.datetime({ offset: true }),
+    includeWorkPolicy: z.literal("true").optional(),
   })
   .strict()
   .refine((value) => {
@@ -63,7 +64,7 @@ export async function replayAutoRounds(
           caveats: [
             ...velocity.caveats,
             "Read-only replay: no wake, tracker write, round-record write or pending drift consumption.",
-            "WIP cap is unavailable until VUH-2256; over_wip cannot be evaluated.",
+            ...(project.wipCap === undefined ? ["No WIP cap is set; over_wip cannot be evaluated."] : []),
           ],
         },
       ],

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProjectOwnerLoopSchema } from "./project-work-policy.ts";
 
 /** The Auto round record (ADR 0270): `clankie auto rounds` and its operator route. */
 export const AUTO_ROUNDS_PATH = "/v1/auto/rounds";
@@ -82,10 +83,13 @@ const ProjectStatusUpdateSchema = z
     health: z.string().nullable(),
   })
   .strict();
+export const VelocityLandingSchema = z.object({ sha: z.string(), at: z.string() }).strict();
 export const MilestoneReportSchema = z
   .object({
     /** Exactly one update is requested for these newly seen milestones together. */
     milestones: z.array(VelocityMilestoneSchema),
+    cadence: ProjectOwnerLoopSchema.optional(),
+    landings: z.array(VelocityLandingSchema).optional(),
     updates: z.array(ProjectStatusUpdateSchema.extend({ unexpected: z.boolean() })),
   })
   .strict();
@@ -95,6 +99,13 @@ export type MilestoneReport = z.infer<typeof MilestoneReportSchema>;
 export const ProjectVelocitySchema = z
   .object({
     projectId: z.string(),
+    ownerLoop: ProjectOwnerLoopSchema.optional(),
+    landings: z
+      .union([
+        z.object({ state: z.literal("known"), commits: z.array(VelocityLandingSchema) }).strict(),
+        Unknown,
+      ])
+      .optional(),
     tracker: z
       .object({ kind: z.enum(["linear", "built-in"]), projectId: z.string() })
       .strict()
@@ -134,7 +145,7 @@ export const ProjectVelocitySchema = z
           state: z.literal("known"),
           total: z.number().int().nonnegative(),
           byState: z.record(z.string(), z.number().int().nonnegative()),
-          cap: z.null(),
+          cap: z.number().int().min(1).max(1000).nullable(),
         })
         .strict(),
       Unknown,

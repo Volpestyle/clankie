@@ -1,3 +1,4 @@
+import { hireAdmissionReport, hireAdmissionChoice } from "./hire-admission.ts";
 import type {
   StopNativeTaskResult,
   FleetSeatInputCapabilities,
@@ -852,6 +853,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private projectPolicyQueue = Promise.resolve();
   private readonly hireDefaultPolicies = new WeakMap<SpawnOperatorSeat, string>();
   /** Why Clankie chose this hire's harness, when no layer named one (VUH-1974). */
+  private readonly workHires = new WeakSet<SpawnOperatorSeat>();
   private readonly hireHarnessReasons = new WeakMap<SpawnOperatorSeat, string>();
   /** The latest local admission's notice that this hire's heavy work will queue on load. */
   private readonly hireResourceNotices = new WeakMap<SpawnOperatorSeat, string>();
@@ -952,6 +954,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly projectHirePolicy?: ProjectHirePolicy;
       readonly fleetHireTools?: () => Promise<readonly string[]>;
       readonly hireDefaults?: () => Promise<HireProfile>;
+      readonly workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
       /** The owner's maximum trust mode (VUH-2048), read at each launch. Absent, it is off. */
       readonly maximumTrustMode?: () => Promise<boolean>;
       readonly resolveHireModel?: (harness: string, model: string) => Promise<string>;
@@ -1047,6 +1050,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.hireReceipts = new DeliveryFence(`${path}.hire-receipts.json`);
     this.skillBundle = options.skillBundle;
     this.hireDefaults = options.hireDefaults;
+    if (options.workerAccountsReport) this.workerAccountsReport = options.workerAccountsReport;
     this.maximumTrustMode = options.maximumTrustMode;
     this.resolveModel = options.resolveHireModel;
     this.claudeAccounts = options.claudeAccounts;
@@ -2011,7 +2015,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     adopt?: AdoptHire,
     flushAdoption?: () => Promise<void>,
   ): Promise<HerdrSeatSpawnResult> {
-    const defaults = (await this.hireDefaults?.()) ?? {};
+    const { effort: _retiredEffort, ...defaults } = (await this.hireDefaults?.()) ?? {};
     try {
       await this.requireWorkerAccess?.(inputRequest.fleet);
     } catch (error) {
@@ -2026,7 +2030,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
     // No layer named a harness: choose one for this hire outside a project. A
     // project hire chooses below, once its role's fields are known.
     const unprojected = async (): Promise<SpawnOperatorSeat | HerdrSeatSpawnResult> => {
-      const chosen = input.harness === undefined ? await this.chooseHireHarness(input, resume) : undefined;
+      const chosen =
+        input.harness === undefined
+          ? await this.chooseHireHarness(
+              input,
+              resume,
+              undefined,
+              brief !== undefined || input.deliverable !== undefined,
+            )
+          : undefined;
       if (chosen !== undefined && "outcome" in chosen) return chosen;
       const seat = { ...input, harness: input.harness ?? chosen!.harness };
       this.hireDefaultPolicies.set(seat, JSON.stringify(defaults));
@@ -2094,9 +2106,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
           : { ...inputRequest, workingDirectory: input.workingDirectory };
       // No request, role or fleet harness: choose one now, recorded as this hire's own choice.
       const planned = projectHireProfile(settings, projectId, hireRequest, defaults);
+      const projectHiring = settings.projects.find((project) => project.id === projectId)?.hiring;
+      if (
+        projectHiring?.excludedModels?.some(
+          (model) => model === planned.model || model === planned.subagents?.model,
+        )
+      )
+        throw new Error("This model is excluded by the project's hiring policy.");
       let harnessReason: string | undefined;
       if (planned.harness === undefined) {
-        const chosen = await this.chooseHireHarness(planned, resume);
+        const chosen = await this.chooseHireHarness(
+          planned,
+          resume,
+          projectHiring,
+          brief !== undefined || planned.deliverable !== undefined,
+        );
         if ("outcome" in chosen) return chosen;
         hireRequest = { ...hireRequest, harness: chosen.harness };
         harnessReason = chosen.why;
@@ -2179,6 +2203,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private async chooseHireHarness(
     input: HireRequest,
     resume?: SavedAgentSession,
+    policy?: import("@clankie/protocol/projects").ProjectHiringPolicy,
+    work = false,
   ): Promise<
     { readonly harness: SpawnOperatorSeat["harness"]; readonly why?: string } | HerdrSeatSpawnResult
   > {
@@ -2238,6 +2264,31 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (!allowed.length)
         return failed("No usable worker harness can run every requested model. No pane was opened.");
     }
+    if (work) {
+      try {
+        const canonicalModels = (
+          await Promise.all(
+            allowed.map(async (harness) =>
+              Promise.all(
+                models.map((model) => (this.resolveModel ? this.resolveModel(harness, model) : model)),
+              ),
+            ),
+          )
+        ).flat();
+        const admitted = hireAdmissionReport(
+          { ...report, accounts: report.accounts.filter((account) => allowed.includes(account.harness)) },
+          policy,
+          canonicalModels,
+        );
+        const selected = hireAdmissionChoice(admitted, undefined, input.account);
+        return {
+          harness: selected.account.harness as SpawnOperatorSeat["harness"],
+          why: `${selected.plan}: ${selected.reason}`,
+        };
+      } catch (error) {
+        return failed(reasonDetail(error));
+      }
+    }
     const choice = chooseWorkerHarness(machine, report, allowed, input.account);
     return "refused" in choice ? failed(choice.refused) : { harness: choice.harness, why: choice.why };
   }
@@ -2248,7 +2299,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const defaultPolicy = this.hireDefaultPolicies.get(input);
       if (
         defaultPolicy !== undefined &&
-        defaultPolicy !== JSON.stringify((await this.hireDefaults?.()) ?? {})
+        defaultPolicy !== JSON.stringify(effortFreeDefaults((await this.hireDefaults?.()) ?? {}))
       )
         throw new Error(
           "Fleet hire defaults changed during startup. Check the current profile before hiring again.",
@@ -2302,10 +2353,32 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   private async resolveHireModels(input: SpawnOperatorSeat): Promise<SpawnOperatorSeat> {
-    if (!this.resolveModel) return input;
     // Validate without replacing the journaled friendly names; native argv uses resolved IDs.
-    if (input.model) await this.resolveModel(input.harness, input.model);
-    if (input.subagents?.model) await this.resolveModel(input.harness, input.subagents.model);
+    if (input.model && this.resolveModel) await this.resolveModel(input.harness, input.model);
+    if (input.subagents?.model && this.resolveModel)
+      await this.resolveModel(input.harness, input.subagents.model);
+    const context = this.projectContexts.get(input);
+    const settings = context ? await this.projectPolicy?.settings() : undefined;
+    const policy = settings?.projects.find((project) => project.id === context?.projectId)?.hiring;
+    if (
+      (policy?.allowedPlans?.length || policy?.excludedPlans?.length) &&
+      input.harness !== "claude" &&
+      input.harness !== "codex"
+    )
+      throw new Error("This harness cannot prove the project's subscription-plan constraints.");
+    if (policy?.excludedModels?.length) {
+      if (!input.model)
+        throw new Error("Choose an explicit model so the project's exclusions can be checked.");
+      for (const model of [input.model, input.subagents?.model].filter(
+        (value): value is string => value !== undefined,
+      ))
+        if (
+          policy.excludedModels.includes(
+            this.resolveModel ? await this.resolveModel(input.harness, model) : model,
+          )
+        )
+          throw new Error("This model is excluded by the project's hiring policy.");
+    }
     return input;
   }
   private async spawnAdmittedSeat(
@@ -2319,6 +2392,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ): Promise<HerdrSeatSpawnResult> {
     try {
       input = await this.resolveHireModels(input);
+      if (brief !== undefined || input.deliverable !== undefined) this.workHires.add(input);
       const subagentModel =
         input.subagents?.model && this.resolveModel
           ? await this.resolveModel(input.harness, input.subagents.model)
@@ -3803,6 +3877,62 @@ export class HerdrWatchStore implements HerdrWatchPort {
         control: { mode: "unavailable", reason: unavailableReason, detail },
       };
     }
+    if (
+      resume === undefined &&
+      this.workHires.has(input) &&
+      (!input.effort || input.effort === HIRE_NO_PREFERENCE || !input.effortReason)
+    )
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail:
+          "Choose effort for this job and give effortReason: why it is the smallest effort that meets acceptance. Fleet-wide effort is retired.",
+      };
+    let admittedAccount: string | undefined;
+    const recheckPlan = async (): Promise<void> => {
+      if (
+        resume !== undefined ||
+        !this.workHires.has(input) ||
+        (input.harness !== "claude" && input.harness !== "codex")
+      )
+        return;
+      if (!this.workerAccountsReport)
+        throw new Error("Observed plan usage is required before a new work hire.");
+      const context = this.projectContexts.get(input);
+      const settings = await this.projectPolicy?.settings();
+      const policy = settings?.projects.find((project) => project.id === context?.projectId)?.hiring;
+      const report = await this.workerAccountsReport(input.fleet);
+      if (policy?.excludedModels?.length && !input.model)
+        throw new Error("Choose an explicit model so the project's exclusions can be checked.");
+      const requestedModels = [input.model, input.subagents?.model].filter(
+        (model): model is string => model !== undefined,
+      );
+      const models = await Promise.all(
+        requestedModels.map((model) => (this.resolveModel ? this.resolveModel(input.harness, model) : model)),
+      );
+      const eligible = hireAdmissionReport(report, policy, models);
+      const selection = hireAdmissionChoice(eligible, input.harness, admittedAccount ?? input.account);
+      // Pin the verified eligible identity; later identity/grant checks still apply.
+      admittedAccount = selection.account.accountKey ?? selection.account.label;
+      chosen.account = admittedAccount;
+      chosen.reason = `${selection.plan}; ${Math.round(selection.remaining * 100)}% remaining at ${selection.account.usage!.observedAt}; ${selection.reason}; model ${input.model ?? "native default"}; effort ${input.effort}: ${input.effortReason}`;
+      const allocation = this.projectAllocations.get(input);
+      if (allocation)
+        this.projectHires.selection(allocation, {
+          at: selection.account.usage!.observedAt,
+          plan: selection.plan,
+          remaining: selection.remaining,
+          reason: selection.reason,
+          model: models[0] ?? "native default",
+          effort: input.effort!,
+          effortReason: input.effortReason!,
+        });
+    };
+    try {
+      await recheckPlan();
+    } catch (error) {
+      return { outcome: "failed", reason: "harness_unavailable", detail: reasonDetail(error) };
+    }
     // Resolve a preference to an identity before preparing any native launch.
     // The chosen home is replaceable; the requested identity is not.
     let identityAccount: import("./harness-accounts.ts").WorkerAccountStatus | undefined;
@@ -3821,22 +3951,31 @@ export class HerdrWatchStore implements HerdrWatchPort {
           reason: "harness_unavailable",
           detail: "Could not verify the requested sign-in; no account was tried.",
         };
-      const choice = chooseWorkerAccount(remote ?? "this Mac", identityHarness, report, input.account);
+      const choice = chooseWorkerAccount(
+        remote ?? "this Mac",
+        identityHarness,
+        report,
+        admittedAccount ?? input.account,
+      );
       if ("refused" in choice)
         return { outcome: "failed", reason: "harness_unavailable", detail: choice.refused };
       identityAccount = choice.account;
       if (input.account === undefined) {
         chosen.account = choice.account.label;
-        chosen.reason = `${choice.account.identity ?? choice.account.displayName ?? choice.account.harness}: ${choice.why}`;
+        chosen.reason ??= `${choice.account.identity ?? choice.account.displayName ?? choice.account.harness}: ${choice.why}`;
       }
     }
     if (this.nativeLaunchPolicy?.prepare) {
+      await recheckPlan();
       await this.admitProjectLaunch(input, true);
       await this.commitRemoteLaunch(receiptKey, input);
       await this.assertRemoteHireAuthority(input, receiptKey, authority);
     }
     const prepared = await this.nativeLaunchPolicy?.prepare?.({
-      seat: structuredClone(input),
+      seat: {
+        ...structuredClone(input),
+        ...(admittedAccount === undefined ? {} : { account: admittedAccount }),
+      },
       resumed: resume !== undefined,
     });
     let account: CodexAccount | undefined =
@@ -4024,6 +4163,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // Pressure is re-read after those awaits, immediately before the pane
       // command can create its native process.
       if (this.fleetResources) await this.admitResourceMutation(input, authority);
+      await recheckPlan();
       await this.admitProjectLaunch(input, true);
       if (identityAccount && identityHarness && this.workerAccounts) {
         const current = await this.workerAccounts(remote, identityHarness);
@@ -5561,4 +5701,9 @@ function hireProfileBrief(profile: HireProfile, brief?: string): string | undefi
       `Native subagents: ${profile.subagents.model ? `model ${profile.subagents.model}` : "inherit model"}; ${profile.subagents.effort ? `effort ${profile.subagents.effort}` : "inherit effort"}. Pass these settings when spawning native children; if the harness cannot honor them, report the limitation instead of substituting.`,
     );
   return lines.length ? `${brief ?? ""}\n\nHire profile:\n${lines.join("\n")}`.trim() : brief;
+}
+
+function effortFreeDefaults(profile: HireProfile): HireProfile {
+  const { effort: _retired, ...rest } = profile;
+  return rest;
 }

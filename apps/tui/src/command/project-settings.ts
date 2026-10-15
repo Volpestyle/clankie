@@ -11,6 +11,8 @@ import {
   readFleetProjectMembership,
   PROJECT_UPDATE_SETTINGS_PATH,
   ProjectFocusSchema,
+  ProjectWipCapSchema,
+  ProjectOwnerLoopSchema,
   LinearProjectBindingSchema,
   type UpdateProjectSettings,
   ProjectsSnapshotSchema,
@@ -26,8 +28,6 @@ import {
   FLEET_GATE_FIELDS,
   FLEET_GATE_PRESETS,
   FleetReleasePolicySchema,
-  FleetVerificationSchema,
-  FleetReportingStyleSchema,
   FleetWorkingPreferencesSchema,
   type FleetAutonomy,
   type FleetAutonomyPatch,
@@ -45,6 +45,7 @@ export async function runProjectSettingsCommand(
     fetchImpl?: typeof fetch;
     operatorCredentialStore?: CredentialStore;
     includeAutonomy?: boolean;
+    includeWorkPolicy?: boolean;
   } = {},
 ) {
   if (args[0] === "settings") return runProjectFleetSettings(args, options);
@@ -62,7 +63,7 @@ export async function runProjectSettingsCommand(
     )
   )
     throw new Error(
-      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--auto on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
+      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
     );
   let command: unknown;
   if (!list && !membership) {
@@ -124,7 +125,14 @@ export async function runProjectSettingsCommand(
   }
   const response = await (options.fetchImpl ?? fetch)(
     new URL(
-      `${list ? PROJECTS_PATH : create ? PROJECT_CREATE_SETTINGS_PATH : PROJECT_UPDATE_SETTINGS_PATH}${(options.includeAutonomy ?? true) ? "?includeAutonomy=true" : ""}`,
+      `${list ? PROJECTS_PATH : create ? PROJECT_CREATE_SETTINGS_PATH : PROJECT_UPDATE_SETTINGS_PATH}?${new URLSearchParams(
+        {
+          ...((options.includeAutonomy ?? true) ? { includeAutonomy: "true" } : {}),
+          ...((options.includeWorkPolicy ?? options.includeAutonomy ?? true)
+            ? { includeWorkPolicy: "true" }
+            : {}),
+        },
+      ).toString()}`,
       commandHost(options),
     ),
     {
@@ -189,12 +197,12 @@ async function runProjectFleetSettings(
 ): Promise<ProjectFleetSettingsResult> {
   if (!args[1] || args.length % 2 !== 0)
     throw new Error(
-      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--auto on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear]",
+      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear]",
     );
   const changes: FleetAutonomyPatch = {};
   const work: Pick<
     UpdateProjectSettings["changes"],
-    "auto" | "focus" | "trackerProjectId" | "linearProjectBinding"
+    "auto" | "focus" | "trackerProjectId" | "linearProjectBinding" | "wipCap" | "ownerLoop"
   > = {};
   let releaseMode: string | undefined;
   let releaseRule: string | undefined;
@@ -210,12 +218,18 @@ async function runProjectFleetSettings(
               ? "push"
               : undefined;
     const value = args[index + 1];
+    if (["--verification", "--report-style"].includes(args[index] ?? ""))
+      throw new Error(`${args[index]} is retired; saved values remain read-only.`);
     if (field && !(field in changes) && ["lead", "owner", "inherit"].includes(value ?? ""))
       changes[field] = value === "inherit" ? null : (value as FleetAutonomyMode);
     else if (args[index] === "--auto" && work.auto === undefined && (value === "on" || value === "off"))
       work.auto = value === "on";
     else if (args[index] === "--focus" && work.focus === undefined)
       work.focus = value === "clear" ? null : ProjectFocusSchema.parse(value);
+    else if (args[index] === "--wip-cap" && work.wipCap === undefined)
+      work.wipCap = value === "none" ? null : ProjectWipCapSchema.parse(Number(value));
+    else if (args[index] === "--owner-loop" && work.ownerLoop === undefined)
+      work.ownerLoop = value === "inherit" ? null : ProjectOwnerLoopSchema.parse(value);
     else if (args[index] === "--tracker-project" && work.trackerProjectId === undefined)
       work.trackerProjectId =
         value === "clear"
@@ -226,10 +240,6 @@ async function runProjectFleetSettings(
         value === "clear" ? null : LinearProjectBindingSchema.parse({ provider: "linear", projectId: value });
     else if (args[index] === "--release" && releaseMode === undefined) releaseMode = value;
     else if (args[index] === "--release-rule" && releaseRule === undefined) releaseRule = value;
-    else if (args[index] === "--verification" && changes.verification === undefined)
-      changes.verification = value === "inherit" ? null : FleetVerificationSchema.parse(value);
-    else if (args[index] === "--report-style" && changes.reportingStyle === undefined)
-      changes.reportingStyle = value === "inherit" ? null : FleetReportingStyleSchema.parse(value);
     else if (args[index] === "--gate-preset") {
       if (FLEET_GATE_FIELDS.some((field) => field in changes))
         throw new Error("Choose one gate preset before individual gate overrides.");
@@ -285,6 +295,8 @@ async function runProjectFleetSettings(
     throw new Error("This service does not support project Auto; update it before editing Auto or focus.");
   if ("linearProjectBinding" in work && snapshot.linearProjectBindings !== true)
     throw new Error("This service does not support Linear project bindings; update it before editing them.");
+  if (("wipCap" in work || "ownerLoop" in work) && snapshot.projectWorkPolicy !== true)
+    throw new Error("This service does not support project work policy; update it before editing it.");
   if (Object.keys(changes).length || Object.keys(work).length) {
     snapshot = await runProjectSettingsCommand(
       [

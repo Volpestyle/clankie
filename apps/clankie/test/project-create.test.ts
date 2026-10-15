@@ -111,7 +111,8 @@ it("creates only the reviewed local project, preserving zero/inherited caps and 
         { role: "builder", concurrencyCap: 0 },
       ],
       workerCap: 0,
-      fleet: { size: "max", models: "efficient" },
+      wipCap: 6,
+      ownerLoop: "milestones",
     }),
   );
   expect(result.status).toBe(201);
@@ -122,7 +123,8 @@ it("creates only the reviewed local project, preserving zero/inherited caps and 
     name: "New",
     workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: f.workspace }],
     workerCap: 0,
-    fleet: { size: "max", models: "efficient" },
+    wipCap: 6,
+    ownerLoop: "milestones",
     grants: [],
     worktreeRoots: [],
     roles: [
@@ -136,17 +138,20 @@ it("creates only the reviewed local project, preserving zero/inherited caps and 
     projects: { ...saved.projects, projects: saved.projects.projects.slice(0, -1) },
   }).toEqual(before);
   expect(await result.json()).toEqual({
-    settings: saved.projects,
+    settings: {
+      ...saved.projects,
+      projects: saved.projects.projects.map(
+        ({ wipCap: _cap, ownerLoop: _loop, hiring: _hiring, ...project }) => project,
+      ),
+    },
     revision: projectsRevision(saved.projects),
   });
 });
 it.each([undefined, null])(
-  "inherited numeric caps stay absent independently of solo preference (%s)",
+  "inherited numeric caps stay absent without retired fleet preferences (%s)",
   async (workerCap) => {
     const f = await fixture();
-    expect(
-      (await f.request(await f.command({ workerCap, fleet: { size: "solo" }, trackerRef: null }))).status,
-    ).toBe(201);
+    expect((await f.request(await f.command({ workerCap, trackerRef: null }))).status).toBe(201);
     const project = (await f.store.load()).projects.projects.at(-1)!;
     expect(project).not.toHaveProperty("workerCap");
     expect(project.roles).toEqual([]);

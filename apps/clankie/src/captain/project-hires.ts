@@ -55,6 +55,18 @@ const AllocationSchema = z
     seat: z.string().optional(),
     occupantId: z.string().optional(),
     proof: ProofSchema.optional(),
+    selection: z
+      .object({
+        at: z.string().datetime(),
+        plan: z.string(),
+        remaining: z.number().min(0).max(1),
+        reason: z.string(),
+        model: z.string(),
+        effort: z.string(),
+        effortReason: z.string(),
+      })
+      .strict()
+      .optional(),
     confirmed: z.boolean().default(false),
     gone: z.boolean().default(false),
     operatorRelease: z
@@ -330,6 +342,11 @@ export class ProjectHires {
     const allocation = this.read().allocations.find((a) => a.id === id);
     return allocation === undefined ? undefined : allocation.request.model;
   }
+  public selection(id: string, selection: NonNullable<Allocation["selection"]>): void {
+    this.change((state) => {
+      state.allocations.find((entry) => entry.id === id)!.selection = selection;
+    });
+  }
   public confirmed(id: string): void {
     this.change((state) => {
       state.allocations.find((a) => a.id === id)!.confirmed = true;
@@ -572,7 +589,13 @@ export function projectHireProfile(
   const role = request.role === undefined ? undefined : projectRolePolicy(project, request.role);
   if (request.role !== undefined && !role)
     throw new Error(`${project.name} has no ${request.role} role. Choose one of its roles before hiring.`);
-  const result = { ...request, ...effectiveHireProfile(request, role, defaults) };
+  // Fleet-wide effort is retired: each work hire chooses it for the job.
+  const { effort: _retiredEffort, ...fleet } = defaults;
+  const profile = request.hireKind === "lead" ? project.hiring?.lead : project.hiring?.worker;
+  const result = {
+    ...request,
+    ...effectiveHireProfile(request, role, effectiveHireProfile(profile ?? {}, {}, fleet)),
+  };
   if (result.subagents === null) delete result.subagents;
   return result;
 }
@@ -581,7 +604,13 @@ function launchPolicy(settings: ProjectsSettings, projectId: string, role?: stri
   const project = settings.projects.find((p) => p.id === projectId);
   const selected = project === undefined || role === undefined ? undefined : projectRolePolicy(project, role);
   const base = [selected?.harness, selected?.model, selected?.effort];
-  const extra = [selected?.subagents, selected?.delegation, selected?.account, selected?.placement];
+  const extra = [
+    selected?.subagents,
+    selected?.delegation,
+    selected?.account,
+    selected?.placement,
+    project?.hiring,
+  ];
   // Preserve legacy journals when no new role fields are configured.
   return JSON.stringify(extra.some((value) => value !== undefined) ? [...base, ...extra] : base);
 }

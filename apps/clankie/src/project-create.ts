@@ -21,11 +21,16 @@ export async function applyProjectCreate(
   const original = await settings.load();
   createProjectSettings(original.projects, input);
   const catalog = await createModelRegistry().catalog();
-  for (const role of input.roles ?? []) {
+  for (const role of [
+    ...(input.roles ?? []),
+    ...(input.hiring?.lead === undefined ? [] : [input.hiring.lead]),
+    ...(input.hiring?.worker === undefined ? [] : [input.hiring.worker]),
+  ]) {
     const profile = effectiveHireProfile({}, role, original.fleet.hire);
     for (const model of [profile.model, profile.subagents?.model])
       if (model) resolveHireModel(catalog, profile.harness, model);
   }
+  for (const model of input.hiring?.excludedModels ?? []) resolveHireModel(catalog, undefined, model);
   await requireOwner();
   let initial = await observeProjectEnrollment(original.projects, input);
   if (expectedObservation && !isDeepStrictEqual(initial, expectedObservation))

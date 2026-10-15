@@ -281,6 +281,14 @@ export async function measureVelocity(
 
   return {
     projectId: project.id,
+    ownerLoop: project.ownerLoop ?? "milestones",
+    landings:
+      commits.state === "unknown"
+        ? commits
+        : {
+            state: "known",
+            commits: (windowCommits ?? []).map((commit) => ({ sha: commit.sha, at: commit.landedAt })),
+          },
     name: project.name,
     measuredAt: until,
     timeZone,
@@ -302,7 +310,12 @@ export async function measureVelocity(
     started:
       "state" in outcomes
         ? outcomes
-        : { state: "known", total: outcomes.started.total, byState: outcomes.started.byState, cap: null },
+        : {
+            state: "known",
+            total: outcomes.started.total,
+            byState: outcomes.started.byState,
+            cap: project.wipCap ?? null,
+          },
     churn: commits.state === "unknown" ? commits : { state: "known", lines, commits: windowCommits!.length },
     days,
     caveats: [
@@ -327,6 +340,8 @@ export async function measureVelocityWithin(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const unknown = (reason: string): ProjectVelocity => ({
     projectId: project.id,
+    ownerLoop: project.ownerLoop ?? "milestones",
+    landings: { state: "unknown", reason },
     name: project.name,
     measuredAt: now.toISOString(),
     timeZone: deps.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -393,7 +408,7 @@ export function velocityLine(velocity: ProjectVelocity): string {
   const started =
     velocity.started.state === "unknown"
       ? `started unknown (${velocity.started.reason})`
-      : `${String(velocity.started.total)} started (no WIP cap)`;
+      : `${String(velocity.started.total)} started (${velocity.started.cap === null ? "no WIP cap" : `WIP cap ${velocity.started.cap}`})`;
   const working = velocity.days.filter((day) => day.inWindow && day.working).length;
   const churn =
     velocity.churn.state === "unknown"

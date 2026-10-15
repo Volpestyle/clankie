@@ -9,6 +9,7 @@ import {
   assertNoSecretShapedValue,
   dropRetiredSettings,
   migrateLegacyFleetWorkingPreferences,
+  migrateRetiredWorkingPreferences,
   emptySettings,
   LinearWakeSettingsSchema,
   type ClankieSettings,
@@ -120,7 +121,9 @@ export class SettingsStore {
     // preferences migrate on read; the next ordinary write persists the format.
     const settings = machineSettings(
       migrateDiscordOwnership(
-        migrateLegacyFleetWorkingPreferences(migrateLinearWakeDefaults(dropRetiredSettings(parsed))),
+        migrateRetiredWorkingPreferences(
+          migrateLegacyFleetWorkingPreferences(migrateLinearWakeDefaults(dropRetiredSettings(parsed))),
+        ),
       ),
     );
     this.parsed = { raw, normalized: JSON.stringify(settings) };

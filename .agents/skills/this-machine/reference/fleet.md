@@ -5,11 +5,10 @@ Owner working preferences, skill selection for hires, Codex accounts, hiring and
 ## Owner working preferences
 
 Read `clankie fleet status` or `clankie doctor --json` in the workspace before work.
-They expose resolved global/project commit, push, official-release, verification
-and reporting preferences from the same `autonomy.fleet` settings as closure and
-machine setup. Unknown or ambiguous project context is reported, not guessed.
+They expose resolved global/project commit, push and official-release policy
+from the same `autonomy.fleet` settings as closure and machine setup. Unknown or ambiguous project context is reported, not guessed.
 Global defaults allow commit/push without asking, ask before official releases,
-use change/run/read verification and report short and plain. The existing
+and preserve explicit task verification and reporting requirements. The existing
 registered `clankie` project receives its weekly-release override on migration;
 an explicitly cleared override stays cleared after settings are saved.
 
@@ -43,7 +42,7 @@ Account list/API reads expose native `hookTrust` (`ready`, `review_required`,
 A home whose sign-in Codex refuses when asked for usage is skipped automatically
 and refused when named. `clankie accounts hold codex LABEL [--machine ID]
 [--reason TEXT]` keeps an account out of automatic choice (`release` returns
-it); an explicit hire may still name a held account.
+it). Fresh work hires cannot bypass a hold by naming that account.
 A hired Codex startup waiting on trust retains its pane and server and continues
 the original brief automatically after owner review. A visible hook/folder prompt
 reports `trust_required`; other pending startup reports `start_unconfirmed`.
@@ -561,3 +560,23 @@ remain for distinct reason profiles or rates at least twice the fleet rate and
 five percentage points higher; workers sharing that exception are grouped.
 Alert delivery receipts and the existing five-minute cooldown still apply.
 See `docs/cli.md` under `metrics --fleet` for the exact comparison thresholds.
+
+## Project work policy
+
+Use `clankie project settings PROJECT --wip-cap 6 --owner-loop milestones` for a
+Started-issue cap and Auto reports. `none` clears the cap; `inherit` restores the
+default milestone cadence. `silent` requests no owner reports; `landings` also
+reports newly observed commits. Measurement continues in all modes.
+
+Read/update project `hiring` through the same API (`includeWorkPolicy=true`,
+`projectWorkPolicy:true`); lead/worker profiles and allowed/excluded plans/models
+constrain new hires. Merge the read whole `hiring` object before a nested edit.
+Fresh work hires need per-job `effortReason` and a selected effort; fleet-wide
+effort is retired. Observed Claude/Codex usage must be fresh (five minutes), above
+the 10% running-work reserve, and allowed by the project. Unknown usage refuses
+new admission. Receipts and the project hire journal record the choice.
+
+Fleet size/model mode, verification mode, reporting style and fleet-wide effort
+are retired from settings editors. Previously saved values remain read-only in
+`retiredWorkingPreferences`; they no longer promise enforcement. Actual task and
+landing checks remain binding. Never edit live settings JSON directly.

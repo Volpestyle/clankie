@@ -1,13 +1,7 @@
 import { formatFleetAutonomyGuidance, autonomyDrift, formatAutonomyDrift } from "@clankie/protocol";
 import { effectiveFleetAutonomy } from "@clankie/settings";
 import { type CaptainSessionLaneV2 } from "@clankie/protocol";
-import {
-  FLEET_MODEL_GUIDANCE,
-  FLEET_SIZE_GUIDANCE,
-  personaInstructions,
-  type ClankieSettings,
-  type PersonaRegister,
-} from "@clankie/settings";
+import { personaInstructions, type ClankieSettings, type PersonaRegister } from "@clankie/settings";
 import { type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -101,15 +95,13 @@ export const SESSION_PROMPT_SECTIONS: readonly CaptainPromptSection[] = [
  */
 export function fleetInstructions(systemTools: boolean, currentSettings: ClankieSettings): string {
   if (!systemTools) return "";
-  const { notes, size, models } = currentSettings.fleet;
+  const { notes } = currentSettings.fleet;
   const policy = effectiveFleetAutonomy(currentSettings.autonomy);
   const drift = autonomyDrift(currentSettings.autonomy.fleet);
   return [
     "# Your fleet",
     "",
-    `Fleet size: ${size}. ${FLEET_SIZE_GUIDANCE[size]}`,
-    `Models: ${models}. ${FLEET_MODEL_GUIDANCE[models]}`,
-    "Size and models are budget targets, not caps: go past them when the work warrants and say so.",
+    "Choose hires from observed account capacity and the job. Concrete project worker caps, profiles and plan/model constraints apply at admission.",
     ...(drift === undefined
       ? []
       : [

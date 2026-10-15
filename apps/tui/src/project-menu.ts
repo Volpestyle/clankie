@@ -7,6 +7,9 @@
 import {
   ProjectIdSchema,
   ProductPathsSchema,
+  ProjectWipCapSchema,
+  ProjectOwnerLoopSchema,
+  ProjectHiringPolicySchema,
   ProjectsSnapshotSchema,
   type Project,
   type ProjectStatus,
@@ -176,9 +179,8 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
           ]),
         done,
       );
-    const fleet = [project.fleet?.size, project.fleet?.models].filter(Boolean).join(" · ");
     const choice = await flow.readSelect({
-      message: `${project.name} · ${project.id}${fleet ? ` · fleet ${fleet}` : ""}`,
+      message: `${project.name} · ${project.id}`,
       options: [
         ...(snapshot.projectsAuto === true
           ? [
@@ -197,6 +199,30 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
                 label: "Product paths",
                 hint: project.productPaths?.join(", ") ?? "default classification",
               },
+            ]
+          : []),
+        ...(snapshot.projectWorkPolicy === true
+          ? [
+              { value: "wip-cap", label: "Started issue cap", hint: project.wipCap?.toString() ?? "none" },
+              {
+                value: "owner-loop",
+                label: "Owner reports",
+                hint: project.ownerLoop ?? "milestones (default)",
+              },
+              {
+                value: "hiring",
+                label: "Hiring defaults and constraints…",
+                hint: "lead / worker profiles and eligible plans",
+              },
+              ...(snapshot.retiredWorkingPreferences?.projects[project.id] === undefined
+                ? []
+                : [
+                    {
+                      value: "retired-preferences",
+                      label: "Retired preferences (read-only)…",
+                      hint: "saved values preserved",
+                    },
+                  ]),
             ]
           : []),
         {
@@ -298,6 +324,62 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
           { productPaths: paths.trim() === "" ? null : ProductPathsSchema.parse(JSON.parse(paths)) },
           paths.trim() === "" ? "Default product classification restored." : "Product paths saved.",
         );
+    } else if (choice === "wip-cap") {
+      const value = await flow.readText({
+        message: "Maximum started tracker issues (1–1000; empty removes the cap)",
+        ...(project.wipCap === undefined ? {} : { defaultValue: String(project.wipCap) }),
+        allowBack: true,
+        validate: (text) =>
+          text.trim() === "" || ProjectWipCapSchema.safeParse(Number(text)).success
+            ? undefined
+            : "Use an integer from 1 to 1000, or leave empty.",
+      });
+      if (value !== undefined)
+        await update({ wipCap: value.trim() === "" ? null : Number(value) }, "Started issue cap saved.");
+    } else if (choice === "owner-loop") {
+      const value = await flow.readSelect({
+        message: "When should the owner hear project updates?",
+        options: [
+          { value: "inherit", label: "Default (milestones)" },
+          { value: "silent", label: "Silent", hint: "no automatic project status posts" },
+          { value: "milestones", label: "Milestones", hint: "one report when a milestone completes" },
+          { value: "landings", label: "Landings", hint: "report new default-branch landings" },
+        ],
+        currentValue: project.ownerLoop ?? "inherit",
+        allowBack: true,
+      });
+      if (value !== undefined)
+        await update(
+          { ownerLoop: value === "inherit" ? null : ProjectOwnerLoopSchema.parse(value) },
+          "Owner report cadence saved.",
+        );
+    } else if (choice === "hiring") {
+      const value = await flow.readText({
+        message:
+          "Hiring policy (JSON: lead / worker profiles, allowedPlans, excludedPlans, excludedModels; empty inherits)",
+        ...(project.hiring === undefined ? {} : { defaultValue: JSON.stringify(project.hiring) }),
+        multiline: true,
+        allowBack: true,
+        validate: (text) => {
+          if (!text.trim()) return undefined;
+          try {
+            ProjectHiringPolicySchema.parse(JSON.parse(text));
+            return undefined;
+          } catch {
+            return "Use valid hiring policy JSON; plan keys look like claude:max_20x or codex:pro.";
+          }
+        },
+      });
+      if (value !== undefined)
+        await update(
+          { hiring: value.trim() === "" ? null : ProjectHiringPolicySchema.parse(JSON.parse(value)) },
+          "Hiring policy saved.",
+        );
+    } else if (choice === "retired-preferences") {
+      flow.renderLine(
+        `Retired controls; these exact saved values are preserved read-only: ${JSON.stringify(snapshot.retiredWorkingPreferences?.projects[project.id])}`,
+        "info",
+      );
     } else if (choice === "tracker-project") {
       const projectId = await flow.readText({
         message: "Built-in tracker project UUID (empty clears it)",

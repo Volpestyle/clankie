@@ -10,6 +10,13 @@ import {
 } from "./autonomy.ts";
 import type { WorkerBridgeStatus } from "./index.ts";
 import { WorkInitSettingsSchema } from "./work-items.ts";
+import {
+  ProjectWipCapSchema,
+  ProjectOwnerLoopSchema,
+  ProjectHiringPolicySchema,
+  RetiredWorkingPreferencesSchema,
+} from "./project-work-policy.ts";
+export * from "./project-work-policy.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const RefSchema = z.string().trim().min(1).max(200);
@@ -136,6 +143,9 @@ export const ProjectSchema = z
     /** One line on what matters now; it steers Auto work and replaces a goal's objective. */
     focus: ProjectFocusSchema.optional(),
     productPaths: ProductPathsSchema.optional(),
+    wipCap: ProjectWipCapSchema.optional(),
+    ownerLoop: ProjectOwnerLoopSchema.optional(),
+    hiring: ProjectHiringPolicySchema.optional(),
     fleet: z
       .object({
         size: z.enum(["max", "large", "small", "solo"]).optional(),
@@ -253,6 +263,9 @@ export const ProjectsSnapshotSchema = z
     /** Advertises project Auto and focus (ADR 0264); absent on an older service. */
     projectsAuto: z.literal(true).optional(),
     productPaths: z.literal(true).optional(),
+    /** Opt-in work-policy view only, so existing strict clients retain their response shape. */
+    projectWorkPolicy: z.literal(true).optional(),
+    retiredWorkingPreferences: RetiredWorkingPreferencesSchema.optional(),
     linearProjectBindings: z.literal(true).optional(),
     /** Each project's status line by project ID, in the autonomy-aware view of a current service. */
     projectStatus: z.record(z.string(), ProjectStatusSchema).optional(),
@@ -314,6 +327,9 @@ export const CreateProjectSettingsSchema = z
       .max(256)
       .optional(),
     workerCap: z.number().int().min(0).max(1000).nullable().optional(),
+    wipCap: ProjectWipCapSchema.nullable().optional(),
+    ownerLoop: ProjectOwnerLoopSchema.nullable().optional(),
+    hiring: ProjectHiringPolicySchema.nullable().optional(),
     trackerRef: z
       .object({ workspaceId: z.literal("primary"), path: z.literal(".clankie/tracking.json") })
       .strict()
@@ -331,7 +347,11 @@ export const CreateProjectSettingsSchema = z
       })
       .strict()
       .nullable()
-      .optional(),
+      .optional()
+      .refine(
+        (value) => value == null,
+        "Fleet size/model controls are retired; use workerCap and hiring policy.",
+      ),
   })
   .strict();
 export type CreateProjectSettings = z.infer<typeof CreateProjectSettingsSchema>;
@@ -370,7 +390,6 @@ export const ProjectProposalTweakSchema = ProjectProposalTargetSchema.extend({
     z
       .object({ field: z.literal("workerCap"), value: CreateProjectSettingsSchema.shape.workerCap.unwrap() })
       .strict(),
-    z.object({ field: z.literal("fleet"), value: CreateProjectSettingsSchema.shape.fleet.unwrap() }).strict(),
     z
       .object({
         field: z.literal("tracker"),
@@ -432,12 +451,24 @@ export const UpdateProjectSettingsSchema = z
         focus: ProjectFocusSchema.nullable().optional(),
         /** null restores default product classification. */
         productPaths: ProductPathsSchema.nullable().optional(),
+        wipCap: ProjectWipCapSchema.nullable().optional(),
+        ownerLoop: ProjectOwnerLoopSchema.nullable().optional(),
+        hiring: ProjectHiringPolicySchema.nullable().optional(),
       })
       .strict()
       .refine(
         (value) => Object.values(value).some((field) => field !== undefined),
         "No project changes supplied",
-      ),
+      )
+      .superRefine((value, ctx) => {
+        for (const field of ["verification", "reportingStyle"] as const)
+          if (value.autonomy?.fleet?.[field] !== undefined)
+            ctx.addIssue({
+              code: "custom",
+              path: ["autonomy", "fleet", field],
+              message: "This control is retired; its saved value remains read-only.",
+            });
+      }),
   })
   .strict();
 export type UpdateProjectSettings = z.infer<typeof UpdateProjectSettingsSchema>;

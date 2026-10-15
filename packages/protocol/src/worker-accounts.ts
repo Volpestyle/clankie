@@ -3,7 +3,7 @@ import { z } from "zod";
 /**
  * Worker accounts on one machine (VUH-1780): what each Claude profile or Codex
  * home can do now, and the owner's holds that set one aside from Clankie's
- * automatic choice. An explicit hire may still name a held account.
+ * automatic choice. Fresh work hires also enforce holds for explicit account pins.
  */
 export const WORKER_ACCOUNTS_PATH = "/v1/worker-accounts";
 export const WORKER_ACCOUNT_HOLDS_PATH = "/v1/worker-accounts/holds";

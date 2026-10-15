@@ -78,7 +78,7 @@ model budget, who commits, pushes, releases, and closes finished work, how work
 is verified, and how reports read. Projects can override each choice.
 
 ```bash
-clankie fleet set --size small --models efficient \
+clankie fleet set \
   --notes "Use Codex for implementation and another agent for review."
 ```
 

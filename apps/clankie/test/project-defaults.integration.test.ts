@@ -89,7 +89,6 @@ it("no tracker proposes local work, baseline roles and small fleet without writi
   expect(draft).toMatchObject({
     trackerSetup: { backend: "default" },
     roles: [{ role: "builder" }, { role: "reviewer" }],
-    fleet: { size: "small" },
     workerCap: 2,
   });
   expect(draft!.evidence).toContain("builder: Implement changes in this repository.");
@@ -217,7 +216,7 @@ it.each([1, 0])("governor capacity %i caps the proposal", async (slots) => {
     ...resources,
     capacity: { ...resources.capacity, heavySlots: slots },
   });
-  expect(result.draft).toMatchObject({ workerCap: slots, fleet: { size: "solo" } });
+  expect(result.draft).toMatchObject({ workerCap: slots });
 });
 it("pressure and unavailable observations refuse new workers", async () => {
   const root = await repo();
@@ -227,7 +226,6 @@ it("pressure and unavailable observations refuse new workers", async () => {
   ])
     expect((await inferProjectDefaults(root, state)).draft).toMatchObject({
       workerCap: 0,
-      fleet: { size: "solo" },
     });
 });
 
@@ -238,12 +236,11 @@ it("large active repos propose four workers, capped by the observed governor", a
   for (let n = 0; n < 50; n++) await commit(root, `change ${n}`);
   expect((await inferProjectDefaults(root, resources)).draft).toMatchObject({
     workerCap: 2,
-    fleet: { size: "small" },
   });
   expect(
     (await inferProjectDefaults(root, { ...resources, capacity: { ...resources.capacity, heavySlots: 4 } }))
       .draft,
-  ).toMatchObject({ workerCap: 4, fleet: { size: "large" } });
+  ).toMatchObject({ workerCap: 4 });
 });
 
 // Explicit live provider gate: real GitHub HTTP and native git, without owner credentials.
@@ -413,7 +410,6 @@ it("tweaks refuse another principal and revocation, and schema accepts only one 
 
 it.each([
   { field: "roles", value: [{ role: "builder" }, { role: "reviewer" }] },
-  { field: "fleet", value: { size: "solo", models: "efficient" } },
   { field: "workerCap", value: 0 },
   {
     field: "tracker",

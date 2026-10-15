@@ -45,6 +45,8 @@ const request = (dir: string): SpawnOperatorSeat => ({
   workingDirectory: dir,
   title: "Implement",
   role: "Engineer",
+  effortReason:
+    "Implementation with native delivery and policy checks needs the configured engineering effort.",
 });
 const proof: ProjectHireProcessProof = {
   nativeOccupantId: occupantIdForHerdrSession({ source: "claude", kind: "id", value: "s1" }),
@@ -81,6 +83,27 @@ async function fixture(harness: "claude" | "codex" = "claude") {
   const path = join(root, "watches.json");
   const options = {
     runner,
+    workerAccountsReport: async () => ({
+      machine: "local",
+      shell: "posix" as const,
+      observedAt: new Date().toISOString(),
+      accounts: [
+        {
+          harness,
+          label: "fixture",
+          home: root,
+          signedIn: true,
+          usable: true,
+          plan: "pro",
+          headroom: 0.8,
+          usage: {
+            source: harness === "codex" ? ("codex-rate-limits" as const) : ("claude-usage" as const),
+            observedAt: new Date().toISOString(),
+            windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+          },
+        },
+      ],
+    }),
     codexAccounts: async () => [{ label: "fixture", home: root }],
     projectHirePolicy: {
       settings: async () => projectSettings,

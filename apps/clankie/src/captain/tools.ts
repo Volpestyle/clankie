@@ -936,9 +936,9 @@ function hireAgentTool(
       "Hire a fleet seat: Herdr opens a pane in the working directory, starts the harness there, and the seat " +
       "lands watched and messageable as a persona — never a bare `herdr agent start`. " +
       "New Git starts fetch origin/main. Clean behind-only starts, including detached HEAD, fast-forward if no live pane uses them; dirty or divergent starts are preserved and refused. The brief records verified HEAD and main. Saved resumes keep their exact cwd. " +
-      "Explicit hire fields (the owner's words) win over the project role, then fleet.hire defaults. Omit fields to inherit. " +
+      "Explicit hire fields win over the project role, project lead/worker profile, then fleet.hire defaults. hireKind selects a profile, never authority. Every fresh work hire needs an explicit effort and effortReason explaining the smallest effort that meets its acceptance. Fleet-wide effort is retired. " +
       "You choose the harness per job unless one of those names it (Claude, Codex or verified native Pi; Claude and Codex support native subagents): weigh the work and worker_accounts usage on the hire's machine. " +
-      "Omitted with no role or fleet harness, the hire falls back to the machine's usable, unheld accounts: the only harness with one, else Codex when its best account has more usage left than Claude's best (unobserved usage counts as half), else Claude; verified Pi is the fallback when neither has an eligible account. Owner holds, requested models and named account scope remain binding. Friendly model names are checked against the registry; retired/unknown models refuse. Subagent model/effort travel in the native brief. native-first requires a stable deliverable key and refuses another pane for it; use the worker's native subagents. Placement targets the repo workspace. Omitted placement fills named 2x2 group tabs, at most four workers, before opening the next numbered tab. Group defaults to the verified project's display name or deliverable; pipeline overrides the group name. Explicit new-tab gives a solo Name · role tab; split requires a pipeline and fills its grid. Never rearrange existing panes. For an override across model families, specify the matching harness (for example claude / Opus) and clear incompatible child settings with subagents:null. Typed " +
+      "Fresh subscription work hires use observed remaining plan capacity, preserving a 10% reserve for already-running work. Unknown or stale usage refuses admission. Project allowed/excluded plans and excluded models constrain explicit choices too. With no harness named, observed spare plan capacity per day chooses among eligible accounts. Owner holds, requested models and named account scope remain binding. Friendly model names are checked against the registry; retired/unknown models refuse. Subagent model/effort travel in the native brief. native-first requires a stable deliverable key and refuses another pane for it; use the worker's native subagents. Placement targets the repo workspace. Omitted placement fills named 2x2 group tabs, at most four workers, before opening the next numbered tab. Group defaults to the verified project's display name or deliverable; pipeline overrides the group name. Explicit new-tab gives a solo Name · role tab; split requires a pipeline and fills its grid. Never rearrange existing panes. For an override across model families, specify the matching harness (for example claude / Opus) and clear incompatible child settings with subagents:null. Typed " +
       "outcomes: unknown_directory, harness_unavailable (no wired flag for what you asked), not_ready (rejected " +
       "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, " +
       "at_capacity (close or reuse a hired agent). brief is its first prompt (codex needs one) and is delivered " +
@@ -1015,6 +1015,15 @@ function hireAgentTool(
       }),
       model: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_MODEL_MAX })),
       effort: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_EFFORT_MAX })),
+      hireKind: Type.Optional(StringEnum(["lead", "worker"])),
+      effortReason: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 600,
+          description:
+            "For this job: why the chosen effort is the smallest that meets acceptance. Required for a fresh work hire.",
+        }),
+      ),
       subagents: Type.Optional(
         Type.Union([
           Type.Null(),

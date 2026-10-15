@@ -12,6 +12,7 @@ import { ProjectIdSchema } from "./projects.ts";
 import { FleetResourcePolicySchema, FleetResourceMachineIdSchema } from "./fleet-resources.ts";
 import { HireProfileSchema, HIRE_NO_PREFERENCE } from "./hire-profile.ts";
 import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
+import { RetiredWorkingPreferencesSchema } from "./project-work-policy.ts";
 
 export const FLEET_SETTINGS_PATH = "/v1/operator/fleet-settings";
 export const FLEET_SETTINGS_CONTEXT_PATH = `${FLEET_SETTINGS_PATH}/context`;
@@ -37,6 +38,8 @@ export const FleetSettingsSnapshotSchema = z
     fleet: FleetPolicySchema,
     /** Advertises support explicitly; absence identifies an older service. */
     workingPreferences: z.literal(true).optional(),
+    workPolicy: z.literal(true).optional(),
+    retiredWorkingPreferences: RetiredWorkingPreferencesSchema.optional(),
     fleetGates: z.literal(true).optional(),
     resourceMachines: z.array(FleetResourceMachineIdSchema).max(31).optional(),
     /** The owner's autonomy dial read back from the leaves (ADR 0263); absent on an older service. */
@@ -75,7 +78,22 @@ export const UpdateFleetSettingsSchema = z
       .refine(
         (value) => Object.values(value).some((field) => field !== undefined),
         "No fleet settings changes supplied",
-      ),
+      )
+      .superRefine((value, ctx) => {
+        for (const field of ["size", "models", "verification", "reportingStyle"] as const)
+          if (value[field] !== undefined)
+            ctx.addIssue({
+              code: "custom",
+              path: [field],
+              message: "This prompt-only control is retired; saved values remain read-only.",
+            });
+        if (value.hire?.effort !== undefined)
+          ctx.addIssue({
+            code: "custom",
+            path: ["hire", "effort"],
+            message: "Fleet-wide effort is retired; choose effort and its reason per hire.",
+          });
+      }),
   })
   .strict();
 export type UpdateFleetSettings = z.infer<typeof UpdateFleetSettingsSchema>;
@@ -200,6 +218,10 @@ export const UpdateFleetHireDefaultsSchema = z
       .refine(
         (value) => Object.values(value).some((field) => field !== undefined),
         "No hire default changes supplied",
+      )
+      .refine(
+        (value) => value.effort === undefined || value.effort === HIRE_NO_PREFERENCE,
+        "Fleet-wide effort is retired; select effort for each job.",
       ),
   })
   .strict();

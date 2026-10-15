@@ -260,7 +260,7 @@ for (const revoked of ["authority", "target", "profile"] as const)
         throw new Error("Unrequested external effect in hire authority fixture");
       };
       const store = new HerdrWatchStore(file, {
-        hireDefaults: async () => ({ effort: profileChanged ? "medium" : "high" }),
+        hireDefaults: async () => ({ model: profileChanged ? "changed-model" : "original-model" }),
         remoteWorkspace: async () => true,
         remoteHireReceipts: {
           claim: async (_fleet, receipt) => ({

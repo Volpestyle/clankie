@@ -7,7 +7,7 @@ import { EmbodimentBudgetSchema } from "@clankie/protocol/embodiment";
 import { HireProfileSchema } from "@clankie/protocol/hire-profile";
 import { FleetResourcePolicySchema, FleetResourceMachineIdSchema } from "@clankie/protocol/fleet-resources";
 import { z } from "zod";
-import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { ProjectsSettingsSchema, RetiredWorkingPreferencesSchema } from "@clankie/protocol/projects";
 import { MinecraftPlaySettingsSchema, MinecraftServerProfileIdSchema } from "@clankie/protocol/minecraft";
 import { isIP } from "node:net";
 
@@ -771,6 +771,8 @@ export const ClankieSettingsSchema = z
      */
     maximumTrustMode: z.boolean().default(false),
     autonomy: AutonomySettingsSchema.default(() => AutonomySettingsSchema.parse({})),
+    /** Exact legacy values, retained read-only when their editable controls retire. */
+    retiredWorkingPreferences: RetiredWorkingPreferencesSchema.optional(),
     projects: ProjectsSettingsSchema.default(() => ProjectsSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
@@ -824,6 +826,40 @@ export function emptySettings(): ClankieSettings {
 
 export const LEGACY_CLANKIE_RELEASE_RULE =
   "Release without asking when the last v* tag is more than one week old and main has user-visible changes worth shipping.";
+
+/** Copy explicitly saved leaves before defaults; compatibility fields stay readable, never editable. */
+export function migrateRetiredWorkingPreferences(parsed: unknown): unknown {
+  const record = (value: unknown): Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const root = record(parsed);
+  if (!Object.keys(root).length || root.retiredWorkingPreferences !== undefined) return parsed;
+  const values = (fleet: Record<string, unknown>, autonomy: Record<string, unknown>) =>
+    Object.fromEntries(
+      [
+        ["size", fleet.size],
+        ["models", fleet.models],
+        ["verification", autonomy.verification],
+        ["reportingStyle", autonomy.reportingStyle],
+        ["fleetEffort", record(fleet.hire).effort],
+      ].filter(([, value]) => value !== undefined),
+    );
+  const fleet = values(record(root.fleet), record(record(root.autonomy).fleet));
+  const projects: Record<string, unknown> = {};
+  const saved = record(root.projects).projects;
+  if (Array.isArray(saved))
+    for (const entry of saved) {
+      const project = record(entry);
+      const old = values(record(project.fleet), record(record(project.autonomy).fleet));
+      if (typeof project.id === "string" && Object.keys(old).length) projects[project.id] = old;
+    }
+  if (!Object.keys(fleet).length && !Object.keys(projects).length) return parsed;
+  return {
+    ...root,
+    retiredWorkingPreferences: RetiredWorkingPreferencesSchema.parse({ schemaVersion: 1, fleet, projects }),
+  };
+}
 
 /** Run on raw disk bytes, before defaults provide the migration receipt. */
 export function migrateLegacyFleetWorkingPreferences(parsed: unknown): unknown {

@@ -189,6 +189,9 @@ export function createProjectSettings(
     workspaces: [workspace],
     ...(roles === undefined ? {} : { roles }),
     ...(input.workerCap == null ? {} : { workerCap: input.workerCap }),
+    ...(input.wipCap == null ? {} : { wipCap: input.wipCap }),
+    ...(input.ownerLoop == null ? {} : { ownerLoop: input.ownerLoop }),
+    ...(input.hiring == null ? {} : { hiring: input.hiring }),
     ...(input.trackerRef == null ? {} : { trackerRef: input.trackerRef }),
     ...(input.fleet == null ? {} : { fleet: input.fleet }),
   });

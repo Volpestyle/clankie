@@ -33,24 +33,26 @@ import {
 } from "@clankie/protocol/projects";
 
 /** Legacy strict clients keep their existing view; the revision always binds full stored policy. */
-function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
+function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean, includeWorkPolicy = false) {
+  const projects = current.projects.projects.map((saved) => {
+    const project = { ...saved };
+    if (!includeAutonomy) {
+      delete project.autonomy;
+      delete project.trackerProjectId;
+      delete project.linearProjectBinding;
+      delete project.auto;
+      delete project.focus;
+      delete project.productPaths;
+    }
+    if (!includeWorkPolicy) {
+      delete project.wipCap;
+      delete project.ownerLoop;
+      delete project.hiring;
+    }
+    return project;
+  });
   return {
-    settings: includeAutonomy
-      ? current.projects
-      : {
-          ...current.projects,
-          projects: current.projects.projects.map(
-            ({
-              autonomy: _autonomy,
-              trackerProjectId: _trackerProjectId,
-              linearProjectBinding: _linearProjectBinding,
-              auto: _auto,
-              focus: _focus,
-              productPaths: _productPaths,
-              ...project
-            }) => project,
-          ),
-        },
+    settings: { ...current.projects, projects },
     ...(current.fleet.hire ? { hireDefaults: current.fleet.hire } : {}),
     ...(includeAutonomy ? { autonomyDefaults: current.autonomy } : {}),
     ...(includeAutonomy
@@ -60,6 +62,14 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
           projectsAuto: true,
           productPaths: true,
           linearProjectBindings: true,
+        }
+      : {}),
+    ...(includeWorkPolicy
+      ? {
+          projectWorkPolicy: true,
+          ...(current.retiredWorkingPreferences === undefined
+            ? {}
+            : { retiredWorkingPreferences: current.retiredWorkingPreferences }),
         }
       : {}),
     revision: projectsRevision(current.projects),
@@ -112,7 +122,7 @@ export function createProjectRoutes(
         ? await options.status(current.projects.projects).catch(() => undefined)
         : undefined;
     return context.json({
-      ...projectSnapshot(current, includeAutonomy),
+      ...projectSnapshot(current, includeAutonomy, context.req.query("includeWorkPolicy") === "true"),
       ...(status === undefined ? {} : { projectStatus: status.projects, needsYou: status.needsYou }),
     });
   });
@@ -134,6 +144,7 @@ export function createProjectRoutes(
       const projected = projectSnapshot(
         { ...current, projects: result.settings },
         context.req.query("includeAutonomy") === "true",
+        context.req.query("includeWorkPolicy") === "true",
       );
       return context.json({ ...projected, revision: result.revision }, 201);
     } catch (error) {
@@ -155,11 +166,17 @@ export function createProjectRoutes(
     try {
       const current = await settings.load();
       const catalog = await createModelRegistry().catalog();
-      for (const role of input.data.changes.roles ?? []) {
+      const hiring = input.data.changes.hiring;
+      for (const role of [
+        ...(input.data.changes.roles ?? []),
+        ...(hiring?.lead === undefined ? [] : [hiring.lead]),
+        ...(hiring?.worker === undefined ? [] : [hiring.worker]),
+      ]) {
         const profile = effectiveHireProfile({}, role, current.fleet.hire);
         for (const model of [profile.model, profile.subagents?.model])
           if (model) resolveHireModel(catalog, profile.harness, model);
       }
+      for (const model of hiring?.excludedModels ?? []) resolveHireModel(catalog, undefined, model);
     } catch (error) {
       return context.json({ error: "invalid_hire_model", detail: String(error) }, 400);
     }
@@ -202,7 +219,13 @@ export function createProjectRoutes(
           if ((await authorize(context.req.raw)) !== true) throw new Error("Owner authority changed");
         },
       );
-      return context.json(projectSnapshot(updated, context.req.query("includeAutonomy") === "true"));
+      return context.json(
+        projectSnapshot(
+          updated,
+          context.req.query("includeAutonomy") === "true",
+          context.req.query("includeWorkPolicy") === "true",
+        ),
+      );
     } catch {
       return context.json({ error: "project_update_conflict" }, 409);
     }
@@ -223,7 +246,13 @@ export function createProjectRoutes(
           if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
         },
       );
-      return context.json(projectSnapshot(updated, context.req.query("includeAutonomy") === "true"));
+      return context.json(
+        projectSnapshot(
+          updated,
+          context.req.query("includeAutonomy") === "true",
+          context.req.query("includeWorkPolicy") === "true",
+        ),
+      );
     } catch {
       return context.json({ error: "workspace_removal_conflict" }, 409);
     }
@@ -249,7 +278,13 @@ export function createProjectRoutes(
           if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
         },
       );
-      return context.json(projectSnapshot(updated, context.req.query("includeAutonomy") === "true"));
+      return context.json(
+        projectSnapshot(
+          updated,
+          context.req.query("includeAutonomy") === "true",
+          context.req.query("includeWorkPolicy") === "true",
+        ),
+      );
     } catch {
       return context.json({ error: "worktree_root_conflict" }, 409);
     }
@@ -270,7 +305,13 @@ export function createProjectRoutes(
           if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
         },
       );
-      return context.json(projectSnapshot(updated, context.req.query("includeAutonomy") === "true"));
+      return context.json(
+        projectSnapshot(
+          updated,
+          context.req.query("includeAutonomy") === "true",
+          context.req.query("includeWorkPolicy") === "true",
+        ),
+      );
     } catch {
       return context.json({ error: "worktree_root_removal_conflict" }, 409);
     }

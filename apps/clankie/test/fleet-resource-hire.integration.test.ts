@@ -242,7 +242,14 @@ async function fixture(projectHirePolicy?: ProjectHirePolicy) {
     proof,
     hire: (brief?: string, authority?: ConversationAuthority) =>
       store.spawnSeat(
-        { schemaVersion: 1, harness: "opencode", title: "Resource fixture", workingDirectory: root },
+        {
+          schemaVersion: 1,
+          effort: "medium",
+          effortReason: "Resource admission and native launch boundaries need integration checks.",
+          harness: "opencode",
+          title: "Resource fixture",
+          workingDirectory: root,
+        },
         undefined,
         brief,
         undefined,
@@ -410,6 +417,8 @@ async function autoFixture(configuredOwner = false) {
         workingDirectory: directory,
         harness: "opencode",
         deliverable: "LOCAL-VUH-4",
+        effort: "medium",
+        effortReason: "Resource admission and native launch boundaries need integration checks.",
         brief: "Read LOCAL-VUH-4 without changing accounts or credentials.",
       },
       undefined,
@@ -430,6 +439,27 @@ async function autoFixture(configuredOwner = false) {
     },
   };
 }
+
+it("refuses a new job without an effort rationale before any native process starts", async () => {
+  const f = await fixture();
+  const result = await f.store.spawnSeat(
+    {
+      schemaVersion: 1,
+      title: "Missing job choice",
+      harness: "opencode",
+      workingDirectory: f.root,
+      effort: "medium",
+    },
+    undefined,
+    "Read the project and report evidence.",
+  );
+  expect(result).toMatchObject({
+    outcome: "failed",
+    reason: "not_ready",
+    detail: expect.stringContaining("effortReason"),
+  });
+  expect(f.launches()).toBe(0);
+});
 
 it("LOCAL-VUH-6: preserves owner policy, project cap and resource refusals", async () => {
   const f = await autoFixture();

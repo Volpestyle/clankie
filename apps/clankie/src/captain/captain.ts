@@ -4750,8 +4750,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   );
   /** Each Auto project's latest measurement; reused while younger than a tick (VUH-2284). */
   const autoMeasurements = new Map<string, ProjectVelocity>();
+  const autoMeasurementPolicies = new Map<string, string>();
   const measureAutoProjects = async (projectIds: ReadonlySet<string>) => {
-    for (const id of autoMeasurements.keys()) if (!projectIds.has(id)) autoMeasurements.delete(id);
+    for (const id of autoMeasurements.keys())
+      if (!projectIds.has(id)) {
+        autoMeasurements.delete(id);
+        autoMeasurementPolicies.delete(id);
+      }
     const projects = (await settings()).projects.projects;
     await Promise.all(
       projects
@@ -4759,7 +4764,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         .map(async (project) => {
           const last = autoMeasurements.get(project.id);
           // A little slack, so a tick's own jitter never skips a measurement.
-          if (last && Date.now() - Date.parse(last.measuredAt) < autoRoundIntervalMs * 0.9) return;
+          const policy = JSON.stringify(project);
+          if (
+            last && autoMeasurementPolicies.get(project.id) === policy &&
+            Date.now() - Date.parse(last.measuredAt) < autoRoundIntervalMs * 0.9
+          ) return;
           const correction = autoRoundRecord.pendingCorrection(project.id);
           const velocity = await measureVelocityWithin(project, autoRoundRecord.lastMilestone(project.id), {
             ...velocityDeps,
@@ -4768,6 +4777,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // A stopped runtime must not append after its state directory is handed over.
           if (shutdown.signal.aborted) return;
           autoRoundRecord.observeUpdates(velocity);
+          autoMeasurementPolicies.set(project.id, policy);
           autoMeasurements.set(
             project.id,
             autoRoundRecord.withReporting(withDrift(velocity, autoRoundRecord.pendingDrift(project.id))),

@@ -142,20 +142,11 @@ A worker's report is your only completion signal, and silence is not progress.
 When one is overdue, read the worker's pane state and `clankie status` rather
 than waiting on its push.
 
-Size toward the owner's targets in "Your fleet" (`clankie fleet status`):
-
-| Size    | Aim for                                                         |
-| ------- | --------------------------------------------------------------- |
-| `max`   | one worker per separable deliverable plus independent reviewers |
-| `large` | about six concurrent workers, reviewers included                |
-| `small` | one or two at a time; sequence the rest                         |
-| `solo`  | no standing workers; ask before a long or parallel run          |
-
-`optimal` uses the strongest model at the effort each job needs; `efficient`
-the smallest that meets acceptance. Targets are not caps, but every worker must
-own a separable result and no budget removes a required review. There is no
-fixed model or effort rule: where the owner set no preference, choose them for
-the task or omit them and let the harness decide.
+Choose staffing from the project's numeric worker cap and Started-issue WIP cap,
+not retired fleet-size/model-mode targets. Each worker owns a separable result.
+Use project lead/worker profiles and allowed/excluded plans/models as constraints.
+Fresh work hires need a per-job effort choice and `effortReason` explaining why
+it is the smallest effort that meets acceptance; no fleet-wide effort is applied.
 
 ## Work-project boundaries
 
@@ -172,8 +163,9 @@ Do not apply one work project's restrictions to social/play lanes or other repos
 
 ## Brief an owned result
 
-Hire with `hire_agent`, omitting harness, model and effort to inherit the
-project's profile, and follow up with `message_seat` on the returned seat ID.
+Hire with `hire_agent`, selecting effort for this job and supplying `effortReason`.
+Harness/model may inherit the project profile; `hireKind:lead` selects its lead
+profile without granting authority. Follow up with `message_seat` on the returned seat ID.
 Where neither the role nor the fleet names a harness, choosing one is yours per
 job: a Claude or a Codex worker, each leading its own native subagents. Every
 lead and worker picks its native children's model and effort per job, the
@@ -188,7 +180,9 @@ lines, `--json` for the raw report).
 Never pause or keep pausing hires on usage grounds without a fresh
 `worker_accounts` / `clankie usage --json` reading in the same turn. A projection
 that runs out near reset is not a blanket no-hire. Signed-out or unknown
-accounts are not exhausted. Respect owner account holds. Auto wakes carry
+accounts are not exhausted, but unknown/stale usage cannot admit fresh
+subscription work. Fresh observed usage must exceed the 10% reserve for running
+work. Explicit account pins cannot bypass owner holds or project exclusions. Auto wakes carry
 current per-account capacity; a "Capacity recovered" notice ends the old
 warning's premise, so reassess staffing from the fresh reading.
 

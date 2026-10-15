@@ -422,6 +422,113 @@ it("names drift from completed working days, carries it until a round is deliver
   ).toEqual(next.drift);
 });
 
+it("applies a configured tracker WIP cap to live velocity and historical replay", async () => {
+  const { project, deps, at, call, trackerProject } = await measuredProject();
+  await at("2026-10-13T19:00:00Z", () =>
+    call("save_issue", {
+      team: "LOCAL",
+      project: trackerProject.id,
+      title: "Second active feature",
+      state: "In Progress",
+    }),
+  );
+  const capped = { ...project, wipCap: 1 };
+  const velocity = withDrift(await measureVelocity(capped, null, deps, new Date("2026-10-14T05:00:00Z")), []);
+  expect(velocity.started).toMatchObject({ state: "known", total: 2, cap: 1 });
+  expect(velocity.drift).toContainEqual(
+    expect.objectContaining({ signal: "over_wip", numbers: { started: 2, cap: 1 } }),
+  );
+  const { replayAutoRounds } = await import("../src/captain/auto-replay.ts");
+  const replay = await replayAutoRounds(
+    capped,
+    { replay: "true", project: project.id, since: "2026-10-13T05:00:00Z", until: "2026-10-14T05:00:00Z" },
+    deps,
+    new Date("2026-10-15T05:00:00Z"),
+  );
+  expect(replay.rounds[0]!.projects[0]!.drift).toContainEqual(
+    expect.objectContaining({ signal: "over_wip", numbers: { started: 2, cap: 1 } }),
+  );
+  expect(replay.rounds[0]!.projects[0]!.caveats.join(" ")).not.toContain("cannot be evaluated");
+});
+
+it("silent owner-loop records milestones without claiming a report and allows a later milestone preference", async () => {
+  const { project, deps } = await measuredProject();
+  const record = new AutoRoundRecord(join(roots.at(-1)!, "silent-reporting"));
+  const velocity = await measureVelocity(
+    { ...project, ownerLoop: "silent" },
+    null,
+    deps,
+    new Date("2026-10-14T03:00:00Z"),
+  );
+  const silent = record.withReporting(velocity);
+  expect(silent.milestones).not.toHaveLength(0);
+  expect(silent.report).toMatchObject({ cadence: "silent", milestones: [], landings: [] });
+  expect(reportingSection([silent]).join(" ")).toContain("owner reports are silent");
+  record.settled(record.measured("lead", [silent]), true);
+  expect(record.withReporting({ ...velocity, ownerLoop: "milestones" }).report!.milestones).not.toHaveLength(
+    0,
+  );
+});
+
+it("landing cadence reports new origin commits once, preserves uncertain claims and retries only a definite refusal", async () => {
+  const { project, deps, commit, git, call, at, trackerProject } = await measuredProject();
+  const directory = join(roots.at(-1)!, "landing-reporting");
+  let record = new AutoRoundRecord(directory);
+  const target = { ...project, ownerLoop: "landings" as const };
+  const initial = record.withReporting(
+    await measureVelocity(target, null, deps, new Date("2026-10-14T03:00:00Z")),
+  );
+  expect(initial.report!.landings).toEqual([]); // Existing history is the baseline.
+  record.settled(record.measured("lead", [initial], new Date("2026-10-14T03:00:00Z")), true);
+  await at("2026-10-14T03:01:00Z", () =>
+    call("save_status_update", {
+      type: "project",
+      project: trackerProject.id,
+      body: "The initial milestone report.",
+    }),
+  );
+  record.observeUpdates(
+    await measureVelocity(target, record.lastMilestone(project.id), deps, new Date("2026-10-14T03:02:00Z")),
+  );
+  await commit("2026-10-14T06:00:00Z", "Playable route landing", { "src/new-feature.cpp": 3 });
+  await git("2026-10-14T06:00:00Z", "push", "-q", "origin", "main");
+  await git("2026-10-14T06:00:00Z", "fetch", "-q", "origin");
+  const velocity = await measureVelocity(
+    target,
+    record.lastMilestone(project.id),
+    deps,
+    new Date("2026-10-14T07:00:00Z"),
+  );
+  const request = record.withReporting(velocity);
+  expect(request.report!.landings).toHaveLength(1);
+  expect(request.report!.milestones).toEqual([]);
+  expect(reportingSection([request]).join(" ")).toContain("Post exactly one project status update");
+  expect(milestoneSignals(request)).not.toEqual(milestoneSignals(initial));
+  const id = record.measured("lead", [request], new Date("2026-10-14T07:00:00Z"));
+  record = new AutoRoundRecord(directory);
+  expect(record.withReporting(velocity).report!.landings).toEqual([]);
+  expect(milestoneSignals(record.withReporting(velocity))).toEqual(milestoneSignals(request));
+  record.settled(id, false);
+  const retry = record.withReporting(velocity);
+  expect(retry.report!.landings).toEqual(request.report!.landings);
+  const retryId = record.measured("lead", [retry], new Date("2026-10-14T07:01:00Z"));
+  record.settled(retryId, true);
+  const update = (await at("2026-10-14T07:02:00Z", () =>
+    call("save_status_update", {
+      type: "project",
+      project: trackerProject.id,
+      body: "Playable route landing with evidence.",
+    }),
+  )) as { id: string };
+  record.observeUpdates(
+    await measureVelocity(target, record.lastMilestone(project.id), deps, new Date("2026-10-14T08:00:00Z")),
+  );
+  expect(record.read({ limit: 1 })[0]!.projects[0]!.report!.updates).toContainEqual(
+    expect.objectContaining({ id: update.id, unexpected: false }),
+  );
+  expect(new AutoRoundRecord(directory).withReporting(velocity).report!.landings).toEqual([]);
+});
+
 it("uses declared product paths for both churn and closure classification", async () => {
   const { project, deps, product, rig } = await measuredProject();
   const velocity = await measureVelocity(

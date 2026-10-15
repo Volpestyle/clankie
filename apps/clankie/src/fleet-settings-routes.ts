@@ -25,7 +25,7 @@ import {
 } from "./fleet-settings-context.ts";
 import { resourceMachine, machineResourcePolicy } from "./machine-fleet-resources.ts";
 
-function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot {
+function fleetSettingsSnapshot(settings: ClankieSettings, includeWorkPolicy = false): FleetSettingsSnapshot {
   const fleet = {
     ...settings.fleet,
     size: settings.fleet.size,
@@ -37,6 +37,14 @@ function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot
   return {
     schemaVersion: 1,
     workingPreferences: true,
+    ...(includeWorkPolicy
+      ? {
+          workPolicy: true,
+          ...(settings.retiredWorkingPreferences === undefined
+            ? {}
+            : { retiredWorkingPreferences: settings.retiredWorkingPreferences }),
+        }
+      : {}),
     fleetGates: true,
     resourceMachines: ["local", ...settings.machines.map((machine) => machine.id)],
     revision: createHash("sha256").update(JSON.stringify(fleet)).digest("hex"),
@@ -79,7 +87,7 @@ export function createFleetSettingsRoutes(
     const current = await settings.load();
     const authority = await authorize(context.req.raw);
     if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
-    return context.json(fleetSettingsSnapshot(current));
+    return context.json(fleetSettingsSnapshot(current, context.req.query("includeWorkPolicy") === "true"));
   });
   app.post(FLEET_SETTINGS_PATH, bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
@@ -163,7 +171,7 @@ export function createFleetSettingsRoutes(
         await dependencies.configureResources?.(machineResourcePolicy(updated, "local"));
       for (const machine of Object.keys(input.data.changes.machineResources ?? {}))
         await dependencies.configureResources?.(machineResourcePolicy(updated, machine), machine);
-      return context.json(fleetSettingsSnapshot(updated));
+      return context.json(fleetSettingsSnapshot(updated, context.req.query("includeWorkPolicy") === "true"));
     } catch {
       return context.json({ error: "fleet_settings_conflict" }, 409);
     }
@@ -187,6 +195,7 @@ export function createFleetSettingsRoutes(
           before = JSON.stringify(current);
           // `auto` is no preference: the field is cleared, never stored (ea54ebd6).
           const next: Record<string, unknown> = { ...current.fleet.hire };
+          delete next.effort; // Preserved in the read-only retirement receipt, never a new default.
           for (const [field, value] of Object.entries(input.data.changes)) {
             if (value === undefined) continue;
             if (value === HIRE_NO_PREFERENCE) delete next[field];

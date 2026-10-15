@@ -2778,7 +2778,7 @@ paths:
       tags: [Operator]
       operationId: updateFleetSettings
       summary: Update fleet budget and working preferences with revision fencing
-      description: Omitted leaves retain their value. A null autonomy leaf restores its global default. Release mode and rule are replaced together.
+      description: Omitted leaves retain their value. A null autonomy leaf restores its global default. Release mode and rule are replaced together. Retired size, models, verification, reportingStyle and hire.effort edits are rejected. Saved values remain in the read-only includeWorkPolicy=true receipt.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
@@ -2796,8 +2796,6 @@ paths:
                   additionalProperties: false
                   minProperties: 1
                   properties:
-                    size: { type: string, enum: [max, large, small, solo] }
-                    models: { type: string, enum: [optimal, efficient] }
                     resources: { type: object, description: FleetResourcePolicySchema }
                     notes: { type: string, maxLength: 4000 }
                     tools: { type: string, enum: [connected, off] }
@@ -2813,9 +2811,6 @@ paths:
                     commit: { type: string, enum: [lead, owner, null], nullable: true }
                     push: { type: string, enum: [lead, owner, null], nullable: true }
                     release: { $ref: "#/components/schemas/FleetReleasePolicyPatch" }
-                    verification:
-                      { type: string, enum: [review_and_seal, change_run_read, null], nullable: true }
-                    reportingStyle: { type: string, minLength: 1, maxLength: 2000, nullable: true }
       responses:
         "200": { description: Updated fleet snapshot and revision }
         "400": { description: Malformed request }
@@ -2826,7 +2821,7 @@ paths:
     get:
       tags: [Operator]
       operationId: getFleetHireDefaults
-      summary: Read the fleet's hire defaults (harness, model, effort)
+      summary: Read the fleet's hire defaults (harness and model; legacy effort read-only)
       description: An omitted field is "no preference"; Clankie chooses per hire. The SHA-256 revision covers the whole stored hire profile, so an account, subagent, delegation or placement change also fences writes. Owner or Take Control device authority (FleetHireDefaultsSnapshotSchema).
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
@@ -2837,7 +2832,7 @@ paths:
       tags: [Operator]
       operationId: updateFleetHireDefaults
       summary: Set or clear fleet hire defaults
-      description: Accepts schemaVersion=1, expectedRevision and changes {harness?, model?, effort?}. The value `auto` clears a field (no preference, never stored); omitted fields and the rest of the hire profile are kept (UpdateFleetHireDefaultsSchema).
+      description: Accepts schemaVersion=1, expectedRevision and changes {harness?, model?}. The value auto clears a field; effort accepts only auto to clear a retired saved value. Any field patch removes legacy global effort while preserving it in the retirement receipt and retaining other profile fields (UpdateFleetHireDefaultsSchema).
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
@@ -3032,6 +3027,12 @@ paths:
             schema: { type: string, enum: ["true"] },
             description: Opt into project autonomy overrides and global autonomyDefaults,
           }
+        - {
+            name: includeWorkPolicy,
+            in: query,
+            schema: { type: string, enum: ["true"] },
+            description: Opt into work policy response fields,
+          }
       requestBody:
         required: true
         content:
@@ -3047,6 +3048,14 @@ paths:
                   type: object
                   description: Validated project fields, including independent autonomy.fleet overrides
                   properties:
+                    wipCap: { type: [integer, "null"], minimum: 1, maximum: 1000 }
+                    ownerLoop: { type: [string, "null"], enum: [silent, milestones, landings, null] }
+                    hiring:
+                      {
+                        type: [object, "null"],
+                        description: Whole-value ProjectHiringPolicy replacement; omitted retains,
+                        null clears. Merge read value before nested edits.,
+                      }
                     linearProjectBinding:
                       type: object
                       nullable: true
@@ -3070,9 +3079,6 @@ paths:
                             commit: { type: string, enum: [lead, owner, null], nullable: true }
                             push: { type: string, enum: [lead, owner, null], nullable: true }
                             release: { $ref: "#/components/schemas/FleetReleasePolicyPatch" }
-                            verification:
-                              { type: string, enum: [review_and_seal, change_run_read, null], nullable: true }
-                            reportingStyle: { type: string, minLength: 1, maxLength: 2000, nullable: true }
       responses:
         "200": { description: Updated project snapshot and revision }
         "400": { description: Malformed request or Linear project not found }
@@ -3085,7 +3091,7 @@ paths:
       tags: [Operator]
       operationId: getOperatorProjects
       summary: Read owner project settings and their current revision
-      description: Legacy responses omit autonomy fields. includeAutonomy=true adds optional project autonomy.fleet overrides, global autonomyDefaults and workingPreferences=true without changing the full settings revision. New working-preference leaves stay absent on an older service.
+      description: Legacy responses omit autonomy and work-policy fields. includeAutonomy=true adds autonomy overrides and defaults. includeWorkPolicy=true adds wipCap, ownerLoop, hiring, projectWorkPolicy=true and a read-only retiredWorkingPreferences receipt. Revision always covers the full stored settings.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {
@@ -3093,6 +3099,12 @@ paths:
             in: query,
             schema: { type: string, enum: ["true"] },
             description: Opt into project autonomy overrides and global autonomyDefaults,
+          }
+        - {
+            name: includeWorkPolicy,
+            in: query,
+            schema: { type: string, enum: ["true"] },
+            description: Opt into project work policy and retired-value receipt,
           }
       responses:
         "200": { description: Project settings and SHA-256 revision }
@@ -3105,9 +3117,9 @@ paths:
       summary: Create a reviewed project with one canonical local workspace
       description: >-
         Owner only. Strict fields are projectId, name, workspacePath, expectedRevision,
-        roles, workerCap, trackerRef, trackerSetup and fleet. The service supplies primary/local
-        workspace identity and its platform. Nullable caps inherit; zero is preserved.
-        Fleet preferences are not numeric caps. Optional trackerRef must name primary
+        roles, workerCap, trackerRef, trackerSetup, productPaths, wipCap, ownerLoop and hiring.
+        The service supplies primary/local workspace identity and its platform.
+        Nullable worker caps inherit; zero is preserved. Retired fleet preferences cannot be created. Optional trackerRef must name primary
         and .clankie/tracking.json, an existing valid canonical convention unless
         trackerSetup supplies reviewed work-init inputs for a missing convention.
         Tracker save precedes settings save; a partial failure can leave only the
@@ -3204,12 +3216,31 @@ paths:
                     linearLabel: { type: string, minLength: 1, maxLength: 64 }
                     decisions: { type: string, minLength: 1, maxLength: 256 }
                     note: { type: string, maxLength: 1000 }
-                fleet:
-                  type: [object, "null"]
+                wipCap: { type: integer, minimum: 1, maximum: 1000 }
+                ownerLoop: { type: string, enum: [silent, milestones, landings] }
+                hiring:
+                  type: object
                   additionalProperties: false
+                  description: Whole-value launch policy; lead/worker use HireProfile fields. Exclusions win and do not grant authority.
                   properties:
-                    size: { type: string, enum: [max, large, small, solo] }
-                    models: { type: string, enum: [optimal, efficient] }
+                    lead: { type: object }
+                    worker: { type: object }
+                    allowedPlans:
+                      {
+                        type: array,
+                        minItems: 1,
+                        maxItems: 32,
+                        uniqueItems: true,
+                        items: { type: string, pattern: "^(claude|codex):[a-z][a-z0-9_]{0,63}$" },
+                      }
+                    excludedPlans:
+                      {
+                        type: array,
+                        maxItems: 32,
+                        uniqueItems: true,
+                        items: { type: string, pattern: "^(claude|codex):[a-z][a-z0-9_]{0,63}$" },
+                      }
+                    excludedModels: { type: array, maxItems: 64, uniqueItems: true, items: { type: string } }
       responses:
         "201": { description: Saved project settings and current revision }
         "400": { description: Malformed or unsupported creation fields }
@@ -4192,7 +4223,7 @@ paths:
         proposal, `project_proposal_tweak` for exactly one reviewed field, and
         `project_proposal_confirm` for explicit acceptance. Tweak requires the
         current immutable target and `change: { field, value }` (`name`, `roles`,
-        `fleet`, `workerCap`, or `tracker`); it returns a fresh proposal target
+        `workerCap`, or `tracker`); it returns a fresh proposal target
         without saving project/tracker settings. Accepting an old target refuses.
         These operations require the original owner; captain bearers and
         preference answers cannot save a project. Acceptance uses the durable

@@ -244,6 +244,7 @@ async function runAutoRounds(args: readonly string[], options: ConversationsComm
     if (!["project", "since", "until"].every((key) => query.has(key)) || query.has("limit"))
       throw new Error(AUTO_USAGE);
   } else if (query.has("since") || query.has("until")) throw new Error(AUTO_USAGE);
+  query.set("includeWorkPolicy", "true");
   // The same operator read as `clankie linear budget`.
   const env = options.env ?? process.env;
   const credential = await resolveOperatorCredential({

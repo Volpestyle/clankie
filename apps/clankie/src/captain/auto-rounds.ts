@@ -156,7 +156,8 @@ export class AutoRoundRecord {
       const requested = eligible.find(
         (round) =>
           round.delivery?.delivered !== false &&
-          round.projects[0]!.report!.milestones.length > 0 &&
+          (round.projects[0]!.report!.milestones.length > 0 ||
+            (round.projects[0]!.report!.landings?.length ?? 0) > 0) &&
           !round.projects[0]!.report!.updates.some((entry) => !entry.unexpected),
       );
       const target = requested ?? eligible.at(-1);
@@ -179,16 +180,48 @@ export class AutoRoundRecord {
    * Historical velocity-only measurements did not request a post and claim nothing.
    */
   withReporting(velocity: ProjectVelocity): ProjectVelocity {
+    const history = this.read({ projectId: velocity.projectId, limit: Number.MAX_SAFE_INTEGER }).filter(
+      (round) => sameTracker(round.projects[0]!, velocity),
+    );
+    const cadence = velocity.ownerLoop ?? "milestones";
     const claimed = new Set(
-      this.read({ projectId: velocity.projectId, limit: Number.MAX_SAFE_INTEGER })
-        .filter((round) => round.delivery?.delivered !== false && sameTracker(round.projects[0]!, velocity))
+      history
+        .filter((round) => round.delivery?.delivered !== false)
         .flatMap((round) => (round.projects[0]?.report?.milestones ?? []).map(milestoneKey)),
     );
+    const claimedLandings = new Set(
+      history
+        .filter((round) => round.delivery?.delivered !== false)
+        .flatMap((round) => round.projects[0]?.report?.landings?.map((landing) => landing.sha) ?? []),
+    );
+    const current = velocity.landings?.state === "known" ? velocity.landings.commits : [];
+    const previous = history.find((round) => round.projects[0]?.landings?.state === "known")?.projects[0]
+      ?.landings;
+    // The first observation establishes a baseline rather than reporting old repository history.
+    const observed = new Set(
+      (previous?.state === "known" ? previous.commits : current).map((landing) => landing.sha),
+    );
+    const retry = history
+      .filter((round) => round.delivery?.delivered === false)
+      .flatMap((round) => round.projects[0]?.report?.landings ?? []);
+    const landings =
+      cadence !== "landings" || velocity.tracker === undefined
+        ? []
+        : [
+            ...new Map(
+              [...current.filter((landing) => !observed.has(landing.sha)), ...retry].map((landing) => [
+                landing.sha,
+                landing,
+              ]),
+            ).values(),
+          ].filter((landing) => !claimedLandings.has(landing.sha));
     return {
       ...velocity,
       report: {
+        cadence,
+        landings,
         milestones:
-          velocity.tracker === undefined
+          velocity.tracker === undefined || cadence === "silent"
             ? []
             : velocity.milestones.filter((milestone) => !claimed.has(milestoneKey(milestone))),
         updates: [],
