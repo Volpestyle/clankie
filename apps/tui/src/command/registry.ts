@@ -416,6 +416,8 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["auto"],
     lines: [
       "  auto [status|on|off]     Master switch for unprompted work: projects on Auto and self-wakes (JSON)",
+      "  auto rounds [--project ID] [--limit N]",
+      "                           Each Auto round's measured velocity per project and its delivery (JSON)",
     ],
   },
   {

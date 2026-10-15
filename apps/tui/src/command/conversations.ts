@@ -3,6 +3,7 @@ import {
   ProjectProposalTargetSchema,
   ProjectProposalTweakSchema,
 } from "@clankie/protocol/projects";
+import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { ClankieApiClient } from "@clankie/api-client";
 import { parseArgs } from "node:util";
 import {
@@ -193,7 +194,7 @@ async function autonomyClient(
   return createCaptainOperatorConversationClient(owner, owner);
 }
 
-const AUTO_USAGE = "Usage: clankie auto [status|on|off]";
+const AUTO_USAGE = "Usage: clankie auto [status|on|off] | rounds [--project ID] [--limit N]";
 
 /**
  * The master switch for unprompted work (ADR 0264): projects on Auto and
@@ -202,6 +203,7 @@ const AUTO_USAGE = "Usage: clankie auto [status|on|off]";
  */
 async function runAutoAction(args: readonly string[], options: ConversationsCommandOptions): Promise<number> {
   const action = args[0] ?? "status";
+  if (action === "rounds") return runAutoRounds(args.slice(1), options);
   if (args.length > 1 || !["status", "on", "off"].includes(action)) throw new Error(AUTO_USAGE);
   const command = OperatorAutonomyCommandSchema.parse(
     action === "status" ? { action: "status" } : { action: "set_enabled", enabled: action === "on" },
@@ -216,6 +218,35 @@ async function runAutoAction(args: readonly string[], options: ConversationsComm
     auto: status.enabled ? "on" : "off",
     ...(status.error === undefined ? {} : { error: status.error }),
   });
+  return 0;
+}
+
+/** The Auto round record (ADR 0270): each round's measured velocity and whether it was delivered. */
+async function runAutoRounds(args: readonly string[], options: ConversationsCommandOptions): Promise<number> {
+  const query = new URLSearchParams();
+  for (let index = 0; index < args.length; index += 2) {
+    const [flag, value] = [args[index], args[index + 1]];
+    if (value === undefined || (flag !== "--project" && flag !== "--limit")) throw new Error(AUTO_USAGE);
+    query.set(flag.slice(2), value);
+  }
+  // The same operator read as `clankie linear budget`.
+  const env = options.env ?? process.env;
+  const credential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
+  if (credential === undefined)
+    throw new Error("Auto rounds need the operator credential. Run clankie doctor.");
+  const response = await (options.fetchImpl ?? fetch)(
+    `${commandHost({ ...options, env })}${AUTO_ROUNDS_PATH}${query.size ? `?${query.toString()}` : ""}`,
+    {
+      headers: { authorization: `Bearer ${credential.token}` },
+      signal: options.signal ?? AbortSignal.timeout(30_000),
+    },
+  );
+  const body: unknown = await response.json();
+  if (!response.ok) throw new Error(`Auto rounds unavailable: ${JSON.stringify(body)}`);
+  outputJson(options.stdout ?? process.stdout, AutoRoundsResponseSchema.parse(body));
   return 0;
 }
 

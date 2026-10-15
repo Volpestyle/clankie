@@ -2,6 +2,7 @@ import { createDeliverableProjectReader } from "./fleet-project-deliverable.ts";
 import { MachineJoins } from "./machine-joins.ts";
 import { connectedLinearSession, importConnectedLinear, importLinearMedia } from "./linear-import.ts";
 import { readProjectOutcomes } from "./project-outcomes.ts";
+import { AutoRoundRecord } from "./captain/auto-rounds.ts";
 import { LinearMirrors } from "./linear-mirror.ts";
 import { LinearCutover } from "./linear-cutover.ts";
 import { linearGraphqlCredential } from "./linear-graphql.ts";
@@ -1930,6 +1931,8 @@ const clankie = await createClankieApp({
   runtimeHealth: () => runtimeHealth.snapshot(),
   fleetHealthMetrics,
   linearRequestBudget,
+  // The captain writes this record under its stateDir; the route only reads it.
+  autoRounds: new AutoRoundRecord(join(stateRoot, "captain", "auto-rounds")),
   discordPermissions: (query, body) =>
     managedDiscord
       ? managedDiscord.permissions(query, body)

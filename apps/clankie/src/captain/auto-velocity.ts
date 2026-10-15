@@ -1,3 +1,4 @@
+import type { ProjectVelocity, VelocityMilestone } from "@clankie/protocol/auto-rounds";
 import type { Project } from "@clankie/protocol/projects";
 import { localDays, type OutcomeIssue, type TrackerOutcomes } from "@clankie/work-items";
 import type { ProjectOutcomesRead } from "../project-outcomes.ts";
@@ -7,7 +8,7 @@ import type { ChurnWindow, RepositoryChurn } from "./repository-churn.ts";
 type Known<T> = T extends { state: "known" } ? T : never;
 type ChurnCommit = Known<RepositoryChurn>["commits"][number];
 type ChurnLines = ChurnCommit["lines"];
-type Unknown = { readonly state: "unknown"; readonly reason: string };
+type Unknown = { state: "unknown"; reason: string };
 
 /** How far back a round looks for a milestone it has not recorded (ADR 0270 amendment). */
 const LOOKBACK_MS = 14 * 24 * 60 * 60_000;
@@ -18,71 +19,7 @@ const CLASSIFY_BEFORE_MS = 14 * 24 * 60 * 60_000;
 /** A record never reads further back than this, however old its last milestone. */
 const MAX_READ_MS = 30 * 24 * 60 * 60_000;
 
-export interface VelocityMilestone {
-  readonly kind: "parent" | "milestone";
-  /** The parent issue's key or the tracker milestone's name. */
-  readonly ref: string;
-  readonly at: string;
-}
-
-interface VelocityDay {
-  readonly date: string;
-  /** Overlaps the velocity window; earlier days are the recent-days tail. */
-  readonly inWindow: boolean;
-  /** A landing or an issue state change that day; null when neither source was readable. */
-  readonly working: boolean | null;
-  readonly lines: ChurnLines | null;
-  readonly closed: {
-    readonly ownerFacing: number;
-    readonly tooling: number;
-    readonly unlinked: number;
-  } | null;
-  readonly stateChanges: number | null;
-}
-
-/** One project's outcomes for one Auto round (ADR 0270). Unreadable parts are `unknown`, never zero. */
-export interface ProjectVelocity {
-  readonly projectId: string;
-  readonly name: string;
-  readonly measuredAt: string;
-  readonly timeZone: string;
-  /** Since the last milestone, or the lookback start when none is known. */
-  readonly window: {
-    readonly since: string;
-    readonly until: string;
-    readonly from: "milestone" | "lookback";
-  };
-  readonly lastMilestone: VelocityMilestone | null;
-  /** Milestones the tracker shows in the read range; the latest starts the window. */
-  readonly milestones: readonly VelocityMilestone[];
-  /**
-   * Keys closed in the window. Tooling: every default-branch commit naming the key touched no
-   * product path. Unlinked: no commit names it, counted as owner-facing. Unclassified: churn unknown.
-   */
-  readonly closures:
-    | {
-        readonly state: "known";
-        readonly ownerFacing: readonly string[];
-        readonly tooling: readonly string[];
-        readonly unlinked: readonly string[];
-        readonly unclassified: readonly string[];
-      }
-    | Unknown;
-  /** Started-state issues now; `cap` is VUH-2256's WIP cap, null until it exists. */
-  readonly started:
-    | {
-        readonly state: "known";
-        readonly total: number;
-        readonly byState: Readonly<Record<string, number>>;
-        readonly cap: null;
-      }
-    | Unknown;
-  readonly churn: { readonly state: "known"; readonly lines: ChurnLines; readonly commits: number } | Unknown;
-  /** Window days plus the last seven local days, oldest first. */
-  readonly days: readonly VelocityDay[];
-  /** On Auto at round time; Auto history is not recorded. */
-  readonly caveats: readonly string[];
-}
+type VelocityDay = ProjectVelocity["days"][number];
 
 export interface VelocityDeps {
   readonly outcomes: (

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ProjectVelocity, VelocityMilestone } from "./auto-velocity.ts";
+import type { AutoRound, ProjectVelocity, VelocityMilestone } from "@clankie/protocol/auto-rounds";
 
 /** One project measured in one round; `delivery` lines settle the round later. */
 interface MeasurementLine {
@@ -72,6 +72,56 @@ export class AutoRoundRecord {
       delivered,
       ...(reason === undefined ? {} : { reason }),
     });
+  }
+
+  /** Rounds newest first, each with its delivery (null when it never settled). */
+  read(query: { readonly projectId?: string; readonly limit?: number } = {}): AutoRound[] {
+    let raw: string;
+    try {
+      raw = readFileSync(this.roundsPath, "utf8");
+    } catch {
+      return [];
+    }
+    const rounds = new Map<string, AutoRound>();
+    const deliveries = new Map<string, AutoRound["delivery"]>();
+    for (const text of raw.split("\n")) {
+      if (!text) continue;
+      let line: MeasurementLine | DeliveryLine;
+      try {
+        line = JSON.parse(text) as MeasurementLine | DeliveryLine;
+      } catch {
+        continue; // A torn final append from a crash is skipped, not fatal.
+      }
+      if (line.type === "delivery") {
+        deliveries.set(line.roundId, {
+          delivered: line.delivered,
+          at: line.at,
+          ...(line.reason === undefined ? {} : { reason: line.reason }),
+        });
+        continue;
+      }
+      const round = rounds.get(line.roundId) ?? {
+        roundId: line.roundId,
+        conversationId: line.conversationId,
+        at: line.at,
+        delivery: null,
+        projects: [],
+      };
+      round.projects.push(line.velocity);
+      rounds.set(line.roundId, round);
+    }
+    return [...rounds.values()]
+      .map((round) => ({
+        ...round,
+        delivery: deliveries.get(round.roundId) ?? null,
+        projects:
+          query.projectId === undefined
+            ? round.projects
+            : round.projects.filter((velocity) => velocity.projectId === query.projectId),
+      }))
+      .filter((round) => round.projects.length > 0)
+      .reverse()
+      .slice(0, query.limit ?? 20);
   }
 
   private append(line: MeasurementLine | DeliveryLine): void {

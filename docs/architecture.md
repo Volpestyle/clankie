@@ -485,7 +485,8 @@ workers write to ([tracker outcomes](../apps/clankie/src/project-outcomes.ts)) a
 origin history. The [measurement](../apps/clankie/src/captain/auto-velocity.ts) adds
 one velocity line per project to the wake, reads `unknown` for any part it cannot
 measure, and is kept in the [round record](../apps/clankie/src/captain/auto-rounds.ts)
-under `<state>/captain/auto-rounds/` with whether the wake was delivered.
+under `<state>/captain/auto-rounds/` with whether the wake was delivered;
+`clankie auto rounds` and `GET /v1/auto/rounds` read it.
 Pending rounds and accepted fingerprints are tracked independently per lead;
 before admission the service rechecks the switches and the group's evidence. A due self-wake queues one turn with Clankie's
 recorded reason and may be replaced by another. Both are ordinary internal turns

@@ -3824,6 +3824,31 @@ denies and the permission hook, with no blanket `ask` rules or Bash allow.
 [Maximum trust mode](#maximum-trust-mode) replaces that mode at launch while it
 is on.
 
+### `auto rounds [--project ID] [--limit N]`
+
+Reads the Auto round record ([ADR 0270](adr/0270-auto-rounds-measure-outcomes-and-name-drift.md))
+through `GET /v1/auto/rounds` with the operator credential, newest round first
+(20 by default, at most 200). Each round lists, per project it carried, what the
+service measured before waking the lead, and whether that wake was delivered
+(`delivery` is null when it never settled, for example across a restart):
+
+- `window`: since the last milestone (a closed parent issue or a complete tracker
+  milestone), or the 14-day lookback start when none is known.
+- `closures`: keys closed in the window, split `ownerFacing`, `tooling` (every
+  default-branch commit naming the key touched no product path), `unlinked` (no
+  commit names it; counted as owner-facing) and `unclassified` (churn unreadable).
+- `started`: started-state issues now, by state; `cap` is null until a WIP cap exists.
+- `churn`: lines added plus deleted by bucket (product, tooling, docs, excluded) on
+  the origin default branch, local or mirrored for remote-only projects.
+- `days`: per local day for the window and the last seven days, whether it was a
+  working day (a landing or an issue state change), its churn, closures and state changes.
+
+A part the service could not read is `{"state":"unknown","reason":…}`, never zero.
+The wake carries the same numbers as one line per project. The record lives in
+`~/.clankie/captain/auto-rounds/` (`rounds.jsonl`, append-only, and
+`projects/<id>.json` with the last milestone); this command makes no tracker or
+git calls.
+
 <a id="maximum-trust-mode"></a>
 
 ### `maximum-trust-mode [status|on|off]`

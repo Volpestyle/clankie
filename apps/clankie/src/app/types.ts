@@ -204,6 +204,8 @@ export interface ClankieAppDependencies {
   workerMcp?: WorkerMcp;
   fleetHealthMetrics?: Pick<FleetHealthMetrics, "snapshot">;
   linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;
+  /** The Auto round record (ADR 0270), read by `clankie auto rounds`. */
+  autoRounds?: Pick<import("../captain/auto-rounds.ts").AutoRoundRecord, "read">;
   runtimes?: ExecutionConnections;
   machineJoins?: import("../machine-joins.ts").MachineJoins;
   /** Optional execution health; failure does not make the captain unhealthy. */

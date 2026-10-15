@@ -5,7 +5,13 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { ProjectSchema } from "@clankie/protocol/projects";
 import { createLocalTracker, TRACKER_LEAD, TRACKER_OWNER, type TrackerActor } from "@clankie/work-items";
+import type { Server } from "node:http";
+import { serve } from "@hono/node-server";
+import { AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { afterEach, expect, it } from "vitest";
+import { runConversationsCommand } from "../../tui/src/command/conversations.ts";
+import { createClankieApp } from "../src/app.ts";
+import { createStubCaptain } from "../src/captain/port.ts";
 import { AutoRoundRecord } from "../src/captain/auto-rounds.ts";
 import { autoRoundPrompt } from "../src/captain/auto-projects.ts";
 import { measureVelocity, velocityLine } from "../src/captain/auto-velocity.ts";
@@ -205,4 +211,85 @@ it("measures a project's velocity from its built-in tracker and origin, and keep
   expect(unknown.closures.state).toBe("unknown");
   expect(unknown.churn.state).toBe("unknown");
   expect(velocityLine(unknown)).toContain("closures unknown (");
+});
+
+it("serves the round record through the operator route and `clankie auto rounds`", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "auto-rounds-")));
+  roots.push(root);
+  const project = (id: string) => ProjectSchema.parse({ id, name: id, workspaces: [], auto: true });
+  const deps = {
+    outcomes: async () => ({ state: "unavailable" as const, reason: "no tracker bound" }),
+    history: async () => ({ state: "unknown" as const, reason: "project has no workspace" }),
+    churn: readRepositoryChurn,
+    timeZone: "America/Chicago",
+  };
+  const now = new Date("2026-10-14T03:00:00.000Z");
+  const record = new AutoRoundRecord(join(root, "auto-rounds"));
+  const first = record.measured(
+    "lead",
+    [
+      await measureVelocity(project("kh2"), null, deps, now),
+      await measureVelocity(project("app"), null, deps, now),
+    ],
+    now,
+  );
+  record.settled(first, true, undefined, now);
+  // The second round never settled (a restart mid-wake).
+  const second = record.measured("lead", [await measureVelocity(project("kh2"), null, deps, now)], now);
+
+  const service = await createClankieApp({
+    captain: createStubCaptain(),
+    autoRounds: new AutoRoundRecord(join(root, "auto-rounds")),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer rounds-owner"
+        ? { operatorId: "rounds-owner" }
+        : undefined,
+  });
+  const server = serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: (request) => service.app.fetch(request),
+  }) as Server;
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing rounds server");
+    const origin = `http://127.0.0.1:${String(address.port)}`;
+    expect((await fetch(`${origin}/v1/auto/rounds`)).status).toBe(401);
+    let written = "";
+    const env = {
+      HOME: join(root, "home"),
+      XDG_CONFIG_HOME: join(root, "config"),
+      PATH: "",
+      CLANKIE_STATE: join(root, "state"),
+      CLANKIE_OPERATOR_TOKEN: "rounds-owner",
+      CLANKIE_CONTROL_PLANE_URL: origin,
+    };
+    const stdout = { write: (chunk: string) => ((written += chunk), true) };
+    expect(await runConversationsCommand(["auto", "rounds", "--project", "kh2"], { env, stdout })).toBe(0);
+    const all = AutoRoundsResponseSchema.parse(JSON.parse(written));
+    expect(
+      all.rounds.map((round) => [round.roundId, round.delivery?.delivered ?? null, round.projects.length]),
+    ).toEqual([
+      [second, null, 1],
+      [first, true, 1],
+    ]);
+    expect(all.rounds[1]!.projects[0]).toMatchObject({
+      projectId: "kh2",
+      closures: { state: "unknown", reason: "no tracker bound" },
+      churn: { state: "unknown", reason: "project has no workspace" },
+    });
+    written = "";
+    expect(await runConversationsCommand(["auto", "rounds", "--limit", "1"], { env, stdout })).toBe(0);
+    expect(AutoRoundsResponseSchema.parse(JSON.parse(written)).rounds.map((round) => round.roundId)).toEqual([
+      second,
+    ]);
+    await expect(runConversationsCommand(["auto", "rounds", "--since"], { env, stdout })).rejects.toThrow(
+      "Usage: clankie auto",
+    );
+  } finally {
+    service.close();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

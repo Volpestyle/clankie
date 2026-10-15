@@ -100,6 +100,8 @@ import { createAppearanceRoutes } from "../appearance-routes.ts";
 import { createSkinDraftRoutes } from "../skin-draft-routes.ts";
 import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
+import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
+import { ProjectIdSchema } from "@clankie/protocol/projects";
 import type { MediaGeneratorPort } from "../media-generation.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
 import { GAME_EXTENSIONS_PATH } from "@clankie/protocol";
@@ -2714,6 +2716,30 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     settingsSource,
     clock,
     authorizeOwnerSettings: authorizeOwnerSecrets,
+  });
+  app.get(AUTO_ROUNDS_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.autoRounds) return context.json({ error: "auto_rounds_unavailable" }, 503);
+    const query = z
+      .object({
+        project: ProjectIdSchema.optional(),
+        limit: z.coerce.number().int().min(1).max(200).optional(),
+      })
+      .strict()
+      .safeParse(context.req.query());
+    if (!query.success) return context.json({ error: "invalid_query" }, 400);
+    return context.json(
+      AutoRoundsResponseSchema.parse({
+        schemaVersion: 1,
+        rounds: dependencies.autoRounds.read({
+          ...(query.data.project === undefined ? {} : { projectId: query.data.project }),
+          ...(query.data.limit === undefined ? {} : { limit: query.data.limit }),
+        }),
+      }),
+    );
   });
   const { wakeRevocationTimer } = registerPairingRoutes({
     get supportGrants() {

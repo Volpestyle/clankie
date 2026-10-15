@@ -2254,6 +2254,59 @@ paths:
         "401": { description: Operator authentication required }
         "409": { description: Target is not an available ordinary global chat }
         "503": { description: Settings or operator authentication unavailable }
+  /v1/auto/rounds:
+    get:
+      tags: [Operator]
+      operationId: readAutoRounds
+      summary: Read the Auto round record, newest first
+      description: Each Auto round's measured velocity per project (ADR 0270) and whether its wake was delivered. Closures since the last milestone split owner-facing, tooling, unlinked and unclassified; started issues (cap null until a WIP cap exists); churn by bucket; per-day facts for the window and the last seven local days. Any part the service could not measure is `{state:"unknown", reason}`, never zero. A round whose wake never settled has a null delivery. Reads the service-local record only; no tracker or git calls.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - { name: project, in: query, required: false, schema: { type: string } }
+        - {
+            name: limit,
+            in: query,
+            required: false,
+            schema: { type: integer, minimum: 1, maximum: 200, default: 20 },
+          }
+      responses:
+        "200":
+          description: Recorded rounds, filtered to one project when asked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, rounds]
+                properties:
+                  schemaVersion: { const: 1 }
+                  rounds:
+                    type: array
+                    items:
+                      type: object
+                      required: [roundId, conversationId, at, delivery, projects]
+                      properties:
+                        roundId: { type: string }
+                        conversationId: { type: string }
+                        at: { type: string, format: date-time }
+                        delivery:
+                          oneOf:
+                            - type: "null"
+                            - type: object
+                              required: [delivered, at]
+                              properties:
+                                delivered: { type: boolean }
+                                at: { type: string, format: date-time }
+                                reason: { type: string }
+                        projects:
+                          type: array
+                          items:
+                            {
+                              type: object,
+                              description: "ProjectVelocity from @clankie/protocol/auto-rounds",
+                            }
+        "400": { description: Invalid project or limit }
+        "401": { description: Operator authentication required }
+        "503": { description: Round record or operator authentication unavailable }
   /v1/linear/request-budget:
     get:
       tags: [Operator]
