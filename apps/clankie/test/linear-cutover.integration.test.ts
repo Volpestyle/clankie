@@ -97,6 +97,14 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
           name: "Unbound Linear",
           workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: unboundWorkspace }],
         },
+        // Like kh2-multiplayer: every workspace on another machine, bound to a Linear project
+        // (VUH-2257). No local convention can be read here.
+        {
+          id: "remote-linear",
+          name: "Remote Linear",
+          workspaces: [{ id: "pc", machineId: "pc", platform: "posix", path: "/home/fixture/remote-linear" }],
+          linearProjectBinding: { provider: "linear", projectId: "b701962e-0000-4000-8000-000000000000" },
+        },
       ],
     }),
   }));
@@ -704,6 +712,7 @@ it("routes a hired worker's tracker calls without repo by its project's saved co
   await f.hire("linear-work", "w1:p2", f.linearWorkspace);
   await f.hire("loose", "w1:p3", f.looseWorkspace);
   await f.hire("unbound-linear", "w1:p4", f.unboundWorkspace);
+  await f.hire("remote-linear", "w1:p5", f.looseWorkspace);
   const store = async () => JSON.parse(await readFile(join(f.trackerDirectory, "tracker.json"), "utf8"));
 
   // The builtin project's worker writes without repo: it lands in the built-in store,
@@ -769,6 +778,13 @@ it("routes a hired worker's tracker calls without repo by its project's saved co
     "w1:p4",
   );
   expect(unbound, JSON.stringify(unbound)).toMatchObject({ outcome: "ok" });
+  // And a remote-only project bound to a Linear project, with no local convention to read.
+  const remote = await f.workerCall(
+    "linear_save_issue",
+    { team: "VUH", project: "Elsewhere", title: "Remote-only Linear write" },
+    "w1:p5",
+  );
+  expect(remote, JSON.stringify(remote)).toMatchObject({ outcome: "ok" });
 
   // A hire whose project has no saved tracker is refused rather than guessed.
   const loose = await f.workerCall("linear_save_issue", { team: "VUH", title: "Nowhere safe" }, "w1:p3");

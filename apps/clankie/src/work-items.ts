@@ -903,7 +903,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         );
       if (project.trackerRef === undefined) {
         // An unbound project's saved conventions live in its local workspaces. All `linear`:
-        // Linear, as before. None, or another backend, needs a trackerRef to say which.
+        // Linear, as before. No local convention but a saved Linear project binding (a
+        // project whose workspaces are all remote): Linear too (VUH-2257). None, or
+        // another backend, needs a trackerRef to say which.
         const machine = options.localMachineId ?? "local";
         const backends = await Promise.all(
           project.workspaces
@@ -911,7 +913,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             .map(async (workspace) => (await readConvention(workspace.path).catch(() => undefined))?.backend),
         );
         const saved = backends.filter((backend) => backend !== undefined);
-        if (saved.length > 0 && saved.every((backend) => backend === "linear")) return undefined;
+        if (
+          (saved.length > 0 || project.linearProjectBinding !== undefined) &&
+          saved.every((backend) => backend === "linear")
+        )
+          return undefined;
       }
       if (project.trackerRef === undefined || !projectReader)
         throw new WorkRequestError(
