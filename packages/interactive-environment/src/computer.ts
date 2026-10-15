@@ -192,7 +192,17 @@ export const ComputerCommandSchema = z.discriminatedUnion("action", [
   }),
   z.strictObject({ action: z.literal("release"), ...leased }),
   z.strictObject({ action: z.literal("revoke"), ...leased }),
-  z.strictObject({ action: z.literal("recover") }),
+  z.strictObject({
+    action: z.literal("recover"),
+    /** Explicit local Mac owner decision accepting unknown native drain, never a stop receipt. */
+    ownerRecovery: z
+      .strictObject({
+        reason: z.string().trim().min(1).max(2000),
+        expectedHolder: id,
+        expectedExpiresAt: z.number().int().nonnegative(),
+      })
+      .optional(),
+  }),
   z.strictObject({ action: z.literal("inventory"), ...leased }),
   z.strictObject({
     action: z.literal("capture"),

@@ -36,7 +36,13 @@ then send ordered input against the
 fresh screenshot UUID. Coordinates are image pixels; foreground input is an
 explicit choice. Reconcile the same request UUID after transport loss and never
 replay an uncertain input. Its macOS adapter preserves Peekaboo's limitations;
-recovery needs host stop proof. Contract and examples:
+ordinary recovery needs host stop proof. For an expired local macOS lease only,
+the owner may explicitly accept unknown native drain with `recover.ownerRecovery`:
+record a reason and copy `expectedHolder` and `expectedExpiresAt` from fresh status.
+Confirm the old native driver has stopped first. Fresh operator authority, no
+service-tracked holder work and no computer operation are required; the host
+durably records this decision before release. This exception cannot recover
+Windows or lent screens, and never authorizes replaying uncertain input. Contract and examples:
 [desktop control](../../../docs/desktop-control.md#shared-computer-body).
 
 ## Lend a joined screen

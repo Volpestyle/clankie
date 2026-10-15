@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "focused-recovery.log",
+      "size": 45811,
+      "sha256": "b3e25051e2bdd6bd017c665260b5b7a5f1d690c105b3a270d8c4898796e0a630",
+      "url": "clankie://evidence/sha256/b3e25051e2bdd6bd017c665260b5b7a5f1d690c105b3a270d8c4898796e0a630"
+    }
+  ]
+}

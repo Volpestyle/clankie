@@ -366,6 +366,8 @@ export interface CaptainPort {
   ): { conversationId: string; cwd: string; machineId?: string } | undefined;
   /** Service-observed turn/driver completion; unavailable evidence must not authorize automatic body stop. */
   conversationTurnIdle(conversationId: string): boolean;
+  /** Explicit owner recovery admission only; native display activity does not prove termination. */
+  conversationServiceTrackedIdle(conversationId: string): boolean;
   /** A native seat's turn end is never service-observed, so its expired bodies wait for its own recovery. */
   conversationHasNativeSeat(conversationId: string): boolean;
   lanePrompt(input: {
@@ -601,6 +603,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     },
     seatContext: (conversationId) => ({ conversationId: conversationId ?? "global-default", cwd: "/tmp" }),
     conversationTurnIdle: () => false,
+    conversationServiceTrackedIdle: () => false,
     conversationHasNativeSeat: () => false,
     lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,
     designatedConversationHead: () => undefined,

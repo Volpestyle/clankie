@@ -375,6 +375,15 @@ export class BodyLeaseStore {
     return this.commit(ref.resource, undefined) ? { outcome: "released" } : this.refused("store_unavailable");
   }
 
+  /** Local Mac host only: an audited explicit owner decision, NOT native termination proof. */
+  public overrideComputerRecovery(ref: LeaseRef): { outcome: "released" } | Refusal {
+    const found = this.match(ref);
+    if ("outcome" in found) return found;
+    if (ref.resource !== "computer" || found.expiresAt > this.clock() || !this.recoveryReady(ref))
+      return this.refused("recovery_required");
+    return this.commit(ref.resource, undefined) ? { outcome: "released" } : this.refused("store_unavailable");
+  }
+
   public close(): void {
     if (this.closed) return;
     // No second process can be admitted while this process still has a live operation.

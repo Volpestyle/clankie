@@ -2385,6 +2385,23 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       if (!operator || operator === "unavailable") return undefined;
       return operatorBodyIdentity(conversationId, request);
     },
+    async ownerRecovery(request) {
+      const original = await authenticateOperator(request, dependencies);
+      if (!original || original === "unavailable") return undefined;
+      return {
+        operatorId: original.operatorId,
+        holderIdle: (id) => dependencies.captain.conversationServiceTrackedIdle(id),
+        authorize: async () => {
+          const current = await authenticateOperator(request, dependencies);
+          return (
+            !request.signal.aborted &&
+            !!current &&
+            current !== "unavailable" &&
+            current.operatorId === original.operatorId
+          );
+        },
+      };
+    },
   });
 
   app.post("/v1/body-leases", async (context) => {

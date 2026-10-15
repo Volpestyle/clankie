@@ -4,7 +4,7 @@ import { z } from "zod";
 import { MachineAccessRefused } from "@clankie/protocol";
 import { ComputerRequestSchema } from "@clankie/interactive-environment";
 import type { BodyConversationIdentity } from "./body-lease-router.ts";
-import type { ComputerBody } from "./computer-body.ts";
+import type { ComputerBody, OwnerComputerRecovery } from "./computer-body.ts";
 
 export function registerComputerRoutes(
   app: Hono,
@@ -12,6 +12,8 @@ export function registerComputerRoutes(
     body?: ComputerBody;
     joined?: import("./joined-computer.ts").JoinedComputer;
     identity(request: Request, conversationId: string): Promise<BodyConversationIdentity | undefined>;
+    /** Independent operator binding, absent on native/tool, Windows and joined-host routes. */
+    ownerRecovery?(request: Request): Promise<OwnerComputerRecovery | undefined>;
   },
 ): void {
   // A native Windows observation host uses this service's existing authority;
@@ -49,9 +51,29 @@ export function registerComputerRoutes(
     if (parsed.data.machineId ? options.joined === undefined : options.body === undefined)
       return context.json({ error: "computer_body_unavailable" }, 503);
     try {
+      if (
+        parsed.data.machineId &&
+        parsed.data.command.action === "recover" &&
+        parsed.data.command.ownerRecovery
+      )
+        return context.json(
+          {
+            outcome: "rejected",
+            reason: "owner_recovery_unsupported",
+            detail:
+              "Owner recovery is only available for the local macOS computer. Use the joined host's stop-proof recovery.",
+          },
+          200,
+        );
       const result = parsed.data.machineId
         ? await options.joined!.dispatch(identity, parsed.data.machineId, parsed.data.command)
-        : await options.body!.dispatch(identity, parsed.data.command);
+        : await options.body!.dispatch(
+            identity,
+            parsed.data.command,
+            parsed.data.command.action === "recover" && parsed.data.command.ownerRecovery
+              ? await options.ownerRecovery?.(context.req.raw)
+              : undefined,
+          );
       return context.json(result as Record<string, unknown>, 200, { "cache-control": "no-store" });
     } catch (error) {
       if (error instanceof MachineAccessRefused)

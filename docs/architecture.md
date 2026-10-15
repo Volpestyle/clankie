@@ -839,7 +839,12 @@ checks at boot and retries with a 5–60 second backoff after a known service-ow
 holder's turn and body operations end. Missing/unreadable holders and native-owned
 turns remain held for explicit owner recovery. It uses the operator recovery proof and fences the
 exact incarnation across every await; expiry alone never releases a body.
-Computer sessions keep their separate adapter recovery. The
+Computer sessions keep their separate adapter recovery. An expired local Mac
+computer lease also permits an explicit operator recovery decision with a reason
+and expected holder/expiry, independent operator reauthorization, no service-tracked
+holder activity and no live body operation. A synced pre-release audit records
+accepted native uncertainty; it is not stop proof. Windows and lent hosts retain
+their native stop-proof contract. The
 [router](../apps/clankie/src/body-lease-router.ts) preserves the original machine
 or social route when handing a request to the holder. See
 [ADR 0215](adr/0215-conversations-lease-one-body.md) and the

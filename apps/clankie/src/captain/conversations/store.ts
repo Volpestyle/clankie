@@ -1107,14 +1107,16 @@ export class ConversationStore {
 
   /** Host-only stop admission: includes queued runs and drivers still settling after their last event. */
   public turnIdle(conversationId: string): boolean {
+    return !this.hasNativeSeat(conversationId) && this.serviceTrackedIdle(conversationId);
+  }
+
+  /** Owner recovery only. Native turn completion still requires the owner's explicit attestation. */
+  public serviceTrackedIdle(conversationId: string): boolean {
     const meta = this.metas.get(conversationId);
-    // Missing metadata and native display activity cannot prove an ended holder turn.
-    // Native-owned bodies retain explicit, host-verified operator recovery.
     if (
       meta === undefined ||
       meta.conversationId !== conversationId ||
-      !OperatorConversationSchema.safeParse(publicConversation(meta)).success ||
-      this.hasNativeSeat(conversationId)
+      !OperatorConversationSchema.safeParse(publicConversation(meta)).success
     )
       return false;
     return (

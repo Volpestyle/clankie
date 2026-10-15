@@ -7900,8 +7900,27 @@ Without the flag, `frame` returns base64 PNG media. Receipts
 contain no pixels. Further actions are `renew` (`leaseId`, optional `ttlMs`),
 `release` (`leaseId`), `revoke` (`leaseId`) and `recover` (operator stop-proof recovery). Never retry
 uncertain input with a new request UUID. A busy body does not transfer ownership. `revoke` quarantines the current driver
-even during an input batch; its next input refuses. Recovery still needs host stop
-proof.
+even during an input batch; its next input refuses. Ordinary recovery needs host
+stop proof. Local Mac recovery refusals include `detail` and `next` guidance.
+
+For an **expired local macOS lease only**, the owner can explicitly accept unknown
+Peekaboo native drain after confirming the old native driver has stopped:
+
+```sh
+clankie computer request '{"conversationId":"global-default","command":{"action":"recover","ownerRecovery":{"reason":"Old native driver stopped; owner accepts unresolved Peekaboo drain for this expired claim","expectedHolder":"global-default","expectedExpiresAt":1791837035456}}}'
+```
+
+Copy the holder and numeric expiry from current `status`; never reuse the example's
+expiry. A nonempty reason (at most 2,000 characters), fresh same-operator authority,
+an expired recovery claim, no service-tracked holder work and no computer operation
+are required. The host records the reason, operator and original claimant in
+`computer-recoveries.jsonl` beside its input journal and syncs it before release.
+The audit records an authorized decision, not native stop proof or a successful
+release. A `released` reply includes `recovery.kind: "owner_override"` and its
+`auditId`; inspect status after transport loss. Stale expectations, active work,
+changed authority or failed audit storage retain the lease. Native display idle
+alone never authorizes recovery; this explicit owner decision accepts that
+remaining uncertainty. Windows and joined screens refuse the override.
 
 The service registers a macOS Peekaboo adapter. A native Windows Codex
 `node_repl` can explicitly attach the Windows computer host; the

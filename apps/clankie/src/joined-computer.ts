@@ -28,6 +28,13 @@ export class JoinedComputer {
 
   async dispatch(identity: BodyConversationIdentity, machineId: string, raw: unknown): Promise<unknown> {
     const command: ComputerCommand = ComputerCommandSchema.parse(raw);
+    if (command.action === "recover" && command.ownerRecovery)
+      return {
+        outcome: "rejected",
+        reason: "owner_recovery_unsupported",
+        detail:
+          "A joined screen requires its own native stop proof; local Mac owner recovery cannot release it.",
+      };
     const recovery = ["status", "release", "revoke", "recover"].includes(command.action);
     const guard = async () => {
       if (

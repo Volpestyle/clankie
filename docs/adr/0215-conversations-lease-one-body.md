@@ -74,6 +74,19 @@ This cleanup does not replay a Discord send or grant another conversation
 authority. Explicit owner recovery remains available; computer sessions use
 their separate adapter contract.
 
+The VUH-2313 amendment (2026-10-15) adds one explicit exception for an expired
+local macOS computer lease. Peekaboo has no native drain receipt; zero active
+requests and a CLI exit are not substitutes. An owner may accept that unresolved
+uncertainty with a reason and the expected holder/expiry. A separate host-only
+binding revalidates the same authenticated operator, service-tracked holder work
+and all body operations must be idle, and the exact incarnation is checked after
+every await. Native holders still require the owner's confirmation that their
+driver stopped; their display activity is not termination proof. The host syncs
+an authorized-decision audit with the original claimant and reason before its
+synchronous release. Audit failure retains the claim; the audit does not claim
+completed release. This is not automatic recovery, native drain evidence, or
+authority to replay input. Windows and joined hosts refuse this exception.
+
 A conflict returns typed `busy` with resource, owning conversation, state, and
 allowed explicit `queue`/`ask` actions. It includes no other room's transcript,
 actor identity, prompt, or private display name. Queueing is an explicit bounded
@@ -108,6 +121,8 @@ flowchart LR
   Effect --> Reconcile[Receipt / termination / recovery]
   Lease -->|recovery required; holder idle; no live operation| Check[Guarded stop-check / capped backoff]
   Check -->|confirmed termination| Reconcile
+  Lease -->|expired local Mac; explicit owner decision; idle| Audit[Sync reason and original claimant]
+  Audit -->|exact incarnation; accepted uncertainty| Reconcile
   Reconcile --> Lease
 ```
 

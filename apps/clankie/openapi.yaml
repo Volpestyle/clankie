@@ -6206,7 +6206,13 @@ paths:
         bounded PNG media separately. Input is ordered and uses screenshotId plus
         a persistent requestId; identical retries reconcile, never replay. Failed
         and uncertain are distinct from confirmed. Expiry/restart/uncertainty retain
-        the lease until host stop proof. Local macOS Peekaboo and an explicitly attached
+        the lease until host stop proof. An expired local macOS lease also permits
+        explicit operator recover with ownerRecovery {reason, expectedHolder, expectedExpiresAt}.
+        This independently reauthorizes the same operator, requires no service-tracked
+        holder work or computer operation, and syncs a decision audit before exact-incarnation
+        release. It accepts unknown native drain; it does not prove termination.
+        Refusals provide detail and next guidance. Windows and joined screens refuse this override.
+        Local macOS Peekaboo and an explicitly attached
         Windows native-harness host, read-only unless its owner explicitly sets
         allowInput true before acquisition; lease and status record that choice.
         Opted-in full Windows clients capture native accessibility

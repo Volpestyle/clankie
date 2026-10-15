@@ -6326,6 +6326,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     createRemoteWorkspaceConversation: (input) => conversations.createRemoteWorkspaceConversation(input),
     seatContext,
     conversationTurnIdle: (conversationId) => conversations.turnIdle(conversationId),
+    conversationServiceTrackedIdle: (conversationId) => conversations.serviceTrackedIdle(conversationId),
     conversationHasNativeSeat: (conversationId) => conversations.hasNativeSeat(conversationId),
     syncSeatTranscript: (id, transcript) => {
       if (!conversations.syncNativeSeatTranscript(id, transcript.sessionId, transcript.entries)) return false;

@@ -179,9 +179,19 @@ resource set; computer status and mutations use `/v1/computer`.
 Today's classic caller-local capture remains read-only. The adapter does not
 bypass Peekaboo's remote-host refusal, change focus to rescue an operation, or
 change macOS permissions. The shared Bridge does not provide a quiescence
-receipt, so the macOS adapter refuses recovery after uncertainty or restart;
-closing a CLI process cannot prove queued native input stopped. The lease stays
-held until a host stop-proof capability is supplied. Raw Peekaboo invocations
+receipt, so ordinary macOS recovery refuses after uncertainty or restart;
+closing a CLI process or observing zero active requests cannot prove queued native
+input stopped. An explicit owner decision can recover an expired local Mac lease:
+after confirming the old native driver has stopped, send `recover` with
+`ownerRecovery: {reason, expectedHolder, expectedExpiresAt}` copied from fresh status.
+The host independently revalidates the same operator, rejects service-tracked
+holder work or computer operations, and fences the exact lease incarnation.
+It fsyncs an `owner_override_authorized` decision with the reason and original
+claimant to `computer-recoveries.jsonl` beside the input journal before release.
+That entry records a decision to accept unknown native drain, not proof of drain
+or of completed release; read status and the returned receipt to reconcile it.
+Audit failure keeps the lease held. This exception is unavailable to Windows and
+joined screens. [CLI example](cli.md#computer-body). Raw Peekaboo invocations
 outside this contract are not fenced by its driver lease; overlapping drivers
 must still be avoided.
 

@@ -325,6 +325,20 @@ test("input opt-in supports one exact receipt, refuses unbounded primitives, and
   const f = await screenFixture("drive", "uncertain");
   try {
     const leaseId = (await f.request({ action: "acquire" })).body.lease.leaseId;
+    const beforeOverride = (await f.actions()).filter((entry) => entry.action !== "heartbeat");
+    expect(
+      (
+        await f.request({
+          action: "recover",
+          ownerRecovery: {
+            reason: "Local Mac owner decision cannot override lent-host drain proof",
+            expectedHolder: "global-default",
+            expectedExpiresAt: 1,
+          },
+        })
+      ).body,
+    ).toMatchObject({ reason: "owner_recovery_unsupported" });
+    expect((await f.actions()).filter((entry) => entry.action !== "heartbeat")).toEqual(beforeOverride);
     const capture = async () =>
       (await f.request({ action: "capture", leaseId, target: { appId: "123", windowId: "456" } })).body;
     for (const input of [
