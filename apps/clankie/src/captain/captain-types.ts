@@ -93,6 +93,8 @@ export interface CaptainOptions {
    * absent, each is delivered at once.
    */
   readonly reportRoundMs?: number;
+  /** How often the default lead seat is considered for a fresh restart; defaults to 5 minutes (ADR 0271). */
+  readonly leadRestartCheckMs?: number;
   /** The fleet efficiency show/review answer deadline; defaults to 25s, under the CLI's 30s abort. */
   readonly fleetEfficiencyDeadlineMs?: number;
   /** First background reprobe of a linked fleet whose census failed; doubles to 30s. Defaults to 5s. */

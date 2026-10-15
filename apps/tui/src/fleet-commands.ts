@@ -314,6 +314,26 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       allowBack: true,
     });
     if (peerMessages !== "on" && peerMessages !== "off") return;
+    const leadRestarts = await flow.readSelect({
+      message: "Fleet — fresh lead restarts",
+      options: [
+        {
+          value: "on",
+          label: "on",
+          description:
+            "An idle lead seat restarts fresh in its pane with a handoff brief once its session is large or a day old.",
+        },
+        {
+          value: "off",
+          label: "off",
+          description: "The lead seat keeps its session until someone restarts it.",
+        },
+      ],
+      initialValue: current.leadRestarts ?? "on",
+      currentValue: current.leadRestarts ?? "on",
+      allowBack: true,
+    });
+    if (leadRestarts !== "on" && leadRestarts !== "off") return;
     const closure = await flow.readSelect({
       message: "Fleet — who accepts and closes completed tracked work",
       options: (["lead", "owner"] as const).map((value) => ({
@@ -452,7 +472,17 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     });
     if (notes === undefined) return;
     await fleetUpdate(
-      { size, models, tools, peerMessages, closure, machineSetup, notes: notes.trim(), ...preference },
+      {
+        size,
+        models,
+        tools,
+        peerMessages,
+        leadRestarts,
+        closure,
+        machineSetup,
+        notes: notes.trim(),
+        ...preference,
+      },
       { ...services, expectedRevision: snapshot.revision },
       { harness, model: model.trim() || "auto", effort, account: account.trim() || "auto" },
     );

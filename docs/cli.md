@@ -3633,7 +3633,7 @@ Specs live in `~/.clankie/views/views.json`. Schemas are in
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status|show]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
@@ -3678,6 +3678,15 @@ selector preserves the existing snapshot shape. Machine policy updates use
 supported IDs. A linked governor supplies its own specs, status and configuration
 through the service's host adapter; native Windows provisioning is VUH-2091.
 No shell or Herdr connection is opened by these resource API/UI paths.
+
+`--lead-restarts on` (the default) lets the service restart the default lead
+seat fresh in its own pane when it is idle, the owner has written nothing for 15
+minutes, the pane holds no unsent draft, and its session has 500k tokens of
+context or is a day old. The seat first answers an escalation with a handoff
+brief, which becomes the new session's first message; the old session stays
+resumable and each restart leaves a notice in the conversation. Only a seat
+started with `clankie <command>` from the pane's shell is restarted. `off`
+leaves the seat's session alone ([ADR 0271](adr/0271-the-lead-seat-restarts-fresh-in-its-own-pane.md)).
 
 `--remote-gates on` lets an integrate batch gate on a linked machine while this
 one is saturated; it defaults to off. Remote placement/staging times out after two minutes and falls back to the local gate with the reason recorded; cleanup is bounded to ten seconds. See [gates on a linked machine](integration.md#gates-on-a-linked-machine).

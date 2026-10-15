@@ -101,6 +101,7 @@ export function createFleetSettingsRoutes(
             tools,
             peerMessages,
             remoteGates,
+            leadRestarts,
             hire,
             autonomyLevel,
             ...preferences
@@ -140,6 +141,7 @@ export function createFleetSettingsRoutes(
               ...(tools === undefined ? {} : { tools }),
               ...(peerMessages === undefined ? {} : { peerMessages }),
               ...(remoteGates === undefined ? {} : { remoteGates }),
+              ...(leadRestarts === undefined ? {} : { leadRestarts }),
               ...(hire === undefined ? {} : { hire: hire ?? undefined }),
             },
             autonomy: {

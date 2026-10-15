@@ -2666,6 +2666,7 @@ paths:
                       notes: { type: string, maxLength: 4000 }
                       tools: { type: string, enum: [connected, off] }
                       peerMessages: { type: string, enum: [on, off] }
+                      leadRestarts: { type: string, enum: [on, off] }
                       hire: { type: object, description: Full HireProfileSchema; null clears on write }
                       everydayWork: { type: string, enum: [allow, lead, owner] }
                       leavesMac: { type: string, enum: [allow, lead, owner] }
@@ -2708,6 +2709,7 @@ paths:
                     notes: { type: string, maxLength: 4000 }
                     tools: { type: string, enum: [connected, off] }
                     peerMessages: { type: string, enum: [on, off] }
+                    leadRestarts: { type: string, enum: [on, off] }
                     hire: { type: object, description: Full HireProfileSchema; null clears on write }
                     everydayWork: { type: string, enum: [allow, lead, owner] }
                     leavesMac: { type: string, enum: [allow, lead, owner] }

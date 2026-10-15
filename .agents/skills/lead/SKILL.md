@@ -269,6 +269,16 @@ a lease or queue misbehaves, a default surprises), fix it on the spot if it is
 small, otherwise file an issue in the same round with the exact symptom and
 evidence. A workaround without an issue leaves the next lead to hit it again.
 
+## Hand over before a fresh restart
+
+An idle default lead seat whose session is large or a day old is restarted
+fresh in its own pane ([ADR 0271](../../../docs/adr/0271-the-lead-seat-restarts-fresh-in-its-own-pane.md)).
+First it gets an escalation asking for a handoff brief: answer it with `reply`
+and only the brief (work in flight and its owners, decisions waiting on the
+owner, commitments and timers you hold). The new session starts from the
+shared log and receives the brief as its first message. Harness-native timers
+such as cron rounds die with the old session; recreate any you still need.
+
 ## Keep the fleet efficient
 
 On each watch wake and periodic round, check **every seat you own**

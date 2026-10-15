@@ -167,3 +167,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0269: Browser pairing binds an account session to one device](0269-browser-pairing-binds-an-account-session-to-one-device.md) — VUH-2122.
 
 - [0270: Auto rounds measure outcomes and name drift](0270-auto-rounds-measure-outcomes-and-name-drift.md) — VUH-2255.
+- [0271: The lead seat restarts fresh in its own pane](0271-the-lead-seat-restarts-fresh-in-its-own-pane.md) — VUH-2274.

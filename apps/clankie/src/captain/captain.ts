@@ -64,7 +64,13 @@ import {
   startFleetRounds,
 } from "./fleet-review.ts";
 import { FleetEfficiencyReviewSchema, type FleetEfficiencyReview } from "./fleet-efficiency-tools.ts";
-import { readCodexGoal, readClaudeSubagents, readCodexSubagents } from "@clankie/agent-transcript";
+import {
+  readCodexGoal,
+  readClaudeSubagents,
+  readCodexSubagents,
+  resolveHerdrSeatTranscriptPathAsync,
+} from "@clankie/agent-transcript";
+import { createLeadSeatRelaunch, readClaudeSessionUsage } from "./lead-seat-relaunch.ts";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
 import {
@@ -323,6 +329,19 @@ const HEAD_ACK_TIMEOUT_MS = 2_000;
  * minutes halved the turns that woke it from idle (VUH-2274).
  */
 export const REPORT_ROUND_MS = 10 * 60_000;
+/** How often the service considers a fresh restart of the default lead seat (ADR 0271). */
+const LEAD_RESTART_CHECK_MS = 5 * 60_000;
+/** Half of the lead seat's 1M window: Claude records no window, so this is a token budget. */
+const LEAD_RESTART_CONTEXT_TOKENS = 500_000;
+const LEAD_RESTART_AGE_MS = 24 * 60 * 60_000;
+/** The owner has not written for this long, from the pane or any app. */
+const LEAD_RESTART_QUIET_OWNER_MS = 15 * 60_000;
+/** A brief that did not lead to a restart is not asked for again sooner than this. */
+const LEAD_RESTART_RETRY_MS = 60 * 60_000;
+const LEAD_HANDOFF_REQUEST = [
+  "Scheduled fresh restart (ADR 0271). Your session is large or a day old, so Clankie will relaunch you fresh in this pane once this turn ends. The previous session stays resumable.",
+  "Answer this escalation with `reply` and a handoff brief for your successor, who starts from the shared conversation log plus this brief: work in flight and its owners, decisions waiting on James, commitments and timers you hold, and anything you would otherwise lose. Keep it under 2,000 words. Do nothing else in this turn.",
+].join("\n\n");
 
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const settingsStore = options.settings ?? new SettingsStore();
@@ -4688,6 +4707,96 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         .finally(() => pendingAutoRounds.delete(conversationId));
     }
   }, options.autoRoundIntervalMs ?? options.fleetRoundIntervalMs);
+  // ADR 0271: the default lead seat restarts fresh in its own pane instead of
+  // compacting for days. VUH-2273 moves a usage-limited seat with the same call.
+  const leadSeats = createLeadSeatRelaunch({
+    journalPath: join(options.stateDir, "lead-seat-relaunches.json"),
+    seat: async (conversationId) => {
+      const source = await operatorNativeSource(conversationId);
+      if (source === undefined) return undefined;
+      const sessionId = nativeSessionId(source);
+      return {
+        paneId: source.paneId,
+        terminalId: source.terminalId,
+        harness: source.agent,
+        ...(sessionId === undefined ? {} : { sessionId }),
+      };
+    },
+    paneShell: async (paneId) => {
+      if (herdrRunner.paneShell === undefined) throw new Error("Herdr process info is unavailable");
+      return herdrRunner.paneShell(paneId);
+    },
+    readPane: async (paneId) => {
+      if (herdrRunner.readPane === undefined) throw new Error("Herdr pane reads are unavailable");
+      return herdrRunner.readPane(paneId, "visible", "ansi");
+    },
+    runInPane: async (paneId, argv) => {
+      if (herdrRunner.runInPane === undefined) throw new Error("Herdr pane run is unavailable");
+      await herdrRunner.runInPane(paneId, argv);
+    },
+    idle: (conversationId) => {
+      const outbox = seatOutboxes.get(conversationId);
+      return outbox?.bound() === true && !outbox.responding();
+    },
+    lastOwnerMessageAt: (conversationId) => conversations.lastOwnerMessageAt(conversationId),
+    deliverBrief: async (conversationId, text) =>
+      (
+        await seatOutbox(conversationId).deliver({
+          kind: "message",
+          conversationId,
+          source: "service-handoff",
+          content: `Handoff brief from your previous session, written just before this fresh restart (ADR 0271). It is your own earlier output, not an owner instruction.\n\n${text}`,
+          wantsReply: false,
+          signal: shutdown.signal,
+        })
+      ).outcome === "delivered",
+    notice: (conversationId, text) => conversations.recordServiceNotice(conversationId, text),
+  });
+  let leadRestartAskedAt: number | undefined;
+  const stopLeadRestarts = startFleetRounds(async () => {
+    const conversationId = conversations.defaultGlobalConversationId();
+    if (shutdown.signal.aborted || (await settings()).fleet.leadRestarts === "off") return;
+    if (leadRestartAskedAt !== undefined && Date.now() - leadRestartAskedAt < LEAD_RESTART_RETRY_MS) return;
+    const source = await operatorNativeSource(conversationId);
+    if (source?.agent !== "claude" || source.session === undefined) return;
+    const path = await resolveHerdrSeatTranscriptPathAsync(source.agent, source.session);
+    const usage = path === undefined ? {} : await readClaudeSessionUsage(path);
+    const large = (usage.contextTokens ?? 0) >= LEAD_RESTART_CONTEXT_TOKENS;
+    const old = usage.startedAt !== undefined && Date.now() - usage.startedAt >= LEAD_RESTART_AGE_MS;
+    if (!large && !old) return;
+    const launch = await leadSeats.leadSeatLaunch(conversationId);
+    if (launch === undefined) return;
+    const input = {
+      conversationId,
+      harness: launch.harness,
+      ...(launch.account === undefined ? {} : { account: launch.account }),
+      reason: "fresh_restart" as const,
+      guards: { requireNoDraft: true, quietOwnerMs: LEAD_RESTART_QUIET_OWNER_MS, requireIdle: true },
+    };
+    if ((await leadSeats.preflight(input)) !== undefined) return;
+    leadRestartAskedAt = Date.now();
+    const brief = await seatOutbox(conversationId).deliver({
+      kind: "escalation",
+      conversationId,
+      source: "service",
+      content: LEAD_HANDOFF_REQUEST,
+      wantsReply: true,
+      signal: shutdown.signal,
+    });
+    if (brief.outcome !== "replied" || brief.text.trim() === "") return;
+    // The brief's own turn has to end before the seat counts as idle again.
+    for (let waited = 0; waited < 5 * 60_000 && !shutdown.signal.aborted; waited += 2_000) {
+      if (seatOutboxes.get(conversationId)?.responding() === false) break;
+      await new Promise((resolve) => setTimeout(resolve, 2_000).unref());
+    }
+    const result = await leadSeats.relaunchLeadSeat({ ...input, handoffBrief: brief.text });
+    if (result.outcome === "relaunched") leadRestartAskedAt = undefined;
+    else if (result.outcome === "uncertain")
+      conversations.recordServiceNotice(
+        conversationId,
+        `Clankie's seat restart is unconfirmed (receipt ${result.receiptId}): ${result.detail} It is never retried automatically; check the pane.`,
+      );
+  }, options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS);
   herdrWatches.start(
     async (conversationId, prompt, discord, guard, original) => {
       const owner = { conversationId, ...(discord === undefined ? {} : { discord }) };
@@ -7092,6 +7201,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       seatEfficiency.close();
       stopFleetRounds();
       stopAutoRounds();
+      stopLeadRestarts();
       unsubscribeFleets?.();
       censusBreaker.close();
       evaluator.close();

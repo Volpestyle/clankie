@@ -1954,6 +1954,15 @@ export class ConversationStore {
     return held;
   }
 
+  /** When the owner last wrote here, typed in a native pane or sent from any app (VUH-2274). */
+  public lastOwnerMessageAt(conversationId: string): number | undefined {
+    const last = this.readEvents(conversationId).findLast(
+      (event) => event.type === "message" && event.role === "operator",
+    );
+    const at = last === undefined ? Number.NaN : Date.parse(last.occurredAt);
+    return Number.isFinite(at) ? at : undefined;
+  }
+
   /** Read actual on-disk acceptance, never an in-memory success guess. */
   public inboundAcceptance(id: string): InboundAcceptance | undefined {
     let receipt: InboundAcceptance | undefined;

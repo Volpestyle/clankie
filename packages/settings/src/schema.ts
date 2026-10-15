@@ -388,6 +388,11 @@ export const FleetSettingsSchema = z
      * one is saturated (VUH-2066). Off until the owner or lead turns it on.
      */
     remoteGates: z.enum(["on", "off"]).default("off"),
+    /**
+     * An idle native lead seat restarts fresh in its own pane, with a handoff
+     * brief, once its session grows large or old (VUH-2274, ADR 0271).
+     */
+    leadRestarts: z.enum(["on", "off"]).default("on"),
     /** Physical machine capacity is separate from the fleet-size staffing preference. */
     resources: FleetResourcePolicySchema.optional(),
     machineResources: z.record(FleetResourceMachineIdSchema, FleetResourcePolicySchema).optional(),

@@ -78,6 +78,7 @@ describe("clankie fleet", () => {
         tools: "connected",
         peerMessages: "on",
         remoteGates: "off",
+        leadRestarts: "on",
       },
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
@@ -87,6 +88,7 @@ describe("clankie fleet", () => {
       "efficient",
       "codex",
       "xhigh",
+      "off",
       "off",
       "off",
       "owner",
@@ -126,6 +128,7 @@ describe("clankie fleet", () => {
       { currentValue: "auto" },
       { currentValue: "connected" },
       { currentValue: "on" },
+      { currentValue: "on" },
       { currentValue: "lead" },
       { currentValue: "lead" },
       { currentValue: "hands-off" },
@@ -148,6 +151,7 @@ describe("clankie fleet", () => {
       tools: "off",
       peerMessages: "off",
       remoteGates: "off",
+      leadRestarts: "off",
     });
     expect(read().autonomy.fleet).toEqual(
       FleetAutonomySchema.parse({
@@ -180,6 +184,7 @@ describe("clankie fleet budget", () => {
       tools: "off",
       peerMessages: "on",
       remoteGates: "off",
+      leadRestarts: "on",
       ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain("fleet tool access disabled");
@@ -201,6 +206,7 @@ describe("clankie fleet budget", () => {
       tools: "connected",
       peerMessages: "on",
       remoteGates: "off",
+      leadRestarts: "on",
     });
     const lines = formatFleetLines(status.fleet).join("\n");
     expect(lines).toContain("fleet size: max");
@@ -222,6 +228,7 @@ describe("clankie fleet budget", () => {
       tools: "connected",
       peerMessages: "on",
       remoteGates: "off",
+      leadRestarts: "on",
       ...FleetAutonomySchema.parse({}),
     });
     await runFleetCommand(["set", "--models", "optimal"], fleetSettingsClient(settings));
@@ -232,6 +239,7 @@ describe("clankie fleet budget", () => {
       tools: "connected",
       peerMessages: "on",
       remoteGates: "off",
+      leadRestarts: "on",
     });
     expect((await runFleetCommand(["clear"], fleetSettingsClient(settings))).fleet).toEqual({
       notes: "",
@@ -240,6 +248,7 @@ describe("clankie fleet budget", () => {
       tools: "connected",
       peerMessages: "on",
       remoteGates: "off",
+      leadRestarts: "on",
       ...FleetAutonomySchema.parse({}),
     });
   });
@@ -264,6 +273,7 @@ describe("clankie fleet budget", () => {
       tools: "connected",
       peerMessages: "on",
       remoteGates: "off",
+      leadRestarts: "on",
     });
   });
 });
@@ -280,6 +290,7 @@ describe("clankie fleet peer messages", () => {
       tools: "off",
       peerMessages: "off",
       remoteGates: "off",
+      leadRestarts: "on",
       ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain(
