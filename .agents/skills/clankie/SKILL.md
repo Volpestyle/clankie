@@ -119,8 +119,10 @@ own pane's native prompt; this does not create an app ask or supply an answer.
 Notification failures include a credential-redacted cause in the hook reason
 and service log. Permission prompts remain denied if notification fails.
 
-Sender progress also arrives automatically as `worker-report-receipt` channel
-events: stored, taken into a lead turn, then acknowledged. These are receipts,
+Sender progress also arrives as `worker-report-receipt` channel events: stored,
+taken into a lead turn, then acknowledged. They never wake you on their own;
+they arrive with your next real event, such as your lead's next message, and
+`message_clankie_status` reads a report's stage meanwhile. These are receipts,
 not new assignments; no reply is needed. The acknowledgment includes the lead's
 short summary and resulting links when supplied, but only once a message from
 your lead has reached you after the report. Otherwise it says no reply has

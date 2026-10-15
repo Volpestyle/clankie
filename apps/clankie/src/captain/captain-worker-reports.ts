@@ -84,13 +84,7 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
     },
   };
 
-  let reportChange = new AbortController();
-  ctx.conversations.onInboundReportChange = () => {
-    const previous = reportChange;
-    reportChange = new AbortController();
-    previous.abort();
-    ctx.onChange();
-  };
+  ctx.conversations.onInboundReportChange = () => ctx.onChange();
   function reportSummaries(
     conversationId?: string,
     native?: HerdrAgentSnapshot,
@@ -224,7 +218,6 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
   }
   return {
     workerReportActions,
-    reportChangeSignal: () => reportChange.signal,
     reportSummaries,
     conversationReportRunner,
     recoverWorkerReports,

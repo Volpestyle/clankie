@@ -459,6 +459,66 @@ it("refuses a parent native health message behind its durable fleet mailbox with
   ).toBe(false);
 });
 
+// VUH-2249: each report receipt (stored, taken, acknowledged) ended the
+// reporter's parked poll, so an idle worker spent a whole turn saying it was
+// standing by. Receipts now wait for the seat's next actionable event.
+it("keeps an idle reporter parked through its report receipts and delivers them with its next real event", async () => {
+  const f = await fixture(60 * 60_000, undefined, false, true, async (_root, rows) => {
+    rows[3]!.parent_pane_id = "w1:p1";
+  });
+  const reporter = f.rows[0]!;
+  const binding = deliveryFingerprint(
+    JSON.stringify([reporter.pane_id, reporter.terminal_id, reporter.agent, reporter.agent_session]),
+  );
+  expect(await f.captain.pollFleetSeatEvents("w1:p1", 0)).toEqual([]);
+  const sent = await f.captain.receiveFleetSeatMessage("w1:p1", "Final report: VUH-1662 landed.", {
+    id: randomUUID(),
+    binding,
+  });
+  expect(sent).toMatchObject({ received: true, deliveryStage: "stored" });
+  const deliveryId = (sent as { deliveryId: string }).deliveryId;
+
+  // Stored: the parked poll runs to its deadline instead of waking the seat.
+  const started = performance.now();
+  expect(await f.captain.pollFleetSeatEvents("w1:p1", 600)).toEqual([]);
+  expect(performance.now() - started).toBeGreaterThanOrEqual(550);
+
+  // Taken into the lead's turn and then acknowledged while the seat is parked: still no wake.
+  const parked = f.captain.pollFleetSeatEvents("w1:p1", 1_500);
+  const inbox = await f.captain.serveOperatorConversation({
+    op: "worker_reports",
+    schemaVersion: 1,
+    conversationId: "global-default",
+  });
+  expect(inbox).toMatchObject({ page: { items: [{ deliveryId, text: "Final report: VUH-1662 landed." }] } });
+  const acknowledged = await f.captain.serveOperatorConversation({
+    op: "acknowledge_worker_reports",
+    schemaVersion: 1,
+    conversationId: "global-default",
+    deliveryIds: [deliveryId],
+  });
+  expect(acknowledged).toMatchObject({ op: "acknowledge_worker_reports", acknowledged: 1 });
+  expect(await parked).toEqual([]);
+  // The delivery itself is unchanged: its status still reads from the sender's side.
+  expect(await f.captain.fleetSeatMessageStatus("w1:p1", deliveryId)).toMatchObject({ deliveryId });
+
+  // An actionable event wakes the seat, and the receipts ride with it.
+  const woken = f.captain.pollFleetSeatEvents("w1:p1", 3000);
+  const alert = f.captain.notifyFleetHealthAlert("w1:p4", "Fleet proof alert: child needs its lead.");
+  const events = (await woken)!;
+  expect(events[0]?.content).toBe("Worker w1:p4 (codex). Fleet proof alert: child needs its lead.");
+  expect(events.slice(1).map((event) => event.id)).toEqual(
+    expect.arrayContaining([
+      `report:${deliveryId}:stored`,
+      `report:${deliveryId}:taken`,
+      `report:${deliveryId}:acknowledged`,
+    ]),
+  );
+  expect(events.slice(1).every((event) => event.source === "worker-report-receipt")).toBe(true);
+  for (const event of events) expect(await f.captain.acknowledgeFleetSeatEvent("w1:p1", event.id)).toBe(true);
+  expect(await alert).toBe(true);
+});
+
 it("does not accept an older identical native control receipt as a fresh health dispatch", async () => {
   const text = "Fleet proof alert: parent-owned failure.";
   const originalId = randomUUID();

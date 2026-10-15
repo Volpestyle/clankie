@@ -4754,7 +4754,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   void refreshFleet().catch(() => undefined);
   const {
     workerReportActions,
-    reportChangeSignal,
     reportSummaries,
     conversationReportRunner,
     recoverWorkerReports,
@@ -6922,37 +6921,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       const binding = native?.terminalId === seatId ? inboundBinding(native) : undefined;
       const live = binding !== undefined && mailbox.boundTo(binding);
-      const deadline = Date.now() + waitMs;
-      let firstPoll = true;
-      for (;;) {
-        const changed = reportChangeSignal();
-        const receipts = binding ? conversations.senderReportEvents(paneId, binding) : [];
-        const pending = mailbox.poll(
-          receipts.length ? 0 : Math.max(0, deadline - Date.now()),
-          AbortSignal.any([changed, ...(signal ? [signal] : [])]),
-          binding,
-        );
-        if (firstPoll && binding && !live) fleetChanges.touch();
-        firstPoll = false;
-        const events = await pending;
-        // A report change ends every seat's parked poll at once. Re-park an
-        // empty one without a Herdr lookup per seat (VUH-2034).
-        if (
-          binding &&
-          !events.length &&
-          changed.aborted &&
-          !signal?.aborted &&
-          Date.now() < deadline &&
-          !conversations.senderReportEvents(paneId, binding).length
-        )
-          continue;
-        const current = await herdrRunner.get(paneId).catch(() => undefined);
-        if (!binding || inboundBinding(current) !== binding) return [];
-        const result = [...events, ...conversations.senderReportEvents(paneId, binding)].slice(0, 64);
-        // Receipt changes wake every waiter. Another sender's receipt must not
-        // end this seat's long poll before its own mailbox delivery arrives.
-        if (result.length || !changed.aborted || signal?.aborted || Date.now() >= deadline) return result;
-      }
+      const pending = mailbox.poll(waitMs, signal, binding);
+      if (binding && !live) fleetChanges.touch();
+      const events = await pending;
+      const current = await herdrRunner.get(paneId).catch(() => undefined);
+      if (!binding || inboundBinding(current) !== binding || !events.length) return [];
+      // Report receipts (stored, taken, acknowledged) need no action, so they
+      // never end a parked poll and start a turn on an idle seat by
+      // themselves: they ride with the seat's next real event, and
+      // message_clankie_status answers in the meantime (VUH-2249).
+      return [...events, ...conversations.senderReportEvents(paneId, binding)].slice(0, 64);
     },
 
     async acknowledgeFleetSeatEvent(paneId, eventId) {

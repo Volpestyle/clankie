@@ -6099,7 +6099,9 @@ Reading does not mark them read. After reviewing every offered report, run
 `clankie agents reports ack DELIVERY_ID... --conversation ID` (or
 `acknowledge_worker_reports`). Only fully offered IDs can be acknowledged.
 The original sender receives durable channel events for stored, taken into a
-lead turn, and acknowledged, including unadopted native panes. Events remain
+lead turn, and acknowledged, including unadopted native panes. They need no
+action, so they never wake an idle seat on their own: they ride with the seat's
+next real event, such as a message from its lead (VUH-2249). Events remain
 pending across reconnect until their transport acknowledgment; that transport
 ack never marks the report read. Status lookup uses the original sender binding
 and works immediately for returned IDs through both local and remote fleet links.
