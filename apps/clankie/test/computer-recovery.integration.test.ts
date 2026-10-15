@@ -218,7 +218,10 @@ it.each(["revoked", "changed"])("rechecks %s operator authority while recovery i
   let reads = 0;
   // Initial route authentication, owner binding, ordinary identity grant, then bound operator recheck.
   f.hookAuth(() => {
-    if (++reads === 4) mode === "revoked" ? f.revoke() : f.changeOwner();
+    if (++reads === 4) {
+      if (mode === "revoked") f.revoke();
+      else f.changeOwner();
+    }
   });
   expect(await f.cli(f.command)).toMatchObject({ reason: "owner_recovery_refused" });
   expect(f.store.status("computer")?.state).toBe("recovery_required");
