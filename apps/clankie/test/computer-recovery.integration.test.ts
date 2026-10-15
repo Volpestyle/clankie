@@ -78,14 +78,14 @@ async function fixture() {
     () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
-        server.closeAllConnections();
+        if ("closeAllConnections" in server) server.closeAllConnections();
       }),
   );
   const address = server.address();
   if (!address || typeof address === "string") throw Error("No computer HTTP port");
   const origin = `http://127.0.0.1:${address.port}`;
   const env = { CLANKIE_OPERATOR_TOKEN: bearer, CLANKIE_CONTROL_PLANE_URL: origin, HOME: root, PATH: "" };
-  const request = (command: unknown, token = bearer) =>
+  const request = (command: unknown, token: string = bearer) =>
     fetch(`${origin}/v1/computer`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
