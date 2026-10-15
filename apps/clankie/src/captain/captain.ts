@@ -4459,6 +4459,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const seats = await refreshFleet({ force });
     return seats.filter((seat) => JSON.stringify(seatLeadOwners.get(seat)?.owner) === JSON.stringify(owner));
   }
+  /**
+   * A native lead seat that refuses turns on a usage limit stops receiving
+   * wakes and rounds until it resets; they run on the service lane meanwhile
+   * (VUH-2273). The conversation hears once when that starts.
+   */
+  function observeSeatUsageLimit(
+    conversationId: string,
+    entries: readonly import("@clankie/agent-transcript").SeatTranscriptUpload["entries"][number][],
+  ): void {
+    const limited = seatOutbox(conversationId).observeAgentMessages(
+      entries.flatMap((entry) => (entry.type === "message" && entry.role === "agent" ? [entry] : [])),
+    );
+    if (limited)
+      conversations.recordServiceNotice(
+        conversationId,
+        `Your native seat hit its ${limited.window === "other" ? "usage" : limited.window} limit (resets ${new Date(limited.until).toISOString()}). Until then, wakes and rounds run on Clankie's service lane instead of being sent into it.`,
+      );
+  }
+
   const efficiencyActions = {
     async run(authority: ConversationAuthority, input?: FleetEfficiencyReview) {
       // One deadline for the whole call, so the CLI hears an answer before its
@@ -6173,6 +6192,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     conversationHasNativeSeat: (conversationId) => conversations.hasNativeSeat(conversationId),
     syncSeatTranscript: (id, transcript) => {
       if (!conversations.syncNativeSeatTranscript(id, transcript.sessionId, transcript.entries)) return false;
+      observeSeatUsageLimit(id, transcript.entries);
       if (
         transcript.activity !== undefined &&
         seatOutbox(id).observeTurn(transcript.sessionId, transcript.activity)

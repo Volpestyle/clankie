@@ -18,6 +18,8 @@ export function createServiceHandoffDelivery(ctx: ServiceHandoffDeliveryContext)
   return function deliverServiceHandoff(conversationId: string): void {
     if (inFlight.has(conversationId)) return;
     const outbox = ctx.seatOutbox(conversationId);
+    // A usage-limited seat takes its handoff once it resets (VUH-2273).
+    if (outbox.usageLimited() !== undefined) return;
     const claim = ctx.conversations.claimServiceHandoff(conversationId);
     if (claim === undefined) return;
     if (claim.kind === "reconcile") {

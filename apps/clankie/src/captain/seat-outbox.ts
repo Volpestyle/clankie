@@ -158,6 +158,15 @@ interface ParkedPoller {
   finish(events: OperatorSeatEvent[], source: PollFinishSource): void;
 }
 
+/** A usage-limit refusal that names no reset parks its seat this long (VUH-2273). */
+const UNKNOWN_USAGE_LIMIT_RESET_MS = 60 * 60_000;
+
+/** A native usage-limit refusal: which window, and when it resets (epoch ms). */
+export interface SeatUsageLimit {
+  readonly window: "session" | "weekly" | "other";
+  readonly until: number;
+}
+
 interface Pending {
   /** The original content's fingerprint; the wire event may carry a clipped copy. */
   readonly fingerprint: string;
@@ -224,6 +233,67 @@ export class SeatOutbox {
   private turnSessionId: string | undefined;
   private turnObservedAt = 0;
   private readonly turnHoldStaleMs: number;
+  private usageLimit: SeatUsageLimit | undefined;
+
+  /**
+   * The native seat refused a turn on a session or weekly usage limit
+   * (VUH-2273). Until it resets, new input routes to the service lane like an
+   * unbound seat, and input queued but not yet taken is released to it. Input
+   * the bridge already took stays with its receipt.
+   */
+  public limitUntil(limit: SeatUsageLimit): void {
+    if (this.closed) return;
+    this.usageLimit = limit;
+    // Settling removes each from the queue; iterate a copy.
+    for (const pending of this.queued.slice())
+      if (!pending.taken && !pending.settled) pending.settle({ outcome: "unbound" });
+  }
+
+  /** A real reply after the refusal: the seat answers again (another account, an early reset). */
+  public clearUsageLimit(): void {
+    this.usageLimit = undefined;
+  }
+
+  /**
+   * The seat's synced agent messages, oldest first: the latest decides. A
+   * usage-limit refusal parks the seat until its reset; a real reply after it
+   * releases the seat. A refusal without a reset time parks it for an hour
+   * from when it happened, and one whose reset has passed is ignored. Returns
+   * the limit when this call newly parked the seat.
+   */
+  public observeAgentMessages(
+    messages: readonly {
+      readonly usageLimit?:
+        | { readonly window: SeatUsageLimit["window"]; readonly resetsAt?: string | undefined }
+        | undefined;
+      readonly occurredAt?: string | undefined;
+    }[],
+  ): SeatUsageLimit | undefined {
+    let latest: SeatUsageLimit | null | undefined;
+    for (const message of messages) {
+      if (message.usageLimit === undefined) {
+        latest = null;
+        continue;
+      }
+      const reset = Date.parse(message.usageLimit.resetsAt ?? "");
+      const at = Date.parse(message.occurredAt ?? "");
+      const until = Number.isFinite(reset)
+        ? reset
+        : (Number.isFinite(at) ? at : this.now()) + UNKNOWN_USAGE_LIMIT_RESET_MS;
+      latest = until > this.now() ? { window: message.usageLimit.window, until } : null;
+    }
+    if (latest === null) this.clearUsageLimit();
+    if (!latest) return undefined;
+    const wasLimited = this.usageLimited() !== undefined;
+    this.limitUntil(latest);
+    return wasLimited ? undefined : latest;
+  }
+
+  /** The seat's current usage limit; none once its reset time has passed. */
+  public usageLimited(): SeatUsageLimit | undefined {
+    if (this.usageLimit !== undefined && this.now() >= this.usageLimit.until) this.usageLimit = undefined;
+    return this.usageLimit;
+  }
 
   /** The seat reported a turn in progress that has not gone quiet. */
   public responding(): boolean {
@@ -468,7 +538,7 @@ export class SeatOutbox {
    */
   public routesToSeat(content: string, messageId?: string): boolean {
     return (
-      this.bound() ||
+      (this.bound() && this.usageLimited() === undefined) ||
       this.conflict({ content, ...(messageId === undefined ? {} : { messageId }) }) !== undefined
     );
   }
@@ -640,7 +710,7 @@ export class SeatOutbox {
     const parkedPoll = this.pollers.size > 0;
     const lastPollAgeMs = this.lastPollAt === undefined ? undefined : this.now() - this.lastPollAt;
     const observed = { parkedPoll, ...(lastPollAgeMs === undefined ? {} : { lastPollAgeMs }) };
-    if (!this.bound() && this.arriving === 0) {
+    if ((!this.bound() && this.arriving === 0) || this.usageLimited() !== undefined) {
       this.deliveryEvent({ eventId: "", source: input.source, outcome: "unbound", ...observed });
       return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
     }

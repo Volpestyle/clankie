@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { OperatorSeatEventSchema, type OperatorSeatEvent } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
+import { readHerdrSeatTranscript, SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { createConversationRunner, runAutonomyTurn } from "../src/captain/captain-conversation-runner.ts";
 import { seatEventKindFor } from "../src/captain/captain-session.ts";
@@ -840,4 +841,121 @@ it("reports hosted credential repair as service operator work without console au
   ]);
   expect(JSON.stringify(failed)).not.toContain("/auth");
   expect(JSON.stringify(failed)).not.toContain("notified");
+});
+
+// VUH-2273: on 2026-10-13 the lead seat hit its weekly limit and 2.5 hours of
+// wakes and rounds were delivered into it, returning 33 limit errors. The seat's
+// own synthetic refusal (shape copied from its transcript) now parks it: wakes
+// run on the service lane until the reset, then the seat takes the handoff.
+it("runs wakes on the service lane while the native seat is usage-limited, then hands back after the reset", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-13T22:26:30Z"));
+  const f = fixture();
+  f.conversations.rememberNativeHead(ID, "claude-lead");
+  const sessionId = "af163034-7a51-4345-aec4-f8173adea1b0";
+  const transcript = join(f.root, `${sessionId}.jsonl`);
+  const resetsAt = Date.parse("2026-10-14T01:00:00Z") / 1000;
+  writeFileSync(
+    transcript,
+    [
+      {
+        type: "assistant",
+        uuid: "a1",
+        timestamp: "2026-10-13T22:20:00Z",
+        sessionId,
+        message: {
+          role: "assistant",
+          model: "claude-opus-5-5",
+          content: [{ type: "text", text: "Round done." }],
+        },
+      },
+      {
+        parentUuid: "a1",
+        isSidechain: false,
+        type: "assistant",
+        uuid: "a2",
+        timestamp: "2026-10-13T22:26:00Z",
+        sessionId,
+        message: {
+          id: "limit",
+          model: "<synthetic>",
+          role: "assistant",
+          stop_reason: "stop_sequence",
+          type: "message",
+          content: [
+            { type: "text", text: "You've hit your weekly limit · resets Oct 13, 8pm (America/Chicago)" },
+          ],
+        },
+        apiError: "usage_limit_reached",
+        apiErrorParams: { rate_limit_info: { status: "rejected", resetsAt, rateLimitType: "seven_day" } },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n",
+  );
+  // The seat's upload, as `clankie seat-sync` sends it and the service receives it.
+  const upload = SeatTranscriptUploadSchema.parse({
+    sessionId,
+    entries: readHerdrSeatTranscript("claude", { source: "native-seat", kind: "path", value: transcript })!
+      .entries,
+  });
+  expect(upload.entries.at(-1)).toMatchObject({
+    role: "agent",
+    usageLimit: { window: "weekly", resetsAt: "2026-10-14T01:00:00.000Z" },
+  });
+  expect(f.conversations.syncNativeSeatTranscript(ID, sessionId, upload.entries)).toBe(true);
+  expect(
+    f
+      .outbox(ID)
+      .observeAgentMessages(
+        upload.entries.flatMap((entry) =>
+          entry.type === "message" && entry.role === "agent" ? [entry] : [],
+        ),
+      ),
+  ).toEqual({ window: "weekly", until: resetsAt * 1000 });
+
+  // The seat keeps polling, but the wake runs on the service lane, not in the limited seat.
+  const parked = f.pollSeat(ID, 300);
+  const wakeA = f.conversations.submitInternal(ID, "Wake A overnight round", "wake");
+  if (wakeA.status !== "accepted") throw new Error("Expected wake");
+  await settled(f, wakeA.runId);
+  expect(f.sessions[0]!.prompts).toEqual([expect.stringContaining("Wake A overnight round")]);
+  expect(await parked).toEqual([]);
+
+  // After the reset the seat is offered the service's turns, and the next wake goes to it.
+  vi.setSystemTime(new Date("2026-10-14T01:00:01Z"));
+  const [handoff] = (await f.pollSeat(ID, 60_000)).map((event) => OperatorSeatEventSchema.parse(event));
+  expect(handoff!.source).toBe("service-handoff");
+  expect(handoff!.content).toContain("Wake A overnight round");
+  f.outbox(ID).acknowledge(handoff!.id);
+  const next = f.pollSeat(ID, 60_000);
+  const wakeB = f.conversations.submitInternal(ID, "Wake B after reset", "wake");
+  if (wakeB.status !== "accepted") throw new Error("Expected wake");
+  const [event] = (await next).map((item) => OperatorSeatEventSchema.parse(item));
+  expect(event!.content).toContain("Wake B after reset");
+  f.outbox(ID).acknowledge(event!.id);
+  await settled(f, wakeB.runId);
+  expect(f.sessions.flatMap((session) => session.prompts)).toHaveLength(1);
+});
+
+it("releases a usage-limited seat when it replies again before the reset, and ignores a limit already past", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-13T22:30:00Z"));
+  const f = fixture();
+  const limit = { usageLimit: { window: "session" as const, resetsAt: "2026-10-14T03:00:00Z" } };
+  expect(f.outbox(ID).observeAgentMessages([limit])).toMatchObject({ window: "session" });
+  expect(f.outbox(ID).observeAgentMessages([limit])).toBeUndefined();
+  // The owner switched the seat's account; its next real reply releases it.
+  f.outbox(ID).observeAgentMessages([{}]);
+  expect(f.outbox(ID).usageLimited()).toBeUndefined();
+  // A replayed refusal whose reset already passed parks nothing.
+  f.outbox(ID).observeAgentMessages([
+    { usageLimit: { window: "session", resetsAt: "2026-10-13T20:00:00Z" } },
+  ]);
+  expect(f.outbox(ID).usageLimited()).toBeUndefined();
+  // Wording alone, without a reset, parks for an hour from when it happened.
+  f.outbox(ID).observeAgentMessages([
+    { usageLimit: { window: "other" }, occurredAt: "2026-10-13T22:00:00Z" },
+  ]);
+  expect(f.outbox(ID).usageLimited()).toEqual({ window: "other", until: Date.parse("2026-10-13T23:00:00Z") });
 });

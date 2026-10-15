@@ -463,3 +463,19 @@ attachment with a standalone Windows Claude bridge over the fleet link and a
 seat/chat/machine-bound delegation. Existing worker context moves by a written
 handoff when the launch path cannot resume it; adoption and retirement require
 separate coordination, never an implicit restart of active workers.
+
+## A usage-limited seat is not a driver (VUH-2273)
+
+A bound seat that refuses turns on a session or weekly usage limit is treated as
+unbound for new input until the limit resets. Claude Code writes the refusal
+into the seat transcript as a synthetic reply with `apiError:
+"usage_limit_reached"`, its window and its reset time (older entries have only
+the wording). `clankie seat-sync` carries that as `usageLimit` on the message, and
+the seat outbox parks the seat. Wakes, rounds and reports then run on the service
+lane, input queued but not yet taken moves there too, and the conversation gets
+one service notice. A real reply from the seat releases it early. Once the reset
+passes, the next poll delivers the usual service handoff. A refusal without a
+reset time parks the seat for an hour from when it happened. A remote project
+head has no local fallback, so its runs fail with the existing refusal instead of
+reaching the limited seat; failing over to another account or harness is the
+next slice of VUH-2273.

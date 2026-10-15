@@ -38,6 +38,14 @@ export interface HerdrTranscriptMessage {
   readonly nativeRequestId?: string;
   readonly text: string;
   readonly occurredAt?: string | undefined;
+  /** The harness refused this turn on a usage limit and wrote this in place of a reply. */
+  readonly usageLimit?: HerdrUsageLimit | undefined;
+}
+
+/** A native session or weekly usage-limit refusal (VUH-2273); resetsAt when the harness said. */
+export interface HerdrUsageLimit {
+  readonly window: "session" | "weekly" | "other";
+  readonly resetsAt?: string | undefined;
 }
 
 interface HerdrTranscriptTool {
@@ -821,7 +829,11 @@ function claudeEntries(
       const at = timestamp(entry);
       const content = array(message.content).filter(isRecord);
       if (entry.type === "assistant") {
-        const spoken = transcriptMessage(`claude:${nativeId}`, "agent", messageText(message.content), at);
+        const text = messageText(message.content);
+        const limit = claudeUsageLimit(entry, message, text);
+        const spoken = transcriptMessage(`claude:${nativeId}`, "agent", text, at).map((said) =>
+          limit === undefined ? said : { ...said, usageLimit: limit },
+        );
         const tools = content.flatMap((item, contentIndex) => {
           if (item.type !== "tool_use") return [];
           const callId = cleanRef(item.id, nativeId);
@@ -1098,6 +1110,38 @@ function messageText(value: unknown): string {
     .join("\n");
 }
 
+const CLAUDE_LIMIT_TEXT =
+  /\b(?:you've|you have) hit your (?:(\w+) )?(?:usage )?limit\b|\bclaude ai usage limit reached\|(\d{9,12})\b/iu;
+
+/**
+ * Claude Code writes a synthetic assistant entry when the account refuses a
+ * turn on a usage limit: `apiError: "usage_limit_reached"` with the window and
+ * reset time, and text such as "You've hit your weekly limit · resets …".
+ * Older or unstructured entries are recognised by that wording alone.
+ */
+function claudeUsageLimit(
+  entry: Record<string, unknown>,
+  message: Record<string, unknown>,
+  text: string,
+): HerdrUsageLimit | undefined {
+  const wording = CLAUDE_LIMIT_TEXT.exec(text);
+  if (entry.apiError !== "usage_limit_reached" && !(message.model === "<synthetic>" && wording))
+    return undefined;
+  const info = record(record(entry.apiErrorParams)?.rate_limit_info) ?? record(entry.quotaLimits);
+  const type = string(info?.rateLimitType) ?? "";
+  const named = wording?.[1]?.toLowerCase() ?? "";
+  const window =
+    /five_hour/u.test(type) || named === "session"
+      ? "session"
+      : /seven_day/u.test(type) || named === "weekly"
+        ? "weekly"
+        : "other";
+  const seconds = typeof info?.resetsAt === "number" ? info.resetsAt : Number(wording?.[2]);
+  return Number.isFinite(seconds) && seconds > 0
+    ? { window, resetsAt: new Date(seconds * 1000).toISOString() }
+    : { window };
+}
+
 function transcriptMessage(
   id: string,
   role: HerdrTranscriptMessage["role"],
@@ -1220,6 +1264,13 @@ export const SeatTranscriptUploadSchema = z
               role: z.enum(["operator", "agent"]),
               text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX).transform(redactSensitiveText),
               occurredAt: z.string().max(64).optional(),
+              usageLimit: z
+                .object({
+                  window: z.enum(["session", "weekly", "other"]),
+                  resetsAt: z.iso.datetime().optional(),
+                })
+                .strict()
+                .optional(),
             })
             .strict(),
           z
