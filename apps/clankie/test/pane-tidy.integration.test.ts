@@ -1,3 +1,4 @@
+import type { SeatControl } from "@clankie/agent-hosts";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +15,18 @@ import { createHerdrWatchRunner, HerdrWatchStore } from "../src/captain/herdr-wa
 import { HireOwners } from "../src/captain/hire-owners.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import type { ConversationAuthority } from "../src/captain/conversation-owner.ts";
-import type { OperatorSeatSpawnResult, SpawnOperatorSeat } from "@clankie/protocol";
+import {
+  SpawnOperatorSeatSchema,
+  type OperatorSeatSpawnResult,
+  type SpawnOperatorSeat,
+} from "@clankie/protocol";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { ProjectHires, type ProjectHireProcessProof } from "../src/captain/project-hires.ts";
+import { createRemoteHireReceipts } from "../src/remote-hire-receipts.ts";
+import { codex0160Protocol } from "./fixtures/codex-0160-protocol.ts";
+import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
+import { remoteRetirementWork } from "../src/captain/remote-retirement-work.ts";
+import { DeliveryFence, ReceiptSchema } from "../src/captain/delivery-fence.ts";
 
 const roots: string[] = [];
 const socketCleanups: (() => Promise<void>)[] = [];
@@ -47,6 +59,9 @@ async function fixture(
     readopt?: boolean;
     remote?: boolean;
     socket?: boolean;
+    projectHire?: boolean;
+    controller?: boolean;
+    reload?: boolean;
     cwd?: string;
     harness?: "codex" | "claude";
   } = {},
@@ -79,6 +94,7 @@ async function fixture(
     now = 1_800_000_000_000;
   let ansi = await golden(harness, "empty");
   let finalAnsi: string | undefined;
+  let replaceHostOnClose = false;
   const calls: string[][] = [];
   const pane = {
     pane_id: "w1:p1",
@@ -122,6 +138,7 @@ async function fixture(
     if (args[0] === "pane" && args[1] === "close") {
       closes++;
       present = false;
+      if (replaceHostOnClose) fixtureHost = "replacement-host";
       return "{}";
     }
     throw new Error(`Unexpected fixture native call ${args.join(" ")}`);
@@ -186,8 +203,155 @@ async function fixture(
     };
   }
   const baseRunner = createHerdrWatchRunner(undefined, transport);
-  const runner = options.remote ? routeHerdrFleets(baseRunner, new Map([["pc", baseRunner]])) : baseRunner;
-  let watch = new HerdrWatchStore(watchPath, { runner });
+  const routedRunner = options.remote
+    ? routeHerdrFleets(baseRunner, new Map([["pc", baseRunner]]))
+    : baseRunner;
+  const runner = options.reload
+    ? {
+        ...routedRunner,
+        createTab: async () => {
+          pane.pane_id = "w1:p2";
+          pane.terminal_id = "term_222";
+          present = true;
+          return "pc/w1:p2";
+        },
+        startAgent: async ({ args }: { args: readonly string[] }) => {
+          expect(args).toContain(native.value);
+          nativeProtocol!.startView();
+        },
+      }
+    : routedRunner;
+  const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "fixture", name: "Fixture" }] });
+  const proof: ProjectHireProcessProof = {
+    nativeOccupantId: occupant,
+    fleet: "pc",
+    pane: paneId,
+    binding: { socketPath: "fixture.sock", session: "fixture" },
+    shell: { pid: 100, startTime: "original-shell" },
+    processes: [{ pid: 123, startTime: "original-codex" }],
+  };
+  const ledger = new ProjectHires(`${watchPath}.project-hires.json`);
+  let proofReads = 0;
+  let refuseProofAt = Infinity;
+  let fixtureHost = "fixture-host";
+  const remoteHireReceipts = createRemoteHireReceipts({
+    fleet: async () => ({ id: "pc", session: "fixture", ssh: { host: fixtureHost, shell: "posix" } }),
+    shell: () => async (command) => {
+      if (!options.reload) throw new Error("No host mutation in a census proof");
+      return (
+        await promisify(execFile)("/bin/sh", ["-c", command], {
+          timeout: 15000,
+          env: { ...process.env, HOME: root },
+        })
+      ).stdout;
+    },
+  });
+  if (options.projectHire) {
+    const request = SpawnOperatorSeatSchema.parse({
+      schemaVersion: 1,
+      fleet: "pc",
+      harness,
+      title: "Pip",
+      workingDirectory: options.cwd ?? root,
+    });
+    const allocation = ledger.reserve(settings, "fixture", request);
+    ledger.launch(allocation.id, settings);
+    ledger.pane(allocation.id, paneId);
+    ledger.observe(allocation.id, seatId, occupant, proof);
+    ledger.confirmed(allocation.id);
+    const golden = JSON.parse(
+      await readFile(new URL("./fixtures/hire-receipts/completed-hire.json", import.meta.url), "utf8"),
+    );
+    const claim = (await remoteHireReceipts.claim("pc", {
+      receiptId: golden.messageId,
+      receiptKey: "completed-original",
+      fingerprint: golden.fingerprint,
+    }))!;
+    const receipt = ReceiptSchema.parse({
+      ...golden,
+      paneId,
+      sessionId: native.value,
+      occupantId: occupant,
+      remoteAdmission: { target: claim.target, nonce: claim.nonce },
+    });
+    await writeFile(`${watchPath}.hire-receipts.json`, JSON.stringify({ "completed-original": receipt }));
+  }
+  let controllerStopped = false;
+  let nativeProtocol = options.controller
+    ? await codex0160Protocol(root, { threadId: native.value, workingDirectory: options.cwd ?? root })
+    : undefined;
+  if (nativeProtocol) nativeProtocol.turns.push({ id: "saved-turn", status: "completed", items: [] });
+  const adapter = nativeProtocol
+    ? createCodexSeatAdapter({
+        server: async (input) => {
+          if (controllerStopped) {
+            nativeProtocol = await codex0160Protocol(root, {
+              threadId: native.value,
+              workingDirectory: options.cwd ?? root,
+            });
+            nativeProtocol.turns.push({ id: "saved-turn", status: "completed", items: [] });
+            controllerStopped = false;
+          }
+          const original = nativeProtocol!;
+          return {
+            ...(await original.launch(input)),
+            close: async () => {
+              controllerStopped = true;
+              await original.close();
+            },
+          };
+        },
+        trackerOverrides: async () => [],
+        herdr: async () => {},
+      })
+    : undefined;
+  let control: SeatControl | undefined;
+  if (adapter && nativeProtocol) {
+    const started = await adapter.start(
+      { harness: "codex", cwd: options.cwd ?? root, brief: "", resumeSessionId: native.value },
+      {
+        paneId,
+        run: async () => {
+          throw new Error("No terminal fallback");
+        },
+        start: async () => {
+          nativeProtocol!.startView();
+        },
+      },
+    );
+    if (started.outcome !== "started") throw new Error(JSON.stringify(started));
+    control = started.control;
+    socketCleanups.push(async () => {
+      await started.control.close();
+      await nativeProtocol!.close();
+    });
+  }
+  let watch = new HerdrWatchStore(watchPath, {
+    runner,
+    ...(adapter ? { remoteSeatAdapters: () => [adapter] } : {}),
+    ...(options.reload
+      ? {
+          validateOwner: async () => true,
+          remoteWorkspace: async (fleet: string, directory: string) =>
+            fleet === "pc" && directory === options.cwd,
+          nativeLaunchPolicy: { admit: async () => {}, prepare: async () => ({ args: [], env: {} }) },
+        }
+      : {}),
+    ...(options.projectHire
+      ? {
+          remoteHireReceipts,
+          projectHirePolicy: {
+            settings: async () => settings,
+            project: async () => "fixture",
+            tools: async () => [],
+            proof: async () =>
+              ++proofReads >= refuseProofAt || controllerStopped
+                ? undefined
+                : { ...proof, pane: `pc/${pane.pane_id}` },
+          },
+        }
+      : {}),
+  });
   if (options.readopt) {
     // Replacement service loads the original journal, then admits path→id reattachment.
     watch.close();
@@ -212,7 +376,24 @@ async function fixture(
   const ports: ConstructorParameters<typeof PaneTidy>[1] = {
     runner,
     provenance: (agent) => watch.tidyProvenance(agent),
+    ...(options.projectHire
+      ? {
+          retirementGuard: (agent: Parameters<HerdrWatchStore["retirementGuard"]>[0]) =>
+            watch.retirementGuard(agent),
+        }
+      : {}),
     ownerValid: async () => true,
+    ...(options.projectHire
+      ? {
+          worktreeHold: () =>
+            remoteRetirementWork(
+              { id: "pc", session: "fixture", ssh: { host: "fixture-host", shell: "posix" } },
+              async (command: string) =>
+                (await promisify(execFile)("/bin/sh", ["-c", command], { timeout: 15000 })).stdout,
+              [options.cwd ?? root],
+            ),
+        }
+      : {}),
     close: (seat, guard) => watch.closeSeat(seat, guard),
     untrack: (seat) => watch.untrackSeat(seat),
     changed: () => {},
@@ -221,11 +402,25 @@ async function fixture(
       ref,
       host: "local",
       sessionId: native.value,
-      workingDirectory: root,
+      workingDirectory: options.cwd ?? root,
       file: { harness, path: join(root, "session.jsonl"), size: 1, mtimeMs: now },
     }),
-    hire: async (request) => {
+    hire: async (request, brief, source) => {
       hires.push(request);
+      if (options.reload)
+        return watch.spawnSeat(
+          request,
+          undefined,
+          brief,
+          {
+            ref: `pc:${native.value}`,
+            host: { id: "pc", ssh: "fixture-host", shell: "posix" },
+            sessionId: native.value,
+            workingDirectory: options.cwd!,
+            file: { harness, path: nativeProtocol!.rolloutPath, size: 1, mtimeMs: now },
+          },
+          source,
+        );
       return hireResult();
     },
   };
@@ -262,8 +457,214 @@ async function fixture(
       others.push({ ...pane, pane_id: "w1:p9", terminal_id: "term_999" });
     },
     closes: () => closes,
+    watchPath,
+    ledger,
+    refuseProofAfter: (reads: number) => {
+      refuseProofAt = proofReads + reads;
+    },
+    replaceHostOnClose: () => {
+      replaceHostOnClose = true;
+    },
+    control,
+    protocol: () => nativeProtocol!,
+    closeController: async () => {
+      await (
+        await adapter?.attach({ harness: "codex", sessionId: native.value, paneId: `pc/${pane.pane_id}` })
+      )?.close();
+    },
+    controllerStopped: () => controllerStopped,
+    receipts: () => new DeliveryFence(`${watchPath}.hire-receipts.json`).all(),
   };
 }
+
+// VUH-2311: production close, allocation, ownership and completed-receipt journals
+// across the remote native socket boundary. No live PC panes are contacted.
+it("records a completed remote project hire close without re-running live admission after exit", async () => {
+  const f = await fixture({ remote: true, socket: true, projectHire: true });
+  try {
+    const result = await f.tidy.close(
+      {
+        pane: "pc/w1:p1",
+        reason: "Reload the saved thread",
+        reportPath: f.reportPath,
+        unlandedReason: "Resume this same worktree and thread; clean commits remain retained",
+      },
+      authority,
+    );
+    expect(result, JSON.stringify(result)).toMatchObject({ outcome: "closed" });
+    expect(f.closes()).toBe(1);
+    expect(f.ledger.retirementCandidate("pc", "pc/w1:p1")).toBeUndefined();
+    expect(f.receipts()[0]![1].retired).toBeDefined();
+    expect(new PaneTidy(f.path, f.ports).history()).toMatchObject([{ state: "closed" }]);
+  } finally {
+    f.watch.close();
+  }
+});
+
+it("a remote provenance refusal preserves allocation, owner, receipt and native roster", async () => {
+  const f = await fixture({ remote: true, socket: true, projectHire: true, controller: true });
+  try {
+    const journals = [".owners.json", ".project-hires.json", ".hire-receipts.json"];
+    const before = await Promise.all(journals.map((suffix) => readFile(f.watchPath + suffix, "utf8")));
+    const roster = await f.ports.runner.list!("pc");
+    // Capture valid original proof, then refuse its final native observation.
+    f.refuseProofAfter(4);
+    expect(
+      await f.tidy.close(
+        {
+          pane: "pc/w1:p1",
+          reason: "Reload",
+          reportPath: f.reportPath,
+          unlandedReason: "Resume the same saved work",
+        },
+        authority,
+      ),
+    ).toMatchObject({
+      outcome: "failed",
+      reason: "provenance_unknown",
+    });
+    expect(await Promise.all(journals.map((suffix) => readFile(f.watchPath + suffix, "utf8")))).toEqual(
+      before,
+    );
+    expect(await f.ports.runner.list!("pc")).toEqual(roster);
+    expect(f.closes()).toBe(0);
+    expect(f.controllerStopped()).toBe(false);
+    expect(await f.control!.status()).toBe("idle");
+    expect(await f.control!.send("One distinct message after the refused close")).toMatchObject({
+      outcome: "accepted",
+    });
+    expect(f.tidy.history()).toEqual([]);
+  } finally {
+    f.watch.close();
+  }
+});
+
+it("reloads a remote Codex thread through close and ordinary hire/resume with four clean unlanded commits", async () => {
+  const w = await workerWorktree();
+  for (let i = 1; i <= 4; i++) {
+    await writeFile(join(w.tree, "feature.txt"), `unlanded ${i}\n`);
+    await git(w.tree, "add", "feature.txt");
+    await git(w.tree, "commit", "--quiet", "-m", `Retained fixture ${i}`);
+  }
+  const head = await git(w.tree, "rev-parse", "HEAD");
+  const f = await fixture({
+    remote: true,
+    socket: true,
+    projectHire: true,
+    controller: true,
+    reload: true,
+    cwd: w.tree,
+  });
+  try {
+    expect(
+      await f.tidy.close({ pane: "pc/w1:p1", reason: "Plugin reload", reportPath: f.reportPath }, authority),
+    ).toMatchObject({
+      outcome: "refused",
+      reason: "unlanded_work",
+      worktrees: [{ dirtyFiles: 0, unlandedCommits: 4 }],
+    });
+    expect(f.controllerStopped()).toBe(false);
+    const closed = await f.tidy.close(
+      {
+        pane: "pc/w1:p1",
+        reason: "Plugin reload",
+        reportPath: f.reportPath,
+        unlandedReason: "Resume the exact thread in this retained worktree; all four commits remain needed",
+      },
+      authority,
+    );
+    expect(closed).toMatchObject({
+      outcome: "closed",
+      entry: {
+        unlanded: {
+          reason: expect.stringContaining("all four commits"),
+          worktrees: [{ dirtyFiles: 0, unlandedCommits: 4, head }],
+        },
+      },
+    });
+    if (closed.outcome !== "closed") throw new Error(JSON.stringify(closed));
+    expect(f.controllerStopped()).toBe(true);
+    const restarted = new PaneTidy(f.path, f.ports);
+    const reopened = await restarted.undo(closed.entry.id, authority);
+    expect(reopened, JSON.stringify(reopened)).toMatchObject({
+      outcome: "reopened",
+      entry: { resumedSeatId: "pc/term_222" },
+    });
+    expect(f.hires).toMatchObject([
+      { fleet: "pc", harness: "codex", resume: `pc:${session.value}`, workingDirectory: w.tree },
+    ]);
+    expect(f.protocol().requests.filter(({ method }) => method === "thread/resume")).toMatchObject([
+      { params: { threadId: session.value } },
+    ]);
+    expect(f.protocol().requests.some(({ method }) => method === "turn/start")).toBe(false);
+    expect(await git(w.tree, "rev-parse", "HEAD")).toBe(head);
+    expect(await git(w.tree, "status", "--porcelain")).toBe("");
+    expect(await git(w.tree, "rev-list", "--count", "origin/main..HEAD")).toBe("4");
+  } finally {
+    f.watch.close();
+    await f.closeController();
+  }
+});
+
+it("retains an uncertain remote close when the host changes during post-exit bookkeeping", async () => {
+  const f = await fixture({ remote: true, socket: true, projectHire: true });
+  try {
+    f.replaceHostOnClose();
+    expect(
+      await f.tidy.close({ pane: "pc/w1:p1", reason: "Reload", reportPath: f.reportPath }, authority),
+    ).toMatchObject({
+      outcome: "failed",
+      reason: "close_unconfirmed",
+    });
+    expect(f.closes()).toBe(1);
+    expect(f.receipts()[0]![1].retired).toBeUndefined();
+    const restarted = new PaneTidy(f.path, f.ports);
+    expect(restarted.history()).toMatchObject([{ state: "close_unconfirmed" }]);
+    expect(await restarted.undo(restarted.history()[0]!.id, authority)).toMatchObject({
+      reason: "undo_unknown",
+    });
+    expect(f.hires).toEqual([]);
+  } finally {
+    f.watch.close();
+  }
+});
+
+it("keeps a remote uncertain resume visible and discovers its same thread before any second hire", async () => {
+  const f = await fixture({ remote: true, socket: true, projectHire: true });
+  try {
+    const closed = await f.tidy.close(
+      { pane: "pc/w1:p1", reason: "Reload", reportPath: f.reportPath },
+      authority,
+    );
+    if (closed.outcome !== "closed") throw new Error(JSON.stringify(closed));
+    f.setHire(async () => ({
+      outcome: "failed",
+      reason: "start_unconfirmed",
+      detail: "fleet_command_failed: Native Herdr observation failed",
+    }));
+    expect(await f.tidy.undo(closed.entry.id, authority)).toMatchObject({
+      reason: "undo_unconfirmed",
+      detail: expect.stringContaining("Native Herdr observation failed"),
+    });
+    const restarted = new PaneTidy(f.path, f.ports);
+    expect(restarted.leadHistory()).toMatchObject([
+      { state: "closed", undoFailure: { detail: expect.stringContaining("start_unconfirmed") } },
+    ]);
+    f.reopenElsewhere();
+    expect(await restarted.undo(closed.entry.id, authority)).toMatchObject({
+      outcome: "reopened",
+      entry: { resumedSeatId: "pc/term_999" },
+    });
+    expect(f.hires).toHaveLength(1);
+    expect(f.hires[0]).toMatchObject({
+      fleet: "pc",
+      resume: `pc:${session.value}`,
+      workingDirectory: f.root,
+    });
+  } finally {
+    f.watch.close();
+  }
+});
 
 // VUH-2130: actual Unix socket requests, production fleet qualification, and journals
 // reloaded on both sides of re-adoption. No live owner panes or terminal typing.

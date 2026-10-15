@@ -294,6 +294,14 @@ A Claude seat still on an older plugin fails with `original_claude_plugin_unchan
 the catalog refresh reaches its running bridge, but a plugin loads only when its
 session starts. Its `detail` names that step: between tasks, close the pane and
 call `hire_agent` with `resume` set to its transcript ref.
+For hired remote Codex seats, retain the report and settle original receipts,
+then require `closed` before resuming `FLEET:SESSION_ID` in the same harness,
+fleet and workingDirectory. Clean unlanded commits may remain only with an
+explicit `unlandedReason`; dirty or unknown work evidence still refuses.
+`undo_worker_pane` within five minutes performs the same guarded resume and
+checks for an already-open thread first. A refusal keeps the worker intact.
+An uncertain close or resume keeps its original history/receipt: inspect it,
+never blindly retry the launch or create a fresh replacement.
 Local Codex `catalog-refreshed` proves the original connected MCP catalog,
 not next-turn model exposure or report delivery. Check `clankie_tools` in that
 same thread and send one new `message_clankie` report; keep its stored receipt.

@@ -662,7 +662,17 @@ older plugin is never reported `refreshed`: it fails with
 `original_claude_plugin_unchanged`, because its plugin loads only when its session
 starts. Its `detail` and the pane's older-plugin notice name the step that loads
 it: between tasks, close the pane and resume its session with `hire_agent`
-(`resume` set to its transcript ref), keeping its context. Local Codex seats started on
+(`resume` set to its transcript ref), keeping its context. For a hired remote Codex
+seat, retain its report, settle original receipts, and wait for a confirmed
+`closed` result before resuming `FLEET:SESSION_ID` with the same harness, fleet and
+working directory. Clean unlanded commits can remain there with an explicit
+`unlandedReason` explaining their retained handoff; dirty or unknown Git evidence
+still refuses. `undo_worker_pane` within five minutes uses the ordinary guarded
+hire/resume path and rescans for the same thread before hiring. A refused close
+leaves the worker intact. `close_unconfirmed` retains close history for inspection;
+`start_unconfirmed` retains the original launch receipt. Inspect either uncertainty
+before another action; never replace or blindly repeat that launch.
+Local Codex seats started on
 worker plugins before 0.6.5 show **restart needed** instead of an in-place refresh
 success. Automatic restart of those legacy seats is disabled. They retire
 naturally; deployment or refresh never quits them. The lead may close an idle

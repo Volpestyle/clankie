@@ -4569,7 +4569,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
           this.activeProjectHires,
           candidates,
         );
-        if (fleet) await this.retireCompletedHires(fleet, { paneId: current.paneId }, guard);
+        // The pane has exited and its allocation is now gone. Its live admission
+        // guard is no longer meaningful here; retirement has its own complete
+        // census and unchanged-host fence. A bookkeeping failure stays unconfirmed.
+        if (fleet) await this.retireCompletedHires(fleet, { paneId: current.paneId });
         return true;
       };
       // pane.close has no lifetime condition. A prepared native TUI can exit
@@ -4603,16 +4606,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return false;
       }
       if (this.stateUnreadable && (current.agent === "opencode" || current.agent === "pi")) return false;
-      // End programmatic control first, so nothing outlives its pane.
+      // Controller disposal can stop the dedicated native backend. Keep it
+      // alive through every admission check so a refusal has no close effects.
       const control = await this.seatControl.attach(current);
-      await guard?.();
-      await control?.close().catch(() => undefined);
       await guard?.();
       if (guard) await this.runner.closePane(current.paneId, guard);
       else await this.runner.closePane(current.paneId);
       // The manager independently checks this original process tuple. A pane
       // close reply alone cannot reclaim a still-live or replaced occupant.
       if (!(await confirmGone())) return false;
+      await control?.close().catch(() => undefined);
       noteVerifiedExit();
       return true;
     } catch {

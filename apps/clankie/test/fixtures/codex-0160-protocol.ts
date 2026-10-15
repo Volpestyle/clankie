@@ -29,6 +29,8 @@ export async function codex0160Protocol(
     /** Replay an observed thread identity across native RPC and host-proof goldens. */
     threadId?: string;
     threadName?: string;
+    /** Store history outside an owned Git worktree while retaining its native cwd. */
+    workingDirectory?: string;
     rejectName?: boolean;
     /** Exercise the same dedicated Unix transport used by local native hires. */
     socketPath?: string;
@@ -41,7 +43,12 @@ export async function codex0160Protocol(
     JSON.stringify({
       timestamp: new Date().toISOString(),
       type: "session_meta",
-      payload: { id: threadId, cwd: directory, cli_version: "0.160.0", source: "cli" },
+      payload: {
+        id: threadId,
+        cwd: options.workingDirectory ?? directory,
+        cli_version: "0.160.0",
+        source: "cli",
+      },
     }) + "\n",
   );
   const http = createServer();
@@ -78,7 +85,7 @@ export async function codex0160Protocol(
     sessionId: threadId,
     turns,
     path: rolloutPath,
-    cwd: directory,
+    cwd: options.workingDirectory ?? directory,
     cliVersion: "0.160.0",
     createdAt: 1_791_201_600,
     updatedAt: 1_791_201_600,
@@ -168,7 +175,7 @@ export async function codex0160Protocol(
               thread: request.params.excludeTurns === true ? { ...thread(), turns: [] } : thread(),
               approvalPolicy: "never",
               approvalsReviewer: "user",
-              cwd: directory,
+              cwd: options.workingDirectory ?? directory,
               model: "fixture-model",
               modelProvider: "fixture",
               sandbox: { type: "readOnly" },
