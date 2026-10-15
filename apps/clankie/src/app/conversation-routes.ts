@@ -519,6 +519,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     const goalOwnerOp =
       parsed.data.op === "autonomy" && operatorAutonomyCommandRequiresOwner(parsed.data.command);
     if (goalOwnerOp && !owner) return context.json({ error: "goal_owner_required" }, 403);
+    const ownerHireOp = parsed.data.op === "spawn_seat" && parsed.data.seat.ownerWork !== undefined;
+    if (ownerHireOp && !owner) return context.json({ error: "owner_hire_required" }, 403);
     const nativeMessageOp = parsed.data.op === "pending_messages" || parsed.data.op === "stop_task";
     if (nativeMessageOp && !owner) return context.json({ error: "operator_authority_required" }, 403);
     const questionOp =
@@ -535,7 +537,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     if (questionOp && !owner) return context.json({ error: "question_owner_required" }, 403);
     if (
       owner &&
-      (nativeMessageOp ||
+      (ownerHireOp ||
+        nativeMessageOp ||
         goalOwnerOp ||
         questionOp ||
         workerOwnerOp ||

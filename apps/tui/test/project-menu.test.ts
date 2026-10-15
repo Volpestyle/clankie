@@ -53,11 +53,28 @@ it("edits and creates projects from the modal through the revision-bearing proje
       "cap",
       "name",
       "product-paths",
+      "wip-cap",
+      "owner-loop",
+      "milestones",
+      "hiring",
       undefined,
       "create",
       undefined,
     ];
-    const texts = ["3", "Garden Path", '["src/","tools/launcher/"]', "orchard", "Orchard", orchard];
+    const hiring = {
+      lead: { harness: "claude", effort: "high" },
+      worker: { harness: "codex", effort: "low" },
+    };
+    const texts = [
+      "3",
+      "Garden Path",
+      '["src/","tools/launcher/"]',
+      "6",
+      JSON.stringify(hiring),
+      "orchard",
+      "Orchard",
+      orchard,
+    ];
     const readSelect = vi.fn(async (_options: unknown) => choices.shift());
     const renderLine = vi.fn();
     const shell = {
@@ -83,6 +100,9 @@ it("edits and creates projects from the modal through the revision-bearing proje
       name: "Garden Path",
       workerCap: 3,
       productPaths: ["src/", "tools/launcher/"],
+      wipCap: 6,
+      ownerLoop: "milestones",
+      hiring,
     });
     expect(saved.find((p) => p.id === "orchard")).toMatchObject({
       name: "Orchard",

@@ -484,3 +484,13 @@ saved leaves when the dial reads `custom`. Treat this as a comparison, never
 permission to reset or raise authority. If a custom leaf causes an owner-gated
 decision, mention that leaf and its saved value when asking. The autonomy dial
 and maximum trust harness mode are separate controls.
+
+## Decision deadlines
+
+Owner decision asks carry a default action and UTC deadline. Choose a default
+within existing authority and pass `defaultAction` plus `deadlineAt` together.
+At a service deadline event, take that default only within current authority and
+tell the owner what you actually did. An expired ask is service-attributed,
+never an owner answer. Owner gates, approvals, verification, account and money
+actions cannot be approved by time passing. Legacy decisions safely defer the
+requested change and continue other authorized work after 24 hours.

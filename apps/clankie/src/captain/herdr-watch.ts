@@ -1,4 +1,4 @@
-import { hireAdmissionReport, hireAdmissionChoice } from "./hire-admission.ts";
+import { hireAdmissionReport, hireAdmissionChoice, HireAdmissionError } from "./hire-admission.ts";
 import type {
   StopNativeTaskResult,
   FleetSeatInputCapabilities,
@@ -2016,6 +2016,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
     flushAdoption?: () => Promise<void>,
   ): Promise<HerdrSeatSpawnResult> {
     const { effort: _retiredEffort, ...defaults } = (await this.hireDefaults?.()) ?? {};
+    if (inputRequest.ownerWork)
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: "Owner app provenance must be verified by the owner service route.",
+      };
     try {
       await this.requireWorkerAccess?.(inputRequest.fleet);
     } catch (error) {
@@ -2036,7 +2042,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
               input,
               resume,
               undefined,
-              brief !== undefined || input.deliverable !== undefined,
+              brief !== undefined || input.deliverable !== undefined || input.effortReason !== undefined,
+              authority?.ownerHire,
             )
           : undefined;
       if (chosen !== undefined && "outcome" in chosen) return chosen;
@@ -2119,7 +2126,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
           planned,
           resume,
           projectHiring,
-          brief !== undefined || planned.deliverable !== undefined,
+          brief !== undefined || planned.deliverable !== undefined || planned.effortReason !== undefined,
+          authority?.ownerHire,
         );
         if ("outcome" in chosen) return chosen;
         hireRequest = { ...hireRequest, harness: chosen.harness };
@@ -2205,11 +2213,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
     resume?: SavedAgentSession,
     policy?: import("@clankie/protocol/projects").ProjectHiringPolicy,
     work = false,
+    ownerHire?: ConversationAuthority["ownerHire"],
   ): Promise<
     { readonly harness: SpawnOperatorSeat["harness"]; readonly why?: string } | HerdrSeatSpawnResult
   > {
     if (resume !== undefined) return { harness: savedSessionHarness(resume) as SpawnOperatorSeat["harness"] };
-    const failed = (detail: string): HerdrSeatSpawnResult => ({
+    const failed = (detail: string): HerdrSeatSpawnFailure => ({
       outcome: "failed",
       reason: "harness_unavailable",
       detail,
@@ -2279,6 +2288,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
           { ...report, accounts: report.accounts.filter((account) => allowed.includes(account.harness)) },
           policy,
           canonicalModels,
+          Date.now(),
+          ownerHire?.overrideUsage === true,
         );
         const selected = hireAdmissionChoice(admitted, undefined, input.account);
         return {
@@ -2286,7 +2297,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
           why: `${selected.plan}: ${selected.reason}`,
         };
       } catch (error) {
-        return failed(reasonDetail(error));
+        return {
+          ...failed(reasonDetail(error)),
+          ...(ownerHire && error instanceof HireAdmissionError ? { admission: error.admission } : {}),
+        };
       }
     }
     const choice = chooseWorkerHarness(machine, report, allowed, input.account);
@@ -2392,7 +2406,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ): Promise<HerdrSeatSpawnResult> {
     try {
       input = await this.resolveHireModels(input);
-      if (brief !== undefined || input.deliverable !== undefined) this.workHires.add(input);
+      if (brief !== undefined || input.deliverable !== undefined || input.effortReason !== undefined)
+        this.workHires.add(input);
       const subagentModel =
         input.subagents?.model && this.resolveModel
           ? await this.resolveModel(input.harness, input.subagents.model)
@@ -3783,11 +3798,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const resourceNotice = this.hireResourceNotices.get(input);
     if (result.outcome === "spawned" && resourceNotice !== undefined) result = { ...result, resourceNotice };
     const harnessReason = this.hireHarnessReasons.get(input);
-    if (result.outcome !== "spawned" || (harnessReason === undefined && chosen.reason === undefined))
+    if (
+      result.outcome !== "spawned" ||
+      (harnessReason === undefined && chosen.reason === undefined && input.effortReason === undefined)
+    )
       return result;
     const reason = [
-      harnessReason === undefined ? undefined : `${input.harness}: ${harnessReason}`,
+      input.effortReason === undefined
+        ? undefined
+        : `model ${input.model ?? "native default"}; effort ${input.effort ?? "native default"}: ${input.effortReason}`,
       chosen.reason,
+      harnessReason === undefined ? undefined : `${input.harness}: ${harnessReason}`,
     ]
       .filter((part): part is string => part !== undefined)
       .join(". ");
@@ -3880,7 +3901,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (
       resume === undefined &&
       this.workHires.has(input) &&
-      (!input.effort || input.effort === HIRE_NO_PREFERENCE || !input.effortReason)
+      ((!authority?.ownerHire && (!input.effort || input.effort === HIRE_NO_PREFERENCE)) ||
+        !input.effortReason)
     )
       return {
         outcome: "failed",
@@ -3910,28 +3932,41 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const models = await Promise.all(
         requestedModels.map((model) => (this.resolveModel ? this.resolveModel(input.harness, model) : model)),
       );
-      const eligible = hireAdmissionReport(report, policy, models);
+      const eligible = hireAdmissionReport(
+        report,
+        policy,
+        models,
+        Date.now(),
+        authority?.ownerHire?.overrideUsage === true,
+      );
       const selection = hireAdmissionChoice(eligible, input.harness, admittedAccount ?? input.account);
       // Pin the verified eligible identity; later identity/grant checks still apply.
       admittedAccount = selection.account.accountKey ?? selection.account.label;
       chosen.account = admittedAccount;
-      chosen.reason = `${selection.plan}; ${Math.round(selection.remaining * 100)}% remaining at ${selection.account.usage!.observedAt}; ${selection.reason}; model ${input.model ?? "native default"}; effort ${input.effort}: ${input.effortReason}`;
+      chosen.reason = `${selection.plan}; ${Math.round(selection.remaining * 100)}% remaining at ${selection.account.usage!.observedAt}; ${selection.reason}${authority?.ownerHire?.overrideUsage ? "; owner explicitly overrode the new-hire usage reserve" : ""}`;
       const allocation = this.projectAllocations.get(input);
       if (allocation)
         this.projectHires.selection(allocation, {
           at: selection.account.usage!.observedAt,
           plan: selection.plan,
           remaining: selection.remaining,
-          reason: selection.reason,
+          reason: `${selection.reason}${authority?.ownerHire?.overrideUsage ? "; owner explicitly overrode the new-hire usage reserve" : ""}`,
           model: models[0] ?? "native default",
-          effort: input.effort!,
+          effort: input.effort ?? "native default",
           effortReason: input.effortReason!,
         });
     };
     try {
       await recheckPlan();
     } catch (error) {
-      return { outcome: "failed", reason: "harness_unavailable", detail: reasonDetail(error) };
+      return {
+        outcome: "failed",
+        reason: "harness_unavailable",
+        detail: reasonDetail(error),
+        ...(authority?.ownerHire && error instanceof HireAdmissionError
+          ? { admission: error.admission }
+          : {}),
+      };
     }
     // Resolve a preference to an identity before preparing any native launch.
     // The chosen home is replaceable; the requested identity is not.

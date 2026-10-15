@@ -805,11 +805,23 @@ export function createOperatorService(
             detail: "An exact authorized hiring conversationId is required",
           },
         };
-      const hired = await ctx.hireSeat(request.seat, request.brief, {
-        owner: { conversationId },
-        current: () => ctx.conversations.runsCaptainTurns(conversationId),
-        authorize: async () => ctx.conversations.runsCaptainTurns(conversationId),
-      });
+      const { ownerWork, ...seat } = request.seat;
+      if (ownerWork) await authorizeQuestion(authority);
+      const hired = await ctx.hireSeat(
+        { ...seat, ...(ownerWork ? { effortReason: `owner-chosen via app (${ownerWork.surface})` } : {}) },
+        request.brief,
+        {
+          owner: { conversationId },
+          ...(ownerWork ? { ownerHire: ownerWork } : {}),
+          current: () =>
+            ctx.conversations.runsCaptainTurns(conversationId) &&
+            (!ownerWork || authority?.current() === true),
+          authorize: async () => {
+            if (ownerWork) await authorizeQuestion(authority);
+            return ctx.conversations.runsCaptainTurns(conversationId);
+          },
+        },
+      );
       const result = {
         ...hired,
         deliveryStage:

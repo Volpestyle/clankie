@@ -70,6 +70,11 @@ export function captureNativeSeatAuthority(source: NativeSeatAuthority): NativeS
 
 /** A live admitted turn. Persist only owner; refresh authority before each later wake. */
 export interface ConversationAuthority {
+  /** Host-verified owner app intent; never copied from model input. */
+  readonly ownerHire?: {
+    readonly surface: "phone" | "tablet" | "web" | "desktop";
+    readonly overrideUsage?: boolean;
+  };
   readonly owner: ConversationOwner;
   readonly current: () => boolean;
   readonly authorize: () => Promise<boolean>;
@@ -81,7 +86,12 @@ export function captureConversationAuthority(
   if (source === undefined) throw new Error("Turn conversation attribution is unavailable");
   const owner = ConversationOwnerSchema.parse(source.owner);
   if (owner.discord !== undefined) Object.freeze(owner.discord);
-  return Object.freeze({ owner: Object.freeze(owner), current: source.current, authorize: source.authorize });
+  return Object.freeze({
+    owner: Object.freeze(owner),
+    current: source.current,
+    authorize: source.authorize,
+    ...(source.ownerHire ? { ownerHire: Object.freeze({ ...source.ownerHire }) } : {}),
+  });
 }
 
 export async function assertConversationAuthority(source: ConversationAuthority): Promise<void> {

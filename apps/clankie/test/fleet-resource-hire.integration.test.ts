@@ -461,6 +461,33 @@ it("refuses a new job without an effort rationale before any native process star
   expect(f.launches()).toBe(0);
 });
 
+it("records the verified owner's app choice without asking for a rationale, including a native-default effort", async () => {
+  const f = await fixture();
+  const result = await f.store.spawnSeat(
+    {
+      schemaVersion: 1,
+      title: "Owner job",
+      harness: "opencode",
+      workingDirectory: f.root,
+      effortReason: "owner-chosen via app (phone)",
+    },
+    undefined,
+    undefined,
+    undefined,
+    {
+      owner: { conversationId: "global-default" },
+      current: () => true,
+      authorize: async () => true,
+      ownerHire: { surface: "phone" },
+    },
+  );
+  expect(result).toMatchObject({
+    outcome: "spawned",
+    accountChoice: { reason: expect.stringContaining("effort native default: owner-chosen via app (phone)") },
+  });
+  expect(f.launches()).toBe(1);
+});
+
 it("LOCAL-VUH-6: preserves owner policy, project cap and resource refusals", async () => {
   const f = await autoFixture();
   await f.settings.update((current) => ({

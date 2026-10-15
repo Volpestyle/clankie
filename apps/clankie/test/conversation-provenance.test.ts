@@ -400,6 +400,20 @@ it("validates a persisted exact room against current grants and never falls back
       seat: { schemaVersion: 1, harness: "claude", title: "not launched", workingDirectory: stateDir },
     });
     expect(missingHire).toMatchObject({ result: { outcome: "failed", reason: "not_ready" } });
+    await expect(
+      captain.serveOperatorConversation({
+        schemaVersion: 1,
+        op: "spawn_seat",
+        conversationId: "global-default",
+        seat: {
+          schemaVersion: 1,
+          harness: "claude",
+          title: "unverified app",
+          workingDirectory: stateDir,
+          ownerWork: { surface: "phone", overrideUsage: true },
+        },
+      }),
+    ).rejects.toThrow("question_owner_unavailable");
   } finally {
     captain.close();
     start.mockRestore();

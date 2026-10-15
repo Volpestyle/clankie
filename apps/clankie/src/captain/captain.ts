@@ -4766,9 +4766,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // A little slack, so a tick's own jitter never skips a measurement.
           const policy = JSON.stringify(project);
           if (
-            last && autoMeasurementPolicies.get(project.id) === policy &&
+            last &&
+            autoMeasurementPolicies.get(project.id) === policy &&
             Date.now() - Date.parse(last.measuredAt) < autoRoundIntervalMs * 0.9
-          ) return;
+          )
+            return;
           const correction = autoRoundRecord.pendingCorrection(project.id);
           const velocity = await measureVelocityWithin(project, autoRoundRecord.lastMilestone(project.id), {
             ...velocityDeps,

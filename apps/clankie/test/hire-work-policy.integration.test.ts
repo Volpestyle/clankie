@@ -199,3 +199,62 @@ it("stops new hires on near-limit, held, stale or unobserved plans even when exp
     hireAdmissionChoice(hireAdmissionReport(unknown, undefined, [], NOW), undefined, undefined, NOW),
   ).toThrow("unavailable");
 });
+
+it("permits an explicit owner override of the reserve, while keeping holds, exclusions and exhausted accounts binding", () => {
+  const near = structuredClone(report);
+  near.accounts.forEach((account) =>
+    account.usage?.windows.forEach((window) => {
+      window.usedPercent = 95;
+    }),
+  );
+  const refused = hireAdmissionReport(near, { allowedPlans: ["codex:pro"] }, [], NOW);
+  try {
+    hireAdmissionChoice(refused, "codex", "default", NOW);
+    throw new Error("Expected refusal");
+  } catch (error) {
+    expect(error).toMatchObject({
+      admission: {
+        kind: "usage_refused",
+        canOverride: true,
+        accounts: [{ plan: "codex:pro", canOverride: true, resetsAt: expect.any(String) }],
+      },
+    });
+  }
+  expect(
+    hireAdmissionChoice(hireAdmissionReport(near, undefined, [], NOW, true), "codex", "default", NOW)
+      .remaining,
+  ).toBeCloseTo(0.05);
+  for (const guarded of [
+    {
+      source: { ...near, accounts: near.accounts.map((account) => ({ ...account, held: {} })) },
+      policy: undefined,
+    },
+    {
+      source: near,
+      policy: { excludedPlans: ["codex:pro", "claude:max_20x", "claude:max_5x", "codex:free"] },
+    },
+    {
+      source: {
+        ...near,
+        accounts: near.accounts.map((account) => ({ ...account, usable: false, reason: "Signed out" })),
+      },
+      policy: undefined,
+    },
+  ])
+    expect(() =>
+      hireAdmissionChoice(
+        hireAdmissionReport(guarded.source, guarded.policy, [], NOW, true),
+        "codex",
+        "default",
+        NOW,
+      ),
+    ).toThrow("No observed plan");
+  near.accounts.forEach((account) =>
+    account.usage?.windows.forEach((window) => {
+      window.usedPercent = 100;
+    }),
+  );
+  expect(() =>
+    hireAdmissionChoice(hireAdmissionReport(near, undefined, [], NOW, true), "codex", "default", NOW),
+  ).toThrow("No observed plan");
+});

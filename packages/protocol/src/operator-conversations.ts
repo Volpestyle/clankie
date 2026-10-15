@@ -1184,6 +1184,14 @@ export const SpawnOperatorSeatSchema = z
     hireKind: z.enum(["lead", "worker"]).optional(),
     /** Per-job explanation of why this is the smallest effort that meets acceptance. */
     effortReason: z.string().trim().min(1).max(600).optional(),
+    /** Opt-in owner app work hire; service verifies owner authority and supplies its own rationale. */
+    ownerWork: z
+      .object({
+        surface: z.enum(["phone", "tablet", "web", "desktop"]),
+        overrideUsage: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
 
     /** Saved transcript ref (`host:sessionId`); continue it as a normal native seat. */
     resume: z.string().trim().min(1).max(128).optional(),
@@ -1327,6 +1335,29 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
         "delivery_unconfirmed",
         "start_unconfirmed",
       ]),
+      /** Only returned to an ownerWork client opting into usage admission details. */
+      admission: z
+        .object({
+          kind: z.literal("usage_refused"),
+          canOverride: z.boolean(),
+          accounts: z
+            .array(
+              z
+                .object({
+                  harness: z.string(),
+                  account: z.string(),
+                  plan: z.string(),
+                  remaining: z.number().min(0).max(1).nullable(),
+                  resetsAt: z.string().optional(),
+                  reason: z.string(),
+                  canOverride: z.boolean(),
+                })
+                .strict(),
+            )
+            .max(256),
+        })
+        .strict()
+        .optional(),
       detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
       control: SeatControlModeSchema.optional(),
     })

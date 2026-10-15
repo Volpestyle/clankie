@@ -176,7 +176,10 @@ export function createProjectRoutes(
         for (const model of [profile.model, profile.subagents?.model])
           if (model) resolveHireModel(catalog, profile.harness, model);
       }
-      for (const model of hiring?.excludedModels ?? []) resolveHireModel(catalog, undefined, model);
+      for (const model of hiring?.excludedModels ?? []) {
+        const canonical = resolveHireModel(catalog, undefined, model);
+        if (canonical !== model) throw new Error(`Use the canonical excluded model id: ${canonical}`);
+      }
     } catch (error) {
       return context.json({ error: "invalid_hire_model", detail: String(error) }, 400);
     }

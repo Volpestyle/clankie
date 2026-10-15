@@ -6446,6 +6446,22 @@ the same mailbox. Legacy `preference` questions remain supported. `kind`
 never grant credentials, enroll a machine or change settings. Project creation
 still requires its separate reviewed CREATE target.
 
+Decision asks include `defaultAction` (up to 1900 characters) and `deadlineAt`
+(UTC ISO timestamp) together. The owner sees both in the existing steps display.
+If neither is supplied, the safe default leaves the requested change pending and
+continues other authorized work after 24 hours. Existing pending decisions acquire
+that same default and a deadline 24 hours after their original creation time.
+Gates, approvals, verification, owner actions and native worker questions never
+expire into permission.
+
+At expiry, the service cancels the ask with reason `decision_deadline_elapsed`,
+records service attribution and no owner answer, publishes one owner notice, and
+queues one continuation asking the source lead to take its declared default
+within existing authority and report the actual outcome. Both survive restart;
+an interrupted accepted continuation remains visibly failed rather than being
+replayed on uncertainty. An owner answer accepted before expiry prevents the
+default. Elapsed time never grants money, account, credential or gate authority.
+
 ```sh
 clankie conversations questions
 clankie conversations questions --status pending
@@ -6812,6 +6828,19 @@ minutes, preserve a 10% reserve for running work, and honor owner holds and proj
 constraints even when an account is pinned. Automatic choice ranks observed spare
 plan capacity per day. Admission records plan, remaining usage, model, effort and
 rationale in the hire receipt and project journal. No existing seat is stopped.
+
+Owner app composes with a first message send `ownerWork: {surface}` (phone,
+tablet, web or desktop). The service verifies owner authority and records
+`owner-chosen via app (<surface>)`; the owner need not write a rationale. Effort
+uses the owner's choice or role/project profile, otherwise the native default,
+recorded explicitly. Agent-initiated jobs still supply their own effort rationale.
+
+An ownerWork refusal can include `admission` with plan, remaining fraction,
+reset, reason and `canOverride`. An explicit retry with
+`ownerWork.overrideUsage:true` may override only the new-hire reserve on a known,
+nonzero, otherwise usable plan. Holds, project exclusions, unavailable/stale usage,
+exhaustion and other authority/capacity gates remain binding. Older clients that
+do not opt into ownerWork retain the existing result shape.
 
 For a reviewed JSON update, `autonomy: { "fleet": { "closure": "owner" } }`
 sets one override; `autonomy: { "fleet": { "closure": null } }` clears it. No
