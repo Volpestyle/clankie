@@ -101,7 +101,10 @@ booted from it) retires itself and shows `latest.reconciled`; then another updat
 is permitted, subject to remaining deploy holds. Until that proof appears, keep
 the original operation and lock, report its reason, error and rollback details,
 and ask the owner to review it. Do not resend a `stop-unconfirmed` or other
-uncertain failure, delete its lock, or restart to work around it.
+uncertain failure, delete its lock, or restart to work around it. Such an ending
+already retried each unconfirmed step and alerts once through runtime health when
+the next service boots; its attempts are in `service-attempts.jsonl` beside the
+operation.
 An update that never left `scheduled` because its helper crashed on start (no
 `claimed` file beside `helper.log`) changed nothing. The helper can record it
 `failed` with `pre-cutover-failed`; otherwise, an unclaimed scheduled operation is

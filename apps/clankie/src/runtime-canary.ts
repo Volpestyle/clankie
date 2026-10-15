@@ -51,6 +51,7 @@ export interface RuntimeCanaryCpu {
 export { RUNTIME_CANARY_HOLDER };
 const HOLDER = RUNTIME_CANARY_HOLDER;
 const CheckpointSchema = z.strictObject({ commit: z.string().regex(/^[a-f0-9]{40,64}$/u) });
+const UnconfirmedAlertSchema = z.enum(["claimed", "submitted", "unavailable"]);
 // Sidecar metadata keeps result.json readable by retained older runtimes during rollback.
 const PressureSchema = z.strictObject({
   state: z.enum(["busy", "clear", "unavailable"]),
@@ -307,6 +308,7 @@ export class RuntimeCanary {
     if (!result) return;
     if (["rolled-back", "failed", "stop-unconfirmed"].includes(result.phase)) {
       await this.releasePrehealthyRollback(result);
+      await this.alertUnconfirmed(result);
       return;
     }
     if (result.phase === "restarting" && result.newCommit === this.options.runtime.commit) {
@@ -537,6 +539,7 @@ export class RuntimeCanary {
     let result = this.latest();
     if (result !== undefined && ["rolled-back", "failed", "stop-unconfirmed"].includes(result.phase)) {
       await this.releasePrehealthyRollback(result);
+      await this.alertUnconfirmed(result);
       return;
     }
     if (!result || result.phase !== "healthy") return;
@@ -818,6 +821,48 @@ export class RuntimeCanary {
         existing,
       );
     }
+  }
+
+  /**
+   * A deploy that stopped services and could not confirm a healthy end may have
+   * left them down until someone started them (VUH-2293). The runtime that boots
+   * next alerts the initiating conversation, or the owner's, once per update
+   * through the runtime-health route; an uncertain delivery is never replayed.
+   */
+  private async alertUnconfirmed(result: RuntimeUpdateResult): Promise<void> {
+    const unconfirmed =
+      result.phase === "stop-unconfirmed" ||
+      (result.phase === "failed" &&
+        result.reason !== "pre-cutover-failed" &&
+        result.rollbackHealthy !== true);
+    if (!unconfirmed || !this.options.alert) return;
+    const path = join(this.options.updatesDirectory, result.id, "unconfirmed-alert.json");
+    if (existsSync(path) && UnconfirmedAlertSchema.parse(readPrivateJson(path)) !== "unavailable") return;
+    const failures = [
+      ...new Set(
+        (result.serviceReceipts ?? []).flatMap((receipt) =>
+          receipt.services.flatMap((entry) => (entry.ok ? [] : [`${entry.id}: ${entry.error ?? "failed"}`])),
+        ),
+      ),
+    ];
+    const text = [
+      `Deploy ${result.id} (${result.oldCommit.slice(0, 9)} → ${result.newCommit.slice(0, 9)}) ended ${result.phase}${result.reason ? ` (${result.reason})` : ""}${result.error ? `: ${result.error}` : ""}.`,
+      `Its services may have been down until this runtime (${this.options.runtime.commit.slice(0, 9)}) started.`,
+      failures.length ? `Unconfirmed: ${failures.join("; ")}` : "",
+      `Inspect: clankie update status; every attempt is in ~/.clankie/updates/${result.id}/service-attempts.jsonl.`,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 4000);
+    // A crash after this claim leaves delivery unknown. It must never replay an uncertain notification.
+    await durableJson(path, "claimed");
+    let submitted = false;
+    try {
+      submitted = (await this.options.alert(text, result.initiator?.conversationId)) === true;
+    } catch {
+      return;
+    }
+    await durableJson(path, submitted ? "submitted" : "unavailable");
   }
 
   private async releasePrehealthyRollback(result: RuntimeUpdateResult): Promise<void> {

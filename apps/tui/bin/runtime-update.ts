@@ -3,8 +3,9 @@
  * The helper runs a private copy of this file beside `pinned-runtime.ts` and `update-files.ts`, outside
  * any workspace, so it may import only `node:` builtins and those copies.
  */
-import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   readPrivateJson,
   writePrivateJson,
@@ -287,7 +288,15 @@ export interface RuntimeUpdatePorts {
   readonly services: (runtime: string, action: "down" | "restart") => Promise<RuntimeServiceReceipt>;
   readonly now?: () => Date;
   readonly refreshHarnesses?: (runtime: string) => Promise<{ ok: boolean }>;
+  /** Waits before retrying an unconfirmed stop or restart; defaults to 10 s, then 30 s. */
+  readonly retryDelaysMs?: readonly number[];
 }
+
+/**
+ * A loaded Mac can leave a stop or restart unconfirmed for seconds (VUH-2293).
+ * Retry before treating the cutover as failed or leaving services down.
+ */
+const SERVICE_RETRY_DELAYS_MS = [10_000, 30_000];
 
 export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
   const value = object(readPrivateJson(join(directory, "result.json")));
@@ -533,9 +542,16 @@ export async function executeRuntimeUpdate(
   const stage = join(plan.directory, "staged");
   const backup = join(plan.directory, "previous");
   const serviceReceipts: RuntimeServiceReceipt[] = [];
-  const service = async (action: "down" | "restart", expectedCommit: string) => {
+  const attempt = async (action: "down" | "restart", expectedCommit: string, retry: boolean) => {
     const receipt = parseServiceReceipt(await ports.services(plan.runtime, action));
+    // The record keeps one receipt per step, its latest; every attempt stays in the log.
+    if (retry) serviceReceipts.pop();
     serviceReceipts.push(receipt);
+    appendFileSync(
+      join(plan.directory, "service-attempts.jsonl"),
+      `${JSON.stringify({ at: (ports.now?.() ?? new Date()).toISOString(), action, receipt })}\n`,
+      { mode: 0o600 },
+    );
     if (
       !receipt.ok ||
       !receipt.services.every((entry) => entry.ok) ||
@@ -548,6 +564,21 @@ export async function executeRuntimeUpdate(
       receipt.runtime.commit === expectedCommit &&
       receipt.runtime.instanceId !== plan.oldInstanceId
     );
+  };
+  const service = async (action: "down" | "restart", expectedCommit: string) => {
+    const delays = ports.retryDelaysMs ?? SERVICE_RETRY_DELAYS_MS;
+    let attempted = false;
+    for (let index = 0; ; index += 1) {
+      try {
+        const settled = await attempt(action, expectedCommit, attempted);
+        attempted = true;
+        if (settled) return true;
+      } catch (error) {
+        if (index >= delays.length) throw error;
+      }
+      if (index >= delays.length) return false;
+      await sleep(delays[index]!);
+    }
   };
   const persist = (phase: RuntimeUpdateResult["phase"], fields: Partial<RuntimeUpdateResult> = {}) => {
     const result: RuntimeUpdateResult = {

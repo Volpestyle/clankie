@@ -702,7 +702,7 @@ it("cleans an armed pre-canary hold only after the ordinary helper confirms roll
 });
 
 it.each(["failed", "stop-unconfirmed"] as const)(
-  "retains a pre-canary hold for owner reconciliation when helper outcome is %s",
+  "retains a pre-canary hold for owner reconciliation and alerts once when helper outcome is %s",
   async (phase) => {
     const f = await fixture({ phase: "restarting" });
     const target = await start(f.root);
@@ -713,7 +713,10 @@ it.each(["failed", "stop-unconfirmed"] as const)(
     expect(recovered.result.phase).toBe(phase);
     expect(recovered.holds.map((hold) => hold.id)).toEqual([f.id]);
     await expect(previous.call("landing")).rejects.toThrow("Deploy held");
-    expect(await alerts(f.root)).toEqual([]);
+    // The services may have been down: the runtime that boots says so once (VUH-2293).
+    const sent = await alerts(f.root);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain(`Deploy ${f.id} (aaaaaaaaa → bbbbbbbbb) ended ${phase}`);
     // Once the running runtime reconciles the ending, the never-started canary's hold goes.
     await stop(previous.child);
     const directory = join(f.updates, f.id);
@@ -725,6 +728,7 @@ it.each(["failed", "stop-unconfirmed"] as const)(
     expect((await reconciled.status()).holds).toEqual([]);
     await expect(reconciled.call("landing")).resolves.toBeDefined();
     await stop(reconciled.child);
+    expect(await alerts(f.root)).toHaveLength(1);
   },
 );
 

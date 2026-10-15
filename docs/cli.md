@@ -699,8 +699,14 @@ example because it cannot load, has changed nothing: it records `failed` with
 If it could not record even that, an operation still `scheduled` and unclaimed
 ten minutes after acceptance is recorded the same way when the service next
 starts or admits an update. Reading status alone never retires or reconciles it.
-An operation that ended `stop-unconfirmed` or `failed` reconciles itself when the
-service next starts, and again before the next update, once three facts hold: its
+The helper retries a stop or restart it could not confirm, after 10 seconds and
+then 30, before it rolls back or reports the step unconfirmed; the result keeps
+each step's latest receipt and `service-attempts.jsonl` beside it keeps every
+attempt. A deploy that stopped services and still ended `stop-unconfirmed`, or
+`failed` without a confirmed rollback, may have left them down: the runtime that
+boots next sends one runtime-health alert to the initiating conversation, or the
+owner's, naming the unconfirmed services. An operation that ended
+`stop-unconfirmed` or `failed` reconciles itself when the service next starts, and again before the next update, once three facts hold: its
 helper wrote that final result as its last log line, the pin is a clean detached
 worktree at the old or new commit, and the running service booted from that exact
 pin. The result gains `reconciled` (time, commit, instance) and the lock is kept
@@ -1200,7 +1206,11 @@ other ports does not block them. This uses
 `lsof`, supplied by macOS and required in Linux installations for this check;
 if inspection fails, the launcher conservatively refuses matching unowned
 processes. Named activity tunnels check their configured tunnel name. Foreign
-processes are never signalled.
+processes are never signalled. A process counts as this runtime's service only
+when it belongs to this runtime: a release `libexec/node` under the runtime
+root, or a workspace `pnpm --filter … start` whose working directory is the
+runtime. Another checkout's service or a test fixture's look-alike under a
+temporary directory never blocks a stop or start (VUH-2293).
 
 Use plain `clankie restart` for a normal restart. The optional service target
 is only needed to select a narrower dependency set.

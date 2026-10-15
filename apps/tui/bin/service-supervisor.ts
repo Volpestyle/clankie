@@ -6,11 +6,12 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { clankieStateHome } from "../src/state-home.ts";
 import { localSandboxControl, localSandboxLaunch } from "@clankie/settings";
@@ -155,6 +156,8 @@ export interface ServiceCommandOptions {
   readonly readProcessCommandImpl?: (pid: number) => string;
   /** Test seam for the process-table scan behind `matchingPids`. */
   readonly listProcessCommandsImpl?: () => readonly (readonly [number, string])[];
+  /** Test seam for the working directories that scope `matchingPids` to this runtime. */
+  readonly processDirectoriesImpl?: (pids: readonly number[]) => ReadonlyMap<number, string>;
   readonly listPortOwnersImpl?: (port: number) => readonly number[] | undefined;
   readonly spawnImpl?: typeof spawn;
   readonly timeoutMs?: number;
@@ -170,6 +173,11 @@ export interface ServiceStatus {
 }
 
 const DEFAULT_SERVICE_STARTUP_TIMEOUT_MS = 60_000;
+/**
+ * `-b` skips kernel calls that can block; without it a port query took about
+ * 3 s at load 12 (0.07 s with it), and `-w` keeps its warnings off stderr.
+ */
+const LSOF_TIMEOUT_MS = 10_000;
 const STOP_GRACE_MS = 10_000;
 
 function clankieStateDirectory(env: NodeJS.ProcessEnv = process.env): string {
@@ -222,7 +230,8 @@ function readProcessCommand(pid: number): string {
 /** Every live process as `[pid, command]`, for finding a service nobody recorded. */
 export function listProcessCommands(): readonly (readonly [number, string])[] {
   try {
-    return execFileSync("ps", ["-Ao", "pid=,command="], { encoding: "utf8" })
+    // A loaded Mac's table passes execFileSync's 1 MB default, and a failed read reads as no processes.
+    return execFileSync("ps", ["-Ao", "pid=,command="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
       .split("\n")
       .map((line) => {
         const match = /^\s*(\d+)\s+(.*)$/u.exec(line);
@@ -246,23 +255,80 @@ export function listProcessCommands(): readonly (readonly [number, string])[] {
  * a heartbeat. A bridge that exits without publishing `off` leaves a `present`
  * behind forever, and `clankie restart` then refuses to proceed against a
  * process that does not exist. Asking the process table is the direct answer.
+ *
+ * Only this runtime's processes count. A release-shaped process is this
+ * runtime's when its `libexec/node` lives under the runtime root; a workspace
+ * `pnpm --filter … start` is when its working directory does. Another checkout's
+ * service or a test fixture's look-alike is not this service: on 2026-10-15
+ * leaked fixtures under a temp directory made a deploy refuse to restart its
+ * own services, leaving them down (VUH-2293). A process whose directory cannot
+ * be read still counts, so an uninspected process never permits a start.
  */
 function findServiceProcessPids(
   service: Pick<ManagedService, "commandMatches">,
-  listImpl: () => readonly (readonly [number, string])[] = listProcessCommands,
+  options: Pick<ServiceCommandOptions, "repoRoot" | "listProcessCommandsImpl" | "processDirectoriesImpl">,
 ): readonly number[] {
-  return listImpl()
-    .filter(([pid, command]) => pid !== process.pid && service.commandMatches(command))
+  const matching = (options.listProcessCommandsImpl ?? listProcessCommands)().filter(
+    ([pid, command]) => pid !== process.pid && service.commandMatches(command),
+  );
+  const roots = new Set([resolve(options.repoRoot), canonical(options.repoRoot)]);
+  const inRuntime = (path: string) => [...roots].some((root) => path === root || path.startsWith(`${root}/`));
+  const release = (command: string) => /^(\/.*?)\/libexec\/node /u.exec(command)?.[1];
+  // A substituted process table has no real pids to inspect.
+  const readDirectories =
+    options.processDirectoriesImpl ??
+    (options.listProcessCommandsImpl === undefined ? processDirectories : () => new Map<number, string>());
+  const directories = readDirectories(
+    matching.filter(([, command]) => release(command) === undefined).map(([pid]) => pid),
+  );
+  return matching
+    .filter(([pid, command]) => {
+      const root = release(command);
+      if (root !== undefined) return inRuntime(canonical(root));
+      const directory = directories.get(pid);
+      return directory === undefined || inRuntime(canonical(directory));
+    })
     .map(([pid]) => pid);
+}
+
+function canonical(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+/** Each pid's working directory from one lsof call; a pid it could not read is absent. */
+function processDirectories(pids: readonly number[]): ReadonlyMap<number, string> {
+  const directories = new Map<number, string>();
+  if (pids.length === 0) return directories;
+  let output: string;
+  try {
+    output = execFileSync("lsof", ["-bw", "-a", "-d", "cwd", "-p", pids.join(","), "-Fpn"], {
+      encoding: "utf8",
+      timeout: LSOF_TIMEOUT_MS,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch (error) {
+    // lsof exits 1 when any listed pid has gone, still printing the rest.
+    output = (error as { stdout?: string }).stdout ?? "";
+  }
+  let pid: number | undefined;
+  for (const line of output.split("\n")) {
+    if (line.startsWith("p")) pid = Number(line.slice(1));
+    else if (line.startsWith("n/") && pid !== undefined) directories.set(pid, line.slice(1));
+  }
+  return directories;
 }
 
 /** A listener's pid can be a grandchild of the pnpm pid in the launcher record. */
 function listPortOwners(port: number): readonly number[] | undefined {
   if (!Number.isInteger(port) || port < 1 || port > 65_535) return undefined;
   try {
-    const output = execFileSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
+    const output = execFileSync("lsof", ["-nPbw", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
       encoding: "utf8",
-      timeout: 2_000,
+      timeout: LSOF_TIMEOUT_MS,
       stdio: ["ignore", "pipe", "pipe"],
     });
     const pids = output.trim().length === 0 ? [] : output.trim().split(/\s+/u).map(Number);
@@ -280,10 +346,7 @@ function conflictingServicePids(
   env: NodeJS.ProcessEnv,
   options: ServiceCommandOptions,
 ): readonly number[] {
-  const matchingPids = findServiceProcessPids(
-    service,
-    options.listProcessCommandsImpl ?? listProcessCommands,
-  );
+  const matchingPids = findServiceProcessPids(service, options);
   return (
     service.conflictingPids?.({
       env,
@@ -495,7 +558,7 @@ export async function inspectService(
     fetchImpl: options.fetchImpl ?? fetch,
     operatorToken: options.operatorToken,
     record,
-    matchingPids: findServiceProcessPids(service, options.listProcessCommandsImpl ?? listProcessCommands),
+    matchingPids: findServiceProcessPids(service, options),
   });
   return {
     id: service.id,
@@ -655,7 +718,7 @@ export async function startService(
       fetchImpl,
       operatorToken: options.operatorToken,
       record,
-      matchingPids: findServiceProcessPids(service, options.listProcessCommandsImpl ?? listProcessCommands),
+      matchingPids: findServiceProcessPids(service, options),
     });
     if (probe.state === "healthy") {
       // Never hold the launcher's event loop open on a detached service, or

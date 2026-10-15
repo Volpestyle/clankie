@@ -1,4 +1,13 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, renameSync, existsSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  realpathSync,
+  renameSync,
+  existsSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
@@ -106,6 +115,8 @@ function fixture(buildBridge = false) {
     plan,
     run,
     services,
+    // Single attempts unless a case is about retries.
+    retryDelaysMs: [] as number[],
     calls,
     commits,
     dirty,
@@ -252,6 +263,58 @@ it("new health failure restores exact previous pin and records rollback health",
     "restart:old",
   ]);
   expect(f.commits.get(f.plan.runtime)).toBe(f.plan.oldCommit);
+});
+it("retries a restart left unconfirmed under load and keeps one receipt per step", async () => {
+  const f = fixture();
+  let refusals = 1;
+  f.onService(
+    async (root, action) =>
+      !(action === "restart" && f.commits.get(root) === f.plan.newCommit && refusals-- > 0),
+  );
+  const result = await executeRuntimeUpdate(f.plan, { ...f, retryDelaysMs: [0, 0] });
+  expect(result).toMatchObject({ phase: "healthy", healthy: true });
+  expect(f.calls).toEqual([
+    "stage",
+    "install",
+    "down:old",
+    "move:pin",
+    "move:stage",
+    "restart:new",
+    "restart:new",
+  ]);
+  expect(result.serviceReceipts).toHaveLength(2);
+  expect(readRuntimeUpdate(f.plan.directory)).toEqual(result);
+  const attempts = readFileSync(join(f.plan.directory, "service-attempts.jsonl"), "utf8").trim().split("\n");
+  expect(attempts.map((line) => [JSON.parse(line).action, JSON.parse(line).receipt.ok])).toEqual([
+    ["down", true],
+    ["restart", false],
+    ["restart", true],
+  ]);
+});
+it("a stop refused while the new services are down is retried, so the rollback still completes (VUH-2293)", async () => {
+  const f = fixture();
+  let downRefusals = 1;
+  f.onService(async (root, action) => {
+    const fresh = f.commits.get(root) === f.plan.newCommit;
+    if (action === "restart") return !fresh;
+    return !(fresh && downRefusals-- > 0);
+  });
+  expect(await executeRuntimeUpdate(f.plan, { ...f, retryDelaysMs: [0, 0] })).toMatchObject({
+    phase: "rolled-back",
+    rollbackHealthy: true,
+  });
+  expect(f.calls.slice(5)).toEqual([
+    "restart:new",
+    "restart:new",
+    "restart:new",
+    "down:new",
+    "down:new",
+    "move:pin",
+    "move:previous",
+    "restart:old",
+  ]);
+  expect(f.commits.get(f.plan.runtime)).toBe(f.plan.oldCommit);
+  expect(readRuntimeUpdate(f.plan.directory).serviceReceipts).toHaveLength(4);
 });
 it("uncertain new shutdown retains both runtime worktrees without unsafe rollback moves", async () => {
   const f = fixture();
