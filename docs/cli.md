@@ -216,7 +216,14 @@ cooldown bounds alarms for subsequent incidents. An unavailable native delivery
 retries the same text at most once a minute, and a retained uncertain native
 receipt counts as accepted so it is not replayed. These observations create no
 service model turn. Include incident and recovery evidence in the next Linear
-check-in.
+project check-in, even if the runtime has recovered by then: alarm and recovery
+times, incident duration, native delivery result, and the issue's evidence link.
+
+This observer runs throughout the service's lifetime, independently of the
+[post-update canary](#service-lifecycle). The canary checks a new runtime's health over a
+bounded window and reports CPU as an advisory comparison; it does not replace
+the sustained CPU/health alarm. Machine pressure can extend that canary window
+without disabling this observer or changing its thresholds.
 
 An operator catalog report with fresh process/session proof preserves the exact
 native attachment to that conversation. A bare transcript attachment still
