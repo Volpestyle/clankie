@@ -252,7 +252,12 @@ authority is rechecked with a 250 ms deadline immediately before sending. Timeou
 means undelivered; late approval cannot send. Private or unproved
 homes refuse the CLI fallback, and private native receipts never authorize a
 second send. Large finite SSH commands stream their quoted wrapper over stdin,
-keeping message bodies out of the multiplexing control request. A proven
+keeping message bodies out of the multiplexing control request. On Windows the
+default-home `codex queue` fallback takes its message only as an argument, so a
+message too long for the command line is staged in full as
+`%USERPROFILE%\.clankie\seat-messages\<id>.md` (SHA-256 checked on the PC) and
+the queued message points to that file; a failed staging is not-sent (VUH-2258).
+A proven
 pre-launch transport failure returns undelivered and releases its exact delivery
 fence; a later deliberate follow-up may send. A reset, timeout or lost native
 acknowledgment remains uncertain and must not be replayed. An unavailable endpoint grants no tools or authority to another

@@ -18,7 +18,7 @@ import { isDeepStrictEqual } from "node:util";
 import { posix, win32 } from "node:path";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomInt, randomUUID } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 import {
   SSH_BASE_OPTIONS,
   freeLoopbackPort,
@@ -29,6 +29,7 @@ import {
   powershellScriptCommand,
   remoteProgramCommand,
   splitFleetQualified,
+  windowsArgument,
   type FleetShellRun,
   type HerdrFleet,
   type HerdrFleetRun,
@@ -460,6 +461,45 @@ async function finalCodexAuthority(beforeDispatch: () => Promise<boolean>): Prom
   }
 }
 
+/** Windows caps a process command line at 32,767 characters; this keeps room for node and codex.js. */
+const WINDOWS_COMMAND_LINE_BOUND = 30_000;
+
+/**
+ * Write a message too long for the PC's command line to a file there (VUH-2258).
+ * The body crosses SSH stdin inside the script, never an argument, and the
+ * script reports the written file's SHA-256 so a partial write cannot pass.
+ * Files older than a week are pruned on each write.
+ */
+async function stageWindowsMessage(
+  shell: FleetShellRun,
+  text: string,
+): Promise<{ path: string; sha256: string }> {
+  const bytes = Buffer.from(text, "utf8");
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const stdout = await shell(
+    powershellScriptCommand(
+      [
+        "$dir = Join-Path $env:USERPROFILE '.clankie\\seat-messages'",
+        "New-Item -ItemType Directory -Force -Path $dir | Out-Null",
+        "Get-ChildItem -LiteralPath $dir -Filter '*.md' | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue",
+        `$path = Join-Path $dir ${powershellLiteral(`${randomUUID()}.md`)}`,
+        `[IO.File]::WriteAllBytes($path, [Convert]::FromBase64String('${bytes.toString("base64")}'))`,
+        "$hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($path))).Replace('-','').ToLowerInvariant()",
+        "[Console]::WriteLine($path + '|' + $hash)",
+      ].join("; "),
+    ),
+    30_000,
+  );
+  const [path, written] = (stdout.trim().split(/\r?\n/u).at(-1) ?? "").split("|");
+  if (!path || written !== sha256) throw new Error("The staged message did not match what was sent");
+  return { path, sha256 };
+}
+
+/** The short queued message that points a Windows seat at its staged message. */
+export function stagedMessagePointer(staged: { path: string; sha256: string }, text: string): string {
+  return `This message is ${String(text.length)} characters, longer than this machine's command line allows, so it is saved in full at ${staged.path} (UTF-8, SHA-256 ${staged.sha256}). Read that entire file now; its contents are the message.`;
+}
+
 /**
  * `codex queue` on a remote fleet's machine (VUH-1527): a Codex session
  * Clankie did not start there receives his message as its next prompt. On
@@ -518,8 +558,28 @@ export function remoteCodexQueue(
         );
       }
     }
-    const argv = ["queue", "--thread", sessionId, "--message", text];
-    const queueArgs = fleet.ssh.shell === "powershell" ? [await codexScript(), ...argv] : argv;
+    let argv = ["queue", "--thread", sessionId, "--message", text];
+    let queueArgs = fleet.ssh.shell === "powershell" ? [await codexScript(), ...argv] : argv;
+    // `codex queue` takes the message only as an argument. On Windows a full
+    // message outgrows the command line, so the body is staged as a file and
+    // the queued message points to it (VUH-2258).
+    if (
+      fleet.ssh.shell === "powershell" &&
+      queueArgs.map(windowsArgument).join(" ").length > WINDOWS_COMMAND_LINE_BOUND
+    ) {
+      let staged: { path: string; sha256: string };
+      try {
+        staged = await stageWindowsMessage(shell, text);
+      } catch (error) {
+        return {
+          outcome: "undelivered",
+          deliveryStage: "unavailable",
+          detail: `The message is too long for ${fleet.id}'s command line and could not be staged there; nothing was queued: ${String(error)}`,
+        };
+      }
+      argv = ["queue", "--thread", sessionId, "--message", stagedMessagePointer(staged, text)];
+      queueArgs = [queueArgs[0]!, ...argv];
+    }
     if (beforeDispatch) {
       try {
         if (!(await beforeDispatch())) throw new Error("Peer authority changed; nothing was sent.");

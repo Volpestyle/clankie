@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { windowsCodexBridge, windowsCodexLaunchCommand } from "../src/windows-codex-launch.ts";
 import * as externalCodex from "../src/captain/external-codex-control.ts";
 
@@ -286,6 +287,49 @@ describe("replying to a Codex session Clankie did not start on another machine (
       'C:\\npm\\node_modules\\@openai\\codex\\bin\\codex.js queue --thread thread-1 --message "Reply \\"now\\" & 100% done"',
     );
     expect(commands).toHaveLength(3);
+  });
+
+  // VUH-2258: `codex queue` takes its message only as an argument, and a full
+  // 32 KB message outgrows the Windows command line. The body is staged on the
+  // PC through the script (SSH stdin), and the queued message points to it.
+  it("stages a message too long for the Windows command line and queues a pointer to it", async () => {
+    const text = 'VUH-2258 — ✳ "quotes" & % $HOME \\ paths\n'.repeat(1_024).slice(0, 32_768);
+    const sha256 = createHash("sha256").update(text).digest("hex");
+    const commands: string[] = [];
+    const shell = vi.fn(async (command: string) => {
+      commands.push(command);
+      if (commands.length === 1) return "C:\\npm\\node_modules\\@openai\\codex\\bin\\codex.js\r\n";
+      if (commands.length === 2) return `C:\\Users\\volpe\\.clankie\\seat-messages\\m.md|${sha256}\r\n`;
+      return "queued\r\n";
+    });
+    expect(await remoteCodexQueue(windows, shell)("thread-1", text)).toBe(true);
+    expect(commands).toHaveLength(3);
+    const stage = decoded(commands[1]!);
+    const body = /FromBase64String\('([^']+)'\)/u.exec(stage)![1]!;
+    expect(Buffer.from(body, "base64").toString("utf8")).toBe(text);
+    expect(stage).toContain(".clankie\\seat-messages");
+    const run = decoded(commands[2]!);
+    const argv = Buffer.from(/FromBase64String\('([^']+)'\)/u.exec(run)![1]!, "base64").toString("utf8");
+    expect(argv.length).toBeLessThan(30_000);
+    expect(argv).toContain("queue --thread thread-1 --message");
+    expect(argv).toContain(
+      `saved in full at C:\\Users\\volpe\\.clankie\\seat-messages\\m.md (UTF-8, SHA-256 ${sha256})`,
+    );
+    expect(argv).not.toContain("paths");
+  });
+
+  it("queues nothing when a long message cannot be staged intact", async () => {
+    const commands: string[] = [];
+    const shell = vi.fn(async (command: string) => {
+      commands.push(command);
+      return commands.length === 1 ? "C:\\npm\\codex.js\r\n" : "C:\\x.md|0000\r\n";
+    });
+    expect(await remoteCodexQueue(windows, shell)("thread-1", "x".repeat(32_768))).toMatchObject({
+      outcome: "undelivered",
+      deliveryStage: "unavailable",
+      detail: expect.stringContaining("nothing was queued"),
+    });
+    expect(commands).toHaveLength(2);
   });
 
   it("calls codex directly on a POSIX machine and reports a session that is gone", async () => {
