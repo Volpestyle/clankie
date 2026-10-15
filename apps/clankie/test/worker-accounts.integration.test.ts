@@ -640,21 +640,15 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
           : account,
       ),
     };
-    for (const unavailable of [
-      { held: { reason: "reserved" } },
-      { signedIn: false, usable: false },
-      { signedIn: null, usable: false },
-      { usage: undefined },
+    const healthy = recovered.accounts[0]!;
+    const { usage: _usage, ...withoutUsage } = healthy;
+    for (const account of [
+      { ...healthy, held: { reason: "reserved" } },
+      { ...healthy, signedIn: false, usable: false },
+      { ...healthy, signedIn: null, usable: false },
+      withoutUsage,
     ]) {
-      const report = {
-        ...recovered,
-        accounts: recovered.accounts.map((account) =>
-          account.harness === "claude" && account.label === "james"
-            ? { ...account, ...unavailable }
-            : account,
-        ),
-      };
-      expect(notices.pending(report, settings, resetAt)).toEqual([]);
+      expect(notices.pending({ ...recovered, accounts: [account] }, settings, resetAt)).toEqual([]);
     }
     const recovery = notices.pending(recovered, settings, resetAt);
     expect(recovery).toHaveLength(1);
