@@ -90,6 +90,7 @@ it("native continuation goes through one hire/adoption path and preserves the ex
       expect.objectContaining({ owner: { conversationId: "global-default" } }),
       expect.any(Function),
       expect.any(Function),
+      true,
     );
     expect(track).toHaveBeenCalledWith("term_existing");
     for (const bad of [
