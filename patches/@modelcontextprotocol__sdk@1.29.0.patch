@@ -1,0 +1,30 @@
+diff --git a/dist/cjs/server/webStandardStreamableHttp.js b/dist/cjs/server/webStandardStreamableHttp.js
+index 86f88b05c475f35fe6cef9276acc007bb3845e0c..f8d9f6cef1f6aa15ef78767a2e0980ae58e4cbb8 100644
+--- a/dist/cjs/server/webStandardStreamableHttp.js
++++ b/dist/cjs/server/webStandardStreamableHttp.js
+@@ -737,6 +737,10 @@ class WebStandardStreamableHTTPServerTransport {
+                     else {
+                         stream.resolveJson(new Response(JSON.stringify(responses), { status: 200, headers }));
+                     }
++                    // Release the settled JSON response; otherwise each request's
++                    // stream entry retains its request context for the session
++                    // (VUH-2216; upstream modelcontextprotocol/typescript-sdk#2559).
++                    stream.cleanup();
+                 }
+                 else {
+                     // End the SSE stream
+diff --git a/dist/esm/server/webStandardStreamableHttp.js b/dist/esm/server/webStandardStreamableHttp.js
+index 55691c51b3065015a07154f45a99826334298504..393d4dcc97790fd4b7808d255dc736fe383b439a 100644
+--- a/dist/esm/server/webStandardStreamableHttp.js
++++ b/dist/esm/server/webStandardStreamableHttp.js
+@@ -734,6 +734,10 @@ export class WebStandardStreamableHTTPServerTransport {
+                     else {
+                         stream.resolveJson(new Response(JSON.stringify(responses), { status: 200, headers }));
+                     }
++                    // Release the settled JSON response; otherwise each request's
++                    // stream entry retains its request context for the session
++                    // (VUH-2216; upstream modelcontextprotocol/typescript-sdk#2559).
++                    stream.cleanup();
+                 }
+                 else {
+                     // End the SSE stream
