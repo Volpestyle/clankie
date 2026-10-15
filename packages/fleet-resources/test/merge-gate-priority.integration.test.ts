@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it } from "vitest";
-import { createResourceGovernor, MergeGateWaitingError } from "../src/governor.ts";
+import { createResourceGovernor } from "../src/governor.ts";
 import { defaultResourcePolicy } from "../src/model.ts";
 const exists = (path: string) =>
   access(path).then(
@@ -23,16 +23,18 @@ const hold = `const fs = require('node:fs'); fs.writeFileSync(process.argv[1], '
 const timer = setInterval(() => { if (fs.existsSync(process.argv[2])) { clearInterval(timer); } }, 20);`;
 
 it.each(["arbiter", "fallback"] as const)(
-  "%s gives queued gates priority, holds new full/light work and boots, then restores ordinary admission",
+  "%s admits gates in full FIFO order and shares spare slots with builds and light work",
   async (mode) => {
     const root = await mkdtemp(join(tmpdir(), "clankie-gate-priority-"));
     // This data/API boundary controls pressure, not the processes, native runners,
-    // process births, OS locks or journals. The surrounding check has a real permit.
+    // process births, OS locks or journals. A zero settle interval lets small CI
+    // hosts exercise both slots without pretending these marker commands ramp up.
+    // The surrounding check has a real permit.
     const directory = join(root, "registry");
-    const probe = async () => ({ loadRatio: 0, availableMemoryMb: 65_536 });
-    const client = createResourceGovernor({ directory, probe });
-    const service = createResourceGovernor({ directory, probe });
-    const policy = { ...defaultResourcePolicy(), heavySlots: 1 };
+    const probe = async () => ({ loadRatio: 0, cpuRatio: 0, availableMemoryMb: 65_536 });
+    const client = createResourceGovernor({ directory, probe, heavyJobSettleMs: 0 });
+    const service = createResourceGovernor({ directory, probe, heavyJobSettleMs: 0 });
+    const policy = { ...defaultResourcePolicy(), heavySlots: 2 };
     const stop = new AbortController();
     const runs: Promise<number>[] = [];
     const releases: string[] = [];
@@ -72,10 +74,15 @@ it.each(["arbiter", "fallback"] as const)(
         () => client.snapshot(),
         (s) => s.queue.length === 2,
       );
-      const second = start("gate-second", secondId);
+      const later = start("normal-later");
       await until(
         () => client.snapshot(),
         (s) => s.queue.length === 3,
+      );
+      const second = start("gate-second", secondId);
+      await until(
+        () => client.snapshot(),
+        (s) => s.queue.length === 4,
       );
       const compiler = join(root, "tsc");
       const lightMarker = join(root, "light.started"),
@@ -90,15 +97,13 @@ it.each(["arbiter", "fallback"] as const)(
         () => client.snapshot(),
         (s) => s.lightQueue.length === 1,
       );
-      await expect(
-        client.updateSimulator(existing.lease.id, existing.lease.token, { phase: "boot-submitted" }),
-      ).rejects.toBeInstanceOf(MergeGateWaitingError);
+      await client.updateSimulator(existing.lease.id, existing.lease.token, { phase: "boot-submitted" });
       const blocked = await client.tryAcquireSimulator({
         seatId: "new-seat",
         occupantId: "new-owner",
         externalActive: async () => 0,
       });
-      expect(blocked).toMatchObject({ admitted: false, reason: "shared_capacity" });
+      expect(blocked).toMatchObject({ admitted: false, reason: "simulator_capacity" });
       if (mode === "arbiter") {
         await service.arbitrate();
         timer = setInterval(() => {
@@ -108,20 +113,26 @@ it.each(["arbiter", "fallback"] as const)(
         }, 50);
       }
       await client.configure(policy);
+      await until(() => exists(normal.marker), Boolean);
       await until(() => exists(first.marker), Boolean);
-      expect(await exists(normal.marker)).toBe(false);
-      expect(await exists(light.marker)).toBe(false);
+      await until(() => exists(light.marker), Boolean);
+      expect(await exists(later.marker)).toBe(false);
       expect(await exists(second.marker)).toBe(false);
       expect((await client.snapshot()).mergeGate).toMatchObject({ batchId: firstId, state: "running" });
+      await writeFile(normal.release, "");
+      expect(await normal.run).toBe(0);
+      // A build queued after the first gate starts while it is still running;
+      // a later gate cannot jump that build or reserve the remaining slot.
+      await until(() => exists(later.marker), Boolean);
+      expect(await exists(second.marker)).toBe(false);
+      expect((await client.snapshot()).capacity.used).toBe(2);
+      await writeFile(later.release, "");
+      expect(await later.run).toBe(0);
+      await until(() => exists(second.marker), Boolean);
       await writeFile(first.release, "");
       expect(await first.run).toBe(0);
-      await until(() => exists(second.marker), Boolean);
-      expect(await exists(normal.marker)).toBe(false);
-      expect(await exists(light.marker)).toBe(false);
       await writeFile(second.release, "");
       expect(await second.run).toBe(0);
-      await until(() => exists(normal.marker), Boolean);
-      await until(() => exists(light.marker), Boolean);
       expect((await client.snapshot()).mergeGate).toBeUndefined();
       expect((await client.snapshot()).leases.some((row) => row.id === existing.lease.id)).toBe(true);
       await client.updateSimulator(existing.lease.id, existing.lease.token, { phase: "boot-submitted" });
@@ -146,7 +157,7 @@ it.each(["arbiter", "fallback"] as const)(
   },
 );
 
-it("cancelling a queued gate removes its priority without opening the memory floor", async () => {
+it("cancelling a queued gate removes its ticket without opening the memory floor", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-cancel-gate-"));
   const governor = createResourceGovernor({
     directory: root,

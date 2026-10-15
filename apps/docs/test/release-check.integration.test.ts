@@ -55,13 +55,15 @@ const count = existsSync(marker) ? Number(readFileSync(marker, 'utf8')) + 1 : 1;
 writeFileSync(marker, String(count));
 it('unchanged passing case', () => expect(true).toBe(true));
 ${
-  kind === "hang"
-    ? "it('real hang', () => new Promise(() => {}), 100);"
-    : kind === "unhandled"
-      ? "it('unhandled rejection', async () => { Promise.reject(new Error('outside test assertion')); await new Promise(r => setTimeout(r, 10)); });"
-      : kind === "skip"
-        ? "it.skipIf(count > 1)('first failed case', () => expect(false).toBe(true));"
-        : `it('first failed case', () => expect(${["green", "overlap"].includes(kind) ? "true" : kind === "persistent" ? "false" : "count > 1"}).toBe(true));`
+  kind === "retry-hang"
+    ? "it('hangs only on rerun', () => count > 1 ? new Promise(() => {}) : expect(false).toBe(true), 60_000);"
+    : kind === "hang"
+      ? "it('real hang', () => new Promise(() => {}), 100);"
+      : kind === "unhandled"
+        ? "it('unhandled rejection', async () => { Promise.reject(new Error('outside test assertion')); await new Promise(r => setTimeout(r, 10)); });"
+        : kind === "skip"
+          ? "it.skipIf(count > 1)('first failed case', () => expect(false).toBe(true));"
+          : `it('first failed case', () => expect(${["green", "overlap"].includes(kind) ? "true" : kind === "persistent" ? "false" : "count > 1"}).toBe(true));`
 }
 `,
     );
@@ -133,4 +135,19 @@ it("unhandled errors, incomplete reports and stale reports cannot trigger recove
   rmSync(proof.firstReport);
   expect(await retryFailedFiles(proof)).toBe(false);
   expect(proof.counts()).toEqual([1]);
+});
+
+// VUH-2291: exercise the real runner deadline, not Vitest's per-test timeout.
+it("bounds the entire retry pass and stops before retrying any later failed file", async () => {
+  const proof = fixture(["retry-hang", "flake"]);
+  const receipts: { passed: boolean; signal: string }[] = [];
+  const started = performance.now();
+  expect(
+    await retryFailedFiles({ ...proof, retryTimeoutMs: 3_000, onRetry: (receipt) => receipts.push(receipt) }),
+  ).toBe(false);
+  expect(performance.now() - started).toBeLessThan(10_000);
+  expect(proof.counts()).toEqual([2, 1]);
+  expect(receipts).toHaveLength(1);
+  expect(receipts[0]).toMatchObject({ passed: false, signal: "SIGKILL" });
+  expect(proof.summary()).toContain("exceeded 3000ms");
 });

@@ -8,10 +8,20 @@ const reporter = fileURLToPath(new URL("./testing/release-test-reporter.mjs", im
 const testScript =
   "vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug";
 
-async function run(command, args, root, env) {
+async function run(command, args, root, env, timeoutMs) {
   return await new Promise((fulfill) => {
     const child = spawn(command, args, { cwd: root, env, stdio: "inherit" });
     let interrupted = false;
+    let timedOut = false;
+    const deadline =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true;
+            // Retry runs invoke Vitest directly, so this kills the runner rather than
+            // only pnpm. The enclosing heavy permit drains any surviving fork children.
+            child.kill("SIGKILL");
+          }, timeoutMs);
     const interrupt = (signal) => {
       interrupted = true;
       child.kill(signal);
@@ -22,9 +32,10 @@ async function run(command, args, root, env) {
     process.on("SIGTERM", term);
     child.on("error", (error) => console.error(error));
     child.on("close", (code, signal) => {
+      clearTimeout(deadline);
       process.off("SIGINT", int);
       process.off("SIGTERM", term);
-      fulfill({ code, signal, interrupted });
+      fulfill({ code, signal, interrupted, timedOut });
     });
   });
 }
@@ -101,25 +112,31 @@ export async function retryFailedFiles({
   maxFlakyFiles = 2,
   beforeRetry = async () => {},
   onRetry = () => {},
+  retryTimeoutMs = 5 * 60_000,
 }) {
   mkdirSync(join(root, ".data/qa"), { recursive: true });
   const flaky = [],
     blocked = [];
   try {
+    if (!Number.isSafeInteger(retryTimeoutMs) || retryTimeoutMs <= 0 || retryTimeoutMs > 5 * 60_000)
+      throw new Error("Retry deadline must be a positive integer of at most five minutes.");
+    const deadline = performance.now() + retryTimeoutMs;
     const first = report(firstReport, runId, root);
     const failed = first.files.filter((file) => file.state === "failed");
     if (first.reason !== "failed" || !failed.length)
       throw new Error("Failure is outside Vitest test files; release blocked.");
     for (const [index, file] of failed.entries()) {
       await beforeRetry();
+      const remainingMs = Math.floor(deadline - performance.now());
+      if (remainingMs <= 0)
+        throw new Error(`Isolated retry pass exceeded ${retryTimeoutMs}ms; ${purpose} blocked.`);
       const retryId = randomUUID();
       const retryReport = join(root, `.data/qa/${purpose}-rerun-${index + 1}.json`);
       const startedAt = new Date().toISOString();
       const outcome = await run(
-        "pnpm",
+        process.execPath,
         [
-          "exec",
-          "vitest",
+          join(root, "node_modules/vitest/vitest.mjs"),
           "run",
           "--config",
           "vitest.config.ts",
@@ -141,6 +158,7 @@ export async function retryFailedFiles({
           CLANKIE_RELEASE_TEST_RUN_ID: retryId,
           CLANKIE_RELEASE_RETRY_FILE: file.path,
         },
+        remainingMs,
       );
       let passed = outcome.code === 0 && !outcome.signal && !outcome.interrupted;
       try {
@@ -179,8 +197,12 @@ export async function retryFailedFiles({
         startedAt,
         finishedAt: new Date().toISOString(),
       });
+      if (outcome.timedOut)
+        throw new Error(
+          `Isolated retry pass exceeded ${retryTimeoutMs}ms at ${file.path}; ${purpose} blocked.`,
+        );
       if (outcome.signal || outcome.interrupted)
-        throw new Error("Isolated rerun interrupted; release blocked.");
+        throw new Error(`Isolated rerun interrupted; ${purpose} blocked.`);
     }
     const ok = blocked.length === 0 && flaky.length <= maxFlakyFiles;
     summary(

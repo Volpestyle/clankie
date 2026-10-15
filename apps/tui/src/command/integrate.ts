@@ -12,6 +12,7 @@ import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 
 const usage = `Usage: clankie integrate [run] SHA... [--app SHA]... [--push] [--id UUID] [--no-wait] | status [UUID] | push UUID | cancel UUID --actor NAME --reason TEXT | revert PASSED_UUID [--push] | reclaim | holds | hold --holder NAME --reason TEXT --minutes 1-${DEPLOY_HOLD_MAX_MINUTES} [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT
+Default: land directly on main: commit, git pull --rebase origin main, clankie heavy -- pnpm check:landing, then git push origin main (ADR 0240: docs/adr/0240-changes-land-directly-on-main.md). Integrate is optional for composed batches.
 Cancel withdraws a waiting or isolating request before landing. An in-flight gate finishes, but cannot land a withdrawn input.
 A hold keeps deploys off the running service and lifts on its own when its minutes run out; landing on main never waits for one.`;
 
@@ -112,7 +113,7 @@ export async function runIntegrationCommand(
   // One mutation, no retry; a lost response is reconciled with the printed request ID.
   if (request.action === "run")
     process.stderr.write(
-      `Integration batch ${request.id}; reconcile with clankie integrate status ${request.id}\n`,
+      `Direct landing on main is the default (ADR 0240: docs/adr/0240-changes-land-directly-on-main.md); integrate is optional.\nIntegration batch ${request.id}; reconcile with clankie integrate status ${request.id}\n`,
     );
   let result = await client.integrate(request);
   while (

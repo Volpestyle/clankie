@@ -202,6 +202,12 @@ a profiler or frequent event-loop histogram can hide that delay.
 
 ## Integration queue recovery
 
+Direct landing is the default in Clankie's repositories
+([ADR 0240](../../../../docs/adr/0240-changes-land-directly-on-main.md)):
+commit to `main`, `git pull --rebase origin main`,
+`clankie heavy -- pnpm check:landing`, then push. Use `integrate` when you want
+an optional composed batch.
+
 `clankie integrate status [UUID]` shows the scheduled position, isolation chain
 and conditional completion ETA from recent completed gates (unknown before
 measurements). Compatible batches have at most three requests; a failed shared
@@ -230,7 +236,7 @@ own `AGENTS.md`/`CLAUDE.md`, and keep anyone else's uncommitted work intact.
 Doing it yourself or hiring a worker is your call.
 
 Commit, run the repo's narrow checks, and land through the repo's own path
-(in Clankie's repo, `clankie integrate`; see its `AGENTS.md`), following doctor's
+(in Clankie's repo, direct landing on `main` under ADR 0240; see its `AGENTS.md`), following doctor's
 `workingPreferences`. Because the pin shares that repository, `clankie update --ref FULL_SHA`
 installs a local commit without pushing; no ref takes fetched `origin/main`.
 Update performs the guarded restart, so do not also run `clankie restart`.

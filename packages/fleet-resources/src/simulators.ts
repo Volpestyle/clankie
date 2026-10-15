@@ -1,7 +1,7 @@
 import { observeSimulatorUsage, simulatorUsageFor, type SimulatorUsage } from "./simulator-usage.ts";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { MergeGateWaitingError, SimulatorsDisabledError } from "./governor.ts";
+import { SimulatorsDisabledError } from "./governor.ts";
 import type { FleetResourceGovernor, ResourceSnapshot, SimulatorReservation } from "./model.ts";
 import { probeProcess } from "./process.ts";
 import {
@@ -603,11 +603,7 @@ export function createSimulatorManager(input: {
       reason,
       blockers,
       retryAfterMs: RETRY_MS,
-      hint:
-        hint ??
-        (snapshot.mergeGate
-          ? `Waiting for merge gate ${snapshot.mergeGate.batchId} (${snapshot.mergeGate.state}); current holders continue.`
-          : hintFor(reason, blockers)),
+      hint: hint ?? hintFor(reason, blockers),
     };
   };
 
@@ -726,9 +722,7 @@ export function createSimulatorManager(input: {
           return revoked();
         }
         return lease;
-      } catch (error) {
-        if (error instanceof MergeGateWaitingError)
-          return blockersFor("shared_capacity", await input.governor.snapshot());
+      } catch {
         return held(lease);
       }
     });

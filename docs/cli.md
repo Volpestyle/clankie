@@ -987,11 +987,18 @@ the service returned `spawned`; completion still needs the matching native event
 
 ### `integrate`
 
-Clankie's core queue landing gates rerun each failed Vitest file once in isolation on the same
-composed tree before isolating batch members. The first attempt completes its
-original selection; recovery requires complete accounted results and every
-rerun passing. Non-test failures, repeated failures, interruptions and changed
-sources still block. `status UUID` includes `repos[].gate.testRecovery` with
+Default landing is direct: commit to `main`, `git pull --rebase origin main`,
+run `clankie heavy -- pnpm check:landing`, then push
+([ADR 0240](adr/0240-changes-land-directly-on-main.md)). `integrate` is optional
+when you want a composed, gated batch.
+
+Clankie's core queue landing gates rerun each failed Vitest file once in
+isolation on the same composed tree before isolating batch members. The first attempt completes its
+original selection. The entire isolated retry pass has a five-minute deadline;
+a timeout kills the Vitest runner, blocks the gate and retains the failed rerun
+receipt and log. The enclosing heavy permit drains leftover forks. Recovery
+requires complete accounted results and every rerun passing. Non-test failures,
+repeated failures, interruptions and changed sources still block. `status UUID` includes `repos[].gate.testRecovery` with
 the flaky files, first failure and rerun receipts. The direct root gate uses
 this policy only with `pnpm check:landing --retry-failed-tests`. An app
 `check:landing` receives the same flag only when the composed app tree's
@@ -1009,9 +1016,7 @@ clankie integrate hold --holder NAME --reason TEXT --minutes 1-60 [--pane ID|--s
 clankie integrate release UUID --actor NAME --reason TEXT
 ```
 
-Changes land directly on `main` after their narrow checks
-([ADR 0240](adr/0240-changes-land-directly-on-main.md)); the queue is optional.
-To use it, push a branch, run `clankie integrate <sha> --push --no-wait`, then
+To use the queue, push a branch, run `clankie integrate <sha> --push --no-wait`, then
 follow with `clankie integrate status`. With no UUID, status shows running batches, waiting
 requests, the last result and interrupted work. `status UUID` reads a request
 receipt, including its shared batch and attempts. `progress` shows the isolation
@@ -1020,11 +1025,12 @@ completed gates (`null` until measurements exist). `/integrate` displays the cha
 and ETA in the TUI.
 
 Local batches hold one governed full permit across installation and landing
-gates. Gates precede queued ordinary builds. While a gate is queued or running,
-new full/light builds and simulator reservations or boot submissions wait;
-current holders finish, servers keep their separate lane, and resource guards
-still apply. `fleet resources` exposes the blocking batch as `mergeGate`, and
-`heavy` names it while waiting. This requires the updated service and workers.
+gates, admitted through the same FIFO queue and slots as ordinary full builds.
+They leave spare full slots, light jobs, servers and simulator work available
+under the normal resource guards. `fleet resources` exposes the batch as
+`mergeGate` for observation; it does not reserve the machine. Gates held over
+fifteen minutes also appear in `holderAlerts`. Sharing requires the updated
+service and workers.
 
 The service checks integration progress every 30 seconds. A running head without
 a checkpoint for three minutes alerts the owner through the existing runtime

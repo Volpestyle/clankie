@@ -80,7 +80,6 @@ const ticketOwner = (
 const abort = () => new DOMException("Fleet resource wait cancelled", "AbortError");
 type SimulatorBlock = "simulator_capacity" | "shared_capacity" | "pressure";
 /** The owner's simulator limit is zero; distinct from an unavailable registry. */
-export class MergeGateWaitingError extends Error {}
 export class SimulatorsDisabledError extends Error {
   constructor() {
     super("Simulator leases are disabled by owner policy");
@@ -420,10 +419,8 @@ export function createResourceGovernor(
       ? await observeSimulatorUsage()
       : new Map();
     const sampledPressure = await pressure.sample(state.policy);
-    const priority = gates(state);
-    const gate =
-      priority.find((entry) => entry.state === "running") ??
-      priority.find((entry) => entry.id === heavyHead(state)?.id);
+    const activeGates = gates(state);
+    const gate = activeGates.find((entry) => entry.state === "running") ?? activeGates[0];
     return {
       schemaVersion: 1,
       ...(gate ? { mergeGate: { id: gate.id, batchId: gate.batchId, state: gate.state } } : {}),
@@ -671,25 +668,7 @@ export function createResourceGovernor(
     });
   }
   function heavyHead(state: ResourceState) {
-    const priority = new Set(gates(state).map((gate) => gate.id));
-    return (
-      state.queue.find((entry) => entry.kind === "heavy" && priority.has(entry.id)) ??
-      state.queue.find((entry) => entry.kind === "heavy")
-    );
-  }
-  async function admissionTransaction<T>(
-    lane: HeavyJobLane,
-    apply: (state: ResourceState, main: ResourceState) => Promise<T>,
-    options: { signal?: AbortSignal } = {},
-  ): Promise<T> {
-    const target = laneStore(lane);
-    if (lane !== "light") return target.transaction((state) => apply(state, state), options);
-    // Gate intent and light admission share the main lock. Always main -> light.
-    const seen = await look(mainStore);
-    return mainStore.transaction(async (main) => {
-      await reconcile(main, seen, mainStore.directory);
-      return target.transaction((state) => apply(state, main), options);
-    }, options);
+    return state.queue.find((entry) => entry.kind === "heavy");
   }
   /** Whether the head of this lane's queue may start, under one sample. */
   function headAdmits(
@@ -697,13 +676,7 @@ export function createResourceGovernor(
     state: ResourceState,
     policy: FleetResourcePolicy,
     sampled: ResourcePressure,
-    main: ResourceState = state,
   ): boolean {
-    if (lane !== "server") {
-      const priority = gates(main);
-      if (lane === "light" && priority.length) return false;
-      if (lane === "full" && priority.some((gate) => gate.state === "running")) return false;
-    }
     const held = state.leases.filter((lease) => lease.kind === "heavy");
     if (lane === "server") return held.length < serverLaneCapacity().slots && sampled.healthy;
     if (held.length >= (lane === "light" ? baseHeavySlots(policy) : resourceCapacity(policy))) return false;
@@ -763,7 +736,7 @@ export function createResourceGovernor(
     const due = Date.now() - arbiterPassAt >= FULL_PASS_MS;
     let granted = 0;
     const heads: HeavyArbitration["heads"] = [];
-    const recordHead = (lane: HeavyJobLane, state: ResourceState, main: ResourceState = state) => {
+    const recordHead = (lane: HeavyJobLane, state: ResourceState) => {
       const head = heavyHead(state);
       if (!head) return;
       heads.push({
@@ -774,7 +747,7 @@ export function createResourceGovernor(
         pid: head.owner.pid,
         queuedAtMs: head.queuedAtMs,
         marked: grantable(head.id),
-        admits: headAdmits(lane, state, policy, sampled, main),
+        admits: headAdmits(lane, state, policy, sampled),
       });
     };
     for (const [index, { lane, from }] of lanes.entries()) {
@@ -785,14 +758,14 @@ export function createResourceGovernor(
         continue;
       }
       const seen = await look(from);
-      granted += await admissionTransaction(lane, async (state, main) => {
+      granted += await from.transaction(async (state) => {
         await reconcile(state, seen, from.directory);
         let count = 0;
         for (;;) {
           const head = heavyHead(state);
           // An older waiter at the head judges for itself; FIFO waits on it.
-          if (!head || !grantable(head.id) || !headAdmits(lane, state, policy, sampled, main)) {
-            recordHead(lane, state, main);
+          if (!head || !grantable(head.id) || !headAdmits(lane, state, policy, sampled)) {
+            recordHead(lane, state);
             return count;
           }
           grant(state, head);
@@ -875,12 +848,8 @@ export function createResourceGovernor(
     // The owner's policy lives in the main journal for both lanes.
     const policyFor = async (state: ResourceState) =>
       options.lane !== "full" ? (await mainStore.read()).policy : state.policy;
-    const admits = (
-      state: ResourceState,
-      policy: FleetResourcePolicy,
-      sampled: ResourcePressure,
-      main: ResourceState = state,
-    ) => heavyHead(state)?.id === id && headAdmits(options.lane, state, policy, sampled, main);
+    const admits = (state: ResourceState, policy: FleetResourcePolicy, sampled: ResourcePressure) =>
+      heavyHead(state)?.id === id && headAdmits(options.lane, state, policy, sampled);
     const isHead = (state: ResourceState) => heavyHead(state)?.id === id;
     /** A lease granted to this request, by an arbiter or by this waiter. */
     const mine = (state: ResourceState) =>
@@ -932,7 +901,7 @@ export function createResourceGovernor(
           }
           const policy = await policyFor(peek);
           sampled = await pressure.sample(policy);
-          if (!admits(peek, policy, sampled, options.lane === "light" ? await mainStore.read() : peek)) {
+          if (!admits(peek, policy, sampled)) {
             await report(peek);
             await wait(jittered(PEEK_MS), signal);
             continue;
@@ -942,9 +911,8 @@ export function createResourceGovernor(
         if (!sampled && peek) sampled = await pressure.sample(await policyFor(peek));
         const seen = await look(store);
         let advisory: ResourceState | undefined;
-        const lease = await admissionTransaction(
-          options.lane,
-          async (state, main) => {
+        const lease = await store.transaction(
+          async (state) => {
             await reconcile(state, seen, store.directory);
             const blocked = () => {
               advisory = structuredClone(state);
@@ -956,7 +924,7 @@ export function createResourceGovernor(
             const policy = await policyFor(state);
             // Sampled before the lock when the peek ran; the sampler caches a
             // fresh reading, so the full pass's sample forks nothing here.
-            if (!admits(state, policy, sampled ?? (await pressure.sample(policy)), main)) return blocked();
+            if (!admits(state, policy, sampled ?? (await pressure.sample(policy)))) return blocked();
             if (signal.aborted) throw abort();
             const head = state.queue.find((entry) => entry.id === id)!;
             return structuredClone(grant(state, head));
@@ -1308,7 +1276,6 @@ export function createResourceGovernor(
           refusal = { reason, state: structuredClone(state) };
           return undefined;
         };
-        if (gates(state).length) return blocked("shared_capacity");
         if (options.ticketId) {
           const index = state.queue.findIndex(
             (entry) => entry.id === options.ticketId && ticketOwner(entry, options),
@@ -1414,8 +1381,6 @@ export function createResourceGovernor(
             entry.kind === "simulator" && entry.id === id && entry.token === token,
         );
         if (!lease) throw new Error("Simulator reservation changed");
-        if (update.phase === "boot-submitted" && lease.phase !== "boot-submitted" && gates(state).length)
-          throw new MergeGateWaitingError("New simulator boots wait for the merge gate");
         Object.assign(lease, update);
         return structuredClone(lease);
       });

@@ -1,5 +1,9 @@
 # Approved commit integration
 
+Default landing is direct on `main`: commit, `git pull --rebase origin main`,
+`clankie heavy -- pnpm check:landing`, then push
+([ADR 0240](adr/0240-changes-land-directly-on-main.md)).
+
 `clankie integrate` lets the service compose and gate an ordered batch of already
 approved commits. The caller owns review and approval. The service must run from
 a source checkout with Git and pnpm available; installed release and hosted
@@ -42,6 +46,12 @@ queue-drain admission waits: explicit reclamation and other lock users still
 refuse a busy lock. Missing/unreadable owner records and permission failures
 remain errors. A newly dead owner reports a retained stale lock; the existing
 recovery of a proven abandoned pre-boot lock still records its interrupted work.
+
+Local install and gate commands share one full permit with the ordinary heavy
+FIFO queue. They consume one slot; other full builds, light jobs and simulator
+work remain eligible under normal guards. Gates held over fifteen minutes
+appear in `holderAlerts`. Core failed-file retries have one five-minute deadline for the entire pass; timeout blocks the gate, records the
+failed attempt, and leaves fork cleanup to the enclosing heavy permit.
 
 The service serializes gates and coalesces compatible waiting requests in batches
 of **at most three requests**. Push requests coalesce past gate-only ones;

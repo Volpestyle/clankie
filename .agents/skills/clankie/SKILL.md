@@ -36,7 +36,9 @@ When you spawn native subagents, choose each child's model and effort per job:
 the smallest that meets its acceptance, passed explicitly and adjusted as the
 work requires. A subagent profile in your hire brief overrides that.
 
-For Clankie's own repository changes, use focused checks while iterating. Before
+For Clankie's own repository changes, direct landing on `main` is the default
+([ADR 0240](../../../docs/adr/0240-changes-land-directly-on-main.md));
+`clankie integrate` is optional for composed batches. Use focused checks while iterating. Before
 pushing, commit your files, `git pull --rebase origin main`, then run
 `clankie heavy -- pnpm check:landing` from the repository root. Keep its own
 `--changed` selection against fetched `origin/main`; hand-picked subsets do not

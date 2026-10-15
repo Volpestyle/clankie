@@ -1,6 +1,7 @@
 # ADR 0266: Landing gates keep isolation and load less
 
 Status: accepted by the lead for VUH-2148, 2026-10-11; landed 2026-10-12.
+Gate scheduling amended 2026-10-15 for [VUH-2291](https://linear.app/vuhlp/issue/VUH-2291).
 Tracked by [VUH-2148](https://linear.app/vuhlp/issue/VUH-2148).
 Builds on [ADR 0221](0221-tests-prove-the-product-and-its-boundaries.md).
 
@@ -29,11 +30,16 @@ state. Reduce the module graph loaded before a feature is used:
   siblings. Preserve the public index exports and its Node-free Metro contract.
 
 Separately, local integration batches acquire one service-owned full permit
-across install and gate. Gate tickets precede ordinary full builds in FIFO
-order between gates. New full/light builds and simulator reservations or boot
-submissions wait while a gate is queued or running. Current holders finish,
-servers keep their separate lane, and resource guards still apply. This needs
-the updated service arbiter and workers; journal readability is not enforcement.
+across install and gate. Amended 2026-10-15 (VUH-2291): gate tickets use the
+ordinary full FIFO queue and share heavy slots with builds. They no longer
+block new full/light work or simulator reservations and boot submissions.
+Normal capacity and pressure guards apply; gates held over fifteen minutes
+appear in `holderAlerts`. The core retry pass reruns only failed files, with one
+five-minute deadline for the whole pass; a timeout blocks recovery. This
+replaces exclusive gate priority after batch 329f5725 held off nine requests
+for 42 minutes with three heavy slots idle. Sharing requires the updated
+service arbiter and clients. Direct landing remains the default under
+[ADR 0240](0240-changes-land-directly-on-main.md).
 
 ## Evidence and limits
 
