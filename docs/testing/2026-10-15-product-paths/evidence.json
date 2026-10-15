@@ -3,9 +3,9 @@
   "objects": [
     {
       "path": "captures.txt",
-      "size": 2383832,
-      "sha256": "b3638c35c008c154503225f1937c6610819d73f181eea7363b82adcc28f10810",
-      "url": "clankie://evidence/sha256/b3638c35c008c154503225f1937c6610819d73f181eea7363b82adcc28f10810"
+      "size": 2386080,
+      "sha256": "a26b0d005925fa24b7a25c391de548f16b9de4ece5f6a2b0a23cb25937e7e99b",
+      "url": "clankie://evidence/sha256/a26b0d005925fa24b7a25c391de548f16b9de4ece5f6a2b0a23cb25937e7e99b"
     },
     {
       "path": "landing-gate.json",

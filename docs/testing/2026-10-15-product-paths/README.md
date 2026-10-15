@@ -59,9 +59,23 @@ exception; never a green product landing gate.
 
 ## Live KH2 acceptance
 
-Pending the lead's live-service deploy of `680974037`, then CLI set and readback of
-`inject/`, `common/`, `server/`, `runtime/`, `tools/launcher/`, `tools/packaging/`
-and `content/` on the existing `kh2-multiplayer` project.
+**Passed against the running service.** The lead reported deployed revision
+`80a2f527e` healthy, containing the implementation and its earlier evidence.
+The source CLI advertised `productPaths: true`, read the existing
+`kh2-multiplayer` project with no declaration, then submitted the seven requested
+paths through `project update` with the exact revision it had read. A separate
+`project list` returned the same saved list and revision as the update:
+
+```json
+["inject/", "common/", "server/", "runtime/", "tools/launcher/", "tools/packaging/", "content/"]
+```
+
+Before revision: `8f63ecf92170482b8642059bc77a23e31d9267ac5efbd3516f7a2ce3a3d39f86`.
+Update and independent readback revision:
+`b1395efcdc3343331066ca4ca441cdaeb27aae0c8687ff273376edca78c4a1df`.
+All three source CLI commands exited 0. The capture retains their commands,
+completion times, capability, project ID, values and revisions; unrelated
+settings and credentials are omitted. There are no remaining acceptance gaps.
 
 ## Captures
 
