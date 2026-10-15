@@ -760,4 +760,15 @@ it("retains a drift response across restart and keeps unreadable correction chec
   expect(driftSection([unknown]).join("\n")).toContain("tracker offline");
   record.measured("lead", [unknown], new Date("2026-10-14T04:00:00Z"));
   expect(new AutoRoundRecord(directory).pendingCorrection(project.id)).toEqual(correction);
+  const older = await measureVelocity(
+    project,
+    null,
+    {
+      ...deps,
+      correction: { ...correction, recordedAt: "2026-08-01T00:00:00.000Z" },
+    },
+    new Date("2026-10-14T04:00:00Z"),
+  );
+  expect(older.correctionCheck).toMatchObject({ state: "unknown", issueStarted: null, productLines: null });
+  expect(older.correctionCheck!.reasons.join("; ")).toContain("predates retained tracker range");
 });

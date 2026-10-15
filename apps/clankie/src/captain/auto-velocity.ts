@@ -230,9 +230,9 @@ export async function measureVelocity(
   let correctionCheck: DriftCorrectionCheck | undefined;
   if (correction) {
     const reasons: string[] = [];
-    const issueStarted =
+    const observedStarted =
       "state" in outcomes
-        ? null
+        ? false
         : outcomes.started.issues.some((issue) => issue.identifier === correction.issue) ||
           (outcomes.history?.some(
             (issue) =>
@@ -245,13 +245,18 @@ export async function measureVelocity(
           ) ??
             false);
     const covered = correction.recordedAt >= readSince;
+    const historyKnown = !("state" in outcomes) && outcomes.history !== undefined;
+    const issueStarted = observedStarted ? true : covered && historyKnown ? false : null;
     const productLines =
       known === undefined || !covered
         ? null
         : known
             .filter((commit) => commit.landedAt >= correction.recordedAt && commit.landedAt < until)
             .reduce((sum, commit) => sum + commit.lines.product, 0);
-    if (issueStarted === null) reasons.push(`Issue state unknown: ${(outcomes as Unknown).reason}`);
+    if (issueStarted === null)
+      reasons.push(
+        `Issue state unknown: ${"state" in outcomes ? outcomes.reason : !covered ? "correction predates retained tracker range" : "tracker history unavailable"}`,
+      );
     else if (!issueStarted)
       reasons.push(`${correction.issue} has not reached a started state since the correction`);
     if (productLines === null)
