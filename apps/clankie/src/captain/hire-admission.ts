@@ -133,7 +133,7 @@ export class HireAdmissionError extends Error {
   readonly admission: Admission;
   constructor(admission: Admission) {
     super(
-      `No observed plan can take this hire: ${admission.accounts.map((account) => `${account.plan}/${account.account}: ${account.remaining === null ? "remaining unknown" : `${Math.round(account.remaining * 100)}% remaining`}${account.resetsAt ? `, resets ${account.resetsAt}` : ""}; ${account.reason}`).join("; ")}`,
+      `No observed plan can take this hire: ${admission.accounts.length ? admission.accounts.map((account) => `${account.plan}/${account.account}: ${account.remaining === null ? "remaining unknown" : `${Math.round(account.remaining * 100)}% remaining`}${account.resetsAt ? `, resets ${account.resetsAt}` : ""}; ${account.reason}`).join("; ") : "the requested harness/account was not observed"}`,
     );
     this.admission = admission;
   }

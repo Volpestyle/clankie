@@ -609,7 +609,7 @@ function launchPolicy(settings: ProjectsSettings, projectId: string, role?: stri
     selected?.delegation,
     selected?.account,
     selected?.placement,
-    project?.hiring,
+    ...(project?.hiring === undefined ? [] : [project.hiring]),
   ];
   // Preserve legacy journals when no new role fields are configured.
   return JSON.stringify(extra.some((value) => value !== undefined) ? [...base, ...extra] : base);

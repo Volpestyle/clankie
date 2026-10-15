@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it } from "vitest";
@@ -257,4 +257,23 @@ it("permits an explicit owner override of the reserve, while keeping holds, excl
   expect(() =>
     hireAdmissionChoice(hireAdmissionReport(near, undefined, [], NOW, true), "codex", "default", NOW),
   ).toThrow("No observed plan");
+});
+
+it("recovers an unchanged advanced-profile allocation written by the pre-policy service, while retaining its launch fence", async () => {
+  // Captured by running origin/main a36858a3f's actual ProjectHires writer.
+  const capture = JSON.parse(
+    await readFile(new URL("./fixtures/hire-receipts/legacy-profile-policy.json", import.meta.url), "utf8"),
+  );
+  const settings = ProjectsSettingsSchema.parse(capture.settings);
+  const root = await mkdtemp(join(tmpdir(), "legacy-profile-policy-"));
+  try {
+    const path = join(root, "hires.json");
+    await writeFile(path, JSON.stringify(capture.journal));
+    const id = capture.journal.allocations[0].id;
+    expect(() => new ProjectHires(path).launch(id, settings, false)).not.toThrow();
+    settings.projects[0]!.roles[0]!.model = "changed-model";
+    expect(() => new ProjectHires(path).launch(id, settings, false)).toThrow("launch settings changed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

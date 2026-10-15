@@ -1,0 +1,64 @@
+{
+  "source": "a36858a3f:apps/clankie/src/captain/project-hires.ts",
+  "settings": {
+    "projects": [
+      {
+        "id": "example",
+        "name": "Example",
+        "workspaces": [],
+        "worktreeRoots": [],
+        "roles": [
+          {
+            "role": "builder",
+            "harness": "codex",
+            "model": "gpt-6.1-sol",
+            "effort": "medium",
+            "subagents": {
+              "model": "gpt-6.1-sol",
+              "effort": "low"
+            },
+            "delegation": "panes",
+            "account": "fixture",
+            "placement": "new-tab"
+          }
+        ],
+        "workerCap": 2,
+        "labelRoleMap": [],
+        "grants": []
+      }
+    ],
+    "assignments": [],
+    "roleWriteReceipts": []
+  },
+  "journal": {
+    "version": 1,
+    "allocations": [
+      {
+        "id": "f3d24998-e01c-49f6-b2aa-8d4b10ddaec7",
+        "key": "[\"default\",\"/fixture/workspace\"]",
+        "projectId": "example",
+        "role": "builder",
+        "policy": "[\"codex\",\"gpt-6.1-sol\",\"medium\",{\"model\":\"gpt-6.1-sol\",\"effort\":\"low\"},\"panes\",\"fixture\",\"new-tab\"]",
+        "request": {
+          "schemaVersion": 1,
+          "harness": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "subagents": {
+            "model": "gpt-6.1-sol",
+            "effort": "low"
+          },
+          "delegation": "panes",
+          "account": "fixture",
+          "placement": "new-tab",
+          "title": "Upgrade proof",
+          "workingDirectory": "/fixture/workspace",
+          "role": "builder"
+        },
+        "started": false,
+        "confirmed": false,
+        "gone": false
+      }
+    ]
+  }
+}

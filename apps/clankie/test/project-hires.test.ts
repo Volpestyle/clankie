@@ -91,6 +91,7 @@ async function fixture(harness: "claude" | "codex" = "claude") {
         {
           harness,
           label: "fixture",
+          aliases: ["second"],
           home: root,
           signedIn: true,
           usable: true,
