@@ -24,7 +24,11 @@ type VelocityDay = ProjectVelocity["days"][number];
 export interface VelocityDeps {
   readonly outcomes: (
     project: Project,
-    input: { readonly window: { since: string; until: string }; readonly history: boolean },
+    input: {
+      readonly window: { since: string; until: string };
+      readonly history: boolean;
+      readonly asOf?: string;
+    },
   ) => Promise<ProjectOutcomesRead>;
   readonly history: ProjectMirrors["history"];
   readonly churn: (repository: string, window: ChurnWindow) => Promise<RepositoryChurn>;

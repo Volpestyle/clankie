@@ -565,3 +565,120 @@ it("replays KH2 Shared world as one due post despite its 16-issue cleanup batch"
   // Claiming a post changes no milestone fingerprint, so it does not cause an extra wake.
   expect(milestoneSignals(record.withReporting(velocity))).toEqual(milestoneSignals(report));
 });
+
+it("replays completed days over real tracker history and origin through HTTP/CLI without waking or persisting rounds", async () => {
+  const { project, deps, product, quiet, at, call } = await measuredProject();
+  // Today it is reopened; the replay must still see yesterday's completed state.
+  await at("2026-10-14T15:00:00.000Z", () =>
+    call("save_issue", { id: product.id, state: "In Progress" }, owner),
+  );
+  const root = roots.at(-1)!;
+  const { replayAutoRounds } = await import("../src/captain/auto-replay.ts");
+  const { FileCredentialStore, OPERATOR_CREDENTIAL_PROVIDER_ID, mintOperatorToken } =
+    await import("@clankie/credential-broker");
+  const record = new AutoRoundRecord(join(root, "replay-rounds"));
+  const token = mintOperatorToken();
+  let wakes = 0;
+  const trackerBefore = await readFile(join(root, "tracker", "tracker.json"), "utf8");
+  const captain = createStubCaptain({
+    wakeConversation: async () => {
+      wakes++;
+      return false;
+    },
+  });
+  captain.replayAutoRounds = (query) => replayAutoRounds(project, query, deps);
+  const service = await createClankieApp({
+    captain,
+    autoRounds: record,
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === `Bearer ${token}` ? { operatorId: "replay-owner" } : undefined,
+  });
+  const server = serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: (request) => service.app.fetch(request),
+  }) as Server;
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing replay address");
+    const origin = `http://127.0.0.1:${String(address.port)}`;
+    const credentials = new FileCredentialStore(join(root, "replay-credentials.json"));
+    await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+    let written = "";
+    const options = {
+      env: { CLANKIE_CONTROL_PLANE_URL: origin },
+      operatorCredentialStore: credentials,
+      stdout: { write: (chunk: string) => ((written += chunk), true) },
+    };
+    const query = "replay=true&project=mod&since=2026-10-11T05:00:00Z&until=2026-10-14T05:00:00Z";
+    expect((await fetch(`${origin}/v1/auto/rounds?${query}`)).status).toBe(401);
+    expect(
+      await runConversationsCommand(
+        [
+          "auto",
+          "rounds",
+          "--replay",
+          "--project",
+          "mod",
+          "--since",
+          "2026-10-11T00:00:00-05:00",
+          "--until",
+          "2026-10-14T00:00:00-05:00",
+        ],
+        options,
+      ),
+    ).toBe(0);
+    const replay = AutoRoundsResponseSchema.parse(JSON.parse(written));
+    expect(replay.rounds).toHaveLength(3);
+    const early = replay.rounds[0]!.projects[0]!;
+    const middle = replay.rounds[1]!.projects[0]!;
+    const later = replay.rounds[2]!.projects[0]!;
+    expect(early.started).toMatchObject({ state: "known", total: 0 });
+    expect(middle.started).toMatchObject({ state: "known", total: 1 });
+    expect(early.closures).toMatchObject({ state: "known", ownerFacing: [], tooling: [], unlinked: [] });
+    expect(middle.drift).toContainEqual(
+      expect.objectContaining({ signal: "nothing_closed", day: "2026-10-12" }),
+    );
+    expect(later.closures).toMatchObject({
+      state: "known",
+      ownerFacing: [product.identifier],
+      unlinked: [quiet.identifier],
+    });
+    expect(later.started).toMatchObject({ cap: null });
+    expect(later.caveats.join(" ")).toContain("over_wip cannot be evaluated");
+    expect(replay.rounds.every((round) => round.delivery === null && round.conversationId === "replay")).toBe(
+      true,
+    );
+    expect(record.read({})).toEqual([]);
+    expect(wakes).toBe(0);
+    expect(await readFile(join(root, "tracker", "tracker.json"), "utf8")).toBe(trackerBefore);
+    expect(
+      (
+        await fetch(`${origin}/v1/auto/rounds?${query}&limit=1`, {
+          headers: { authorization: `Bearer ${token}` },
+        })
+      ).status,
+    ).toBe(400);
+    for (const invalid of [
+      "since=2026-10-14T05:00:00Z&until=2026-10-12T05:00:00Z",
+      "since=2026-09-01T05:00:00Z&until=2026-10-14T05:00:00Z",
+      "since=2099-01-01T00:00:00Z&until=2099-01-02T00:00:00Z",
+    ]) {
+      expect(
+        (
+          await fetch(`${origin}/v1/auto/rounds?replay=true&project=mod&${invalid}`, {
+            headers: { authorization: `Bearer ${token}` },
+          })
+        ).status,
+      ).toBe(400);
+    }
+    await expect(
+      runConversationsCommand(["auto", "rounds", "--replay", "--project", "mod"], options),
+    ).rejects.toThrow("Usage: clankie auto");
+  } finally {
+    service.close();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

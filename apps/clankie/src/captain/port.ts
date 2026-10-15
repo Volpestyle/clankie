@@ -238,6 +238,10 @@ export interface CaptainPort {
     conversationId: string,
     sessionId: string,
   ): "current" | "retired" | "elsewhere" | "unknown";
+  /** Read-only historical velocity and drift; never wakes a conversation. */
+  replayAutoRounds?(
+    query: import("./auto-replay.ts").AutoReplayQuery,
+  ): Promise<import("@clankie/protocol/auto-rounds").AutoRoundsResponse>;
   /** Each project's live status line and the count of every pending owner question (ADR 0264). */
   projectStatus?(projects: readonly import("@clankie/protocol/projects").Project[]): Promise<{
     projects: Record<string, import("@clankie/protocol/projects").ProjectStatus>;

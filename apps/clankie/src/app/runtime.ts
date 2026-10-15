@@ -100,6 +100,7 @@ import { createAppearanceRoutes } from "../appearance-routes.ts";
 import { createSkinDraftRoutes } from "../skin-draft-routes.ts";
 import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
+import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-replay.ts";
 import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
 import type { MediaGeneratorPort } from "../media-generation.ts";
@@ -2722,6 +2723,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (context.req.query("replay") !== undefined) {
+      const input = AutoReplayQuerySchema.safeParse(context.req.query());
+      if (!input.success) return context.json({ error: "invalid_query" }, 400);
+      if (!dependencies.captain.replayAutoRounds)
+        return context.json({ error: "auto_replay_unavailable" }, 503);
+      try {
+        return context.json(
+          AutoRoundsResponseSchema.parse(await dependencies.captain.replayAutoRounds(input.data)),
+        );
+      } catch (error) {
+        return context.json(
+          {
+            error: "auto_replay_unavailable",
+            reason: error instanceof Error ? error.message : String(error),
+          },
+          error instanceof AutoReplayInputError ? 400 : 503,
+        );
+      }
+    }
     if (!dependencies.autoRounds) return context.json({ error: "auto_rounds_unavailable" }, 503);
     const query = z
       .object({

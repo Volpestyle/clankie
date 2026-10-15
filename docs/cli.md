@@ -3898,6 +3898,31 @@ The wake carries the same numbers as one line per project. The record lives in
 `projects/<id>.json` with the last milestone); this command makes no tracker or
 git calls.
 
+Historical replay uses the same service measurement and slice-1 drift detection:
+
+```sh
+clankie auto rounds --replay --project kh2-multiplayer --since 2026-10-10T00:00:00-05:00 --until 2026-10-14T00:00:00-05:00
+```
+
+The operator GET route accepts `replay=true`, `project`, `since` and `until`.
+The increasing range is bounded at 14 days and cannot extend into the future;
+it selects complete local calendar days in the service's time zone. One replay
+round per day measures at the following midnight, so the selected day is complete
+for drift detection. Records have `replay:PROJECT:DATE` IDs, conversation `replay`
+and null delivery. Replay reads tracker state spans and the already-fetched origin
+or mirror; it sends no wake, writes no tracker or round record, and consumes no
+pending detection. Project, parent and milestone membership use today's bindings;
+Auto history is unavailable. Historical state and completion are reconstructed
+from the spans, including issues that closed or reopened after the selected day.
+A two-minute measurement budget bounds the replay. Unreadable measurements stay
+unknown with reasons; an exhausted overall budget refuses the request.
+
+`tooling_lead` and `nothing_closed` use the ordinary completed-day rules. WIP caps
+are unavailable until VUH-2256: replay retains `cap: null` and cannot emit
+`over_wip`. It does not substitute a worker cap or invent a historical WIP policy.
+This limitation is included in each replay's caveats. Replay requires an updated
+service; older services refuse the query.
+
 <a id="maximum-trust-mode"></a>
 
 ### `maximum-trust-mode [status|on|off]`

@@ -363,6 +363,7 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
     readonly projectId: string;
     readonly window: OutcomeWindow;
     readonly history?: boolean;
+    readonly asOf?: string;
   }): Promise<TrackerOutcomes>;
 }
 
@@ -3031,7 +3032,7 @@ function statusSpans(store: Store, issue: Issue): OutcomeStateSpan[] {
 
 function builtInOutcomes(
   store: Store,
-  input: { projectId: string; window: OutcomeWindow; history?: boolean },
+  input: { projectId: string; window: OutcomeWindow; history?: boolean; asOf?: string },
   readAt: string,
 ): TrackerOutcomes {
   findProject(store, input.projectId);
@@ -3076,6 +3077,7 @@ function builtInOutcomes(
     projectId: input.projectId,
     window: input.window,
     readAt,
+    ...(input.asOf === undefined ? {} : { asOf: input.asOf }),
     issues,
     milestones: (store.milestones ?? [])
       .filter((entry) => linearId(entry.project) === input.projectId || entry.projectId === input.projectId)

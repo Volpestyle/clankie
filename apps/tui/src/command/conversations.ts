@@ -194,7 +194,8 @@ async function autonomyClient(
   return createCaptainOperatorConversationClient(owner, owner);
 }
 
-const AUTO_USAGE = "Usage: clankie auto [status|on|off] | rounds [--project ID] [--limit N]";
+const AUTO_USAGE =
+  "Usage: clankie auto [status|on|off] | rounds [--project ID] [--limit N] | rounds --replay --project ID --since ISO --until ISO";
 
 /**
  * The master switch for unprompted work (ADR 0264): projects on Auto and
@@ -224,11 +225,25 @@ async function runAutoAction(args: readonly string[], options: ConversationsComm
 /** The Auto round record (ADR 0270): each round's measured velocity and whether it was delivered. */
 async function runAutoRounds(args: readonly string[], options: ConversationsCommandOptions): Promise<number> {
   const query = new URLSearchParams();
-  for (let index = 0; index < args.length; index += 2) {
-    const [flag, value] = [args[index], args[index + 1]];
-    if (value === undefined || (flag !== "--project" && flag !== "--limit")) throw new Error(AUTO_USAGE);
-    query.set(flag.slice(2), value);
+  for (let index = 0; index < args.length; index++) {
+    const flag = args[index];
+    if (flag === "--replay" && !query.has("replay")) {
+      query.set("replay", "true");
+      continue;
+    }
+    const value = args[++index];
+    if (
+      value === undefined ||
+      !["--project", "--limit", "--since", "--until"].includes(flag ?? "") ||
+      query.has(flag!.slice(2))
+    )
+      throw new Error(AUTO_USAGE);
+    query.set(flag!.slice(2), value);
   }
+  if (query.has("replay")) {
+    if (!["project", "since", "until"].every((key) => query.has(key)) || query.has("limit"))
+      throw new Error(AUTO_USAGE);
+  } else if (query.has("since") || query.has("until")) throw new Error(AUTO_USAGE);
   // The same operator read as `clankie linear budget`.
   const env = options.env ?? process.env;
   const credential = await resolveOperatorCredential({
@@ -241,7 +256,7 @@ async function runAutoRounds(args: readonly string[], options: ConversationsComm
     `${commandHost({ ...options, env })}${AUTO_ROUNDS_PATH}${query.size ? `?${query.toString()}` : ""}`,
     {
       headers: { authorization: `Bearer ${credential.token}` },
-      signal: options.signal ?? AbortSignal.timeout(30_000),
+      signal: options.signal ?? AbortSignal.timeout(query.has("replay") ? 150_000 : 30_000),
     },
   );
   const body: unknown = await response.json();

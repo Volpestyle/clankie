@@ -94,8 +94,34 @@ export function summarizeOutcomes(input: {
   statusUpdates: readonly OutcomeStatusUpdate[];
   history?: readonly OutcomeHistory[];
   caveats: readonly string[];
+  /** Reconstruct issue states from history at this instant, for a read-only replay. */
+  asOf?: string;
 }): TrackerOutcomes {
-  const started = input.issues.filter((issue) => issue.state.type === "started");
+  if (input.asOf !== undefined && input.history === undefined) throw new Error("Replay needs state history");
+  const projectAt = (issues: readonly OutcomeIssue[]) =>
+    input.asOf === undefined
+      ? issues
+      : issues.flatMap((issue) => {
+          const history = input.history?.find((entry) => entry.id === issue.id);
+          if (history === undefined) return [issue]; // Unchanged since the read window began.
+          const at = Date.parse(input.asOf!);
+          const span = history.spans.find(
+            (span) =>
+              Date.parse(span.startedAt) <= at && (span.endedAt === null || at < Date.parse(span.endedAt)),
+          );
+          return span === undefined
+            ? []
+            : [
+                {
+                  ...issue,
+                  state: span.state,
+                  completedAt: span.state.type === "completed" ? span.startedAt : null,
+                },
+              ];
+        });
+  const issues = projectAt(input.issues);
+  const milestoneIssues = projectAt(input.milestoneIssues);
+  const started = issues.filter((issue) => issue.state.type === "started");
   const byState: Record<string, number> = {};
   for (const issue of started) byState[issue.state.name] = (byState[issue.state.name] ?? 0) + 1;
   const byIdentifier = (a: OutcomeIssue, b: OutcomeIssue) =>
@@ -105,12 +131,12 @@ export function summarizeOutcomes(input: {
     projectId: input.projectId,
     window: input.window,
     readAt: input.readAt,
-    closed: input.issues
+    closed: issues
       .filter((issue) => issue.state.type === "completed" && inWindow(issue.completedAt, input.window))
       .sort((a, b) => a.completedAt!.localeCompare(b.completedAt!) || byIdentifier(a, b)),
     started: { total: started.length, byState, issues: started.sort(byIdentifier) },
     milestones: input.milestones.map((milestone) => {
-      const counted = input.milestoneIssues.filter(
+      const counted = milestoneIssues.filter(
         (issue) => issue.milestoneId === milestone.id && !NOT_COUNTED.has(issue.state.type),
       );
       const done = counted.filter((issue) => issue.state.type === "completed");
@@ -130,7 +156,12 @@ export function summarizeOutcomes(input: {
       .filter((update) => inWindow(update.createdAt, input.window))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     ...(input.history === undefined ? {} : { history: input.history }),
-    caveats: input.caveats,
+    caveats: [
+      ...input.caveats,
+      ...(input.asOf === undefined
+        ? []
+        : ["Replay uses historical state spans; project, parent and milestone membership are current."]),
+    ],
   };
 }
 
@@ -225,6 +256,7 @@ export async function collectLinearOutcomes(input: {
   window: OutcomeWindow;
   history?: boolean;
   now?: () => Date;
+  asOf?: string;
 }): Promise<TrackerOutcomes> {
   const { projectId, query, window } = input;
   const issuePage = (filter: string, fields: string) =>
@@ -332,6 +364,7 @@ export async function collectLinearOutcomes(input: {
     })),
     ...(history === undefined ? {} : { history }),
     caveats: LINEAR_CAVEATS,
+    ...(input.asOf === undefined ? {} : { asOf: input.asOf }),
   });
 }
 

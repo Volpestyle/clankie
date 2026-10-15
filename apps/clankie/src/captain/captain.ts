@@ -132,6 +132,7 @@ import {
   type AutoProjectState,
 } from "./auto-projects.ts";
 import { ProjectMirrors } from "./project-mirrors.ts";
+import { replayAutoRounds, AutoReplayInputError } from "./auto-replay.ts";
 import { AutoRoundRecord } from "./auto-rounds.ts";
 import { milestoneSignals, reportingSection } from "./auto-reporting.ts";
 import { measureVelocityWithin, velocityLine, type VelocityDeps } from "./auto-velocity.ts";
@@ -6375,6 +6376,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return matches.length === 1 && personas.personaForOccupant(occupantId) === matches[0]!.personaId
         ? matches[0]!.personaId
         : undefined;
+    },
+    replayAutoRounds: async (query) => {
+      const project = (await settings()).projects.projects.find((entry) => entry.id === query.project);
+      if (!project) throw new AutoReplayInputError("Unknown replay project");
+      return replayAutoRounds(project, query, velocityDeps);
     },
     projectStatus: async (projects) => {
       const questions = conversations.pendingOwnerQuestionWorkspaces();

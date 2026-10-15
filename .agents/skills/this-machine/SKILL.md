@@ -309,6 +309,13 @@ lockfiles/generated/binary files excluded first. `null` restores the default:
 tests, fixtures, rigs, scripts, tools and CI are tooling, docs/Markdown are docs,
 and the rest is product. `/project` → Product paths edits the same setting.
 
+For read-only historical drift proof, use `clankie auto rounds --replay --project
+ID --since ISO --until ISO` (at most 14 days, complete local days). It reads tracker
+state spans and fetched git/mirror history without waking anyone, writing tracker
+or round records, or consuming pending drift. WIP cap stays null until VUH-2256,
+so `over_wip` is unavailable; never substitute worker cap. Project/parent/milestone
+membership and Auto selection are current, with those limits stated in output.
+
 Standing work comes from projects on Auto (ADR 0264). Auto rounds go to the
 existing configured lead chat owning the bound tracker project, even when that
 chat uses a different workspace. A lead assigned to another project never takes
