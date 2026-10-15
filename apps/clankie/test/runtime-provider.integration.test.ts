@@ -40,7 +40,7 @@ async function fixture(
   autoRounds: boolean | "captured-ownership" = false,
   outcomeProof?: {
     projectId: string;
-    read: NonNullable<Parameters<typeof createCaptain>[1]>["projectOutcomes"];
+    read: NonNullable<Parameters<typeof createCaptain>[1]["projectOutcomes"]>;
   },
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-runtime-provider-"));
