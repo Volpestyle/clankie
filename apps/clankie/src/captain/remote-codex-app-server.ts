@@ -496,7 +496,7 @@ async function stageWindowsMessage(
 }
 
 /** The short queued message that points a Windows seat at its staged message. */
-export function stagedMessagePointer(staged: { path: string; sha256: string }, text: string): string {
+function stagedMessagePointer(staged: { path: string; sha256: string }, text: string): string {
   return `This message is ${String(text.length)} characters, longer than this machine's command line allows, so it is saved in full at ${staged.path} (UTF-8, SHA-256 ${staged.sha256}). Read that entire file now; its contents are the message.`;
 }
 
