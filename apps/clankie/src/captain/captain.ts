@@ -136,6 +136,7 @@ import { replayAutoRounds, AutoReplayInputError } from "./auto-replay.ts";
 import { AutoRoundRecord } from "./auto-rounds.ts";
 import { AutoRoundCadence } from "./auto-cadence.ts";
 import { milestoneSignals, reportingSection } from "./auto-reporting.ts";
+import type { DriftCorrectionInput } from "./auto-correction-tools.ts";
 import { measureVelocityWithin, velocityLine, type VelocityDeps } from "./auto-velocity.ts";
 import { driftSection, driftSignals, withDrift } from "./auto-drift.ts";
 import type { ProjectVelocity } from "@clankie/protocol/auto-rounds";
@@ -4736,7 +4737,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   async function recordDriftCorrection(
     authority: ConversationAuthority,
-    input: import("./auto-correction-tools.ts").DriftCorrectionInput,
+    input: DriftCorrectionInput,
   ) {
     await assertConversationAuthority(authority);
     const rounds = await readAutoRounds();
