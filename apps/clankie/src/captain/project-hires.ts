@@ -596,6 +596,8 @@ export function projectHireProfile(
     ...request,
     ...effectiveHireProfile(request, role, effectiveHireProfile(profile ?? {}, {}, fleet)),
   };
+  if (result.model === undefined && project.hiring?.allowedModels?.length === 1)
+    result.model = project.hiring.allowedModels[0]!;
   if (result.subagents === null) delete result.subagents;
   return result;
 }

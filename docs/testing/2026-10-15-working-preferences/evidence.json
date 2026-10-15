@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "focused-proof.zip",
+      "size": 50868,
+      "sha256": "71028eaeb4bd5c919564e7e5e9cc2d90f7d1d9fe2ec0002f4347cc1b7d1d8ef0",
+      "url": "clankie://evidence/sha256/71028eaeb4bd5c919564e7e5e9cc2d90f7d1d9fe2ec0002f4347cc1b7d1d8ef0"
+    },
+    {
+      "path": "raw/vuh2256-landing-2.log",
+      "size": 18785,
+      "sha256": "9ce3e50021c0e49a57311c2d2e89e2ac9d3cc208a39c0162e7a716c887b6ed17",
+      "url": "clankie://evidence/sha256/9ce3e50021c0e49a57311c2d2e89e2ac9d3cc208a39c0162e7a716c887b6ed17"
+    }
+  ]
+}

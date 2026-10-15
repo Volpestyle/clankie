@@ -30,9 +30,9 @@ export async function applyProjectCreate(
     for (const model of [profile.model, profile.subagents?.model])
       if (model) resolveHireModel(catalog, profile.harness, model);
   }
-  for (const model of input.hiring?.excludedModels ?? []) {
+  for (const model of [...(input.hiring?.allowedModels ?? []), ...(input.hiring?.excludedModels ?? [])]) {
     const canonical = resolveHireModel(catalog, undefined, model);
-    if (canonical !== model) throw new Error(`Use the canonical excluded model id: ${canonical}`);
+    if (canonical !== model) throw new Error(`Use the canonical constrained model id: ${canonical}`);
   }
   await requireOwner();
   let initial = await observeProjectEnrollment(original.projects, input);

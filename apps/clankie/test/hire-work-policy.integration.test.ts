@@ -277,3 +277,43 @@ it("recovers an unchanged advanced-profile allocation written by the pre-policy 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("pins a model through allowedModels rather than treating a default profile as a constraint", () => {
+  const settings = ProjectsSettingsSchema.parse({
+    projects: [{ id: "pinned", name: "Pinned", hiring: { allowedModels: ["gpt-6.1-sol"] } }],
+  });
+  expect(
+    projectHireProfile(settings, "pinned", { schemaVersion: 1, title: "Job", workingDirectory: "/fixture" })
+      .model,
+  ).toBe("gpt-6.1-sol");
+  expect(
+    hireAdmissionChoice(
+      hireAdmissionReport(report, { allowedModels: ["gpt-6.1-sol"] }, ["gpt-6.1-sol"], NOW),
+      "codex",
+      undefined,
+      NOW,
+    ).plan,
+  ).toBe("codex:pro");
+  expect(() =>
+    hireAdmissionChoice(
+      hireAdmissionReport(report, { allowedModels: ["gpt-6.1-sol"] }, ["another-model"], NOW, true),
+      "codex",
+      undefined,
+      NOW,
+    ),
+  ).toThrow("model not allowed");
+  expect(() =>
+    hireAdmissionChoice(
+      hireAdmissionReport(
+        report,
+        { allowedModels: ["gpt-6.1-sol"], excludedModels: ["gpt-6.1-sol"] },
+        ["gpt-6.1-sol"],
+        NOW,
+        true,
+      ),
+      "codex",
+      undefined,
+      NOW,
+    ),
+  ).toThrow("model excluded");
+});

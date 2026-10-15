@@ -2380,18 +2380,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
       input.harness !== "codex"
     )
       throw new Error("This harness cannot prove the project's subscription-plan constraints.");
-    if (policy?.excludedModels?.length) {
+    if (policy?.excludedModels?.length || policy?.allowedModels) {
       if (!input.model)
-        throw new Error("Choose an explicit model so the project's exclusions can be checked.");
+        throw new Error("Choose an explicit model so the project's model constraints can be checked.");
       for (const model of [input.model, input.subagents?.model].filter(
         (value): value is string => value !== undefined,
-      ))
+      )) {
+        const canonical = this.resolveModel ? await this.resolveModel(input.harness, model) : model;
         if (
-          policy.excludedModels.includes(
-            this.resolveModel ? await this.resolveModel(input.harness, model) : model,
-          )
+          policy.excludedModels?.includes(canonical) ||
+          (policy.allowedModels && !policy.allowedModels.includes(canonical))
         )
-          throw new Error("This model is excluded by the project's hiring policy.");
+          throw new Error("This model is not permitted by the project's hiring policy.");
+      }
     }
     return input;
   }
@@ -3924,8 +3925,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const settings = await this.projectPolicy?.settings();
       const policy = settings?.projects.find((project) => project.id === context?.projectId)?.hiring;
       const report = await this.workerAccountsReport(input.fleet);
-      if (policy?.excludedModels?.length && !input.model)
-        throw new Error("Choose an explicit model so the project's exclusions can be checked.");
+      if ((policy?.excludedModels?.length || policy?.allowedModels) && !input.model)
+        throw new Error("Choose an explicit model so the project's model constraints can be checked.");
       const requestedModels = [input.model, input.subagents?.model].filter(
         (model): model is string => model !== undefined,
       );

@@ -6813,9 +6813,11 @@ mode. Auto history/replay API readers use `includeWorkPolicy=true` for numeric
 caps and cadence fields.
 
 The same JSON update accepts `hiring` with `lead` and `worker` launch profiles,
-`allowedPlans`, `excludedPlans` and `excludedModels`. Plan keys use the observed
+`allowedPlans`, `excludedPlans`, `allowedModels` and `excludedModels`. Plan keys use the observed
 provider and tier, such as `claude:max_20x` or `codex:pro`; one allowed plan pins
-it. Exclusions win. Profiles can pin harness, model and account; explicit hire
+it. A singleton `allowedModels` similarly pins a canonical registry model ID.
+Exclusions win, including over explicit requests. Profiles default harness, model
+and account; explicit hire
 fields win over role, project profile and fleet defaults, in that order.
 `hireKind:lead` selects the lead profile without granting authority. `hiring` is
 a whole-value replacement: merge the read value before changing a nested field;

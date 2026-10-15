@@ -22,7 +22,9 @@ export const ProjectHiringPolicySchema = z
     /** A singleton pins a plan. Unset permits every otherwise eligible plan. */
     allowedPlans: unique(HirePlanKeySchema, 32).min(1).optional(),
     excludedPlans: unique(HirePlanKeySchema, 32).optional(),
-    /** Canonical model ids from the model registry. Explicit profile model fields pin a model. */
+    /** Canonical model ids; a singleton pins the model. Unset permits any eligible model. */
+    allowedModels: unique(z.string().trim().min(1).max(200), 64).min(1).optional(),
+    /** Exclusions win over allowed models and explicit profile/request choices. */
     excludedModels: unique(z.string().trim().min(1).max(200), 64).optional(),
   })
   .strict();

@@ -10,6 +10,8 @@ landing gate or a deployed capability yet.
 
 - Project Started-issue WIP cap, milestone/silent/landing report cadence, lead and
   worker profiles, and plan/model constraints share one revision-fenced API.
+- A singleton allowed-model list is a hard pin, independently of default profiles.
+  Explicit request overrides cannot bypass allowed/excluded model constraints.
 - Fresh subscription work hires use observed plan capacity, keep a 10% reserve
   and retain plan, remaining usage, effort and selection reasons. Explicit owner
   app choices need no typed rationale; only the usage reserve can be overridden,
@@ -21,6 +23,8 @@ landing gate or a deployed capability yet.
 
 ## Focused evidence
 
+[Raw boundary logs and retained gate attempts](clankie://evidence/sha256/71028eaeb4bd5c919564e7e5e9cc2d90f7d1d9fe2ec0002f4347cc1b7d1d8ef0).
+
 | Check                                                                                 | Observed result                                                                                                       |
 | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Combined settings, profiles and CLI boundaries                                        | 141 passed, one existing optional native test skipped                                                                 |
@@ -28,6 +32,7 @@ landing gate or a deployed capability yet.
 | Real TUI modal/settings persistence and native hire boundary                          | 22 passed                                                                                                             |
 | Owner app authority, explicit reserve override and native launch                      | 36 passed                                                                                                             |
 | Retired-setting HTTP refusal and exact-value retention                                | 2 passed                                                                                                              |
+| Hard model pin, legacy-journal recovery, project settings and hire policy             | 54 passed                                                                                                             |
 | Canonical model exclusion and project creation                                        | 41 passed                                                                                                             |
 | Decision deadlines, restart/duplicate/atomic-write recovery and owner gate exemptions | 33 passed; [AC6 evidence](clankie://evidence/sha256/2e4682e7ab92ab3cab19a6a160e3eaeebf1dbc8515501b4632c9c2f144b5f240) |
 

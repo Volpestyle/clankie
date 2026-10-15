@@ -34,19 +34,22 @@ export function hireAdmissionReport(
       ? "held by the owner"
       : !account.usable
         ? (account.reason ?? "Account cannot take work")
-        : models.some((model) => policy?.excludedModels?.includes(model))
-          ? "model excluded by project"
-          : policy?.allowedPlans && (plan === undefined || !policy.allowedPlans.includes(plan))
-            ? "plan not allowed by project"
-            : plan !== undefined && policy?.excludedPlans?.includes(plan)
-              ? "plan excluded by project"
-              : stale || staleUsage
-                ? "usage observation is stale or unavailable"
-                : measured?.remaining == null
-                  ? "remaining plan usage was not observed"
-                  : measured.remaining <= HIRE_PLAN_RESERVE && !(overrideUsage && measured.remaining > 0)
-                    ? `plan is near its limit (${Math.round(measured.remaining * 100)}% remaining; 10% reserved for running work)`
-                    : undefined;
+        : policy?.allowedModels &&
+            (models.length === 0 || models.some((model) => !policy.allowedModels!.includes(model)))
+          ? "model not allowed by project"
+          : models.some((model) => policy?.excludedModels?.includes(model))
+            ? "model excluded by project"
+            : policy?.allowedPlans && (plan === undefined || !policy.allowedPlans.includes(plan))
+              ? "plan not allowed by project"
+              : plan !== undefined && policy?.excludedPlans?.includes(plan)
+                ? "plan excluded by project"
+                : stale || staleUsage
+                  ? "usage observation is stale or unavailable"
+                  : measured?.remaining == null
+                    ? "remaining plan usage was not observed"
+                    : measured.remaining <= HIRE_PLAN_RESERVE && !(overrideUsage && measured.remaining > 0)
+                      ? `plan is near its limit (${Math.round(measured.remaining * 100)}% remaining; 10% reserved for running work)`
+                      : undefined;
     return reason === undefined ? account : { ...account, usable: false, reason };
   });
   const filtered = { ...report, accounts };

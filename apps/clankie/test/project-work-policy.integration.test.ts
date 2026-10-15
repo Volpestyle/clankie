@@ -84,6 +84,8 @@ it("edits project work policy through authenticated CLI/HTTP, fences revisions a
       { hiring: { allowedPlans: ["codex:pro", "codex:pro"] } },
       { hiring: { excludedPlans: ["some-account"] } },
       { hiring: { excludedModels: ["Opus"] } },
+      { hiring: { allowedModels: [] } },
+      { hiring: { allowedModels: ["Opus"] } },
     ]) {
       const response = await fetch(`${host}${PROJECT_UPDATE_SETTINGS_PATH}`, {
         method: "POST",
