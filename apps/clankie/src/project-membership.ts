@@ -1,6 +1,6 @@
-import { execFile } from "node:child_process";
 import { realpath } from "node:fs/promises";
-import { promisify, isDeepStrictEqual } from "node:util";
+import { isDeepStrictEqual } from "node:util";
+import { observeNativeCwd } from "./local-fleet-process.ts";
 import {
   resolveProjectMembership,
   projectsRevision,
@@ -18,33 +18,20 @@ export type ProjectHireLookup =
   | { state: "none" }
   | { state: "invalid" }
   | { state: "assigned"; projectId: string; role?: string; occupantId: string };
-const exec = promisify(execFile);
 type WorkspaceOptions = {
   settings(): Promise<ProjectsSettings>;
   canonical?(path: string): Promise<string>;
-  cwd?(pid: number): Promise<string | undefined>;
+  cwd?(pid: number, signal?: AbortSignal): Promise<string | undefined>;
   remoteCanonical?(machineId: string, path: string): Promise<string | undefined>;
   worktreeRoot?: ObserveProjectWorktreeRoot;
   gitWorktree?: ObserveProjectGitWorktree;
 };
-const processCwd = async (pid: number) => {
-  const { stdout } = await exec("/usr/sbin/lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
-    timeout: 5_000,
-    maxBuffer: 100_000,
-    encoding: "utf8",
-  });
-  const paths = stdout
-    .split("\n")
-    .filter((line) => line.startsWith("n"))
-    .map((line) => line.slice(1));
-  return paths.length === 1 ? paths[0] : undefined;
-};
-
 /** Called only inside a caller's initial/final native-process proof checks. */
 async function workspaceProject(
   options: WorkspaceOptions,
   proof: ProjectProcessProof,
   settings: ProjectsSettings,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   const remote = proof.fleet !== "default";
   if (remote && (!proof.workspace || proof.workspace.machineId !== proof.fleet || !options.remoteCanonical))
@@ -54,8 +41,11 @@ async function workspaceProject(
   const canonical = remote
     ? (path: string) => options.remoteCanonical!(machineId, path)
     : (options.canonical ?? realpath);
-  const cwd = remote ? async (_pid: number) => proof.workspace?.canonicalPath : (options.cwd ?? processCwd);
-  const current = await cwd(proof.processes[0]!.pid);
+  const cwd = remote
+    ? async (_pid: number) => proof.workspace?.canonicalPath
+    : (options.cwd ?? observeNativeCwd);
+  signal?.throwIfAborted();
+  const current = await cwd(proof.processes[0]!.pid, signal);
   if (!current || (await canonical(current)) !== current) return undefined;
   const eligible: ProjectsSettings = { ...settings, projects: [] };
   for (const project of settings.projects) {
@@ -84,7 +74,7 @@ async function workspaceProject(
     ),
   );
   if (membership.outcome === "member") matched.add(membership.projectId);
-  if (matched.size !== 1 || (await cwd(proof.processes[0]!.pid)) !== current) return undefined;
+  if (matched.size !== 1 || (await cwd(proof.processes[0]!.pid, signal)) !== current) return undefined;
   return [...matched][0];
 }
 
@@ -94,7 +84,7 @@ export function createProjectWorkspaceResolver(
     observe(fleet: string, pane: string): Promise<ProjectProcessProof | undefined>;
   },
 ) {
-  return async (proof: ProjectProcessProof): Promise<string | undefined> => {
+  return async (proof: ProjectProcessProof, signal?: AbortSignal): Promise<string | undefined> => {
     try {
       if (
         proof.privateSeat ||
@@ -105,7 +95,7 @@ export function createProjectWorkspaceResolver(
         return undefined;
       const settings = await options.settings();
       const revision = projectsRevision(settings);
-      const projectId = await workspaceProject(options, proof, settings);
+      const projectId = await workspaceProject(options, proof, settings, signal);
       if (
         !projectId ||
         !isDeepStrictEqual(await options.observe(proof.fleet, proof.pane), proof) ||

@@ -97,7 +97,7 @@ export function remoteFleetMembershipNative(
         remoteCanonical: createRemoteWorkspaceCanonical(options),
         worktreeRoot: createRemoteWorktreeRootObserver(options),
         gitWorktree: createRemoteGitWorktreeObserver(options),
-      })(proof);
+      })(proof, signal);
     },
   };
 }
@@ -135,20 +135,8 @@ export function fleetMembershipNative(
             const resolve = createProjectWorkspaceResolver({
               settings,
               observe: (_fleet, pane) => native.observe(pane, current, signal),
-              cwd: async (pid) => {
-                const output = await membershipNativeCommand(
-                  "/usr/sbin/lsof",
-                  ["-a", "-p", String(pid), "-d", "cwd", "-Fn"],
-                  signal,
-                );
-                const paths = output
-                  .split("\n")
-                  .filter((line) => line.startsWith("n"))
-                  .map((line) => line.slice(1));
-                return paths.length === 1 ? paths[0] : undefined;
-              },
             });
-            return resolve(proof);
+            return resolve(proof, signal);
           },
         }
       : {}),

@@ -102,6 +102,32 @@ const ProcessBirthSchema = z
   })
   .strict();
 
+const ProcessCwdSchema = ProcessBirthSchema.extend({
+  cwd: z.string().min(1).max(4096).refine(isAbsolute),
+});
+
+/** Fresh same-user kernel cwd, bracketed by process births; never cached or inferred from a roster. */
+export async function observeNativeCwd(
+  processPid: number,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (!["darwin", "linux"].includes(process.platform) || !pid.safeParse(processPid).success) return undefined;
+  try {
+    const reply = await nativeProcessRequest(fleetProcessHelper(), ["--cwd", String(processPid)], signal);
+    if (!reply) return undefined;
+    const result = ProcessCwdSchema.parse(JSON.parse(reply.stdout));
+    if (
+      result.process.pid !== processPid ||
+      result.process.uid !== process.getuid?.() ||
+      (process.platform === "linux" && result.process.kernelIdentity === undefined)
+    )
+      return undefined;
+    return result.cwd;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Fresh same-user process lifetime only; no executable, argv or display-time authority. */
 export async function observeNativeBirth(
   processPid: number,

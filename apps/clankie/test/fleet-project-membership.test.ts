@@ -1,5 +1,7 @@
-import { mkdtemp, rm, readFile, realpath } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { mkdtemp, mkdir, rm, readFile, realpath } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import { observeNativeCwd } from "../src/local-fleet-process.ts";
 import { once } from "node:events";
 import { createProjectWorkspaceResolver } from "../src/project-membership.ts";
 import { tmpdir } from "node:os";
@@ -16,6 +18,13 @@ import { occupantIdForHerdrSession, type HerdrCensusAgent } from "../src/captain
 import { projectProcessFixture } from "./helpers/local-fleet-process.ts";
 import type { ProjectProcessProof } from "../src/project-process-proof.ts";
 
+// Source checkouts prepare the same kernel helper shipped in installed runtimes.
+const prepareCwd = () =>
+  promisify(execFile)(
+    process.execPath,
+    [join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs")],
+    { timeout: 65_000 },
+  );
 const directories: string[] = [];
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -109,6 +118,7 @@ const read = (service: FleetProjectMembership, input: ReadFleetProjectMembership
   service.read(input, new AbortController().signal, async () => true);
 
 it("joins an owner-started process's real cwd to enrolled settings and its saved project role without a hire", async () => {
+  await prepareCwd();
   const f = await fixture();
   const path = await realpath(f.directory);
   const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], { cwd: path, stdio: "ignore" });
@@ -123,7 +133,7 @@ it("joins an owner-started process's real cwd to enrolled settings and its saved
       settings: f.options.settings,
       observe: (_fleet, pane) => f.observe(pane),
     });
-    f.options.workspace = (proof) => resolve(proof);
+    f.options.workspace = (proof, signal) => resolve(proof, signal);
     const before = await readFile(f.path, "utf8");
     const service = new FleetProjectMembership(f.options);
     expect((await read(service, f.input)).seats[0]!.membership).toEqual({
@@ -150,6 +160,42 @@ it("joins an owner-started process's real cwd to enrolled settings and its saved
     child.kill();
     await exited;
   }
+});
+
+it("reads a live process's cwd afresh after chdir and refuses canceled or exited observations", async () => {
+  await prepareCwd();
+  const directory = await mkdtemp(join(tmpdir(), "native-cwd-"));
+  directories.push(directory);
+  const first = await realpath(directory);
+  const changed = join(first, 'cwd "quoted"\nπ');
+  await mkdir(changed);
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      `
+    process.send('ready');
+    process.on('message', path => { process.chdir(path); process.send('changed'); });
+  `,
+    ],
+    { cwd: first, stdio: ["ignore", "ignore", "ignore", "ipc"] },
+  );
+  await once(child, "message");
+  try {
+    expect(await observeNativeCwd(child.pid!)).toBe(first);
+    const moved = once(child, "message");
+    child.send(changed);
+    await moved;
+    expect(await observeNativeCwd(child.pid!)).toBe(await realpath(changed));
+    const canceled = new AbortController();
+    canceled.abort();
+    expect(await observeNativeCwd(child.pid!, canceled.signal)).toBeUndefined();
+  } finally {
+    const closed = once(child, "exit");
+    child.kill();
+    await closed;
+  }
+  expect(await observeNativeCwd(child.pid!)).toBeUndefined();
 });
 
 it("rechecks workspace selection after authorization and never substitutes cwd for a broken hire", async () => {

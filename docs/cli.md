@@ -4388,6 +4388,11 @@ not confirm live ownership. The command's HTTP requests also have a twelve-secon
 transport deadline. Rename and role lookups refuse incomplete contact reads;
 read again before making that change.
 
+Owner-started workspace membership reads cwd directly from the kernel through
+the native process helper, with fresh process-lifetime and cwd rechecks. The
+five-second membership budget remains unchanged; slow `lsof` startup no longer
+consumes that budget. Missing or changed observations still refuse membership.
+
 `clankie agents role NAME|PERSONA_ID ROLE|none [--project PROJECT]` assigns a current
 member's role in the selected project. Omit `--project` for the default project.
 The host verifies the agent's current native seat and project membership through

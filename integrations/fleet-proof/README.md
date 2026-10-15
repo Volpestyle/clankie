@@ -200,6 +200,27 @@ lifetime with its own existing private-process registration; neither a supplied
 PID nor the observation alone grants authority. Exit, changed identity,
 unavailable data or exceeded bounds refuses the entire observation.
 
+## Process working directory
+
+```sh
+native-process-proof --cwd PID [--diagnostics]
+```
+
+This PID-local observation returns
+`{schemaVersion:1,process:{pid,uid,birth:[seconds,microseconds]},cwd}`.
+Darwin reads `PROC_PIDVNODEPATHINFO` through libproc; Linux reads `cwd` through
+its pinned proc-directory descriptor and includes `kernelIdentity` as in birth
+mode. Two agreeing cwd reads are bracketed by fresh, live same-user process
+identities. Missing, invalid UTF-8, changed, inaccessible or exited observations
+refuse; paths are JSON-escaped. The existing helper/transport bounds and Linux
+host/procfs checks apply. No `lsof`, cwd cache or roster path supplies a fallback.
+
+Project workspace resolution still checks current canonical paths, settings and
+native process proofs before publication. Its five-second membership deadline
+is unchanged. Four serial `lsof` reads could consume roughly ten seconds under
+load (VUH-2299); this narrower kernel observation removes that setup cost while
+retaining fresh cwd reads at both checkpoints. Cwd alone grants no authority.
+
 ## Reattached Codex server observation
 
 ```sh

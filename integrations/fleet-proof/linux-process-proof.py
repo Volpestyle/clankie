@@ -389,6 +389,22 @@ class Proof:
         return {"schemaVersion": 1, "process": {key: identity[key] for key in
                 ("pid", "uid", "birth", "kernelIdentity")}}
 
+    def cwd(self, args):
+        require(len(args) == 2, "arguments", "invalid_arguments")
+        pid = decimal(args[1], 2147483647)
+        require(pid > 1, "arguments", "invalid_arguments")
+        directory, (identity, state, uids) = self.pin(pid)
+        require(state not in (b"Z", b"X", b"x") and all(uid == self.uid for uid in uids),
+                "process", "process_unavailable")
+        before = os.readlink("cwd", dir_fd=directory)
+        require(before.startswith("/") and len(before.encode("utf-8", "strict")) <= 4096,
+                "process", "process_unavailable")
+        require(os.readlink("cwd", dir_fd=directory) == before, "process", "process_changed")
+        self.pin(pid)
+        self.bound()
+        return {"schemaVersion": 1, "process": {key: identity[key] for key in
+                ("pid", "uid", "birth", "kernelIdentity")}, "cwd": before}
+
     def unix_listener(self, path):
         # unix_diag_req / unix_diag_msg, UAPI linux/unix_diag.h. Request
         # kernel names and lifetime cookies, never a caller's filesystem inode.
@@ -479,6 +495,8 @@ def execute(args):
                 result = proof.processes(args)
             elif args[:1] == ["--birth"]:
                 result = proof.birth(args)
+            elif args[:1] == ["--cwd"]:
+                result = proof.cwd(args)
             elif args[:1] == ["--codex-server"]:
                 result = proof.codex_server(args)
             else:

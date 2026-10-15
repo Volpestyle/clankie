@@ -661,6 +661,50 @@ static int prove_birth(int argc, char **argv) {
   return 0;
 }
 
+/* PID-local vnode paths avoid lsof's machine-wide filesystem setup. Retain
+ * fresh before/after birth and repeated cwd checks; no path is cached. */
+static int cwd_path(pid_t pid, char *out, size_t capacity) {
+  if (!within_budget()) return refuse();
+  struct proc_vnodepathinfo info;
+  memset(&info, 0, sizeof(info));
+  errno = 0;
+  if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, sizeof(info)) != sizeof(info))
+    return refuse_at("process", "process_unavailable", errno);
+  const char *path = info.pvi_cdir.vip_path;
+  size_t length = strnlen(path, sizeof(info.pvi_cdir.vip_path));
+  if (length == 0 || length >= sizeof(info.pvi_cdir.vip_path) || length >= capacity ||
+      path[0] != '/' || !valid_utf8(path, length))
+    return refuse_at("process", "process_unavailable", 0);
+  memcpy(out, path, length + 1);
+  return 0;
+}
+
+static int prove_cwd(int argc, char **argv) {
+  uint64_t pid;
+  if (argc != 3 || !decimal(argv[2], INT_MAX, &pid) || pid <= 1)
+    return refuse_at("arguments", "invalid_arguments", 0);
+  struct identity first, second;
+  char before[MAXPATHLEN], after[MAXPATHLEN];
+  int result = target_identity((pid_t)pid, &first, 0);
+  if (result != 0) return result;
+  if (first.ruid != getuid()) return refuse_at("socket_owner", "owner_mismatch", 0);
+  result = cwd_path((pid_t)pid, before, sizeof(before));
+  if (result != 0) return result;
+  result = cwd_path((pid_t)pid, after, sizeof(after));
+  if (result != 0) return result;
+  result = target_identity((pid_t)pid, &second, 0);
+  if (result != 0) return result;
+  if (!same_process(&first, &second) || strcmp(before, after) != 0)
+    return refuse_at("process", "process_changed", 0);
+  if (!within_budget()) return refuse();
+  fputs("{\"schemaVersion\":1,\"process\":", proof_output);
+  print_identity(&first, 1);
+  fputs("},\"cwd\":", proof_output);
+  print_string(proof_output, before);
+  fputs("}\n", proof_output);
+  return 0;
+}
+
 /* The hex framing carries no authority; decoded values are compared only to
  * current kernel observations. Neither value is emitted or logged. */
 static int hex_path(const char *hex, char *out, size_t capacity) {
@@ -1076,6 +1120,7 @@ static int execute_proof(int argc, char **argv) {
     int result;
     if (argc > 1 && (strcmp(argv[1], "--processes") == 0 || strcmp(argv[1], "--claude-processes") == 0)) result = prove_processes(argc, argv);
     else if (argc > 1 && strcmp(argv[1], "--birth") == 0) result = prove_birth(argc, argv);
+    else if (argc > 1 && strcmp(argv[1], "--cwd") == 0) result = prove_cwd(argc, argv);
     else if (argc > 1 && strcmp(argv[1], "--codex-server") == 0) result = prove_codex_server(argc, argv);
     else result = prove(argc, argv);
     if (result == 0) return 0;
