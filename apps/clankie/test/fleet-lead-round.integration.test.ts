@@ -528,9 +528,21 @@ it("keeps an idle reporter parked through its report receipts and delivers them 
 // global-default seat's 828 turns on 2026-10-13). Routine reports now wait for
 // the seat's next round; an urgent one is heard at once and brings them along.
 it("holds routine reports for an idle lead seat's round and delivers an urgent one at once with them", async () => {
-  const f = await fixture(60 * 60_000, undefined, false, true, undefined, undefined, true, true, undefined, undefined, {
-    reportRoundMs: 1_500,
-  });
+  const f = await fixture(
+    60 * 60_000,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    true,
+    true,
+    undefined,
+    undefined,
+    {
+      reportRoundMs: 1_500,
+    },
+  );
   const report = async (index: number, text: string, urgent?: true) => {
     const row = f.rows[index]!;
     const binding = deliveryFingerprint(
@@ -802,6 +814,38 @@ it("a real watch wake includes every owned seat and never another lead's or unow
   expect(event?.content).toContain("overlap");
   await f.finish(event!.id);
   expect(await f.captain.pollSeatEvents(0, undefined, f.other)).toEqual([]);
+});
+
+// VUH-2274: a clean completion is routine; it joins the idle lead's round
+// instead of waking it at once, and its watch stays durable meanwhile.
+it("holds a clean completion watch for an idle lead's round, then wakes it once", async () => {
+  const f = await fixture(
+    60 * 60_000,
+    undefined,
+    false,
+    false,
+    undefined,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    {
+      reportRoundMs: 1_500,
+    },
+  );
+  const bank = await f.captain.laneToolBank("operator", "global-default");
+  const watch = bank.tools.find((tool) => tool.name === "herdr_watch")!;
+  await watch.call({ agent: f.rows[0]!.pane_id, reason: "Harvest the assigned patch" });
+  const settledAt = performance.now();
+  f.settle(0);
+  expect(await f.captain.pollSeatEvents(600, undefined, "global-default")).toEqual([]);
+  const [event] = await f.captain.pollSeatEvents(3000, undefined, "global-default");
+  expect(event?.content).toContain("This is a Herdr watcher notification you armed earlier");
+  expect(event?.content).toContain("Reason you recorded: Harvest the assigned patch");
+  expect(performance.now() - settledAt).toBeGreaterThanOrEqual(1_400);
+  await f.finish(event!.id);
+  expect(await f.captain.pollSeatEvents(500, undefined, "global-default")).toEqual([]);
 });
 
 it("periodic rounds independently wake both leading conversations with only their seats", async () => {

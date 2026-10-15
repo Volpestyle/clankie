@@ -904,6 +904,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly summaryWatchIntervalMs: number;
   private readonly seatTranscriptTailMs: number;
   private readonly lastReply: ((agent: HerdrAgentSnapshot) => Promise<string | undefined>) | undefined;
+  private readonly awaitRound: ((conversationId: string, signal: AbortSignal) => Promise<void>) | undefined;
   private state: PersistedHerdrWatches;
   private wake: InternalWake | undefined;
   /** Host policy resolution and escalation reuse the owner's ask store. */
@@ -982,6 +983,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
        * Clankie did not hire (no seat event carries their final text).
        */
       readonly lastReply?: (agent: HerdrAgentSnapshot) => Promise<string | undefined>;
+      /**
+       * Wait for the leading conversation's next round before a routine
+       * completion wakes it (VUH-2274). The watch stays durable meanwhile.
+       */
+      readonly awaitRound?: (conversationId: string, signal: AbortSignal) => Promise<void>;
       /** A hosted body's model for pi seats (VUH-1373); absent, pi uses its own configuration. */
       readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
       /**
@@ -1089,6 +1095,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
     this.seatTranscriptTailMs = options.seatTranscriptTailMs ?? SEAT_TRANSCRIPT_TAIL_MS;
     this.lastReply = options.lastReply;
+    this.awaitRound = options.awaitRound;
     this.state = this.read();
   }
 
@@ -5085,6 +5092,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
 
   private async run(record: HerdrWatchRecord, signal: AbortSignal): Promise<void> {
     let prompt: string;
+    // A clean completion can wait for the lead's round; a gone pane, an
+    // unverified or failed turn, or a pane waiting on someone is heard now.
+    let routine = false;
     let harvestMessageId = record.messageId;
     try {
       const current = await this.runner.resolveTerminal(record.terminalId);
@@ -5106,6 +5116,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           const after = await this.runner.resolveTerminal(record.terminalId).catch(() => undefined);
           if (this.endsOnNativeChange(record, after)) return;
           prompt = watchPrompt(record, after ?? current, undefined, event);
+          routine = event.type === "turn_completed" && event.ok;
         } else if (record.messageId !== undefined) {
           prompt = watchPrompt(
             record,
@@ -5120,6 +5131,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           // A transcript that cannot be read leaves the ordinary no-report wake.
           const reply = await this.lastReply?.(settled).catch(() => undefined);
           prompt = watchPrompt(record, settled, undefined, undefined, reply?.trim() || undefined);
+          routine = settled.status === "done" || settled.status === "idle";
         }
       }
     } catch {
@@ -5207,6 +5219,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
         },
       };
       if (!this.wake) return;
+      if (routine && owner.discord === undefined && record.wakeReceipt === undefined) {
+        await this.awaitRound?.(owner.conversationId, signal);
+        if (signal.aborted || this.closed || !this.state.watches.some((watch) => watch.id === record.id))
+          return;
+      }
       const result = await this.wake(owner.conversationId, prompt, owner.discord, guard, original);
       if (result === "deferred") this.retry(record);
       else this.remove(record.id);

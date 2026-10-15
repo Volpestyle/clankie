@@ -253,6 +253,20 @@ export function roomHandoffConversationId(roomConversationId: string, deliveryId
   return `handoff-${createHash("sha256").update(`${roomConversationId}:${deliveryId}`).digest("hex").slice(0, 32)}`;
 }
 
+/** A round's release, or cancellation of the work waiting for it. */
+function untilRoundOrAbort(round: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (signal === undefined) return round;
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    if (signal.aborted) return resolve();
+    signal.addEventListener("abort", done, { once: true });
+    void round.then(done);
+  });
+}
+
 export class ConversationStore {
   /** Live outbox binding, never inferred from a remembered transcript. */
   public nativeTurnDelivery?: (conversationId: string) => boolean;
@@ -1914,6 +1928,16 @@ export class ConversationStore {
     round.release();
   }
 
+  /**
+   * Wait for this conversation's next round, or return at once when waiting
+   * saves nothing. Durable work that is not a report waits here before it is
+   * accepted, such as a routine completion watch (VUH-2274).
+   */
+  public async awaitReportRound(conversationId: string, signal?: AbortSignal): Promise<void> {
+    const round = this.joinReportRound(conversationId);
+    if (round !== undefined) await untilRoundOrAbort(round, signal);
+  }
+
   /** The round a routine report waits on; undefined when it should go now. */
   private joinReportRound(conversationId: string): Promise<void> | undefined {
     const existing = this.reportRounds.get(conversationId);
@@ -2865,14 +2889,7 @@ export class ConversationStore {
         // The seat may have started a turn or gone away since this report
         // arrived; then waiting saves nothing.
         if (this.reportRoundMs?.(conversationId) === undefined) this.releaseReportRound(conversationId);
-        await new Promise<void>((resolve) => {
-          const done = () => {
-            controller.signal.removeEventListener("abort", done);
-            resolve();
-          };
-          controller.signal.addEventListener("abort", done, { once: true });
-          void round.then(done);
-        });
+        await untilRoundOrAbort(round, controller.signal);
       }
       if (provenance.questionAnswer) {
         const preparation = new ConversationServiceRun(controller.signal);

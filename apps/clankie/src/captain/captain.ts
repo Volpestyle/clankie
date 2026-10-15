@@ -758,6 +758,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       stateDir: options.stateDir,
     },
     runner: herdrRunner,
+    // A routine completion joins the lead's next round, like a routine report (VUH-2274).
+    awaitRound: (conversationId, signal) => conversations.awaitReportRound(conversationId, signal),
     // A pane Clankie did not hire reports nothing on settling; its own transcript holds its last word.
     lastReply: async (agent) => {
       if (deps.agentSessions === undefined || agent.session?.kind !== "id" || agent.paneId.includes("/"))

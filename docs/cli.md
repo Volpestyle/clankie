@@ -6016,7 +6016,11 @@ next round: the seat's next turn, any other delivery to its conversation, or at
 most ten minutes. Many reports then cost the seat one turn instead of one turn
 each (VUH-2274). An urgent report, an owner turn or a lead message from another
 conversation is delivered at once and brings the waiting reports with it. A
-waiting report stays `stored`; restarts deliver it in the next round. Completion harvests remain
+waiting report stays `stored`; restarts deliver it in the next round. A
+completion watch whose worker finished cleanly (its turn completed, or the pane
+settled `done` or `idle`) joins the same round before it is accepted, so the
+watch stays durable while it waits. A gone pane, an unverified or failed turn,
+or a pane waiting on input wakes the lead at once. Completion harvests remain
 `kind="watch"`, and self-wakes remain `kind="wake"`. These tags do not change
 the service-owned lead route or delivery receipts. A room-owned worker message
 still uses `reply` with its `event_id` for the correlated room reply; the original
