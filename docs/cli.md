@@ -2092,7 +2092,14 @@ on pace to run out before its weekly reset (`usage.runOutWarning`, default on;
 reads this Mac's accounts; a weekly window projected to run out at least that
 many hours before its reset wakes each lead once per window reset, naming where
 the next hires should go and suggesting a handoff at the next checkpoint.
-Nothing is moved or stopped.
+When a warned window has a fresh reset reading or its measured pace recovers
+through reset, that lead hears one "Capacity recovered" notice with used percent,
+reset and observation time. Auto wakes include fresh per-account headroom, pace,
+reset and observation age from the same reader. Never pause or keep pausing hires
+on usage grounds without a fresh `worker_accounts` / `clankie usage --json`
+reading in that turn. A near-reset projection is routing advice, not a blanket
+hiring pause. Unknown and signed-out accounts are not exhausted; owner holds
+still apply. Nothing is moved or stopped.
 
 `usage overlay on|off` shows or hides the meters beside Clankie in the desktop
 overlay (`usage.overlay` in settings, default on; `GET`/`POST /v1/usage/settings`,

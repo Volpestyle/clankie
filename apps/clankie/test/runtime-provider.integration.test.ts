@@ -418,6 +418,9 @@ it("routes Auto rounds to the configured project lead and independently wakes th
     command: { action: "set_enabled", enabled: true },
   });
   const [led, head] = await Promise.all([accept(lead), accept("global-default")]);
+  expect(led.content).toContain("Current account capacity (service reading;");
+  expect(head.content).toContain("Current account capacity (service reading;");
+  expect(led.content).toContain("clankie usage --json");
   expect(led.content).toContain("Lead backlog");
   expect(led.content).toContain("Linear project: 11111111-1111-4111-8111-111111111111");
   expect(led.content).not.toContain("Head backlog");

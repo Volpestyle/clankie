@@ -206,6 +206,12 @@ export interface RunOutWarning {
   /** Stable for one window's one reset, so it is told once. */
   readonly key: string;
   readonly text: string;
+  readonly machine: string;
+  readonly harness: string;
+  readonly label: string;
+  readonly window: string;
+  readonly resetsAt: string;
+  readonly observedAt: string;
 }
 
 /**
@@ -224,9 +230,17 @@ export function runOutWarnings(
   for (const entry of allocation.accounts) {
     const account = report.accounts.find((a) => a.harness === entry.harness && a.label === entry.label);
     if (!account || account.held || account.signedIn !== true) continue;
-    for (const out of entry.runsOut ?? []) {
-      const window = account.usage?.windows.find((w) => w.id === out.window);
-      if (!window || (window.windowMinutes ?? 0) < 1440) continue;
+    for (const window of account.usage?.windows ?? []) {
+      // Project from the observation, not from a later wake's wall clock.
+      const pace = usageWindowPace(window, Date.parse(account.usage!.observedAt));
+      if (pace.runsOutAt === undefined || pace.resetsAt === undefined || pace.resetsAt <= now) continue;
+      const out = {
+        window: window.id,
+        label: window.label,
+        at: new Date(pace.runsOutAt).toISOString(),
+        resetsAt: new Date(pace.resetsAt).toISOString(),
+      };
+      if ((window.windowMinutes ?? 0) < 1440) continue;
       if (Date.parse(out.resetsAt) - Date.parse(out.at) < settings.runOutWarningHours * 3_600_000) continue;
       const noun = entry.harness === "claude" ? "Claude" : "Codex";
       const next = allocation.recommendations.find((r) => r.harness === entry.harness);
@@ -237,13 +251,106 @@ export function runOutWarnings(
       const scoped = out.window.includes(":") ? ` Only hires on that model draw on this limit.` : "";
       warnings.push({
         key: `${report.machine}:${entry.harness}:${entry.label}:${out.window}:${out.resetsAt}`,
+        machine: report.machine,
+        harness: entry.harness,
+        label: entry.label,
+        window: out.window,
+        resetsAt: out.resetsAt,
+        observedAt: account.usage!.observedAt,
         text:
           `Usage warning: ${noun} account ${entry.label}${account.identity ? ` (${account.identity})` : ""} on ${report.machine} ` +
           `is on pace to run out of ${out.label} around ${out.at}, ${days(Date.parse(out.resetsAt) - Date.parse(out.at))} before it resets at ${out.resetsAt} ` +
           `(${Math.round(window.usedPercent)}% used).${scoped} ${elsewhere}, and hand long-running seats on ${entry.label} off at their next checkpoint. ` +
-          "Nothing was moved or stopped; live seats stay where they are unless you move them.",
+          "This is routing advice, not a blanket hiring pause. Re-read worker_accounts or clankie usage --json before a usage-based staffing decision. Nothing was moved or stopped; live seats stay where they are unless you move them.",
       });
     }
   }
   return warnings;
+}
+
+/** One lead's delivered warnings and recoveries, fed by the existing account reader. */
+export class AccountUsageNotices {
+  private readonly told = new Set<string>();
+  private readonly warned = new Map<string, RunOutWarning>();
+
+  pending(
+    report: MachineWorkerAccounts,
+    settings: { readonly runOutWarning: boolean; readonly runOutWarningHours: number },
+    now = Date.now(),
+  ): RunOutWarning[] {
+    if (!settings.runOutWarning) return [];
+    const notices = runOutWarnings(report, settings, now).filter((warning) => !this.told.has(warning.key));
+    for (const warning of this.warned.values()) {
+      const account = report.accounts.find((a) => a.harness === warning.harness && a.label === warning.label);
+      if (report.machine !== warning.machine || !account?.usable || account.held || account.signedIn !== true)
+        continue;
+      const observedAt = account.usage?.observedAt;
+      if (!observedAt || Date.parse(observedAt) <= Date.parse(warning.observedAt)) continue;
+      const window = account.usage?.windows.find((w) => w.id === warning.window);
+      if (
+        !window?.resetsAt ||
+        Date.parse(window.resetsAt) <= Date.parse(observedAt) ||
+        window.usedPercent >= 100
+      )
+        continue;
+      const pace = usageWindowPace(window, Date.parse(observedAt));
+      const reset =
+        Date.parse(window.resetsAt) > Date.parse(warning.resetsAt) &&
+        Date.parse(observedAt) >= Date.parse(warning.resetsAt);
+      if (!reset && !(pace.burnPerDay !== undefined && pace.runsOutAt === undefined)) continue;
+      notices.push({
+        ...warning,
+        key: `recovered|${warning.key}`,
+        text: `Capacity recovered: ${account.harness} account ${account.label} on ${report.machine}, ${window.label}: ${Math.round(window.usedPercent)}% used, resetsAt ${window.resetsAt}, observedAt ${observedAt}. ${reset ? "The window reset." : "Its current pace lasts until the reset."} Reassess new hires from this reading; owner account holds still apply.`,
+      });
+    }
+    return notices;
+  }
+
+  delivered(notices: readonly RunOutWarning[]): void {
+    for (const notice of notices) {
+      if (notice.key.startsWith("recovered|")) this.warned.delete(notice.key.slice("recovered|".length));
+      else {
+        this.told.add(notice.key);
+        this.warned.set(notice.key, notice);
+      }
+    }
+    while (this.told.size > 512) this.told.delete(this.told.values().next().value!);
+    while (this.warned.size > 512) this.warned.delete(this.warned.keys().next().value!);
+  }
+}
+
+/** Actual reported headroom, never inferred from the passage of a reset timestamp. */
+export function accountCapacityLines(report: MachineWorkerAccounts, now = Date.now()): string[] {
+  return [
+    ...report.accounts.map((account) => {
+      const prefix = `${report.machine} ${account.harness} ${account.label}: `;
+      const status = account.held
+        ? `held by owner${account.held.reason ? ` (${account.held.reason})` : ""}; `
+        : account.signedIn === false
+          ? "signed out; "
+          : account.signedIn === null
+            ? "sign-in unknown; "
+            : !account.usable
+              ? `${account.reason ?? "unavailable"}; `
+              : "";
+      const usage = account.usage;
+      if (!usage?.windows.length) return `${prefix}${status}capacity unknown (usage not reported)`;
+      const age = Math.max(0, Math.round((now - Date.parse(usage.observedAt)) / 1000));
+      const windows = usage.windows.map((window) => {
+        const pace = usageWindowPace(window, Date.parse(usage.observedAt));
+        const projection =
+          window.resetsAt && Date.parse(window.resetsAt) <= Date.parse(usage.observedAt)
+            ? "pace unknown (reset reading needed)"
+            : pace.burnPerDay === undefined
+              ? "pace unknown"
+              : `${Math.round(pace.burnPerDay)}%/day, ${pace.runsOutAt === undefined ? "capacity lasts to reset" : `out ${new Date(pace.runsOutAt).toISOString()}`}`;
+        return `${window.label} ${Math.round(100 - window.usedPercent)}% left, ${projection}, reset ${window.resetsAt ?? "unknown"}`;
+      });
+      return `${prefix}${status}${windows.join("; ")}; observed ${usage.observedAt} (${age}s ago)`;
+    }),
+    ...Object.entries(report.unavailable ?? {}).map(
+      ([harness, reason]) => `${report.machine} ${harness}: capacity unknown (${reason})`,
+    ),
+  ];
 }

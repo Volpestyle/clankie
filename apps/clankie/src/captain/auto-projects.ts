@@ -182,6 +182,7 @@ export function autoRoundPrompt(
   states: readonly AutoProjectState[],
   velocity: readonly string[] = [],
   drift: readonly string[] = [],
+  capacity: readonly string[] = [],
 ): string {
   return [
     "Auto round. The owner put these projects on Auto: work their backlogs without being asked.",
@@ -202,5 +203,10 @@ export function autoRoundPrompt(
         ]
       : []),
     ...drift,
+    "",
+    "Current account capacity (service reading; refresh worker_accounts or clankie usage --json in this turn before pausing hires on usage grounds):",
+    ...(capacity.length
+      ? capacity.map((line) => `- ${line}`)
+      : ["- Capacity unknown; read worker_accounts before deciding staffing."]),
   ].join("\n");
 }

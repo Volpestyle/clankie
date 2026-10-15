@@ -288,7 +288,7 @@ import { RoomHandoffCoordinator } from "./room-handoff-coordinator.ts";
 import { NativeRoomHandoffs } from "./native-room-handoffs.ts";
 import { RoomConversations } from "./room-conversations.ts";
 import { sameLinearWakeRecipient } from "./conversations/linear-wakes.ts";
-import { runOutWarnings } from "./account-allocation.ts";
+import { AccountUsageNotices, accountCapacityLines } from "./account-allocation.ts";
 import { captainRoutingExtension } from "./routing.ts";
 import { captainTurnModelExtension, TurnModelRecorder } from "./turn-model.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
@@ -4556,13 +4556,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const pendingFleetRounds = new Set<string>();
   const completedFleetRounds = new Map<string, string>();
   // Each lead hears a run-out projection once per window reset (VUH-1974).
-  const toldRunOuts = new Set<string>();
+  const usageNotices = new Map<string, AccountUsageNotices>();
+  const usageNoticeOwners = new Map<string, ConversationOwner>();
   const warnRunOuts = async (owners: ReadonlyMap<string, ConversationOwner>) => {
     const usage = (await settings()).usage;
     if (!usage.runOutWarning || shutdown.signal.aborted) return;
-    const warnings = runOutWarnings(await readWorkerAccounts(undefined, ["claude", "codex"]), usage);
+    const reading = await readWorkerAccounts(undefined, ["claude", "codex"]);
     for (const [ownerKey, owner] of owners) {
-      const fresh = warnings.filter((warning) => !toldRunOuts.has(`${ownerKey}|${warning.key}`));
+      const notices = usageNotices.get(ownerKey) ?? new AccountUsageNotices();
+      usageNotices.set(ownerKey, notices);
+      const fresh = notices.pending(reading, usage);
       if (!fresh.length || !(await validateConversationOwner(owner))) continue;
       const accepted = await wakeConversation(
         owner,
@@ -4575,14 +4578,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         false,
       );
       if (!accepted) continue;
-      for (const warning of fresh) toldRunOuts.add(`${ownerKey}|${warning.key}`);
-      while (toldRunOuts.size > 512) toldRunOuts.delete(toldRunOuts.values().next().value!);
+      notices.delivered(fresh);
+      usageNoticeOwners.set(ownerKey, owner);
     }
   };
   const stopFleetRounds = startFleetRounds(async () => {
     if (shutdown.signal.aborted) return;
     const seats = await refreshFleet();
-    const owners = new Map<string, ConversationOwner>();
+    // Keep checking a warned lead even after its last seat finishes.
+    const owners = new Map(usageNoticeOwners);
     for (const seat of seats) {
       const owner = seatLeadOwners.get(seat)?.owner;
       if (owner) owners.set(JSON.stringify(owner), owner);
@@ -4768,9 +4772,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         } catch (error) {
           console.warn("Auto round record unavailable", conversationId, String(error));
         }
+        const report = await readWorkerAccounts(undefined, ["claude", "codex"]);
+        const capacity = accountCapacityLines(report);
         return wakeConversation(
           { conversationId },
-          autoRoundPrompt(states, velocities.map(velocityLine), driftSection(velocities)),
+          autoRoundPrompt(states, velocities.map(velocityLine), driftSection(velocities), capacity),
           async () => {
             if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
             const current = (await readAutoRounds()).get(conversationId);

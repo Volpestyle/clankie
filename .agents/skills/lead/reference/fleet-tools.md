@@ -38,7 +38,12 @@ rank-1 account in `allocation`: the one with the most spare capacity per day
 result's `accountChoice.reason` says which and why. A "Usage warning" wake
 means an account is on pace to run out well before its reset: steer new hires
 to the account it names and hand long seats off at their next checkpoint;
-nothing was moved for you.
+nothing was moved for you. A fresh reset or pace recovery sends one "Capacity
+recovered" notice with its reading. Auto rounds carry account headroom, pace,
+reset and observation age. Never keep a usage-based pause without a fresh
+`worker_accounts` / `clankie usage --json` read in that turn; near-reset pace is
+not a blanket hiring ban, unknown/signed-out is not exhausted, and owner holds
+still apply.
 
 Changing `clankie model` or `clankie effort` tunes Clankie's own turns, not an
 external worker. A pane label or a brief asking for effort is not

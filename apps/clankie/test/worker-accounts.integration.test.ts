@@ -1,3 +1,4 @@
+import { autoRoundPrompt } from "../src/captain/auto-projects.ts";
 import { mintOperatorToken } from "@clankie/credential-broker";
 import { createWorkerAccountHoldsRoutes } from "../src/worker-account-holds-routes.ts";
 import { execFile, execFileSync } from "node:child_process";
@@ -21,7 +22,12 @@ import {
   type MachineWorkerAccounts,
   type WorkerAccountHold,
 } from "../src/captain/harness-accounts.ts";
-import { allocateAccounts, runOutWarnings } from "../src/captain/account-allocation.ts";
+import {
+  AccountUsageNotices,
+  accountCapacityLines,
+  allocateAccounts,
+  runOutWarnings,
+} from "../src/captain/account-allocation.ts";
 
 /**
  * Account choice across the fleet link (VUH-1527, ADR 0221): the probe is the
@@ -601,6 +607,104 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("a warned window reset delivers one recovery and fresh headroom in the Auto wake (VUH-2310)", () => {
+    const original = {
+      ...OCT_9,
+      accounts: OCT_9.accounts.filter((account) => account.harness === "claude" && account.label === "james"),
+    };
+    const notices = new AccountUsageNotices();
+    const settings = { runOutWarning: true, runOutWarningHours: 12 };
+    const warnings = notices.pending(original, settings, NOW);
+    expect(warnings).toHaveLength(1);
+    notices.delivered(warnings);
+    expect(notices.pending(original, settings, NOW)).toEqual([]);
+    const resetAt = Date.parse("2026-10-14T11:05:00.000Z");
+    // Time passing alone is not a recovery observation.
+    expect(notices.pending(original, settings, resetAt)).toEqual([]);
+    const recovered: MachineWorkerAccounts = {
+      ...original,
+      observedAt: new Date(resetAt).toISOString(),
+      accounts: original.accounts.map((account) =>
+        account.harness === "claude" && account.label === "james"
+          ? {
+              ...account,
+              headroom: 0.98,
+              usage: {
+                ...account.usage!,
+                observedAt: new Date(resetAt).toISOString(),
+                windows: [week(2, "2026-10-21T11:00:00.000Z")],
+              },
+            }
+          : account,
+      ),
+    };
+    for (const unavailable of [
+      { held: { reason: "reserved" } },
+      { signedIn: false, usable: false },
+      { signedIn: null, usable: false },
+      { usage: undefined },
+    ]) {
+      const report = {
+        ...recovered,
+        accounts: recovered.accounts.map((account) =>
+          account.harness === "claude" && account.label === "james"
+            ? { ...account, ...unavailable }
+            : account,
+        ),
+      };
+      expect(notices.pending(report, settings, resetAt)).toEqual([]);
+    }
+    const recovery = notices.pending(recovered, settings, resetAt);
+    expect(recovery).toHaveLength(1);
+    expect(recovery[0]!.text).toContain("Capacity recovered:");
+    expect(recovery[0]!.text).toContain("2% used");
+    expect(recovery[0]!.text).toContain("resetsAt 2026-10-21T11:00:00.000Z");
+    expect(recovery[0]!.text).toContain("observedAt 2026-10-14T11:05:00.000Z");
+    // An unaccepted delivery remains pending; accepting it ends this warning.
+    expect(notices.pending(recovered, settings, resetAt)).toEqual(recovery);
+    notices.delivered(recovery);
+    expect(notices.pending(recovered, settings, resetAt)).toEqual([]);
+    expect(notices.pending(recovered, settings, resetAt + 60_000)).toEqual([]);
+    const wake = autoRoundPrompt([], [], [], accountCapacityLines(recovered, resetAt + 60_000));
+    expect(wake).toContain("pc claude james: Current week (all models) 98% left");
+    expect(wake).toContain("pace unknown, reset 2026-10-21T11:00:00.000Z");
+    expect(wake).toContain("observed 2026-10-14T11:05:00.000Z (60s ago)");
+    process.stdout.write(
+      "VUH-2310 reset recovery capture " +
+        JSON.stringify({
+          warning: warnings[0]!.text,
+          recovery: recovery[0]!.text,
+          autoWake: wake,
+          repeatedRecoveryCount: notices.pending(recovered, settings, resetAt + 60_000).length,
+        }) +
+        "\n",
+    );
+  });
+
+  it("announces measured pace recovery without waiting for a reset", () => {
+    const original = {
+      ...OCT_9,
+      accounts: OCT_9.accounts.filter((account) => account.harness === "claude" && account.label === "james"),
+    };
+    const notices = new AccountUsageNotices();
+    const settings = { runOutWarning: true, runOutWarningHours: 12 };
+    notices.delivered(notices.pending(original, settings, NOW));
+    // Same observed usage, but enough of the week has now elapsed to last until reset.
+    const nearReset = Date.parse("2026-10-14T10:00:00.000Z");
+    const reading = {
+      ...original,
+      accounts: original.accounts.map((account) => ({
+        ...account,
+        usage: { ...account.usage!, observedAt: new Date(nearReset).toISOString() },
+      })),
+    };
+    const recovery = notices.pending(reading, settings, nearReset);
+    expect(recovery).toHaveLength(1);
+    expect(recovery[0]!.text).toContain("Its current pace lasts until the reset");
+    notices.delivered(recovery);
+    expect(notices.pending(reading, settings, nearReset)).toEqual([]);
   });
 
   it("projects the 20x week running out before its reset, once per reset", () => {

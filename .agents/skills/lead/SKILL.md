@@ -184,6 +184,14 @@ for the job, weighing `allocation` in `worker_accounts` (each harness's
 accounts ranked by plan size, what is left and pace against reset; `clankie
 usage` shows each account's plan tier and windows with the same "Next hire"
 lines, `--json` for the raw report).
+
+Never pause or keep pausing hires on usage grounds without a fresh
+`worker_accounts` / `clankie usage --json` reading in the same turn. A projection
+that runs out near reset is not a blanket no-hire. Signed-out or unknown
+accounts are not exhausted. Respect owner account holds. Auto wakes carry
+current per-account capacity; a "Capacity recovered" notice ends the old
+warning's premise, so reassess staffing from the fresh reading.
+
 Workers report with `message_clankie`. Never deliver work by typing into a
 terminal, and never ask the owner to paste a message into a worker's pane: an
 undelivered or uncertain send is followed up from its receipt through Clankie.
