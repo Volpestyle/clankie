@@ -4827,6 +4827,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           async () => {
             if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
             const current = (await readAutoRounds()).get(conversationId);
+            if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
             if (!current || autoFingerprint(current) !== fingerprint)
               throw new Error("Projects on Auto changed before delivery");
             passedDeliveryGuard = true;
