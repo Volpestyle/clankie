@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type {
   AutoRound,
   DriftDetection,
+  DriftCorrection,
   MilestoneReport,
   ProjectVelocity,
   VelocityMilestone,
@@ -30,6 +31,12 @@ interface UpdateLine {
   readonly roundId: string;
   readonly projectId: string;
   readonly update: MilestoneReport["updates"][number];
+}
+interface CorrectionLine {
+  readonly type: "drift-correction";
+  readonly roundId: string;
+  readonly projectId: string;
+  readonly correction: DriftCorrection;
 }
 
 interface ProjectState {
@@ -69,6 +76,63 @@ export class AutoRoundRecord {
 
   pendingDrift(projectId: string): DriftDetection[] {
     return this.state(projectId).pendingDrift ?? [];
+  }
+
+  /** The latest response remains due until a later recorded round proves it happened. */
+  pendingCorrection(projectId: string): DriftCorrection | undefined {
+    const rounds = this.read({ projectId, limit: Number.MAX_SAFE_INTEGER });
+    const correction = rounds.find((round) => round.projects[0]?.correction)?.projects[0]?.correction;
+    if (!correction) return undefined;
+    return rounds.some(
+      (round) =>
+        round.delivery?.delivered === true &&
+        round.projects[0]?.correctionCheck?.correction.roundId === correction.roundId &&
+        round.projects[0].correctionCheck.state === "satisfied",
+    )
+      ? undefined
+      : correction;
+  }
+
+  /** One immutable choice per project/round; exact retries return the retained response. */
+  recordCorrection(
+    conversationId: string,
+    input: {
+      projectId: string;
+      roundId: string;
+      issue: string;
+      reason: string;
+    },
+    at = new Date(),
+  ): DriftCorrection {
+    const rounds = this.read({ projectId: input.projectId, limit: Number.MAX_SAFE_INTEGER });
+    const round = rounds.find((entry) => entry.roundId === input.roundId);
+    const velocity = round?.projects[0];
+    if (
+      !round ||
+      round.conversationId !== conversationId ||
+      !velocity ||
+      !(
+        velocity.drift?.length ||
+        (velocity.correctionCheck && velocity.correctionCheck.state !== "satisfied")
+      ) ||
+      round.delivery?.delivered === false
+    )
+      throw new Error("No drift round owned by this conversation");
+    if (velocity.correction) {
+      if (velocity.correction.issue === input.issue && velocity.correction.reason === input.reason)
+        return velocity.correction;
+      throw new Error("This drift round already has a correction; use a later round for a new choice");
+    }
+    if (rounds.some((entry) => entry.at > round.at && entry.projects[0]?.correction))
+      throw new Error("A newer drift correction already exists");
+    const correction = {
+      roundId: input.roundId,
+      issue: input.issue,
+      reason: input.reason,
+      recordedAt: at.toISOString(),
+    };
+    this.append({ type: "drift-correction", roundId: input.roundId, projectId: input.projectId, correction });
+    return correction;
   }
 
   /**
@@ -193,13 +257,18 @@ export class AutoRoundRecord {
     const rounds = new Map<string, AutoRound>();
     const deliveries = new Map<string, AutoRound["delivery"]>();
     const updates: UpdateLine[] = [];
+    const corrections: CorrectionLine[] = [];
     for (const text of raw.split("\n")) {
       if (!text) continue;
-      let line: MeasurementLine | DeliveryLine | UpdateLine;
+      let line: MeasurementLine | DeliveryLine | UpdateLine | CorrectionLine;
       try {
-        line = JSON.parse(text) as MeasurementLine | DeliveryLine | UpdateLine;
+        line = JSON.parse(text) as MeasurementLine | DeliveryLine | UpdateLine | CorrectionLine;
       } catch {
         continue; // A torn final append from a crash is skipped, not fatal.
+      }
+      if (line.type === "drift-correction") {
+        corrections.push(line);
+        continue;
       }
       if (line.type === "status-update") {
         updates.push(line);
@@ -223,6 +292,10 @@ export class AutoRoundRecord {
       round.projects.push(line.velocity);
       rounds.set(line.roundId, round);
     }
+    for (const line of corrections) {
+      const project = rounds.get(line.roundId)?.projects.find((entry) => entry.projectId === line.projectId);
+      if (project) project.correction = line.correction;
+    }
     for (const line of updates) {
       const report = rounds
         .get(line.roundId)
@@ -244,7 +317,7 @@ export class AutoRoundRecord {
       .slice(0, query.limit ?? 20);
   }
 
-  private append(line: MeasurementLine | DeliveryLine | UpdateLine): void {
+  private append(line: MeasurementLine | DeliveryLine | UpdateLine | CorrectionLine): void {
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     appendFileSync(this.roundsPath, `${JSON.stringify(line)}\n`, { mode: 0o600 });
   }

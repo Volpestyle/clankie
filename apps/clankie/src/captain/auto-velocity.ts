@@ -1,4 +1,9 @@
-import type { ProjectVelocity, VelocityMilestone } from "@clankie/protocol/auto-rounds";
+import type {
+  DriftCorrection,
+  DriftCorrectionCheck,
+  ProjectVelocity,
+  VelocityMilestone,
+} from "@clankie/protocol/auto-rounds";
 import type { Project } from "@clankie/protocol/projects";
 import { localDays, type OutcomeIssue, type TrackerOutcomes } from "@clankie/work-items";
 import type { ProjectOutcomesRead } from "../project-outcomes.ts";
@@ -22,6 +27,7 @@ const MAX_READ_MS = 30 * 24 * 60 * 60_000;
 type VelocityDay = ProjectVelocity["days"][number];
 
 export interface VelocityDeps {
+  readonly correction?: DriftCorrection;
   readonly outcomes: (
     project: Project,
     input: {
@@ -220,6 +226,54 @@ export async function measureVelocity(
     return { date: day.date, inWindow: day.end > since, working, lines: dayLines, closed, stateChanges };
   });
 
+  const correction = deps.correction;
+  let correctionCheck: DriftCorrectionCheck | undefined;
+  if (correction) {
+    const reasons: string[] = [];
+    const issueStarted =
+      "state" in outcomes
+        ? null
+        : outcomes.started.issues.some((issue) => issue.identifier === correction.issue) ||
+          (outcomes.history?.some(
+            (issue) =>
+              issue.identifier === correction.issue &&
+              issue.spans.some(
+                (span) =>
+                  span.state.type === "started" &&
+                  (span.endedAt === null || span.endedAt > correction.recordedAt),
+              ),
+          ) ??
+            false);
+    const covered = correction.recordedAt >= readSince;
+    const productLines =
+      known === undefined || !covered
+        ? null
+        : known
+            .filter((commit) => commit.landedAt >= correction.recordedAt && commit.landedAt < until)
+            .reduce((sum, commit) => sum + commit.lines.product, 0);
+    if (issueStarted === null) reasons.push(`Issue state unknown: ${(outcomes as Unknown).reason}`);
+    else if (!issueStarted)
+      reasons.push(`${correction.issue} has not reached a started state since the correction`);
+    if (productLines === null)
+      reasons.push(
+        `Product churn unknown: ${commits.state === "unknown" ? commits.reason : "correction predates retained measurement range"}`,
+      );
+    else if (productLines === 0) reasons.push("No product churn landed after the correction");
+    correctionCheck = {
+      correction,
+      checkedAt: until,
+      issueStarted,
+      productLines,
+      state:
+        issueStarted === true && productLines !== null && productLines > 0
+          ? "satisfied"
+          : issueStarted === false || productLines === 0
+            ? "unresolved"
+            : "unknown",
+      reasons,
+    };
+  }
+
   return {
     projectId: project.id,
     name: project.name,
@@ -250,6 +304,7 @@ export async function measureVelocity(
       "On Auto means on Auto at round time; Auto history is not recorded.",
       ...("state" in outcomes ? [] : outcomes.caveats),
     ],
+    ...(correctionCheck ? { correctionCheck } : {}),
   };
 }
 
@@ -283,6 +338,18 @@ export async function measureVelocityWithin(
     churn: { state: "unknown", reason },
     days: [],
     caveats: [],
+    ...(deps.correction
+      ? {
+          correctionCheck: {
+            correction: deps.correction,
+            checkedAt: now.toISOString(),
+            issueStarted: null,
+            productLines: null,
+            state: "unknown" as const,
+            reasons: [reason],
+          },
+        }
+      : {}),
   });
   try {
     return await Promise.race([

@@ -50,6 +50,30 @@ export const DriftDetectionSchema = z
   .strict();
 export type DriftDetection = z.infer<typeof DriftDetectionSchema>;
 
+/** A lead's chosen response, attached to the round that named the detection. */
+export const DriftCorrectionSchema = z
+  .object({
+    roundId: z.string(),
+    issue: z.string(),
+    reason: z.string(),
+    recordedAt: z.string(),
+  })
+  .strict();
+export type DriftCorrection = z.infer<typeof DriftCorrectionSchema>;
+
+export const DriftCorrectionCheckSchema = z
+  .object({
+    correction: DriftCorrectionSchema,
+    checkedAt: z.string(),
+    /** Null means the relevant source was unavailable, never a failed correction. */
+    issueStarted: z.boolean().nullable(),
+    productLines: z.number().int().nonnegative().nullable(),
+    state: z.enum(["satisfied", "unresolved", "unknown"]),
+    reasons: z.array(z.string()),
+  })
+  .strict();
+export type DriftCorrectionCheck = z.infer<typeof DriftCorrectionCheckSchema>;
+
 const ProjectStatusUpdateSchema = z
   .object({
     id: z.string(),
@@ -129,6 +153,8 @@ export const ProjectVelocitySchema = z
     caveats: z.array(z.string()),
     /** Absent on rounds recorded before drift detection (VUH-2284). */
     drift: z.array(DriftDetectionSchema).optional(),
+    correction: DriftCorrectionSchema.optional(),
+    correctionCheck: DriftCorrectionCheckSchema.optional(),
   })
   .strict();
 export type ProjectVelocity = z.infer<typeof ProjectVelocitySchema>;

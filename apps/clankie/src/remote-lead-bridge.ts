@@ -20,6 +20,7 @@ const PROJECT_TOOLS = new Set([
   "herdr_watch",
   "schedule_wake",
   "report_continuation",
+  "record_drift_correction",
   "cancel_wake",
   "routine",
   "request_user_input",

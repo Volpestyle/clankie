@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +30,7 @@ import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { ConversationStore, type ConversationTurnContext } from "../src/captain/conversations.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { RuntimeProvider } from "../src/runtime-provider.ts";
+import { runConversationsCommand } from "../../tui/src/command/conversations.ts";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -139,9 +142,9 @@ async function fixture(
   };
   const deps: CaptainDeps = {
     herdrAvailable: () => false,
-    mcp: { catalog: unavailable, call: unavailable },
+    mcp: { catalog: async () => [], call: unavailable },
     email: { list: unavailable, read: unavailable, search: unavailable, send: unavailable },
-    browser: { catalog: unavailable, call: unavailable },
+    browser: { catalog: async () => ({ schemaVersion: 1, available: false, tools: [] }), call: unavailable },
     media: { generateImage: unavailable, generateVideo: unavailable, finishedRenders: async () => [] },
     embodiment: {
       submitIntent: unavailable,
@@ -236,6 +239,8 @@ async function fixture(
     request,
     journal,
     attach,
+    root,
+    host,
     state,
     settings,
     // Restart the real runtime and its native endpoints over the same durable stores.
@@ -712,4 +717,177 @@ it("Auto reaches native delivery despite repeated early restarts, then preserves
     "Restart Auto cadence proof",
     JSON.stringify({ intervalMs, initialDeadline, accepted, final: await cadence(), rounds: record.read() }),
   );
+});
+
+it("an isolated Auto runtime records the lead's drift choice and checks started state and subsequent product landings", async () => {
+  const trackerRoot = await mkdtemp(join(tmpdir(), "auto-correction-runtime-"));
+  cleanups.push(() => rm(trackerRoot, { recursive: true, force: true }));
+  let clock = new Date(Date.now() - 2 * 86_400_000);
+  const actor: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
+  const tracker = createLocalTracker({ directory: trackerRoot, clock: () => clock });
+  const call = (name: string, args: Record<string, unknown>) => tracker.call(name, args, { actor });
+  const project = (await call("save_project", { name: "Drift correction proof", addTeams: ["LOCAL"] })) as {
+    id: string;
+  };
+  const old = (await call("save_issue", {
+    team: "LOCAL",
+    project: project.id,
+    title: "Earlier tooling",
+  })) as { id: string };
+  await call("save_issue", { id: old.id, state: "In Progress" });
+  clock = new Date();
+  const chosen = (await call("save_issue", {
+    team: "LOCAL",
+    project: project.id,
+    title: "Playable milestone feature",
+  })) as { id: string; identifier: string };
+  const f = await fixture(undefined, true, {
+    projectId: project.id,
+    read: (target, input) =>
+      readProjectOutcomes(target, input, {
+        route: async () => "project:led",
+        builtIn: tracker,
+        linearQuery: async () => {
+          throw new Error("Not a Linear proof");
+        },
+      }),
+  });
+  const exec = promisify(execFile);
+  const workspace = join(f.root, "project");
+  const origin = join(f.root, "origin.git");
+  await exec("git", ["init", "-q", "--bare", "-b", "main", origin]);
+  await exec("git", ["init", "-q", "-b", "main", workspace]);
+  const git = (...args: string[]) =>
+    exec("git", [
+      "-C",
+      workspace,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      ...args,
+    ]);
+  await git("remote", "add", "origin", origin);
+  await writeFile(join(workspace, "game.ts"), "export const playable = false;\n");
+  await git("add", "game.ts");
+  await git("commit", "-q", "-m", "Earlier product scaffold");
+  await git("push", "-q", "origin", "main");
+  await git("remote", "set-head", "origin", "main");
+  const leadId = f.projectLead!;
+  const accept = async () => {
+    const event = (await f.captain.pollSeatEvents(5_000, undefined, leadId)).find((entry) =>
+      entry.content.startsWith("Auto round."),
+    );
+    expect(event).toBeDefined();
+    await f.captain.acknowledgeSeatEvent(event!.id, leadId);
+    return event!;
+  };
+  const rounds = async () =>
+    AutoRoundsResponseSchema.parse(
+      await (await f.request("/v1/auto/rounds?project=led", "fixture-owner")).json(),
+    ).rounds;
+  await f.command({
+    schemaVersion: 1,
+    op: "autonomy",
+    conversationId: "global-default",
+    command: { action: "set_enabled", enabled: true },
+  });
+  // The fallback head has its own round and cannot answer this project's detection.
+  const fallback = f.captain.pollSeatEvents(5_000, undefined, "global-default").then(async (events) => {
+    for (const event of events) await f.captain.acknowledgeSeatEvent(event.id, "global-default");
+  });
+  const detection = await accept();
+  await fallback;
+  expect(detection.content).toContain("nothing_closed");
+  expect(detection.content).toContain("record_drift_correction");
+  const roundId = (await rounds())[0]!.roundId;
+  expect(detection.content).toContain(roundId);
+  const input = {
+    projectId: "led",
+    roundId,
+    issue: chosen.identifier,
+    reason: "Staff the playable milestone instead of more tooling",
+  };
+  const ownBank = await f.captain.laneToolBank("operator", leadId);
+  const own = ownBank.tools.find((tool) => tool.name === "record_drift_correction")!;
+  const foreign = (await f.captain.laneToolBank("operator", "global-default")).tools.find(
+    (tool) => tool.name === "record_drift_correction",
+  )!;
+  expect((await foreign.call(input)).isError).toBe(true);
+  expect(
+    (await f.captain.laneToolBank("discord_presence")).tools.some(
+      (tool) => tool.name === "record_drift_correction",
+    ),
+  ).toBe(false);
+  const result = await own.call(input);
+  expect(result.isError).not.toBe(true);
+  expect(await own.call(input)).toEqual(result);
+  expect((await own.call({ ...input, reason: "Silently replace the original choice" })).isError).toBe(true);
+  const original = (await rounds()).find((round) => round.roundId === roundId)!.projects[0]!;
+  expect(original).toMatchObject({
+    drift: [{ signal: "nothing_closed" }],
+    correction: { issue: chosen.identifier, reason: input.reason },
+  });
+  const checkWake = await accept();
+  expect(checkWake.content).toContain(`correction check for ${chosen.identifier}: unresolved`);
+  expect(checkWake.content).toContain("No product churn landed after the correction");
+  await expect
+    .poll(async () => (await rounds())[0]?.projects[0]?.correctionCheck)
+    .toMatchObject({ state: "unresolved", issueStarted: false, productLines: 0 });
+  // Product that predates the response did not count. Now start the choice and land real product.
+  clock = new Date();
+  await call("save_issue", { id: chosen.id, state: "In Progress" });
+  await new Promise((resolve) => setTimeout(resolve, 1_100)); // Git dates have second precision.
+  await writeFile(join(workspace, "game.ts"), "export const playable = true;\nexport const party = 2;\n");
+  await git("add", "game.ts");
+  await git("commit", "-q", "-m", `Playable milestone (${chosen.identifier})`);
+  await git("push", "-q", "origin", "main");
+  const checked = await accept();
+  expect(checked.content).toContain(`correction check for ${chosen.identifier}: satisfied`);
+  await expect.poll(async () => (await rounds())[0]?.projects[0]?.correctionCheck?.state).toBe("satisfied");
+  const record = new AutoRoundRecord(join(f.state, "auto-rounds"));
+  expect(record.pendingCorrection("led")).toBeUndefined();
+  const proof = await rounds();
+  expect(proof[0]!.projects[0]!.correctionCheck!.productLines).toBeGreaterThan(0);
+  let cliOutput = "";
+  expect(
+    await runConversationsCommand(["auto", "rounds", "--project", "led"], {
+      env: {
+        HOME: f.root,
+        CLANKIE_STATE: f.state,
+        CLANKIE_OPERATOR_TOKEN: "fixture-owner",
+        CLANKIE_CONTROL_PLANE_URL: f.host,
+      },
+      stdout: { write: (chunk: string) => ((cliOutput += chunk), true) },
+    }),
+  ).toBe(0);
+  expect(AutoRoundsResponseSchema.parse(JSON.parse(cliOutput)).rounds).toEqual(proof);
+  if (process.env.AUTO_DRIFT_PROOF_DIRECTORY) {
+    await mkdir(process.env.AUTO_DRIFT_PROOF_DIRECTORY, { recursive: true });
+    await writeFile(
+      join(process.env.AUTO_DRIFT_PROOF_DIRECTORY, "isolated-runtime.json"),
+      JSON.stringify(
+        {
+          method:
+            "Isolated runtime: real captain, native-channel poll/ACK, HTTP, CLI, built-in tracker and origin; no model or deployed-project claim",
+          detection: detection.content,
+          unresolved: checkWake.content,
+          followup: checked.content,
+          cli: JSON.parse(cliOutput),
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+  }
+  console.info(
+    "Isolated Auto drift correction runtime proof",
+    JSON.stringify({ detection: detection.content, followup: checked.content, rounds: proof }),
+  );
+  await f.command({
+    schemaVersion: 1,
+    op: "autonomy",
+    conversationId: "global-default",
+    command: { action: "set_enabled", enabled: false },
+  });
 });

@@ -1536,6 +1536,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const capture: TurnContext = { shell: systemTools };
     if (lane === "operator" && privateLeadConversation(_conversationId)) {
       capture.leadChats = leadChats;
+      capture.recordDriftCorrection = recordDriftCorrection;
       capture.hireReceiptOperator = true;
     }
     if (systemTools && options.deliveredFiles !== undefined) {
@@ -3347,6 +3348,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             (conversations.runsCaptainTurns(targetId) || binding.machineId !== undefined) &&
             ((await delegation?.authorize()) ?? true),
         };
+        capture.recordDriftCorrection = recordDriftCorrection;
         capture.shell = binding.machineId === undefined;
         capture.room = roomKey("operator", targetId);
         capture.targetId = targetId;
@@ -4732,6 +4734,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       conversations.defaultGlobalConversationId(),
     );
   };
+  async function recordDriftCorrection(
+    authority: ConversationAuthority,
+    input: import("./auto-correction-tools.ts").DriftCorrectionInput,
+  ) {
+    await assertConversationAuthority(authority);
+    const rounds = await readAutoRounds();
+    if (!rounds.get(authority.owner.conversationId)?.some((project) => project.id === input.projectId))
+      throw new Error("Auto project is not owned by this lead conversation");
+    await assertConversationAuthority(authority);
+    return autoRoundRecord.recordCorrection(authority.owner.conversationId, input);
+  }
   const autoRoundIntervalMs = options.autoRoundIntervalMs ?? options.fleetRoundIntervalMs ?? 30 * 60_000;
   const autoCadence = new AutoRoundCadence(join(options.stateDir, "auto-rounds"), autoRoundIntervalMs, () =>
     autoRoundRecord.read({ limit: Number.MAX_SAFE_INTEGER }),
@@ -4748,11 +4761,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           const last = autoMeasurements.get(project.id);
           // A little slack, so a tick's own jitter never skips a measurement.
           if (last && Date.now() - Date.parse(last.measuredAt) < autoRoundIntervalMs * 0.9) return;
-          const velocity = await measureVelocityWithin(
-            project,
-            autoRoundRecord.lastMilestone(project.id),
-            velocityDeps,
-          );
+          const correction = autoRoundRecord.pendingCorrection(project.id);
+          const velocity = await measureVelocityWithin(project, autoRoundRecord.lastMilestone(project.id), {
+            ...velocityDeps,
+            ...(correction ? { correction } : {}),
+          });
           autoRoundRecord.observeUpdates(velocity);
           autoMeasurements.set(
             project.id,
@@ -4804,7 +4817,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           autoRoundPrompt(
             states,
             velocities.map(velocityLine),
-            driftSection(velocities),
+            driftSection(velocities, roundId),
             capacity,
             reportingSection(velocities),
           ),

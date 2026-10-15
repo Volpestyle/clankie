@@ -66,6 +66,7 @@ import { fleetEfficiencyTools } from "./fleet-efficiency-tools.ts";
 import { routineTool } from "./routine-tools.ts";
 import { minecraftHostTools } from "./minecraft-host-tools.ts";
 import { skinDraftTool } from "./skin-draft-tools.ts";
+import { driftCorrectionTools, type RecordDriftCorrection } from "./auto-correction-tools.ts";
 
 /**
  * What the running turn is, as its tools need to see it: the last attachable
@@ -73,6 +74,7 @@ import { skinDraftTool } from "./skin-draft-tools.ts";
  * (which scopes every room-keyed read and write a tool makes).
  */
 export interface TurnContext {
+  recordDriftCorrection?: RecordDriftCorrection | undefined;
   /** Host-stamped owner principal for this live private turn, never model input. */
   skinDraftAuthority?: import("./conversation-questions.ts").QuestionAuthority | undefined;
   /** Host-only private operator projection; never installed for Discord or workers. */
@@ -287,6 +289,7 @@ export function captainTools(
         ]
       : deps.gameExtensions.projections().flatMap((projection) => projection.tools(turn))),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
+    ...(lane === "operator" ? driftCorrectionTools(turn) : []),
     ...(lane === "operator" && herdrWatches?.routines !== undefined
       ? [routineTool(herdrWatches.routines, turn)]
       : []),

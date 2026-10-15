@@ -82,10 +82,22 @@ function driftLine(name: string, detection: DriftDetection): string {
 }
 
 /** The round's drift section; empty when nothing drifts. */
-export function driftSection(velocities: readonly ProjectVelocity[]): string[] {
-  const rows = velocities.flatMap((velocity) =>
-    (velocity.drift ?? []).map((detection) => `- ${driftLine(velocity.name, detection)}`),
-  );
+export function driftSection(velocities: readonly ProjectVelocity[], roundId?: string): string[] {
+  const rows = velocities.flatMap((velocity) => [
+    ...(velocity.drift ?? []).map((detection) => `- ${driftLine(velocity.name, detection)}`),
+    ...(velocity.correctionCheck
+      ? [
+          `- ${velocity.name}: correction check for ${velocity.correctionCheck.correction.issue}: ${velocity.correctionCheck.state}; issue started ${velocity.correctionCheck.issueStarted === null ? "unknown" : String(velocity.correctionCheck.issueStarted)}; product lines landed after the response ${velocity.correctionCheck.productLines === null ? "unknown" : String(velocity.correctionCheck.productLines)}.${velocity.correctionCheck.reasons.length ? ` ${velocity.correctionCheck.reasons.join("; ")}. Correct course again; keep the next milestone feature staffed.` : ""}`,
+        ]
+      : []),
+    ...(roundId &&
+    ((velocity.drift?.length ?? 0) > 0 ||
+      (velocity.correctionCheck && velocity.correctionCheck.state !== "satisfied"))
+      ? [
+          `- Record the chosen issue and one-line reason with record_drift_correction (projectId ${JSON.stringify(velocity.projectId)}, roundId ${JSON.stringify(roundId)}), then start and staff it.`,
+        ]
+      : []),
+  ]);
   return rows.length
     ? [
         "",
@@ -97,7 +109,14 @@ export function driftSection(velocities: readonly ProjectVelocity[]): string[] {
 
 /** The signal set a round fingerprint carries: names per project, not numbers or days. */
 export function driftSignals(velocity: ProjectVelocity | undefined): string[] {
-  return [...new Set((velocity?.drift ?? []).map((detection) => detection.signal))].sort();
+  return [
+    ...new Set([
+      ...(velocity?.drift ?? []).map((detection) => detection.signal),
+      ...(velocity?.correctionCheck && velocity.correctionCheck.state !== "satisfied"
+        ? ["correction_unresolved"]
+        : []),
+    ]),
+  ].sort();
 }
 
 /** The round's drift for a measurement: what is detected now, plus undelivered detections carried. */

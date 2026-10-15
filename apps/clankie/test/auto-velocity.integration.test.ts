@@ -719,3 +719,45 @@ it("replays completed days over real tracker history and origin through HTTP/CLI
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+it("retains a drift response across restart and keeps unreadable correction checks unknown", async () => {
+  const { project, deps, call } = await measuredProject();
+  const directory = join(roots.at(-1)!, "auto-rounds");
+  let record = new AutoRoundRecord(directory);
+  const at = new Date("2026-10-14T03:00:00.000Z");
+  const velocity = withDrift(await measureVelocity(project, null, deps, at), []);
+  const roundId = record.measured("lead", [velocity], at);
+  record.settled(roundId, true, undefined, at);
+  const issue = (await call("save_issue", {
+    team: "LOCAL",
+    project: project.trackerProjectId,
+    title: "Next playable feature",
+  })) as { identifier: string };
+  const input = {
+    projectId: project.id,
+    roundId,
+    issue: issue.identifier,
+    reason: "Ship the next milestone feature",
+  };
+  expect(() => record.recordCorrection("other-lead", input, at)).toThrow("owned by this conversation");
+  const correction = record.recordCorrection("lead", input, at);
+  record = new AutoRoundRecord(directory);
+  expect(record.pendingCorrection(project.id)).toEqual(correction);
+  expect(record.recordCorrection("lead", input, at)).toEqual(correction);
+  expect(record.read()[0]!.projects[0]).toMatchObject({ drift: velocity.drift, correction });
+  const unknown = await measureVelocity(
+    project,
+    null,
+    {
+      ...deps,
+      correction,
+      outcomes: async () => ({ state: "unavailable" as const, reason: "tracker offline" }),
+      history: async () => ({ state: "unknown" as const, reason: "origin unreadable" }),
+    },
+    new Date("2026-10-14T04:00:00Z"),
+  );
+  expect(unknown.correctionCheck).toMatchObject({ state: "unknown", issueStarted: null, productLines: null });
+  expect(driftSection([unknown]).join("\n")).toContain("tracker offline");
+  record.measured("lead", [unknown], new Date("2026-10-14T04:00:00Z"));
+  expect(new AutoRoundRecord(directory).pendingCorrection(project.id)).toEqual(correction);
+});

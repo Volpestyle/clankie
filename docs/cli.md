@@ -3882,6 +3882,20 @@ service measured before waking the lead, and whether that wake was delivered
   `carried: true` marks a detection from an earlier round whose wake was not
   delivered; a detection clears only once a round carrying it is delivered.
 
+- `correction`: the lead's chosen issue, one-line reason and response time, joined
+  to the original drift round. The shared `record_drift_correction` lead tool
+  takes `projectId`, `roundId`, `issue` and `reason`; service turns, native seats
+  and remote project leads use the same conversation-scoped implementation. It
+  records a decision without changing tracker state or staffing. An exact retry
+  returns the retained choice; a changed choice requires a later drift round.
+- `correctionCheck`: the next round's independent check of that choice.
+  `issueStarted` reads the tracker started state/history; `productLines` counts
+  project product churn landed after the response, independent of milestone
+  window changes. `state` is `satisfied`, `unresolved` or `unknown`; reasons
+  distinguish missing progress from unreadable sources. Unresolved choices remain
+  in subsequent normal rounds until satisfied. Product churn is project-wide,
+  not attribution to the issue.
+
 - `report`: newly seen `milestones` requesting one combined project status update,
   and the later `updates` linked back to that request. Each update carries its id,
   URL, creation time and `unexpected`: true for routine posts or extra posts after

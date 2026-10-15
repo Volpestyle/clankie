@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "focused.log",
+      "size": 26410,
+      "sha256": "40c432e353c3cc275f7f71d714508ddb8932f9b7606fb6a49f4167d977e8fdc9",
+      "url": "clankie://evidence/sha256/40c432e353c3cc275f7f71d714508ddb8932f9b7606fb6a49f4167d977e8fdc9"
+    },
+    {
+      "path": "isolated-runtime.json",
+      "size": 38198,
+      "sha256": "1d61cdebd5d572f822fe35973e33a5763174a22c96f446a110cbf2c9cb9daaf3",
+      "url": "clankie://evidence/sha256/1d61cdebd5d572f822fe35973e33a5763174a22c96f446a110cbf2c9cb9daaf3"
+    }
+  ]
+}

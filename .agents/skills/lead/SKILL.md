@@ -403,6 +403,22 @@ should have happened; `failed` and `interrupted` runs are yours to follow up.
 Where each kind of state lives is the handoff protocol in `work-items`; fleet-wide
 state is a project status update, never a lead-only file. Sizing records, Linear mapping and cutovers: [trackers](reference/trackers.md).
 
+## Auto drift corrections
+
+When an Auto round names drift, choose the next milestone feature and staff it;
+for excess WIP, choose which issues to return to Backlog and note where they stopped.
+Record the feature issue and one-line reason with `record_drift_correction`, using
+the `projectId` and `roundId` in that wake. The tool records the decision; it does
+not start an issue or hire anyone. It accepts only Auto projects owned by this
+conversation and retains exact retries. A new choice belongs to a later round.
+
+The next round checks the named issue reached a started state and product churn
+landed after the response. Read the correction check: unresolved means correct
+course again; unknown means the service could not read a source, not success.
+Product churn is project-wide evidence, not proof that the chosen issue caused it.
+Keep the correction in the ordinary Auto round; routine drift does not warrant
+an owner message or project status update.
+
 ## Auto milestone reports
 
 Auto's check deadline and each lead's delivery fence survive service restarts.
