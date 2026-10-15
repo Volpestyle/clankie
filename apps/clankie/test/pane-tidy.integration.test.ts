@@ -11,7 +11,11 @@ import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import { afterEach, expect, it } from "vitest";
 import { PaneTidy } from "../src/captain/pane-tidy.ts";
 import { paneDraftState } from "../src/captain/pane-draft.ts";
-import { createHerdrWatchRunner, HerdrWatchStore } from "../src/captain/herdr-watch.ts";
+import {
+  createHerdrWatchRunner,
+  HerdrWatchStore,
+  type HerdrWatchRunner,
+} from "../src/captain/herdr-watch.ts";
 import { HireOwners } from "../src/captain/hire-owners.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import type { ConversationAuthority } from "../src/captain/conversation-owner.ts";
@@ -206,7 +210,7 @@ async function fixture(
   const routedRunner = options.remote
     ? routeHerdrFleets(baseRunner, new Map([["pc", baseRunner]]))
     : baseRunner;
-  const runner = options.reload
+  const runner: HerdrWatchRunner = options.reload
     ? {
         ...routedRunner,
         createTab: async () => {
@@ -215,7 +219,7 @@ async function fixture(
           present = true;
           return "pc/w1:p2";
         },
-        startAgent: async ({ args }: { args: readonly string[] }) => {
+        startAgent: async ({ args }) => {
           expect(args).toContain(native.value);
           nativeProtocol!.startView();
         },
