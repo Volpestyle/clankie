@@ -61,7 +61,7 @@ export async function requireRuntimeMachineAccess(
 }
 
 /** One durable owner observation per machine/required level; repeated refusals coalesce. */
-async function refuseMachineAccess(
+export async function refuseMachineAccess(
   settings: SettingsStore,
   machine: string,
   level: MachineAccessLevel,

@@ -489,7 +489,9 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
       ...current,
       machineAccess: { ...current.machineAccess, [credential.lease.machineId]: "portal" },
     }));
-    await expect(runSeatCommand(["--new"], cli)).rejects.toThrow("join_channel_unavailable");
+    await expect(runSeatCommand(["--new"], cli)).rejects.toThrow(
+      `Machine ${credential.lease.machineId} has portal access; this request requires workers.`,
+    );
     await joins.remove(credential.lease.machineId);
     expect(await channel).toBe("revoked");
     await expect(runSeatCommand(["--new"], cli)).rejects.toThrow("revoked");

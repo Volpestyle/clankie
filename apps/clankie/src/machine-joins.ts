@@ -7,7 +7,13 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { CredentialStore } from "@clankie/credential-broker";
 import type { SettingsStore } from "@clankie/settings";
-import { MachineAccessLevelSchema, type Machine, type MachineAccessLevel } from "@clankie/protocol";
+import {
+  MachineAccessLevelSchema,
+  MachineAccessRefused,
+  machineAccessAllows,
+  type Machine,
+  type MachineAccessLevel,
+} from "@clankie/protocol";
 import {
   MachineJoinEnvelopeSchema,
   MachineJoinPayloadSchema,
@@ -27,7 +33,7 @@ import {
   type JoinedSeatRequest,
   type JoinedSeatResponse,
 } from "@clankie/protocol/machine-join";
-import { machineAccessLevel } from "./machine-access.ts";
+import { machineAccessLevel, refuseMachineAccess } from "./machine-access.ts";
 import { privateDirectory, readPrivateJson, writePrivateJson } from "../../tui/bin/update-files.ts";
 
 const credentialName = (id: string) => `clankie-joined-host-${id}`;
@@ -222,20 +228,36 @@ export class MachineJoins {
     this.challenges.delete(envelope.challenge); // Consume before any dispatch; a replay cannot execute again.
     const authorize = async () => {
       if (this.registrations.get(record.id) !== record) throw Error("revoked");
-      const settings = await this.options.settings.load();
-      const level = machineAccessLevel(settings, record.id, this);
-      if (this.registrations.get(record.id) !== record || level === "portal")
-        throw Error("machine_access_refused");
+      const level = machineAccessLevel(await this.options.settings.load(), record.id, this);
+      if (this.registrations.get(record.id) !== record) throw Error("revoked");
+      // Records the owner observation and names the machine, its level and the requirement.
+      if (!machineAccessAllows(level, "workers"))
+        await refuseMachineAccess(this.options.settings, record.id, level, "workers");
     };
     const result =
       payload.op === "seat"
-        ? await (async () => {
-            await authorize();
-            if (!this.seatHandler) throw Error("joined_seats_unavailable");
-            return this.seatHandler(
-              { machineId: record.id, platform: record.platform, directories: record.directories, authorize },
-              payload.request,
-            );
+        ? await (async (): Promise<JoinedSeatResponse> => {
+            try {
+              await authorize();
+              if (!this.seatHandler) throw Error("joined_seats_unavailable");
+              return await this.seatHandler(
+                {
+                  machineId: record.id,
+                  platform: record.platform,
+                  directories: record.directories,
+                  authorize,
+                },
+                payload.request,
+              );
+            } catch (error) {
+              if (!(error instanceof MachineAccessRefused)) throw error;
+              // Sealed for the joined host alone: the gateway sees an ordinary exchange.
+              return {
+                status: 403,
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ error: error.message }),
+              };
+            }
           })()
         : payload.op === "poll"
           ? await this.poll(secret.key, { results: payload.results })
