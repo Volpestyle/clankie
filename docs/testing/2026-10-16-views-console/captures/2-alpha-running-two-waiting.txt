@@ -1,0 +1,18 @@
+       ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+       │ Heavy queue  view_08d204cb130c · expires in 23h58m · read 2:54:19 AM                         │
+       │                                                                                              │
+       │ Capacity                                                                                     │
+       │ heavy       █  1/1 in use                                                                    │
+       │ simulators  ░  0/1 in use                                                                    │
+       │ queue       2 waiting                                                                        │
+       │ pressure    ok  load 0.50 · 36.2 GB free                                                     │
+       │                                                                                              │
+       │ Waiting                                                                                      │
+       │  1. heavy     node  seat board-beta  waiting 10s                                             │
+       │  2. heavy     node  seat board-gamma  waiting 7s                                             │
+       │                                                                                              │
+       │ Running                                                                                      │
+       │ heavy     node  seat board-alpha  running  12s                                               │
+       │                                                                                              │
+       │ live · every 2s · esc close                                                                  │
+       └──────────────────────────────────────────────────────────────────────────────────────────────┘

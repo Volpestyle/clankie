@@ -1,0 +1,17 @@
+       ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+       │ Heavy queue  view_08d204cb130c · expires in 23h58m · read 2:54:05 AM                         │
+       │                                                                                              │
+       │ Capacity                                                                                     │
+       │ heavy       ░  0/1 in use                                                                    │
+       │ simulators  ░  0/1 in use                                                                    │
+       │ queue       empty                                                                            │
+       │ pressure    ok  load 0.47 · 37.1 GB free                                                     │
+       │                                                                                              │
+       │ Waiting                                                                                      │
+       │ Nothing waiting.                                                                             │
+       │                                                                                              │
+       │ Running                                                                                      │
+       │ No leases held.                                                                              │
+       │                                                                                              │
+       │ live · every 2s · esc close                                                                  │
+       └──────────────────────────────────────────────────────────────────────────────────────────────┘
