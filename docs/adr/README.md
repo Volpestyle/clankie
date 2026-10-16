@@ -168,3 +168,4 @@ scope is archived; readers should follow the successor for its implementation.
 
 - [0270: Auto rounds measure outcomes and name drift](0270-auto-rounds-measure-outcomes-and-name-drift.md) — VUH-2255.
 - [0271: The lead seat restarts fresh in its own pane](0271-the-lead-seat-restarts-fresh-in-its-own-pane.md) — VUH-2274.
+- [0272: A hosted body runs model-directed work as a separate uid](0272-a-hosted-body-runs-model-directed-work-as-a-separate-uid.md) — VUH-2320 (Proposed).
