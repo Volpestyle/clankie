@@ -2,9 +2,9 @@
 
 Tracks: https://linear.app/vuhlp/issue/VUH-2256/working-preference-knobs-do-what-they-say-enforce-or-remove-and-add
 
-The public implementation has focused verification. Landing and deployed KH2
-proof are pending. This record does not claim a green
-landing gate or a deployed capability yet.
+The public implementation landed at [d169a17e9](https://github.com/Volpestyle/clankie/commit/d169a17e9604849a5f4dee245dd76c55fb5ea9a6)
+with a green root landing gate. Deployed KH2 and private app proof are pending;
+this record does not yet claim those runtime results.
 
 ## Scope
 
@@ -69,8 +69,8 @@ write and prompt expectations were updated for the approved removal.
 Focused follow-up results: 88 tests across seven hire suites; 30 relay/settings/
 creation tests; 21 real native lifecycle tests, including empty manual launches
 and remote authority fences. The corrected settings/Auto/model command cases
-and focused compiler also passed. Counts overlap earlier runs. Root landing
-revalidation and deployed proof remain pending.
+and focused compiler also passed. Counts overlap earlier runs. The green root
+landing result is recorded below; deployed proof remains pending.
 
 The compatibility issue was reproduced by running main's actual prior writer:
 the new reader refused its unchanged advanced-profile journal. The fix keeps the
@@ -79,9 +79,31 @@ journal exercises recovery and still refuses a genuinely changed model policy.
 
 [Repair checks, nonzero gate results and incomplete diagnostic](clankie://evidence/sha256/ff5b8157bb70967788a804e5116d18a0768e23b8ba5b40d59bd481e92694df08).
 
+## Green landing result
+
+Root attempt 8 checked `d169a17e9604849a5f4dee245dd76c55fb5ea9a6` against fetched `origin/main`
+`1110679213b4540f47f6ae50989fcea700004b0e` and passed every phase: skills, format, lint, dead-code,
+docs, retired claims, evidence, all 24 selected package typechecks and tests.
+The selected test result was **728 suites / 6,547 tests passed**, with **31 suites /
+83 tests skipped**; exit 0, `sourceStable: true`, 934.16 seconds. A final pull was
+unchanged and the checked HEAD was pushed directly to main. No load exception
+was used.
+
+Attempt 6 had passed 305 suites before an existing native-continuation spy
+expected the old seven-argument internal call. Its task-intent assertion was
+updated and all three callers passed (15 tests). Attempt 7 was stopped at the
+lead's request (exit 130, incomplete) to finish a no-bail diagnostic first. That
+complete diagnostic passed the same 728 suites / 6,547 tests with the same skips
+on the unchanged tree; it did not substitute for attempt 8.
+
+The read-only instruction audit found no fixed model/effort pin or harness split
+in the active personal instructions. No dotfiles edit was made in this slice.
+
+[Final landing log, complete diagnostic, prior nonzero/incomplete records and
+instruction audit](clankie://evidence/sha256/d3b063f0683c1faab1a36a01a0525db3ed0242ba685d3bd7871bf16659da82df).
+
 ## Open proof
 
-- Green root landing gate and pushed public SHA.
 - Landed app slice and its owner-choice/usage-refusal path.
 - Deployed KH2 WIP 6/milestone-only set and independent readback.
 - Live 10-10 through 10-13 replay with `over_wip` and the next natural Auto round.

@@ -8,6 +8,12 @@
       "url": "clankie://evidence/sha256/71028eaeb4bd5c919564e7e5e9cc2d90f7d1d9fe2ec0002f4347cc1b7d1d8ef0"
     },
     {
+      "path": "landing-final.zip",
+      "size": 16659226,
+      "sha256": "d3b063f0683c1faab1a36a01a0525db3ed0242ba685d3bd7871bf16659da82df",
+      "url": "clankie://evidence/sha256/d3b063f0683c1faab1a36a01a0525db3ed0242ba685d3bd7871bf16659da82df"
+    },
+    {
       "path": "landing-repairs.zip",
       "size": 3142988,
       "sha256": "ff5b8157bb70967788a804e5116d18a0768e23b8ba5b40d59bd481e92694df08",
