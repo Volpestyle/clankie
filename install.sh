@@ -187,5 +187,8 @@ fi
 
 # Skip launch when no artifact is pinned or the owner opted out. Pairing output is private.
 if [ "$app_launch" = "yes" ]; then
+  # The app pairs through the running service's private issuer, and a fresh Mac
+  # has neither the service nor its operator credential until it starts once.
+  "$bin_link" start clankie || echo "clankie installer: the service did not start; run clankie start clankie, then open Clankie.app." >&2
   "$target/libexec/node" "$app_helper" "$target" "$install_root" launch
 fi

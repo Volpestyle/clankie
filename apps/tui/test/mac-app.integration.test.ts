@@ -173,16 +173,18 @@ if [ "$1" = pair ]; then echo '{"ok":true,"localCompanion":true,"private":"synth
     const installed = await exec("sh", [installer, "--version", "v1.0.0"], { env });
     expect(installed.stdout).not.toContain("synthetic-handoff-marker");
     expect(await readlink(join(f.install, "current"))).toBe("releases/v1.0.0");
-    expect(await readFile(env.APP_TEST_CALLS, "utf8")).toContain("pair --local-companion --json");
-    expect(await readFile(env.APP_TEST_CALLS, "utf8")).toContain(`open ${f.apps}/Clankie.app`);
     const calls = await readFile(env.APP_TEST_CALLS, "utf8");
+    // A fresh Mac has no running service or operator credential; the handoff needs both.
+    expect(calls.indexOf("start clankie\n")).toBeGreaterThanOrEqual(0);
+    expect(calls.indexOf("start clankie\n")).toBeLessThan(calls.indexOf("pair --local-companion --json"));
+    expect(calls).toContain(`open ${f.apps}/Clankie.app`);
     await exec("sh", [installer, "--version", "v1.0.0", "--no-app"], { env });
     expect(JSON.parse(await readFile(join(f.install, "app-policy.json"), "utf8"))).toEqual({
       disabled: true,
     });
-    expect((await readFile(env.APP_TEST_CALLS, "utf8")).split("pair --local-companion").length).toBe(
-      calls.split("pair --local-companion").length,
-    );
+    const terminalOnly = await readFile(env.APP_TEST_CALLS, "utf8");
+    for (const call of ["pair --local-companion", "start clankie"])
+      expect(terminalOnly.split(call).length).toBe(calls.split(call).length);
     expect(existsSync(join(f.apps, "Clankie.app"))).toBe(true);
   },
 );

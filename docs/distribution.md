@@ -88,6 +88,9 @@ the previous app. An unmanaged existing app or a symlink destination is refused.
 Installation never removes app data, credentials or device identity, and never
 quits a running app; it uses the new bundle on its next launch.
 
+Before opening the app, the installer starts the local service (`clankie start
+clankie`), which creates the operator credential and publishes the private
+companion issuer on a fresh Mac. `--no-app` installs start nothing.
 Pairing uses `clankie pair --local-companion`, which writes the capability only
 to the existing private handoff file. It is never put in command arguments or
 installer output. If the handoff or open fails, the verified app remains
