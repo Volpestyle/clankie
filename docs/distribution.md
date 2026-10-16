@@ -64,7 +64,8 @@ The hosted deployment image remains a separate path.
 
 A Mac release with an approved `scripts/release/mac-app.json` pin installs
 `Clankie.app` into `/Applications`, then opens it with the service's private
-local pairing handoff. Pass `--no-app` to keep a terminal-only installation:
+local pairing handoff. The Mac starts with the desktop pet; the World window
+is opt-in. Pass `--no-app` to keep a terminal-only installation:
 
 ```sh
 curl -fsSL https://clankie.bot/install | sh -s -- --no-app
@@ -100,9 +101,13 @@ records only `{ paired: true|false }` in `app-handoff.json`.
 **Distribution remains gated:** the checked-in pin is currently `app: null`.
 No companion download is enabled until VUH-1727 produces a signed, notarized,
 published artifact and its approved SHA-256. This installer change does not
-sign, notarize, publish or release an app. Actual first-launch redemption and
-pet appearance require VUH-1833; fixture integration proves installation,
-update/rollback and invocation of the private handoff, not a signed app launch.
+sign, notarize, publish or release an app. The current installer supplies the
+terminal bundle only. VUH-1833 proved first-launch redemption and session
+restore with an isolated development-signed app; that is not proof
+of the public installer or a clean Mac. VUH-1730's clean-Mac, paired-pet proof
+remains blocked on VUH-1727's distribution artifact. Fixture integration proves
+installation, update/rollback and invocation of the private handoff, not a
+signed distribution app launch.
 
 ## Updating
 

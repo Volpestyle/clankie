@@ -33,10 +33,17 @@ clankie
 ```
 
 A Mac release with a published app pin also installs `Clankie.app` in
-`/Applications`. Add `--no-app` (`sh -s -- --no-app`) to stay terminal-only;
-updates retain that choice. The companion distribution pin is currently gated
-on its signed release; see [distribution](docs/distribution.md#mac-companion-app).
-Linux and source checkouts do not install it.
+`/Applications` and opens it to pair with the local service. The Mac starts with
+the desktop pet; the World window is opt-in. For a terminal-only install:
+
+```sh
+curl -fsSL https://clankie.bot/install | sh -s -- --no-app
+```
+
+Updates retain that choice. **The signed companion release is not available
+yet**, so the current installer supplies the terminal bundle only; see
+[distribution](docs/distribution.md#mac-companion-app). Linux and source
+checkouts do not install the app.
 
 `/setup` connects a model (subscription, API key, or local runtime), then
 offers phone pairing, account connections, and a first agent. Only the model is

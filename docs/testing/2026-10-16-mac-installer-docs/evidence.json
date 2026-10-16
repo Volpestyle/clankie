@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "install-390.png",
+      "size": 81762,
+      "sha256": "134c658dff2b245d2a8d88096024f5c729c60eeb1b3b3c187d31ab99b1109859",
+      "url": "clankie://evidence/sha256/134c658dff2b245d2a8d88096024f5c729c60eeb1b3b3c187d31ab99b1109859"
+    },
+    {
+      "path": "verification.json",
+      "size": 35024,
+      "sha256": "be25e6c4b326aac5ab54afeaa50d33b6edc1eedf29eaa6634d984a053b1e017a",
+      "url": "clankie://evidence/sha256/be25e6c4b326aac5ab54afeaa50d33b6edc1eedf29eaa6634d984a053b1e017a"
+    }
+  ]
+}
