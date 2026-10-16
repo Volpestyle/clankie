@@ -16,6 +16,8 @@ import {
   FleetHireDefaultsSnapshotSchema,
   MachineWorkerAccountsSchema,
   OPERATOR_PERSONA_PATH,
+  OperatorConversationServiceRequestSchema,
+  OperatorConversationServiceResultSchema,
   ProjectsSettingsSchema,
   TAKE_CONTROL_GRANTS,
   WORKER_ACCOUNT_HOLDS_PATH,
@@ -33,6 +35,7 @@ import {
 } from "../../../packages/protocol/src/views.ts";
 import { publicGatewayTargetFor } from "../../../packages/protocol/src/public-gateway.ts";
 import { ViewStore } from "../../clankie/src/views.ts";
+import { FleetRoomJournal } from "../../clankie/src/captain/fleet-room.ts";
 import { createWorkItemsService } from "../../clankie/src/work-items.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
 import { createStubCaptain, type CaptainPort } from "../../clankie/src/captain/port.ts";
@@ -43,6 +46,7 @@ import { HostedPairing } from "../../clankie/src/hosted-pairing.ts";
 import { hostedFixture } from "../../clankie/test/fixtures/hosted-body.ts";
 import { ControlPlaneDeviceAuthorizer } from "../src/device-auth.ts";
 import { createOperatorConversationRelayHandler } from "../src/operator-conversations.ts";
+import { createDeviceConversationDispatch } from "../src/conversation-upstream.ts";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -71,6 +75,7 @@ async function fixture(
   options: {
     unavailableAwakeRegistry?: boolean;
     routineCommand?: CaptainPort["routineCommand"];
+    fleetRoom?: CaptainPort["fleetRoom"];
     workItems?: ReturnType<typeof createWorkItemsService>;
   } = {},
 ) {
@@ -143,6 +148,7 @@ async function fixture(
         throw new Error("Settings cannot use captain conversations");
       },
       ...(options.routineCommand ? { routineCommand: options.routineCommand } : {}),
+      ...(options.fleetRoom ? { fleetRoom: options.fleetRoom } : {}),
     }),
     settings,
     views: new ViewStore(join(root, "views"), () => hf.now),
@@ -206,8 +212,14 @@ async function fixture(
   });
   const forwarded: Array<{ path: string; token: string }> = [];
   const hooks: { before?: (() => Promise<void>) | undefined; after?: (() => Promise<void>) | undefined } = {};
+  const ownerDispatch = createDeviceConversationDispatch({ baseUrl: controlUrl });
   const handler = createOperatorConversationRelayHandler({
     authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl: controlUrl }),
+    // Owner ops ride the device's own bearer to the service (the production wiring).
+    deviceDispatch: (request, authority, signal) => {
+      forwarded.push({ path: "/operator/v1/dispatch", token: authority.deviceToken });
+      return ownerDispatch(request, authority, signal);
+    },
     dispatch: async () => {
       captainCalls++;
       throw new Error("Settings cannot use captain dispatch");
@@ -687,5 +699,83 @@ it("lets a Take Control device manage routines through the relay as the owner, a
   expect((await call("control", { action: "remove" })).status).toBe(400);
   expect(f.forwarded).toHaveLength(forwarded);
   expect(routines.status({ kind: "owner" }).routines).toHaveLength(1);
+  expect(f.captainCalls()).toBe(0);
+});
+
+it("carries the fleet room to the hosted owner's device, live, and to no chat, steer, borrowed or anonymous caller (VUH-2184)", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "fleet-room-relay-"));
+  cleanups.push(() => rm(stateDir, { recursive: true, force: true }));
+  const journal = new FleetRoomJournal(stateDir);
+  const lead = { kind: "lead" as const, label: "Clankie", conversationId: "global-default" };
+  const worker = { kind: "worker" as const, label: "Wren", seatId: "term_wren" };
+  journal.record({
+    id: "lead-message:one",
+    at: new Date().toISOString(),
+    kind: "lead_message",
+    from: lead,
+    to: worker,
+    text: "Take VUH-2184",
+    thread: { conversationId: "global-default" },
+    delivery: { stage: "delivered" },
+  });
+  // This body is hosted, so its relay forwards every device through the hosted envelope.
+  const f = await fixture({ fleetRoom: (request, signal) => journal.read(request, signal) });
+  const call = (body: unknown, device: keyof typeof f.tokens = "hosted") =>
+    fetch(`${f.relayUrl}/operator/v1/dispatch`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${f.tokens[device]}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const read = OperatorConversationServiceRequestSchema.parse({ op: "fleet_room", schemaVersion: 1 });
+  const page = await call(read);
+  expect(page.status).toBe(200);
+  const result = OperatorConversationServiceResultSchema.parse(await page.json());
+  if (result.op !== "fleet_room" || result.result.outcome !== "ready")
+    throw new Error("Fleet room unavailable");
+  expect(result.result.entries).toMatchObject([
+    { kind: "lead_message", from: lead, to: worker, links: { issues: ["VUH-2184"] } },
+  ]);
+  // The owner's device forwarded its own bearer; the captain's never stood in for it.
+  expect(f.forwarded.at(-1)?.token).toBe(f.tokens.hosted);
+
+  // Following the room: a waiting read hears the next entry as it is recorded.
+  const waiting = call({ ...read, direction: "newer", cursor: result.result.newer, waitMs: 5000 });
+  setTimeout(
+    () =>
+      journal.record({
+        id: "report:two",
+        at: new Date().toISOString(),
+        kind: "worker_report",
+        from: worker,
+        to: lead,
+        text: "Landed 7d7a4063d",
+        delivery: { stage: "stored" },
+      }),
+    100,
+  );
+  const live = OperatorConversationServiceResultSchema.parse(await (await waiting).json());
+  if (live.op !== "fleet_room" || live.result.outcome !== "ready") throw new Error("Fleet room unavailable");
+  expect(live.result.entries).toMatchObject([{ kind: "worker_report", links: { commits: ["7d7a4063d"] } }]);
+
+  // This machine's operator reads it directly.
+  const operator = await fetch(`${f.controlUrl}/operator/v1/dispatch`, {
+    method: "POST",
+    headers: { authorization: "Bearer owner", "content-type": "application/json" },
+    body: JSON.stringify(read),
+  });
+  expect(operator.status).toBe(200);
+
+  // Chat and steer devices are refused at the relay, before any hop. A device this hosted body
+  // did not mint for its account owner is refused by the service, exactly as owner questions are.
+  const forwarded = f.forwarded.length;
+  for (const device of ["chat", "steer"] as const) expect((await call(read, device)).status).toBe(403);
+  expect(f.forwarded).toHaveLength(forwarded);
+  expect((await call(read, "control")).status).toBe(403);
+  const anonymous = await fetch(`${f.controlUrl}/operator/v1/dispatch`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(read),
+  });
+  expect(anonymous.status).toBe(403);
   expect(f.captainCalls()).toBe(0);
 });

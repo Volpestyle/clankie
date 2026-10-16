@@ -22,6 +22,16 @@ interface InboundAttempt {
 }
 
 /** Admission fence; the conversation retains report delivery and explicit read state. */
+/** A report the conversation durably accepted, as told to observers (the fleet room, VUH-2184). */
+export interface AcceptedReport {
+  readonly paneId: string;
+  /** The sender's seat, when the host resolved one. */
+  readonly seatId?: string;
+  readonly deliveryId: string;
+  readonly text: string;
+  readonly conversationId: string;
+}
+
 export class InboundSeatReceipts {
   private readonly fencePath: string;
   private readonly conversations: Pick<ConversationStore, "inboundAcceptance" | "submitInbound">;
@@ -29,11 +39,19 @@ export class InboundSeatReceipts {
   private readonly now: () => number;
   private readonly deadlineMs: number;
   private readonly shutdown: AbortSignal | undefined;
+  private readonly onAccepted: ((report: AcceptedReport) => void) | undefined;
   private readonly active = new Map<string, InboundAttempt>();
   public constructor(
     path: string,
     conversations: Pick<ConversationStore, "inboundAcceptance" | "submitInbound">,
-    options: { instanceId?: string; now?: () => number; deadlineMs?: number; signal?: AbortSignal } = {},
+    options: {
+      instanceId?: string;
+      now?: () => number;
+      deadlineMs?: number;
+      signal?: AbortSignal;
+      /** Told once per report the conversation durably accepted (the fleet room, VUH-2184). */
+      accepted?: (report: AcceptedReport) => void;
+    } = {},
   ) {
     this.fencePath = path;
     this.conversations = conversations;
@@ -41,6 +59,7 @@ export class InboundSeatReceipts {
     this.now = options.now ?? Date.now;
     this.deadlineMs = options.deadlineMs ?? INBOUND_REQUEST_DEADLINE_MS;
     this.shutdown = options.signal;
+    this.onAccepted = options.accepted;
   }
 
   /** Restart cannot discard an active original or an unreadable admission fence. */
@@ -324,6 +343,8 @@ export class InboundSeatReceipts {
     recipient?: InboundReportRecipient,
     /** The sender asked to be heard at once rather than in the lead's next round. */
     urgent = false,
+    /** The sender's seat (Herdr terminal), when the host resolved one; for observers only. */
+    senderSeatId?: string,
   ): FleetSeatMessageReceipt {
     const fingerprint = deliveryFingerprint(text);
     const previous = this.reconcile(paneId, delivery, fingerprint);
@@ -389,7 +410,20 @@ export class InboundSeatReceipts {
         conversationId,
         runner,
       );
-      return this.reconcile(paneId, delivery, fingerprint);
+      const receipt = this.reconcile(paneId, delivery, fingerprint);
+      if (receipt.received)
+        try {
+          this.onAccepted?.({
+            paneId,
+            ...(senderSeatId === undefined ? {} : { seatId: senderSeatId }),
+            deliveryId: delivery.id,
+            text,
+            conversationId,
+          });
+        } catch {
+          // Observers never turn an accepted report into a failed delivery.
+        }
+      return receipt;
     } catch {
       return previous;
     }

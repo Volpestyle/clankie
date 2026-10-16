@@ -110,7 +110,16 @@ export class PeerSeatMessages {
       recipientOccupantId: string;
     }): void;
     /** Both the audit and Clankie's agent-role transcript, without submitting an owner turn. */
-    record(event: { sender: string; recipient: string; message: string; receipt: FleetPeerReceipt }): void;
+    record(event: {
+      sender: string;
+      recipient: string;
+      message: string;
+      /** The sender's own words, without delivery framing. */
+      text: string;
+      receipt: FleetPeerReceipt;
+      /** False for the placeholder written before dispatch; true for each settled outcome. */
+      final: boolean;
+    }): void;
   };
   constructor(options: PeerSeatMessages["options"]) {
     this.options = options;
@@ -297,7 +306,9 @@ export class PeerSeatMessages {
         sender: sender.terminalId,
         recipient: input.seatId,
         message,
+        text: input.text,
         receipt: record.receipt,
+        final: false,
       });
       const result = await this.options.deliver(input.seatId, message, {
         fence: (native) => this.fence(authority, input, native),
@@ -424,7 +435,9 @@ export class PeerSeatMessages {
       sender: record.senderSeatId,
       recipient: record.input.seatId,
       message: record.message,
+      text: record.input.text,
       receipt,
+      final: true,
     });
     return receipt;
   }

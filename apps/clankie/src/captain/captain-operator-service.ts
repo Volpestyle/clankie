@@ -907,7 +907,7 @@ export function createOperatorService(
       ctx.fleetChanges.touch();
       return { op: "move_seat", schemaVersion: 1, result: { outcome: "moved", seat: rehired } };
     }
-    if (request.op === "connections" || request.op === "lead_chats")
+    if (request.op === "connections" || request.op === "lead_chats" || request.op === "fleet_room")
       throw new Error("Connections are served by the authenticated app boundary");
     if (
       request.op === "work_repos" ||

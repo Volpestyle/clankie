@@ -443,6 +443,13 @@ export class ConversationStore {
     };
   }
   public linearFollowing: (() => Promise<boolean>) | undefined;
+  /** Told when a question to the owner is asked or settled (the fleet room, VUH-2184). */
+  public onQuestionChange:
+    | ((change: {
+        readonly phase: "asked" | "resolved";
+        readonly question: import("@clankie/protocol").ConversationQuestion;
+      }) => void)
+    | undefined;
   public onLinearWakeReceived:
     | ((
         references: readonly import("../../linear-wake-read.ts").LinearWakeNotificationReference[],

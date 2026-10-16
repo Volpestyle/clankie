@@ -407,6 +407,40 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
       }
     }
+    if (parsed.success && parsed.data.op === "fleet_room") {
+      // The room carries coordination text, so only the owner reads it (VUH-2184): a paired
+      // device holding Take Control, or this machine's operator. Never a support grant, a
+      // captain or worker bearer, or a room.
+      const ownerReader = () => {
+        if (!owner?.current()) return false;
+        if (owner.principal.kind === "operator") return true;
+        const record = ctx.devices.get(owner.principal.id);
+        // Never a hosted visitor, whichever route its request took (as lead_chats).
+        return (
+          record !== undefined &&
+          record.supportGrantId === undefined &&
+          record.mintedBy !== "hosted-account" &&
+          !record.mintedBy.startsWith("support:")
+        );
+      };
+      const denied = () => context.json({ error: "owner_required" }, 403);
+      if (!ownerReader() || !owner || !(await owner.authorize())) return denied();
+      const { op: _op, schemaVersion: _version, ...request } = parsed.data;
+      try {
+        if (!ctx.dependencies.captain.fleetRoom) throw new Error("Fleet room unavailable");
+        // A `newer` read may wait; authority is checked again before anything is returned.
+        const result = await ctx.dependencies.captain.fleetRoom(request, context.req.raw.signal);
+        if (!ownerReader() || !(await owner.authorize())) return denied();
+        return context.json({ op: "fleet_room", schemaVersion: 1, result });
+      } catch {
+        if (!ownerReader() || !(await owner.authorize())) return denied();
+        return context.json({
+          op: "fleet_room",
+          schemaVersion: 1,
+          result: { outcome: "unavailable", message: "The fleet room can’t be read here." },
+        });
+      }
+    }
     if (parsed.success && parsed.data.op === "evidence_fetch") {
       // Media stays in the device's authenticated relay. Operator/captain tokens are not device authority.
       const ownerDevice = () =>

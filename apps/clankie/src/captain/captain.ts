@@ -46,6 +46,7 @@ import { pruneTidyWorktree, type PruneWorktreeResult } from "./prune-worktree.ts
 import { managedWorktreePaths } from "./tidy-worktrees.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/protocol";
+import { fleetDeliveryStage, type DeliveryStage, type FleetRoomParty } from "@clankie/protocol";
 import { autoHireAuthority } from "./auto-hire-policy.ts";
 import { effectiveFleetAutonomy } from "@clankie/settings";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
@@ -215,6 +216,7 @@ import {
   LeadVisitWindow,
   type EdgeSeat,
 } from "./fleet-edges.ts";
+import { FleetRoomJournal, type FleetRoomRecord } from "./fleet-room.ts";
 import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.js";
 import {
   deliverFleetSeatMessage,
@@ -1158,6 +1160,38 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // drew. Same bounds and the same volatility as the prompt ring (ADR 0163).
   const seatMessages = new SeatMessageWindow();
   const leadVisits = new LeadVisitWindow();
+  // The fleet room (VUH-2184): the durable, owner-only record of the same
+  // coordination, written where it happens. Recording never blocks delivery.
+  const fleetRoom = new FleetRoomJournal(join(options.stateDir, "fleet-room"));
+  const noteFleetRoom = (record: FleetRoomRecord) => {
+    try {
+      fleetRoom.record(record);
+    } catch (error) {
+      console.warn("Fleet room record unavailable", record.kind, String(error));
+    }
+  };
+  const leadParty = (conversationId: string): FleetRoomParty => ({
+    kind: "lead",
+    label:
+      conversationId === conversations.defaultGlobalConversationId()
+        ? "Clankie"
+        : conversations.conversation(conversationId)?.title.trim().slice(0, 120) || "Lead",
+    conversationId,
+  });
+  const workerParty = (seatId: string): FleetRoomParty => {
+    const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
+    const name =
+      seat === undefined
+        ? undefined
+        : personas.all(liveSeats, () => undefined).find((persona) => persona.personaId === seat.personaId)
+            ?.name;
+    return {
+      kind: "worker",
+      label: (name ?? seat?.title ?? seatId).trim().slice(0, 120) || seatId,
+      seatId,
+      ...(seat === undefined ? {} : { personaId: seat.personaId }),
+    };
+  };
   const recordLeadVisit = (seatId: string, kind: "message" | "close", text?: string) => {
     const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
     leadVisits.record({
@@ -2396,8 +2430,46 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     (await settings()).linearWebhook.following &&
     (options.linearFollowing === undefined || (await options.linearFollowing()));
   conversations.onLinearWakeReceived = options.linearWakeReceived;
+  conversations.onQuestionChange = ({ phase, question }) => {
+    const asker =
+      question.workerQuestion === undefined
+        ? leadParty(question.conversationId)
+        : workerParty(question.workerQuestion.seatId);
+    const owner: FleetRoomParty = { kind: "owner", label: "You" };
+    const issue = question.issue?.key;
+    // The answer itself stays in its conversation; the room says only that it was answered.
+    noteFleetRoom(
+      phase === "asked"
+        ? {
+            id: `question:${question.requestId}`,
+            at: question.createdAt,
+            kind: "owner_question",
+            from: asker,
+            to: owner,
+            text:
+              issue === undefined || question.prompt.includes(issue)
+                ? question.prompt
+                : `${question.prompt}\n${issue}`,
+            thread: { conversationId: question.conversationId },
+          }
+        : {
+            id: `answer:${question.requestId}`,
+            at: question.resolvedAt ?? new Date().toISOString(),
+            kind: "owner_answer",
+            from: owner,
+            to: asker,
+            text:
+              question.status === "submitted"
+                ? `Answered: ${question.prompt}`
+                : `Closed without an answer: ${question.prompt}`,
+            thread: { conversationId: question.conversationId },
+          },
+    );
+  };
   const hireSeat: HireSeat = async (request, brief, source, autonomous) => {
     const taskBrief = brief !== undefined;
+    // The room shows the lead's own brief, not the preferences appended below.
+    const leadBrief = brief;
     const captured = captureConversationAuthority(source);
     // Retain the original route proof and reread owner policy at every native
     // admission boundary, including after asynchronous checkout preparation.
@@ -2590,6 +2662,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (result.control?.mode === "adapter" || result.control?.mode === "channel")
     )
       recordLeadVisit(adopted.seatId, "message", brief);
+    if (leadBrief !== undefined && result.deliveryStage !== undefined)
+      noteFleetRoom({
+        id: `hire:${adopted.seatId}:${adopted.occupantId}`,
+        at: new Date().toISOString(),
+        kind: "lead_message",
+        from: leadParty(authority.owner.conversationId),
+        to: workerParty(adopted.seatId),
+        text: leadBrief,
+        thread: { conversationId: authority.owner.conversationId },
+        delivery: { stage: result.deliveryStage },
+      });
     fleetChanges.touch();
     const roleAssignment =
       adoptedRoleWrite?.outcome === "pending"
@@ -3003,6 +3086,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             },
           )
         : await herdrWatches.answerSeatQuestion(seatId, questionAnswer, authority);
+    if (
+      questionAnswer === undefined &&
+      (delivery.outcome === "delivered" || delivery.outcome === "unconfirmed")
+    )
+      noteFleetRoom({
+        id: `lead-message:${delivery.messageId ?? randomUUID()}`,
+        at: new Date().toISOString(),
+        kind: "lead_message",
+        from: leadParty(authority.owner.conversationId),
+        to: workerParty(seatId),
+        text: message,
+        thread: { conversationId: authority.owner.conversationId },
+        // An unconfirmed send may or may not have arrived; it is never shown as read.
+        delivery: { stage: fleetDeliveryStage(delivery) },
+      });
     if (delivery.outcome === "offline")
       return { outcome: "seat_offline", seatId, deliveryStage: "unavailable" };
     if (delivery.outcome !== "delivered") return { ...delivery, seatId };
@@ -3087,6 +3185,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       message,
     ].join("\n");
     const outbox = seatOutbox(to);
+    const noteLeadToLead = (id: string, stage: DeliveryStage) =>
+      noteFleetRoom({
+        id,
+        at: new Date().toISOString(),
+        kind: "lead_to_lead",
+        from: leadParty(from),
+        to: leadParty(to),
+        text: message,
+        thread: { conversationId: from },
+        delivery: { stage },
+      });
     const result = await outbox.deliver({
       kind: "message",
       conversationId: to,
@@ -3095,6 +3204,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       wantsReply: false,
       signal: shutdown.signal,
     });
+    if (result.outcome === "delivered" || result.outcome === "unconfirmed")
+      noteLeadToLead(
+        `lead-to-lead:${result.messageId ?? randomUUID()}`,
+        result.outcome === "unconfirmed" ? "uncertain" : (result.deliveryStage ?? "delivered"),
+      );
     if (result.outcome === "delivered")
       return {
         outcome: "delivered",
@@ -3137,6 +3251,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         to,
         conversationReportRunner({ conversationId: to }, messageId),
       );
+      if (accepted.status === "accepted") noteLeadToLead(`lead-to-lead:${messageId}`, "stored");
       if (accepted.status === "accepted")
         return {
           outcome: "delivered",
@@ -4828,6 +4943,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       pendingAutoRounds.add(conversationId);
       let roundId: string | undefined;
       let passedDeliveryGuard = false;
+      let roundSummary: string | undefined;
       void (async () => {
         const velocities = states.flatMap((state) => {
           const velocity = autoMeasurements.get(state.id);
@@ -4836,6 +4952,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         try {
           roundId = autoRoundRecord.measured(conversationId, velocities);
           autoCadence.claim(conversationId, roundId, fingerprint);
+          roundSummary = velocities.map(velocityLine).join("\n");
         } catch (error) {
           console.warn("Auto round record unavailable", conversationId, String(error));
           // A milestone request must be durably claimed before it can be dispatched.
@@ -4867,6 +4984,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       })()
         .then((accepted) => {
           settleAutoRound(conversationId, roundId, accepted, accepted ? undefined : "not delivered");
+          if (accepted && roundId !== undefined && roundSummary)
+            noteFleetRoom({
+              id: `auto-round:${roundId}`,
+              at: new Date().toISOString(),
+              kind: "auto_round",
+              from: { kind: "clankie", label: "Clankie · Auto" },
+              to: leadParty(conversationId),
+              text: roundSummary,
+              thread: { conversationId },
+              // Admitted to the lead's conversation as a machine turn, not read by it.
+              delivery: { stage: "stored" },
+            });
           if (!accepted) console.warn("Auto round was not delivered", conversationId);
         })
         .catch((error: unknown) => {
@@ -5116,7 +5245,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const inboundReceipts = new InboundSeatReceipts(
     join(options.stateDir, "delivery-receipts", "inbound.json"),
     conversations,
-    { signal: shutdown.signal },
+    {
+      signal: shutdown.signal,
+      // Recorded as it is accepted, so a report always sits before the reply it draws.
+      accepted: ({ paneId, seatId, deliveryId, text, conversationId }) =>
+        noteFleetRoom({
+          id: `report:${deliveryId}`,
+          at: new Date().toISOString(),
+          kind: "worker_report",
+          // A joined machine's worker has no local seat; its pane names it.
+          from: seatId === undefined ? { kind: "worker", label: paneId.slice(0, 120) } : workerParty(seatId),
+          to: leadParty(conversationId),
+          text,
+          thread: { conversationId },
+          // Accepted into the lead's conversation; that is not the lead reading it.
+          delivery: { stage: "stored" },
+        }),
+    },
   );
   function inboundBinding(agent: HerdrAgentSnapshot | undefined): string | undefined {
     if (!agent?.session || agent.agent === "shell" || agent.agent === "unknown") return undefined;
@@ -5489,10 +5634,26 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       });
       fleetChanges.touch();
     },
-    record: ({ message, receipt }) =>
-      conversations.publishFleetPeerExchange(
+    record: ({ sender, recipient, message, text, receipt, final }) => {
+      if (final && (receipt.outcome === "delivered" || receipt.outcome === "unconfirmed"))
+        noteFleetRoom({
+          id: `peer:${receipt.deliveryId}`,
+          at: new Date().toISOString(),
+          kind: "peer_message",
+          from: workerParty(sender),
+          to: workerParty(recipient),
+          text,
+          delivery: {
+            stage:
+              receipt.deliveryStage === "recipient_gone" || receipt.deliveryStage === "superseded"
+                ? "uncertain"
+                : receipt.deliveryStage,
+          },
+        });
+      return conversations.publishFleetPeerExchange(
         `${message}\n\nPeer delivery receipt: ${JSON.stringify(receipt)}`,
-      ),
+      );
+    },
   });
 
   return {
@@ -6137,6 +6298,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     prepareWorkHandoffIntent,
     prepareFreeAgentIntent,
     leadChats,
+    fleetRoom: (request, signal) => fleetRoom.read(request, signal),
     readWorkerAccounts,
     resolveWorkerAccountLabel: (machine, harness, label) =>
       harnessAccountIdentities(harnessAccountIdentityPath(options.stateDir)).resolve(machine, harness, label),
@@ -7048,6 +7210,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 conversationId: retainedOwner.conversationId,
               },
               { kind: "conversation", owner: retainedOwner },
+              false,
+              agent.terminalId,
             );
           }
 
@@ -7225,6 +7389,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             },
             route.native ?? { kind: "conversation", owner: target },
             options?.urgent === true,
+            agent.terminalId,
           );
           if (accepted.received) {
             try {

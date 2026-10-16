@@ -763,3 +763,64 @@ it("a head whose bridge is slow to acknowledge under load keeps its conversation
     await pump;
   }
 }, 30_000);
+
+it("the fleet room records a lead's message to its hire and the hire's report once each, across restart, and wakes a waiting reader (VUH-2184)", async () => {
+  const f = await fixture();
+  await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+  const bank = await f.captain.laneToolBank("operator", f.leads[0]);
+  await bank.tools
+    .find((tool) => tool.name === "message_seat")!
+    .call({ seat: f.agent.terminalId, message: "Take VUH-2184 and land it on main" });
+  const report = "Landed 7d7a4063d for VUH-2184; api_key=sk-fixture-secret-0123456789";
+  const receipt = await delivery(f.captain, f.agent.paneId);
+  expect(await f.captain.receiveFleetSeatMessage(f.agent.paneId, report, receipt)).toMatchObject({
+    received: true,
+  });
+  // The same delivery retried is the same report, never a second line.
+  await f.captain.receiveFleetSeatMessage(f.agent.paneId, report, receipt);
+  const read = async (captain: ReturnType<typeof createCaptain>) => {
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      const page = await captain.fleetRoom!({});
+      if (page.outcome !== "ready") throw new Error("Fleet room unavailable");
+      if (page.entries.length >= 2 || Date.now() > deadline) return page;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  };
+  const page = await read(f.captain);
+  expect(page.entries.map((entry) => entry.kind)).toEqual(["lead_message", "worker_report"]);
+  const [brief, reply] = page.entries;
+  expect(brief).toMatchObject({
+    from: { kind: "lead", label: "Lead A", conversationId: f.leads[0] },
+    to: { kind: "worker", seatId: f.agent.terminalId },
+    text: "Take VUH-2184 and land it on main",
+    links: { issues: ["VUH-2184"], commits: [] },
+    thread: { conversationId: f.leads[0] },
+    // The native channel took it into a running turn (ADR 0211), which is not the worker answering.
+    delivery: { stage: "consumed" },
+  });
+  expect(reply).toMatchObject({
+    id: `report:${receipt.id}`,
+    from: { kind: "worker", seatId: f.agent.terminalId },
+    to: { kind: "lead", conversationId: f.leads[0] },
+    links: { issues: ["VUH-2184"], commits: ["7d7a4063d"] },
+    // Accepted into the lead's conversation is not the lead having read it.
+    delivery: { stage: "stored" },
+  });
+  // Credentials are scrubbed the way transcripts are.
+  expect(reply!.text).not.toContain("sk-fixture-secret");
+  expect(reply!.sequence).toBeGreaterThan(brief!.sequence);
+
+  // A restart keeps the room and its order; a reader following it hears the next report.
+  await f.captain.close();
+  const restarted = f.open();
+  await restarted.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+  expect((await read(restarted)).entries).toEqual(page.entries);
+  const waiting = restarted.fleetRoom!({ direction: "newer", cursor: page.newer, waitMs: 5000 });
+  const next = await delivery(restarted, f.agent.paneId);
+  await restarted.receiveFleetSeatMessage(f.agent.paneId, "Ready for review", next);
+  const live = await waiting;
+  if (live.outcome !== "ready") throw new Error("Fleet room unavailable");
+  expect(live.entries).toMatchObject([{ kind: "worker_report", text: "Ready for review" }]);
+  expect(live.entries[0]!.sequence).toBe(reply!.sequence + 1);
+});

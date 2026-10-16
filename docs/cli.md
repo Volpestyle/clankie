@@ -3720,6 +3720,44 @@ with 200.
 Specs live in `~/.clankie/views/views.json`. Schemas are in
 `packages/protocol/src/views.ts`. Hosted share links are not part of this repository.
 
+### `fleet room [--older CURSOR] [--limit N] [--follow]`
+
+The fleet room ([ADR 0273](adr/0273-the-fleet-room-is-a-durable-owner-only-coordination-record.md)):
+one time-ordered feed of how the fleet coordinates. It holds lead briefs and
+messages to workers, worker reports, peer and lead-to-lead messages, delivered
+Auto rounds, and owner questions with their answered or withdrawn state. The
+host records each one as it happens, and only the owner reads it: this machine's
+operator credential, or a paired device holding Take Control through the service
+op `fleet_room`.
+
+The JSON page is oldest first. Each entry has:
+
+- `id` (the source's own id), `sequence` and `at`;
+- `kind`;
+- `from`/`to` (`{kind: lead|worker|clankie|owner, label, conversationId?, seatId?, personaId?}`);
+- bounded `text`, with credentials scrubbed;
+- `links` (the issue keys and commit SHAs the text names);
+- `thread`, when one exists;
+- `delivery.stage` as recorded (ADR 0211; `stored` is not read).
+
+The page also carries:
+
+- `older`, a cursor for the page before it, or null at the start;
+- `newer`, a cursor to follow from;
+- `recordingSince`.
+
+`--older CURSOR` reads the page before a cursor, and `--limit` sets 1–100 entries
+(default 50). `--follow` prints the page's entries and then each new one as a
+JSON line until interrupted. It waits up to 20 seconds per read, so it adds
+almost no load. Device op: `{op: "fleet_room", schemaVersion: 1, direction:
+"older"|"newer", cursor?, limit?, waitMs?}`.
+
+The room keeps the newest 2,000 entries, none older than 14 days. History from
+before the host recorded the room is not reconstructed. An owner's answer text
+stays in its conversation; the room says only that the question was answered.
+Entries are display only and grant no authority. Nothing mirrors the room to a
+channel or Discord.
+
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
 ### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`

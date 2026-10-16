@@ -56,6 +56,7 @@ export type DeviceConversationRequest = Extract<
       | "work_item_write_receipt"
       | "tracker_sync"
       | "evidence_fetch"
+      | "fleet_room"
       | "autonomy";
   }
 >;
@@ -100,6 +101,7 @@ export function createDeviceConversationDispatch(options: {
         "work_item_write_receipt",
         "tracker_sync",
         "evidence_fetch",
+        "fleet_room",
         "autonomy",
       ].includes(request.op)
     )

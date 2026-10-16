@@ -1,4 +1,10 @@
 import { LeadChatsResultSchema, type LeadChatsResult } from "./lead-chats.ts";
+import {
+  FleetRoomRequestSchema,
+  FleetRoomResultSchema,
+  type FleetRoomRequest,
+  type FleetRoomResult,
+} from "./fleet-room.ts";
 import { TrackerSyncCommandSchema, TrackerSyncResultSchema } from "./tracker-sync.ts";
 import {
   EvidenceDeviceFetchSchema,
@@ -444,6 +450,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({ op: z.literal("tracker_sync"), schemaVersion: z.literal(1), command: TrackerSyncCommandSchema })
     .strict(),
   z.object({ op: z.literal("lead_chats"), schemaVersion: z.literal(1) }).strict(),
+  /** The fleet room (VUH-2184): owner devices and the local operator only. */
+  FleetRoomRequestSchema,
   EvidenceDeviceFetchRequestSchema.extend({
     op: z.literal("evidence_fetch"),
     schemaVersion: z.literal(1),
@@ -766,6 +774,9 @@ export type OperatorWorkItemsOutcome =
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
   z
     .object({ op: z.literal("lead_chats"), schemaVersion: z.literal(1), result: LeadChatsResultSchema })
+    .strict(),
+  z
+    .object({ op: z.literal("fleet_room"), schemaVersion: z.literal(1), result: FleetRoomResultSchema })
     .strict(),
   z
     .object({
@@ -1363,6 +1374,11 @@ export interface OperatorConversationServiceClient {
   connections?(command?: OperatorConnectionCommand): Promise<z.infer<typeof OperatorConnectionResultSchema>>;
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
   leadChats?(): Promise<LeadChatsResult>;
+  /** The fleet room's coordination feed (VUH-2184). */
+  fleetRoom?(
+    request?: Omit<FleetRoomRequest, "op" | "schemaVersion">,
+    signal?: AbortSignal,
+  ): Promise<FleetRoomResult>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
   /** The roster with any degraded-read warnings; seats may be the last completed projection. */
   rosterRead?(): Promise<{
@@ -1705,6 +1721,14 @@ export function createOperatorConversationServiceClient(
     async leadChats() {
       const result = await dispatch({ op: "lead_chats", schemaVersion: 1 });
       if (result.op !== "lead_chats") throw new Error(`Unexpected ${result.op} result for lead_chats`);
+      return result.result;
+    },
+    async fleetRoom(request = {}, signal) {
+      const result = await dispatch(
+        FleetRoomRequestSchema.parse({ ...request, op: "fleet_room", schemaVersion: 1 }),
+        signal,
+      );
+      if (result.op !== "fleet_room") throw new Error(`Unexpected ${result.op} result for fleet_room`);
       return result.result;
     },
     async roster() {

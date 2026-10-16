@@ -628,6 +628,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         : nativeMessageOp ||
             questionOp ||
             workWriteOp ||
+            // The fleet room is the owner's coordination record (VUH-2184).
+            serviceRequest.op === "fleet_room" ||
             autoOnOp ||
             serviceRequest.op === "terminal_control" ||
             serviceRequest.op === "terminal_input"
@@ -718,6 +720,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       autoOnOp ||
       serviceRequest.op === "tracker_sync" ||
       serviceRequest.op === "evidence_fetch" ||
+      serviceRequest.op === "fleet_room" ||
       (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);
     try {
       if (abort.signal.aborted) return true;
@@ -740,6 +743,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "work_item_write_receipt" ||
           serviceRequest.op === "tracker_sync" ||
           serviceRequest.op === "evidence_fetch" ||
+          serviceRequest.op === "fleet_room" ||
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||
           serviceRequest.op === "project_proposal_tweak" ||

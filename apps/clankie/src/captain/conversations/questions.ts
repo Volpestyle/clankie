@@ -319,6 +319,11 @@ export async function requestQuestion(
     ...(record.question.steps ? { steps: record.question.steps } : {}),
     options: input.options.map((o) => o.label),
   });
+  try {
+    ctx.onQuestionChange?.({ phase: "asked", question: record.question });
+  } catch {
+    // Observers never undo an asked question.
+  }
   ctx["scheduleDecisionDeadlines"]();
   return ctx["questionResult"](meta, record, "ready");
 }
@@ -726,6 +731,11 @@ export function publishQuestionResolution(
     requestId: record.question.requestId,
     outcome: record.question.status === "submitted" ? "submitted" : "cancelled",
   });
+  try {
+    ctx.onQuestionChange?.({ phase: "resolved", question: record.question });
+  } catch {
+    // Observers never undo a settled question.
+  }
 }
 
 export async function questionOperation(

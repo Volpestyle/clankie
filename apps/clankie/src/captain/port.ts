@@ -323,6 +323,11 @@ export interface CaptainPort {
     harnesses?: readonly import("./harness-accounts.ts").WorkerAccountHarness[],
   ): Promise<import("./harness-accounts.ts").MachineWorkerAccounts>;
   leadChats?(): Promise<readonly import("@clankie/protocol").LeadChat[]>;
+  /** The fleet room (VUH-2184); the app boundary admits only the owner. */
+  fleetRoom?(
+    request: Omit<import("@clankie/protocol").FleetRoomRequest, "op" | "schemaVersion">,
+    signal?: AbortSignal,
+  ): Promise<import("@clankie/protocol").FleetRoomResult>;
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
