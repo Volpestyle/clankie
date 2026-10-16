@@ -258,6 +258,19 @@ completed prior-hour support files are removed only after both acknowledge.
 Create the support child directory with the same body write ownership as the
 parent before mounting it. See [`telemetry ship`](../../docs/cli.md) for its output.
 
+`CLANKIE_SUPPORT_GRANTS_FILE`, when set (managed hosts use
+`/state/support-grants.json`), receives the body's unended support grant
+metadata: id, scope, status and window, never the support reference. It is
+rewritten atomically on every lifecycle change and restored on the next
+one-second tick if the copy on disk diverges. When a write fails, a record that
+would still list a revoked or ended shell grant is truncated. The host's shell
+watcher closes Systems Manager unless the fleet-tagged grant is listed as an
+active shell grant, so a customer's revoke holds within one watcher tick while
+fleet sync is down. The record can only narrow access; opening a shell still
+needs the provisioner-only tag. A process sharing the body's uid that keeps
+rewriting it can hold a revoked window open until fleet sync returns, which
+only a separate uid for agent tools would close.
+
 Managed bodies also register paired-device P-256 wake keys with the fleet via
 `POST /v1/devices/wake-key`, inside the existing encrypted device channel. The
 live session chooses the device id; device revocation immediately denies local

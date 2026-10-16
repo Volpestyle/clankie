@@ -2118,6 +2118,9 @@ const clankie = await createClankieApp({
     : {
         hostedBody,
         supportGrantSync: hostedBody,
+        ...(process.env.CLANKIE_SUPPORT_GRANTS_FILE
+          ? { supportGrantsFile: process.env.CLANKIE_SUPPORT_GRANTS_FILE }
+          : {}),
         accountSettings: hostedBody,
         hostedDeviceSecurity: new HostedDeviceSecurity(hostedBody, `${deviceSessionKeyPath}.hosted.json`),
       }),

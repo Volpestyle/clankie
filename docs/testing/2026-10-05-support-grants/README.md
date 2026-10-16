@@ -95,3 +95,35 @@ and require coordinated integration. This is code evidence, not proof of a
 deployed hosted service or AWS IAM/SSM enforcement. Deployment and privacy
 publication remain with the owner; no live-service restart, AWS change,
 account change, sign-in or spend occurred in this task.
+
+## Revoke while fleet sync is down (2026-10-16)
+
+The host watcher trusted only fleet-written instance tags, so a revoke made
+while the body could not sync to fleet left Systems Manager open until the
+tag's expiry. With `CLANKIE_SUPPORT_GRANTS_FILE` set, the body now
+(`writeSupportGrantProjection`):
+
+- atomically rewrites a metadata-only record (`{schemaVersion, revision, grants}`) on every grant change and at startup;
+- restores a diverged copy on its one-second tick;
+- on a failed write, truncates a record that would still list a revoked or ended shell grant.
+
+The clankie-ops watcher requires the tagged grant to be listed there as an
+active shell grant.
+
+`support-access.test.ts` passes 11/11. The new case is "projects revoke and
+expiry to the host shell watcher's file", run through the real owner HTTP API.
+It proves:
+
+- a revoke reaches the record synchronously and survives a body restart;
+- a tampered copy is restored, and a planted FIFO neither blocks the body nor survives a tick;
+- a read-only state directory truncates the record during a revoke;
+- expired windows drop out;
+- the support reference never appears.
+
+Removing the on-change write or the truncation fails it, and dropping
+`O_NONBLOCK` hangs the body on the FIFO.
+An independent native review found no authorization bypass; its hardening
+findings are addressed here and in clankie-ops. Residual: a process sharing
+the body's uid that keeps rewriting the record can hold a revoked window open
+until fleet sync returns. This is code evidence; the deployed watcher on EC2
+remains part of the owner's dev proof.

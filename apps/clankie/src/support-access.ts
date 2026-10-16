@@ -1,5 +1,17 @@
 import { randomUUID, createHmac } from "node:crypto";
 import {
+  closeSync,
+  constants,
+  fstatSync,
+  ftruncateSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname } from "node:path";
+import {
   SupportGrantCreateRequestSchema,
   SupportGrantSchema,
   SUPPORT_GRANT_WINDOW_CAPACITY,
@@ -12,6 +24,61 @@ import type { DomainEvent } from "@clankie/protocol";
 import type { BodyTelemetry } from "@clankie/observability/body-telemetry";
 
 export class SupportGrantCapacityError extends Error {}
+
+/**
+ * The hosted host's shell watcher reads this beside the fleet's instance tags
+ * and closes Systems Manager unless the tagged grant is listed active here, so a
+ * revoke holds even while fleet sync is down. It can only narrow access: the
+ * shell still needs the provisioner-only tag. Metadata only, no support ref.
+ * Called every tick, it also restores a copy that diverged on disk.
+ */
+export function writeSupportGrantProjection(
+  path: string,
+  snapshot: { revision: number; grants: SupportGrantMetadata[] },
+): void {
+  const content = `${JSON.stringify({ schemaVersion: 1, ...snapshot })}\n`;
+  // The volume is writable from inside the container: never follow a planted
+  // link or block on a FIFO, and read a plain file only under the watcher's cap.
+  const withRecord = <T>(flags: number, use: (fd: number) => T): T | undefined => {
+    let fd: number;
+    try {
+      fd = openSync(path, flags | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    } catch {
+      return undefined;
+    }
+    try {
+      const stat = fstatSync(fd);
+      return stat.isFile() && stat.size <= 1 << 20 ? use(fd) : undefined;
+    } finally {
+      closeSync(fd);
+    }
+  };
+  const current = withRecord(constants.O_RDONLY, (fd) => readFileSync(fd, "utf8"));
+  if (current === content) return;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const temporary = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporary, content, { mode: 0o644 });
+    renameSync(temporary, path);
+  } catch (error) {
+    // Truncation needs no free space, and an empty record closes the shell, so
+    // a failed write never leaves a revoked or ended shell window listed active.
+    const shell = (text: string | undefined) => {
+      try {
+        const grants = (JSON.parse(text ?? "") as { grants?: SupportGrantMetadata[] }).grants ?? [];
+        return grants
+          .filter((grant) => grant.scope === "shell" && grant.status === "active")
+          .map((grant) => grant.grantId);
+      } catch {
+        return [];
+      }
+    };
+    const allowed = new Set(shell(content));
+    if (shell(current).some((grantId) => !allowed.has(grantId)))
+      withRecord(constants.O_WRONLY, (fd) => ftruncateSync(fd, 0));
+    throw error;
+  }
+}
 
 /** Durable body authority. Fleet snapshots contain metadata only and never create authority here. */
 export class SupportGrantStore {

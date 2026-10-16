@@ -17,7 +17,7 @@ import { RuntimeHealthObservationSchema } from "@clankie/protocol";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
 import { WORKER_ACCOUNTS_PATH } from "@clankie/protocol/worker-accounts";
-import { SupportGrantStore } from "../support-access.ts";
+import { SupportGrantStore, writeSupportGrantProjection } from "../support-access.ts";
 import { SUPPORT_DEVICE_GRANTS } from "@clankie/protocol/support-access";
 import { createIntegrationRoutes } from "../integrate-routes.ts";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
@@ -210,6 +210,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       supportSyncRunning = false;
     }
   };
+  const projectSupportGrants = () => {
+    if (dependencies.supportGrantsFile === undefined) return;
+    try {
+      writeSupportGrantProjection(dependencies.supportGrantsFile, supportGrants.snapshot());
+    } catch {
+      logger.error({ event: "support.projection_unavailable" }, "Support grant projection will retry");
+    }
+  };
   const supportGrants = new SupportGrantStore({
     events: storedEvents,
     recordEvent,
@@ -220,6 +228,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? {}
       : { deviceRefKey: dependencies.supportDeviceRefKey }),
     changed: () => {
+      projectSupportGrants();
       void syncSupportGrants();
     },
   });
@@ -230,9 +239,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     } catch {
       logger.warn({ event: "support.expiry_unavailable" }, "Support grant expiration will retry");
     }
+    projectSupportGrants();
     void syncSupportGrants();
   }, 1000);
   supportTimer.unref();
+  projectSupportGrants();
   void syncSupportGrants();
   for (const event of storedEvents) applyDeviceEvent(devices, event);
   const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);

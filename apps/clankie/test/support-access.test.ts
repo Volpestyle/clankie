@@ -9,8 +9,10 @@ import {
   randomUUID,
   verify,
 } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -81,7 +83,8 @@ async function fixture(
   const key = randomBytes(32),
     log = join(root, "events.jsonl"),
     spool = join(root, "telemetry"),
-    deviceRefKeyPath = join(root, "telemetry-device.key");
+    deviceRefKeyPath = join(root, "telemetry-device.key"),
+    grantsFile = join(root, "state", "support-grants.json");
   const telemetry = createBodyTelemetry({ dir: spool, writer: "service", clock: () => now });
   const historicalIds: string[] = [];
   if (history !== undefined) {
@@ -176,6 +179,7 @@ async function fixture(
       deviceSessionKey: key,
       eventLogPath: log,
       supportTelemetry: telemetry,
+      supportGrantsFile: grantsFile,
       ...(supportDeviceRefKey === undefined ? {} : { supportDeviceRefKey }),
       clock: () => new Date(now),
       authenticateOperator: async (r) =>
@@ -285,6 +289,7 @@ async function fixture(
     gatewayHost,
     bodySigning,
     deviceRefKeyPath,
+    grantsFile,
     tail: () => tailStarted.promise,
     nextTail: () => nextTail.promise,
     resetTail: () => {
@@ -388,6 +393,65 @@ it("enforces owner grant lifecycle, readonly pairing, durable restart and conten
   expect(JSON.stringify(events)).not.toContain("CUSTOMER PRIVATE REFERENCE");
   expect(JSON.stringify(events)).not.toContain("/operator/v1");
   expect(JSON.stringify(events)).not.toContain(device.deviceToken);
+});
+
+it("projects revoke and expiry to the host shell watcher's file without the support reference, across restart and tampering", async () => {
+  const f = await fixture(true);
+  const projected = () =>
+    JSON.parse(readFileSync(f.grantsFile, "utf8")) as {
+      schemaVersion: number;
+      revision: number;
+      grants: { grantId: string; scope: string; status: string; expiresAt: string }[];
+    };
+  expect(projected()).toEqual({ schemaVersion: 1, revision: 0, grants: [] });
+  const shell = await f.owner.createSupportGrant({
+    scope: "shell",
+    durationSeconds: 120,
+    supportRef: "PRIVATE SHELL REFERENCE",
+  });
+  const kept = await f.owner.createSupportGrant({ scope: "shell", durationSeconds: 60, supportRef: "kept" });
+  expect(projected().grants).toContainEqual(
+    expect.objectContaining({
+      grantId: shell.grantId,
+      scope: "shell",
+      status: "active",
+      expiresAt: shell.expiresAt,
+    }),
+  );
+  await f.owner.revokeSupportGrant(shell.grantId);
+  // The owner's revoke reaches the host file before any fleet sync could.
+  expect(projected().grants.find((grant) => grant.grantId === shell.grantId)?.status).toBe("revoked");
+  expect(readFileSync(f.grantsFile, "utf8")).not.toMatch(/PRIVATE|kept"/u);
+  await f.restart();
+  expect(projected().grants.find((grant) => grant.grantId === shell.grantId)?.status).toBe("revoked");
+  expect(projected().grants.find((grant) => grant.grantId === kept.grantId)?.status).toBe("active");
+  // A copy rewritten on disk is restored on the next tick.
+  const genuine = readFileSync(f.grantsFile, "utf8");
+  writeFileSync(f.grantsFile, genuine.replace('"revoked"', '"active"'));
+  await expect.poll(() => readFileSync(f.grantsFile, "utf8"), { timeout: 5000 }).toBe(genuine);
+  // A planted FIFO neither blocks the body nor survives the next tick.
+  rmSync(f.grantsFile);
+  execFileSync("mkfifo", [f.grantsFile]);
+  await expect
+    .poll(() => (lstatSync(f.grantsFile).isFile() ? readFileSync(f.grantsFile, "utf8") : ""), {
+      timeout: 5000,
+    })
+    .toBe(genuine);
+  // A write that cannot land truncates the record rather than leave a revoked shell listed active.
+  chmodSync(join(f.root, "state"), 0o555);
+  try {
+    await f.owner.revokeSupportGrant(kept.grantId);
+    expect(readFileSync(f.grantsFile, "utf8")).toBe("");
+  } finally {
+    chmodSync(join(f.root, "state"), 0o755);
+  }
+  await expect.poll(() => readFileSync(f.grantsFile, "utf8"), { timeout: 5000 }).not.toBe("");
+  expect(projected().grants.find((grant) => grant.grantId === kept.grantId)?.status).toBe("revoked");
+  const live = await f.owner.createSupportGrant({ scope: "shell", durationSeconds: 60, supportRef: "live" });
+  expect(projected().grants.find((grant) => grant.grantId === live.grantId)?.status).toBe("active");
+  f.advance(121_000);
+  await f.owner.listSupportGrants();
+  expect(projected().grants).toEqual([]);
 });
 
 it("refuses shell pairing and closes terminal and file reads for support, including restored shell devices", async () => {

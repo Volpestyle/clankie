@@ -179,6 +179,8 @@ export interface ClankieAppDependencies {
   onHostedPairing?: () => void;
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
   supportGrantSync?: Pick<HostedBodyClient, "syncSupportGrants">;
+  /** Host-readable grant metadata for the hosted shell watcher (`CLANKIE_SUPPORT_GRANTS_FILE`). */
+  supportGrantsFile?: string;
   /** Mandatory support audit bypasses ordinary diagnostic consent. */
   supportTelemetry?: BodyTelemetry;
   /** Tenant telemetry key or a dedicated random key persisted on this body volume. */
