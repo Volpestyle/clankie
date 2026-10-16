@@ -1154,6 +1154,12 @@ after the proof. Port selection does not reserve ports across later launches:
 a collision fails startup; generate a new directory and preset rather than
 falling back to the installed ports.
 
+Start the scratch relay before `scratch-stack.mjs run DIR cli pair`. Pairing
+guarantees a relay, and with none healthy the launcher starts a detached one
+outside `clankie heavy` that survives the proof. If that happened, stop its
+process group (working directory is the checkout, command
+`pnpm --filter @clankie/relay start`).
+
 `CLANKIE_SCRATCH=1` enables the startup guard. Scratch/dev harnesses must set
 this flag; a custom state directory or `NODE_ENV` alone does not imply a scratch
 stack. Both entrypoints refuse bind or peer ports `4310`
