@@ -1,0 +1,13 @@
+Heavy queue  view_d58ff18d1f79 · expires in 23h59m · read 3:26:09 AM
+
+Capacity
+heavy       ░░░░  0/4 in use
+simulators  ░  0/1 in use
+queue       empty
+pressure    ok  load 0.73 · 38.7 GB free
+
+Waiting
+Nothing waiting.
+
+Running
+No leases held.

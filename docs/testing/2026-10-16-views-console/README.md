@@ -81,6 +81,41 @@ The panel stayed open the whole time; nothing was retyped or reopened.
 (The frame is narrowed here; `captures/2-alpha-running-two-waiting.txt` is the read
 at full width.)
 
+## Clankie builds the board from a one-line ask (deployed runtime)
+
+On the deployed runtime (`8eda89c14`, which includes `7d7a4063d`), the ask went to
+the owner conversation at 03:25:42:
+
+```
+clankie send --conversation global-default --delivery queue \
+  "Make me a live board of the heavy queue so I can watch it move."
+```
+
+The receipt was `accepted`, with delivery stage `delivered` and seat delivery
+`started` (run `run-049c09e2-be7a-4765-a516-175892b5421c`). VUH-2045 had blocked
+this route on 2026-10-10; it now works. The ask arrived as a worker's message,
+not as a turn the owner typed.
+
+At 03:25:58, 16 s later, Clankie had created `view_d58ff18d1f79`. It has one
+`fleet_resources` source with Capacity, Waiting (heavy) and Running (heavy)
+panels, is temporary for 24 h, and refreshes every 5 s.
+
+The installed `clankie view show view_d58ff18d1f79 --text` read the board for
+four minutes. The machine's heavy queue stayed idle throughout (`live/1-idle`).
+
+To make it move, five `clankie heavy --seat views-proof-N -- sleep 20` jobs went
+through the live governor, one second apart. That briefly held all four
+full-lane slots of the real fleet.
+
+| Read    | Board (`live/`)                                                        |
+| ------- | ---------------------------------------------------------------------- |
+| 3:26:09 | `1-idle`: 0/4 in use, nothing waiting                                  |
+| 3:30:37 | `2-full-one-waiting`: 4/4 in use, `views-proof-1`–`4` running, 5 waits |
+| 3:30:54 | `3-last-running`: 1–4 finished, `views-proof-5` running, queue empty   |
+| 3:31:16 | `4-drained`: 0/4 in use, no leases                                     |
+
+The spec never changed between reads.
+
 ## Tests
 
 | Guarantee                                 | Test                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Fails when sabotaged                                                                |
@@ -122,7 +157,6 @@ sanitizer. Checked and holding:
   so such a view would need a hand-built client holding terminal control. The
   reviewer's sturdier alternative closes this too: store an operator's path as
   its registered id at create, and render as a device. It also changes how
-  existing stored views read, so it is left for a follow-up.
-- **One-line ask:** the 2026-10-10 board was built by the lead seat, because
-  VUH-2045 stopped `clankie send` reaching the conversation. Repeating it
-  through `clankie send` to global-default follows this deploy.
+  existing stored views read, so it is left for a follow-up (below).
+- **Pre-fix path views:** storing a tracker source by its registered id at create
+  is [VUH-2323](https://linear.app/vuhlp/issue/VUH-2323).
