@@ -86,7 +86,15 @@ const server = createServer((request, response) => {
     return;
   }
   healthRequests++;
-  if (mode === "timeout" || mode === "pressure-timeout" || (mode === "first-timeout" && healthRequests === 1))
+  if (
+    mode === "timeout" ||
+    mode === "pressure-timeout" ||
+    (mode === "first-timeout" && healthRequests === 1) ||
+    // Misses every probe on a quiet machine while it lasts.
+    mode === "first-timeout-quiet" ||
+    // Only one probe in five answers: a runtime that is mostly unreachable under load.
+    (mode === "pressure-flaky-timeout" && healthRequests % 5 !== 0)
+  )
     return;
   if (mode === "first-reset" && healthRequests === 1) {
     request.socket.destroy();
@@ -106,7 +114,11 @@ const server = createServer((request, response) => {
       }),
     );
   };
-  if (mode.endsWith("latency") || mode === "pressure") setTimeout(answer, 60);
+  // "pressure" alone is slow under load; "pressure-healthy" answers promptly under load.
+  // Every fourth probe is slow: a flaky regression that only an overlapping window could hide.
+  const periodicSlow = mode === "pressure-periodic-slow" && healthRequests % 4 === 0;
+  if (mode.endsWith("latency") || mode === "pressure" || mode.includes("-slow-") || periodicSlow)
+    setTimeout(answer, 60);
   else answer();
 });
 if (mode !== "body-only") await canary.recover();
@@ -121,7 +133,7 @@ sample = createRuntimeHealthSampler({
   timeoutMs: mode.includes("timeout") ? 200 : 1000,
 });
 const burn = setInterval(() => {
-  if (mode !== "cpu") return;
+  if (mode !== "cpu" && !mode.endsWith("-cpu")) return;
   const start = performance.now();
   while (performance.now() - start < 30) {
     Math.sqrt(performance.now());

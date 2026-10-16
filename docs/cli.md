@@ -222,8 +222,8 @@ times, incident duration, native delivery result, and the issue's evidence link.
 This observer runs throughout the service's lifetime, independently of the
 [post-update canary](#service-lifecycle). The canary checks a new runtime's health over a
 bounded window and reports CPU as an advisory comparison; it does not replace
-the sustained CPU/health alarm. Machine pressure can extend that canary window
-without disabling this observer or changing its thresholds.
+the sustained CPU/health alarm. Machine pressure can extend a failing canary
+verdict, within a bound, without disabling this observer or changing its thresholds.
 
 An operator catalog report with fresh process/session proof preserves the exact
 native attachment to that conversation. A bare transcript attachment still
@@ -530,20 +530,42 @@ claim a confirmed recipient receipt.
 
 The canary samples host load before and after each health probe. It subtracts
 service CPU (converted to cores) from the busier of the 1-minute and 15-minute
-load averages. Kernel per-core tick deltas measure current busy CPU across each interval,
-including short-lived forks. Measured external CPU above half the cores keeps
-the canary pending and discards the affected window. Before a valid CPU interval
-is available, it conservatively uses the external load ratio instead; unavailable
-host observations stay pending. Historical load alone cannot defer a quiet CPU
-interval: fork bursts can inflate loadavg long after live CPU settles. When pressure clears it requires a fresh full window; budgets stay
-unchanged. Transport timeouts and scheduler gaps under pressure are retried;
-wrong identity, unhealthy HTTP and invalid metadata still fail. Load is a
-conservative pressure signal, not proof that the build has no regression.
-A continuing pressured machine keeps its hold until a quiet window or explicit
-owner review. The lead receives a pressure notice with recovery commands so
-this wait is visible. `update status` and `update canary` expose the pressure
-state and load observations. Pressure metadata lives beside the operation in
-`canary-pressure.json`, preserving older runtimes' cutover journal readers.
+load averages. Kernel per-core tick deltas measure current busy CPU across each
+interval, including short-lived forks. Before a valid CPU interval is available,
+it uses the external load ratio instead. External CPU above half the cores marks
+that sample as pressured.
+
+Pressure never discards a sample or delays a pass, because load can only inflate
+the runtime's own latency. At the end of the first window, a health p95 within
+budget passes however busy the machine was. CPU stays advisory and comes from the
+runtime process alone.
+
+A transport timeout under pressure is not ignored. It counts against the
+window's p95 as an over-budget probe, so a runtime that misses more than one probe
+in twenty cannot pass on the probes that did answer. A scheduling gap under
+pressure counts the same way.
+
+Pressure only extends a failing verdict. If the first window's p95 is over budget
+and the window contained pressured probes, the canary judges fresh,
+non-overlapping windows. It passes once two in a row fit the budget. The extension
+is bounded at five more windows, at most one hour (by default it decides within
+about 30 minutes). At the bound it fails with
+`runtime-canary-latency-budget-exceeded-under-pressure`, or with the
+health-unavailable diagnostic when too few probes answered, and keeps its hold. A
+busy machine can therefore never leave a canary pending indefinitely.
+
+A quiet window over budget still fails at its end. Wrong identity, unhealthy HTTP
+and invalid metadata fail as on a quiet machine: within the existing
+three-interval budget in the first window, and at once during an extension. A
+quiet transport miss keeps the three-interval budget throughout. A service restart
+begins a fresh observation and bound, but an extension carries over (in
+`canary-extension.json`), so the canary still needs two windows in a row.
+
+The lead receives one extension notice with recovery commands. `update status`
+and `update canary` expose the pressure state and load observations, and the
+extension's progress appears in the canary's `error` field. Pressure metadata
+lives beside the operation in `canary-pressure.json`, preserving older runtimes'
+cutover journal readers.
 
 `update status` reports top-level `phase: canary-failed` and `canary` for a
 failed observation, and exits 1 in both terminal and JSON modes. The nested

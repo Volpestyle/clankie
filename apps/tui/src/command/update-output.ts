@@ -42,6 +42,8 @@ const short = (sha: string) => sha.slice(0, 8);
 const causes: Record<string, string> = {
   "runtime-canary-cpu-budget-exceeded": "historical CPU canary",
   "runtime-canary-latency-budget-exceeded": "health latency canary",
+  "runtime-canary-latency-budget-exceeded-under-pressure":
+    "health latency over budget through the machine-pressure extension",
   "runtime-canary-health-unavailable": "canary could not verify runtime health",
   "runtime-canary-runtime-changed": "canary runtime changed during observation",
   "runtime-canary-sampling-gap": "canary sampling was interrupted",

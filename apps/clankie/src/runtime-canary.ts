@@ -65,22 +65,47 @@ const PressureSchema = z.strictObject({
   observedAt: z.iso.datetime(),
 });
 const MAX_EXTERNAL_LOAD_RATIO = 0.5;
+const ExtensionSchema = z.strictObject({ extended: z.literal(true) });
 const ArmSchema = z.strictObject({
   policy: RuntimeCanaryPolicySchema,
   previousHealthyCommit: CheckpointSchema.shape.commit,
 });
 
+/**
+ * One health probe of the current window. A probe that missed under pressure is
+ * kept as an over-budget latency (Infinity), so misses count against the p95.
+ */
+interface Observation {
+  readonly latencyMs: number;
+  readonly cpuPercent?: number;
+  readonly intervalMs: number;
+  readonly pressured: boolean;
+}
+
 interface Session {
   readonly id: string;
   readonly policy: RuntimeCanaryPolicy;
   startedAt: number;
-  pressured?: boolean;
-  readonly latencies: number[];
-  cpuTotal: number;
-  cpuDurationMs: number;
+  /** Windows are judged fresh, one after another, never as overlapping slices. */
+  windowStartedAt: number;
+  observations: Observation[];
+  /** Set once an over-budget window under pressure extended the observation. */
+  extended?: boolean;
+  /** Consecutive windows within budget since the extension began. */
+  passingWindows: number;
+  lastMiss?: string;
   lastCpuPercent?: number;
   lastSampleAt?: number;
   unavailableSince?: number;
+}
+
+/**
+ * Host pressure can only inflate the runtime's own latency, so it never discards
+ * evidence or delays a pass. It only extends a failing verdict, by at most this
+ * long past the first window, so a busy machine can never hold a canary forever.
+ */
+export function runtimeCanaryDecisionMs(policy: RuntimeCanaryPolicy): number {
+  return policy.windowMs + Math.min(policy.windowMs * 5, 3_600_000);
 }
 
 // Persist local check names and transport codes, never response bodies or arbitrary error payloads.
@@ -365,13 +390,20 @@ export class RuntimeCanary {
       return;
     }
     const armed = await this.arm(result);
+    const startedAt = this.now();
+    // New-runtime sidecar: a restart mid-extension still needs two windows in a row.
+    // A restart begins a fresh observation, and with it a fresh decision bound.
+    const extensionPath = join(this.options.updatesDirectory, result.id, "canary-extension.json");
     this.session = {
       id: result.id,
       policy: armed.policy,
-      startedAt: this.now(),
-      latencies: [],
-      cpuTotal: 0,
-      cpuDurationMs: 0,
+      startedAt,
+      windowStartedAt: startedAt,
+      observations: [],
+      passingWindows: 0,
+      ...(existsSync(extensionPath) && ExtensionSchema.safeParse(readPrivateJson(extensionPath)).success
+        ? { extended: true }
+        : {}),
     };
     await this.save(result, {
       state: "pending",
@@ -503,30 +535,19 @@ export class RuntimeCanary {
     }
   }
 
-  private async defer(result: RuntimeUpdateResult, pressure: z.infer<typeof PressureSchema>): Promise<void> {
-    const session = this.session!;
-    session.pressured = true;
-    session.latencies.length = 0;
-    session.cpuTotal = 0;
-    session.cpuDurationMs = 0;
-    delete session.lastSampleAt;
-    delete session.unavailableSince;
-    const canary = {
-      ...result.canary!,
-      samples: 0,
-      error:
-        pressure.state === "busy" ? "runtime-canary-machine-pressure" : "runtime-canary-pressure-unavailable",
-    };
-    delete canary.cpuMeanPercent;
-    delete canary.healthP95Ms;
+  /** One stable notice when load first extends a verdict; definite non-delivery retries the same text. */
+  private async noticeExtension(
+    result: RuntimeUpdateResult,
+    canary: RuntimeCanaryResult,
+    pressure: z.infer<typeof PressureSchema>,
+    deadline: string,
+  ): Promise<void> {
     const pending = await this.save(result, canary);
     const noticePath = join(this.options.updatesDirectory, result.id, "canary-pressure-alert.json");
-    // Retry the same text after definite non-delivery, so the conversation's
-    // durable notice deduplication does not append a new incident every tick.
     if (!existsSync(noticePath))
       await durableJson(
         noticePath,
-        `Runtime canary is extending its window for ${result.newCommit}: ${pending.canary!.error}. Load 1m ${pressure.load1?.toFixed(2) ?? "unavailable"}, 15m ${pressure.load15?.toFixed(2) ?? "unavailable"} on ${pressure.cores ?? "unknown"} cores; external load ratio ${pressure.externalLoadRatio?.toFixed(2) ?? "unavailable"}, external CPU ratio ${pressure.externalCpuRatio?.toFixed(2) ?? "unavailable"} (quiet budget ${MAX_EXTERNAL_LOAD_RATIO}). CPU observation ${pressure.cpuPercent?.toFixed(2) ?? "unavailable"}%; health observation ${pressure.healthLatencyMs?.toFixed(2) ?? "unavailable"}ms. A fresh full window will run when pressure clears. ${this.commands(result)}`,
+        `Runtime canary is extending its window for ${result.newCommit} while the machine is busy: ${canary.error}. Load 1m ${pressure.load1?.toFixed(2) ?? "unavailable"}, 15m ${pressure.load15?.toFixed(2) ?? "unavailable"} on ${pressure.cores ?? "unknown"} cores; external load ratio ${pressure.externalLoadRatio?.toFixed(2) ?? "unavailable"}, external CPU ratio ${pressure.externalCpuRatio?.toFixed(2) ?? "unavailable"} (quiet budget ${MAX_EXTERNAL_LOAD_RATIO}). Once extended it passes on two windows in a row within budget, and otherwise holds by ${deadline}. ${this.commands(result)}`,
       );
     await this.notify(pending, z.string().min(1).max(4000).parse(readPrivateJson(noticePath)));
   }
@@ -565,10 +586,6 @@ export class RuntimeCanary {
     const attemptStartedAt = this.now();
     const before = this.pressure(session.lastCpuPercent ?? result.canary.cpuMeanPercent);
     const pressurePath = join(this.options.updatesDirectory, result.id, "canary-pressure.json");
-    if (session.pressured && before.state === "clear") {
-      session.startedAt = attemptStartedAt;
-      session.pressured = false;
-    }
     try {
       sample = RuntimeHealthSampleSchema.parse(await this.options.sample(this.options.runtime));
       const mismatch = runtimeIdentityMismatch(
@@ -586,6 +603,7 @@ export class RuntimeCanary {
       if (this.closed) return;
       const pressure = this.pressure(session.lastCpuPercent ?? result.canary.cpuMeanPercent);
       await durableJson(pressurePath, pressure);
+      const diagnostic = `runtime-canary-health-unavailable: ${sampleFailure(error)}`;
       // Wrong identity, invalid HTTP, and invalid metadata remain regressions under load.
       // Only transport misses can be explained by a pressured scheduler.
       const transportMiss =
@@ -593,18 +611,23 @@ export class RuntimeCanary {
         !(error instanceof RuntimeIdentityMismatch) &&
         !(error instanceof z.ZodError) &&
         !error.message.startsWith("runtime-health-");
-      if (transportMiss && (before.state !== "clear" || pressure.state !== "clear")) {
-        await this.defer(result, before.state !== "clear" ? before : pressure);
+      const busy = before.state !== "clear" ? before : pressure.state !== "clear" ? pressure : undefined;
+      if (transportMiss && busy) {
+        // The canary ran; the miss counts against this window's p95 as an over-budget probe.
+        session.observations.push({ latencyMs: Infinity, intervalMs: 0, pressured: true });
+        session.lastMiss = diagnostic;
+        session.lastSampleAt = this.now();
+        await this.judge(result, session, busy);
         return;
       }
       session.unavailableSince ??= session.lastSampleAt ?? attemptStartedAt;
       const now = this.now();
-      const diagnostic = `runtime-canary-health-unavailable: ${sampleFailure(error)}`;
       // Keep the existing three-interval availability budget, but allow transient misses to recover.
-      // A completely unavailable first observation is bounded by the full window as well.
+      // Unhealthy, wrong-identity or invalid health after the first window fails at once, as before;
+      // a quiet transport miss keeps the three-interval budget even during an extension.
       if (
         now - session.unavailableSince >= session.policy.sampleIntervalMs * 3 ||
-        now - session.startedAt >= session.policy.windowMs
+        (now - session.startedAt >= session.policy.windowMs && (!transportMiss || !session.extended))
       )
         await this.fail(result, result.canary, diagnostic);
       else await this.save(result, { ...result.canary, error: diagnostic });
@@ -620,20 +643,16 @@ export class RuntimeCanary {
       healthLatencyMs: sample.healthLatencyMs,
     };
     await durableJson(pressurePath, pressure);
-    if (pressure.state !== "clear") {
-      await this.defer(result, pressure);
-      return;
-    }
-    if (session.pressured) {
-      session.startedAt = now;
-      session.pressured = false;
-    }
     const lastVerifiedAt = session.lastSampleAt ?? session.unavailableSince;
-    if (lastVerifiedAt !== undefined && now - lastVerifiedAt >= session.policy.sampleIntervalMs * 3) {
+    const gap = lastVerifiedAt !== undefined && now - lastVerifiedAt >= session.policy.sampleIntervalMs * 3;
+    // A pressured scheduler may stall the canary itself: count the gap as one over-budget probe.
+    if (gap && pressure.state !== "clear")
+      session.observations.push({ latencyMs: Infinity, intervalMs: 0, pressured: true });
+    else if (gap) {
       await this.fail(
         result,
         result.canary,
-        `runtime-canary-sampling-gap: ${Math.round(now - lastVerifiedAt)}ms without verified health (budget ${session.policy.sampleIntervalMs * 3}ms)${result.canary.error ? `; last failure ${result.canary.error}` : ""}`.slice(
+        `runtime-canary-sampling-gap: ${Math.round(now - lastVerifiedAt!)}ms without verified health (budget ${session.policy.sampleIntervalMs * 3}ms)${result.canary.error ? `; last failure ${result.canary.error}` : ""}`.slice(
           0,
           1024,
         ),
@@ -642,37 +661,129 @@ export class RuntimeCanary {
     }
     delete session.unavailableSince;
     session.lastSampleAt = now;
-    session.latencies.push(sample.healthLatencyMs);
-    session.cpuTotal += sample.cpuPercent * sample.intervalMs;
-    session.cpuDurationMs += sample.intervalMs;
-    const sorted = [...session.latencies].sort((a, b) => a - b);
-    const healthP95Ms = sorted[Math.ceil(sorted.length * 0.95) - 1]!;
-    const cpuMeanPercent = session.cpuTotal / session.cpuDurationMs;
-    const canary = {
-      ...result.canary,
-      samples: session.latencies.length,
-      cpuMeanPercent,
-      healthP95Ms,
+    session.observations.push({
+      latencyMs: sample.healthLatencyMs,
+      cpuPercent: sample.cpuPercent,
+      intervalMs: sample.intervalMs,
+      pressured: pressure.state !== "clear",
+    });
+    await this.judge(result, session, pressure);
+  }
+
+  /**
+   * Judge fresh, non-overlapping windows. The first window passes within budget
+   * however busy the machine was. Over budget with pressure in the window, the
+   * observation extends; it then needs two consecutive windows within budget, and
+   * fails at the decision bound. Nothing non-finite is persisted.
+   */
+  private async judge(
+    result: RuntimeUpdateResult,
+    session: Session,
+    pressure: z.infer<typeof PressureSchema>,
+  ): Promise<void> {
+    const canaryBefore = result.canary!;
+    const now = this.now();
+    const observations = session.observations;
+    const verified = observations.filter((observation) => Number.isFinite(observation.latencyMs));
+    const sorted = observations.map((observation) => observation.latencyMs).sort((a, b) => a - b);
+    const p95 = sorted.length ? sorted[Math.ceil(sorted.length * 0.95) - 1]! : Infinity;
+    const timed = verified.filter((observation) => observation.intervalMs > 0);
+    const cpuDurationMs = timed.reduce((total, observation) => total + observation.intervalMs, 0);
+    const canary: RuntimeCanaryResult = {
+      ...canaryBefore,
+      samples: verified.length,
+      ...(cpuDurationMs > 0
+        ? {
+            cpuMeanPercent:
+              timed.reduce(
+                (total, observation) => total + observation.cpuPercent! * observation.intervalMs,
+                0,
+              ) / cpuDurationMs,
+          }
+        : {}),
+      ...(Number.isFinite(p95) ? { healthP95Ms: p95 } : {}),
     };
-    delete canary.error;
-    if (now - session.startedAt < session.policy.windowMs) {
-      await this.save(result, canary);
+    if (cpuDurationMs === 0) delete (canary as { cpuMeanPercent?: number }).cpuMeanPercent;
+    if (!Number.isFinite(p95)) delete (canary as { healthP95Ms?: number }).healthP95Ms;
+    delete (canary as { error?: string }).error;
+    const decisionMs = runtimeCanaryDecisionMs(session.policy);
+    const deadline = new Date(Date.now() + Math.max(0, session.startedAt + decisionMs - now)).toISOString();
+    const progress = (error?: string) =>
+      error === undefined ? canary : { ...canary, error: error.slice(0, 1024) };
+    if (now - session.windowStartedAt < session.policy.windowMs) {
+      const missing = session.lastMiss && !Number.isFinite(observations.at(-1)?.latencyMs ?? 0);
+      const note = session.extended
+        ? `runtime-canary-extended-under-pressure: judging window ${session.passingWindows + 1} of 2 in a row within budget; deciding by ${deadline}${missing ? `; last probe ${session.lastMiss}` : ""}`
+        : missing
+          ? `${session.lastMiss} while the machine is busy`
+          : undefined;
+      // Only an actual extension notifies; the notice path retries a definitely undelivered
+      // notice each tick and never replays a claim.
+      if (note && session.extended) await this.noticeExtension(result, progress(note), pressure, deadline);
+      else await this.save(result, progress(note));
       return;
     }
     // CPU is recorded for comparison only; holds are for a new service that is not healthy.
-    if (session.latencies.length < 2) {
-      await this.fail(result, canary, "runtime-canary-samples-incomplete");
-    } else if (healthP95Ms > session.policy.healthLatencyMs) {
-      await this.fail(result, canary, "runtime-canary-latency-budget-exceeded");
-    } else {
-      const passed = await this.save(result, {
-        ...canary,
-        state: "passed",
-        completedAt: new Date().toISOString(),
-      });
-      await this.releasePassed(passed);
+    const within = verified.length >= 2 && p95 <= session.policy.healthLatencyMs;
+    const windowPressured = observations.some((observation) => observation.pressured);
+    const nextWindow = () => {
+      session.windowStartedAt = now;
+      session.observations = [];
+      delete session.lastMiss;
+    };
+    if (within) {
+      session.passingWindows += 1;
+      if (!session.extended || session.passingWindows >= 2) {
+        const passed = await this.save(result, {
+          ...canary,
+          state: "passed",
+          completedAt: new Date().toISOString(),
+        });
+        await this.releasePassed(passed);
+        this.session = undefined;
+        return;
+      }
+    } else session.passingWindows = 0;
+    // Another full window fits the bound (allowing half a window of tick drift).
+    const room =
+      now + session.policy.windowMs <= session.startedAt + decisionMs + session.policy.windowMs / 2;
+    if ((within || windowPressured) && room) {
+      if (!session.extended)
+        await durableJson(join(this.options.updatesDirectory, result.id, "canary-extension.json"), {
+          extended: true,
+        });
+      session.extended = true;
+      nextWindow();
+      const reason = within
+        ? "1 of 2 windows in a row within budget"
+        : verified.length < 2
+          ? `too few verified samples${session.lastMiss ? ` (${session.lastMiss})` : ""}`
+          : Number.isFinite(p95)
+            ? `health p95 ${p95.toFixed(2)}ms over budget ${session.policy.healthLatencyMs}ms`
+            : `${observations.length - verified.length} of ${observations.length} probes missed`;
+      await this.noticeExtension(
+        result,
+        progress(
+          `runtime-canary-extended-under-pressure: ${reason} in a window with machine pressure; deciding by ${deadline}`,
+        ),
+        pressure,
+        deadline,
+      );
+      return;
     }
-    this.session = undefined;
+    await this.fail(
+      result,
+      canary,
+      verified.length < 2
+        ? session.lastMiss
+          ? `${session.lastMiss} (under machine pressure through the decision bound)`
+          : "runtime-canary-samples-incomplete"
+        : within
+          ? "runtime-canary-latency-budget-exceeded-under-pressure: two windows in a row within budget were not observed by the decision bound"
+          : windowPressured || session.extended
+            ? "runtime-canary-latency-budget-exceeded-under-pressure"
+            : "runtime-canary-latency-budget-exceeded",
+    );
   }
 
   private async fail(result: RuntimeUpdateResult, canary: RuntimeCanaryResult, error: string): Promise<void> {

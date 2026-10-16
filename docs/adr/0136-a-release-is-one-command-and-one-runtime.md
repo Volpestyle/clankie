@@ -172,6 +172,35 @@ malformed known records report reconciliation as JSON without retiring locks.
 Tests use actual Git remotes, HTTP CLI calls and isolated native supervisor
 processes. Integration into the live pin belongs to the fleet integrator.
 
+## Pressure extends a failing verdict, never a pass (VUH-2216, 2026-10-16)
+
+VUH-2154 (2026-10-12) let machine pressure discard the canary's samples and
+restart its window, so a pass needed a full window of consecutive quiet ticks. On
+2026-10-16 sustained fleet load kept a healthy runtime pending for nearly two
+hours with 0 samples. That runtime had CPU of 20–40% and health of about 1 ms.
+The same rule deferred a runtime whose health was unreachable forever, as long as
+the machine stayed busy.
+
+The canary now samples every interval, whatever the load. Load can only inflate
+the runtime's own latency, so a first window whose health p95 is within budget
+passes on schedule. A transport miss or scheduling gap under pressure counts
+against the window's p95 as an over-budget probe, so a mostly unreachable
+runtime cannot pass on the probes that answered.
+
+Pressure only extends a failing verdict. The canary then judges fresh,
+non-overlapping windows and needs two in a row within budget. The extension is
+bounded at five more windows, capped at one hour, after which the canary fails
+and keeps its hold. Overlapping slices are not used, so a periodically slow
+regression cannot pick a lucky window. During an extension, unhealthy HTTP and
+wrong identity fail at once, as they do after a quiet window.
+
+CPU stays advisory and is measured on the runtime process. The bound is derived
+from the existing `windowMs`, so no persisted field or policy key changes for
+older runtimes. A service restart begins a fresh observation, and with it a fresh
+bound. An extension carries over in a new-runtime-only sidecar
+(`canary-extension.json`), so the restarted canary still needs two windows in a
+row. During an extension, a quiet transport miss keeps the three-interval budget.
+
 ## Release installs update to official releases (2026-10-06)
 
 A source checkout updates to `origin/main`; the owner develops there. A release
