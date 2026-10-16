@@ -20,6 +20,12 @@
       "url": "clankie://evidence/sha256/ff5b8157bb70967788a804e5116d18a0768e23b8ba5b40d59bd481e92694df08"
     },
     {
+      "path": "live-proof.zip",
+      "size": 191246,
+      "sha256": "63910b756260873a3c1fbbbb14989dc64c00501d40ed3229c544fed37c098f62",
+      "url": "clankie://evidence/sha256/63910b756260873a3c1fbbbb14989dc64c00501d40ed3229c544fed37c098f62"
+    },
+    {
       "path": "raw/vuh2256-landing-2.log",
       "size": 18785,
       "sha256": "9ce3e50021c0e49a57311c2d2e89e2ac9d3cc208a39c0162e7a716c887b6ed17",

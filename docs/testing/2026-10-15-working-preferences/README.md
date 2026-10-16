@@ -3,8 +3,10 @@
 Tracks: https://linear.app/vuhlp/issue/VUH-2256/working-preference-knobs-do-what-they-say-enforce-or-remove-and-add
 
 The public implementation landed at [d169a17e9](https://github.com/Volpestyle/clankie/commit/d169a17e9604849a5f4dee245dd76c55fb5ea9a6)
-with a green root landing gate. Deployed KH2 and private app proof are pending;
-this record does not yet claim those runtime results.
+with a green root landing gate. The private app landed at
+[d48665c9](https://github.com/Volpestyle/clankie-app/commit/d48665c9441ec7dd32db3a5a4f3644037f8be864).
+Deployed KH2 settings, historical replay and the next natural round passed their
+policy checks. The round records non-delivery; no delivered report is claimed.
 
 ## Scope
 
@@ -70,7 +72,7 @@ Focused follow-up results: 88 tests across seven hire suites; 30 relay/settings/
 creation tests; 21 real native lifecycle tests, including empty manual launches
 and remote authority fences. The corrected settings/Auto/model command cases
 and focused compiler also passed. Counts overlap earlier runs. The green root
-landing result is recorded below; deployed proof remains pending.
+landing result and subsequent deployed proof are recorded below.
 
 The compatibility issue was reproduced by running main's actual prior writer:
 the new reader refused its unchanged advanced-profile journal. The fix keeps the
@@ -102,10 +104,81 @@ in the active personal instructions. No dotfiles edit was made in this slice.
 [Final landing log, complete diagnostic, prior nonzero/incomplete records and
 instruction audit](clankie://evidence/sha256/d3b063f0683c1faab1a36a01a0525db3ed0242ba685d3bd7871bf16659da82df).
 
-## Open proof
+## App landing and native proof
 
-- Landed app slice and its owner-choice/usage-refusal path.
-- Deployed KH2 WIP 6/milestone-only set and independent readback.
-- Live 10-10 through 10-13 replay with `over_wip` and the next natural Auto round.
-- Live hire selection/default-deadline followthrough evidence or an explicit
-  statement of the remaining runtime gap.
+The app root landing gate passed against the landed public `d169a17e9` in
+72.56 seconds, followed by a valid base revalidation before push. Its real owner
+HTTP policy test passed against that public sibling. The earlier full app check
+passed against the preceding complete public draft `434a64906`.
+
+[App gate report](clankie://evidence/sha256/0acc3730ee529da5997685ee5a0e504d26966e3f09b8be2197705ca4771608a6),
+[gate log](clankie://evidence/sha256/f3fd27142488ffe95aa45ee1a4b3b261c91b135ff9861804db6dc8f4e032f9a0),
+and [full app check](clankie://evidence/sha256/92e2fb8028d8da2cfead40bb663e2ff00726b6081792ae3a86a42005a387df36).
+
+[Inspected iPhone/iPad settings, refusal and explicit retry journeys](https://github.com/Volpestyle/clankie-app/blob/d48665c9441ec7dd32db3a5a4f3644037f8be864/docs/testing/2026-10-15-project-work-policy/README.md)
+use source-only samples; they did not start a real hire or mutate an account.
+Physical installation remains unverified because the owner's iPhone reported
+`tunnelState: unavailable`. The app worker released its simulator and Metro
+resources. No load exception or eval was used.
+
+## Deployed KH2 settings and replay
+
+The lead reported deployed `4034fb7c1` healthy at **2026-10-16 00:42:55Z**.
+The source launcher wrote KH2's `wipCap: 6` and `ownerLoop: milestones` through
+the revision-fenced API, completing at 00:44:07Z. An independent project-list
+read completed at 00:44:30Z and returned the same values and revision
+`efbb1f32f018e16c3c6afba81cfb43290354011d864e296cc626af0b25f7a71e`.
+Auto stayed enabled and the seven product-path declarations stayed unchanged.
+
+The deployed read-only historical replay completed at 00:44:34Z:
+
+| Completed Chicago day | Product / tooling / docs lines | Closed | Started / cap | Emitted signals                              |
+| --------------------- | -----------------------------: | -----: | ------------: | -------------------------------------------- |
+| 2026-10-10            |             1644 / 21138 / 861 |      0 |        22 / 6 | `tooling_lead`, `nothing_closed`, `over_wip` |
+| 2026-10-11            |               108 / 7227 / 371 |      0 |        22 / 6 | `tooling_lead`, `nothing_closed`, `over_wip` |
+| 2026-10-12            |                 67 / 734 / 236 |      2 |        24 / 6 | `tooling_lead`, `over_wip`                   |
+| 2026-10-13            |               777 / 1592 / 378 |      7 |        23 / 6 | `tooling_lead`, `over_wip`                   |
+
+These results match the VUH-2255 table and resolve VUH-2287's cap-null gap.
+The October 13 closures split into five owner-facing and two unlinked.
+Replay applies the **current configured cap** to historical started counts;
+it does not reconstruct old settings. Its `over_wip.day` is the next midnight's
+measurement date, while the replay ID names the completed day above. Tracker
+membership remains current. Replay writes no round record or tracker state and
+does not wake a lead or consume pending drift.
+
+The initial launcher attempt entered the interactive TUI and refused without a
+TTY before any write; the corrected `bin/clankie.ts` launcher succeeded. No
+service restart, forced Auto wake, paid hire or eval was performed.
+
+## Next natural KH2 round
+
+No wake was forced. The next normal record after the policy write is
+`b63a2d2c-fc15-4392-915d-b190329b3f48`, recorded at
+**2026-10-16 01:12:02.472Z**, measured at **01:11:55.576Z** in conversation
+`conv-7687818a-09c3-4f37-bf7b-9d201c2e1932`.
+
+The preceding record at 00:41:57.595Z had one started issue and `cap: null`,
+with no owner-loop field. The fresh record has **one started issue, cap 6,
+`ownerLoop: milestones` and `report.cadence: milestones`**. It retains the
+pending Shared world milestone request with no landing report. No `over_wip`
+is expected at 1/6; the historical replay above supplies the positive cases.
+The measured window has 16 owner-facing, 5 tooling and 3 unlinked closures,
+3823 product / 6244 tooling / 624 docs lines, and 38 commits.
+
+Delivery is explicitly **false**, settled at **01:12:09.221Z**, reason
+`not delivered`; `report.updates` is empty. This proves live policy consumption,
+measurement and report selection, not a delivered wake, owner report, or lead
+correction. The prior round had the same non-delivery result.
+
+[Live settings projection, full deployed replay, before/after natural round,
+commands and policy checks](clankie://evidence/sha256/63910b756260873a3c1fbbbb14989dc64c00501d40ed3229c544fed37c098f62).
+
+## Verification limits
+
+Hire admission and deadline expiry are verified at real native, HTTP, storage
+and runner boundaries in the linked focused and full-gate checks. This proof
+did not manufacture a paid hire or an owner ask to expire. A deployed hire's
+selection and a live lead's actual default-action followthrough remain
+unobserved here. Physical iPhone installation also remains unverified as
+described above. No delivered KH2 milestone report is claimed.

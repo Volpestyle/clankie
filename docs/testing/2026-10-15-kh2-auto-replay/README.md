@@ -19,9 +19,9 @@ VUH-2255's America/Chicago table, with KH2's declared product paths:
 | 2026-10-12 |            67 |           734 |        236 |      2 |                    24 | tooling_lead, over_wip                 |
 | 2026-10-13 |           777 |          1592 |        378 |      7 |                    23 | tooling_lead, over_wip                 |
 
-## Scope limit
+## Original scope limit
 
-`over_wip` cannot currently be evaluated: the deployed velocity contract uses
+At the original VUH-2287 deployment, `over_wip` could not be evaluated: the velocity contract used
 `cap: null`; VUH-2256 owns the missing per-project WIP setting. A worker cap is
 not an issue WIP cap. This replay preserves that unknown and does not fabricate
 `over_wip`, add a cap override, or implement drift slice 2. The historical started
@@ -121,10 +121,20 @@ The [tracked live-round capture](live-round-capture.txt) retains the before/afte
 journal reads and the fresh normal record. The fresh record arrived within the
 lead's 45-minute window ending 21:55:31Z, so the older 19:38Z fallback is unused.
 
-## Remaining gap
+## Original remaining gap and its resolution
 
-The only unsupported requested signal is `over_wip`, because no per-project
-WIP cap exists yet (VUH-2256). The four historical started counts are measured,
-and the existing cap-null contract is preserved. Drift slice 2 remains on hold.
+The original unsupported requested signal was `over_wip`, because no per-project
+WIP cap existed yet. The original records above retain their actual cap-null result.
+
+VUH-2256 subsequently added the setting. On deployed `4034fb7c1`, KH2's cap of 6
+and milestone cadence were saved and independently read back on
+2026-10-16 at 00:44Z. The deployed replay then emitted `over_wip` for all four
+end-of-day snapshots: 22/6, 22/6, 24/6 and 23/6, alongside the original signals.
+This applies the current saved cap to historical started counts; it does not
+claim the cap was saved in October 10–13's settings history. The raw `over_wip`
+day is the following midnight's measurement date; the replay ID names the
+completed day. See the [VUH-2256 proof](../2026-10-15-working-preferences/README.md).
+
+Drift slice 2 remains on hold.
 No evals ran. Temporary test listeners closed; the worker did not restart the
 service or force an Auto wake.
