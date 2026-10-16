@@ -28,7 +28,8 @@ await poll();
 setInterval(() => void poll().catch(() => undefined), 2_000);
 
 const routes = createViewRoutes(
-  async (request) => (request.headers.get("authorization") === owner.authorization ? true : "forbidden"),
+  async (request) =>
+    request.headers.get("authorization") === owner.authorization ? "operator" : "forbidden",
   new ViewStore(await mkdtemp(join(tmpdir(), "views-proof-"))),
   {
     fleetResources: () => snapshot,

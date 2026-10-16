@@ -3686,6 +3686,9 @@ model-written script runs. Two sources ship today:
 - `{"kind":"tracker_issues","repo":ID_OR_ROOT,"status":[...],"owner":O,"label":L,"limit":N}`:
   a `work list` filter through the repo's own tracker. Its panels show
   `issues`. The CLI resolves a `./` or `../` repo path against the current directory.
+  A path is accepted only from this machine's own operator bearer, and it
+  registers the repo. A paired device names a registered repo id; a create from
+  a device with a path is refused with 400 (ADR 0191).
 
 A spec has a `title`, 1–8 `sources`, 1–12 `panels` (`{source, show, title?, resource?}`)
 and `refreshSeconds` (2–300, default 5). `create` validates the spec, keeps it,
@@ -3697,7 +3700,9 @@ now. `expire` deletes it. Expired views drop out of `list` and `show`.
 `show ID` prints the view with every source read now
 (`{schemaVersion, view, renderedAtMs, sources}`). A source that cannot be read
 returns `{"state":"unavailable","detail":...}` while the other sources still
-render. `--text` prints the board as the console draws it, and `--watch`
+render. `--text` prints the board as the console draws it, with control
+characters in source text (issue titles, process names) replaced by spaces so
+none reaches the terminal as an escape sequence. `--watch`
 redraws it every `refreshSeconds` until interrupted. In the console, `/view ID`
 opens the same board as a live panel, and `/view` lists your views. The
 shipped [`views` skill](../.agents/skills/views/SKILL.md) teaches Clankie and his

@@ -188,6 +188,13 @@ export interface ViewTextStyle {
 }
 const PLAIN: ViewTextStyle = { bold: (t) => t, dim: (t) => t, red: (t) => t, yellow: (t) => t };
 
+/**
+ * Source data (issue titles, process names, error details) comes from trackers
+ * and processes no one vetted, and this text goes straight to a terminal: no
+ * control character in it may reach one as an escape sequence.
+ */
+export const terminalText = (text: string) => text.replace(/\p{Cc}/gu, " ");
+
 export function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${String(seconds)}s`;
@@ -209,12 +216,14 @@ const who = (entry: {
   holderId?: string | undefined;
   executable?: string | undefined;
 }) =>
-  [
-    entry.executable ?? "process",
-    entry.seatId ? `seat ${entry.seatId}` : entry.holderId ? `holder ${entry.holderId}` : "",
-  ]
-    .filter(Boolean)
-    .join("  ");
+  terminalText(
+    [
+      entry.executable ?? "process",
+      entry.seatId ? `seat ${entry.seatId}` : entry.holderId ? `holder ${entry.holderId}` : "",
+    ]
+      .filter(Boolean)
+      .join("  "),
+  );
 
 function fleetLines(
   panel: ViewPanel,
@@ -233,7 +242,7 @@ function fleetLines(
       `simulators  ${bar(simulatorUsed, capacity.simulatorSlots)}  ${String(simulatorUsed)}/${String(capacity.simulatorSlots)} in use`,
       `queue       ${waiting === 0 ? style.dim("empty") : `${String(waiting)} waiting`}`,
       `pressure    ${
-        pressure.healthy ? "ok" : style.yellow(`high (${pressure.reason ?? "unknown"})`)
+        pressure.healthy ? "ok" : style.yellow(`high (${terminalText(pressure.reason ?? "unknown")})`)
       }  load ${pressure.loadRatio.toFixed(2)} · ${(pressure.availableMemoryMb / 1024).toFixed(1)} GB free`,
     ];
   }
@@ -251,8 +260,8 @@ function fleetLines(
   if (leases.length === 0) return [style.dim("No leases held.")];
   return leases.map(
     (lease) =>
-      `${lease.kind.padEnd(9)} ${who(lease)}  ${lease.state}  ${formatDuration(now - lease.createdAtMs)}${
-        lease.deviceId ? style.dim(`  ${lease.deviceId.slice(0, 8)}`) : ""
+      `${lease.kind.padEnd(9)} ${who(lease)}  ${terminalText(lease.state)}  ${formatDuration(now - lease.createdAtMs)}${
+        lease.deviceId ? style.dim(`  ${terminalText(lease.deviceId.slice(0, 8))}`) : ""
       }`,
   );
 }
@@ -260,20 +269,20 @@ function fleetLines(
 const PRIORITY = ["", "Urgent", "High", "Medium", "Low"] as const;
 
 function sourceLines(panel: ViewPanel, data: ViewSourceData, now: number, style: ViewTextStyle): string[] {
-  if (data.state === "unavailable") return [style.red(`Unavailable: ${data.detail}`)];
+  if (data.state === "unavailable") return [style.red(`Unavailable: ${terminalText(data.detail)}`)];
   if (data.kind === "fleet_resources") return fleetLines(panel, data.snapshot, now, style);
   if (data.items.length === 0) return [style.dim("No matching issues.")];
   return data.items.map(
     (item) =>
-      `${item.id.padEnd(9)} ${item.status.padEnd(11)} ${(item.priority ? PRIORITY[item.priority] : "").padEnd(6)} ${item.title}${
-        item.owner ? style.dim(`  @${item.owner}`) : ""
+      `${terminalText(item.id).padEnd(9)} ${item.status.padEnd(11)} ${(item.priority ? PRIORITY[item.priority] : "").padEnd(6)} ${terminalText(item.title)}${
+        item.owner ? style.dim(`  @${terminalText(item.owner)}`) : ""
       }`,
   );
 }
 
 const defaultTitle = (panel: ViewPanel, data: ViewSourceData | undefined) =>
   `${panel.show[0]!.toUpperCase()}${panel.show.slice(1)}${panel.resource ? ` (${panel.resource})` : ""}${
-    data?.state === "ok" && data.kind === "tracker_issues" ? ` · ${data.repo.name}` : ""
+    data?.state === "ok" && data.kind === "tracker_issues" ? ` · ${terminalText(data.repo.name)}` : ""
   }`;
 
 /** One text rendering of a view, shared by `clankie view show --text` and the TUI `/view` panel. */
@@ -286,11 +295,14 @@ export function formatViewLines(
   const { view } = render;
   const lifetime = view.pinned ? "pinned" : `expires in ${formatDuration((view.expiresAtMs ?? now) - now)}`;
   const lines = [
-    `${style.bold(view.spec.title)}  ${style.dim(`${view.id} · ${lifetime} · read ${new Date(render.renderedAtMs).toLocaleTimeString()}`)}`,
+    `${style.bold(terminalText(view.spec.title))}  ${style.dim(`${view.id} · ${lifetime} · read ${new Date(render.renderedAtMs).toLocaleTimeString()}`)}`,
   ];
   for (const panel of view.spec.panels) {
     const data = render.sources[panel.source];
-    lines.push("", style.bold(panel.title ?? defaultTitle(panel, data)));
+    lines.push(
+      "",
+      style.bold(panel.title === undefined ? defaultTitle(panel, data) : terminalText(panel.title)),
+    );
     lines.push(
       ...(data === undefined ? [style.red("Source missing")] : sourceLines(panel, data, now, style)),
     );

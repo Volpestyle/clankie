@@ -33,6 +33,7 @@ import {
 } from "../../../packages/protocol/src/views.ts";
 import { publicGatewayTargetFor } from "../../../packages/protocol/src/public-gateway.ts";
 import { ViewStore } from "../../clankie/src/views.ts";
+import { createWorkItemsService } from "../../clankie/src/work-items.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
 import { createStubCaptain, type CaptainPort } from "../../clankie/src/captain/port.ts";
 import { RoutineStore } from "../../clankie/src/captain/routines.ts";
@@ -67,7 +68,11 @@ async function listen(handler: (request: IncomingMessage, response: ServerRespon
   return `http://127.0.0.1:${address.port}`;
 }
 async function fixture(
-  options: { unavailableAwakeRegistry?: boolean; routineCommand?: CaptainPort["routineCommand"] } = {},
+  options: {
+    unavailableAwakeRegistry?: boolean;
+    routineCommand?: CaptainPort["routineCommand"];
+    workItems?: ReturnType<typeof createWorkItemsService>;
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-settings-relay-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
@@ -141,6 +146,7 @@ async function fixture(
     }),
     settings,
     views: new ViewStore(join(root, "views"), () => hf.now),
+    ...(options.workItems ? { workItems: options.workItems } : {}),
     ...(options.unavailableAwakeRegistry
       ? {
           applyKeepAwake: async () => {
@@ -523,6 +529,111 @@ it("carries the owner's views to a control device, unavailable sources included,
     expect((await call(VIEWS_PATH, { action: "create", spec }, device)).status).toBe(403);
   }
   expect(f.forwarded).toHaveLength(forwarded);
+  expect(f.captainCalls()).toBe(0);
+});
+
+it("lets a control device name a view's tracker only by its registered repo id, never a path to enroll (ADR 0191)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "views-work-"));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const registered = join(root, "registered");
+  const elsewhere = join(root, "elsewhere");
+  const work = createWorkItemsService({
+    stateDirectory: join(root, "work"),
+    run: async () => {
+      throw new Error("no git here");
+    },
+  });
+  // The owner's own CLI enrolls one repo by path; nothing else is registered.
+  await work.handle(
+    { action: "create", repo: registered, title: "Owner's tracked work", status: "todo" },
+    true,
+  );
+  const repos = async () => {
+    const result = await work.handle({ action: "repos" }, false);
+    return "repos" in result ? result.repos : [];
+  };
+  const [repo] = await repos();
+  if (!repo) throw new Error("The owner's repo was not registered");
+  const f = await fixture({ workItems: work });
+  const create = (repoRef: string, authorization = `Bearer ${f.tokens.control}`, base = f.relayUrl) =>
+    fetch(`${base}${VIEWS_PATH}`, {
+      method: "POST",
+      headers: { authorization, "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "create",
+        spec: {
+          title: "Open work",
+          sources: { open: { kind: "tracker_issues", repo: repoRef } },
+          panels: [{ source: "open", show: "issues" }],
+        },
+      }),
+    });
+
+  // A path, unregistered or even registered, is refused and enrolls nothing. The
+  // relay answers its own refusal; the service's reason shows with the same token.
+  for (const path of [elsewhere, registered]) {
+    expect((await create(path)).status).toBe(400);
+    const refused = await create(path, `Bearer ${f.tokens.control}`, f.controlUrl);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({
+      error: "invalid_view_request",
+      detail: "sources.open.repo: a device names a registered repo id, not a path",
+    });
+  }
+  // A device paired through the hosted account reaches the same route inside the
+  // hosted operator envelope, where the service authenticates it as the operator.
+  const hosted = (repoRef: string) =>
+    fetch(`${f.controlUrl}/v1/hosted/operator`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${f.tokens.hosted}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "POST",
+        path: VIEWS_PATH,
+        body: JSON.stringify({
+          action: "create",
+          spec: {
+            title: "Open work",
+            sources: { open: { kind: "tracker_issues", repo: repoRef } },
+            panels: [{ source: "open", show: "issues" }],
+          },
+        }),
+      }),
+    });
+  const hostedRefused = await hosted(elsewhere);
+  expect(hostedRefused.status).toBe(400);
+  expect(await hostedRefused.json()).toEqual({
+    error: "invalid_view_request",
+    detail: "sources.open.repo: a device names a registered repo id, not a path",
+  });
+  // Nothing was kept, so nothing can enroll a path when it renders.
+  expect(
+    ViewListSchema.parse(
+      await (
+        await fetch(`${f.controlUrl}${VIEWS_PATH}`, { headers: { authorization: "Bearer owner" } })
+      ).json(),
+    ).views,
+  ).toEqual([]);
+  expect((await repos()).map((entry) => entry.id)).toEqual([repo.id]);
+  expect((await hosted(repo.id)).status).toBe(201);
+
+  // The registered id works, and the view reads that repo's issues.
+  const created = await create(repo.id);
+  expect(created.status).toBe(200);
+  const { view } = ViewResultSchema.parse(await created.json());
+  const render = ViewRenderSchema.parse(
+    await (
+      await fetch(`${f.relayUrl}${viewPath(view.id)}`, {
+        headers: { authorization: `Bearer ${f.tokens.control}` },
+      })
+    ).json(),
+  );
+  expect(render.sources.open).toMatchObject({
+    state: "ok",
+    items: [{ title: "Owner's tracked work", status: "todo" }],
+  });
+
+  // The local operator bearer is this machine's own caller and may still name a path.
+  expect((await create(registered, "Bearer owner", f.controlUrl)).status).toBe(201);
   expect(f.captainCalls()).toBe(0);
 });
 

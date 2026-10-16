@@ -1130,14 +1130,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   );
   app.route(
     "/",
-    createViewRoutes(authorizeOwnerSecrets, dependencies.views, {
-      ...(dependencies.fleetResources === undefined
-        ? {}
-        : { fleetResources: () => dependencies.fleetResources!.status() }),
-      ...(dependencies.workItems === undefined
-        ? {}
-        : { listIssues: (request) => dependencies.workItems!.handle(request, true) }),
-    }),
+    createViewRoutes(
+      async (request) => {
+        const operator = await authenticateOperator(request, dependencies);
+        // A hosted device's inner request authenticates as the operator; it is still a device.
+        if (operator && operator !== "unavailable")
+          return hostedOriginalRequests.has(request) ? "device" : "operator";
+        // The same owner authority as `authorizeOwnerSecrets`, naming which caller it is.
+        const device = await authenticateDevice(request);
+        if (device === "unavailable" || "denied" in device) return "authentication_required";
+        return device.grants.terminalControl ? "device" : "forbidden";
+      },
+      dependencies.views,
+      {
+        ...(dependencies.fleetResources === undefined
+          ? {}
+          : { fleetResources: () => dependencies.fleetResources!.status() }),
+        ...(dependencies.workItems === undefined
+          ? {}
+          : { listIssues: (request) => dependencies.workItems!.handle(request, true) }),
+      },
+    ),
   );
   app.route(
     "/",

@@ -64,7 +64,7 @@ async function fixture() {
     async (request) => {
       const header = request.headers.get("authorization");
       if (!header) return "authentication_required";
-      return header === `Bearer ${bearer}` ? true : "forbidden";
+      return header === `Bearer ${bearer}` ? "operator" : "forbidden";
     },
     new ViewStore(join(root, "views")),
     { fleetResources: () => resources.status(), listIssues: (request) => work.handle(request, true) },
@@ -75,9 +75,10 @@ async function fixture() {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("No fixture address");
   const host = `http://127.0.0.1:${String(address.port)}`;
-  const cli = (args: string[]) =>
+  const cli = (args: string[], stdout?: { write(chunk: string): unknown }) =>
     runViewCommand(args, {
       host,
+      ...(stdout === undefined ? {} : { stdout }),
       env: { HOME: root, CLANKIE_OPERATOR_TOKEN: bearer },
       operatorCredentialStore: new FileCredentialStore(join(root, "credentials.json")),
     });
@@ -206,4 +207,26 @@ it("creates a temporary view over live fleet resources and tracker issues, follo
   await expect(
     f.cli(["create", JSON.stringify({ ...spec, panels: [{ source: "nope", show: "queue" }] })]),
   ).rejects.toThrow(/No source named nope/u);
+});
+
+it("prints tracker text to a terminal with no control character left to act as an escape sequence", async () => {
+  const f = await fixture();
+  // A tracker title is anyone's text: OSC 52 would write the owner's clipboard, CSI 2J clear the screen.
+  const title = "Ship it\u001b]52;c;aGk=\u0007 now\u001b[2J\u009b31m";
+  await f.work.handle({ action: "create", repo: f.repo, title, status: "todo" }, true);
+  const { view } = (await f.cli([
+    "create",
+    JSON.stringify({
+      title: "Open work",
+      sources: { open: { kind: "tracker_issues", repo: f.repo } },
+      panels: [{ source: "open", show: "issues" }],
+    }),
+  ])) as { view: ViewRender["view"] };
+  // The source still carries the title as the tracker holds it; only the terminal text is cleaned.
+  const render = (await f.cli(["show", view.id])) as ViewRender;
+  expect(render.sources.open).toMatchObject({ state: "ok", items: [{ title }] });
+  let printed = "";
+  await f.cli(["show", view.id, "--text"], { write: (chunk: string) => (printed += chunk) });
+  expect(printed).toContain("Ship it ]52;c;aGk=  now [2J 31m");
+  expect(printed).not.toMatch(/[^\P{Cc}\n]/u);
 });

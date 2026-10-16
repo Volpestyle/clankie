@@ -1,4 +1,4 @@
-import { viewClient, formatDuration, type ViewCommandOptions } from "./command/view.ts";
+import { viewClient, formatDuration, terminalText, type ViewCommandOptions } from "./command/view.ts";
 import { ClankieViewOverlay } from "./face/clankie-view-overlay.ts";
 import type { FaceShellCommand } from "./shell/shell.ts";
 
@@ -29,7 +29,7 @@ export function buildViewCommands(options: ViewCommandOptions): FaceShellCommand
                 : views
                     .map(
                       (view) =>
-                        `${view.id}  ${view.spec.title}  ${view.pinned ? "pinned" : `expires in ${formatDuration((view.expiresAtMs ?? now) - now)}`}`,
+                        `${view.id}  ${terminalText(view.spec.title)}  ${view.pinned ? "pinned" : `expires in ${formatDuration((view.expiresAtMs ?? now) - now)}`}`,
                     )
                     .concat("", "Open one with /view ID.")
                     .join("\n"),
@@ -53,7 +53,7 @@ export function buildViewCommands(options: ViewCommandOptions): FaceShellCommand
               overlay.setRender(render);
               wait = render.view.spec.refreshSeconds * 1000;
             } catch (error) {
-              overlay.setNotice(error instanceof Error ? error.message : String(error));
+              overlay.setNotice(terminalText(error instanceof Error ? error.message : String(error)));
             }
             await new Promise<void>((done) => {
               const timer = setTimeout(done, wait);

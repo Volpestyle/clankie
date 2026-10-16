@@ -70,7 +70,7 @@ a repo that isn't registered. Then tell the owner the id and how to open it:
   or lease panel.
 - `tracker_issues` is a `clankie work list` filter through the repo's own tracker:
   `repo` (a registered repo id, or the repo's absolute root path; the CLI
-  resolves `./`), and optionally `status`, `owner`, `label` and `limit` (1–100).
+  resolves `./`, and only this machine's own CLI may give a path), and optionally `status`, `owner`, `label` and `limit` (1–100).
   Its panels show `issues`.
 - A view has 1–8 sources and 1–12 panels. `refreshSeconds` is 2–300 (default 5).
   A panel's `title` is optional.

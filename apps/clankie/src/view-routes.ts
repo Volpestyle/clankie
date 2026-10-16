@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
@@ -10,24 +11,28 @@ import {
 } from "@clankie/protocol";
 import { renderView, ViewRequestError, type ViewSources, type ViewStore } from "./views.ts";
 
+type ViewCaller = "operator" | "device";
+
 /**
  * Views stay private to the owner (VUH-2035): the same owner authority as
  * fleet resources, which a view can show. List, render, and one POST for
- * create, pin, unpin and expire.
+ * create, pin, unpin and expire. `operator` is a local caller holding the
+ * operator bearer; `device` is a paired device with terminal control.
  */
 export function createViewRoutes(
-  authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
+  authorize: (request: Request) => Promise<ViewCaller | "authentication_required" | "forbidden">,
   store: ViewStore | undefined,
   sources: ViewSources,
-): Hono {
-  const app = new Hono();
+): Hono<{ Variables: { caller: ViewCaller } }> {
+  const app = new Hono<{ Variables: { caller: ViewCaller } }>();
   for (const path of [VIEWS_PATH, `${VIEWS_PATH}/:id`])
     app.use(path, async (context, next) => {
       context.header("cache-control", "no-store");
       const authority = await authorize(context.req.raw);
-      if (authority !== true)
+      if (authority !== "operator" && authority !== "device")
         return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
       if (!store) return context.json({ error: "views_unavailable" }, 503);
+      context.set("caller", authority);
       await next();
     });
   const failed = (error: unknown) => {
@@ -61,6 +66,22 @@ export function createViewRoutes(
         },
         400,
       );
+    // Sources are read as a local caller on every render, so the trust decision is
+    // made here: a device names a tracker only by its registered repo id, never
+    // a path that would enroll a new directory (ADR 0191).
+    if (input.data.action === "create" && context.get("caller") === "device") {
+      const path = Object.entries(input.data.spec.sources).find(
+        ([, source]) => source.kind === "tracker_issues" && isAbsolute(source.repo),
+      );
+      if (path)
+        return context.json(
+          {
+            error: "invalid_view_request",
+            detail: `sources.${path[0]}.repo: a device names a registered repo id, not a path`,
+          },
+          400,
+        );
+    }
     try {
       const result = await store!.apply(input.data);
       return context.json(
