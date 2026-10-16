@@ -4145,7 +4145,15 @@ running in its terminal. `join status` reports the locally stored registration;
 and removes its broker credential. `machines remove join-UUID` also revokes it;
 the old capability cannot reconnect, including after service restart. A new
 join needs a new code, owner approval and machine identity. Interrupting the
-foreground command disconnects it without revoking approval.
+foreground command disconnects it without revoking approval. A running `join`
+rides out a home restart or network loss: it says on stderr that Clankie is
+unreachable, retries with backoff up to 30 seconds and says when it reconnects.
+Its `--json` stdout events are unchanged. A request whose delivery was lost
+fails at the home and is never replayed. Leave, removal, or a home that sends
+another machine's identity or a duplicate request ends the command. Every other
+failure, including a home that is gone for good, keeps it retrying after one
+notice. A joined seat refused by the machine's level names the machine, its
+level and the level required, inside the encrypted response.
 
 From an approved folder on a joined install, `clankie claude [--new | --conversation ID | --resume … | --reset]`
 opens the local Claude Code seat in a workspace chat stored at Clankie's home.

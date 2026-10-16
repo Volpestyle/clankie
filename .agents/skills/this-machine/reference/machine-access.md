@@ -67,7 +67,9 @@ host. From an existing authenticated owner CLI/device approve its code with
 `clankie join approve CODE --access LEVEL --directory PATH`. The code expires
 in five minutes. It is generated locally with 256 bits of entropy; bootstrap
 advertises only its hash. Copy it only to the existing trusted owner approval
-surface; never record it in evidence. Keep the join command running. `join resume` restores approval;
+surface; never record it in evidence. Keep the join command running; it
+reconnects by itself after a home restart or network loss. Revocation ends it;
+a home that never returns leaves it retrying after one stderr notice. `join resume` restores approval;
 `join status` is local registration status, not a live connection assertion.
 `join leave` or `machines remove join-UUID` revokes it durably. A new join needs
 new owner approval. Lease and machine exchanges are authenticated AES-256-GCM

@@ -233,7 +233,12 @@ export async function exchangeJoinedMachine(
   );
 }
 
-/** Claims are one-shot: a lost response parks the client instead of replaying any operation. */
+/**
+ * Claims are one-shot: a claim lost with its response expires at the home and is
+ * never replayed. A failed poll carries no operation, so the channel reconnects
+ * with backoff after a home restart, network loss or an unreadable response.
+ * Revocation, a foreign identity or a duplicate request ends it.
+ */
 export async function runJoinedMachineChannel(
   credential: JoinedMachineCredential,
   options: {
@@ -242,13 +247,29 @@ export async function runJoinedMachineChannel(
     fetchImpl?: typeof fetch;
     ports?: JoinedMachinePorts;
     intervalMs?: number;
+    /** First retry delay; doubles per failed poll up to 30 seconds. */
+    retryMs?: number;
     onConnected?: () => void;
+    /** Once per outage, and again when the home answers. */
+    onDisconnected?: () => void;
+    onReconnected?: () => void;
   },
 ): Promise<"left" | "revoked"> {
   machineJoinOrigin(credential.origin);
   const active = new Map<string, { request: JoinedMachineRequest; abort: AbortController }>();
   let results: JoinedMachineResult[] = [];
   const fetcher = options.fetchImpl ?? fetch;
+  const pause = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        options.signal.removeEventListener("abort", done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      options.signal.addEventListener("abort", done, { once: true });
+    });
+  let retryMs = 0;
   let connected = false;
   let currentScreen = false;
   let policyAt = 0;
@@ -277,7 +298,15 @@ export async function runJoinedMachineChannel(
           ),
         );
       } catch (error) {
-        if (!(error instanceof JoinedMachineRevoked)) throw error;
+        if (!(error instanceof JoinedMachineRevoked)) {
+          if (options.signal.aborted) throw error;
+          // Resent results settle at most once at the home; unknown ones are ignored.
+          results = [...outgoing, ...results];
+          if (retryMs === 0) options.onDisconnected?.();
+          retryMs = Math.min(retryMs === 0 ? (options.retryMs ?? 1000) : retryMs * 2, 30_000);
+          await pause(retryMs);
+          continue;
+        }
         // Erase the lease, but retain a secret-free refusal until explicit leave
         // or rejoin. An absent lease must not fall back to a local operator.
         if (!options.store.updateMany) throw Error("join_credential_atomic_update_unavailable");
@@ -288,6 +317,10 @@ export async function runJoinedMachineChannel(
         return "revoked";
       }
       if (batch.policy.machineId !== credential.lease.machineId) throw Error("join_identity_refused");
+      if (retryMs !== 0) {
+        retryMs = 0;
+        options.onReconnected?.();
+      }
       const policy = {
         ...batch.policy,
         accessLevel: machineAccessAllows(credential.lease.accessLevel, batch.policy.accessLevel)
@@ -333,15 +366,7 @@ export async function runJoinedMachineChannel(
           })
           .finally(() => active.delete(request.id));
       }
-      await new Promise<void>((resolve) => {
-        const done = () => {
-          clearTimeout(timer);
-          options.signal.removeEventListener("abort", done);
-          resolve();
-        };
-        const timer = setTimeout(done, options.intervalMs ?? 500);
-        options.signal.addEventListener("abort", done, { once: true });
-      });
+      await pause(options.intervalMs ?? 500);
     }
   } catch (error) {
     if (!options.signal.aborted) throw error;

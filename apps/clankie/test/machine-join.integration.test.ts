@@ -535,3 +535,62 @@ test("the receiver preserves original host consent even if authenticated body po
     await f.close();
   }
 });
+
+test("a joined machine reconnects after its home restarts, and revocation still ends it", async () => {
+  const f = await fixture();
+  const abort = new AbortController();
+  let running: Promise<unknown> | undefined;
+  let home: ReturnType<typeof serve> | undefined;
+  const listen = async (joins: MachineJoins, port = 0) => {
+    const routes = new Hono().route(
+      `/h/${fixtureHost}`,
+      createMachineJoinRoutes(joins, async () => "authentication_required"),
+    );
+    home = serve({ fetch: routes.fetch, hostname: "127.0.0.1", port });
+    if (!home.listening) await new Promise<void>((resolve) => home!.once("listening", resolve));
+    return (home.address() as AddressInfo).port;
+  };
+  const stop = async () => {
+    if ("closeAllConnections" in home!) home.closeAllConnections();
+    await new Promise<void>((resolve) => home!.close(() => resolve()));
+  };
+  try {
+    const approved = await f.approve("shell");
+    const port = await listen(f.joins);
+    const credential = { ...approved, origin: `http://127.0.0.1:${port}/h/${fixtureHost}` };
+    await saveJoinedMachineCredential(f.store, credential);
+    const seen = { connected: 0, disconnected: 0, reconnected: 0 };
+    running = runJoinedMachineChannel(credential, {
+      store: f.store,
+      signal: abort.signal,
+      intervalMs: 10,
+      retryMs: 10,
+      onConnected: () => seen.connected++,
+      onDisconnected: () => seen.disconnected++,
+      onReconnected: () => seen.reconnected++,
+    });
+    await until(() => seen.connected === 1);
+    await stop();
+    await until(() => seen.disconnected === 1);
+    // A new home process restores the same machine from its durable ledger.
+    const restored = new MachineJoins({ settings: f.settings, secrets: f.secrets, directory: f.ledger });
+    await listen(restored, port);
+    await until(() => seen.reconnected === 1);
+    expect(
+      await restored.request(credential.lease.machineId, {
+        kind: "shell",
+        directory: f.directory,
+        command: "printf after-restart",
+      }),
+    ).toMatchObject({ ok: true, output: "after-restart" });
+    expect(seen).toEqual({ connected: 1, disconnected: 1, reconnected: 1 });
+    await restored.remove(credential.lease.machineId);
+    expect(await running).toBe("revoked");
+    await expect(readJoinedMachineCredential(f.store)).rejects.toThrow("revoked");
+  } finally {
+    abort.abort();
+    await running;
+    if (home?.listening) await stop();
+    await f.close();
+  }
+});

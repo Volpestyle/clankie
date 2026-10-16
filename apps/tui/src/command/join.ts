@@ -266,6 +266,9 @@ export async function runJoinCommand(
         values.json
           ? event({ event: "joined", machineId: credential!.lease.machineId })
           : stdout.write(`Joined ${credential!.lease.machineId}; keep this command running.\n`),
+      // Stderr keeps the --json event stream unchanged for existing consumers.
+      onDisconnected: () => stderr.write("Clankie is unreachable; reconnecting.\n"),
+      onReconnected: () => stderr.write("Reconnected to Clankie.\n"),
     });
     if (values.json) event({ event: "finished", state });
     else stdout.write(JSON.stringify({ ok: true, state }) + "\n");
