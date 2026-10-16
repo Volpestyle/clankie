@@ -11,7 +11,7 @@ import {
   type Machine,
   type MachineInventory,
 } from "@clankie/protocol";
-import { JoinedMachineIdSchema } from "@clankie/protocol/machine-join";
+import { JoinedMachineIdSchema, type JoinedShellAuditEntry } from "@clankie/protocol/machine-join";
 import { readMachineAccessRefusals, machineAccessLevel } from "./machine-access.ts";
 import { verifiedLocalSandbox } from "@clankie/settings";
 import { remoteProgramCommand } from "./herdr-fleet.ts";
@@ -79,6 +79,7 @@ interface JoinedMachineProvider {
   accessCeiling(id: string): MachineAccessLevel | undefined;
   inventory(): Promise<Machine[]>;
   remove(id: string): Promise<void>;
+  shellAudit?(limit?: number): Promise<{ entries: JoinedShellAuditEntry[] }>;
 }
 export class Machines {
   private joined: JoinedMachineProvider | undefined;
@@ -272,6 +273,11 @@ export class Machines {
             ? ("joined-host" as const)
             : ("service-preference" as const),
     };
+  }
+
+  /** Clankie's own shell calls on joined machines, newest last. */
+  async shellAudit(limit?: number) {
+    return (await this.joined?.shellAudit?.(limit)) ?? { entries: [] };
   }
 
   async accessRefusals() {

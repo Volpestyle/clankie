@@ -133,3 +133,41 @@ Access refusals are retained per machine and required level and appear in
 read is `GET /v1/machines/access-refusals`, also available as
 `clankie machines access-refusals --json`; it names the machine and owner fix.
 Resolved refusals leave the doctor view after the owner's grant covers them.
+
+Amended 2026-10-16 (VUH-2319): a joined machine's `shell` level now grants
+Clankie's own shell there, through one tool, `joined_machine_shell`. It is
+offered only in the owner console lane with machine tools. Discord lanes,
+including owner-only rooms and DMs, and peer seats never receive it. Within that
+lane, only turns the owner started may use it. Autonomy, Linear wakes and worker
+reports are refused, so untrusted input never reaches another machine. James can
+widen this later. Input steered into an owner's running turn still inherits its
+owner status.
+
+Each call:
+
+- rechecks the machine's live level, with no cached grant;
+- starts in a folder approved at join; the shell itself is not an OS boundary
+  (VUH-1804);
+- relies on the receiver's ceiling, output and time bounds, single execution and
+  revocation.
+
+The receiver runs each command in its own process group, so revocation, the time
+limit or a lowered level stops what it started. A deliberately detached process
+(`setsid`) escapes, and on Windows children left after the shell exits are not
+stopped (no Job Object). Its first output line is its own exit or stop, so command output cannot
+forge the audited exit. Older receivers report success only for exit 0.
+
+At `screen`, the shell can reach the screen through the machine's own permissions
+without the per-session screen consent. That follows from `screen` including
+`shell`. Screen lending without shell is not expressible in the ordered levels;
+an owner who wants neither chooses `workers`. Whether to add consent-only screen
+lending is an open owner decision.
+
+Each call is recorded before anything is sent; a call that cannot be recorded
+does not run. The record holds the lane, origin, conversation, machine, folder,
+command digest and the reported outcome. `unknown` means no result arrived in
+time. The command text still lives in the session transcript; the digest is a
+convention, not secrecy. It is readable through
+`GET /v1/machines/shell-audit`, `clankie machines shell-audit` and doctor.
+Hiding `shell` for joined machines was rejected: `screen` includes it, so one
+hidden rung would break the single ordered vocabulary above.

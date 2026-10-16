@@ -1583,6 +1583,7 @@ const captain = createCaptain(
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
     settings: settingsStore,
+    joinedMachines: machineJoins,
     reportRoundMs: REPORT_ROUND_MS,
     requireMachineAccess: (fleet, required) => runtimes.requireAccess(fleet, required),
     personaImages,

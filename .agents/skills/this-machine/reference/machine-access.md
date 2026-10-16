@@ -71,7 +71,13 @@ surface; never record it in evidence. Keep the join command running; it
 reconnects by itself after a home restart or network loss. Revocation ends it;
 a home that never returns leaves it retrying after one stderr notice. `join resume` restores approval;
 `join status` is local registration status, not a live connection assertion.
-`join leave` or `machines remove join-UUID` revokes it durably. A new join needs
+`join leave` or `machines remove join-UUID` revokes it durably. At `shell` or
+`screen`, `joined_machine_shell` runs your own command there (owner console,
+owner-started turns only; autonomous turns are refused;
+it starts in an approved folder; 30 s; 8192 characters; the first line is its exit;
+everything the command started stops when it ends or is revoked). Each call is audited for the owner
+(`machines shell-audit`). A lost delivery is never re-run, so check state before
+repeating an effect. A new join needs
 new owner approval. Lease and machine exchanges are authenticated AES-256-GCM
 envelopes with one-use challenges and independently keyed responses. The
 gateway cannot read or forge work or broker capabilities. Never print or copy

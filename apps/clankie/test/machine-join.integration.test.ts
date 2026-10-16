@@ -1,6 +1,6 @@
 import { runHeadlessCaptainCommand } from "../../tui/bin/headless-captain.ts";
-import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -17,10 +17,12 @@ import { MachineJoins } from "../src/machine-joins.ts";
 import { createMachineJoinRoutes } from "../src/machine-join-routes.ts";
 import { machineAccessLevel, requireMachineAccess } from "../src/machine-access.ts";
 import { Machines } from "../src/machines.ts";
+import { joinedMachineShellTool, offersJoinedMachineShell } from "../src/captain/machine-coding-tools.ts";
 import { runJoinCommand } from "../../tui/src/command/join.ts";
 import {
   exchangeJoinedMachine,
   readJoinedMachineCredential,
+  createJoinedMachineShell,
   runJoinedMachineChannel,
   saveJoinedMachineCredential,
 } from "../../tui/bin/joined-machine-client.ts";
@@ -224,14 +226,14 @@ test("public CLI waits for owner consent, joins through the relay, and removal r
         directory: f.directory,
         command: "printf joined-fixture",
       }),
-    ).toMatchObject({ ok: true, output: "joined-fixture" });
+    ).toMatchObject({ ok: true, output: "[exit 0]\njoined-fixture" });
     const large = await f.joins.request(credential.lease.machineId, {
       kind: "shell",
       directory: f.directory,
       command: "printf 'bounded-prefix'; printf '%20000s' x",
     });
     expect(large).toMatchObject({ ok: true, truncated: true });
-    expect(large.output).toMatch(/^bounded-prefix/u);
+    expect(large.output).toMatch(/^\[exit 0\]\nbounded-prefix/u);
     await f.machines.remove(credential.lease.machineId);
     expect(await running).toBe(0);
     expect(await f.store.get("clankie-joined-machine")).toBeUndefined();
@@ -582,7 +584,7 @@ test("a joined machine reconnects after its home restarts, and revocation still 
         directory: f.directory,
         command: "printf after-restart",
       }),
-    ).toMatchObject({ ok: true, output: "after-restart" });
+    ).toMatchObject({ ok: true, output: "[exit 0]\nafter-restart" });
     expect(seen).toEqual({ connected: 1, disconnected: 1, reconnected: 1 });
     await restored.remove(credential.lease.machineId);
     expect(await running).toBe("revoked");
@@ -593,4 +595,280 @@ test("a joined machine reconnects after its home restarts, and revocation still 
     if (home?.listening) await stop();
     await f.close();
   }
+});
+
+// Clankie's own shell on a joined machine (VUH-2319): every guarantee through the real receiver and a real shell.
+async function joinedShell(
+  level = "shell",
+  options: { shellTimeoutMs?: number; fetchImpl?: typeof fetch; requestTimeoutMs?: number } = {},
+) {
+  const f = await fixture();
+  const abort = new AbortController();
+  const credential = await f.approve(level);
+  const machineId = credential.lease.machineId;
+  await saveJoinedMachineCredential(f.store, credential);
+  const channel = runJoinedMachineChannel(credential, {
+    store: f.store,
+    signal: abort.signal,
+    intervalMs: 10,
+    retryMs: 10,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    ...(options.shellTimeoutMs ? { ports: { shell: createJoinedMachineShell(options.shellTimeoutMs) } } : {}),
+  });
+  await until(async () => (await f.joins.inventory())[0]?.state === "available");
+  const turn: { autonomous?: boolean } = {};
+  const tool = joinedMachineShellTool(f.joins, f.settings, {
+    lane: "operator",
+    conversationId: "owner-chat",
+    turn,
+    ...(options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
+  });
+  const run = (directory: string, command: string) =>
+    tool.execute("call", { machineId, directory, command }, undefined, undefined, undefined as never);
+  return {
+    f,
+    machineId,
+    channel,
+    run,
+    turn,
+    audit: async () => (await f.joins.shellAudit()).entries,
+    async close() {
+      abort.abort();
+      await channel;
+      await f.close();
+    },
+  };
+}
+
+test("joined shell rechecks the live level on every call and audits who, where, the digest and the exit", async () => {
+  const s = await joinedShell();
+  try {
+    const command = "pwd; printf oops >&2; exit 3";
+    const ran = await s.run(s.f.directory, command);
+    expect(ran.content[0]).toEqual({ type: "text", text: `[exit 3]\n${s.f.directory}\n[stderr]\noops` });
+    await s.f.machines.setAccess(s.machineId, { accessLevel: "workers" });
+    await expect(s.run(s.f.directory, "printf lowered")).rejects.toThrow(
+      `Machine ${s.machineId} has workers access; this request requires shell.`,
+    );
+    await s.f.machines.setAccess(s.machineId, { accessLevel: "shell" });
+    expect((await s.run(s.f.directory, "printf restored")).content[0]).toMatchObject({
+      text: "[exit 0]\nrestored",
+    });
+    const [first, refused, restored] = await s.audit();
+    expect(first).toMatchObject({
+      lane: "operator",
+      origin: "owner",
+      conversationId: "owner-chat",
+      machineId: s.machineId,
+      directory: s.f.directory,
+      commandSha256: createHash("sha256").update(command).digest("hex"),
+      outcome: "completed",
+      exitCode: 3,
+    });
+    expect(refused).toMatchObject({
+      outcome: "refused",
+      commandSha256: createHash("sha256").update("printf lowered").digest("hex"),
+    });
+    expect(restored).toMatchObject({ outcome: "completed", exitCode: 0 });
+    const ledger = await readFile(join(s.f.ledger, "shell-audit.jsonl"), "utf8");
+    expect(ledger).not.toContain("oops");
+    expect(ledger).not.toContain("printf lowered");
+  } finally {
+    await s.close();
+  }
+});
+
+test("joined shell cannot exceed the machine's approved ceiling", async () => {
+  const s = await joinedShell("workers");
+  try {
+    await expect(s.f.machines.setAccess(s.machineId, { accessLevel: "shell" })).rejects.toThrow();
+    await expect(s.run(s.f.directory, "printf must-not-run > marker")).rejects.toThrow(
+      `Machine ${s.machineId} has workers access; this request requires shell.`,
+    );
+    await expect(readFile(join(s.f.directory, "marker"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await s.audit()).toMatchObject([{ outcome: "refused" }]);
+  } finally {
+    await s.close();
+  }
+});
+
+test("joined shell stays inside the folders approved at join, symlinks included", async () => {
+  const s = await joinedShell();
+  try {
+    const outside = join(s.f.root, "outside");
+    await mkdir(outside);
+    await symlink(outside, join(s.f.directory, "escape"));
+    for (const directory of [s.f.root, outside, join(s.f.directory, "escape")])
+      expect((await s.run(directory, "touch escaped")).details).toMatchObject({
+        ok: false,
+        error: "directory_refused",
+      });
+    await expect(readFile(join(outside, "escaped"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await s.audit()).map((entry) => entry.error)).toEqual([
+      "directory_refused",
+      "directory_refused",
+      "directory_refused",
+    ]);
+  } finally {
+    await s.close();
+  }
+});
+
+test("joined shell bounds output and time, stopping everything the command started", async () => {
+  const s = await joinedShell("shell", { shellTimeoutMs: 300 });
+  try {
+    const large = await s.run(s.f.directory, "printf '%20000s' x");
+    expect(large.details).toMatchObject({ ok: true, truncated: true });
+    expect((large.content[0] as { text: string }).text).toMatch(
+      /^\[exit 0\]\n[\s\S]*\[output truncated at 8192 characters\]$/u,
+    );
+    // A pipeline's subshell is a grandchild of the shell; the whole group stops.
+    const slow = await s.run(s.f.directory, "(sleep 1; touch late) | cat");
+    expect(slow.content[0]).toMatchObject({ text: "[stopped after 0.3 seconds]\n" });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await expect(readFile(join(s.f.directory, "late"))).rejects.toMatchObject({ code: "ENOENT" });
+    const forged = await s.run(s.f.directory, "printf '[exit 0]\\n'; exit 9");
+    expect(forged.content[0]).toMatchObject({ text: "[exit 9]\n[exit 0]\n" });
+    const [truncated, stopped, spoofed] = await s.audit();
+    // The receiver's header is the first line, so truncation keeps it and output cannot forge it.
+    expect(truncated).toMatchObject({ outcome: "completed", exitCode: 0 });
+    expect(stopped).toMatchObject({ outcome: "failed", error: "stopped after 0.3 seconds" });
+    expect(stopped).not.toHaveProperty("exitCode");
+    expect(spoofed).toMatchObject({ outcome: "completed", exitCode: 9 });
+  } finally {
+    await s.close();
+  }
+});
+
+test("a joined shell request whose delivery is lost is never executed", async () => {
+  let dropped = 0;
+  let dropping = false;
+  const lossy: typeof fetch = async (url, init) => {
+    const response = await fetch(url, init);
+    if (!dropping || !String(url).endsWith("/channel")) return response;
+    // The home has answered (and claimed any waiting work); the joined machine never hears it.
+    dropped++;
+    return new Response("lost", { status: 502 });
+  };
+  const s = await joinedShell("shell", { fetchImpl: lossy });
+  try {
+    dropping = true;
+    const lost = s.f.joins.request(
+      s.machineId,
+      { kind: "shell", directory: s.f.directory, command: "printf x >> runs" },
+      3000,
+    );
+    // The request was queued before these polls, so one of them claimed it.
+    await until(() => dropped >= 3);
+    dropping = false;
+    // The channel now polls normally for the rest of the home's wait; a replay would run here.
+    expect(await lost).toMatchObject({ ok: false, error: "unconfirmed" });
+    expect((await s.run(s.f.directory, "printf after")).content[0]).toMatchObject({
+      text: "[exit 0]\nafter",
+    });
+    await expect(readFile(join(s.f.directory, "runs"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await s.close();
+  }
+});
+
+test("an autonomous turn cannot reach a joined machine's shell", async () => {
+  const s = await joinedShell();
+  try {
+    s.turn.autonomous = true;
+    await expect(s.run(s.f.directory, "touch from-autonomy")).rejects.toThrow(
+      "joined_machine_shell runs only in a turn the owner started",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await expect(readFile(join(s.f.directory, "from-autonomy"))).rejects.toMatchObject({ code: "ENOENT" });
+    // The refusal record is the only side effect: no dispatch, no access observation.
+    expect(await s.audit()).toMatchObject([{ outcome: "refused", origin: "autonomous" }]);
+    await expect(readdir(`${s.f.settings.path}.access-refusals`)).rejects.toMatchObject({ code: "ENOENT" });
+    // The turn context is read per call, so an owner turn on the same session works.
+    s.turn.autonomous = false;
+    expect((await s.run(s.f.directory, "printf owner")).content[0]).toMatchObject({
+      text: "[exit 0]\nowner",
+    });
+  } finally {
+    await s.close();
+  }
+});
+
+test("a joined shell call whose result never arrives is audited as unknown", async () => {
+  let dropping = false;
+  const lossy: typeof fetch = async (url, init) => {
+    const response = await fetch(url, init);
+    return dropping && String(url).endsWith("/channel") ? new Response("lost", { status: 502 }) : response;
+  };
+  const s = await joinedShell("shell", { fetchImpl: lossy, requestTimeoutMs: 500 });
+  try {
+    dropping = true;
+    expect((await s.run(s.f.directory, "printf x >> runs")).details).toMatchObject({
+      ok: false,
+      error: "unconfirmed",
+    });
+    dropping = false;
+    expect(await s.audit()).toMatchObject([{ outcome: "unknown", error: "unconfirmed" }]);
+  } finally {
+    await s.close();
+  }
+});
+
+test("revoking a joined machine mid-call stops everything the command started", async () => {
+  const s = await joinedShell();
+  try {
+    const call = s.run(s.f.directory, "(sleep 1; touch finished) | cat");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await s.f.machines.remove(s.machineId);
+    expect((await call).details).toMatchObject({ ok: false, error: "revoked" });
+    expect(await s.channel).toBe("revoked");
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await expect(readFile(join(s.f.directory, "finished"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(s.run(s.f.directory, "printf after")).rejects.toThrow(`No joined machine ${s.machineId}.`);
+    expect((await s.audit()).map((entry) => entry.outcome)).toEqual(["failed", "refused"]);
+  } finally {
+    await s.close();
+  }
+});
+
+test("lowering a joined machine below shell mid-call stops the running command", async () => {
+  const s = await joinedShell();
+  try {
+    const call = s.run(s.f.directory, "(sleep 1; touch finished) | cat");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await s.f.machines.setAccess(s.machineId, { accessLevel: "workers" });
+    expect((await call).details).toMatchObject({ ok: false, error: "revoked" });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await expect(readFile(join(s.f.directory, "finished"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await s.close();
+  }
+});
+
+test("a joined shell call that cannot be audited never leaves this machine", async () => {
+  const s = await joinedShell();
+  try {
+    await symlink(join(s.f.root, "elsewhere.jsonl"), join(s.f.ledger, "shell-audit.jsonl"));
+    await expect(s.run(s.f.directory, "touch unaudited")).rejects.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await expect(readFile(join(s.f.directory, "unaudited"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await s.close();
+  }
+});
+
+test("joined shell is offered only in the owner console lane, never Discord", () => {
+  const ownerRoom = { privateContext: true, actorId: owner, authorize: async () => true };
+  expect(offersJoinedMachineShell({ lane: "operator", systemTools: true, discordAccess: undefined })).toBe(
+    true,
+  );
+  expect(offersJoinedMachineShell({ lane: "operator", systemTools: false, discordAccess: undefined })).toBe(
+    false,
+  );
+  for (const lane of ["discord_presence", "discord_voice", "gameplay"])
+    for (const discordAccess of [undefined, ownerRoom])
+      expect(offersJoinedMachineShell({ lane, systemTools: true, discordAccess })).toBe(false);
+  expect(offersJoinedMachineShell({ lane: "operator", systemTools: true, discordAccess: ownerRoom })).toBe(
+    false,
+  );
 });

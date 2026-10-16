@@ -146,6 +146,10 @@ export interface InstallDoctorReport {
   readonly machineAccessRefusals?:
     | { refusals: import("@clankie/protocol").MachineAccessRefusal[] }
     | { status: "unavailable"; detail: string };
+  /** Recent joined-machine shell calls: who, machine, folder, command digest and outcome. */
+  readonly joinedShellAudit?:
+    | { entries: import("@clankie/protocol/machine-join").JoinedShellAuditEntry[] }
+    | { status: "unavailable"; detail: string };
   /** Where the service keeps evidence blobs and records (ADR 0258), as it reports them. */
   readonly evidenceStore?:
     | import("@clankie/protocol/evidence").EvidenceStoreStatus

@@ -17,6 +17,14 @@ export function createMachineAccessRoutes(options: {
     if (!options.machines) return context.json({ error: "machines_unavailable" }, 503);
     return context.json(await options.machines.accessRefusals());
   });
+  app.get("/v1/machines/shell-audit", async (context) => {
+    if (!options.authenticateOperator)
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!(await options.authenticateOperator(context.req.raw)))
+      return context.json({ error: "operator_authentication_required" }, 401);
+    if (!options.machines) return context.json({ error: "machines_unavailable" }, 503);
+    return context.json(await options.machines.shellAudit(), 200, { "cache-control": "no-store" });
+  });
   app.patch("/v1/machines/:id/access", bodyLimit({ maxSize: 4096 }), async (context) => {
     if (!options.authenticateOperator)
       return context.json({ error: "operator_authentication_unavailable" }, 503);

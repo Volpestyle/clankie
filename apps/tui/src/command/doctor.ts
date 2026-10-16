@@ -1,6 +1,7 @@
 import { DiscordRoomsSnapshotSchema, DISCORD_ROOMS_PATH, formatAutonomyDrift } from "@clankie/protocol";
 import { z } from "zod";
 import { MachineAccessRefusalSchema } from "@clankie/protocol";
+import { JoinedShellAuditSchema } from "@clankie/protocol/machine-join";
 import { runMachinesCommand } from "./machines.ts";
 import {
   CheckoutReportSchema,
@@ -369,6 +370,10 @@ export async function doctorCommand(
       ...options,
       ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),
     }),
+    joinedShellAudit: await inspectJoinedShellAudit({
+      ...options,
+      ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),
+    }),
     remoteHarnesses,
     discordRoomDelivery,
     toolCatalogHealth,
@@ -507,6 +512,16 @@ export async function machineDoctorCommand(
         ? {}
         : { linkState: connection.linkState }),
   };
+}
+
+/** Clankie's own recent shell calls on joined machines, for the owner to read. */
+async function inspectJoinedShellAudit(options: Parameters<typeof runMachinesCommand>[1]) {
+  try {
+    const { entries } = JoinedShellAuditSchema.parse(await runMachinesCommand(["shell-audit"], options));
+    return { entries: entries.slice(-20) };
+  } catch (error) {
+    return { status: "unavailable" as const, detail: String(error) };
+  }
 }
 
 async function inspectMachineAccessRefusals(

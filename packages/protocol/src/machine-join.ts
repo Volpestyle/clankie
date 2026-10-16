@@ -146,10 +146,34 @@ export const JoinedMachineResultSchema = z
         "operation_unavailable",
         "operation_failed",
         "revoked",
+        // Home-side only: no result arrived in time, so whether it ran is unknown.
+        "unconfirmed",
       ])
       .optional(),
   })
   .strict();
+/** Home-side record of Clankie's own shell on a joined machine; the command is kept only as a digest. */
+export const JoinedShellAuditEntrySchema = z.strictObject({
+  id: z.string().uuid(),
+  requestedAt: z.string().datetime(),
+  finishedAt: z.string().datetime().optional(),
+  lane: z.string().min(1).max(64),
+  /** `owner` turns only reach the remote shell; autonomous ones are refused. */
+  origin: z.enum(["owner", "autonomous"]),
+  conversationId: z.string().min(1).max(512),
+  machineId: JoinedMachineIdSchema,
+  directory: z.string().min(1).max(4096),
+  commandSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  /** `unknown`: the home stopped waiting, so the command may or may not have run. */
+  outcome: z.enum(["dispatched", "completed", "refused", "failed", "unknown"]),
+  /** As reported by the joined machine's receiver. */
+  exitCode: z.number().int().optional(),
+  error: z.string().min(1).max(256).optional(),
+});
+export const JoinedShellAuditSchema = z.strictObject({
+  entries: z.array(JoinedShellAuditEntrySchema).max(500),
+});
+export type JoinedShellAuditEntry = z.infer<typeof JoinedShellAuditEntrySchema>;
 export const JoinedMachinePollSchema = z
   .object({ results: z.array(JoinedMachineResultSchema).max(16) })
   .strict();

@@ -210,6 +210,60 @@ paths:
           description: Owner authentication required
         "503":
           description: Machine inventory or authentication unavailable
+  /v1/machines/shell-audit:
+    get:
+      tags: [Workers]
+      summary: Read Clankie's recent shell calls on joined machines
+      description: >-
+        Each call is recorded before anything reaches the joined machine and updated with its
+        outcome. The command is kept here only as a SHA-256 digest (its text remains in the
+        session transcript); the exit code is as the joined machine's receiver reported it.
+        `unknown` means no result arrived in time.
+      operationId: getJoinedShellAudit
+      security:
+        - operatorBearer: []
+      responses:
+        "200":
+          description: The most recent calls, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        [
+                          id,
+                          requestedAt,
+                          lane,
+                          origin,
+                          conversationId,
+                          machineId,
+                          directory,
+                          commandSha256,
+                          outcome,
+                        ]
+                      properties:
+                        id: { type: string, format: uuid }
+                        requestedAt: { type: string, format: date-time }
+                        finishedAt: { type: string, format: date-time }
+                        lane: { type: string }
+                        origin: { type: string, enum: [owner, autonomous] }
+                        conversationId: { type: string }
+                        machineId: { type: string }
+                        directory: { type: string }
+                        commandSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+                        outcome: { type: string, enum: [dispatched, completed, refused, failed, unknown] }
+                        exitCode: { type: integer }
+                        error: { type: string }
+        "401":
+          description: Owner authentication required
+        "503":
+          description: Machine inventory or authentication unavailable
   /v1/machines/{id}/access:
     patch:
       tags: [Operator]

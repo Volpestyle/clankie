@@ -12,7 +12,11 @@ import {
   prepareFreeAgentIntent as prepareFreeIntent,
 } from "./free-agent-intent.ts";
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
-import { machineCodingTools } from "./machine-coding-tools.ts";
+import {
+  joinedMachineShellTool,
+  machineCodingTools,
+  offersJoinedMachineShell,
+} from "./machine-coding-tools.ts";
 import { discordActorOwnsServer, discordOwnerAudience } from "@clankie/discord-presence-core";
 import {
   discordAllowedToolNames,
@@ -1698,6 +1702,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           customTools: evalTools?.customTools ?? [
             ...authored,
             ...(systemTools ? machineCodingTools(cwd, settingsStore) : []),
+            ...(options.joinedMachines &&
+            offersJoinedMachineShell({ lane, systemTools, discordAccess: access })
+              ? [
+                  joinedMachineShellTool(options.joinedMachines, settingsStore, {
+                    lane,
+                    conversationId: _conversationId ?? "operator",
+                    turn: capture,
+                  }),
+                ]
+              : []),
           ],
           ...(evalTools !== undefined
             ? { tools: evalTools.tools }

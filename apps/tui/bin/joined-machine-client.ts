@@ -2,10 +2,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { openGatewayValue, sealGatewayValue } from "../../clankie/src/gateway-encryption.ts";
 import { machineJoinKey } from "../../clankie/src/machine-join-crypto.ts";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
-import { promisify } from "node:util";
 import { z } from "zod";
 import type { CredentialStore } from "@clankie/credential-broker";
 import { machineAccessAllows } from "@clankie/protocol";
@@ -39,7 +38,6 @@ const JoinedMachineCredentialSchema = z
   })
   .strict();
 export type JoinedMachineCredential = z.infer<typeof JoinedMachineCredentialSchema>;
-const exec = promisify(execFile);
 
 /** TLS protects the carrier; machine envelopes independently authenticate the body. */
 export function machineJoinOrigin(value: string): string {
@@ -162,24 +160,85 @@ async function executeJoinedMachineRequest(
     return { id: request.id, ok: false, error: signal.aborted ? "revoked" : "operation_failed" };
   }
 }
-export const joinedMachineShell: NonNullable<JoinedMachinePorts["shell"]> = async (
-  command,
-  directory,
-  signal,
-) => {
-  const windows = process.platform === "win32";
-  const result = await exec(
-    windows ? "powershell.exe" : "/bin/sh",
-    windows ? ["-NoProfile", "-NonInteractive", "-Command", command] : ["-lc", command],
-    {
-      cwd: directory,
-      signal,
-      timeout: 30_000,
-      maxBuffer: 65_536,
-    },
-  );
-  return result.stdout;
-};
+/**
+ * The receiver's own shell. The command runs in its own process group (a process
+ * tree on Windows), so revocation, the time limit and an output overflow stop
+ * everything it started. On POSIX anything still in the group when the shell
+ * exits is stopped too. Known limits: a process that leaves its group (setsid, a
+ * daemon) escapes, and on Windows children still running after the shell exits
+ * are not stopped (no Job Object).
+ * The first line is always the receiver's own `[exit N]` or `[stopped …]`, so
+ * truncation cannot drop it and command output cannot forge it.
+ */
+export function createJoinedMachineShell(timeoutMs = 30_000): NonNullable<JoinedMachinePorts["shell"]> {
+  return (command, directory, signal) =>
+    new Promise<string>((resolve, reject) => {
+      if (signal.aborted) return reject(Error("revoked"));
+      const windows = process.platform === "win32";
+      const child = spawn(
+        windows ? "powershell.exe" : "/bin/sh",
+        windows ? ["-NoProfile", "-NonInteractive", "-Command", command] : ["-lc", command],
+        { cwd: directory, detached: !windows, stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
+      );
+      let stdout = "",
+        stderr = "",
+        bytes = 0,
+        stopped: string | undefined,
+        exited: string | undefined,
+        done = false;
+      const killGroup = () => {
+        if (child.pid === undefined) return;
+        try {
+          if (windows)
+            spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+              stdio: "ignore",
+              windowsHide: true,
+            });
+          else process.kill(-child.pid, "SIGKILL");
+        } catch {
+          // The group is already gone.
+        }
+      };
+      const stop = (reason?: string) => {
+        stopped ??= reason;
+        killGroup();
+      };
+      const collect = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
+        bytes += chunk.length;
+        if (bytes > 65_536) return stop("stopped after 64 KiB of output");
+        if (stream === "stdout") stdout += chunk.toString("utf8");
+        else stderr += chunk.toString("utf8");
+      };
+      child.stdout!.on("data", collect("stdout"));
+      child.stderr!.on("data", collect("stderr"));
+      const timer = setTimeout(() => stop(`stopped after ${timeoutMs / 1000} seconds`), timeoutMs);
+      const abort = () => stop();
+      signal.addEventListener("abort", abort, { once: true });
+      const finish = (error?: Error) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        signal.removeEventListener("abort", abort);
+        // POSIX: leftovers in the command's group do not outlive it. Windows has no
+        // tree to find once the shell has exited, and its PID may already be reused.
+        if (!windows) killGroup();
+        if (error) return reject(error);
+        if (signal.aborted) return reject(Error("revoked"));
+        const printed = stderr
+          ? stdout + (stdout && !stdout.endsWith("\n") ? "\n" : "") + `[stderr]\n${stderr}`
+          : stdout;
+        resolve(`[${stopped ?? exited ?? "exit unknown"}]\n${printed}`);
+      };
+      child.on("error", (error) => finish(error));
+      child.on("exit", (code, killedBy) => {
+        exited = code === null ? `stopped by ${killedBy ?? "signal"}` : `exit ${code}`;
+        // Let buffered output arrive; a background child holding the pipes is stopped.
+        setTimeout(() => finish(), 200).unref();
+      });
+      child.on("close", () => finish());
+    });
+}
+export const joinedMachineShell = createJoinedMachineShell();
 
 class JoinedMachineRevoked extends Error {}
 /** A fresh one-use challenge binds each encrypted request and independently keyed response. */

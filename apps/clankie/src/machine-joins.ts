@@ -2,7 +2,8 @@ import { openGatewayValue, sealGatewayValue } from "./gateway-encryption.ts";
 import { machineJoinHash as hash, machineJoinKey } from "./machine-join-crypto.ts";
 /** Service-owned join approval and revocation. No hosted gateway or account control plane. */
 import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { constants, existsSync, mkdirSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import type { CredentialStore } from "@clankie/credential-broker";
@@ -25,6 +26,8 @@ import {
   JoinedMachineIdSchema,
   JoinedMachineOperationSchema,
   JoinedMachinePollSchema,
+  JoinedShellAuditEntrySchema,
+  type JoinedShellAuditEntry,
   type MachineJoinStart,
   type MachineJoinLease,
   type JoinedMachineOperation,
@@ -75,6 +78,7 @@ export class MachineJoins {
   private readonly work = new Map<string, Work>();
   private readonly challenges = new Map<string, { machineId: string; expiresAt: number }>();
   private readonly file: string;
+  private readonly auditFile: string;
   private readonly options: {
     settings: SettingsStore;
     secrets: CredentialStore;
@@ -87,6 +91,7 @@ export class MachineJoins {
     mkdirSync(options.directory, { recursive: true, mode: 0o700 });
     privateDirectory(options.directory);
     this.file = join(options.directory, "machines.json");
+    this.auditFile = join(options.directory, "shell-audit.jsonl");
     if (existsSync(this.file)) {
       const rows = z.array(RegistrationSchema).max(64).parse(readPrivateJson(this.file));
       for (const row of rows) {
@@ -101,6 +106,58 @@ export class MachineJoins {
   private save() {
     writePrivateJson(this.file, [...this.registrations.values()]);
     this.options.changed?.();
+  }
+  /** Append-only and synced before the caller proceeds, so an audited effect is never unrecorded. */
+  async recordShell(entry: JoinedShellAuditEntry): Promise<void> {
+    const line = JSON.stringify(JoinedShellAuditEntrySchema.parse(entry)) + "\n";
+    privateDirectory(this.options.directory);
+    const handle = await open(
+      this.auditFile,
+      constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.nlink > 1 || (stat.mode & 0o077) !== 0) throw Error("unsafe_shell_audit");
+      await handle.appendFile(line);
+      await handle.datasync();
+    } finally {
+      await handle.close();
+    }
+  }
+  /** The most recent calls, each merged from its dispatch and outcome records. */
+  async shellAudit(limit = 50): Promise<{ entries: JoinedShellAuditEntry[] }> {
+    let text = "";
+    try {
+      privateDirectory(this.options.directory);
+      const handle = await open(this.auditFile, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.nlink > 1 || (stat.mode & 0o077) !== 0) throw Error("unsafe_shell_audit");
+        const length = Math.min(stat.size, 512 * 1024);
+        const buffer = Buffer.alloc(length);
+        await handle.read(buffer, 0, length, stat.size - length);
+        text = buffer.toString("utf8");
+        if (length < stat.size) text = text.slice(text.indexOf("\n") + 1);
+      } finally {
+        await handle.close();
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { entries: [] };
+      throw error;
+    }
+    const merged = new Map<string, JoinedShellAuditEntry>();
+    for (const line of text.split("\n")) {
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        continue; // A torn final line from a crash is not a record.
+      }
+      const parsed = JoinedShellAuditEntrySchema.safeParse(value);
+      if (parsed.success) merged.set(parsed.data.id, { ...merged.get(parsed.data.id), ...parsed.data });
+    }
+    return { entries: [...merged.values()].slice(-limit) };
   }
   get count(): number {
     return this.registrations.size;
@@ -355,10 +412,7 @@ export class MachineJoins {
     if (this.work.size >= 128) return Promise.reject(Error("join_capacity"));
     const request = { id: randomUUID(), operation };
     return new Promise((resolve) => {
-      const timer = setTimeout(
-        () => settle({ id: request.id, ok: false, error: "operation_failed" }),
-        timeoutMs,
-      );
+      const timer = setTimeout(() => settle({ id: request.id, ok: false, error: "unconfirmed" }), timeoutMs);
       const settle = (result: JoinedMachineResult) => {
         clearTimeout(timer);
         this.work.delete(request.id);

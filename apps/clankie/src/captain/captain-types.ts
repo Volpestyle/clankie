@@ -118,6 +118,8 @@ export interface CaptainOptions {
   readonly stateDir: string;
   /** Settings store; defaults to the owner-authored file. Reloaded per turn. */
   readonly settings?: SettingsStore;
+  /** Joined machines, for Clankie's own shell there beside his local coding tools. */
+  readonly joinedMachines?: import("./machine-coding-tools.ts").JoinedShellMachines;
   /** Live webhook readiness, rechecked before a queued Linear wake starts. */
   readonly linearFollowing?: () => Promise<boolean>;
   readonly linearWakeReceived?: (

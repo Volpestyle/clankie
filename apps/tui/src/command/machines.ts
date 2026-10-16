@@ -12,7 +12,7 @@ import {
 } from "@clankie/settings";
 
 const MACHINES_USAGE =
-  "Usage: clankie machines [list|discover] [--json]\n       clankie machines add NAME --ssh HOST [--shell posix|powershell]\n       clankie machines access NAME portal|workers|shell|screen\n       clankie machines sandbox status|remove\n       clankie machines sandbox prepare portal|workers|shell --workspace DIR [--workspace DIR] [--home DIR]\n       clankie machines remove NAME\n       clankie machines sessions NAME [--connect SESSION --id CONNECTION] [--json]";
+  "Usage: clankie machines [list|discover] [--json]\n       clankie machines add NAME --ssh HOST [--shell posix|powershell]\n       clankie machines access NAME portal|workers|shell|screen\n       clankie machines sandbox status|remove\n       clankie machines sandbox prepare portal|workers|shell --workspace DIR [--workspace DIR] [--home DIR]\n       clankie machines remove NAME\n       clankie machines shell-audit\n       clankie machines sessions NAME [--connect SESSION --id CONNECTION] [--json]";
 export const MACHINE_RESTART_HINT =
   "Named machine connections apply immediately. Default workspace changes require clankie restart captain.";
 export async function runMachinesCommand(
@@ -81,6 +81,7 @@ export async function runMachinesCommand(
     method = "GET",
     body: string | undefined;
   if (verb === "access-refusals" && values.length === 1) path += "/access-refusals";
+  else if (verb === "shell-audit" && values.length === 1) path += "/shell-audit";
   else if (verb === "discover" && values.length === 1) path += "?discover=true";
   else if (verb === "access" && name && rest.length === 1) {
     body = JSON.stringify(MachineAccessChangeSchema.parse({ accessLevel: rest[0] }));

@@ -4155,6 +4155,29 @@ failure, including a home that is gone for good, keeps it retrying after one
 notice. A joined seat refused by the machine's level names the machine, its
 level and the level required, inside the encrypted response.
 
+At `shell` or `screen`, Clankie can run his own shell on a joined machine with
+the `joined_machine_shell` tool. It is offered only in the owner console lane,
+never in Discord (even owner-only rooms) or to peer seats. Only turns the owner
+started may use it. Autonomy, Linear wakes and worker reports are refused, but
+input steered into an owner's running turn inherits that turn's owner status.
+Every call rechecks the machine's live level. The command runs as that machine's owner with `/bin/sh` or
+PowerShell. It starts in a folder approved at join, but the shell itself is not
+confined there (OS confinement is VUH-1804).
+
+It gets 30 seconds and up to 8192 characters of output. The first line is the
+joined machine's own `[exit N]` or `[stopped …]`, and stderr is marked. The command
+runs in its own process group (a process tree on Windows). A time limit,
+revocation or a level below `shell` stops everything it started, and anything
+still running when it ends is stopped too. A process that deliberately leaves the
+group (`setsid`, a daemon) is not, and on Windows children still running after
+the shell exits are not stopped. At `screen`, a shell can also reach the screen
+through the machine's own permissions without the screen-lending consent; screen
+lending without shell is not available, so an owner who wants neither chooses
+`workers`.
+
+Each call is recorded on the home before anything is sent; `machines shell-audit`
+lists the records.
+
 From an approved folder on a joined install, `clankie claude [--new | --conversation ID | --resume … | --reset]`
 opens the local Claude Code seat in a workspace chat stored at Clankie's home.
 Plain `clankie claude` reuses an existing chat for that machine and folder, or
@@ -8261,6 +8284,16 @@ success. Revoke alone is not proof that an outstanding screen effect stopped.
 with the machine, selected and required levels, observation time and owner fix.
 Doctor includes unresolved observations; an owner's sufficient access grant
 removes them from the view. This read never raises machine authority.
+
+`clankie machines shell-audit --json` (`GET /v1/machines/shell-audit`) lists
+Clankie's recent joined-machine shell calls. Each record holds the lane, the
+origin (`owner` or a refused `autonomous`), the conversation, machine, folder,
+SHA-256 of the command, outcome and the exit code the joined machine reported.
+`unknown` means the home stopped waiting, so the command may or may not have run.
+Doctor shows the last 20 as `joinedShellAudit`. A record is synced before the
+command is sent, and a call that cannot be recorded is refused. The audit stores
+only the digest, but the full command text stays in that conversation's session
+transcript. The digest is a convention, not secrecy.
 
 ### `fleet processes` / `fleet processes retire`
 
