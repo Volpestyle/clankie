@@ -1,0 +1,99 @@
+{
+  "room": "blinker city #house-hunting (1052402897645752351:1551975693582336060)",
+  "source": "~/.clankie/captain/turn-settled.jsonl joined with discord-text-inbox deliveries by runId; actor IDs truncated, no message content",
+  "turns": [
+    {
+      "runId": "turn-1-1558196139973672991",
+      "acceptedAt": "2026-10-09T19:15:20.416Z",
+      "outcome": "completed",
+      "session": "room handoff",
+      "actor": "non-owner \u20266782",
+      "toolCount": {
+        "house_hunting": 22,
+        "send_text_update": 1,
+        "browser_tool_search": 3,
+        "browser_browser_use_read": 11,
+        "browser_browser_use_open": 1,
+        "browser_browser_use_snapshot": 1,
+        "browser_browser_use_screenshot": 2,
+        "browser_browser_use_evaluate": 5
+      },
+      "mutatingCount": 0
+    },
+    {
+      "runId": "turn-1-1558216942865883217",
+      "acceptedAt": "2026-10-09T20:37:53.941Z",
+      "outcome": "completed",
+      "session": "room handoff",
+      "actor": "non-owner \u20266782",
+      "toolCount": {
+        "house_hunting": 4,
+        "browser_browser_use_read": 2
+      },
+      "mutatingCount": 0
+    },
+    {
+      "runId": "turn-1-1558220104112676875",
+      "acceptedAt": "2026-10-09T20:50:30.568Z",
+      "outcome": "completed",
+      "session": "room handoff",
+      "actor": "non-owner \u20266782",
+      "toolCount": {
+        "house_hunting": 6
+      },
+      "mutatingCount": 0
+    },
+    {
+      "runId": "turn-1-1558628916577566802",
+      "acceptedAt": "2026-10-10T23:54:55.969Z",
+      "outcome": "completed",
+      "session": "room handoff",
+      "actor": "non-owner \u20266782",
+      "toolCount": {},
+      "mutatingCount": 0
+    },
+    {
+      "runId": "turn-1-1558628963306442848",
+      "acceptedAt": "2026-10-10T23:55:05.143Z",
+      "outcome": "completed",
+      "session": "room handoff",
+      "actor": "non-owner \u20266782",
+      "toolCount": {},
+      "mutatingCount": 0
+    },
+    {
+      "runId": "turn-1-1558629024476045392",
+      "acceptedAt": "2026-10-10T23:55:19.650Z",
+      "outcome": "completed",
+      "session": "room handoff",
+      "actor": "non-owner \u20266782",
+      "toolCount": {
+        "house_hunting": 5,
+        "send_text_update": 1,
+        "browser_browser_use_read": 6,
+        "browser_tool_search": 1,
+        "browser_browser_use_snapshot": 2,
+        "browser_browser_use_close": 1
+      },
+      "mutatingCount": 0
+    },
+    {
+      "runId": "turn-1-1558653260456263690",
+      "acceptedAt": "2026-10-11T01:31:47.962Z",
+      "outcome": "completed",
+      "session": "room handoff",
+      "actor": "non-owner \u20266782",
+      "toolCount": {
+        "house_hunting": 5,
+        "send_text_update": 1,
+        "browser_tool_search": 1,
+        "browser_browser_use_read": 6,
+        "browser_browser_use_snapshot": 1,
+        "browser_browser_use_open": 1,
+        "browser_browser_use_screenshot": 1,
+        "browser_browser_use_close": 1
+      },
+      "mutatingCount": 0
+    }
+  ]
+}

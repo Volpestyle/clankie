@@ -1,0 +1,10 @@
+clankie heavy: light lane waiting (0/4 held, 1 queued)
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1831-wren
+
+
+ Test Files  3 passed (3)
+      Tests  17 passed (17)
+   Start at  12:17:32
+   Duration  4.61s (transform 1.13s, setup 35ms, import 2.55s, tests 6.05s, environment 0ms)
+
