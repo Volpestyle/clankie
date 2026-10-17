@@ -132,8 +132,9 @@ The opt-in browser gate uses installed Chromium (override
 `ACTIVITY_TEST_CHROMIUM`), actual PNG decoding and Web Audio against loopback HTTP
 and WebSockets, with the shipped SDK talking to a local Discord RPC fixture.
 It writes desktop, phone and tablet screenshots under
-`.local/testing/activity-browser/`. Live Discord launch configuration and human
-playback quality remain owner checks.
+`.local/testing/activity-browser/`. Official application setup and deployment
+remain prerequisites for live Discord verification; the local browser check
+does not establish live launch or playback quality.
 
 ## Running it
 

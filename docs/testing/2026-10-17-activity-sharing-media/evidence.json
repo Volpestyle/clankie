@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "fixture-proof.json",
+      "size": 65785,
+      "sha256": "1e260e59f5ca9254626ccadf494edbd57b043885eb91c743ba444ca6e0d8d375",
+      "url": "clankie://evidence/sha256/1e260e59f5ca9254626ccadf494edbd57b043885eb91c743ba444ca6e0d8d375"
+    },
+    {
+      "path": "phone-animation.png",
+      "size": 7614,
+      "sha256": "f2c7bb78864763f4fa3536724d6ecf0d8f79c271aea9579825c6653208c90253",
+      "url": "clankie://evidence/sha256/f2c7bb78864763f4fa3536724d6ecf0d8f79c271aea9579825c6653208c90253"
+    },
+    {
+      "path": "revoked-terminal.png",
+      "size": 12461,
+      "sha256": "394aa729077dcabc0184c9da65eed80149bcee31ea75168cc9249e88de51c092",
+      "url": "clankie://evidence/sha256/394aa729077dcabc0184c9da65eed80149bcee31ea75168cc9249e88de51c092"
+    },
+    {
+      "path": "tablet-animation.png",
+      "size": 9014,
+      "sha256": "cb0f167cc21ab2185e2682239b991cafccebb5fcefdefa53511ed3640be3e6f8",
+      "url": "clankie://evidence/sha256/cb0f167cc21ab2185e2682239b991cafccebb5fcefdefa53511ed3640be3e6f8"
+    },
+    {
+      "path": "tenant-a-game-sound.png",
+      "size": 24058,
+      "sha256": "a2a61c11beb40d2b51acb84ca3744ed4667e0f2af3c6b32f473e621ec1ad057b",
+      "url": "clankie://evidence/sha256/a2a61c11beb40d2b51acb84ca3744ed4667e0f2af3c6b32f473e621ec1ad057b"
+    },
+    {
+      "path": "tenant-a-switched-animation.png",
+      "size": 9725,
+      "sha256": "2dbcfeb9463a63ac85a774d48089a9805d2910e6524d0b11690c55cfd437aeb2",
+      "url": "clankie://evidence/sha256/2dbcfeb9463a63ac85a774d48089a9805d2910e6524d0b11690c55cfd437aeb2"
+    },
+    {
+      "path": "tenant-b-image.png",
+      "size": 9338,
+      "sha256": "b0c7218774fb535188d6950a0676458750e7028388cd43e63df8b88027bc566a",
+      "url": "clankie://evidence/sha256/b0c7218774fb535188d6950a0676458750e7028388cd43e63df8b88027bc566a"
+    }
+  ]
+}

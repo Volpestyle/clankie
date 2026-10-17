@@ -66,6 +66,7 @@ export class ActivitySharing {
   private readonly installationId: string;
   private readonly tenantId: string;
   private readonly active = new Map<string, ActiveShare>();
+  private readonly transitions = new Set<string>();
   private client: ReturnType<typeof createActivityShareClient> | undefined;
   private closed = false;
   private busy = false;
@@ -138,6 +139,7 @@ export class ActivitySharing {
     this.closed = true;
     const active = [...this.active.values()];
     this.active.clear();
+    this.transitions.clear();
     for (const share of active) this.release(share);
     this.client?.close();
     this.notifyBusy();
@@ -236,43 +238,52 @@ export class ActivitySharing {
         channelId: input.action === "switch" ? "" : input.channelId,
       };
       await this.admit(scope, authorize);
-      const session =
-        previous === undefined
-          ? await client.start({
-              scope,
-              source,
-              ...(input.action !== "switch" && input.ttlMs !== undefined ? { ttlMs: input.ttlMs } : {}),
-            })
-          : await client.switchSource(previous, source);
-      const sink = client.sink(session);
-      const old = this.active.get(session.shareId);
-      if (old !== undefined) {
-        this.active.delete(session.shareId);
-        this.release(old);
-      }
-      const active: ActiveShare = { session, sink };
-      this.active.set(session.shareId, active);
-      const deadline = Date.now() + 3_000;
-      while (!sink.connected && !this.closed && Date.now() < deadline)
-        await new Promise<void>((done) => setTimeout(done, 10));
+      // The old producer closes before the replacement's HTTP receipt arrives.
+      // Keep its compute hold across that transfer, including source attachment.
+      const transition = previous && this.active.has(previous.shareId) ? previous.shareId : undefined;
+      if (transition !== undefined) this.transitions.add(transition);
       try {
-        if (!sink.connected) throw new Error("activity_producer_unavailable");
-        await this.admit(session.scope, authorize);
-        const detach = await producer.attach(createActivityShareFrameSink(sink), sink);
-        if (detach !== undefined) active.detach = detach;
-        if (this.active.get(session.shareId) !== active || !sink.connected) {
-          this.release(active);
-          throw new Error("activity_producer_unavailable");
+        const session =
+          previous === undefined
+            ? await client.start({
+                scope,
+                source,
+                ...(input.action !== "switch" && input.ttlMs !== undefined ? { ttlMs: input.ttlMs } : {}),
+              })
+            : await client.switchSource(previous, source);
+        const sink = client.sink(session);
+        const old = this.active.get(session.shareId);
+        if (old !== undefined) {
+          this.active.delete(session.shareId);
+          this.release(old);
         }
-        await this.admit(session.scope, authorize);
-        if (imageFrame !== undefined) sink.publishFrame(imageFrame);
+        const active: ActiveShare = { session, sink };
+        this.active.set(session.shareId, active);
+        const deadline = Date.now() + 3_000;
+        while (!sink.connected && !this.closed && Date.now() < deadline)
+          await new Promise<void>((done) => setTimeout(done, 10));
+        try {
+          if (!sink.connected) throw new Error("activity_producer_unavailable");
+          await this.admit(session.scope, authorize);
+          const detach = await producer.attach(createActivityShareFrameSink(sink), sink);
+          if (detach !== undefined) active.detach = detach;
+          if (this.active.get(session.shareId) !== active || !sink.connected) {
+            this.release(active);
+            throw new Error("activity_producer_unavailable");
+          }
+          await this.admit(session.scope, authorize);
+          if (imageFrame !== undefined) sink.publishFrame(imageFrame);
+          this.notifyBusy();
+          const receipt = await this.effect(this.options.launch, session);
+          if (receipt?.outcome === "refused") sink.close();
+          return { session, ...(receipt === undefined ? {} : { receipt }) };
+        } catch (error) {
+          sink.close();
+          throw error;
+        }
+      } finally {
+        if (transition !== undefined) this.transitions.delete(transition);
         this.notifyBusy();
-        const receipt = await this.effect(this.options.launch, session);
-        if (receipt?.outcome === "refused") sink.close();
-        return { session, ...(receipt === undefined ? {} : { receipt }) };
-      } catch (error) {
-        sink.close();
-        throw error;
       }
     }
     const session = await this.current(input.shareId, input.generation, authorize);
@@ -320,7 +331,7 @@ export class ActivitySharing {
   }
 
   private notifyBusy() {
-    const busy = this.active.size > 0;
+    const busy = !this.closed && (this.active.size > 0 || this.transitions.size > 0);
     if (busy === this.busy) return;
     this.busy = busy;
     this.options.onBusyChange?.(busy);

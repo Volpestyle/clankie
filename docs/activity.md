@@ -80,8 +80,9 @@ failure and refused/anonymous admission. The
 Discord RPC and admission provider boundaries use local fixtures; no Discord
 account, tunnel or external media provider is contacted.
 
-The live Discord iframe, official application configuration, distributed launch
-qualification and human playback quality still require the owner's live check.
-Local browser evidence does not establish those results. See the
+Official application registration and deployment remain prerequisites. Recorded
+Discord iframe, launch, routing and playback checks remain pending; agents can
+perform the technical verification once that setup is authorized and deployed.
+Local browser evidence does not establish those live results. See the
 [wire reference](../apps/discord-activity/README.md#scoped-general-media-core) and
 [ADR 0233](adr/0233-activity-shares-own-their-media-scope.md).

@@ -610,6 +610,7 @@ it("attaches an existing game producer, switches to an exact image, returns one-
   let detached = 0;
   let permit = true;
   let loseLaunch = false;
+  let failAttach = false;
   const f = await ownerPlane(p, {
     tenantId: "customer",
     installationId: "current-install",
@@ -622,6 +623,7 @@ it("attaches an existing game producer, switches to an exact image, returns one-
           ? {
               source,
               attach: (sink) => {
+                if (failAttach) throw new Error("activity_source_unavailable");
                 game = sink;
                 return () => {
                   detached += 1;
@@ -725,6 +727,7 @@ it("attaches an existing game producer, switches to an exact image, returns one-
   );
   expect(v.messages.at(-1)!.frame).not.toHaveProperty("frame");
   expect(detached).toBe(1);
+  expect(busy).toEqual([true]);
   oldGame.publishFrame({ ...frame(500), schemaVersion: 1, surface: "gba_emulator", frame: 500 });
   expect(
     (await f.command({ action: "stop", shareId: created.session.shareId, generation: 2 })).body,
@@ -748,6 +751,23 @@ it("attaches an existing game producer, switches to an exact image, returns one-
   await vi.waitFor(() => expect(busy.at(-1)).toBe(false));
   expect(detached).toBe(2);
   await vi.waitFor(async () => expect((await f.command({ action: "list" })).body).toEqual({ sessions: [] }));
+  loseLaunch = false;
+  const replacing = (
+    await f.command({ action: "start", sourceId: "existing-game", guildId: "1", channelId: "2" })
+  ).body as { session: ActivityShareSession };
+  failAttach = true;
+  expect(
+    (
+      await f.command({
+        action: "switch",
+        shareId: replacing.session.shareId,
+        generation: 1,
+        sourceId: "existing-game",
+      })
+    ).ok,
+  ).toBe(false);
+  await vi.waitFor(() => expect(busy.at(-1)).toBe(false));
+  expect(busy).toEqual([true, false, true, false, true, false]);
 });
 
 it("decodes real delivered MP4 audio and GIF animation, fences switches and cleans its owned media on stop, TTL, EOF and shutdown", async () => {
@@ -848,21 +868,19 @@ it("decodes real delivered MP4 audio and GIF animation, fences switches and clea
     conversationId,
     sourceRoot: f.root,
     path: "demo.mp4",
-    mediaType: "video/mp4",
   });
   const gif = await f.files.publish({
     conversationId,
     sourceRoot: f.root,
     path: "animation.gif",
-    mediaType: "image/gif",
   });
   const png = await f.files.publish({ conversationId, sourceRoot: f.root, path: "view.png" });
+  expect(video.mediaType).toBe("video/mp4");
   for (const path of ["too-long.mp4", "invalid.mp4"]) {
     const refused = await f.files.publish({
       conversationId,
       sourceRoot: f.root,
       path,
-      mediaType: "video/mp4",
     });
     expect(
       (
@@ -1089,20 +1107,19 @@ it("plays exact delivered WAV and MP3 through scoped audio-only demos, switches 
     conversationId,
     sourceRoot: f.root,
     path: "sound.wav",
-    mediaType: "audio/wav",
   });
   const mp3 = await f.files.publish({
     conversationId,
     sourceRoot: f.root,
     path: "sound.mp3",
-    mediaType: "audio/mpeg",
   });
   const long = await f.files.publish({
     conversationId,
     sourceRoot: f.root,
     path: "too-long.wav",
-    mediaType: "audio/wav",
   });
+  expect(wav.mediaType).toBe("audio/wav");
+  expect(mp3.mediaType).toBe("audio/mpeg");
   expect(
     (
       await f.command({
