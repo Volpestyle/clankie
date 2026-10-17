@@ -398,6 +398,7 @@ function mcpLaneTool(
           server: tool.server,
           tool: tool.name,
           arguments: parameters,
+          ...(scope && tool.name === "get_issue" ? { resultMode: "data" as const } : {}),
           ...(turn.conversationAuthority ? { conversationAuthority: turn.conversationAuthority } : {}),
           ...(serviceAccess
             ? {
