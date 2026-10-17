@@ -261,7 +261,12 @@ logs. Discord faces are app-baked PNGs served under content-hashed HTTPS paths
 by the existing Activity origin
 ([ADR 0147](adr/0147-an-agent-persona-outlives-its-herdr-seat.md)).
 Herdr's native event subscription advances the volatile fleet cursor; persona,
-seat, channel, and stance changes advance the same cursor. Foreground apps
+seat, channel, and stance changes advance the same cursor. Seat status waits are
+Herdr `agent.wait` requests held on that socket inside the service, never a
+process per seat; a local Codex seat hears its pane close from the feed; and
+catalog coordination shares one census per cursor. Watched transcripts fold
+from a byte checkpoint, Claude's replaying from its last safe point when
+parallel tool results branch the chain. Foreground apps
 therefore render one current seats/personas/channels moment without polling or
 persisting a second world projection
 ([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)).

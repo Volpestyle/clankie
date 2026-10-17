@@ -132,6 +132,7 @@ import type { SavedAgentSession } from "../agent-sessions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
+import { NativePaneNotFoundError, nativeRequest } from "../herdr-native-request.ts";
 import { createRemoteHireReceipts } from "../remote-hire-receipts.ts";
 import { materializeOwnerAttachments } from "../owner-attachments.ts";
 import { createPersonaImageSource, personaImagesExtension } from "../persona-images.ts";
@@ -497,6 +498,39 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       run: (args: readonly string[]) => deps.runtimes!.runNamed!(entry.id, args, undefined, undefined, entry),
     })),
   ];
+  // A local Codex seat hears its pane close from the fleet event feed instead
+  // of polling `herdr pane get` every few seconds (VUH-2391). A restarted feed
+  // may have missed a close, so each watched pane is read once then.
+  const paneGoneListeners = new Map<string, Set<() => void>>();
+  const paneGone = (paneId: string) => {
+    for (const gone of paneGoneListeners.get(paneId) ?? []) gone();
+  };
+  const watchPaneGone = (paneId: string, gone: () => void) => {
+    let once = false;
+    const listener = () => {
+      if (once) return;
+      once = true;
+      stop();
+      gone();
+    };
+    const stop = () => {
+      const listeners = paneGoneListeners.get(paneId);
+      listeners?.delete(listener);
+      if (listeners?.size === 0) paneGoneListeners.delete(paneId);
+    };
+    paneGoneListeners.set(paneId, (paneGoneListeners.get(paneId) ?? new Set()).add(listener));
+    return stop;
+  };
+  // The feed and the CLI it replaces both reach Herdr through HERDR_SOCKET_PATH.
+  const fleetFeedSocket = process.env.HERDR_SOCKET_PATH?.trim() || undefined;
+  const recheckGonePanes = async () => {
+    if (fleetFeedSocket === undefined) return;
+    const binding = { runtime: "external" as const, socketPath: fleetFeedSocket, session: "default" };
+    for (const paneId of paneGoneListeners.keys())
+      await nativeRequest(binding, "pane.get", { pane_id: paneId }).catch((error: unknown) => {
+        if (error instanceof NativePaneNotFoundError) paneGone(paneId);
+      });
+  };
   const herdrRunner = routeHerdrFleets(
     options.nativeHerdrRunner ??
       createHerdrWatchRunner(
@@ -844,6 +878,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     seatAdapters: options.seatAdapters ?? [
       createCodexSeatAdapter({
         fleetGates: localFleetGates,
+        ...(deps.herdrAvailable?.() === false || fleetFeedSocket === undefined
+          ? {}
+          : { paneGone: watchPaneGone }),
         catalogObserved: observeCodexToolCatalog,
         ...(options.localCodexProcess === undefined
           ? {}
@@ -1219,7 +1256,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     deps.herdrAvailable?.() === false
       ? () => fleetChanges.close()
       : watchHerdrFleetChanges(fleetChanges, {
+          ...(fleetFeedSocket === undefined ? {} : { socketPath: fleetFeedSocket }),
           onPromptEdge: (edge) => promptEdges.record(edge),
+          onPaneClosed: paneGone,
+          onSubscribed: () => void recheckGonePanes(),
         });
   /** Pane join for the current roster, rebuilt with it on every census. */
   let liveEdgeSeats: readonly EdgeSeat[] = [];
@@ -3768,6 +3808,33 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     } finally {
       if (fleetRefresh === pending) fleetRefresh = undefined;
     }
+  }
+
+  // Catalog coordination shares one census per fleet cursor (VUH-2391): every
+  // Herdr event and fleet mutation moves the cursor, so an answer is never
+  // older than the last change it could have missed. Effects that need fresh
+  // native proof still take their own census.
+  let sharedCensus:
+    | { cursor: string; fleet: ReturnType<typeof observeFleet>; completedAt?: number }
+    | undefined;
+  function observeSharedFleet(): ReturnType<typeof observeFleet> {
+    const cursor = fleetChanges.current();
+    if (
+      sharedCensus?.cursor === cursor &&
+      (sharedCensus.completedAt === undefined ||
+        performance.now() - sharedCensus.completedAt < FLEET_FRESH_MS)
+    )
+      return sharedCensus.fleet;
+    const fleet = observeFleet();
+    const entry: NonNullable<typeof sharedCensus> = { cursor, fleet };
+    sharedCensus = entry;
+    fleet.then(
+      () => (entry.completedAt = performance.now()),
+      () => {
+        if (sharedCensus === entry) sharedCensus = undefined;
+      },
+    );
+    return fleet;
   }
 
   const checkoutObservations = new CheckoutObservationCache();
@@ -7067,8 +7134,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return recordNativeToolCatalog(paneId, report, workerTools, proof, operatorTools);
     },
 
+    fleetChangeCursor: () => fleetChanges.current(),
+
     async workerCatalogSeats() {
-      const fleet = await observeFleet();
+      const fleet = await observeSharedFleet();
       return fleet.seats.map((seat) => {
         const sessionId = nativeSessionId({
           terminalId: seat.seatId,
@@ -7112,7 +7181,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async toolCatalogHealth() {
-      const fleet = await observeFleet();
+      const fleet = await observeSharedFleet();
       const seats = await Promise.all(
         [
           ...fleet.seats.map((seat) => ({ seat, bridge: "worker" as const })),

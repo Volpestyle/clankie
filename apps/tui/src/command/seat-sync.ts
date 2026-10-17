@@ -3,7 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import {
-  readHerdrSeatTranscript,
+  readHerdrSeatTranscriptSince,
   SeatTranscriptUploadSchema,
   type SeatTranscriptUpload,
 } from "@clankie/agent-transcript";
@@ -27,6 +27,8 @@ export async function runSeatSyncCommand(
     signal?: AbortSignal;
     /** Remote hooks retain only IDs the service has acknowledged, never transcript text. */
     checkpointPath?: string;
+    /** Where the acknowledged native fold is kept between hooks (ids and offsets, never text). */
+    transcriptCheckpointPath?: string;
   } = {},
 ): Promise<number> {
   if (args.length) throw new Error("Usage: clankie seat-sync (native seat hook JSON on stdin)");
@@ -79,25 +81,38 @@ export async function runSeatSyncCommand(
       : basename(hook.transcript_path) === `${sessionId}.jsonl`)
   )
     throw new Error("Seat transcript does not match the launched session");
-  const transcript = readHerdrSeatTranscript(harness, {
-    source: "native-seat",
-    kind: "path",
-    value: hook.transcript_path,
-  });
+  const url = new URL("/v1/seat/transcript", commandHost({ ...options, env }));
+  if (env.CLANKIE_CONVERSATION_ID) url.searchParams.set("conversationId", env.CLANKIE_CONVERSATION_ID);
+  // Each hook continues from the fold the service last acknowledged (VUH-2391),
+  // so it reads and sends what the session appended since, not the whole
+  // session. A start or resume replays the retained window once.
+  const foldPath =
+    options.transcriptCheckpointPath ?? join(tmpdir(), `clankie-seat-transcript-${sessionId}.json`);
+  const saved = hook.hook_event_name === "SessionStart" ? undefined : readFold(foldPath, sessionId, url.href);
+  const transcript = readHerdrSeatTranscriptSince(
+    harness,
+    { source: "native-seat", kind: "path", value: hook.transcript_path },
+    saved,
+  );
+  const saveFold = () => {
+    if (transcript)
+      writePrivate(foldPath, { sessionId, target: url.href, transcript: transcript.checkpoint });
+  };
   const activity: SeatTranscriptUpload["activity"] =
     hook.hook_event_name === "PreCompact"
       ? undefined
       : hook.hook_event_name === "UserPromptSubmit" || hook.hook_event_name === "PostToolUse"
         ? "responding"
         : "waiting";
-  if (!transcript?.entries.length && activity === undefined) return 0;
+  if (!transcript?.entries.length && activity === undefined) {
+    saveFold();
+    return 0;
+  }
   const credential = await resolveOperatorCredential({
     env,
     ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
   });
   if (!credential) throw new Error("Seat transcript needs the operator credential");
-  const url = new URL("/v1/seat/transcript", commandHost({ ...options, env }));
-  if (env.CLANKIE_CONVERSATION_ID) url.searchParams.set("conversationId", env.CLANKIE_CONVERSATION_ID);
   // One upload budget for the whole transcript, not ten seconds per page.
   const budget = () =>
     options.signal
@@ -149,25 +164,12 @@ export async function runSeatSyncCommand(
       );
     if (options.checkpointPath) {
       for (const entry of entries) acknowledged.add(entry.id);
-      const temporary = `${options.checkpointPath}.${process.pid}.tmp`;
-      try {
-        // Keep the checkpoint bounded to the native reader's retained history.
-        const ids = (transcript?.entries ?? []).flatMap((entry) =>
-          acknowledged.has(entry.id) ? [entry.id] : [],
-        );
-        writeFileSync(temporary, JSON.stringify({ sessionId, target: url.href, entries: ids }), {
-          mode: 0o600,
-        });
-        renameSync(temporary, options.checkpointPath);
-      } catch {
-        /* A failed checkpoint only causes an idempotent replay. */
-      } finally {
-        try {
-          rmSync(temporary, { force: true });
-        } catch {
-          /* best-effort cleanup */
-        }
-      }
+      // Keep the checkpoint bounded to the native reader's retained window, newest last.
+      writePrivate(options.checkpointPath, {
+        sessionId,
+        target: url.href,
+        entries: [...acknowledged].slice(-RETAINED_ENTRIES),
+      });
     }
   };
   const upload = async () => {
@@ -195,6 +197,7 @@ export async function runSeatSyncCommand(
   for (let attempt = 0; ; attempt += 1) {
     try {
       await upload();
+      saveFold();
       return 0;
     } catch (error) {
       const wait = options.retryDelaysMs?.[attempt];
@@ -206,3 +209,44 @@ export async function runSeatSyncCommand(
 }
 
 export class SeatSessionRetiredError extends Error {}
+
+/** The native reader's retained window (agent-transcript MAX_ENTRIES). */
+const RETAINED_ENTRIES = 9_000;
+/** A fold checkpoint past this is not one this command wrote. */
+const FOLD_CHECKPOINT_MAX_BYTES = 64 * 1024 * 1024;
+
+function readFold(path: string, sessionId: string, target: string): unknown {
+  try {
+    if (statSync(path).size > FOLD_CHECKPOINT_MAX_BYTES) return undefined;
+    const saved: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return typeof saved === "object" &&
+      saved !== null &&
+      "sessionId" in saved &&
+      saved.sessionId === sessionId &&
+      "target" in saved &&
+      saved.target === target &&
+      "transcript" in saved
+      ? saved.transcript
+      : undefined;
+  } catch {
+    /* Missing or invalid checkpoints replay the window safely. */
+    return undefined;
+  }
+}
+
+/** Atomic owner-only replace; a failed write only causes an idempotent replay. */
+function writePrivate(path: string, value: unknown): void {
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
+    renameSync(temporary, path);
+  } catch {
+    /* A failed checkpoint only causes an idempotent replay. */
+  } finally {
+    try {
+      rmSync(temporary, { force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+}

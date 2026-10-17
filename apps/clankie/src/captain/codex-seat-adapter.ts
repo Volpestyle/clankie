@@ -44,6 +44,11 @@ export function createCodexSeatAdapter(
     /** Service-owned process identity; returned cleanup revokes its local fleet access. */
     localProcess?: (pid: number, pane: string) => LocalCodexRegistration;
     herdr?: (args: readonly string[]) => Promise<unknown>;
+    /**
+     * Calls `gone` once the pane closes, from Herdr's event feed; returns the
+     * unsubscribe. Without it the seat polls `herdr pane get` (a remote fleet).
+     */
+    paneGone?: (paneId: string, gone: () => void) => () => void;
     trackerOverrides?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<string[]>;
     /** A local hire's MCP profile overrides (`codexWorkerMcpOverrides`). */
     workerMcpOverrides?: typeof codexWorkerMcpOverrides;
@@ -281,13 +286,13 @@ export function createCodexSeatAdapter(
       const pending = new Promise<SeatStartResult>((resolve) => {
         reportPending = resolve;
       });
-      let monitor: ReturnType<typeof setInterval> | undefined;
+      let monitor: (() => void) | undefined;
       const close = async () => {
         if (closed) return;
         closed = true;
         releaseProcess?.();
         startupAbort.abort(new Error("Codex native pane closed"));
-        clearInterval(monitor);
+        monitor?.();
         if (ref) controls.delete(ref.sessionId);
         await seat?.close();
         observe({ method: "connection/closed", params: { code: null } });
@@ -386,12 +391,17 @@ export function createCodexSeatAdapter(
             ...(options.listenTimeoutMs === undefined ? {} : { listenTimeoutMs: options.listenTimeoutMs }),
             startView: async (args) => {
               // Monitor while waiting for owner trust as well as after startup.
-              monitor = setInterval(() => {
-                void herdr(["pane", "get", view.paneId]).catch((error: unknown) => {
-                  if (/pane_not_found|unknown_pane/u.test(String(error))) void close();
-                });
-              }, 3_000);
-              monitor.unref();
+              monitor?.();
+              if (options.paneGone) monitor = options.paneGone(view.paneId, () => void close());
+              else {
+                const poll = setInterval(() => {
+                  void herdr(["pane", "get", view.paneId]).catch((error: unknown) => {
+                    if (/pane_not_found|unknown_pane/u.test(String(error))) void close();
+                  });
+                }, 3_000);
+                poll.unref();
+                monitor = () => clearInterval(poll);
+              }
               await view.guard?.();
               await (view.start ? view.start("codex", args) : view.run(["codex", ...args]));
             },

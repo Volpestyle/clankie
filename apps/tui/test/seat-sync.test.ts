@@ -6,6 +6,10 @@ import { Readable } from "node:stream";
 import { expect, test, vi } from "vitest";
 import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
 
+/** Each hook keeps its acknowledged native fold here between runs. */
+const forgetFold = (sessionId: string) =>
+  rm(join(tmpdir(), `clankie-seat-transcript-${sessionId}.json`), { force: true });
+
 test("Codex hooks project only their bound native rollout and redact tools", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-seat-sync-"));
   const sessionId = randomUUID();
@@ -77,6 +81,7 @@ test("Codex hooks project only their bound native rollout and redact tools", asy
     });
   } finally {
     await rm(root, { recursive: true, force: true });
+    await forgetFold(sessionId);
   }
 });
 
@@ -142,6 +147,7 @@ test("seat hook uploads redacted native records to its selected conversation and
     expect(requests).toHaveLength(1);
   } finally {
     await rm(root, { recursive: true, force: true });
+    await forgetFold(sessionId);
   }
 });
 
@@ -181,6 +187,7 @@ test("native hooks report activity even before a transcript exists, but compacti
     );
   } finally {
     await rm(root, { recursive: true, force: true });
+    await forgetFold(sessionId);
   }
 });
 
@@ -249,6 +256,7 @@ test("seat sync omits internal channel deliveries but keeps queued human prompts
     expect(bodies[1]).toMatchObject({ entries: [], activity: "waiting" });
   } finally {
     await rm(root, { recursive: true, force: true });
+    await forgetFold(sessionId);
   }
 });
 
@@ -290,6 +298,7 @@ test("seat sync stops paging when the shared upload deadline expires", async () 
   } finally {
     timeout.mockRestore();
     await rm(root, { recursive: true, force: true });
+    await forgetFold(sessionId);
   }
 });
 
@@ -318,6 +327,7 @@ test("tool-call progress syncs mid-turn, at most once per burst", async () => {
     expect(bodies).toEqual([{ sessionId, entries: [], activity: "responding" }]);
   } finally {
     await rm(root, { recursive: true, force: true });
+    await forgetFold(sessionId);
     await rm(join(tmpdir(), `clankie-seat-sync-${sessionId}`), { force: true });
   }
 });
@@ -366,12 +376,93 @@ test("Codex PostToolUse uploads commentary before Stop and Stop flushes throttle
     await sync("PostToolUse");
     expect(bodies).toHaveLength(1);
     await sync("Stop");
-    expect(bodies[1]).toMatchObject({
-      entries: [{ text: "I found the cause and am fixing it" }, { text: "The fix passed" }],
-      activity: "waiting",
-    });
+    // The first progress upload was acknowledged; Stop sends what came after it.
+    expect(bodies[1]).toMatchObject({ entries: [{ text: "The fix passed" }], activity: "waiting" });
   } finally {
     await rm(root, { recursive: true, force: true });
+    await forgetFold(sessionId);
     await rm(join(tmpdir(), `clankie-seat-sync-${sessionId}`), { force: true });
+  }
+});
+
+test("each hook sends only what the Claude session appended since its acknowledged upload", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-seat-delta-"));
+  const sessionId = randomUUID();
+  const path = join(root, `${sessionId}.jsonl`);
+  const line = (record: Record<string, unknown>) => JSON.stringify(record) + "\n";
+  const call = (uuid: string, parentUuid: string, id: string) =>
+    line({
+      uuid,
+      parentUuid,
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: id } }] },
+    });
+  const result = (uuid: string, parentUuid: string, id: string) =>
+    line({
+      uuid,
+      parentUuid,
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: id, content: `${id} done` }] },
+    });
+  const bodies: Array<{ entries: Array<{ id: string }> }> = [];
+  let fail = false;
+  const sync = (hook_event_name = "Stop") =>
+    runSeatSyncCommand([], {
+      env: { CLANKIE_SEAT_SESSION_ID: sessionId, CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43) },
+      stdin: Readable.from([
+        JSON.stringify({ session_id: sessionId, transcript_path: path, hook_event_name }),
+      ]),
+      fetchImpl: async (_url, options) => {
+        if (fail) return new Response("", { status: 503 });
+        bodies.push(JSON.parse(String(options?.body)));
+        return Response.json({ ok: true });
+      },
+    });
+  const ids = () => bodies.at(-1)!.entries.map((entry) => entry.id);
+  try {
+    await writeFile(
+      path,
+      line({ uuid: "u1", parentUuid: null, type: "user", message: { content: "Run both" } }) +
+        line({
+          uuid: "a1",
+          parentUuid: "u1",
+          type: "assistant",
+          message: { content: [{ type: "text", text: "On it" }] },
+        }),
+    );
+    await sync();
+    expect(ids()).toEqual(["claude:u1", "claude:a1"]);
+
+    // Parallel calls whose results branch behind the chain head.
+    await writeFile(path, call("t1", "a1", "x") + call("t2", "t1", "y"), { flag: "a" });
+    await sync();
+    expect(ids()).toEqual(["claude:t1:tool:0", "claude:t2:tool:0"]);
+    await writeFile(path, result("r1", "t1", "x") + result("r2", "t2", "y"), { flag: "a" });
+    await sync();
+    expect(ids()).toEqual(["claude:r1:tool-result:0", "claude:r2:tool-result:0"]);
+
+    // An unacknowledged upload is sent again by the next hook.
+    await writeFile(
+      path,
+      line({
+        uuid: "a2",
+        parentUuid: "r2",
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Done" }] },
+      }),
+      { flag: "a" },
+    );
+    fail = true;
+    await expect(sync()).rejects.toThrow("next hook retries");
+    fail = false;
+    await sync();
+    expect(ids()).toEqual(["claude:a2"]);
+
+    // A start or resume replays the retained window once.
+    await sync("SessionStart");
+    expect(ids()).toHaveLength(7);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await forgetFold(sessionId);
   }
 });

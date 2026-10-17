@@ -305,7 +305,9 @@ live foreground harness and bridge ancestry (or the exact dedicated Codex
 environment. The roster carries the same observation in each seat's
 `harnessBridge`; the console flags missing/mismatched bridges and shows the
 selected pane's full fix when focused with `Ctrl+G`. Roster polls reuse these
-bounded process observations for up to five seconds; doctor takes a fresh sample.
+bounded process observations for up to a minute (fifteen seconds once the pane
+set changes); doctor takes a fresh sample. The sweep reads command lines and
+environments in batches, up to 1,024 node/Codex processes and 256 bridges.
 
 `toolCatalogHealth` reads the service's native catalog diagnostics for current
 Claude and Codex panes, including the operator head. The roster carries the
@@ -7579,7 +7581,12 @@ again when its hook definitions change.
 
 The CLI reads the matching native transcript locally, redacts display records,
 and posts bounded message/tool batches to `/v1/seat/transcript` with the operator
-credential. No host file path is read by the service. The session is pinned to its
+credential. Each hook continues from the native fold the service last
+acknowledged and sends only what the session appended since; that checkpoint
+(`$TMPDIR/clankie-seat-transcript-<session>.json`, owner-only) holds native ids,
+tool names and byte offsets, never transcript text. A missing, foreign or
+outgrown checkpoint, a rewound session, and every `SessionStart` replay the
+retained window once; the service deduplicates it. No host file path is read by the service. The session is pinned to its
 conversation; retries and resume retain the same native entry identities. The
 next hook retries retained records after a transport failure. The final page carries
 `responding` at prompt submission or tool progress and `waiting` at session start/end or stop/failure;

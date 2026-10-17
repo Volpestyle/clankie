@@ -88,3 +88,12 @@ flowchart LR
   polling fallback keeps a protocol mismatch degraded, not broken.
 - The plugin requires `clankie` and `herdr-lead` on `PATH` and activates on
   the next herdr server start after `herdr plugin link`.
+
+## Amendment: waits ride the socket (VUH-2391, 2026-10-17)
+
+Status waits no longer spawn `herdr agent wait` per watched seat (39 were live
+on 2026-10-17). The service sends the same `agent.wait` request on the
+configured socket and holds it open; a remote fleet keeps its shared `pane list`
+poll. Local Codex seats hear `pane.closed` from the fleet feed instead of
+polling `herdr pane get` every three seconds, and re-read their pane once
+whenever the feed resubscribes.

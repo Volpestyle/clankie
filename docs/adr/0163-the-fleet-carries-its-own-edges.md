@@ -191,3 +191,12 @@ seat and its observed persona when available. A captain delivery carries a
 verbatim excerpt; a confirmed close carries no invented speech. Owner DMs and
 room traffic do not become Clankie's own words. Surfaces that lack a known
 recipient location omit the visit rather than guessing one.
+
+## Amendment: Herdr 0.9.3 has no edge events (VUH-2391, 2026-10-17)
+
+The pinned Herdr 0.9.3 (protocol 22) has no `agent.prompted` or `agent.spawned`
+subscription and refuses a subscription that names them. The fleet feed had
+been refused and reconnected every second, so it never advanced the cursor
+from Herdr. It now asks once with the edge events and, on refusal, subscribes
+without them. On such a Herdr, prompt edges come only from confirmed native
+peer receipts (above); spawn edges come from the `agent list` parent.

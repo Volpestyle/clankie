@@ -221,6 +221,72 @@ describe("incremental seat transcript tailing", () => {
     );
   });
 
+  // Claude's record shape (VUH-2391): one record per content block, chained by
+  // parentUuid. Parallel results point at their own call, so the chain branches
+  // behind its head on every parallel batch.
+  const claudeLine = (record: Record<string, unknown>) =>
+    `${JSON.stringify({ timestamp: "2026-10-17T00:00:00Z", isSidechain: false, ...record })}\n`;
+  const prompt = (uuid: string, parentUuid: string | null, text: string) =>
+    claudeLine({ uuid, parentUuid, type: "user", message: { role: "user", content: text } });
+  const reply = (uuid: string, parentUuid: string, text: string) =>
+    claudeLine({ uuid, parentUuid, type: "assistant", message: { content: [{ type: "text", text }] } });
+  const call = (uuid: string, parentUuid: string, id: string) =>
+    claudeLine({
+      uuid,
+      parentUuid,
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: id } }] },
+    });
+  const result = (uuid: string, parentUuid: string, id: string) =>
+    claudeLine({
+      uuid,
+      parentUuid,
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: id, content: `${id} done` }] },
+    });
+
+  it("continues a Claude transcript from its byte checkpoint, matching a whole-file parse", () => {
+    let history = prompt("u1", null, "Fix it") + reply("a1", "u1", "Looking");
+    const file = seatFile(history);
+    readHerdrSeatTranscript("claude", sessionAt(file, "herdr:claude"));
+    const steps = [
+      call("t1", "a1", "x") + call("t2", "t1", "y"),
+      // Each result branches from its own call; the second rejoins the first's chain.
+      result("r1", "t1", "x"),
+      result("r2", "t2", "y"),
+      reply("a2", "r2", "Both passed"),
+      prompt("u2", "a2", "Ship it"),
+    ];
+    for (const step of steps) {
+      const checkpoint = statSync(file).size;
+      appendFileSync(file, step);
+      history += step;
+      io.reads.length = 0;
+      io.wholeFile = 0;
+      const tailed = readHerdrSeatTranscript("claude", sessionAt(file, "herdr:claude"));
+
+      expect(io.wholeFile).toBe(0);
+      expect(io.reads.every((read) => read.position > 0)).toBe(true);
+      expect(io.reads.at(-1)?.position).toBeLessThanOrEqual(checkpoint);
+      expect(tailed?.entries).toEqual(parseHerdrSeatTranscript("claude", history, true));
+    }
+  });
+
+  it("re-reads a Claude transcript whose chain re-roots behind its safe point", () => {
+    const first = prompt("u1", null, "First") + reply("a1", "u1", "One") + prompt("u2", "a1", "Second");
+    const file = seatFile(first);
+    readHerdrSeatTranscript("claude", sessionAt(file, "herdr:claude"));
+    // A rewind: the new prompt continues from the first reply, abandoning u2.
+    const rewind = reply("a2", "u2", "Two") + prompt("u3", "a1", "Instead");
+    appendFileSync(file, rewind);
+    io.reads.length = 0;
+    const tailed = readHerdrSeatTranscript("claude", sessionAt(file, "herdr:claude"));
+
+    expect(io.reads.some((read) => read.position === 0)).toBe(true);
+    expect(textsOf(tailed)).toEqual(["First", "One", "Instead"]);
+    expect(tailed?.entries).toEqual(parseHerdrSeatTranscript("claude", first + rewind, true));
+  });
+
   it("reports the identity of the session asked for, not the one that filled the tail", () => {
     const file = seatFile(codexLine("m1", "one"));
 

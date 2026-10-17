@@ -20,9 +20,15 @@ export type RefreshWorkerCatalogs = (
   authority?: WorkerCatalogRefreshAuthority,
 ) => Promise<FleetWorkerCatalogRefreshResult>;
 
+/** How often a quiet fleet re-checks a pending refresh, whose verdict comes after 30 seconds. */
+const PENDING_RECHECK_MS = 10_000;
+
 /** Coordinates only original native controllers. A missing controller fails visibly. */
 export function createWorkerToolRefresh(input: {
-  captain: Pick<CaptainPort, "workerCatalogSeats" | "refreshNativeWorkerCatalog" | "toolCatalogHealth">;
+  captain: Pick<
+    CaptainPort,
+    "workerCatalogSeats" | "refreshNativeWorkerCatalog" | "toolCatalogHealth" | "fleetChangeCursor"
+  >;
   local: ReturnType<typeof createLocalCodexCatalogCoordinator>;
   remote: RemoteCodexSeats;
   workerMcp: WorkerMcp;
@@ -32,6 +38,8 @@ export function createWorkerToolRefresh(input: {
   let revision = input.revision,
     stopped = false,
     ticking = false;
+  // The fleet cursor and revision the last sweep finished against, and when.
+  let swept: { cursor: string; revision: string; at: number } | undefined;
   type Seat = Awaited<ReturnType<NonNullable<CaptainPort["workerCatalogSeats"]>>>[number];
   type Result = FleetWorkerCatalogRefreshResult["seats"][number];
   const complete = new Map<string, string>();
@@ -286,7 +294,18 @@ export function createWorkerToolRefresh(input: {
   };
   const tick = async () => {
     if (stopped || ticking) return;
+    // A sweep reads the census, so it runs on a fleet change or a new revision
+    // (VUH-2391). A pending refresh also re-checks toward its 30-second verdict.
+    const cursor = input.captain.fleetChangeCursor?.();
+    if (
+      cursor !== undefined &&
+      swept?.cursor === cursor &&
+      swept.revision === revision &&
+      (pending.size === 0 || Date.now() - swept.at < PENDING_RECHECK_MS)
+    )
+      return;
     ticking = true;
+    const sweeping = revision;
     try {
       const roster = (await input.captain.workerCatalogSeats?.()) ?? [];
       const live = new Set(roster.map((row) => key(row)));
@@ -310,6 +329,7 @@ export function createWorkerToolRefresh(input: {
         const result = await perform({ paneId: seat.paneId }, revision);
         if (result.seats.some((row) => row.outcome === "skipped-busy")) continue;
       }
+      if (cursor !== undefined) swept = { cursor, revision: sweeping, at: Date.now() };
     } catch {
       /* A failed read leaves original controllers and receipts untouched. */
     } finally {

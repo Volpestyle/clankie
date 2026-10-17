@@ -113,6 +113,10 @@ class BoundedSet {
     this.keys.add(key);
     if (this.keys.size > MAX_REMEMBERED_KEYS) this.keys.delete(this.keys.values().next().value!);
   }
+  /** Oldest first, so restoring re-adds in the same eviction order. */
+  public list(): string[] {
+    return [...this.keys];
+  }
 }
 
 /** Insertion-ordered by last write; the oldest key leaves first. */
@@ -126,6 +130,10 @@ class BoundedMap {
     this.values.set(key, value);
     if (this.values.size > MAX_REMEMBERED_KEYS) this.values.delete(this.values.keys().next().value!);
   }
+  /** Oldest first, so restoring re-sets in the same eviction order. */
+  public list(): [string, string][] {
+    return [...this.values];
+  }
 }
 
 interface TailedTranscript {
@@ -136,9 +144,33 @@ interface TailedTranscript {
   mtimeMs: number;
   /** Byte offset just past the last complete line already folded into entries. */
   parsedBytes: number;
+  /** Codex and Grok hold the window; Claude holds up to CLAUDE_SLACK more before it. */
   entries: HerdrTranscriptEntry[];
   state: FlatTranscriptState;
+  claude?: ClaudeTail;
 }
+
+/** A Claude fold at the checkpoint, and the last point an append is not expected to branch behind. */
+interface ClaudeTail {
+  fold: ClaudeFoldState;
+  /** The buffer has dropped its oldest entries. */
+  trimmed: boolean;
+  safe?: ClaudeSafePoint;
+}
+
+interface ClaudeSafePoint {
+  readonly fold: ClaudeFoldState;
+  readonly offset: number;
+  readonly entries: HerdrTranscriptEntry[];
+  readonly trimmed: boolean;
+}
+
+/**
+ * Earlier entries a Claude tail keeps behind its window: a superseded queued
+ * prompt leaves the parse, so the window can reach back that far without a
+ * re-read. A larger burst of supersessions rebuilds from the file.
+ */
+const CLAUDE_SLACK = 1_024;
 
 /**
  * The seat tail re-reads every watched transcript once a second while a Codex or
@@ -152,6 +184,107 @@ const tails = new Map<string, TailedTranscript>();
 /** Codex and Grok map each record independently; Claude, Pi and Prime re-walk a parent chain. */
 function tailableAgent(agent: string): boolean {
   return agent === "codex" || agent === "grok";
+}
+
+/** Claude's append continues its chain fold (VUH-2391); Pi and Prime still re-parse on change. */
+function appendableAgent(agent: string): boolean {
+  return tailableAgent(agent) || agent === "claude";
+}
+
+/** What a tail answers: its window, never the slack behind it. */
+function windowOf(tail: TailedTranscript): HerdrTranscriptEntry[] {
+  return tail.entries.length > MAX_ENTRIES ? tail.entries.slice(-MAX_ENTRIES) : tail.entries;
+}
+
+/** Bytes a Claude tail folds past its safe point before taking a newer one. */
+const CLAUDE_SAFE_STRIDE = 64 * 1024;
+/** Without a safe head for this long, a safe point is taken anyway; a branch behind it re-reads. */
+const CLAUDE_SAFE_MAX_STRIDE = 8 * 1024 * 1024;
+
+/**
+ * Apply an append to a fold at `base`, landing the tail at `offset`. False when
+ * the fold cannot continue exactly, so the caller replays or re-reads.
+ */
+function applyClaude(
+  tail: TailedTranscript,
+  fold: ClaudeFoldState,
+  records: readonly Record<string, unknown>[],
+  base: { entries: HerdrTranscriptEntry[]; trimmed: boolean; safe: ClaudeSafePoint | undefined },
+  offset: number,
+): boolean {
+  const appended = claudeAppend(fold, records);
+  if (appended === "rebuild") return false;
+  const superseded = new Set(appended.superseded);
+  let entries = superseded.size ? base.entries.filter((entry) => !superseded.has(entry.id)) : base.entries;
+  if (appended.entries.length) entries = [...entries, ...appended.entries];
+  // A trimmed buffer that supersession shrank below the window no longer holds it.
+  if (base.trimmed && entries.length < MAX_ENTRIES) return false;
+  let trimmed = base.trimmed;
+  if (entries.length > MAX_ENTRIES + CLAUDE_SLACK) {
+    entries = entries.slice(-(MAX_ENTRIES + CLAUDE_SLACK / 2));
+    trimmed = true;
+  }
+  const stride = offset - (base.safe?.offset ?? 0);
+  const safe =
+    (fold.headSafe && stride >= CLAUDE_SAFE_STRIDE) || stride >= CLAUDE_SAFE_MAX_STRIDE
+      ? { fold: cloneClaudeFold(fold), offset, entries, trimmed }
+      : base.safe;
+  tail.claude = { fold, trimmed, ...(safe === undefined ? {} : { safe }) };
+  tail.entries = entries;
+  tail.parsedBytes = offset;
+  return true;
+}
+
+/**
+ * Fold the complete records after the tail's checkpoint. Claude continues its
+ * chain from the last parse; when an append branches behind the head (parallel
+ * tool results do), it replays from the last safe point. Only a fold that
+ * cannot continue from either, or a fresh tail, parses the whole file.
+ */
+function foldClaudeTail(path: string, size: number, tail: TailedTranscript): boolean {
+  const claude = tail.claude;
+  if (claude !== undefined && tail.parsedBytes > 0) {
+    const chunk = readRecordsFrom(path, tail.parsedBytes, size, false, true);
+    if (chunk.consumed === 0) return false;
+    const current = { entries: tail.entries, trimmed: claude.trimmed, safe: claude.safe };
+    if (applyClaude(tail, claude.fold, chunk.records, current, tail.parsedBytes + chunk.consumed))
+      return false;
+    const safe = claude.safe;
+    if (safe !== undefined) {
+      const replay = readRecordsFrom(path, safe.offset, size, false, true);
+      if (
+        applyClaude(
+          tail,
+          cloneClaudeFold(safe.fold),
+          replay.records,
+          { ...safe, safe },
+          safe.offset + replay.consumed,
+        )
+      )
+        return false;
+    }
+  }
+  const whole = readRecordsFrom(path, 0, size, true, true);
+  // Fold up to the last safe record first, so the next branch replays from there.
+  let split = whole.records.length - 1;
+  while (split >= 0 && !claudeSafe(whole.records[split]!)) split--;
+  if (split >= 0) {
+    const prefix = claudeFold(whole.records.slice(0, split + 1), true);
+    const trimmed = prefix.entries.length > MAX_ENTRIES + CLAUDE_SLACK;
+    const safe = {
+      fold: cloneClaudeFold(prefix.state),
+      offset: whole.ends![split]!,
+      entries: prefix.entries.slice(-(MAX_ENTRIES + CLAUDE_SLACK)),
+      trimmed,
+    };
+    if (applyClaude(tail, prefix.state, whole.records.slice(split + 1), { ...safe, safe }, whole.consumed))
+      return true;
+  }
+  const parsed = claudeFold(whole.records, true);
+  tail.claude = { fold: parsed.state, trimmed: parsed.entries.length > MAX_ENTRIES + CLAUDE_SLACK };
+  tail.entries = parsed.entries.slice(-(MAX_ENTRIES + CLAUDE_SLACK));
+  tail.parsedBytes = whole.consumed;
+  return true;
 }
 
 function freshState(): FlatTranscriptState {
@@ -175,24 +308,31 @@ export function readHerdrSeatTranscript(
   const cached = tails.get(key);
   const sameFile = cached !== undefined && cached.device === stats.dev && cached.inode === stats.ino;
   if (sameFile && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs) {
-    return { sessionKey, entries: keep(key, cached).entries };
+    return { sessionKey, entries: windowOf(keep(key, cached)) };
   }
 
   // Only strict growth on the same file is an append; a shrunk file, a new inode,
   // or a same-length rewrite in place is history we have to read again.
-  const tail =
-    sameFile && tailableAgent(agent) && stats.size > cached.size
-      ? cached
-      : {
-          device: stats.dev,
-          inode: stats.ino,
-          size: 0,
-          mtimeMs: 0,
-          parsedBytes: 0,
-          entries: [] as HerdrTranscriptEntry[],
-          state: freshState(),
-        };
+  const tail = sameFile && appendableAgent(agent) && stats.size > cached.size ? cached : freshTail(stats);
+  advanceTail(agent, path, stats, tail);
+  return { sessionKey, entries: windowOf(keep(key, tail)) };
+}
 
+function freshTail(stats: Stats): TailedTranscript {
+  return {
+    device: stats.dev,
+    inode: stats.ino,
+    size: 0,
+    mtimeMs: 0,
+    parsedBytes: 0,
+    entries: [],
+    state: freshState(),
+  };
+}
+
+/** Fold what the file gained since the tail's checkpoint; true when it read the whole file again. */
+function advanceTail(agent: string, path: string, stats: Stats, tail: TailedTranscript): boolean {
+  let whole = tail.parsedBytes === 0;
   if (tailableAgent(agent)) {
     let span = READ_CHUNK_BYTES;
     while (tail.parsedBytes < stats.size) {
@@ -210,16 +350,190 @@ export function readHerdrSeatTranscript(
       tail.state.index += chunk.records.length;
       tail.parsedBytes += chunk.consumed;
     }
+  } else if (agent === "claude") {
+    whole = foldClaudeTail(path, stats.size, tail);
   } else {
-    // ponytail: Claude and Pi re-walk a parent chain that an append can re-root,
-    // so they re-parse on change; give them a checkpointed chain to tail too if
-    // a long seat on those starts costing real CPU here.
+    // ponytail: Pi re-walks a parent chain that an append can re-root, so it
+    // re-parses on change; give it Claude's checkpointed fold if a long Pi
+    // seat starts costing real CPU here.
     tail.entries = parseHerdrSeatTranscript(agent, readFileSync(path, "utf8"), true).slice(-MAX_ENTRIES);
     tail.parsedBytes = stats.size;
+    whole = true;
   }
   tail.size = stats.size;
   tail.mtimeMs = stats.mtimeMs;
-  return { sessionKey, entries: keep(key, tail).entries };
+  return whole;
+}
+
+const hashes = (value: string) => {
+  const bytes = Buffer.from(value, "base64");
+  const set = new Set<number>();
+  for (let offset = 0; offset + 4 <= bytes.length; offset += 4) set.add(bytes.readUInt32LE(offset));
+  return set;
+};
+const hashText = (set: ReadonlySet<number>) => {
+  const bytes = Buffer.alloc(set.size * 4);
+  let offset = 0;
+  for (const hash of set) offset = bytes.writeUInt32LE(hash, offset);
+  return bytes.toString("base64");
+};
+const ClaudeFoldCheckpointSchema = z
+  .object({
+    includeChannelPrompts: z.boolean(),
+    kept: z.number().int().nonnegative(),
+    head: z.string().optional(),
+    headSafe: z.boolean(),
+    trailer: z.array(z.tuple([z.string(), z.string().nullable()])),
+    ids: z.string(),
+    parents: z.array(z.string()),
+    prompts: z.array(z.string()),
+    calls: z.array(z.string()),
+    toolNames: z.array(z.tuple([z.string(), z.string()])),
+    seen: z.array(z.string()),
+    queued: z.array(z.tuple([z.string(), z.array(z.string())])),
+    waitingParents: z.string(),
+    waitingCalls: z.string(),
+  })
+  .strict();
+
+/**
+ * Where a seat-sync's last upload left the native transcript (VUH-2391): the
+ * file, the byte offset of a fold it continues from, and the entries already
+ * sent past that offset. Native ids, names and offsets only, never text.
+ */
+export const HerdrTranscriptCheckpointSchema = z
+  .object({
+    version: z.literal(1),
+    agent: z.string(),
+    path: z.string(),
+    device: z.number(),
+    inode: z.number(),
+    offset: z.number().int().nonnegative(),
+    sent: z.array(z.string()),
+    flat: z
+      .object({
+        index: z.number().int().nonnegative(),
+        toolNames: z.array(z.tuple([z.string(), z.string()])),
+        seen: z.array(z.string()),
+      })
+      .strict()
+      .optional(),
+    claude: ClaudeFoldCheckpointSchema.optional(),
+  })
+  .strict();
+export type HerdrTranscriptCheckpoint = z.infer<typeof HerdrTranscriptCheckpointSchema>;
+
+function claudeFoldCheckpoint(fold: ClaudeFoldState): z.infer<typeof ClaudeFoldCheckpointSchema> {
+  return {
+    includeChannelPrompts: fold.includeChannelPrompts,
+    kept: fold.kept,
+    ...(fold.head === undefined ? {} : { head: fold.head }),
+    headSafe: fold.headSafe,
+    trailer: [...fold.trailer].map(([id, link]) => [id, link ?? null]),
+    ids: hashText(fold.ids),
+    parents: [...fold.parents],
+    prompts: [...fold.prompts],
+    calls: [...fold.calls],
+    toolNames: [...fold.toolNames],
+    seen: [...fold.seen],
+    queued: [...fold.queued],
+    waitingParents: hashText(fold.waitingParents),
+    waitingCalls: hashText(fold.waitingCalls),
+  };
+}
+
+function restoredClaudeFold(saved: z.infer<typeof ClaudeFoldCheckpointSchema>): ClaudeFoldState {
+  return {
+    includeChannelPrompts: saved.includeChannelPrompts,
+    kept: saved.kept,
+    head: saved.head,
+    headSafe: saved.headSafe,
+    trailer: new Map(saved.trailer.map(([id, link]) => [id, link ?? undefined])),
+    ids: hashes(saved.ids),
+    parents: new Set(saved.parents),
+    prompts: new Set(saved.prompts),
+    calls: new Set(saved.calls),
+    toolNames: new Map(saved.toolNames),
+    seen: new Set(saved.seen),
+    queued: new Map(saved.queued),
+    waitingParents: hashes(saved.waitingParents),
+    waitingCalls: hashes(saved.waitingCalls),
+  };
+}
+
+/**
+ * The entries a native transcript gained since a seat-sync checkpoint, and the
+ * checkpoint to save once they are acknowledged. Codex and Grok continue from
+ * the byte offset; Claude from its last safe fold, skipping what it already
+ * sent. A missing, foreign or unusable checkpoint answers the whole window
+ * (`complete`), as a cold read always did.
+ */
+export function readHerdrSeatTranscriptSince(
+  agent: string,
+  session: HerdrAgentSession,
+  checkpoint?: unknown,
+): (HerdrSeatTranscript & { complete: boolean; checkpoint: HerdrTranscriptCheckpoint }) | undefined {
+  const path = resolveHerdrSeatTranscriptPath(agent, session);
+  if (path === undefined) return undefined;
+  const stats = statSync(path, { throwIfNoEntry: false });
+  if (stats === undefined) return undefined;
+  const sessionKey = `${session.source}:${session.kind}:${session.value}`;
+  const prior = HerdrTranscriptCheckpointSchema.safeParse(checkpoint).data;
+  const usable =
+    prior !== undefined &&
+    appendableAgent(agent) &&
+    prior.agent === agent &&
+    prior.path === path &&
+    prior.device === stats.dev &&
+    prior.inode === stats.ino &&
+    prior.offset > 0 &&
+    prior.offset <= stats.size &&
+    (agent === "claude" ? prior.claude !== undefined : prior.flat !== undefined);
+  const tail = freshTail(stats);
+  if (usable) {
+    tail.parsedBytes = prior.offset;
+    if (prior.claude) {
+      const fold = restoredClaudeFold(prior.claude);
+      tail.claude = {
+        fold,
+        trimmed: false,
+        safe: { fold: cloneClaudeFold(fold), offset: prior.offset, entries: [], trimmed: false },
+      };
+    } else if (prior.flat) {
+      for (const [id, name] of prior.flat.toolNames) tail.state.toolNames.set(id, name);
+      for (const key of prior.flat.seen) tail.state.seen.add(key);
+      tail.state.index = prior.flat.index;
+    }
+  }
+  const restored = tail.claude?.safe;
+  const complete = advanceTail(agent, path, stats, tail) || !usable;
+  const sent = new Set(complete ? [] : prior!.sent);
+  const entries = complete ? windowOf(tail) : tail.entries.filter((entry) => !sent.has(entry.id));
+  const base = { version: 1 as const, agent, path, device: stats.dev, inode: stats.ino };
+  let next: HerdrTranscriptCheckpoint;
+  if (tail.claude) {
+    // Continue next time from the safe point; what was produced past it counts
+    // as sent. While the point stays, earlier sends count too: a parallel batch
+    // can drop a call from the parse and restore it with its result.
+    const safe = tail.claude.safe;
+    const before = new Set(safe?.entries.map((entry) => entry.id));
+    const past = tail.entries.flatMap((entry) => (before.has(entry.id) ? [] : [entry.id]));
+    next = {
+      ...base,
+      offset: safe?.offset ?? tail.parsedBytes,
+      sent:
+        safe === undefined ? [] : safe === restored && !complete ? [...new Set([...sent, ...past])] : past,
+      claude: claudeFoldCheckpoint(safe?.fold ?? tail.claude.fold),
+    };
+  } else if (tailableAgent(agent)) {
+    next = {
+      ...base,
+      offset: tail.parsedBytes,
+      sent: [],
+      flat: { index: tail.state.index, toolNames: tail.state.toolNames.list(), seen: tail.state.seen.list() },
+    };
+  } else next = { ...base, offset: 0, sent: [] };
+  return { sessionKey, entries, complete, checkpoint: next };
 }
 
 /** Most-recently-read stays resident; the fleet turns panes over. */
@@ -241,7 +555,14 @@ function readRecordsFrom(
   path: string,
   from: number,
   to: number,
-): { records: Record<string, unknown>[]; consumed: number } {
+  /** Also answer the absolute byte offset just past each record's line. */
+  withEnds = false,
+  /**
+   * Also take a final record its writer has not ended with a newline yet, as a
+   * whole-file parse does. Only a complete object parses; a half-written one waits.
+   */
+  unterminated = false,
+): { records: Record<string, unknown>[]; consumed: number; ends?: number[] } {
   if (to <= from) return { records: [], consumed: 0 };
   const buffer = Buffer.allocUnsafe(to - from);
   const fd = openSync(path, "r");
@@ -255,11 +576,42 @@ function readRecordsFrom(
   // Bound the search to the bytes actually read: allocUnsafe leaves the rest of
   // the buffer holding whatever was in memory, newlines included.
   const complete = buffer.subarray(0, read).lastIndexOf(0x0a);
-  if (complete < 0) return { records: [], consumed: 0 };
-  return {
-    records: parseRecords(buffer.toString("utf8", 0, complete + 1)),
-    consumed: complete + 1,
-  };
+  let last: Record<string, unknown> | undefined;
+  if (unterminated && complete + 1 < read) {
+    try {
+      const value: unknown = JSON.parse(buffer.toString("utf8", complete + 1, read));
+      if (isRecord(value)) last = value;
+    } catch {
+      /* still being written: it folds once complete */
+    }
+  }
+  const consumed = last === undefined ? complete + 1 : read;
+  if (consumed === 0) return { records: [], consumed: 0 };
+  if (!withEnds) {
+    const records = complete < 0 ? [] : parseRecords(buffer.toString("utf8", 0, complete + 1));
+    return { records: last === undefined ? records : [...records, last], consumed };
+  }
+  const records: Record<string, unknown>[] = [];
+  const ends: number[] = [];
+  for (let start = 0; start <= complete;) {
+    const end = buffer.indexOf(0x0a, start);
+    const line = buffer.toString("utf8", start, end);
+    start = end + 1;
+    if (!line) continue;
+    try {
+      const value: unknown = JSON.parse(line);
+      if (!isRecord(value)) continue;
+      records.push(value);
+      ends.push(from + start);
+    } catch {
+      /* a malformed line folds like parseRecords: skipped */
+    }
+  }
+  if (last !== undefined) {
+    records.push(last);
+    ends.push(from + read);
+  }
+  return { records, consumed, ends };
 }
 
 /** Normalize the words and expandable tool executions the harness TUI renders. */
@@ -757,140 +1109,366 @@ function claudeEntries(
   entries: readonly Record<string, unknown>[],
   includeChannelPrompts: boolean,
 ): HerdrTranscriptEntry[] {
-  const chain = activeChain(
-    entries,
-    "uuid",
-    "parentUuid",
-    (entry) =>
-      (entry.type === "user" || entry.type === "assistant" || queuedCommand(entry) !== undefined) &&
-      entry.isSidechain !== true,
-    // A compacted session keeps its earlier history, including deliveries
-    // a receipt may need to find (VUH-2034).
-    "logicalParentUuid",
+  return claudeFold(entries, includeChannelPrompts).entries;
+}
+
+const claudeIncluded = (entry: Record<string, unknown>) =>
+  (entry.type === "user" || entry.type === "assistant" || queuedCommand(entry) !== undefined) &&
+  entry.isSidechain !== true;
+
+/** Claude's walk link: a compact boundary has no parent; its logical parent continues the history. */
+const claudeLink = (entry: Record<string, unknown>) =>
+  string(entry.parentUuid) ?? string(entry.logicalParentUuid);
+
+/** The tool calls an assistant record makes. */
+const claudeCalls = (entry: Record<string, unknown>) =>
+  entry.type === "assistant"
+    ? array(record(entry.message)?.content)
+        .filter(isRecord)
+        .flatMap((item) => (item.type === "tool_use" && typeof item.id === "string" ? [item.id] : []))
+    : [];
+
+/** A user record carrying only tool results: kept beside the chain when its calls are on it. */
+function claudeResultIds(entry: Record<string, unknown>): string[] | undefined {
+  if (entry.type !== "user" || entry.isSidechain === true) return undefined;
+  const content = array(record(entry.message)?.content).filter(isRecord);
+  return content.length > 0 && content.every((item) => item.type === "tool_result")
+    ? content.map((item) => String(item.tool_use_id))
+    : undefined;
+}
+
+/** A human prompt, or a reply without tool calls: parallel results branch only after it. */
+const claudeSafe = (entry: Record<string, unknown>) =>
+  claudeIncluded(entry) &&
+  (entry.type === "assistant"
+    ? claudeCalls(entry).length === 0
+    : entry.type === "user" && claudeResultIds(entry) === undefined);
+
+function cloneClaudeFold(state: ClaudeFoldState): ClaudeFoldState {
+  return {
+    ...state,
+    trailer: new Map(state.trailer),
+    ids: new Set(state.ids),
+    parents: new Set(state.parents),
+    prompts: new Set(state.prompts),
+    calls: new Set(state.calls),
+    toolNames: new Map(state.toolNames),
+    seen: new Set(state.seen),
+    queued: new Map(state.queued),
+    waitingParents: new Set(state.waitingParents),
+    waitingCalls: new Set(state.waitingCalls),
+  };
+}
+
+/** 32-bit FNV-1a: a membership set that can only err toward re-reading the file. */
+function idHash(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * What appended Claude records need to fold exactly as a whole-file parse
+ * would (VUH-2391). An append usually extends the active chain from its last
+ * included record, so only the new lines are parsed and transformed. Anything
+ * else (a rewind or fork, a reused uuid, a result that would admit an earlier
+ * record) reports `rebuild`, and the caller parses the whole file again. Hashed
+ * sets may only claim membership falsely, which also rebuilds.
+ */
+interface ClaudeFoldState {
+  readonly includeChannelPrompts: boolean;
+  /** Records the chain filter kept; the positional fallback id counts on from here. */
+  kept: number;
+  /** The last included record; undefined (or uuid-less) cannot be extended. */
+  head: string | undefined;
+  /** That head is a prompt or a reply without tool calls: no append should branch behind it. */
+  headSafe: boolean;
+  /** Non-included records after the head: an append may walk through them to it. */
+  trailer: Map<string, string | undefined>;
+  /** Hashes of every uuid in the file: reusing one rebinds the walk. */
+  ids: Set<number>;
+  /** Exact chain uuids, chain user uuids and chain tool calls (claudeEntries' sets). */
+  parents: Set<string>;
+  prompts: Set<string>;
+  calls: Set<string>;
+  toolNames: Map<string, string>;
+  seen: Set<string>;
+  /** Rendered queued prompts by the user record that would supersede them. */
+  queued: Map<string, string[]>;
+  /** Hashes of a parent or a call an off-chain result is still waiting for. */
+  waitingParents: Set<number>;
+  waitingCalls: Set<number>;
+}
+
+function claudeRecordEntries(
+  entry: Record<string, unknown>,
+  entryIndex: number,
+  prompts: ReadonlySet<string>,
+  toolNames: Map<string, string>,
+  includeChannelPrompts: boolean,
+): HerdrTranscriptEntry[] {
+  const nativeId = string(entry.uuid) ?? String(entryIndex);
+  // Claude stores channel deliveries as user records with isMeta: true
+  // and promptSource: "system". Keep their opt-in internal receipts before
+  // dropping other metadata; they must never become visible operator chat.
+  if (entry.type === "user") {
+    const text = messageText(record(entry.message)?.content);
+    if (CLAUDE_CHANNEL_PROMPT.test(text.trimStart()))
+      return claudePrompt(`claude:${nativeId}`, text, timestamp(entry), includeChannelPrompts);
+  }
+  if (entry.isMeta === true || entry.promptSource === "system") return [];
+  // Mid-turn input rides the active chain as an attachment, stamped when it was sent.
+  const queued = queuedCommand(entry);
+  if (queued !== undefined) {
+    if (prompts.has(queued.source_uuid as string)) return [];
+    const text = messageText(queued.prompt);
+    const origin = record(queued.origin)?.kind;
+    const admitted =
+      origin === "channel"
+        ? CLAUDE_CHANNEL_PROMPT.test(text.trimStart())
+        : origin === "human" && queued.isMeta !== true;
+    return admitted
+      ? claudePrompt(`claude:${nativeId}`, text, timestamp(entry, queued.timestamp), includeChannelPrompts)
+      : [];
+  }
+  const message = record(entry.message);
+  if (message === undefined) return [];
+  const at = timestamp(entry);
+  const content = array(message.content).filter(isRecord);
+  if (entry.type === "assistant") {
+    const text = messageText(message.content);
+    const limit = claudeUsageLimit(entry, message, text);
+    const spoken = transcriptMessage(`claude:${nativeId}`, "agent", text, at).map((said) =>
+      limit === undefined ? said : { ...said, usageLimit: limit },
+    );
+    const tools = content.flatMap((item, contentIndex) => {
+      if (item.type !== "tool_use") return [];
+      const callId = cleanRef(item.id, nativeId);
+      const name = cleanName(item.name);
+      toolNames.set(callId, name);
+      return [
+        transcriptTool(
+          `claude:${nativeId}:tool:${String(contentIndex)}`,
+          callId,
+          name,
+          "started",
+          item.input,
+          at,
+        ),
+      ];
+    });
+    return [...spoken, ...tools];
+  }
+  const toolResults = content.flatMap((item, contentIndex) => {
+    if (item.type !== "tool_result") return [];
+    const callId = cleanRef(
+      item.tool_use_id ?? entry.sourceToolUseID ?? entry.sourceToolAssistantUUID,
+      nativeId,
+    );
+    const failed = item.is_error === true || record(entry.toolUseResult)?.isError === true;
+    return [
+      transcriptTool(
+        `claude:${nativeId}:tool-result:${String(contentIndex)}`,
+        callId,
+        toolNames.get(callId) ?? cleanName(record(entry.toolUseResult)?.name),
+        failed ? "failed" : "completed",
+        item.content ?? entry.toolUseResult,
+        at,
+      ),
+    ];
+  });
+  if (toolResults.length > 0) return toolResults;
+  if (
+    entry.sourceToolAssistantUUID !== undefined ||
+    entry.toolUseResult !== undefined ||
+    entry.sourceToolUseID !== undefined
+  ) {
+    const callId = cleanRef(entry.sourceToolUseID ?? entry.sourceToolAssistantUUID, nativeId);
+    return [
+      transcriptTool(
+        `claude:${nativeId}:tool-result`,
+        callId,
+        toolNames.get(callId) ?? cleanName(record(entry.toolUseResult)?.name),
+        record(entry.toolUseResult)?.isError === true ? "failed" : "completed",
+        entry.toolUseResult ?? message.content,
+        at,
+      ),
+    ];
+  }
+  return claudePrompt(`claude:${nativeId}`, messageText(message.content), at, includeChannelPrompts);
+}
+
+/** Render one kept record, remembering a rendered queued prompt its own user record may supersede. */
+function claudeKeep(state: ClaudeFoldState, entry: Record<string, unknown>): HerdrTranscriptEntry[] {
+  const produced = claudeRecordEntries(
+    entry,
+    state.kept++,
+    state.prompts,
+    state.toolNames,
+    state.includeChannelPrompts,
   );
+  const source = queuedCommand(entry)?.source_uuid;
+  if (produced.length > 0 && typeof source === "string")
+    state.queued.set(source, [...(state.queued.get(source) ?? []), ...produced.map((item) => item.id)]);
+  return produced;
+}
+
+/** Note an off-chain result an appended parent or call could still admit. */
+function claudeWaiting(state: ClaudeFoldState, entry: Record<string, unknown>, ids: readonly string[]): void {
+  const parent = string(entry.parentUuid);
+  if (!state.parents.has(entry.parentUuid as string)) {
+    if (parent !== undefined && !state.ids.has(idHash(parent))) state.waitingParents.add(idHash(parent));
+    return;
+  }
+  for (const id of ids) if (!state.calls.has(id)) state.waitingCalls.add(idHash(id));
+}
+
+function claudeTrailer(records: readonly Record<string, unknown>[], from: number) {
+  const trailer = new Map<string, string | undefined>();
+  for (const entry of records.slice(from)) {
+    const id = string(entry.uuid);
+    if (id !== undefined) trailer.set(id, claudeLink(entry));
+  }
+  return trailer;
+}
+
+/** The whole-file parse, with the state an append continues from. */
+function claudeFold(
+  entries: readonly Record<string, unknown>[],
+  includeChannelPrompts: boolean,
+): { entries: HerdrTranscriptEntry[]; state: ClaudeFoldState } {
+  // A compacted session keeps its earlier history, including deliveries
+  // a receipt may need to find (VUH-2034).
+  const chain = activeChain(entries, "uuid", "parentUuid", claudeIncluded, "logicalParentUuid");
   const active = new Set(chain);
-  // A queued prompt Claude also wrote as its own user record renders once.
-  const prompts = new Set(chain.flatMap((entry) => (entry.type === "user" ? [entry.uuid] : [])));
-  const parents = new Set(chain.map((entry) => entry.uuid));
-  const calls = new Set(
-    chain.flatMap((entry) =>
-      entry.type === "assistant"
-        ? array(record(entry.message)?.content)
-            .filter(isRecord)
-            .flatMap((item) => (item.type === "tool_use" && typeof item.id === "string" ? [item.id] : []))
-        : [],
-    ),
-  );
+  const head = chain.at(-1);
+  const state: ClaudeFoldState = {
+    includeChannelPrompts,
+    kept: 0,
+    head: head === undefined ? undefined : string(head.uuid),
+    headSafe: head !== undefined && claudeSafe(head),
+    trailer: head === undefined ? new Map() : claudeTrailer(entries, entries.lastIndexOf(head) + 1),
+    ids: new Set(entries.flatMap((entry) => (typeof entry.uuid === "string" ? [idHash(entry.uuid)] : []))),
+    // A queued prompt Claude also wrote as its own user record renders once.
+    prompts: new Set(chain.flatMap((entry) => (entry.type === "user" ? [entry.uuid as string] : []))),
+    parents: new Set(chain.map((entry) => entry.uuid as string)),
+    calls: new Set(chain.flatMap(claudeCalls)),
+    toolNames: new Map(),
+    seen: new Set(),
+    queued: new Map(),
+    waitingParents: new Set(),
+    waitingCalls: new Set(),
+  };
+  // A uuid-less chain record would let parentless results join it; never extend one.
+  if (chain.some((entry) => typeof entry.uuid !== "string")) state.head = undefined;
   // Parallel Claude results can be siblings of the active branch. Keep only
   // results for its own calls, never messages or tools from an abandoned branch.
   const records = entries.filter((entry) => {
     if (active.has(entry)) return true;
-    if (entry.type !== "user" || entry.isSidechain === true || !parents.has(entry.parentUuid)) return false;
-    const content = array(record(entry.message)?.content).filter(isRecord);
-    return (
-      content.length > 0 &&
-      content.every((item) => item.type === "tool_result" && calls.has(String(item.tool_use_id)))
-    );
+    const ids = claudeResultIds(entry);
+    if (ids === undefined) return false;
+    if (state.parents.has(entry.parentUuid as string) && ids.every((id) => state.calls.has(id))) return true;
+    claudeWaiting(state, entry, ids);
+    return false;
   });
-  const toolNames = new Map<string, string>();
-  return dedupeTools(
-    records.flatMap<HerdrTranscriptEntry>((entry, entryIndex) => {
-      const nativeId = string(entry.uuid) ?? String(entryIndex);
-      // Claude stores channel deliveries as user records with isMeta: true
-      // and promptSource: "system". Keep their opt-in internal receipts before
-      // dropping other metadata; they must never become visible operator chat.
-      if (entry.type === "user") {
-        const text = messageText(record(entry.message)?.content);
-        if (CLAUDE_CHANNEL_PROMPT.test(text.trimStart()))
-          return claudePrompt(`claude:${nativeId}`, text, timestamp(entry), includeChannelPrompts);
-      }
-      if (entry.isMeta === true || entry.promptSource === "system") return [];
-      // Mid-turn input rides the active chain as an attachment, stamped when it was sent.
-      const queued = queuedCommand(entry);
-      if (queued !== undefined) {
-        if (prompts.has(queued.source_uuid)) return [];
-        const text = messageText(queued.prompt);
-        const origin = record(queued.origin)?.kind;
-        const admitted =
-          origin === "channel"
-            ? CLAUDE_CHANNEL_PROMPT.test(text.trimStart())
-            : origin === "human" && queued.isMeta !== true;
-        return admitted
-          ? claudePrompt(
-              `claude:${nativeId}`,
-              text,
-              timestamp(entry, queued.timestamp),
-              includeChannelPrompts,
-            )
-          : [];
-      }
-      const message = record(entry.message);
-      if (message === undefined) return [];
-      const at = timestamp(entry);
-      const content = array(message.content).filter(isRecord);
-      if (entry.type === "assistant") {
-        const text = messageText(message.content);
-        const limit = claudeUsageLimit(entry, message, text);
-        const spoken = transcriptMessage(`claude:${nativeId}`, "agent", text, at).map((said) =>
-          limit === undefined ? said : { ...said, usageLimit: limit },
-        );
-        const tools = content.flatMap((item, contentIndex) => {
-          if (item.type !== "tool_use") return [];
-          const callId = cleanRef(item.id, nativeId);
-          const name = cleanName(item.name);
-          toolNames.set(callId, name);
-          return [
-            transcriptTool(
-              `claude:${nativeId}:tool:${String(contentIndex)}`,
-              callId,
-              name,
-              "started",
-              item.input,
-              at,
-            ),
-          ];
-        });
-        return [...spoken, ...tools];
-      }
-      const toolResults = content.flatMap((item, contentIndex) => {
-        if (item.type !== "tool_result") return [];
-        const callId = cleanRef(
-          item.tool_use_id ?? entry.sourceToolUseID ?? entry.sourceToolAssistantUUID,
-          nativeId,
-        );
-        const failed = item.is_error === true || record(entry.toolUseResult)?.isError === true;
-        return [
-          transcriptTool(
-            `claude:${nativeId}:tool-result:${String(contentIndex)}`,
-            callId,
-            toolNames.get(callId) ?? cleanName(record(entry.toolUseResult)?.name),
-            failed ? "failed" : "completed",
-            item.content ?? entry.toolUseResult,
-            at,
-          ),
-        ];
-      });
-      if (toolResults.length > 0) return toolResults;
-      if (
-        entry.sourceToolAssistantUUID !== undefined ||
-        entry.toolUseResult !== undefined ||
-        entry.sourceToolUseID !== undefined
-      ) {
-        const callId = cleanRef(entry.sourceToolUseID ?? entry.sourceToolAssistantUUID, nativeId);
-        return [
-          transcriptTool(
-            `claude:${nativeId}:tool-result`,
-            callId,
-            toolNames.get(callId) ?? cleanName(record(entry.toolUseResult)?.name),
-            record(entry.toolUseResult)?.isError === true ? "failed" : "completed",
-            entry.toolUseResult ?? message.content,
-            at,
-          ),
-        ];
-      }
-      return claudePrompt(`claude:${nativeId}`, messageText(message.content), at, includeChannelPrompts);
-    }),
-  );
+  return {
+    entries: dedupeTools(
+      records.flatMap((entry) => claudeKeep(state, entry)),
+      state.seen,
+    ),
+    state,
+  };
+}
+
+/**
+ * Continue a fold with records appended after it. Returns the new entries and
+ * the ids of earlier queued prompts their own user record now supersedes, or
+ * `rebuild` when only a whole-file parse would answer exactly.
+ */
+function claudeAppend(
+  state: ClaudeFoldState,
+  appended: readonly Record<string, unknown>[],
+): { entries: HerdrTranscriptEntry[]; superseded: string[] } | "rebuild" {
+  if (appended.length === 0) return { entries: [], superseded: [] };
+  if (state.head === undefined) return "rebuild";
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const entry of appended) {
+    const id = entry.uuid;
+    if (id === undefined) continue;
+    if (
+      typeof id !== "string" ||
+      byId.has(id) ||
+      state.ids.has(idHash(id)) ||
+      state.waitingParents.has(idHash(id))
+    )
+      return "rebuild";
+    byId.set(id, entry);
+  }
+  const included = appended.filter(claudeIncluded);
+  const head = included.at(-1);
+  const trailerFrom = (entry: Record<string, unknown> | undefined) =>
+    claudeTrailer(appended, entry === undefined ? 0 : appended.indexOf(entry) + 1);
+  if (head === undefined) {
+    // No included record: the chain stands, and nothing new is kept.
+    for (const [id, link] of trailerFrom(undefined)) state.trailer.set(id, link);
+    for (const id of byId.keys()) state.ids.add(idHash(id));
+    return { entries: [], superseded: [] };
+  }
+  if (typeof head.uuid !== "string") return "rebuild";
+  // Walk back from the new head; it must reach the old head through new
+  // records and the old head's non-included trailer, or the chain re-rooted.
+  const path: Record<string, unknown>[] = [];
+  const visited = new Set<string>();
+  for (let current: Record<string, unknown> = head; ;) {
+    if (claudeIncluded(current)) path.push(current);
+    let link = claudeLink(current);
+    while (link !== undefined && !byId.has(link) && link !== state.head) {
+      if (visited.has(link) || !state.trailer.has(link)) return "rebuild";
+      visited.add(link);
+      link = state.trailer.get(link);
+    }
+    if (link === undefined) return "rebuild";
+    if (link === state.head) break;
+    if (visited.has(link)) return "rebuild";
+    visited.add(link);
+    current = byId.get(link)!;
+  }
+  const onPath = new Set(path);
+  for (const entry of path) {
+    state.parents.add(entry.uuid as string);
+    if (entry.type === "user") state.prompts.add(entry.uuid as string);
+    for (const call of claudeCalls(entry)) {
+      if (state.waitingCalls.has(idHash(call))) return "rebuild";
+      state.calls.add(call);
+    }
+  }
+  for (const id of byId.keys()) state.ids.add(idHash(id));
+  const kept = appended.filter((entry) => {
+    if (onPath.has(entry)) return true;
+    const ids = claudeResultIds(entry);
+    if (ids === undefined) return false;
+    if (state.parents.has(entry.parentUuid as string) && ids.every((id) => state.calls.has(id))) return true;
+    claudeWaiting(state, entry, ids);
+    return false;
+  });
+  const superseded = path.flatMap((entry) => {
+    const ids = entry.type === "user" ? state.queued.get(entry.uuid as string) : undefined;
+    if (ids !== undefined) state.queued.delete(entry.uuid as string);
+    return ids ?? [];
+  });
+  state.head = head.uuid;
+  state.headSafe = claudeSafe(head);
+  state.trailer = trailerFrom(head);
+  return {
+    entries: dedupeTools(
+      kept.flatMap((entry) => claudeKeep(state, entry)),
+      state.seen,
+    ),
+    superseded,
+  };
 }
 
 const CLAUDE_CHANNEL_PROMPT = /^<channel[ >]/u;

@@ -1,6 +1,12 @@
 // Read-only host facts. Process presence is not MCP catalog or delivery acceptance.
 const MAX_PANES = 48;
-const MAX_BRIDGES = 96;
+// A working fleet runs hundreds of node and Codex processes (316 and 61 bridges
+// on 2026-10-17, VUH-2391). Command lines and environments are read in batches,
+// so each ps answer stays well inside a caller's output buffer.
+const MAX_ARGV_PROCESSES = 1024;
+const MAX_BRIDGES = 256;
+const ARGV_BATCH = 128;
+const ENV_BATCH = 32;
 const daemonFix =
   "After saving affected sessions, stop the shared daemon with codex app-server daemon stop. Resume each session in its own pane with codex --no-daemon resume <SESSION>; keep daemon_auto_start=false in the source-owned config.";
 const fix = (harness) =>
@@ -61,7 +67,7 @@ function processStarts(stdout) {
   );
 }
 
-/** One process snapshot and one targeted env read, plus bounded Herdr pane facts. */
+/** One process snapshot and batched targeted argv/env reads, plus bounded Herdr pane facts. */
 export async function inspectLiveHarnessBridges({
   socket,
   panes,
@@ -87,16 +93,19 @@ export async function inspectLiveHarnessBridges({
     const argvPids = [...rows]
       .filter(([, row]) => /(?:^|\/)(?:node|bun|clankie|codex)(?:\s|$)/u.test(row.command))
       .map(([pid]) => pid);
-    if (argvPids.length > 256) throw new Error("Process command observation limit exceeded");
-    if (argvPids.length) {
-      const commands = table(await run("/bin/ps", ["-p", argvPids.join(","), "-o", "pid=,ppid=,command="]));
+    if (argvPids.length > MAX_ARGV_PROCESSES) throw new Error("Process command observation limit exceeded");
+    for (let start = 0; start < argvPids.length; start += ARGV_BATCH) {
+      const batch = argvPids.slice(start, start + ARGV_BATCH);
+      const commands = table(await run("/bin/ps", ["-p", batch.join(","), "-o", "pid=,ppid=,command="]));
       for (const [pid, row] of commands) if (rows.has(pid)) rows.get(pid).command = row.command;
     }
     const candidates = [...rows].filter(([, row]) => bridgeKind(row.command));
     if (candidates.length > MAX_BRIDGES) throw new Error("Bridge observation limit exceeded");
-    const envText = candidates.length
-      ? await run("/bin/ps", ["eww", "-p", candidates.map(([pid]) => pid).join(","), "-o", "pid=,command="])
-      : "";
+    let envText = "";
+    for (let start = 0; start < candidates.length; start += ENV_BATCH) {
+      const batch = candidates.slice(start, start + ENV_BATCH).map(([pid]) => pid);
+      envText += `${await run("/bin/ps", ["eww", "-p", batch.join(","), "-o", "pid=,command="])}\n`;
+    }
     let starts = new Map();
     if (Number.isSafeInteger(runtimePid) && runtimePid > 1 && rows.has(runtimePid)) {
       try {

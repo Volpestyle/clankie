@@ -28,6 +28,12 @@ const FLEET_SUBSCRIPTIONS = [
   "agent.prompted",
   "agent.spawned",
 ] as const;
+/**
+ * Herdr 0.9.3 (protocol 22) has no agent edge events and refuses the whole
+ * subscription that names them, so the feed asks once and then subscribes
+ * without them (VUH-2391). Before this the feed re-connected every second.
+ */
+const EDGE_SUBSCRIPTIONS = new Set<string>(["agent.prompted", "agent.spawned"]);
 
 interface FleetWaiter {
   readonly resolve: (cursor: string) => void;
@@ -101,6 +107,10 @@ export function watchHerdrFleetChanges(
       readonly toPaneId: string;
       readonly at: number;
     }) => void;
+    /** Each `pane.closed` event, so a seat hears its pane go without polling (VUH-2391). */
+    readonly onPaneClosed?: (paneId: string) => void;
+    /** The feed (re)started: events from before it may be missing, so re-check what is watched. */
+    readonly onSubscribed?: () => void;
   } = {},
 ): () => void {
   const socketPath = options.socketPath ?? process.env.HERDR_SOCKET_PATH;
@@ -110,6 +120,7 @@ export function watchHerdrFleetChanges(
   let summaries: FSWatcher | undefined;
   let reconnect: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
+  let edgeEvents = true;
   const paneIds = new Set<string>();
   const paneSockets = new Map<string, Socket>();
 
@@ -156,14 +167,19 @@ export function watchHerdrFleetChanges(
     if (closed || socketPath === undefined || socketPath.length === 0) return;
     let buffer = "";
     const mainSocket = createConnection(socketPath);
+    const subscription = `clankie-fleet-${randomUUID()}`;
     socket = mainSocket;
     mainSocket.setEncoding("utf8");
     mainSocket.on("connect", () => {
       mainSocket.write(
         `${JSON.stringify({
-          id: `clankie-fleet-${randomUUID()}`,
+          id: subscription,
           method: "events.subscribe",
-          params: { subscriptions: FLEET_SUBSCRIPTIONS.map((type) => ({ type })) },
+          params: {
+            subscriptions: FLEET_SUBSCRIPTIONS.filter(
+              (type) => edgeEvents || !EDGE_SUBSCRIPTIONS.has(type),
+            ).map((type) => ({ type })),
+          },
         })}\n`,
       );
     });
@@ -175,9 +191,18 @@ export function watchHerdrFleetChanges(
         if (line.trim().length === 0) continue;
         try {
           const message = JSON.parse(line) as {
+            readonly id?: unknown;
+            readonly result?: unknown;
+            readonly error?: unknown;
             readonly event?: unknown;
             readonly data?: unknown;
           };
+          if (message.id === subscription && message.result !== undefined) options.onSubscribed?.();
+          if (message.id === subscription && message.error !== undefined && edgeEvents) {
+            edgeEvents = false;
+            mainSocket.destroy();
+            return;
+          }
           if (typeof message.event === "string") {
             clock.touch();
             const data =
@@ -207,6 +232,7 @@ export function watchHerdrFleetChanges(
                 : typeof data?.pane_id === "string"
                   ? data.pane_id
                   : undefined;
+            if (paneId !== undefined && message.event === "pane_closed") options.onPaneClosed?.(paneId);
             if (paneId !== undefined && message.event === "pane_created" && !paneIds.has(paneId)) {
               paneIds.add(paneId);
               connectPaneStatus(paneId);

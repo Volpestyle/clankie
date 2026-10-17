@@ -897,10 +897,14 @@ export async function readFleet(
   return remoteSeats.length === 0 ? local : { ...local, seats: [...local.seats, ...remoteSeats] };
 }
 
-// Roster polls reuse a short host observation; explicit doctor reads always probe anew.
+// Roster polls reuse a host observation; explicit doctor reads always probe anew.
 // The cache is display evidence only, never admission or message routing authority.
+// A sweep reads every process on the host, so a census takes one at most once a
+// minute, or every fifteen seconds while the pane set changes (VUH-2391).
+const BRIDGE_SAMPLE_MS = 60_000;
+const BRIDGE_RESAMPLE_MS = 15_000;
 let bridgeSample:
-  | { key: string; at: number; report: ReturnType<typeof inspectLiveHarnessBridges> }
+  | { source: string; key: string; at: number; report: ReturnType<typeof inspectLiveHarnessBridges> }
   | undefined;
 
 async function readLocalFleet(
@@ -947,9 +951,15 @@ async function readLocalFleet(
         harness: entry.agent,
       }));
       const runtimePid = options.runtimePid ?? process.pid;
+      const source = JSON.stringify([options.bridgeSocket, runtimePid]);
       const key = JSON.stringify([options.bridgeSocket, runtimePid, panes]);
-      if (options.runCommand || bridgeSample?.key !== key || Date.now() - bridgeSample.at >= 5_000) {
+      if (
+        options.runCommand ||
+        bridgeSample?.source !== source ||
+        Date.now() - bridgeSample.at >= (bridgeSample.key === key ? BRIDGE_SAMPLE_MS : BRIDGE_RESAMPLE_MS)
+      ) {
         bridgeSample = {
+          source,
           key,
           at: Date.now(),
           report: inspectLiveHarnessBridges({

@@ -186,6 +186,8 @@ export interface CaptainPort {
     input: import("@clankie/protocol/tool-catalog").FleetWorkerToolRestartRequest,
     authority: import("../worker-tool-refresh.ts").WorkerCatalogRefreshAuthority,
   ): Promise<import("@clankie/protocol/tool-catalog").FleetWorkerToolRestartResult>;
+  /** Moves on every Herdr event and fleet mutation; an unchanged cursor means nothing changed. */
+  fleetChangeCursor?(): string;
   workerCatalogSeats?(): Promise<
     readonly {
       paneId: string;

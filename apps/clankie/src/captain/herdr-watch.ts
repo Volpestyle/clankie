@@ -5,6 +5,7 @@ import type {
   FleetSeatMessageReceiver,
 } from "@clankie/protocol";
 import { nativeHerdrRead } from "../herdr-native-read.ts";
+import { nativeAgentWait } from "../herdr-native-wait.ts";
 import { createHireLayout, HireLayoutNotStarted, HireLayoutUnconfirmed } from "./hire-layout.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { ResourceAdmissionError, type FleetResourceRuntime } from "../fleet-resource-runtime.ts";
@@ -563,6 +564,37 @@ export function createHerdrWatchRunner(
     }
     return exec(args, signal, timeoutMs);
   };
+  /**
+   * `herdr agent wait` (no `until` keeps its idle/done/blocked default). On the
+   * configured local socket it is a Herdr event subscription inside this
+   * process, not a subprocess per waiting seat (VUH-2391); elsewhere the CLI.
+   */
+  const waitHerdr = async (
+    target: string,
+    until: readonly string[] | undefined,
+    signal: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<string> => {
+    if (available?.() === false) throw new Error("Herdr execution is unavailable");
+    if (observation.localReadBinding) {
+      const binding = await observation.localReadBinding();
+      if (binding === undefined) throw new Error("Herdr execution is unavailable");
+      return nativeAgentWait({ runtime: "external", ...binding }, target, until ?? [...SETTLED_STATUSES], {
+        signal,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      });
+    }
+    return exec(
+      [
+        "agent",
+        "wait",
+        target,
+        ...(until ?? []).flatMap((status) => ["--until", status]),
+        ...(timeoutMs === undefined ? [] : ["--timeout", String(timeoutMs)]),
+      ],
+      signal,
+    );
+  };
   const createTab = createHireLayout(runHerdr, createCommandTab);
   const recover = async (agent: HerdrAgentSnapshot): Promise<HerdrAgentSnapshot> => {
     const bound = agent.session === undefined ? observation.boundSession?.(agent) : undefined;
@@ -598,41 +630,19 @@ export function createHerdrWatchRunner(
       return agent === undefined ? undefined : recover(agent);
     },
     wait: async (target, signal) =>
-      recover(parseHerdrAgentResult(await runHerdr(["agent", "wait", target], signal))),
+      recover(parseHerdrAgentResult(await waitHerdr(target, undefined, signal))),
     waitUntilIdle: async (target, signal) =>
       recover(
         parseHerdrAgentResult(
-          await runHerdr(
-            [
-              "agent",
-              "wait",
-              target,
-              "--until",
-              "idle",
-              "--until",
-              "working",
-              "--until",
-              "done",
-              "--timeout",
-              String(SPAWN_CHANNEL_DIALOG_WAIT_MS),
-            ],
-            signal,
-          ),
+          await waitHerdr(target, ["idle", "working", "done"], signal, SPAWN_CHANNEL_DIALOG_WAIT_MS),
         ),
       ),
     waitForChange: async (target, currentStatus, signal) =>
       recover(
         parseHerdrAgentResult(
-          await runHerdr(
-            [
-              "agent",
-              "wait",
-              target,
-              ...AGENT_STATUSES.filter((status) => status !== currentStatus).flatMap((status) => [
-                "--until",
-                status,
-              ]),
-            ],
+          await waitHerdr(
+            target,
+            AGENT_STATUSES.filter((status) => status !== currentStatus),
             signal,
           ),
         ),
@@ -5156,10 +5166,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
    * settles. The registry drops entries it already holds, so a re-publish that
    * saw no new output costs nothing downstream.
    */
-  // ponytail: the reader tails Codex and Grok by byte offset, so a poll costs the
-  // append rather than the session. Claude and Pi re-parse on change because an
-  // append can re-root the parent chain their transcripts are walked through;
-  // give them a checkpointed chain if a long seat on those shows up in a profile.
+  // ponytail: the reader tails Codex, Grok and Claude by byte offset (Claude
+  // replays from its last safe point when parallel results branch its chain),
+  // so a poll costs the append rather than the session. Pi still re-parses on
+  // change; give it Claude's checkpointed fold if a long Pi seat shows up in a profile.
   private async followTranscript(
     seatId: string,
     current: HerdrAgentSnapshot,
