@@ -264,6 +264,7 @@ async function routeFixture() {
     blocked: undefined as OfficialDiscordStatus["blocked"],
     usage: undefined as OfficialDiscordStatus["usage"],
     statusError: undefined as string | undefined,
+    unregisterError: false,
   };
   let gatewayUrl = "";
   const server = createServer(async (request: IncomingMessage, response) => {
@@ -290,6 +291,11 @@ async function routeFixture() {
       return;
     }
     if (request.url === OFFICIAL_DISCORD_PATHS.unregister && request.method === "POST") {
+      if (fleet.unregisterError) {
+        response.statusCode = 503;
+        response.end(JSON.stringify({ error: "unavailable" }));
+        return;
+      }
       fleet.registered = false;
       fleet.unregistered++;
       response.end(JSON.stringify({ ok: true }));
@@ -490,3 +496,29 @@ it.each(["not_found", "unavailable"])(
     expect((await f.settings.load()).discord).toEqual(before);
   },
 );
+
+it("keeps a failed account disconnect visible after refresh and finishes only on an explicit off retry", async () => {
+  const f = await routeFixture();
+  await f.cli("on");
+  f.fleet.unregisterError = true;
+  expect(await f.cli("off")).toMatchObject({
+    enabled: false,
+    running: false,
+    fleetError: "unregister_failed:unavailable",
+    next: expect.stringContaining("removal from your account hasn’t been confirmed"),
+  });
+  expect(await f.ingress()).toBe(404);
+  expect(await f.cli("status")).toMatchObject({
+    enabled: false,
+    running: false,
+    fleetError: "unregister_failed:pending",
+    official: { registered: true },
+    next: expect.stringContaining("Try disconnecting again"),
+  });
+  expect(f.fleet.unregistered).toBe(0);
+  f.fleet.unregisterError = false;
+  const off = await f.cli("off");
+  expect(off).toMatchObject({ enabled: false, running: false, official: { registered: false } });
+  expect(off).not.toHaveProperty("fleetError");
+  expect(f.fleet.unregistered).toBe(1);
+});

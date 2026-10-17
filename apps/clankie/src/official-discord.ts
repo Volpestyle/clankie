@@ -16,6 +16,9 @@ import type { CaptainPort } from "./captain/port.ts";
 import { DiscordIngress, discordIngressExecutor, type DiscordIngressPort } from "./discord-ingress.ts";
 import { hostedVerifyKeys } from "./hosted-body.ts";
 
+const DISCONNECT_PENDING =
+  "The official bot is off on this computer. Its removal from your account hasn’t been confirmed. Try disconnecting again.";
+
 /** Broker id of this installation's official-bot ingress key. Never leaves the machine. */
 export function officialDiscordKeyProvider(installationId: string): string {
   return `clankie-discord-ingress-official-${installationId}`;
@@ -221,19 +224,24 @@ export class OfficialDiscordControl implements DiscordIngressPort {
             : "Clankie couldn’t check your account for the official bot. Refresh to try again.",
       };
     }
+    const disconnectPending =
+      !enabled && official.registered && official.installationId === account.installationId;
     const next = official.blocked
       ? `The official bot is blocked for this ${official.blocked.scope}: ${official.blocked.reason}`
-      : !enabled
-        ? "Turn on the official bot."
-        : !base.running
-          ? "This machine is still registering with your account."
-          : !official.discord.connected
-            ? "Add Clankie to a server you manage from your account page."
-            : undefined;
+      : disconnectPending
+        ? DISCONNECT_PENDING
+        : !enabled
+          ? "Turn on the official bot."
+          : !base.running
+            ? "This machine is still registering with your account."
+            : !official.discord.connected
+              ? "Add Clankie to a server you manage from your account page."
+              : undefined;
     return {
       ...base,
       installUrl: official.installUrl,
       official,
+      ...(disconnectPending ? { fleetError: "unregister_failed:pending" } : {}),
       ...(next === undefined ? {} : { next: next.slice(0, 500) }),
     };
   }
@@ -314,7 +322,7 @@ export class OfficialDiscordControl implements DiscordIngressPort {
       fleetError = `unregister_failed:${errorCode(error)}`.slice(0, 200);
     }
     const status = await this.status();
-    return fleetError === undefined ? status : { ...status, fleetError };
+    return fleetError === undefined ? status : { ...status, fleetError, next: DISCONNECT_PENDING };
   }
   private async fleet(account: OfficialDiscordAccountRoute, path: string, method: "GET" | "POST") {
     const { token } = await account.resolveAccountToken();

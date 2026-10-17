@@ -83,6 +83,9 @@ If the fleet report is unavailable, the status retains the local `enabled` and
 `next` step. This does not establish which server is connected. A refused `on`
 leaves the settings unchanged; `off` still stops the local ingress even when
 the account report cannot be read. Clients refresh through the same route.
+If account removal fails, `unregister_failed:*` and `next` keep that incomplete
+disconnect explicit. A refresh also reports it while this installation remains
+registered with its local switch off; an explicit `off` retries removal.
 
 Voice callbacks use `kind: "voice"` and one strict `voice.action`: `briefing`,
 `handoff`, or `self_tool`. Briefing and the three existing voice self-tools use
