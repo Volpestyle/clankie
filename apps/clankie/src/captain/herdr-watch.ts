@@ -1279,7 +1279,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
 
   /** Controller observations and actions retain the exact native occupant. */
   public async inputCapabilities(agent: HerdrAgentSnapshot): Promise<FleetSeatInputCapabilities> {
-    const capabilities = await this.seatControl.inputCapabilities(agent);
+    const capabilities = await this.seatControl.inputCapabilities(agent, { displayOnly: true });
     const current = await this.runner.resolveTerminal(agent.terminalId).catch(() => undefined);
     return current?.paneId === agent.paneId &&
       current.agent === agent.agent &&

@@ -4640,6 +4640,14 @@ not confirm live ownership. The command's HTTP requests also have a twelve-secon
 transport deadline. Rename and role lookups refuse incomplete contact reads;
 read again before making that change.
 
+The fleet API accepts up to 768 occupied seats across execution connections,
+independently of the 1,000-persona history bound. Native census reads do not
+silently cut a connection off at 48 seats. Above 768 seats, the host refuses the
+complete roster read with HTTP 503 `fleet_roster_limit` (count and limit)
+instead of dropping seats.
+Display capability checks reuse an exact native session ID or rollout path;
+sending still rechecks the current process, session and delivery authorization.
+
 Owner-started workspace membership reads cwd directly from the kernel through
 the native process helper, with fresh process-lifetime and cwd rechecks. The
 five-second membership budget remains unchanged; slow `lsof` startup no longer

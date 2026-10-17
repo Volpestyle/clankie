@@ -81,7 +81,7 @@ OperatorConversationScope =
     next?: string;
     conversationId?: string; // the persona's thread
     workingDirectory?: string; // herdr's cwd; the district key for app ADR 0022
-  }>;                        // capped like the census (48)
+  }>;                        // aggregate bound: 768 (2026-10-17 amendment)
 }
 
 // 3. Attribution: the message event's role union gains the seat's voice.
@@ -220,3 +220,22 @@ through seats.
   through their existing forward-compatibility path until they update.
 - The app repo's product direction retires the typed-intents sentence in the
   same change that adopts its ADR 0013.
+
+## Amendment: aggregate roster and display observations (2026-10-17, VUH-2354)
+
+The 48-seat bound was applied to the aggregate response even though multiple
+execution connections can contribute seats. A live 52-seat response therefore
+failed client validation. The public bound is now 768 seats, matching the
+existing aggregate terminal-catalog scale. Native discovery keeps every occupied
+seat rather than truncating local seats at 48. The host explicitly refuses a
+complete projection above 768; it never reports a truncated roster as complete.
+The 1,000-persona history bound remains separate.
+
+Recorded projections took 20–24 seconds, with about 17 seconds spent discovering
+input capabilities. Repeated per-Codex open-file scans rediscovered a native
+thread already identified by the census. Display capability observations reuse
+that exact session ID or rollout UUID and still validate the current native
+occupant. Sessions without an exact identity retain discovery. This is display
+evidence only: sends keep their fresh file/process checks, exact recipient
+fences and authorization. The five-second display deadline and explicit stale
+warnings remain; they are not extended to hide slow observations.

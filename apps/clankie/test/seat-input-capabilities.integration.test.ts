@@ -103,8 +103,10 @@ function fixture(harness: string, owned = true) {
     runner,
     control,
     agent: () => agent,
-    replace: () => {
-      agent = { ...agent, session: { ...agent.session!, value: randomUUID() } };
+    replace: (
+      session: NonNullable<HerdrAgentSnapshot["session"]> = { ...agent.session!, value: randomUUID() },
+    ) => {
+      agent = { ...agent, session };
     },
     roster: async () =>
       OperatorFleetSeatSchema.parse({
@@ -254,4 +256,27 @@ it("capabilities do not bypass Stop authorization, and a mid-observation occupan
     interrupt: false,
     nextTurnOnly: false,
   });
+});
+
+it("display session hints avoid file rediscovery but a send still refuses a changed native thread", async () => {
+  const f = fixture("codex", false);
+  let fileReads = 0;
+  f.runner.openFiles = async () => {
+    fileReads++;
+    return `n/tmp/rollout-recorded-${randomUUID()}.jsonl\n`;
+  };
+  expect((await f.roster()).inputCapabilities?.deliveryModes).toEqual(["queue", "steer"]);
+  expect(fileReads).toBe(0);
+  expect(
+    await f.watch.deliverToSeat("seat1", "must not reach replacement", undefined, { delivery: "queue" }),
+  ).toMatchObject({ outcome: "undelivered", deliveryStage: "rejected" });
+  expect(fileReads).toBe(1);
+  expect(f.writes).toEqual([]);
+  f.replace({
+    source: "herdr:codex",
+    kind: "path",
+    value: `/tmp/rollout-recorded-${f.binding()}.jsonl`,
+  });
+  f.runner.paneProcesses = async () => [];
+  expect((await f.roster()).inputCapabilities?.deliveryModes).toEqual([]);
 });

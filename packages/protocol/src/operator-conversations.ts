@@ -707,8 +707,8 @@ export type StateOperatorAgentStanceResult = z.infer<typeof StateOperatorAgentSt
 
 /** Durable personas outlive seats, so their public bound cannot be the live roster bound. */
 export const OPERATOR_AGENT_PERSONA_LIST_MAX = 1_000;
-/** Bounded fleet roster entry: one herdr seat as a messageable contact (ADR 0135). */
-export const OPERATOR_FLEET_ROSTER_MAX = 48;
+/** Aggregate roster across execution connections, not a per-connection seat limit (ADR 0135). */
+export const OPERATOR_FLEET_ROSTER_MAX = 768;
 /**
  * What the host saw a seat's last run come to (ADR 0162). `passed` is a pane
  * that worked and then settled ready for the next thing; `failed` is one that
@@ -1470,8 +1470,8 @@ export const OperatorComposerCatalogSchema = z
   .strict();
 export type OperatorComposerCatalog = z.infer<typeof OperatorComposerCatalogSchema>;
 
-/** Up to 16 execution connections, each with 48 observable panes. */
-export const OPERATOR_TERMINAL_CATALOG_MAX = 16 * 48;
+/** Aggregate observable terminal catalog, bounded at the fleet roster's scale. */
+export const OPERATOR_TERMINAL_CATALOG_MAX = OPERATOR_FLEET_ROSTER_MAX;
 
 /** Herdr's native workspace → tab → pane location for one observable terminal. */
 export const OperatorTerminalSessionSchema = z

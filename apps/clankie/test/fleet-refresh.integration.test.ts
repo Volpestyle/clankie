@@ -12,7 +12,11 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { ClankieSettingsSchema, SettingsStore } from "@clankie/settings";
-import { OperatorConversationServiceResultSchema, type OperatorFleetSeat } from "@clankie/protocol";
+import {
+  OPERATOR_FLEET_ROSTER_MAX,
+  OperatorConversationServiceResultSchema,
+  type OperatorFleetSeat,
+} from "@clankie/protocol";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
@@ -144,7 +148,10 @@ interface NativeRow {
   agent_session: { source: string; kind: "path"; value: string };
   cwd: string;
 }
-async function captainFixture(tree: Awaited<ReturnType<typeof sessionTree>>) {
+async function captainFixture(
+  tree: Awaited<ReturnType<typeof sessionTree>>,
+  capabilityFiles?: () => Promise<string>,
+) {
   const rows: NativeRow[] = tree.parents.map((parent, index) => ({
     pane_id: `w1:p${index}`,
     terminal_id: `term_${index}`,
@@ -174,8 +181,18 @@ async function captainFixture(tree: Awaited<ReturnType<typeof sessionTree>>) {
       });
     if (args[0] === "pane" && args[1] === "list") return JSON.stringify({ result: { panes: rows } });
     if (args[0] === "workspace" && args[1] === "list") return JSON.stringify({ result: { workspaces: [] } });
+    if (capabilityFiles && args[0] === "pane" && args[1] === "process-info")
+      return JSON.stringify({
+        result: {
+          process_info: {
+            foreground_processes: [{ pid: 123, name: "codex", argv: ["codex", "--no-daemon"] }],
+          },
+        },
+      });
     throw new Error(`Unexpected census transport request: ${args.join(" ")}`);
   };
+  const runner = createHerdrWatchRunner(() => true, execute, undefined, { localCodexRecovery: false });
+  if (capabilityFiles) runner.openFiles = capabilityFiles;
   const captain = createCaptain(
     {
       herdrAvailable: () => true,
@@ -190,9 +207,7 @@ async function captainFixture(tree: Awaited<ReturnType<typeof sessionTree>>) {
       stateDir: tree.root,
       workingDirectory: tree.root,
       settings: new SettingsStore(join(tree.root, "settings.json")),
-      nativeHerdrRunner: createHerdrWatchRunner(() => true, execute, undefined, {
-        localCodexRecovery: false,
-      }),
+      nativeHerdrRunner: runner,
       nativeCensusRunner: async (_command, args) => {
         if (args[0] !== "agent" || args[1] !== "list") return { stdout: await execute(args), stderr: "" };
         calls++;
@@ -494,6 +509,59 @@ async function operatorHttp(captain: ReturnType<typeof createCaptain>, root: str
   });
   return `http://127.0.0.1:${address.port}`;
 }
+
+it("52 native seats cross authenticated HTTP and the contacts CLI without truncation or per-seat file rediscovery", async () => {
+  const tree = await sessionTree(52, 0);
+  let release!: () => void;
+  const blockedFiles = new Promise<string>((resolve) => {
+    release = () => resolve("");
+  });
+  let fileReads = 0;
+  const f = await captainFixture(tree, () => {
+    fileReads++;
+    return blockedFiles;
+  });
+  const host = await operatorHttp(f.captain, tree.root);
+  const dispatch = async (op: "fleet" | "roster") =>
+    fetch(`${host}/operator/v1/dispatch`, {
+      method: "POST",
+      headers: { authorization: "Bearer contacts-test", "content-type": "application/json" },
+      body: JSON.stringify({ schemaVersion: 1, op }),
+    });
+  try {
+    for (const op of ["fleet", "roster"] as const) {
+      const response = await dispatch(op);
+      expect(response.status).toBe(200);
+      const parsed = OperatorConversationServiceResultSchema.parse(await response.json());
+      const snapshot = parsed.op === "fleet" ? parsed.snapshot : parsed.op === "roster" ? parsed : undefined;
+      expect(snapshot?.readWarnings).toBeUndefined();
+      expect(snapshot?.seats).toHaveLength(52);
+      expect(snapshot?.seats.map((seat) => seat.seatId)).toEqual(f.rows.map((row) => row.terminal_id));
+      expect(snapshot?.seats.every((seat) => seat.inputCapabilities?.deliveryModes.includes("queue"))).toBe(
+        true,
+      );
+    }
+    const contacts = await runAgentsCommand(["contacts"], {
+      host,
+      env: { CLANKIE_CAPTAIN_TOKEN: "contacts-test" },
+    });
+    expect(contacts).toHaveLength(52);
+    expect(fileReads).toBe(0);
+
+    // The supported aggregate bound is explicit: overflow refuses the entire
+    // read, rather than returning success with a dropped tail or malformed JSON.
+    while (f.rows.length <= OPERATOR_FLEET_ROSTER_MAX) {
+      const index = f.rows.length;
+      f.rows.push({ ...f.rows[0]!, pane_id: `w1:p${index}`, terminal_id: `term_${index}` });
+    }
+    await delay(1050);
+    const overflow = await dispatch("fleet");
+    expect(overflow.status).toBe(503);
+    expect(await overflow.json()).toMatchObject({ error: "fleet_roster_limit", count: 769, limit: 768 });
+  } finally {
+    release();
+  }
+}, 20_000);
 
 it("busy fleet changes during a slow census return partial contacts instead of starving the HTTP read", async () => {
   const tree = await sessionTree(1, 0);

@@ -8,6 +8,7 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import {
   OPERATOR_HEAD_AGENT_NAME,
+  OPERATOR_FLEET_ROSTER_MAX,
   type OperatorHerdrPlacement,
   type OperatorFleetSeat,
   type OperatorTerminalSession,
@@ -93,6 +94,18 @@ export type HerdrSessionCensus =
 const CENSUS_TIMEOUT_MS = 5_000;
 const SEAT_DIRECTORY_MAX = 1_024;
 const MAX_AGENTS = 48;
+
+/** A complete roster is either within its public bound or explicitly refused. */
+export class FleetRosterLimitError extends Error {
+  readonly limit = OPERATOR_FLEET_ROSTER_MAX;
+  readonly count: number;
+  constructor(count: number) {
+    super(
+      `Fleet roster has ${count} seats, exceeding the supported ${OPERATOR_FLEET_ROSTER_MAX}; the complete read is refused rather than truncated.`,
+    );
+    this.count = count;
+  }
+}
 
 export function occupantIdForHerdrSession(session: {
   readonly source: string;
@@ -668,7 +681,7 @@ export async function readTerminalCatalog(
   const run = options.runCommand ?? ((command, args) => defaultRunner(command, args, options.env));
   try {
     const { stdout } = await run("herdr", ["api", "snapshot"]);
-    return parseHerdrTerminalCatalog(stdout).slice(0, MAX_AGENTS);
+    return parseHerdrTerminalCatalog(stdout);
   } catch {
     return [];
   }
@@ -830,12 +843,9 @@ export async function readFleet(
             agents: parseHerdrAgentList(JSON.stringify({ result: { agents: snapshot.agents } })).map(
               (entry) => qualifyAgent(fleet.id, entry),
             ),
-            placements: parseHerdrTerminalCatalog(stdout)
-              .slice(0, MAX_AGENTS)
-              .map(
-                ({ terminalId, workspace, tab }) =>
-                  [`${fleet.id}/${terminalId}`, { workspace, tab }] as const,
-              ),
+            placements: parseHerdrTerminalCatalog(stdout).map(
+              ({ terminalId, workspace, tab }) => [`${fleet.id}/${terminalId}`, { workspace, tab }] as const,
+            ),
           };
         } catch {
           return { fleet, agents: [], placements: [] };
@@ -995,7 +1005,6 @@ async function readLocalFleet(
           };
     const seats = occupied
       .filter((entry) => entry !== headEntry)
-      .slice(0, MAX_AGENTS)
       .map((entry) => {
         const written = summaries[entry.paneId];
         const paneSubject = subjectForHerdrPane(entry.paneId);

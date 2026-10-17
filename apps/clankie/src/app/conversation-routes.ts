@@ -30,6 +30,7 @@ import { ConversationRefusedError, ConversationResetError } from "../captain/con
 import { manageConnections } from "../connections.ts";
 import { type DeviceRegistry } from "../devices.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
+import { FleetRosterLimitError } from "../captain/herdr-census.ts";
 import { WorkRequestError } from "../work-items.ts";
 import { CutoverRequestSchema } from "../linear-cutover.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
@@ -841,6 +842,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return context.json({ error: "captain_authentication_required" }, 403);
       if (error instanceof HerdrUnavailableError)
         return context.json({ error: "herdr_unavailable", message: error.message }, 503);
+      if (error instanceof FleetRosterLimitError)
+        return context.json(
+          { error: "fleet_roster_limit", message: error.message, count: error.count, limit: error.limit },
+          503,
+        );
       if (error instanceof ConversationResetError)
         return context.json({ error: "reset_refused", message: error.message }, 409);
       if (error instanceof ConversationRefusedError)

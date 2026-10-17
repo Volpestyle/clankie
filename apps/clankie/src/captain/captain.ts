@@ -91,6 +91,7 @@ import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
 import {
   OPERATOR_CONVERSATION_TEXT_MAX,
+  OPERATOR_FLEET_ROSTER_MAX,
   OPERATOR_HEAD_AGENT_NAME,
   CAPTAIN_SILENT_REPLY_SENTINEL,
   type CaptainChannelTurnResult,
@@ -240,6 +241,7 @@ import {
   launchedWithMaximumTrust,
   occupantIdForHerdrSession,
   readFleet,
+  FleetRosterLimitError,
   readPaneForegroundArgv,
   type HerdrCensusFleet,
   type ObservedHeadSeat,
@@ -3807,6 +3809,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       diagnostics,
     );
     const stopGoalStatus = diagnostics.start("goal_status");
+    if (fleet.seats.length > OPERATOR_FLEET_ROSTER_MAX) throw new FleetRosterLimitError(fleet.seats.length);
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
     const goalList = await conversations.serve({ op: "list", schemaVersion: 1 });

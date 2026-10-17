@@ -109,7 +109,10 @@ export function createFleetSeatControl(
     );
   };
 
-  const inputCapabilities = async (agent: HerdrAgentSnapshot): Promise<FleetSeatInputCapabilities> => {
+  const inputCapabilities = async (
+    agent: HerdrAgentSnapshot,
+    { displayOnly = false }: { displayOnly?: boolean } = {},
+  ): Promise<FleetSeatInputCapabilities> => {
     const result: FleetSeatInputCapabilities = { deliveryModes: [], interrupt: false, nextTurnOnly: false };
     if (!isMessageableSeat(agent) || !agent.session || ["offline", "released"].includes(agent.status))
       return result;
@@ -136,8 +139,20 @@ export function createFleetSeatControl(
           result.deliveryModes.push("steer");
       } else if (runner.paneProcesses && runner.openFiles && runner.codexQueue) {
         const process = codexProcess(await runner.paneProcesses(agent.paneId).catch(() => []));
-        const files = process ? await runner.openFiles(process.pid).catch(() => "") : "";
-        const expected = agent.session.kind === "id" ? agent.session.value : undefined;
+        // The roster already has the exact native session (including rollout
+        // paths). Do not rediscover it with a process-wide lsof for every seat.
+        // Delivery calls keep the default fresh file/process checks below and
+        // in deliverCodexQueue; this display hint grants no dispatch authority.
+        const expected =
+          agent.session.kind === "id"
+            ? agent.session.value
+            : displayOnly && process
+              ? nativeSessionId(agent)
+              : undefined;
+        const files =
+          process && (!displayOnly || expected === undefined)
+            ? await runner.openFiles(process.pid).catch(() => "")
+            : "";
         const session = resolveCodexSessionId(process ? [process] : [], files, expected) ?? expected;
         if (session && (expected === undefined || session === expected)) {
           if (!result.deliveryModes.includes("queue")) result.deliveryModes.push("queue");

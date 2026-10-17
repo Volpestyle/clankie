@@ -2,6 +2,12 @@
 
 The full command table, updating and restarting the runtime, models and voice, Discord setup, devices and doorways, memory, steering a turn, setup and conflicts. The flag/JSON/exit-code contract is `{repoRoot}/docs/cli.md`.
 
+Fleet contact reads use `clankie agents contacts`. The API accepts up to 768
+occupied seats across connections and refuses larger complete reads rather than
+silently truncating them. `readWarnings` means cached or partial observations,
+not confirmed live ownership. Display input capabilities do not authorize a send;
+the send performs its own fresh native and authority checks.
+
 ## Command table
 
 Configure through these headless commands; never write Keychain entries, `~/.config/clankie/clankie.json` or `~/.config/clankie/settings.json` yourself.
