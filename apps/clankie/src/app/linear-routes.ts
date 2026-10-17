@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   classifyLinearDelivery,
+  linearArrival,
   linearReplyTo,
   linearActivityWakeTypes,
   linearActivityProject,
@@ -30,7 +31,7 @@ export interface RegisterLinearRoutesContext {
       ClankieAppDependencies["captain"],
       "receiveLinearActivity" | "linearWakeTargetAllowed"
     > &
-      Partial<Pick<ClankieAppDependencies["captain"], "linearWakeDeliveries">>;
+      Partial<Pick<ClankieAppDependencies["captain"], "linearWakeDeliveries" | "recordInbound">>;
   };
   readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;
@@ -372,6 +373,28 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
       matches;
     const ingested =
       targetAllowed && ctx.dependencies.captain.receiveLinearActivity(activity, following, target);
+    // Only what woke him arrives in the room, once: a replayed event is not ingested again.
+    const sourceId = activity.eventId ?? activity.deliveryId;
+    if (following && ingested !== false && sourceId !== undefined) {
+      const rules = current.linearWebhook.wake;
+      const owner =
+        activity.actorType === "user" &&
+        activity.actorId !== undefined &&
+        (rules.ownerUserIds.includes(activity.actorId) ||
+          (activity.actorEmail !== undefined &&
+            rules.ownerUserEmails.some(
+              (email) => email.toLowerCase() === activity.actorEmail!.toLowerCase(),
+            )));
+      ctx.dependencies.captain.recordInbound?.({
+        channel: "linear",
+        sourceId,
+        at: ctx.clock().toISOString(),
+        actor: { label: activity.actorName ?? "Linear", owner },
+        ...linearArrival(activity),
+        ...(activity.url === undefined ? {} : { url: activity.url }),
+        conversationId: target,
+      });
+    }
     mirror(activity);
     logger.info(
       {

@@ -328,6 +328,8 @@ export interface CaptainPort {
     request: Omit<import("@clankie/protocol").FleetRoomRequest, "op" | "schemaVersion">,
     signal?: AbortSignal,
   ): Promise<import("@clankie/protocol").FleetRoomResult>;
+  /** Records a verified outside delivery in the fleet room (VUH-2403); never blocks or alters its handling. */
+  recordInbound?(arrival: import("./fleet-room.ts").InboundArrival): void;
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,

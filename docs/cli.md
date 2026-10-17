@@ -3782,7 +3782,9 @@ Specs live in `~/.clankie/views/views.json`. Schemas are in
 The fleet room ([ADR 0273](adr/0273-the-fleet-room-is-a-durable-owner-only-coordination-record.md)):
 one time-ordered feed of how the fleet coordinates. It holds lead briefs and
 messages to workers, worker reports, peer and lead-to-lead messages, delivered
-Auto rounds, and owner questions with their answered or withdrawn state. The
+Auto rounds, owner questions with their answered or withdrawn state, and
+`inbound` arrivals: a followed Linear activity or a Discord text message that
+reached him (VUH-2403). The
 host records each one as it happens, and only the owner reads it: this machine's
 operator credential, or a paired device holding Take Control through the service
 op `fleet_room`.
@@ -3791,11 +3793,14 @@ The JSON page is oldest first. Each entry has:
 
 - `id` (the source's own id), `sequence` and `at`;
 - `kind`;
-- `from`/`to` (`{kind: lead|worker|clankie|owner, label, conversationId?, seatId?, personaId?}`);
-- bounded `text`, with credentials scrubbed;
+- `from`/`to` (`{kind: lead|worker|clankie|owner|external, label, conversationId?, seatId?, personaId?}`;
+  `external` is a person outside the fleet who is not the owner);
+- bounded `text`, with credentials scrubbed (an `inbound` excerpt is at most 280 characters);
 - `links` (the issue keys and commit SHAs the text names);
 - `thread`, when one exists;
-- `delivery.stage` as recorded (ADR 0211; `stored` is not read).
+- `delivery.stage` as recorded (ADR 0211; `stored` is not read);
+- `inbound` (only on `inbound` entries): `channel` (`linear`, `discord`, `github`),
+  the `issue` key the source stated, and an https `url` that opens the source.
 
 The page also carries:
 

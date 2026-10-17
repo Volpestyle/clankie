@@ -892,6 +892,34 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     return result;
   }
 
+  /**
+   * A text message he was handed shows as an arrival in the fleet room
+   * (VUH-2403), once per delivery: a retry finds its receipt and never gets here.
+   * Voice, reactions and handoffs are not arrivals.
+   */
+  async function recordDiscordArrival(request: DiscordPresenceChannelTurnRequest): Promise<void> {
+    const { trigger } = request;
+    if (trigger.kind !== "message" && trigger.kind !== "mention" && trigger.kind !== "dm") return;
+    try {
+      const { settings } = resolveDiscordSettings(
+        (await ctx.settingsSource.load()).discord,
+        ctx.dependencies.discordEnvironment ?? process.env,
+      );
+      const owner = settings.ownerUserId === trigger.actorId;
+      const images = trigger.attachments.length;
+      ctx.dependencies.captain.recordInbound?.({
+        channel: "discord",
+        sourceId: request.deliveryId,
+        at: ctx.clock().toISOString(),
+        actor: { label: request.room?.peerName ?? (owner ? "Owner" : "Discord user"), owner },
+        excerpt: trigger.body?.trim() || `${images} image${images === 1 ? "" : "s"}`,
+        url: `https://discord.com/channels/${trigger.guildId ?? "@me"}/${trigger.channelId}/${trigger.messageId ?? trigger.id}`,
+      });
+    } catch (error) {
+      logger.warn({ error: String(error) }, "discord arrival not recorded");
+    }
+  }
+
   /** One Discord text/voice message becomes one captain turn. Discord family only. */
   ctx.app.post("/v1/captain/channel-turns", async (context) => {
     const body = await readJson(context.req.raw);
@@ -955,6 +983,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
       } catch {
         return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
       }
+      void recordDiscordArrival(request);
       const turn = Promise.resolve().then(async () => {
         let result: CaptainChannelTurnResult;
         try {

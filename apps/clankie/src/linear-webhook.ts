@@ -590,6 +590,29 @@ export function linearActivityHeadline(activity: LinearActivityEvent): string {
   return line.length > HEADLINE_MAX ? `${line.slice(0, HEADLINE_MAX - 1)}…` : line;
 }
 
+/**
+ * What an arrival shows (VUH-2403): a comment's own words, or what changed and
+ * on what, plus the issue the signed data names. Never the actor; the room
+ * carries that separately.
+ */
+export function linearArrival(activity: LinearActivityEvent): { excerpt: string; issue?: string } {
+  const issue =
+    activity.type === "Issue" ? activity.data : { ...activity.issueContext, ...record(activity.data.issue) };
+  const said =
+    activity.type === "Comment"
+      ? text(activity.data.body)
+      : activity.type === "Reaction"
+        ? [text(activity.data.emoji), text(record(activity.data.comment).body)].filter(Boolean).join(" ")
+        : undefined;
+  const excerpt =
+    said ||
+    [`${activity.type} ${activity.action}`, linearSubject(activity.type, activity.data)]
+      .filter((part): part is string => typeof part === "string" && part.length > 0)
+      .join(" · ");
+  const identifier = text(issue.identifier);
+  return { excerpt, ...(identifier === undefined ? {} : { issue: identifier }) };
+}
+
 /** Marks a headline whose comment answers his own post; the wake routes on it. */
 const LINEAR_REPLY_MARK = "reply to your post";
 

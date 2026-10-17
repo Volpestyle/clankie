@@ -227,7 +227,7 @@ import {
   LeadVisitWindow,
   type EdgeSeat,
 } from "./fleet-edges.ts";
-import { FleetRoomJournal, type FleetRoomRecord } from "./fleet-room.ts";
+import { FleetRoomJournal, inboundFleetRoomRecord, type FleetRoomRecord } from "./fleet-room.ts";
 import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.js";
 import {
   deliverFleetSeatMessage,
@@ -6428,6 +6428,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     prepareFreeAgentIntent,
     leadChats,
     fleetRoom: (request, signal) => fleetRoom.read(request, signal),
+    recordInbound: (arrival) => noteFleetRoom(inboundFleetRoomRecord(arrival)),
     readWorkerAccounts,
     resolveWorkerAccountLabel: (machine, harness, label) =>
       harnessAccountIdentities(harnessAccountIdentityPath(options.stateDir)).resolve(machine, harness, label),

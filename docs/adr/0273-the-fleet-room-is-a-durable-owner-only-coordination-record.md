@@ -34,6 +34,7 @@ at the moments coordination already happens:
 | `lead_to_lead`                    | A lead messages another lead natively, or the receiving lead's service queues it              |
 | `auto_round`                      | An Auto round is admitted to the lead that runs the projects                                  |
 | `owner_question` / `owner_answer` | A question to the owner is asked, then answered or withdrawn                                  |
+| `inbound`                         | A delivery from outside the fleet reaches him (amendment below)                               |
 
 Each entry carries:
 
@@ -105,3 +106,28 @@ are a snapshot of what was known at recording. A report later read by its lead
 still shows `stored`, because the room does not rewrite past lines. The
 per-conversation journals and receipts remain the source of truth for delivery,
 and the room is the owner's view across them.
+
+## Amendment: inbound arrivals (VUH-2403, 2026-10-17)
+
+The World and the pet show a webhook arriving: a Linear comment, a Discord
+message. The room already has the order, stable ids, live follow, scrubbing and
+owner-only reading those surfaces need, so arrivals are one more kind rather
+than a second feed.
+
+- **What arrives.** A signed Linear activity that the wake rules follow and
+  that is newly ingested, and a Discord `message`, `mention` or `dm` turn the
+  bridge hands the service, recorded once at its first receipt. Voice,
+  reactions, handoffs and activity that never woke him are not arrivals.
+  Nothing is inferred from his replies. GitHub has no service ingress yet;
+  its `channel` value is reserved.
+- **Shape.** The id is `inbound:<channel>:<source id>`. `from` is `owner` when
+  the source identifies the owner (Linear owner ids or emails, the Discord
+  owner id), otherwise `external`. `to` is Clankie with the conversation it was
+  handed to, when known. `text` is a scrubbed excerpt of at most 280
+  characters. `inbound` carries the channel, the issue key the source stated
+  and an https link to the source. A fact the contract can't carry is left out;
+  the arrival is still recorded.
+- **Time.** `at` is when the arrival reached the service, not when the comment
+  was written.
+
+The reading rules above are unchanged: owner only, display only, not mirrored.

@@ -2,10 +2,12 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } fr
 import { join } from "node:path";
 import { redactSensitiveText } from "@clankie/observability";
 import {
+  FLEET_ROOM_INBOUND_EXCERPT_MAX,
   FLEET_ROOM_TEXT_MAX,
   FleetRoomEntrySchema,
   FleetRoomRequestSchema,
   type FleetRoomEntry,
+  type FleetRoomInbound,
   type FleetRoomRequest,
   type FleetRoomResult,
 } from "@clankie/protocol";
@@ -16,10 +18,61 @@ const FLEET_ROOM_RETENTION_MS = 14 * 24 * 3_600_000;
 /** The file is rewritten once it holds this many lines, or at most hourly once some have aged out. */
 const COMPACT_AT = 2500;
 const COMPACT_EVERY_MS = 3_600_000;
+const ISSUE_KEY = /^[A-Z][A-Z0-9]{1,9}(?:-[A-Z][A-Z0-9]{1,9})?-\d{1,7}$/u;
 /** Prefixes that look like issue keys but name standards, never tracker issues. */
 const NOT_ISSUES = new Set(["SHA", "UTF", "ISO", "RFC", "MD", "AES", "TLS", "HTTP", "IPV", "X"]);
 
 export type FleetRoomRecord = Omit<FleetRoomEntry, "sequence" | "links" | "text"> & { text: string };
+
+/**
+ * A delivery from outside the fleet that reached him (VUH-2403): a followed
+ * Linear activity or a Discord message he was handed. The route that accepted
+ * it supplies only what it verified; nothing is inferred from replies.
+ */
+export interface InboundArrival extends FleetRoomInbound {
+  /** The source's own delivery or event id; the room keeps it once. */
+  readonly sourceId: string;
+  readonly at: string;
+  readonly actor: { readonly label: string; readonly owner: boolean };
+  readonly excerpt: string;
+  /** The conversation it was handed to, when one exists. */
+  readonly conversationId?: string;
+}
+
+export function inboundFleetRoomRecord(arrival: InboundArrival): FleetRoomRecord {
+  // Scrub before cutting: a cut through a credential could leave a prefix the scrubber no longer knows.
+  const excerpt = redactSensitiveText(arrival.excerpt).replace(/\s+/gu, " ").trim();
+  return {
+    id: `inbound:${arrival.channel}:${arrival.sourceId}`,
+    at: arrival.at,
+    kind: "inbound",
+    from: {
+      kind: arrival.actor.owner ? "owner" : "external",
+      label: arrival.actor.label.trim().slice(0, 120) || arrival.channel,
+    },
+    to: {
+      kind: "clankie",
+      label: "Clankie",
+      ...(arrival.conversationId === undefined ? {} : { conversationId: arrival.conversationId }),
+    },
+    text:
+      excerpt.length > FLEET_ROOM_INBOUND_EXCERPT_MAX
+        ? `${excerpt.slice(0, FLEET_ROOM_INBOUND_EXCERPT_MAX - 1)}…`
+        : excerpt,
+    ...(arrival.conversationId === undefined ? {} : { thread: { conversationId: arrival.conversationId } }),
+    // A source fact the room's contract can't carry is left out, never the whole arrival.
+    inbound: {
+      channel: arrival.channel,
+      ...(arrival.issue !== undefined && ISSUE_KEY.test(arrival.issue) ? { issue: arrival.issue } : {}),
+      ...(arrival.url !== undefined &&
+      arrival.url.length <= 2048 &&
+      arrival.url.startsWith("https://") &&
+      URL.canParse(arrival.url)
+        ? { url: arrival.url }
+        : {}),
+    },
+  };
+}
 
 /** Issue keys and commit SHAs the text names, in order, without duplicates. */
 function fleetRoomLinks(text: string): FleetRoomEntry["links"] {
