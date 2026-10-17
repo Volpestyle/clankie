@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "raw/live-allocation-all-1731Z.heapprofile.json",
+      "size": 117710,
+      "sha256": "811af5bd6ff8764d1ba3e7bc2d52b017392dccdbc219a1495f0d111ca7c01600",
+      "url": "clankie://evidence/sha256/811af5bd6ff8764d1ba3e7bc2d52b017392dccdbc219a1495f0d111ca7c01600"
+    },
+    {
+      "path": "raw/live-allocation-old-gen-1740Z.heapprofile.json",
+      "size": 394729,
+      "sha256": "4a04ee30c052c95109fe86cc2ee6db42e548b8801c8a88291257ed48062964d2",
+      "url": "clankie://evidence/sha256/4a04ee30c052c95109fe86cc2ee6db42e548b8801c8a88291257ed48062964d2"
+    },
+    {
+      "path": "raw/live-main-thread-1717Z.cpuprofile",
+      "size": 2497665,
+      "sha256": "4afc540d66319720eb20d1cd7a4b4922e73cbd4e343d16bff12293e03cb6c8e0",
+      "url": "clankie://evidence/sha256/4afc540d66319720eb20d1cd7a4b4922e73cbd4e343d16bff12293e03cb6c8e0"
+    },
+    {
+      "path": "raw/live-main-thread-1736Z.cpuprofile",
+      "size": 2132216,
+      "sha256": "18165f8ba21b9c0e7c56eb52a7e17493acd3a3e42f01a9d3916c96050ed1e70c",
+      "url": "clankie://evidence/sha256/18165f8ba21b9c0e7c56eb52a7e17493acd3a3e42f01a9d3916c96050ed1e70c"
+    },
+    {
+      "path": "raw/live-retained-1720-1730Z.heapprofile.json",
+      "size": 89183,
+      "sha256": "36a03bc1d0543e26d83ccab9192812ef6c09a225f24f234aeab560fce7b82254",
+      "url": "clankie://evidence/sha256/36a03bc1d0543e26d83ccab9192812ef6c09a225f24f234aeab560fce7b82254"
+    },
+    {
+      "path": "raw/native-sample-1715Z.txt",
+      "size": 1855132,
+      "sha256": "b8e41d00ed20abd4f3948eaa4928107c23d542821231d72335d038dae796663b",
+      "url": "clankie://evidence/sha256/b8e41d00ed20abd4f3948eaa4928107c23d542821231d72335d038dae796663b"
+    }
+  ]
+}

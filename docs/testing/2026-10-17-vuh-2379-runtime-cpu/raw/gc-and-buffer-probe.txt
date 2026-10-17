@@ -1,0 +1,39 @@
+Live runtime PID 27133 (ea428c2b5, started 15:06:14Z), 2026-10-17. Printed results, verbatim.
+
+== v8.getHeapStatistics(), ~17:33Z (uptime ~2h27m)
+used_heap_size 1595143120, total_heap_size 1671299072, heap_size_limit 4395630592,
+external_memory 222538454, total_allocated_bytes 1468303650160
+spaces (used/size MB): old 1175/1212, large_object 368/376, new 12/25, code 22/31, trusted 19/27
+
+== GC PerformanceObserver, 120 s, ~17:34Z
+kind 1 (scavenge)        n=580  803.6 ms
+kind 4 (mark-compact)    n=63   571.5 ms
+kind 8 (incremental)     n=63   65.2 ms
+
+== GC PerformanceObserver by kind:flags, 90 s, ~17:40Z (with old-generation allocation sampling)
+1:0   n=277  380.7 ms
+8:0   n=18   19.0 ms
+4:40  n=18   142.8 ms   (flags 40 = CollectAllExternalMemory|SynchronousPhantomCallbackProcessing: external-memory pressure)
+4:0   n=1    72.4 ms
+used_heap_size at each mark-compact callback (MB): 1827 1827 1828 1836 1827 1830 1829 1834 1825 1833 1826 1828 1833 1830 1830 1826 1828 1833 1818
+
+== Large-buffer probe (probe.js), 90 s, ~17:57Z
+Wrapped Buffer.prototype.toString / Buffer.allocUnsafe / allocUnsafeSlow / concat / TextDecoder.decode for >= 512 KiB,
+recording 8 stack frames; restored afterwards (restored=true). Top rows, stacks truncated to 900 chars:
+total 1484.4 MB in 90 s
+186.1MB n=18 allocUnsafeSlow :: readFileHandle | async readStore (tracker-local.ts:3131) | async load (3282) | async Object.storeId (3984) | async drain (tracker-owner-loop.ts:299)
+186.1MB n=18 allocUnsafeSlow :: readFileHandle | async readStore | async load | async <anonymous> (tracker-local.ts:4132) | async withTrackerStoreLock | async drain (tracker-owner-loop.ts:312)
+155.1MB n=15 allocUnsafeSlow :: readFileHandle | async readStore | async load | async Object.storeId | async Object.trackerProject (work-items.ts:261) | async prepare (project-work-items.ts:46) | ... | prepareSeatIssueTracker (work-items.ts:950)
+155.1MB n=15 allocUnsafeSlow :: readFileHandle | async readStore | async load | async <anonymous> (4132) | withTrackerStoreLock | trackerProject (work-items.ts:264) | prepare (project-work-items.ts:46)
+155.1MB n=15 allocUnsafeSlow :: readFileHandle | async readStore | async load | async Object.projectStoreId (3988) | validate (work-items.ts:270) | trackerProject (work-items.ts:273) | prepare
+155.1MB n=15 allocUnsafeSlow :: readFileHandle | async readStore | async load | projectStoreId | validate (work-items.ts:270) | validate (project-work-items.ts:58) | prepare (project-work-items.ts:60)
+155.1MB n=15 allocUnsafeSlow :: readFileHandle | async readStore | async load | <anonymous> (4132) | withTrackerStoreLock | builtInBinding (work-items.ts:429) | deps (work-items.ts:439) | prepareSeatIssueTracker (work-items.ts:1012)
+155.1MB n=15 allocUnsafeSlow :: readFileHandle | async readStore | async load | <anonymous> (4132) | withTrackerStoreLock | work-items.ts:1043 | prepareSeatIssueTracker (1040) | SeatIssueKeeper.observe (seat-issue-status.ts:236)
+155.1MB n=15 allocUnsafeSlow :: readFileHandle | async readStore | async load | projectStoreId | validate (work-items.ts:270) | validate (project-work-items.ts:58) | beforeWrite (work-items.ts:1063) | prepareSeatIssueTracker (1067)
+14.9MB  n=1  allocUnsafeSlow :: Buffer.from | writeFileSync | ConversationStore.saveMeta (store.ts:3681) | enqueue (2880) | submitInbound (2066)
+4.2MB   n=2  allocUnsafeSlow :: Buffer.from | writeFileSync | ConversationStore.saveMeta (store.ts:3681) | store.ts:3143
+2.1MB   n=1  toString :: nativeSnapshot (seat-telemetry.ts:399) | readNativeSeatSnapshot | readSeatActivity | fleet-projection-diagnostics measure
+2.1MB   n=1  allocUnsafeSlow :: writeFileSync | saveMeta | invoke (store.ts:3007)
+2.1MB   n=1  allocUnsafeSlow :: writeFileSync | saveMeta | invoke (store.ts:3020)
+1.0MB   n=1  allocUnsafe :: loadEntriesFromFile (pi session-manager)
+tracker.json at the time: 10,340,431 bytes (186.1 MB / 18 = 10.34 MB per read).

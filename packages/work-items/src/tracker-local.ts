@@ -8,7 +8,7 @@ import {
 } from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, lstatSync, realpathSync, readFileSync } from "node:fs";
-import { open, readFile, rename, rm } from "node:fs/promises";
+import { open, readFile, rename, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { compareVersions, type ReleaseHistory } from "./releases.ts";
 import { withTrackerStoreLock } from "./tracker-store-lock.ts";
@@ -3124,13 +3124,24 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
   const path = join(directory, "tracker.json");
   const listeners = eventListeners.get(path) ?? new Set<TrackerEventListener>();
   eventListeners.set(path, listeners);
-  let validated: { bytes: Buffer; store: Store } | undefined;
+  let validated: { version: string; bytes: Buffer; store: Store } | undefined;
   const readStore = async (mutable = true): Promise<Store> => {
-    // Read every time: a different process can replace or edit the store.
-    // Only byte-identical, already validated content may skip parsing/auditing.
-    const bytes = await readFile(path);
-    if (validated === undefined || !validated.bytes.equals(bytes))
-      validated = { bytes, store: parseStore(bytes.toString("utf8")) };
+    // A different process can replace or edit the store, so every read checks
+    // the file's version. Its identity, size and timestamps change with any
+    // write; ctime also catches an in-place edit that restores mtime. Reading
+    // the whole store on each call was the service's main allocation churn
+    // (VUH-2379). The version is taken before the read, so a racing write
+    // leaves a stale version that the next read misses.
+    const stats = await stat(path, { bigint: true });
+    const version = `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
+    if (validated?.version !== version) {
+      // Only byte-identical, already validated content may skip parsing/auditing.
+      const bytes = await readFile(path);
+      validated =
+        validated !== undefined && validated.bytes.equals(bytes)
+          ? { ...validated, version }
+          : { version, bytes, store: parseStore(bytes.toString("utf8")) };
+    }
     // Writes and returned views must never mutate the validated snapshot.
     return mutable ? structuredClone(validated.store) : validated.store;
   };

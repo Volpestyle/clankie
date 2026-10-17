@@ -65,3 +65,33 @@ await tracker.call("save_issue", { id: process.argv[4], title: "External" });
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// VUH-2379: the service re-read its 10 MB store about twice a second, and each
+// read's buffer pushed V8 into a full collection of its whole heap.
+it("answers repeated reads of an unchanged store without loading it again", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "tracker-read-unchanged-"));
+  try {
+    const tracker = createLocalTracker({ directory });
+    for (let index = 0; index < 4; index++)
+      await tracker.call("save_issue", {
+        team: "LOCAL",
+        title: `Bulk ${index}`,
+        description: "x".repeat(1 << 20),
+      });
+    const storeBytes = (await stat(join(directory, "tracker.json"))).size;
+    expect(storeBytes).toBeGreaterThan(4 << 20);
+    await tracker.storeId();
+
+    // A read buffer stays allocated until the next collection, so a reload
+    // shows here as growth of about the store's size.
+    const baseline = process.memoryUsage().arrayBuffers;
+    let growth = 0;
+    for (let read = 0; read < 20; read++) {
+      await tracker.storeId();
+      growth = Math.max(growth, process.memoryUsage().arrayBuffers - baseline);
+    }
+    expect(growth).toBeLessThan(storeBytes / 2);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

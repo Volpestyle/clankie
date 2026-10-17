@@ -1,0 +1,3 @@
+Copy of live ~/.clankie/tracker/tracker.json (10,340,431 bytes), 100 storeId() reads after one warm read, tools/bench-store.ts, clankie heavy, 2026-10-17 ~18:05Z
+fixed: p50 0.02 ms, p95 0.06 ms, peak buffer growth 0.0 MB
+old (HEAD ea428c2b5 tracker-local.ts): p50 1.67 ms, p95 3.75 ms, peak buffer growth 155.0 MB
