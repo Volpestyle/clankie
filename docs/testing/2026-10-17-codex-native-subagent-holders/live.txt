@@ -1,0 +1,100 @@
+VUH-1888 native Codex spawn_agent proof, 2026-10-17 UTC.
+Parent term_65e0166547b2083; native children /root/sim_holder_a and /root/sim_holder_b.
+No holderId argument or identity environment mutation was used.
+The first request queued at 04:29:49.536Z. The grant began 05:04:06.615Z; release receipt captured 05:05:54.133Z.
+Initial waiting/restart receipts are retained in proof-packet.json through the evidence manifest.
+
+== Runtime at start (runtime.json)
+{
+  "cliVersion": "clankie 0.4.4",
+  "installedHead": "cc2eb50e57c28b89f3979adf68d3965fb8615989",
+  "sourceHead": "3a233db920e3f7f4a80497a19c123ff6d8b5f754",
+  "parentSeat": "term_65e0166547b2083",
+  "deviceId": "ECF31A58-614F-40A7-87C9-914A4930D974"
+}
+
+== Installed CLI source at grant (runtime-after-restart.json)
+{
+  "observedUtc": "2026-10-17T05:05:13.388966+00:00",
+  "installedHead": "5cfcdc2e9cf22ad43346bed9e235b2de2dbf7774",
+  "cliVersion": "clankie 0.4.4"
+}
+
+== Parent native exec environment (parent.json)
+{
+  "CODEX_THREAD_ID": "01a14809-e898-7413-b46f-fd393fc19a50",
+  "CLANKIE_RESOURCE_HOLDER": "claude:ad9b73a1-9c79-4688-9daf-4cbc4e9502e6",
+  "HERDR_PANE_ID": "w55:pD",
+  "CLANKIE_SEAT_ID": null
+}
+
+== Child A initial native exec environment (a-env.json)
+{
+  "CODEX_THREAD_ID": "01a1481f-5773-7c42-abfe-1c4184c2d835",
+  "CLANKIE_RESOURCE_HOLDER": "claude:ad9b73a1-9c79-4688-9daf-4cbc4e9502e6",
+  "HERDR_PANE_ID": "w55:pD"
+}
+
+== Child B initial native exec environment (b-env.json)
+{
+  "CODEX_THREAD_ID": "01a1481f-6dfb-7bc1-aceb-3beab43dad2d",
+  "CLANKIE_RESOURCE_HOLDER": "claude:ad9b73a1-9c79-4688-9daf-4cbc4e9502e6",
+  "HERDR_PANE_ID": "w55:pD"
+}
+
+== Child A grant/resume environment (a-grant-env.json)
+{
+  "CODEX_THREAD_ID": "01a1481f-5773-7c42-abfe-1c4184c2d835",
+  "CLANKIE_RESOURCE_HOLDER": "claude:ad9b73a1-9c79-4688-9daf-4cbc4e9502e6",
+  "HERDR_PANE_ID": "w55:pD"
+}
+
+== Child A actual commands (a-commands.txt)
+clankie simulator acquire '{"seatId":"term_65e0166547b2083","deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974","exact":true,"ticketId":"85743b98-f2cb-47df-9c7e-d0699ef9734b"}' --wait 600 > docs/testing/2026-10-17-codex-native-subagent-holders/a-acquire-7.txt 2>&1
+clankie simulator touch '{"seatId":"term_65e0166547b2083","id":"883481a4-ee10-4480-8175-e929fd5bfc42"}' > docs/testing/2026-10-17-codex-native-subagent-holders/a-touch.txt 2>&1
+clankie simulator release '{"seatId":"term_65e0166547b2083","id":"883481a4-ee10-4480-8175-e929fd5bfc42"}' > docs/testing/2026-10-17-codex-native-subagent-holders/a-release.txt 2>&1
+
+== Child A acquire receipt (a-acquire-7.txt)
+Idle timeout is 600 seconds; touch the lease while using it, and release when finished.
+{"outcome":"acquired","lease":{"id":"883481a4-ee10-4480-8175-e929fd5bfc42","seatId":"term_65e0166547b2083","holderId":"codex:01a1481f-5773-7c42-abfe-1c4184c2d835","occupantId":"session-41a1ce083e3c4bd35344ff63bdfe7930a6321e57ff939b4aadb71e38eb3dd9f7","phase":"booted","createdAtMs":1792213446615,"lastUsedAtMs":1792213447454,"deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974","deviceName":"iPhone 17 Pro","deviceType":"com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro","runtime":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","origin":"existing"}}
+
+== Child A touch receipt (a-touch.txt)
+{"outcome":"held","lease":{"id":"883481a4-ee10-4480-8175-e929fd5bfc42","seatId":"term_65e0166547b2083","holderId":"codex:01a1481f-5773-7c42-abfe-1c4184c2d835","occupantId":"session-41a1ce083e3c4bd35344ff63bdfe7930a6321e57ff939b4aadb71e38eb3dd9f7","phase":"booted","createdAtMs":1792213446615,"lastUsedAtMs":1792213497448,"deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974","deviceName":"iPhone 17 Pro","deviceType":"com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro","runtime":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","origin":"existing"}}
+
+== Child B resume environment (b-resume-env.json)
+{
+  "CODEX_THREAD_ID": "01a1481f-6dfb-7bc1-aceb-3beab43dad2d",
+  "CLANKIE_RESOURCE_HOLDER": "claude:ad9b73a1-9c79-4688-9daf-4cbc4e9502e6",
+  "HERDR_PANE_ID": "w55:pD"
+}
+
+== Child B actual invocation source (b-commands.txt)
+Acquire invocation (exact Python source executed through exec_command):
+result=subprocess.run(['clankie','simulator','acquire',json.dumps({'seatId':'term_65e0166547b2083','deviceId':'ECF31A58-614F-40A7-87C9-914A4930D974','exact':True}), '--wait','20'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+
+Cancel invocation and ticket selection (exact Python source executed through exec_command):
+lines=(root/'b-acquire.txt').read_text().splitlines()
+r=next(json.loads(line) for line in lines if line.startswith('{'))
+assert r['outcome']=='waiting'
+assert r['ticket']['holderId']=='codex:01a1481f-6dfb-7bc1-aceb-3beab43dad2d'
+result=subprocess.run(['clankie','simulator','cancel',json.dumps({'seatId':'term_65e0166547b2083','id':r['ticket']['id']})],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+
+== Child B acquire receipt while A owns the device (b-acquire.txt)
+waiting (simulator_capacity): Requested device iPhone 17 Pro (ECF31A58-614F-40A7-87C9-914A4930D974) is leased to seat term_65e0166547b2083 holder codex:01a1481f-5773-7c42-abfe-1c4184c2d835. Wait for that exact device; no alternative will be used.
+Ticket c43ddd79-4255-418c-8cab-369d62ab5210, position 2; cancel it with simulator cancel JSON or resume with its ticketId.
+{"outcome":"waiting","ticket":{"id":"c43ddd79-4255-418c-8cab-369d62ab5210","kind":"simulator","seatId":"term_65e0166547b2083","holderId":"codex:01a1481f-6dfb-7bc1-aceb-3beab43dad2d","pid":5404,"queuedAtMs":1792213499946,"deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974","exact":true,"expiresAtMs":1792213821858,"position":2,"estimatedWaitMs":null},"reason":"simulator_capacity","blockers":{"simulatorSlots":1,"heavySlots":4,"leases":[{"id":"883481a4-ee10-4480-8175-e929fd5bfc42","seatId":"term_65e0166547b2083","holderId":"codex:01a1481f-5773-7c42-abfe-1c4184c2d835","phase":"booted","deviceName":"iPhone 17 Pro","deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974"}],"external":[],"heavy":[{"seatId":"w55:pH","executable":"node","pid":77874},{"seatId":"w55:pF","executable":"pnpm","pid":52961},{"seatId":"ship-latest","executable":"pnpm","pid":86544},{"seatId":"w55:pH","executable":"pnpm","pid":50147}],"ahead":[{"id":"76b1d204-787b-4c42-a4ad-320e50e38845","seatId":"term_65e017eac6e1186","holderId":"codex:01a14810-1d3e-7cc2-b9cf-7382a0e0b833","position":1}]},"retryAfterMs":5000,"hint":"Requested device iPhone 17 Pro (ECF31A58-614F-40A7-87C9-914A4930D974) is leased to seat term_65e0166547b2083 holder codex:01a1481f-5773-7c42-abfe-1c4184c2d835. Wait for that exact device; no alternative will be used. Queued ahead: seat term_65e017eac6e1186 holder codex:01a14810-1d3e-7cc2-b9cf-7382a0e0b833."}
+
+== Child B cancellation receipt (b-cancel.txt)
+{"outcome":"cancelled"}
+
+== Child B post-cancel status: A still owns its lease (b-after-cancel-status.json)
+{"schemaVersion":1,"leases":[{"id":"883481a4-ee10-4480-8175-e929fd5bfc42","seatId":"term_65e0166547b2083","holderId":"codex:01a1481f-5773-7c42-abfe-1c4184c2d835","occupantId":"session-41a1ce083e3c4bd35344ff63bdfe7930a6321e57ff939b4aadb71e38eb3dd9f7","phase":"booted","createdAtMs":1792213446615,"lastUsedAtMs":1792213497448,"deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974","deviceName":"iPhone 17 Pro","deviceType":"com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro","runtime":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","usage":{"sampledAtMs":1792213528434,"status":"available","processCount":198,"unavailableProcesses":0,"rssBytes":47784476672,"footprintBytes":23520042760,"cpuTimeMs":574853.7657083329,"cpuPercent":178.54985104211173,"intervalMs":7021},"origin":"existing"}],"inventory":"available","externalActive":0,"external":[],"simulatorSlots":1}
+
+== Child A release receipt (a-release.txt)
+{"outcome":"released"}
+
+== Immediate post-release pool status (a-after-release-status.json)
+{"schemaVersion":1,"leases":[],"inventory":"available","externalActive":0,"external":[],"simulatorSlots":1}
+
+== Mechanical receipt checks (verification.txt)
+PASS: distinct native threads/automatic holders; exact-device queue names A; B cancelled; A released; no final leases.

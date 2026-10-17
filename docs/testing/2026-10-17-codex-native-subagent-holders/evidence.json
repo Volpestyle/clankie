@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "proof-packet.json",
+      "size": 23154,
+      "sha256": "1fbfd4814cd85626869653bc041f00cb66d4155cb85aadc433a7173ee41e53af",
+      "url": "clankie://evidence/sha256/1fbfd4814cd85626869653bc041f00cb66d4155cb85aadc433a7173ee41e53af"
+    }
+  ]
+}
