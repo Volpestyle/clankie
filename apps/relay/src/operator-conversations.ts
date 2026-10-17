@@ -1,4 +1,7 @@
 import {
+  HTTP_SETTINGS_PATH,
+  HttpSettingsSnapshotSchema,
+  UpdateHttpSettingsSchema,
   APPEARANCE_SETTINGS_PATH,
   AppearanceSettingsSnapshotSchema,
   UpdateAppearanceSettingsSchema,
@@ -8,6 +11,7 @@ import {
   OwnerVoiceSnapshotSchema,
   OwnerVoiceUpdateSchema,
 } from "../../../packages/protocol/src/owner-settings.ts";
+import { httpCors } from "@clankie/settings";
 import {
   LINEAR_FOLLOW_PATH,
   LINEAR_WAKE_PATH,
@@ -129,6 +133,8 @@ export interface RelayConversationLogger {
 }
 
 export interface OperatorConversationRelayOptions {
+  /** Same saved exact-origin policy as core; absent configuration denies browser access. */
+  readonly httpSettings?: () => Promise<unknown>;
   readonly authorizeDevice: RelayDeviceAuthorizer;
   readonly dispatch: OperatorConversationServiceDispatch;
   /** Original signed device; only owner-capable send and preference input operations. */
@@ -191,6 +197,8 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "GET", path: LINEAR_WAKE_PATH },
   { method: "POST", path: LINEAR_WAKE_PATH },
   { method: "GET", path: HOST_SETTINGS_PATH },
+  { method: "GET", path: HTTP_SETTINGS_PATH },
+  { method: "POST", path: HTTP_SETTINGS_PATH },
   { method: "POST", path: HOST_SETTINGS_PATH },
   { method: "GET", path: APPEARANCE_SETTINGS_PATH },
   { method: "POST", path: APPEARANCE_SETTINGS_PATH },
@@ -214,6 +222,11 @@ const OWNER_SETTINGS_ROUTES: Readonly<
     { readonly methods: readonly string[]; readonly update?: ParseSchema; readonly snapshot: ParseSchema }
   >
 > = {
+  [HTTP_SETTINGS_PATH]: {
+    methods: ["GET", "POST"],
+    update: UpdateHttpSettingsSchema,
+    snapshot: HttpSettingsSnapshotSchema,
+  },
   [HOST_SETTINGS_PATH]: {
     methods: ["GET", "POST"],
     update: UpdateHostSettingsSchema,
@@ -296,6 +309,21 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
   );
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const path = requestUrl(request).pathname;
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(request.headers))
+      if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+    const cors = await httpCors({
+      path,
+      method: request.method ?? "GET",
+      headers,
+      settings: options.httpSettings ?? (async () => ({})),
+    });
+    for (const [key, value] of Object.entries(cors.headers)) response.appendHeader(key, value);
+    if (cors.status !== undefined) {
+      response.statusCode = cors.status;
+      response.end();
+      return true;
+    }
     const settingsRoute = Object.hasOwn(OWNER_SETTINGS_ROUTES, path)
       ? OWNER_SETTINGS_ROUTES[path]
       : isViewRoute(path)

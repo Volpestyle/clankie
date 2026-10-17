@@ -3,6 +3,12 @@ import { operatorHarness } from "./harness-command.ts";
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["http"],
+    lines: [
+      "  http show | allow-origins [ORIGIN ...]  Read or replace the exact browser origin allowlist (owner API; empty clears)",
+    ],
+  },
+  {
     nouns: ["fixture-admission"],
     lines: [
       "  fixture-admission request|status|revoke FLAGS | read|read-status --fixture PRIVATE_FILE FLAGS  Single-use host-seat fixture get_user admission; native account unverified",

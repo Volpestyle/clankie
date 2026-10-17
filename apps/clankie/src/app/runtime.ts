@@ -96,6 +96,8 @@ import { createComposerTranscriptionRoutes } from "../composer-transcription.ts"
 import { createEvidenceRoutes } from "../evidence-store.ts";
 import { createEvidenceStorageSettingsRoutes } from "../evidence-storage-settings-routes.ts";
 import { createHostSettingsRoutes } from "../host-settings-routes.ts";
+import { createHttpSettingsRoutes } from "../http-settings-routes.ts";
+import { httpCors } from "@clankie/settings";
 import { createAppearanceRoutes } from "../appearance-routes.ts";
 import { createSkinDraftRoutes } from "../skin-draft-routes.ts";
 import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
@@ -516,6 +518,18 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   storedEvents.length = 0;
 
   const app = new Hono();
+  app.use("*", async (context, next) => {
+    const cors = await httpCors({
+      path: context.req.path,
+      method: context.req.method,
+      headers: context.req.raw.headers,
+      settings: async () => (await settingsSource.load()).http,
+    });
+    for (const [name, value] of Object.entries(cors.headers))
+      context.header(name, value, { append: name === "vary" });
+    if (cors.status !== undefined) return context.body(null, cors.status);
+    await next();
+  });
   registerFleetHealthMetricsRoutes(app, dependencies);
   const supportAuditedRequests = new WeakSet<Request>();
   let managedDiscordClosed = false;
@@ -1078,6 +1092,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }),
   );
 
+  app.route("/", createHttpSettingsRoutes(authorizeOwnerSecrets, settingsSource));
   app.route(
     "/",
     createHostSettingsRoutes(authorizeOwnerSecrets, settingsSource, {

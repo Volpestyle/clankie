@@ -18,6 +18,37 @@ an existing remote service with a smaller supported set.
 `clankie help` prints the same command index. On every install the file lives
 at `{repoRoot}/docs/cli.md` — `clankie doctor` names `repoRoot`.
 
+## Browser access to a self-hosted service
+
+```bash
+clankie http show
+clankie http allow-origins https://app.example.test http://localhost:8086
+clankie http allow-origins
+```
+
+`allow-origins` replaces `http.allowedOrigins`; the final example clears it.
+Use the app's actual serialized HTTP(S) origin, including its non-default
+port, with no path or trailing slash. The default list is empty. Wildcards,
+opaque `null` origins, embedded credentials and duplicate origins are refused.
+
+Both core and relay read the same saved list without restarting. The CLI
+uses owner-authenticated `GET`/`POST /v1/operator/http-settings`: GET returns
+`{schemaVersion:1, revision, http:{allowedOrigins}}`; POST takes
+`{schemaVersion:1, expectedRevision, allowedOrigins}`. A conflict requires a
+fresh read and reviewed change. Current terminal-control devices may use the
+same settings API through their relay. No credential or pairing capability is
+created by this setting.
+
+On `/v1/*`, allowed browser origins receive an exact allow-origin header and
+`Vary: Origin`, including authentication errors. Refused origins fail before
+route effects. OPTIONS preflight returns 204 only for an allowed origin,
+supported requested method and explicit application request headers; it does
+not authenticate or redeem a code. The LAN device doorway still exposes only
+its existing device operations. No wildcard or credentialed-cookie CORS is
+enabled. Native bearer authentication, one-time pairing, HTTPS/mixed-content
+and browser local-network permission checks remain in force
+([ADR 0274](adr/0274-self-hosted-browser-access-uses-exact-origins.md)).
+
 ## Invocation
 
 ```bash

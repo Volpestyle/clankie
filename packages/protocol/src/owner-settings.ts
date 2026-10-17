@@ -112,6 +112,47 @@ export const VoiceSettingsSchema = z
 export type VoiceSettings = z.infer<typeof VoiceSettingsSchema>;
 
 const RevisionSchema = z.string().regex(/^[a-f0-9]{64}$/u);
+/** Serialized web origins only: no paths, credentials, opaque origins or patterns. */
+export const HttpOriginSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        (url.protocol === "http:" || url.protocol === "https:") &&
+        !url.hostname.includes("*") &&
+        url.origin === value
+      );
+    } catch {
+      return false;
+    }
+  }, "must be an exact serialized HTTP(S) origin");
+export const HttpSettingsSchema = z
+  .object({
+    allowedOrigins: z
+      .array(HttpOriginSchema)
+      .max(32)
+      .refine((origins) => new Set(origins).size === origins.length, "duplicate origin")
+      .default([]),
+  })
+  .strict();
+export const HTTP_SETTINGS_PATH = "/v1/operator/http-settings";
+export const HttpSettingsSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    revision: RevisionSchema,
+    http: HttpSettingsSchema,
+  })
+  .strict();
+export const UpdateHttpSettingsSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    expectedRevision: RevisionSchema,
+    allowedOrigins: HttpSettingsSchema.shape.allowedOrigins.removeDefault(),
+  })
+  .strict();
 export const HOST_SETTINGS_PATH = "/v1/operator/host-settings";
 export const HOST_SETTINGS_WORDING = {
   title: "Machines and availability",

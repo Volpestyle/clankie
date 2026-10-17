@@ -1,3 +1,4 @@
+export { httpCors } from "./http-cors.ts";
 export {
   EvidenceSettingsSchema,
   type EvidenceSettings,

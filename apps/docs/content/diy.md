@@ -9,6 +9,21 @@ Everything here works from the console, and most of it from the [CLI](/cli/)
 too; Clankie can run the commands for you. Keys go into the setup wizards,
 never into a chat message or a command flag.
 
+## Connect the browser app to your service
+
+Allow the exact origin where you open the browser app:
+
+```bash
+clankie http show
+clankie http allow-origins https://app.example.test http://localhost:8086
+```
+
+Use your app's actual origins. The command replaces the list; no arguments
+clears it. Origins include a non-default port and have no path or trailing
+slash. Browser access starts disabled. Core and relay use the same saved list
+without a restart; pairing codes and device permissions work as usual.
+Browser HTTPS and local-network permission checks still apply.
+
 <a id="shape-his-character-and-skills"></a>
 
 ## Persona

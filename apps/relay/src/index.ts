@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { assertScratchNetwork } from "@clankie/settings";
+import { assertScratchNetwork, SettingsStore } from "@clankie/settings";
 import { resolveCaptainCredential } from "@clankie/credential-broker";
 import { ControlPlaneDeviceAuthorizer } from "./device-auth.ts";
 import {
@@ -23,7 +23,9 @@ const conversationLogger: RelayConversationLogger = {
   warn: (fields, message) => console.warn(JSON.stringify({ level: "warn", ...fields, message })),
 };
 const controlPlaneUrl = process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310";
+const settings = new SettingsStore();
 const conversationHandler = createOperatorConversationRelayHandler({
+  httpSettings: async () => (await settings.load()).http,
   authorizeDevice: new ControlPlaneDeviceAuthorizer({
     baseUrl: controlPlaneUrl,
   }),

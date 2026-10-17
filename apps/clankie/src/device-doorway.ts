@@ -26,7 +26,12 @@ export function deviceDoorwayFetch<Rest extends unknown[]>(
 ): (request: Request, ...rest: Rest) => Response | Promise<Response> {
   return (request, ...rest) => {
     const path = new URL(request.url).pathname;
-    const method = request.method;
+    // Only a preflight for an already exposed device operation reaches CORS.
+    // The request stays OPTIONS: it cannot execute the operation or redeem an offer.
+    const method =
+      request.method === "OPTIONS" && request.headers.has("origin")
+        ? request.headers.get("access-control-request-method")
+        : request.method;
     const allowed =
       (method === "GET" || method === "POST") &&
       DEVICE_ROUTE_PREFIXES.some((prefix) => path.startsWith(prefix)) &&

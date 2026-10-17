@@ -137,6 +137,12 @@ An owner can open a support window of up to 72 hours. Read access shows history
 and state but cannot send, change settings, or see terminals; revoking it ends
 access immediately ([`clankie support`](/cli/)).
 
+For a self-hosted browser app, core and relay accept browser API calls only
+from the owner's exact origin allowlist, configured with `clankie http`.
+Preflight enables the browser transport; pairing and device grants still
+decide access. The [self-hosted setup](/diy/#connect-the-browser-app-to-your-service)
+describes the setting.
+
 ## Go deeper
 
 The [architecture](https://github.com/Volpestyle/clankie/blob/main/docs/architecture.md)

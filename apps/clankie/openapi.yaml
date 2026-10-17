@@ -42,6 +42,43 @@ tags:
 security: []
 
 paths:
+  /v1/operator/http-settings:
+    get:
+      tags: [Operator]
+      summary: Read the shared core and relay browser-origin allowlist
+      description: Requires an owner operator or current terminal-control device. CORS grants no authentication.
+      responses:
+        "200":
+          description: HttpSettingsSnapshotSchema from @clankie/protocol/owner-settings; schemaVersion, revision and http.allowedOrigins
+        "401": { description: Authentication required }
+        "403": { description: Owner grant or browser origin refused }
+    post:
+      tags: [Operator]
+      summary: Replace the exact browser-origin allowlist
+      description: Empty disables browser access. No wildcard, credentials, paths, trailing slash or opaque origin; no restart required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schemaVersion, expectedRevision, allowedOrigins]
+              properties:
+                schemaVersion: { const: 1 }
+                expectedRevision: { type: string, pattern: "^[a-f0-9]{64}$" }
+                allowedOrigins:
+                  type: array
+                  maxItems: 32
+                  uniqueItems: true
+                  items: { type: string, maxLength: 512, description: Exact serialized HTTP(S) origin }
+      responses:
+        "200": { description: Updated HttpSettingsSnapshotSchema }
+        "400": { description: Invalid exact-origin list or malformed request }
+        "401": { description: Authentication required }
+        "403": { description: Owner grant or browser origin refused }
+        "409": { description: Settings or owner authority changed; read before reviewing again }
+        "503": { description: Settings unavailable }
   /v1/machine-joins/start:
     post:
       tags: [Workers]

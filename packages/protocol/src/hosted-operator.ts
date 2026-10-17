@@ -1,4 +1,9 @@
-import { APPEARANCE_SETTINGS_PATH, HOST_SETTINGS_PATH, MAXIMUM_TRUST_MODE_PATH } from "./owner-settings.ts";
+import {
+  APPEARANCE_SETTINGS_PATH,
+  HOST_SETTINGS_PATH,
+  HTTP_SETTINGS_PATH,
+  MAXIMUM_TRUST_MODE_PATH,
+} from "./owner-settings.ts";
 import { isSkinDraftRoute } from "./skin-drafts.ts";
 import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
 import { hostedDiscordAllows } from "./hosted-discord.ts";
@@ -108,6 +113,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
   }
   const routes: Record<string, readonly string[]> = {
     GET: [
+      HTTP_SETTINGS_PATH,
       HOST_SETTINGS_PATH,
       APPEARANCE_SETTINGS_PATH,
       MAXIMUM_TRUST_MODE_PATH,
@@ -142,6 +148,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/support/grants",
     ],
     POST: [
+      HTTP_SETTINGS_PATH,
       HOST_SETTINGS_PATH,
       APPEARANCE_SETTINGS_PATH,
       MAXIMUM_TRUST_MODE_PATH,

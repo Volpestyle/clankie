@@ -6,7 +6,7 @@ import {
   MACHINE_JOIN_CHANNEL_PATH,
   MACHINE_JOIN_LEAVE_PATH,
 } from "./machine-join.ts";
-import { APPEARANCE_SETTINGS_PATH, HOST_SETTINGS_PATH } from "./owner-settings.ts";
+import { APPEARANCE_SETTINGS_PATH, HOST_SETTINGS_PATH, HTTP_SETTINGS_PATH } from "./owner-settings.ts";
 import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
 import { ACCOUNT_DIAGNOSTICS_PATH } from "./account-diagnostics.ts";
 import { CAPTAIN_READINESS_PATH } from "./captain-readiness.ts";
@@ -213,6 +213,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: ROUTINES_PATH, target: "relay" },
   { method: "POST", path: ROUTINES_PATH, target: "relay" },
   { method: "GET", path: HOST_SETTINGS_PATH, target: "relay" },
+  { method: "GET", path: HTTP_SETTINGS_PATH, target: "relay" },
+  { method: "POST", path: HTTP_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: HOST_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: APPEARANCE_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: APPEARANCE_SETTINGS_PATH, target: "relay" },

@@ -241,6 +241,10 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await (await import("../src/command/awake.ts")).runAwakeCommand(rest, options));
       return 0;
     }
+    if (command === "http") {
+      outputJson(stdout, await (await import("../src/command/http.ts")).runHttpCommand(rest, options));
+      return 0;
+    }
     if (command === "usage") {
       const result = await (await import("../src/command/usage.ts")).runUsageCommand(rest, options);
       // The report reads as a table by default; --json (and overlay settings) stay machine-readable.

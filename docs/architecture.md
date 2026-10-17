@@ -107,6 +107,14 @@ flowchart LR
 
 ## Device and host authority
 
+Self-hosted browser access to core and relay uses the same explicit
+`http.allowedOrigins` setting (empty by default), read through the owner API.
+Only exact configured origins receive CORS headers; valid OPTIONS preflights
+do not execute routes. The direct device doorway admits preflight only for
+already-exposed device operations. Pairing capabilities, bearer authentication
+and native-loopback provenance remain independent
+([ADR 0274](adr/0274-self-hosted-browser-access-uses-exact-origins.md)).
+
 The host issues pairing offers and device sessions and decides every grant.
 The public gateway carries bounded exchanges to an authenticated host over its
 outbound connection. A paired device follows the returned host-scoped route;

@@ -1,4 +1,4 @@
-import { EvidenceSettingsSchema } from "@clankie/protocol/owner-settings";
+import { EvidenceSettingsSchema, HttpSettingsSchema } from "@clankie/protocol/owner-settings";
 import { LinearWakeSettingsSchema } from "@clankie/protocol/linear-settings";
 import { MachineAccessSettingsSchema } from "@clankie/protocol/machine-access";
 import { DesktopSettingsSchema } from "./desktop.ts";
@@ -643,6 +643,7 @@ export const ClankieSettingsSchema = z
     appearance: AppearanceSettingsSchema.default(() => AppearanceSettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
+    http: HttpSettingsSchema.default(() => HttpSettingsSchema.parse({})),
     host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),
     runtimeHealth: RuntimeHealthSettingsSchema.default(() => RuntimeHealthSettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
