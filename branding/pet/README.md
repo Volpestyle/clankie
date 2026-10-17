@@ -36,7 +36,8 @@ frame 500                # duration in ms, then exactly H rows of W characters
 
 The build fails on a wrong row width, row count or unknown palette key. Tag
 order in the sheet comes from `SHEETS` in `build.py`. Frame indices in the JSON
-come from the files, so adding or removing frames needs no other change.
+come from the files. Append new tags to keep existing frame indices stable.
+Do not insert or remove frames in earlier tags without coordinating their consumers.
 
 The text grids are the only source. Nothing regenerates them, so hand edits
 are safe.
@@ -113,6 +114,19 @@ above, then sync the built sheets into the app; generated outputs stay untouched
 by hand. Frame timings live in the editable grids; tour cadence and selection
 live in the app.
 
+### Front and back walks (VUH-2384)
+
+`walk_down` (170–173) faces the viewer; `walk_up` (174–177) shows the
+rear case, a small latch and lower case seam, with no screen, eyes, cheeks or
+front chest emblem. Each has four 150 ms frames with alternating raised feet
+and a small crown sway. The rear is derived from the canonical logo silhouette
+and palette; the logo supplies no original back turnaround.
+
+These tags are appended after `play_cheer`. All earlier frame records, tag
+ranges, durations and rendered pixels stay unchanged. The World chooses these
+walks for predominantly vertical travel; skins without them retain their
+horizontal fallback. Front-facing screen overlays do not apply to either walk.
+
 ### Editing the walk cycle
 
 `walk_left` and `walk_right` are separate files: `src/pet/walk_left.txt` and
@@ -130,9 +144,8 @@ live in the app.
    repo root). Check `preview/walk_left.gif`, `preview/walk_right.gif` (6×) and
    `preview/contact-sheet.png`. The red guide is the baseline and the blue one
    the center.
-5. `clankie-pet.json` picks up the new frame range automatically. Every tag
-   after the walk moves to new indices, so an app that reads frames by tag name
-   needs no change.
+5. `clankie-pet.json` picks up the frame range automatically. Keep existing
+   frame counts stable; append new tags rather than shifting later frame indices.
 
 Current layout, for orientation: the walk frames face their travel direction
 in a 3/4 turn. The screen sits on the leading half of the head with the eyes

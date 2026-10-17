@@ -62,6 +62,7 @@ SHEETS = {
             "run_left", "run_right", "seed", "conduct", "read_message", "wilt", "wait",
             "skid_left", "skid_right",
             "work_type", "work_read", "work_write", "work_tinker", "voice_listen", "play_watch", "play_cheer",
+            "walk_down", "walk_up",
         ],
     },
     "clankie-mini": {
