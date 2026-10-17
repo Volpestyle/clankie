@@ -87,8 +87,23 @@ exactly-once work completion guarantee is claimed. A new launcher still needs
 fresh native identity and context preflight; a saved ID alone never arms it.
 
 Missing binary/capability, absent broker credential, changed resume workspace,
-wrong conversation, plugin context failure, disconnected bridge, duplicate
-claim and mismatched session all fail explicitly. Native transcript sync errors
+wrong conversation, disconnected bridge, duplicate claim, mismatched session,
+a deleted session and uncertain delivery all stop the seat explicitly.
+
+**Context reads.** A slow or failed read of Clankie's identity and memory card is
+retried three times with a short backoff. If every attempt fails, only that turn
+fails, with a native toast and a `context_unavailable` warning in the launch
+journal. Queued service events wait until context loads again, rather than
+entering a turn without it. The plugin keeps retrying in the background, so
+delivery resumes without an owner prompt.
+
+**Model errors.** A provider error (`session.error`, such as an invalid key or an
+unavailable model) also fails only its turn. It is recorded as a
+`turn_failed: …` warning, and later turns still deliver.
+
+**First stop cause.** The launch journal's `failure` and the close line keep the
+first cause that stopped the seat. A later refusal, including the bridge's own
+409 to a follow-on poll, never replaces it. Native transcript sync errors
 are reported through native toasts and the launch journal, and retained native
 records retry at later events. They do not
 remove the loaded memory card. The service must support OpenCode `ses_*` upload
@@ -100,7 +115,12 @@ to complete an acceptance probe.
 Deterministic tests cover native busy/idle behavior, identity mismatch,
 claim-before-dispatch and uncertain delivery, role boundaries, bridge auth,
 config preservation, exact resume, preflight-before-ready ordering, context
-failure and identity mismatch without extra turns. Scoped native evidence and remaining
+failure and identity mismatch without extra turns.
+`opencode-seat-resilience.integration.test.ts` runs a real OpenCode 1.18
+server with this plugin, the real seat bridge and an in-process Clankie service;
+only the model provider is a fixture. It covers a stalled context read, a turn
+ending in a provider error followed by a delivered app turn, and a preserved
+first stop cause ([evidence](../../docs/testing/2026-10-17-opencode-seat-resilience/README.md)). Scoped native evidence and remaining
 acceptance gaps are recorded in
 [the verification notes](../../docs/testing/2026-10-03-opencode-seat/README.md).
 Native draft preservation and pending approval behavior were checked in an

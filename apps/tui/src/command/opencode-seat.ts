@@ -168,6 +168,7 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   let sessionId = plan.resumed ? plan.sessionId : undefined;
   let contextLoaded = false;
+  let contextLoading = 0;
   let ready = false,
     failure: string | undefined;
   let queue: Event[] = [];
@@ -230,7 +231,7 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
           },
         },
       ).catch((error) => {
-        failure = String(error);
+        failure ??= String(error);
         persist();
       });
     })();
@@ -290,7 +291,8 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
       } else {
         if (!sessionId) throw new Error("Native session not bound");
         if (action === "/failure") {
-          failure = body.detail ?? "native_control_failed";
+          // The first cause stays: a follow-on refusal (often this bridge's own 409) never replaces it.
+          failure ??= body.detail ?? "native_control_failed";
           ready = false;
           persist();
         } else if (action === "/reconcile") {
@@ -312,11 +314,16 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
             lane: "operator",
             ...(plan.conversationId ? { conversationId: plan.conversationId } : {}),
           };
-          const text = await fetchLaneText("/v1/captain/prompt", query, options);
-          const memory = await fetchLaneText("/v1/captain/memory-card", query, options);
-          if (!text.trim()) throw new Error("Operator context unavailable");
-          contextLoaded = true;
-          reply(200, { text: `${text}\n\n${memory}` });
+          contextLoading++;
+          try {
+            const text = await fetchLaneText("/v1/captain/prompt", query, options);
+            const memory = await fetchLaneText("/v1/captain/memory-card", query, options);
+            if (!text.trim()) throw new Error("Operator context unavailable");
+            contextLoaded = true;
+            reply(200, { text: `${text}\n\n${memory}` });
+          } finally {
+            contextLoading--;
+          }
           return;
         } else if (action === "/ready") {
           if (nativeFence.pending())
@@ -328,6 +335,8 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
           reply(200, {
             event: ready && contextLoaded ? queue[0] : undefined,
             ...(ready && contextLoaded && queue[0] ? { deliveryStage: "stored" } : {}),
+            // A failed refresh holds queued events until context loads again.
+            ...(ready && !contextLoaded && contextLoading === 0 ? { needsContext: true } : {}),
           });
           return;
         } else if (action === "/claim") {

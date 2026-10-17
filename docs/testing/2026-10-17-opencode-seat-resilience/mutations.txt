@@ -1,0 +1,12 @@
+== reverted: plugin.mjs, runtime.mjs, opencode-seat.ts at 5359af383
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+Error: Timed out waiting for seat delivery after a stalled context read
+     34|     if (Date.now() > deadline) throw new Error(`Timed out waiting for …
+== reverted: session.error stops the seat
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+Error: Timed out waiting for the turn's provider error in the receipts
+     34|     if (Date.now() > deadline) throw new Error(`Timed out waiting for …
+== reverted: failure ??= in /failure
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected 'Error: Clankie poll failed (409); no …' to contain 'session.deleted'
+      Tests  1 failed (1)

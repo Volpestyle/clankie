@@ -106,19 +106,37 @@ test.each([true, false])(
   },
 );
 
-test.each([{ nativeId: "ses_other12345" }, { contextFailure: true }, { emptyContext: true }])(
-  "readiness fails closed without a model turn for %j",
+test("readiness fails closed and stops the seat for a mismatched native identity", async () => {
+  await fixture({ nativeId: "ses_other12345", resume: true }, async ({ hooks, order, prompt }) => {
+    await vi.advanceTimersByTimeAsync(500);
+    expect(order).toContain("failure");
+    expect(order).not.toContain("ready");
+    expect(order).not.toContain("poll");
+    expect(prompt).not.toHaveBeenCalled();
+    await expect(
+      hooks["experimental.chat.system.transform"]({ sessionID: id }, { system: [] }),
+    ).rejects.toThrow("stopped");
+    expect(order).not.toContain("bind");
+  });
+});
+
+// VUH-2348: a context read that fails after its retries fails closed for now,
+// without a model turn, but records a warning instead of stopping the seat.
+test.each([{ contextFailure: true }, { emptyContext: true }])(
+  "an unavailable context preflight fails closed without a model turn or a permanent stop for %j",
   async (options) => {
     await fixture({ ...options, resume: true }, async ({ hooks, order, prompt }) => {
-      await vi.advanceTimersByTimeAsync(500);
-      expect(order).toContain("failure");
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(order).toContain("warning");
+      expect(order).not.toContain("failure");
       expect(order).not.toContain("ready");
       expect(order).not.toContain("poll");
       expect(prompt).not.toHaveBeenCalled();
-      await expect(
-        hooks["experimental.chat.system.transform"]({ sessionID: id }, { system: [] }),
-      ).rejects.toThrow("stopped");
-      if (options.nativeId) expect(order).not.toContain("bind");
+      const turn = hooks["experimental.chat.system.transform"]({ sessionID: id }, { system: [] });
+      const refused = expect(turn).rejects.toThrow("context_unavailable");
+      await vi.advanceTimersByTimeAsync(4000);
+      await refused;
+      expect(order).not.toContain("failure");
     });
   },
 );

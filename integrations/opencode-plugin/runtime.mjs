@@ -28,10 +28,31 @@ export async function loadNativeContext(client, sessionId, bridge, signal) {
       throw new Error("Uncertain native event has no exact transcript receipt; every retry remains blocked");
     await bridge("reconcile", { sessionId, eventId: receipt.event.id, detail: expected });
   }
-  const context = await bridge("context", { sessionId });
-  if (typeof context.text !== "string" || !context.text.trim())
-    throw new Error("Clankie operator context unavailable");
-  return context.text;
+  return await loadContextText(sessionId, bridge, signal);
+}
+
+/** A context fetch that failed after its bounded retries. It fails one turn, never the seat. */
+export class ContextUnavailable extends Error {}
+
+const CONTEXT_ATTEMPTS = 3;
+
+// The service's identity/memory reads can stall for seconds under fleet load and
+// answer a moment later. Retry only this read; identity checks stay single-shot.
+export async function loadContextText(sessionId, bridge, signal, delayMs = 1000) {
+  let last;
+  for (let attempt = 1; attempt <= CONTEXT_ATTEMPTS; attempt++) {
+    try {
+      const context = await bridge("context", { sessionId });
+      if (typeof context.text !== "string" || !context.text.trim())
+        throw new Error("Clankie operator context unavailable");
+      return context.text;
+    } catch (error) {
+      last = error;
+      if (signal?.aborted || attempt === CONTEXT_ATTEMPTS) break;
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+    }
+  }
+  throw new ContextUnavailable(`context_unavailable after ${CONTEXT_ATTEMPTS} attempts: ${String(last)}`);
 }
 
 // Native server API only. The injected client belongs to this TUI's server;

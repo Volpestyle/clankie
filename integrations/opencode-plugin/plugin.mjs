@@ -1,4 +1,10 @@
-import { deliverNativeEvent, loadNativeContext, projectMessages } from "./runtime.mjs";
+import {
+  ContextUnavailable,
+  deliverNativeEvent,
+  loadContextText,
+  loadNativeContext,
+  projectMessages,
+} from "./runtime.mjs";
 
 export default async function ClankieSeat({ client }) {
   const address = process.env.CLANKIE_OPENCODE_BRIDGE;
@@ -37,6 +43,10 @@ export default async function ClankieSeat({ client }) {
     ready = false;
     await bridge("failure", { sessionId, detail: String(error) }).catch(() => {});
   };
+  // A turn-scoped failure: recorded in the launch receipts, delivery continues.
+  const warn = async (detail) => {
+    await bridge("warning", { sessionId, detail: String(detail).slice(0, 2000) }).catch(() => {});
+  };
   const assertActive = () => {
     if (failed || switched || stop.signal.aborted) throw new Error("Clankie seat delivery stopped");
   };
@@ -57,6 +67,12 @@ export default async function ClankieSeat({ client }) {
       assertActive();
       ready = true;
     })().catch(async (error) => {
+      if (error instanceof ContextUnavailable) {
+        // Only the context read failed; the next turn or poll retries the preflight.
+        preparation = undefined;
+        await warn(error.message);
+        throw error;
+      }
       await fail(error);
       throw error;
     });
@@ -66,7 +82,13 @@ export default async function ClankieSeat({ client }) {
   // initialization returns, then arm it without issuing a bootstrap turn.
   const startup = sessionId
     ? setTimeout(() => {
-        void bind(sessionId).catch(() => notify("Native context preflight failed; delivery stopped."));
+        void bind(sessionId).catch((error) =>
+          notify(
+            error instanceof ContextUnavailable
+              ? "Clankie context is unavailable; retrying before delivery."
+              : "Native context preflight failed; delivery stopped.",
+          ),
+        );
       }, 0)
     : undefined;
   let syncChain = Promise.resolve();
@@ -96,13 +118,32 @@ export default async function ClankieSeat({ client }) {
     }, 200);
   };
   // Start after native plugin initialization; no model call or session creation.
+  let retryAt = 0;
   const poll = async () => {
     while (!stop.signal.aborted) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       if (stop.signal.aborted) return;
-      if (!sessionId || !ready || switched || failed || permission) continue;
+      if (!sessionId || switched || failed || permission) continue;
+      if (!ready) {
+        // A preflight whose context read failed is retried here, so service
+        // events resume without waiting for an owner prompt.
+        if (Date.now() < retryAt) continue;
+        await bind(sessionId).catch(() => {
+          retryAt = Date.now() + 5000;
+        });
+        continue;
+      }
       try {
         const next = await bridge("poll", { sessionId });
+        if (next.needsContext) {
+          // Queued events wait for fresh identity instead of entering a turn without it.
+          if (Date.now() < retryAt) continue;
+          await loadContextText(sessionId, bridge, stop.signal).catch(async (error) => {
+            retryAt = Date.now() + 5000;
+            await warn(error.message ?? error);
+          });
+          continue;
+        }
         if (!next.event || !ready || switched || failed || permission) continue;
         const result = await deliverNativeEvent(client, sessionId, next.event, bridge, stop.signal);
         if (result.status === "busy") await bridge("status", { sessionId, ...result });
@@ -149,6 +190,11 @@ export default async function ClankieSeat({ client }) {
         assertActive();
         output.system.push(text);
       } catch (error) {
+        if (error instanceof ContextUnavailable) {
+          await warn(error.message);
+          await notify("Clankie context is unavailable; this turn failed and delivery continues.");
+          throw error;
+        }
         await fail(error);
         throw error;
       }
@@ -165,9 +211,14 @@ export default async function ClankieSeat({ client }) {
       if (event.type === "session.idle") sync("waiting");
       if (event.type === "session.status") sync(props.status.type === "idle" ? "waiting" : "responding");
       if (["message.updated", "message.part.updated"].includes(event.type)) sync(undefined);
-      if (["session.error", "session.deleted"].includes(event.type)) {
-        await fail(new Error(event.type));
+      if (event.type === "session.error") {
+        // A model or provider error ends this turn only; the next turn still delivers.
+        const error = props?.error;
+        const detail = [error?.name, error?.data?.message ?? error?.message].filter(Boolean).join(": ");
+        await warn(`turn_failed: ${detail || event.type}`);
+        await notify("This turn failed; Clankie seat delivery continues.");
       }
+      if (event.type === "session.deleted") await fail(new Error(event.type));
     },
   };
 }
