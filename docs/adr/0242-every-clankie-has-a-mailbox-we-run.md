@@ -93,5 +93,7 @@ flowchart LR
   mail on the same domain identity, through a separate configuration set.
 - Turning it on is the owner's: SES production access, the mail stack, the
   fleet's mail environment, and the MX move. Moving the MX ends ADR 0127's
-  Cloudflare forward of `clankie@`, which is reserved and never handed out.
+  Cloudflare forward of `clankie@`, which is reserved and never allocated;
+  an operator gives it to the owner's own account first (`mail:assign` in
+  clankie-ops, 2026-10-17), and its earlier address stays as an alias.
 - Search reads the newest 500 messages of a folder, headers and text.
