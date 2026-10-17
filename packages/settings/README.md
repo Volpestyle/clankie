@@ -42,6 +42,14 @@ parse, returning an independent copy to each caller. There is no time-based or
 file-metadata cache of authority. Fenced loads still check the actual descriptor
 generation and recheck the path immediately before a mutation.
 
+`read()` is for hot, non-authority display and routing reads only: project
+membership and the registered execution connections (VUH-2428). It returns one
+deeply frozen, validated view and reuses it while the file's version (device,
+inode, size, mtime and ctime) is unchanged, so an edit, replacement, corruption
+or deletion is seen on the next read. Authority checks (fleet tool flags, the
+local fleet binding, owners, grants) and every write keep `load()` or
+`loadFenced()`.
+
 ## Discord server role
 
 `discord.serverId` connects one server. `discord.role` is `participant` by

@@ -1,4 +1,4 @@
-import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -40,6 +40,44 @@ it("isolates repeated settings reads and observes replacement, corruption and de
     expect((await store.load()).fleet.tools).toBe("connected");
     await writeFile(store.path, disabled);
     expect((await store.loadFenced()).settings.fleet.tools).toBe("off");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// VUH-2428: the service asked for settings about 160 times a second; each private copy was a full parse.
+it("shares one frozen view while the file is unchanged and sees every edit, replacement, corruption and deletion on the next read", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-settings-shared-"));
+  const store = new SettingsStore(join(root, "settings.json"));
+  const connected = '{"schemaVersion":1,"fleet":{"tools":"connected"}}';
+  const disabled = '{"schemaVersion":1,"fleet":{"tools":"off"}}';
+  try {
+    await writeFile(store.path, connected);
+    const first = await store.read();
+    // Unchanged file: the same validated view, not another parse.
+    expect(await store.read()).toBe(first);
+    expect(() => {
+      (first.fleet as { tools: string }).tools = "off";
+    }).toThrow(TypeError);
+    expect((await store.load()).fleet.tools).toBe("connected");
+
+    // Same size, and the restored mtime, still reads the edit.
+    const before = await stat(store.path);
+    const sameSize = connected.replace("connected", "connectex");
+    expect(sameSize.length).toBe(connected.length);
+    await writeFile(store.path, sameSize);
+    await utimes(store.path, before.atime, before.mtime);
+    await expect(store.read()).rejects.toThrow();
+    await writeFile(store.path, connected);
+    const restored = await store.read();
+    expect(restored).not.toBe(first);
+    expect(restored.fleet.tools).toBe("connected");
+
+    await writeFile(join(root, "next"), disabled);
+    await rename(join(root, "next"), store.path);
+    expect((await store.read()).fleet.tools).toBe("off");
+    await rm(store.path);
+    expect((await store.read()).fleet.tools).toBe("connected");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

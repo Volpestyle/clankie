@@ -369,7 +369,7 @@ export class ExecutionConnections {
 
   /** Enabled ssh fleets, as registered; reachability is each call's own outcome. */
   async fleets(): Promise<readonly HerdrFleet[]> {
-    return (await this.options.settings.load()).execution.connections.flatMap((entry) =>
+    return (await this.options.settings.read()).execution.connections.flatMap((entry) =>
       entry.enabled && entry.ssh !== undefined
         ? [{ id: entry.id, session: entry.session, ssh: entry.ssh }]
         : [],
@@ -378,7 +378,7 @@ export class ExecutionConnections {
 
   async namedLocal() {
     if (verifiedLocalSandbox()) return [];
-    return (await this.options.settings.load()).execution.connections.filter(
+    return (await this.options.settings.read()).execution.connections.filter(
       (entry) => entry.enabled && entry.socketPath !== undefined,
     );
   }

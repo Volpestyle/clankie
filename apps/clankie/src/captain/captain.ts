@@ -4181,7 +4181,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               watches: herdrWatches,
               workItems: { prepareSeatIssueTracker: deps.workItems.prepareSeatIssueTracker },
               projects: () =>
-                diagnostics.measure("issue_project_membership", async () => (await settings()).projects),
+                diagnostics.measure(
+                  "issue_project_membership",
+                  async () => (await settingsStore.read()).projects,
+                ),
             },
           );
           return { ...issue, attribution };

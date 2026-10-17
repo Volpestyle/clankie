@@ -1,6 +1,6 @@
 import { migrateDiscordOwnership, discordServerSettings } from "@clankie/protocol/discord-settings";
 import { statSync, type BigIntStats } from "node:fs";
-import { chmod, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -34,6 +34,7 @@ export class SettingsStore {
   private readonly filePath: string;
   private queue: Promise<unknown> = Promise.resolve();
   private parsed: { raw: string; normalized: string } | undefined;
+  private shared: { version: string; settings: Readonly<ClankieSettings> } | undefined;
 
   public constructor(filePath: string = defaultSettingsPath()) {
     this.filePath = filePath;
@@ -54,6 +55,32 @@ export class SettingsStore {
       throw error;
     }
     return this.parse(raw);
+  }
+
+  /**
+   * One shared, deeply frozen view for hot read-only non-authority callers (VUH-2428). The
+   * service asked for settings about 160 times a second, mostly for one field,
+   * and each `load()` paid a full parse for its private copy. This view is
+   * reused while the file's version is unchanged: identity, size, mtime and
+   * ctime change with every write, and ctime also catches an in-place edit that
+   * restores mtime. The version is read before the file, so a racing write
+   * leaves a stale version that the next read replaces. Content is validated
+   * exactly as `load()` validates it. Not for authority checks or callers
+   * that edit: those use `load()` or `loadFenced()`.
+   */
+  public async read(): Promise<Readonly<ClankieSettings>> {
+    let version: string;
+    try {
+      const stats = await stat(this.filePath, { bigint: true });
+      version = `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      version = "absent";
+    }
+    if (this.shared?.version === version) return this.shared.settings;
+    const settings = deepFreeze(await this.load());
+    this.shared = { version, settings };
+    return settings;
   }
 
   /** Read one file generation; its final freshness check must run without an intervening await. */
@@ -103,7 +130,8 @@ export class SettingsStore {
 
   private parse(raw: string): ClankieSettings {
     // Each caller still reads the file. Reuse validation only for exactly equal
-    // bytes, never a TTL or stat-only authority snapshot. Return a private copy
+    // bytes, never a TTL. (`read()` skips the read only on an unchanged file
+    // version that includes ctime, and shares a frozen view.) Return a private copy
     // so a caller's edits cannot contaminate later reads or fenced snapshots.
     // Validated settings contain JSON values. Parsing their normalized bytes is
     // cheaper than structuredClone for repeated idle reads and still gives each
@@ -284,4 +312,12 @@ function storedMachineSettings(settings: ClankieSettings) {
   const { agentHosts: _hosts, ...stored } = structuredClone(settings);
   for (const connection of stored.execution.connections) delete connection.ssh;
   return stored;
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
 }

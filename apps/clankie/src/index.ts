@@ -996,7 +996,7 @@ const agentSessions = createAgentSessions(
 // hosted body has only the connection, ADR 0196), files the repo itself.
 const workItems = createWorkItemsService({
   stateDirectory: stateRoot,
-  projects: async () => (await settingsStore.load()).projects,
+  projects: async () => (await settingsStore.read()).projects,
   projectsFence: async () => {
     const snapshot = await settingsStore.loadFenced();
     return { projects: snapshot.settings.projects, assertCurrent: snapshot.assertCurrent };
@@ -1877,7 +1877,7 @@ const workerMcp = new WorkerMcp({
   reportBridgeObserved: (fleet, pane, report) => fleetHealthMetrics.observeReport(fleet, pane, report),
   pluginVersionObserved: (identity, version) => workerPluginNotices.observe(identity, version),
   pluginExpectedVersion: () => workerPluginNotices.expected(),
-  projects: async () => (await settingsStore.load()).projects,
+  projects: async () => (await settingsStore.read()).projects,
   fleetTools: async () => (await settingsStore.load()).fleet.tools,
   fleetPeerMessages: async () => (await settingsStore.load()).fleet.peerMessages,
   fleetToolsSnapshot: async () => {
