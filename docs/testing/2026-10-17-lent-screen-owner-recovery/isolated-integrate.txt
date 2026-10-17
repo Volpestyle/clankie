@@ -1,0 +1,49 @@
+23:54  up 5 days,  6:38, 5 users, load averages: 17.78 22.63 23.20
+clankie heavy: light lane waiting (0/4 held, 1 queued)
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / bash · server · held 45m
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / pnpm · server · held 45m
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1803-night
+
+ ❯ |serial-integration| apps/clankie/test/integrate.integration.test.ts (36 tests | 1 failed | 35 skipped) 12477ms
+   × reclaim covers more than 32 historical trees, partial removals and active/foreign boundaries 12415ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |serial-integration| apps/clankie/test/integrate.integration.test.ts > reclaim covers more than 32 historical trees, partial removals and active/foreign boundaries
+AssertionError: [{"id":"0f2d22ab-2792-4bfd-9907-ed5a7e68886a","reason":"worktree_unverified"},{"id":"6b606c99-0040-4bfd-a5f7-b236bc02fa32","reason":"Incomplete account process cwd census: Native process proof diagnostic: {\"schemaVersion\":1,\"stage\":\"census\",\"reason\":\"process_census_changed\",\"errno\":0,\"attempt\":1,\"retry\":true}\nNative process proof diagnostic: {\"schemaVersion\":1,\"stage\":\"census\",\"reason\":\"process_census_unavailable\",\"errno\":3,\"attempt\":2,\"retry\":true}\nNative process proof diagnostic: {\"schemaVersion\":1,\"stage\":\"completion\",\"reason\":\"budget_exhausted\",\"errno\":0,\"attempt\":2,\"retry\":false}\nNative process proof unavailable"}]: expected [ …(66) ] to deeply equal [ …(67) ]
+
+- Expected
++ Received
+
+@@ -19,11 +19,10 @@
+    "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/6293647c-d128-4634-ad49-9226dae00f16/isolation",
+    "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/6293647c-d128-4634-ad49-9226dae00f16/worktrees/clankie",
+    "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/6630eb71-413e-40b3-9d30-369ba76ada6e/isolation",
+    "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/6630eb71-413e-40b3-9d30-369ba76ada6e/worktrees/clankie",
+    "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/6b606c99-0040-4bfd-a5f7-b236bc02fa32/isolation",
+-   "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/6b606c99-0040-4bfd-a5f7-b236bc02fa32/worktrees/clankie",
+    "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/700ec2a6-7d17-44c0-a61d-c242e5a83b0f/isolation",
+    "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/700ec2a6-7d17-44c0-a61d-c242e5a83b0f/worktrees/clankie",
+    "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/73caf64c-5fbd-4b2e-85ab-11e234fe2bcf/isolation",
+    "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/73caf64c-5fbd-4b2e-85ab-11e234fe2bcf/worktrees/clankie",
+    "/private/tmp/cv-8uq4ew/tmp/clankie-integrate-AkiTgZ/integration/batches/74e63ace-6760-4848-b494-5b39f539ff27/isolation",
+
+ ❯ apps/clankie/test/integrate.integration.test.ts:1962:66
+    1960|     }
+    1961|     const result = await f.queue.reclaimWorktrees();
+    1962|     expect(result.reclaimed.sort(), JSON.stringify(result.kept)).toEqu…
+       |                                                                  ^
+    1963|     expect(result.freedBytes).toBeGreaterThan(0);
+    1964|     for (const tree of reclaimable) expect(existsSync(tree)).toBe(fals…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 35 skipped (36)
+   Start at  23:54:11
+   Duration  17.21s (transform 2.66s, setup 32ms, import 4.58s, tests 12.48s, environment 0ms)
+
+exit=1
+23:54  up 5 days,  6:38, 5 users, load averages: 15.95 21.91 22.93

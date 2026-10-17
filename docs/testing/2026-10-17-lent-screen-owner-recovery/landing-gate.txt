@@ -1,0 +1,26 @@
+[landing] root /Users/james/dev/clankie-wt/vuh-1803-night; HEAD 12f46866d0545524c32b201900c12e769c61dd13; fixed base 3a233db920e3f7f4a80497a19c123ff6d8b5f754
+[landing] skills: pnpm herdr:skill:check
+[landing] format: pnpm fmt:check
+[landing] lint: pnpm lint
+[landing] deadcode: pnpm deadcode
+[landing] doc-links: node scripts/check-doc-links.mjs
+[landing] retired-claims: node scripts/check-retired-claims.mjs
+[landing] evidence: node scripts/testing/evidence-landing-guard.mjs
+[landing] evidence roots: no newly added in-scope files
+[landing] public-docs: pnpm docs:public:check
+[landing] typecheck 19/33: @clankie/api-client, @clankie/clankie, @clankie/credential-broker, @clankie/discord-activity, @clankie/discord-bridge, @clankie/discord-presence-core, @clankie/discord-user-session, @clankie/interactive-environment, @clankie/minecraft, @clankie/minecraft-mcp, @clankie/model-provider, @clankie/play, @clankie/play-voice, @clankie/pokemon, @clankie/protocol, @clankie/relay, @clankie/rendered-surface-client, @clankie/settings, @clankie/tui
+[landing] typecheck: pnpm exec turbo run typecheck --only --concurrency=1 --filter=@clankie/api-client --filter=@clankie/clankie --filter=@clankie/credential-broker --filter=@clankie/discord-activity --filter=@clankie/discord-bridge --filter=@clankie/discord-presence-core --filter=@clankie/discord-user-session --filter=@clankie/interactive-environment --filter=@clankie/minecraft --filter=@clankie/minecraft-mcp --filter=@clankie/model-provider --filter=@clankie/play --filter=@clankie/play-voice --filter=@clankie/pokemon --filter=@clankie/protocol --filter=@clankie/relay --filter=@clankie/rendered-surface-client --filter=@clankie/settings --filter=@clankie/tui
+[landing] tests: pnpm exec vitest run --config vitest.config.ts --changed 3a233db920e3f7f4a80497a19c123ff6d8b5f754 --bail 1 --passWithNoTests --reporter=default --reporter=./scripts/testing/landing-graph-reporter.mjs
+[landing] exit 1; 1422.63s; evidence /Users/james/dev/clankie-wt/vuh-1803-night/.local/landing-gate.json
+[landing] tests: pnpm exec vitest run --config vitest.config.ts --changed 3a233db920e3f7f4a80497a19c123ff6d8b5f754 --bail 1 --passWithNoTests --reporter=default --reporter=./scripts/testing/landing-graph-reporter.mjs
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  |serial-integration| apps/clankie/test/integrate.integration.test.ts > reclaim covers more than 32 historical trees, partial removals and active/foreign boundaries
+ Test Files  1 failed | 572 passed | 26 skipped (599)
+      Tests  1 failed | 5148 passed | 61 skipped (5211)
+--- first run (fmt failure, fixed in 12f46866d)
+[landing] root /Users/james/dev/clankie-wt/vuh-1803-night; HEAD 060235e74182ce1af76729c6ca7ab5c331abc4c5; fixed base 3a233db920e3f7f4a80497a19c123ff6d8b5f754
+[landing] skills: pnpm herdr:skill:check
+[landing] format: pnpm fmt:check
+docs/cli.md (2480ms)
+Format issues found in above 1 files. Run without `--check` to fix.
+[landing] exit 1; 15.28s; evidence /Users/james/dev/clankie-wt/vuh-1803-night/.local/landing-gate.json

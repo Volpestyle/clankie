@@ -58,6 +58,19 @@ input, requested permissions, deployed or restarted a service.
   ran on the touched source files.
 - **Mutation check.** With `native.restart()` removed, the new test fails at the
   fresh acquire.
+- **Full-gate result: failed.** `clankie heavy -- pnpm check:landing` ran on
+  `12f46866d`, against base `3a233db92`. Static checks and typecheck passed.
+  Tests ended at 5,148 passed, 1 failed and 61 skipped. The one failure is
+  `integrate.integration.test.ts` › "reclaim covers more than 32 historical
+  trees…", where native process cwd census proof was refused with
+  `process_census_changed`/`process_census_unavailable`. An earlier run stopped
+  at formatting in `docs/cli.md`; that is fixed. See
+  [gate summary](landing-gate.txt).
+- **Isolated rerun: also failed.** The same census refusals came back at load
+  16–22 with about 2,550 processes. See [isolated rerun](isolated-integrate.txt).
+  This change doesn't touch integrate or process proof, but the test imports
+  `createClankieApp`, so it is in the affected graph. Rerun the gate on a quieter
+  machine before landing; it is not accepted as green.
 
 The tests use real HTTP, encrypted join envelopes, the receiver, the body lease
 store and an fsynced audit, plus an explicitly synthetic native subprocess. They
