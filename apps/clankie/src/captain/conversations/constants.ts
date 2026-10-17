@@ -18,6 +18,12 @@ export const LINEAR_BURST_WINDOW_MS = 1_500;
 
 export const LINEAR_REPLAY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 
+/**
+ * How long a read worker report stays in its conversation's metadata (VUH-2410).
+ * Unread reports stay until read; every save rewrites the retained set.
+ */
+export const READ_REPORT_RETENTION_MS = 24 * 60 * 60 * 1_000;
+
 /** Under the relay's 30s upstream dispatch timeout, with headroom. */
 export const DEFAULT_TAIL_WAIT_MS = 25_000;
 

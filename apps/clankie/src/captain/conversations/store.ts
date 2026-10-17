@@ -233,6 +233,7 @@ import {
   recordInboundReportDelivery,
   recordInboundReportReply,
   restoreInboundReports,
+  retainInboundReports,
   retryInboundReport,
   unansweredInboundReports,
 } from "./worker-reports.ts";
@@ -3677,8 +3678,10 @@ export class ConversationStore {
   }
 
   private saveMeta(meta: ConversationMeta): void {
+    retainInboundReports(meta, Date.now());
     const path = join(this.root, meta.conversationId, "meta.json");
-    writeFileSync(path + ".tmp", JSON.stringify(meta, null, 2), { mode: 0o600 });
+    // Compact: this file is rewritten on every change and read only by the store.
+    writeFileSync(path + ".tmp", JSON.stringify(meta), { mode: 0o600 });
     renameSync(path + ".tmp", path);
   }
 
@@ -3812,7 +3815,7 @@ export class ConversationStore {
           }),
     };
     mkdirSync(staging, { recursive: true, mode: 0o700 });
-    writeFileSync(join(staging, "meta.json"), JSON.stringify(fresh, null, 2), { mode: 0o600 });
+    writeFileSync(join(staging, "meta.json"), JSON.stringify(fresh), { mode: 0o600 });
     renameSync(live, archive);
     try {
       this.onPrune?.(conversationId, meta.scope);

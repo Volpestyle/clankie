@@ -7,7 +7,7 @@ import {
   type WorkerReportSummary,
 } from "@clankie/protocol";
 import { z } from "zod";
-import { InboundAcceptanceSchema, WORKER_REPORT_PAGE_BYTES } from "./constants.ts";
+import { InboundAcceptanceSchema, READ_REPORT_RETENTION_MS, WORKER_REPORT_PAGE_BYTES } from "./constants.ts";
 import type { ConversationStore } from "./store.ts";
 import { type ConversationMeta, type ConversationRunner, type InboundReport } from "./types.ts";
 
@@ -29,6 +29,28 @@ export function restoreInboundReports(ctx: ConversationStore, meta: Conversation
   }
   meta.inboundAcceptances = entries;
   ctx["saveMeta"](meta);
+}
+
+/**
+ * Drops reports read more than a day ago before the metadata is written
+ * (VUH-2410). Each save rewrote every report ever accepted, which made the
+ * default conversation's file the service's largest garbage source. An unread
+ * report is never dropped, and a dropped report's exact-ID status reads as
+ * unknown, which never claims it was not sent.
+ */
+export function retainInboundReports(meta: ConversationMeta, now: number): void {
+  const acceptances = meta.inboundAcceptances;
+  if (acceptances === undefined) return;
+  const cutoff = now - READ_REPORT_RETENTION_MS;
+  const kept = Object.entries(acceptances).filter(([, receipt]) => {
+    if (receipt.reportDelivery?.state !== "read") return true;
+    const readAt = Date.parse(receipt.reportDelivery.readAt ?? receipt.acceptedAt ?? "");
+    return !Number.isFinite(readAt) || readAt >= cutoff;
+  });
+  if (kept.length === Object.keys(acceptances).length) return;
+  // A fresh object: a caller restoring its pre-save snapshot after a failed write keeps every report.
+  if (kept.length === 0) delete meta.inboundAcceptances;
+  else meta.inboundAcceptances = Object.fromEntries(kept);
 }
 
 export function hasUnreadInboundReports(meta: ConversationMeta): boolean {

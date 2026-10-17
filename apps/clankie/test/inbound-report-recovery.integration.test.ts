@@ -394,3 +394,78 @@ it.each(["unadopted", "adoption"] as const)(
     await reopened.close();
   },
 );
+
+it("keeps unread reports and reports read within a day, and lets older read reports age out of saved metadata (VUH-2410)", async () => {
+  const root = fixtureRoot();
+  const conversationRoot = join(root, "conversations");
+  const start = new Date("2026-10-17T12:00:00.000Z");
+  vi.useFakeTimers({ toFake: ["Date"], now: start });
+  try {
+    const store = new ConversationStore(conversationRoot, async (_id, _text, _publish, context) => {
+      context.deliveryReceipt?.("delivered");
+    });
+    const receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+    const binding = "a".repeat(64);
+    const send = (text: string) => {
+      const delivery = { id: randomUUID(), binding };
+      expect(
+        receipts.accept(
+          "w3Z:pR",
+          delivery,
+          text,
+          `worker output: ${text}`,
+          "global-default",
+          async (_id, _body, _publish, context) => context.deliveryReceipt?.("delivered"),
+          { source: "adoption", conversationId: "global-default" },
+          { kind: "conversation", owner: { conversationId: "global-default" } },
+        ),
+      ).toMatchObject({ received: true });
+      return delivery.id;
+    };
+    const oldRead = send("read long ago");
+    const unread = send("never read");
+    const recentRead = send("read just now");
+    await store.close();
+    expect(store.acknowledgeInboundReports("global-default", [oldRead])).toBe(false);
+    expect(store.readInboundReports("global-default", { deliveryIds: [oldRead] }).ackDeliveryIds).toEqual([
+      oldRead,
+    ]);
+    expect(store.acknowledgeInboundReports("global-default", [oldRead])).toBe(true);
+
+    // A day and an hour later the lead reads another report; that save drops only the stale read one.
+    vi.setSystemTime(new Date(start.getTime() + 25 * 3_600_000));
+    expect(store.readInboundReports("global-default", { deliveryIds: [recentRead] }).ackDeliveryIds).toEqual([
+      recentRead,
+    ]);
+    expect(store.acknowledgeInboundReports("global-default", [recentRead])).toBe(true);
+    expect(store.inboundAcceptance(oldRead)).toBeUndefined();
+    // Its exact-ID status no longer proves anything, and never claims it was not sent.
+    const aged = receipts.status("w3Z:pR", binding, oldRead);
+    expect(aged === undefined || (aged.deliveryStage === "uncertain" && aged.definitive === undefined)).toBe(
+      true,
+    );
+    expect(receipts.status("w3Z:pR", binding, recentRead)).toMatchObject({ deliveryStage: "consumed" });
+    expect(receipts.status("w3Z:pR", binding, unread)).toMatchObject({ deliveryStage: "delivered" });
+
+    const saved = readFileSync(join(conversationRoot, "global-default/meta.json"), "utf8");
+    expect(saved).not.toContain("\n");
+    expect(saved).not.toContain(oldRead);
+    const restarted = new ConversationStore(conversationRoot, async () => {});
+    expect(
+      restarted
+        .inboundReports(undefined, { includeRead: true })
+        .map((report) => report.deliveryId)
+        .sort(),
+    ).toEqual([unread, recentRead].sort());
+    // An unread report is never dropped, however old.
+    vi.setSystemTime(new Date(start.getTime() + 30 * 24 * 3_600_000));
+    restarted.recordInboundReportDelivery(unread, "consumed");
+    expect(restarted.readInboundReports("global-default")).toMatchObject({
+      unreadCount: 1,
+      items: [{ deliveryId: unread, text: "never read" }],
+    });
+    await restarted.close();
+  } finally {
+    vi.useRealTimers();
+  }
+});

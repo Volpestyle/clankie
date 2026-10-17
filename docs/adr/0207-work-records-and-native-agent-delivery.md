@@ -257,3 +257,15 @@ do not grant access and cannot override occupant, owner or machine checks.
 
 The [protocol contract](../../packages/protocol/README.md#seat-input-capabilities-vuh-1882-service-contract)
 documents the fields, older-service fallback, live changes and app usage.
+
+**Amendment (VUH-2410, 2026-10-17): read reports age out.** A conversation's
+metadata retained every worker report it ever accepted, and every metadata save
+rewrote all of them. The default conversation reached 4,840 reports (15 MB per
+save), which made it the service's main external-memory garbage and drove full
+collections of the whole heap (VUH-2379). A report is now kept until its lead
+reads it, and then for 24 hours after `readAt` (or `acceptedAt` on records
+without one). Unread, pending, delivered and uncertain reports are never
+dropped. After that window, targeted reads omit the ID and exact-ID status
+reads as unknown or `uncertain` (from the admission fence), never `not_sent`. Worker retries happen
+within the admission deadline, far inside the window, so acceptance dedupe is
+unchanged in practice. Metadata is now written as compact JSON.

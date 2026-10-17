@@ -6422,7 +6422,9 @@ and stop stages such as `expired`), without resending, acknowledging a report,
 or reconciling a send fence. Check it before retrying or starting dependent work.
 Consumption does not prove task completion. Unknown receipts return 404 and do
 not prove nothing was sent; preserve and reconcile an uncertain original with
-`message_clankie`.
+`message_clankie`. A report stays retained until its lead reads it, then for
+24 hours; after that its status reads as unknown or `uncertain`, never
+`not_sent` (VUH-2410).
 
 When an uncertain original is reconciled to `stored`, the worker retains a
 five-minute matching window keyed by its native binding and normalized text.

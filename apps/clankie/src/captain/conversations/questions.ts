@@ -23,6 +23,7 @@ import {
 } from "../conversation-questions.ts";
 import { ProjectCreationSchema, proposalHash, proposalResult } from "../project-onboarding.ts";
 import { QuestionCommitError } from "./errors.ts";
+import { retainInboundReports } from "./worker-reports.ts";
 import type { ConversationStore } from "./store.ts";
 import {
   type ConversationMeta,
@@ -942,13 +943,14 @@ export async function questionOperation(
 
 export function saveQuestionMeta(ctx: ConversationStore, meta: ConversationMeta): void {
   if (meta.questions) QuestionStateSchema.parse(meta.questions);
+  retainInboundReports(meta, Date.now());
   const path = join(ctx["root"], meta.conversationId, "meta.json");
   const temporary = `${path}.${randomUUID()}.tmp`;
   let committed = false;
   try {
     const file = openSync(temporary, "wx", 0o600);
     try {
-      writeFileSync(file, JSON.stringify(meta, null, 2));
+      writeFileSync(file, JSON.stringify(meta));
       fsyncSync(file);
     } finally {
       closeSync(file);
