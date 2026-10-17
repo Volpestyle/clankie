@@ -85,7 +85,29 @@ driver stopped; their display activity is not termination proof. The host syncs
 an authorized-decision audit with the original claimant and reason before its
 synchronous release. Audit failure retains the claim; the audit does not claim
 completed release. This is not automatic recovery, native drain evidence, or
-authority to replay input. Windows and joined hosts refuse this exception.
+authority to replay input. Windows hosts refuse this exception; joined hosts
+refuse it unless the proposed amendment below is accepted.
+
+**Proposed amendment (VUH-1803, 2026-10-17; awaiting owner decision).** The
+host of a lent screen may accept the same unresolved uncertainty for its own
+expired, held computer lease. Bounded lent input can never prove native drain
+(ADR 0256), so without this a lent screen that has received any input stays held
+until someone edits its state by hand. The decision comes only from the lent
+host's parent-owned `clankie join … --json` control channel (`screen_recover`
+with a reason and the expected holder/expiry from fresh local status). The
+service API refuses it, and the lent host's body refuses any decision that
+arrives over the encrypted screen wire. The parent first requires its native helper to be running and,
+if that helper held the lease, to report no running, pending or held input. Then
+the body applies the same checks as the Mac exception: an expired recovery claim
+for the exact incarnation, no body operation, an fsynced
+`owner_override_authorized` audit beside the lent host's input journal before
+release, and failed audit storage keeps the claim. After release the parent
+replaces its native helper, because neither native helper ends a session that
+has carried input; the replacement attests to nothing about the old one and
+must ask for local consent again. This does not prove drain, grant consent or
+input, or replay anything. The risk accepted is that input the old helper
+already handed to the OS is still being delivered when the owner releases;
+the owner accepts it by taking over the machine they are sitting at.
 
 A conflict returns typed `busy` with resource, owning conversation, state, and
 allowed explicit `queue`/`ask` actions. It includes no other room's transcript,

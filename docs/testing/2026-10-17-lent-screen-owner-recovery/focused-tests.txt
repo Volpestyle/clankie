@@ -1,0 +1,13 @@
+clankie heavy: light lane waiting (1/4 held, 1 queued)
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / bash · server · held 13m
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / pnpm · server · held 13m
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1803-night
+
+
+ Test Files  2 passed (2)
+      Tests  21 passed (21)
+   Start at  23:22:29
+   Duration  24.01s (transform 2.31s, setup 44ms, import 4.44s, tests 23.36s, environment 0ms)
+
+exit=0

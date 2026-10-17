@@ -1,0 +1,5 @@
+clankie heavy: light lane waiting (3/4 held, 1 queued)
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / bash · server · held 13m
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / pnpm · server · held 13m
+$ node scripts/scoped-code-check.mjs lint packages/protocol/src/machine-join.ts apps/clankie/src/computer-body.ts apps/clankie/src/computer-http.ts apps/clankie/src/joined-computer.ts apps/clankie/test/fixtures/lent-screen-provider.mjs apps/clankie/test/joined-screen.integration.test.ts apps/tui/bin/joined-machine-client.ts apps/tui/bin/joined-screen-host.ts apps/tui/src/command/join.ts --threads=2
+lint exit=0

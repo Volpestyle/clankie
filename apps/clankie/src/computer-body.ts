@@ -75,7 +75,7 @@ const RecoveryAuditSchema = z.strictObject({
   schemaVersion: z.literal(1),
   auditId: z.uuid(),
   at: z.string().datetime(),
-  bodyId: z.literal("macos:console"),
+  bodyId: z.union([z.literal("macos:console"), z.string().regex(/^lent:[0-9a-f-]{36}$/u)]),
   decision: z.literal("owner_override_authorized"),
   operatorId: z.string().min(1),
   requestedFrom: z.string().min(1),
@@ -86,7 +86,10 @@ const RecoveryAuditSchema = z.strictObject({
 });
 type Ref = NonNullable<ReturnType<BodyLeaseStore["recoveryReference"]>>;
 
-/** Host-created from the authenticated operator request, never from a command or native tool identity. */
+/**
+ * Host-created, never from a command or native tool identity: the authenticated operator request
+ * for the local Mac, or the lent host's own parent-owned control channel for a lent screen.
+ */
 export interface OwnerComputerRecovery {
   readonly operatorId: string;
   readonly authorize: () => Promise<boolean>;
@@ -265,7 +268,13 @@ export class ComputerBody {
                   "The computer host cannot prove that queued or running native input has stopped.",
                   "Read status. After confirming the old driver has stopped, use recover with ownerRecovery.reason, expectedHolder and expectedExpiresAt under operator authority.",
                 )
-              : { outcome: "rejected", reason: "recovery_required" };
+              : this.adapter.bodyId.startsWith("lent:")
+                ? recoveryRefusal(
+                    "recovery_required",
+                    "The lent host cannot prove that queued or running native input has stopped.",
+                    "The owner at that machine can take over, then release the expired lease with screen_recover through its clankie join control.",
+                  )
+                : { outcome: "rejected", reason: "recovery_required" };
           await guard();
           const finished = this.store.finish(held, begun.operationId, "settled");
           if (finished.outcome !== "finished") return finished;
@@ -476,11 +485,18 @@ export class ComputerBody {
     decision: NonNullable<Extract<ComputerCommand, { action: "recover" }>["ownerRecovery"]>,
     authority: OwnerComputerRecovery | undefined,
   ): Promise<unknown> {
-    if (this.adapter.bodyId !== "macos:console")
+    const lent = this.adapter.bodyId.startsWith("lent:");
+    if (this.adapter.bodyId !== "macos:console" && !lent)
       return recoveryRefusal(
         "owner_recovery_unsupported",
-        "Owner recovery is only available for the local macOS computer.",
+        "Owner recovery is only available for the local macOS computer and lent screens.",
         "Use this host's native stop-proof recovery.",
+      );
+    if (!authority && lent)
+      return recoveryRefusal(
+        "owner_recovery_unsupported",
+        "A lent screen accepts owner recovery only from its own host.",
+        "The owner at that machine sends screen_recover through its clankie join control.",
       );
     if (!authority)
       return recoveryRefusal(
@@ -517,6 +533,17 @@ export class ComputerBody {
           throw new Error("Owner recovery authority changed");
         return eligible();
       };
+      const current = this.store.status("computer");
+      if (
+        current?.conversationId === decision.expectedHolder &&
+        current.expiresAt === decision.expectedExpiresAt &&
+        current.expiresAt > Date.now()
+      )
+        return recoveryRefusal(
+          "recovery_not_expired",
+          "The lease has not expired yet; Stop has already fenced its input.",
+          "Wait until its expiresAt, read status, then retry with that holder and expiry.",
+        );
       if (!(await guard()))
         return recoveryRefusal(
           "recovery_not_idle",

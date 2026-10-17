@@ -26,6 +26,7 @@ import {
   type JoinedMachineRequest,
   type JoinedMachineResult,
   type JoinedSeatRequest,
+  type MachineJoinScreenRecovery,
 } from "@clankie/protocol/machine-join";
 
 const JOINED_MACHINE_CREDENTIAL = "clankie-joined-machine";
@@ -88,7 +89,10 @@ export interface JoinedMachinePorts {
   screenPolicy?: (allowed: boolean) => void;
   closeScreen?: () => Promise<void>;
   /** Only the joining machine's owned stdin/parent can call these, never the remote screen wire. */
-  localScreen?: (action: "screen_status" | "screen_stop") => Promise<unknown>;
+  localScreen?: (
+    action: "screen_status" | "screen_stop" | "screen_recover",
+    recovery?: MachineJoinScreenRecovery,
+  ) => Promise<unknown>;
 }
 /** Never expose a general shell through a workers-level handler. */
 async function executeJoinedMachineRequest(

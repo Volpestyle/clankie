@@ -54,7 +54,9 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
   );
   let result = {},
     ok = true;
-  if (action === "consent") {
+  // Like the native helpers: a bound lease blocks consent, and a session with effects never ends cleanly.
+  if (action === "consent" && bound) ok = false;
+  else if (action === "consent") {
     session = request.session;
     consent = choice !== "deny";
     result = { approved: consent, allowInput: choice.startsWith("drive") };
@@ -63,8 +65,11 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
     bound = value.leaseId;
     result = { bound: true };
   } else if (action === "end") {
-    bound = "";
-    consent = false;
+    if (effects > 0) ok = false;
+    else {
+      bound = "";
+      consent = false;
+    }
   } else if (action === "inventory") {
     if (choice === "drive-stop") {
       // The test releases Stop only after the input has entered the real host

@@ -190,8 +190,8 @@ It fsyncs an `owner_override_authorized` decision with the reason and original
 claimant to `computer-recoveries.jsonl` beside the input journal before release.
 That entry records a decision to accept unknown native drain, not proof of drain
 or of completed release; read status and the returned receipt to reconcile it.
-Audit failure keeps the lease held. This exception is unavailable to Windows and
-joined screens. [CLI example](cli.md#computer-body). Raw Peekaboo invocations
+Audit failure keeps the lease held. This exception is unavailable to Windows. A
+lent screen has its own host-local form, below. [CLI example](cli.md#computer-body). Raw Peekaboo invocations
 outside this contract are not fenced by its driver lease; overlapping drivers
 must still be avoided.
 
@@ -449,7 +449,23 @@ Native observer acknowledgments establish neither target-queue drain nor
 application completion. Both parent and helper refuse lease release after any
 attempted native effect, even if a helper claims a clean Stop. True native queue
 drain remains an explicit [VUH-1840](https://linear.app/vuhlp/issue/VUH-1840) gap;
-no app-cooperative drain mechanism is added. The person takes over through Stop. Sign-ins, codes, CAPTCHAs,
+no app-cooperative drain mechanism is added. The person takes over through Stop.
+
+**Owner recovery on the lent host** (proposed amendment to ADR 0215, awaiting the
+owner's decision). After taking over, the owner at the lent machine can release
+an expired held session. They send `screen_recover` through the supervised
+`clankie join … --json` control with a reason and the `conversationId`/`expiresAt`
+from fresh local `screen_status`. Clankie cannot send it: the computer API and
+the encrypted screen wire refuse `ownerRecovery` for a lent screen. The host
+refuses while the lease is unexpired (`recovery_not_expired`), while its helper is
+unavailable or reports running, pending or held input (`native_input_active`),
+for a stale holder/expiry or a running body operation (`recovery_not_idle`), and
+when it cannot write the audit (`owner_recovery_refused`). It fsyncs an
+`owner_override_authorized` entry to `lent-screen/computer-recoveries.jsonl`
+under the host's body state before releasing. Then it replaces the native helper,
+because a helper never ends a session that carried input. The next session asks
+for local consent again. This records an owner decision, not drain proof, and
+replays nothing. Sign-ins, codes, CAPTCHAs,
 payments, account changes and destructive actions retain ADR 0127's person stops.
 
 Mac release builds compile `apps/tui/native/lent-screen.swift` into
@@ -461,7 +477,9 @@ native helper in its interactive console. A missing helper is unavailable, with
 no fallback to a harness. Build commands do not grant permissions or drive a screen.
 
 **Live gaps:** a hosted Clankie completing a short task on a lent Mac and Windows
-PC, capture with the visible pet, local input opt-in, person takeover and Stop.
+PC, capture with the visible pet, local input opt-in, person takeover, Stop and
+host-local owner recovery. The daytime steps are in the
+[live-proof runbook](testing/2026-10-17-lent-screen-owner-recovery/live-proof-runbook.md).
 The isolated encrypted HTTP/native-process fixtures and native compiler results
 prove source boundaries, not real desktop readiness. Native input sessions
 currently remain held after Stop whenever quiescence cannot be proved. Hosted

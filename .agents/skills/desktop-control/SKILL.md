@@ -42,7 +42,8 @@ record a reason and copy `expectedHolder` and `expectedExpiresAt` from fresh sta
 Confirm the old native driver has stopped first. Fresh operator authority, no
 service-tracked holder work and no computer operation are required; the host
 durably records this decision before release. This exception cannot recover
-Windows or lent screens, and never authorizes replaying uncertain input. Contract and examples:
+Windows. A lent screen refuses it through the API: only its own owner, on that
+machine, can release it. Neither form ever authorizes replaying uncertain input. Contract and examples:
 [desktop control](../../../docs/desktop-control.md#shared-computer-body).
 
 ## Lend a joined screen
@@ -62,7 +63,9 @@ captured window. Native acknowledgments never release a post-input lease: true
 queue drain stays unknown/held (VUH-1840). Stop on person takeover, access reduction or uncertain
 results. Preserve the original request UUID; never replay unknown input.
 Recovery remains usable after reduction, but unknown native quiescence holds
-the lease. Real Mac/PC driving proof is open; do not infer it from an HTTP
+the lease. Once it expires, the owner at the lent machine can release it with
+the local `screen_recover` join control after taking over. You cannot send that
+for them; tell them the screen is held and they can take over. Real Mac/PC driving proof is open; do not infer it from an HTTP
 fixture or compile. Setup: [lent screens](../../../docs/desktop-control.md#lend-a-joined-screen).
 
 ## Windows native control

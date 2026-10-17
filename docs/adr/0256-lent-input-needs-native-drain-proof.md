@@ -31,6 +31,8 @@ active input, no pending native events, no held key/button and a healthy observe
 restart or process exit cannot attest to an earlier session. AX/UIA calls likewise cannot prove an asynchronous provider is drained.
 True native queue drain remains an explicit VUH-1840 gap; James accepted this
 bounded landing on 2026-10-08. No app-cooperative drain mechanism is added.
+A proposed VUH-1803 amendment to ADR 0215 lets the lent host's own owner release
+an expired held session as an audited decision, not as drain proof.
 
 An observed event establishes observer acknowledgment, not target-queue drain
 or application completion.

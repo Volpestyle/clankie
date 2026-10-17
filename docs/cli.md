@@ -8103,7 +8103,9 @@ release. A `released` reply includes `recovery.kind: "owner_override"` and its
 `auditId`; inspect status after transport loss. Stale expectations, active work,
 changed authority or failed audit storage retain the lease. Native display idle
 alone never authorizes recovery; this explicit owner decision accepts that
-remaining uncertainty. Windows and joined screens refuse the override.
+remaining uncertainty. Windows refuses the override. A lent screen refuses it
+here; its own host owner uses `screen_recover` (see
+[lent computer selection](#lent-computer-selection)).
 
 The service registers a macOS Peekaboo adapter. A native Windows Codex
 `node_repl` can explicitly attach the Windows computer host; the
@@ -8328,8 +8330,20 @@ report `revoked` rather than falling back to a local operator. `clankie join lea
 clears that refusal; approving a new join replaces it.
 
 Keep stdin open. It accepts only `MachineJoinLocalScreenCommandSchema`:
-`{"id":"UUID","action":"screen_status"}` or `screen_stop`. Status and Stop
-cannot grant consent or enable input. Invalid controls fence the screen; stdin
+`{"id":"UUID","action":"screen_status"}`, `screen_stop`, or the owner's
+recovery decision (proposed amendment to ADR 0215), each as one JSON line:
+
+```text
+{"id":"UUID","action":"screen_recover","recovery":{"reason":"I took over; accept unproven native drain","expectedHolder":"CONVERSATION_ID","expectedExpiresAt":1791837035456}}
+```
+
+Copy `expectedHolder` and `expectedExpiresAt` from a fresh `screen_status`
+lease. The owner sends it only after taking over the machine. It needs an expired
+held lease, an idle running helper and a writable audit. Its result is
+`released` with `recovery: {kind: "owner_override", auditId}`, or `held` with
+`recovery: {kind: "refused", reason, detail, next}`. A release replaces the native
+helper, and the next session asks for local consent again. None of these
+controls can grant consent or enable input. Invalid controls fence the screen; stdin
 closure also permanently withholds screen policy for that supervised process.
 The status result contains `available`, `busy`, `allowInput`,
 `inputReady`, `outcome` (`status`, `released`, `held`, `unavailable`) and a nullable

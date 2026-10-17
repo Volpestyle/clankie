@@ -1,0 +1,61 @@
+== @clankie/protocol
+clankie heavy: light lane waiting (0/4 held, 1 queued)
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / bash · server · held 12m
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / pnpm · server · held 12m
+$ node ../../scripts/typecheck.mjs tsconfig.json
+[typecheck] packages/protocol project: 142 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] packages/protocol project passed; compiler heap 491.6 MiB
+[typecheck] packages/protocol: 2.25s; evidence /Users/james/dev/clankie-wt/vuh-1803-night/.local/typechecks/run-AGndHW/report.json
+exit=0
+== @clankie/clankie
+clankie heavy: light lane waiting (0/4 held, 1 queued)
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / bash · server · held 12m
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / pnpm · server · held 12m
+$ node ../../scripts/typecheck.mjs tsconfig.json
+[typecheck] apps/clankie source: 475 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie source passed; compiler heap 1995.7 MiB
+[typecheck] apps/clankie tests-1: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-1 passed; compiler heap 1999.2 MiB
+[typecheck] apps/clankie tests-2: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-2 passed; compiler heap 2095.0 MiB
+[typecheck] apps/clankie tests-3: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-3 passed; compiler heap 2131.2 MiB
+[typecheck] apps/clankie tests-4: 48 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-4 passed; compiler heap 2132.4 MiB
+[typecheck] apps/clankie tests-5: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-5 passed; compiler heap 2075.6 MiB
+[typecheck] apps/clankie tests-6: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-6 passed; compiler heap 2111.6 MiB
+[typecheck] apps/clankie tests-7: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-7 passed; compiler heap 2021.0 MiB
+[typecheck] apps/clankie tests-8: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-8 passed; compiler heap 2076.7 MiB
+[typecheck] apps/clankie tests-9: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-9 passed; compiler heap 2053.5 MiB
+[typecheck] apps/clankie tests-10: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-10 passed; compiler heap 1996.9 MiB
+[typecheck] apps/clankie tests-11: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-11 passed; compiler heap 2090.1 MiB
+[typecheck] apps/clankie tests-12: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-12 passed; compiler heap 2113.6 MiB
+[typecheck] apps/clankie tests-13: 41 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/clankie tests-13 passed; compiler heap 2212.2 MiB
+[typecheck] apps/clankie: 225.03s; evidence /Users/james/dev/clankie-wt/vuh-1803-night/.local/typechecks/run-IO8iY8/report.json
+exit=0
+== @clankie/tui
+clankie heavy: light lane waiting (0/4 held, 1 queued)
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / bash · server · held 16m
+  server: w58:p1 / claude:61e279b1-d634-4bcb-8e72-51afd7a03263 / pnpm · server · held 16m
+$ node ../../scripts/typecheck.mjs tsconfig.json
+[typecheck] apps/tui source: 221 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/tui source passed; compiler heap 1929.7 MiB
+[typecheck] apps/tui tests-1: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/tui tests-1 passed; compiler heap 2077.4 MiB
+[typecheck] apps/tui tests-2: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/tui tests-2 passed; compiler heap 2045.6 MiB
+[typecheck] apps/tui tests-3: 49 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/tui tests-3 passed; compiler heap 2100.4 MiB
+[typecheck] apps/tui tests-4: 16 roots, 2512 MiB old-space / 2560 MiB V8 heap ceiling
+[typecheck] apps/tui tests-4 passed; compiler heap 2100.0 MiB
+[typecheck] apps/tui: 67.12s; evidence /Users/james/dev/clankie-wt/vuh-1803-night/.local/typechecks/run-0FQ37Y/report.json
+exit=0

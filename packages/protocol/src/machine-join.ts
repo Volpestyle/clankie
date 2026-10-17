@@ -31,11 +31,24 @@ export const JoinedMachineIdSchema = z
   .regex(/^join-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u);
 export const MachineJoinSecretSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
 export const MachineJoinTokenSchema = z.string().regex(/^clankie_join_[A-Za-z0-9_-]{43}$/u);
-/** Local owned-child controls: metadata and stop only. Never a consent or input grant. */
-export const MachineJoinLocalScreenCommandSchema = z.strictObject({
-  id: z.string().uuid(),
-  action: z.enum(["screen_status", "screen_stop"]),
+/** Owner decision copied from fresh local status. Accepts unproven native drain; never consent or input. */
+export const MachineJoinScreenRecoverySchema = z.strictObject({
+  reason: z.string().trim().min(1).max(2000),
+  expectedHolder: z.string().min(1).max(512),
+  expectedExpiresAt: z.number().int().nonnegative(),
 });
+/** Local owned-child controls: metadata, stop and owner recovery only. Never a consent or input grant. */
+export const MachineJoinLocalScreenCommandSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    id: z.string().uuid(),
+    action: z.enum(["screen_status", "screen_stop"]),
+  }),
+  z.strictObject({
+    id: z.string().uuid(),
+    action: z.literal("screen_recover"),
+    recovery: MachineJoinScreenRecoverySchema,
+  }),
+]);
 export const MachineJoinLocalScreenStatusSchema = z.strictObject({
   available: z.boolean(),
   busy: z.boolean(),
@@ -49,6 +62,18 @@ export const MachineJoinLocalScreenStatusSchema = z.strictObject({
       state: z.enum(["active", "recovery_required"]),
     })
     .nullable(),
+  /** Present only on a screen_recover reply. */
+  recovery: z
+    .union([
+      z.strictObject({ kind: z.literal("owner_override"), auditId: z.string().uuid() }),
+      z.strictObject({
+        kind: z.literal("refused"),
+        reason: z.string().max(128),
+        detail: z.string().max(1024),
+        next: z.string().max(1024),
+      }),
+    ])
+    .optional(),
 });
 export const MachineJoinEventSchema = z.discriminatedUnion("event", [
   z.strictObject({
@@ -181,6 +206,7 @@ export const JoinedMachineBatchSchema = z
   .object({ policy: JoinedMachinePolicySchema, requests: z.array(JoinedMachineRequestSchema).max(16) })
   .strict();
 export type MachineJoinStart = z.infer<typeof MachineJoinStartSchema>;
+export type MachineJoinScreenRecovery = z.infer<typeof MachineJoinScreenRecoverySchema>;
 export type MachineJoinLease = z.infer<typeof MachineJoinLeaseSchema>;
 export type JoinedMachinePolicy = z.infer<typeof JoinedMachinePolicySchema>;
 export type JoinedMachineOperation = z.infer<typeof JoinedMachineOperationSchema>;

@@ -112,7 +112,9 @@ A joined screen can provide Clankie's computer body, including for a hosted
 Clankie. The owner confirms each session locally and chooses observation or
 input. A visible pet offers Stop; access reduction and loss of consent stop
 queued input. The host supports bounded native input with exact receipts. Observer
-acknowledgments cannot prove queue drain, so Stop retains a post-input lease. Real Mac and Windows driving checks remain open.
+acknowledgments cannot prove queue drain, so Stop retains a post-input lease.
+Once it expires, the owner at that machine can take over and release it from
+the join's local control; Clankie cannot. Real Mac and Windows driving checks remain open.
 
 ## Where the service and data live
 

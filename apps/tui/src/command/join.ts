@@ -248,7 +248,14 @@ export async function runJoinCommand(
           lease: null,
           outcome: "unavailable",
         };
-        void (ports.localScreen ? ports.localScreen(command.action) : Promise.resolve(unavailable))
+        void (
+          ports.localScreen
+            ? ports.localScreen(
+                command.action,
+                command.action === "screen_recover" ? command.recovery : undefined,
+              )
+            : Promise.resolve(unavailable)
+        )
           .catch(() => unavailable)
           .then((result) => {
             if (controlsOpen) event({ event: "screen", id: command.id, result });

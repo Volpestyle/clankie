@@ -32,8 +32,8 @@ export class JoinedComputer {
       return {
         outcome: "rejected",
         reason: "owner_recovery_unsupported",
-        detail:
-          "A joined screen requires its own native stop proof; local Mac owner recovery cannot release it.",
+        detail: "A lent screen accepts owner recovery only from its own host, never through this API.",
+        next: "The owner at that machine sends screen_recover through its clankie join control.",
       };
     const recovery = ["status", "release", "revoke", "recover"].includes(command.action);
     const guard = async () => {

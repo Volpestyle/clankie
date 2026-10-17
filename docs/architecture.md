@@ -847,8 +847,10 @@ Computer sessions keep their separate adapter recovery. An expired local Mac
 computer lease also permits an explicit operator recovery decision with a reason
 and expected holder/expiry, independent operator reauthorization, no service-tracked
 holder activity and no live body operation. A synced pre-release audit records
-accepted native uncertainty; it is not stop proof. Windows and lent hosts retain
-their native stop-proof contract. The
+accepted native uncertainty; it is not stop proof. Windows retains its native
+stop-proof contract. A lent host accepts the same decision only from its own
+parent-owned join control, never through the API (proposed ADR 0215 amendment,
+VUH-1803), and then replaces its native helper. The
 [router](../apps/clankie/src/body-lease-router.ts) preserves the original machine
 or social route when handing a request to the holder. See
 [ADR 0215](adr/0215-conversations-lease-one-body.md) and the

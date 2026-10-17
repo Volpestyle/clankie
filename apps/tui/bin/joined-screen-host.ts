@@ -20,11 +20,16 @@ import {
   ComputerBody,
   type ComputerAdapter,
   type ComputerObservation,
+  type OwnerComputerRecovery,
 } from "../../clankie/src/computer-body.ts";
 import { BodyLeaseStore } from "../../clankie/src/body-leases.ts";
 import type { BodyConversationIdentity } from "../../clankie/src/body-lease-router.ts";
 import type { JoinedMachinePorts } from "./joined-machine-client.ts";
-import { MachineJoinLocalScreenStatusSchema } from "@clankie/protocol/machine-join";
+import {
+  MachineJoinLocalScreenStatusSchema,
+  MachineJoinScreenRecoverySchema,
+  type MachineJoinScreenRecovery,
+} from "@clankie/protocol/machine-join";
 
 const approval = z.strictObject({ approved: z.boolean(), allowInput: z.boolean() });
 const nativeObservation = z.strictObject({
@@ -34,13 +39,25 @@ const nativeObservation = z.strictObject({
   accessibility: ComputerScreenshotSchema.shape.accessibility,
   reference: z.string().uuid(),
 });
+const stopProof = z.strictObject({
+  quiescent: z.boolean(),
+  session: z.string().uuid(),
+  leaseId: z.string(),
+  observer: z.boolean(),
+  uncertain: z.boolean(),
+  pending: z.number().int().nonnegative(),
+  held: z.number().int().nonnegative(),
+  busy: z.boolean(),
+});
 
 /** Sole parent owns this native stdio channel. Neither wire arguments nor a service flag grant consent. */
 class LentScreenNative implements ComputerAdapter {
   readonly bodyId: string;
   allowInput = false;
   inputReady = false;
-  private readonly child: ChildProcessWithoutNullStreams;
+  private child!: ChildProcessWithoutNullStreams;
+  private readonly executable: string;
+  private readonly args: string[];
   private readonly pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
   private readonly heartbeat: NodeJS.Timeout;
   private stopped = false;
@@ -56,11 +73,21 @@ class LentScreenNative implements ComputerAdapter {
   constructor(options: { bodyId: string; executable: string; args?: string[]; onStop(): void }) {
     this.bodyId = options.bodyId;
     this.onStop = options.onStop;
-    this.child = spawn(options.executable, options.args ?? [], { stdio: "pipe", windowsHide: false });
+    this.executable = options.executable;
+    this.args = options.args ?? [];
+    this.start();
+    this.heartbeat = setInterval(() => {
+      if (this.policy && !this.stopped) void this.call("heartbeat").catch(() => this.fence());
+    }, 250);
+  }
+  private start(): void {
+    const child = spawn(this.executable, this.args, { stdio: "pipe", windowsHide: false });
+    this.child = child;
     // Provider diagnostics may contain observations. They never become evidence or API errors.
-    this.child.stderr.resume();
-    const lines = createInterface({ input: this.child.stdout });
+    child.stderr.resume();
+    const lines = createInterface({ input: child.stdout });
     lines.on("line", (line) => {
+      if (child !== this.child) return;
       try {
         if (line.length > 24 * 1024 * 1024) throw Error("native_reply_too_large");
         const reply = z
@@ -83,16 +110,43 @@ class LentScreenNative implements ComputerAdapter {
       }
     });
     const failed = () => {
+      if (child !== this.child) return;
       this.stopped = true;
       this.fence();
       for (const entry of this.pending.values()) entry.reject(Error("native_host_unavailable"));
       this.pending.clear();
     };
-    this.child.once("error", failed);
-    this.child.once("exit", failed);
-    this.heartbeat = setInterval(() => {
-      if (this.policy && !this.stopped) void this.call("heartbeat").catch(() => this.fence());
-    }, 250);
+    child.once("error", failed);
+    child.once("exit", failed);
+  }
+  /** After an owner override only. The fresh helper attests to nothing about the one it replaces. */
+  restart(): void {
+    const old = this.child;
+    this.fence();
+    for (const entry of this.pending.values()) entry.reject(Error("native_host_unavailable"));
+    this.pending.clear();
+    this.session = "";
+    this.bound = false;
+    this.boundLease = "";
+    this.attemptedInput = false;
+    this.stopped = false;
+    old.stdin.end();
+    old.kill();
+    this.start();
+  }
+  /** Not drain proof: refuses only a helper still mid-sequence. The owner accepts what remains unknown. */
+  async ownerIdle(): Promise<boolean> {
+    if (this.stopped) return false;
+    // This helper process never held a lease; the one that did has exited with its parent.
+    if (!this.bound) return true;
+    const proof = stopProof.safeParse(await this.call("stop").catch(() => undefined));
+    return (
+      proof.success &&
+      proof.data.session === this.session &&
+      !proof.data.busy &&
+      proof.data.pending === 0 &&
+      proof.data.held === 0
+    );
   }
   private call(action: string, value: unknown = {}): Promise<unknown> {
     if (this.stopped) return Promise.reject(Error("native_host_unavailable"));
@@ -227,18 +281,7 @@ class LentScreenNative implements ComputerAdapter {
   async stop(guard: () => Promise<void>): Promise<boolean> {
     this.fence();
     await guard();
-    const proof = z
-      .strictObject({
-        quiescent: z.boolean(),
-        session: z.string().uuid(),
-        leaseId: z.string(),
-        observer: z.boolean(),
-        uncertain: z.boolean(),
-        pending: z.number().int().nonnegative(),
-        held: z.number().int().nonnegative(),
-        busy: z.boolean(),
-      })
-      .safeParse(await this.call("stop").catch(() => undefined));
+    const proof = stopProof.safeParse(await this.call("stop").catch(() => undefined));
     await guard();
     if (!proof.success) return false;
     const result = proof.data;
@@ -321,7 +364,10 @@ export function createJoinedScreenPorts(options: {
       authorize: async () => true,
     };
   };
-  const localStatus = async (outcome: "status" | "released" | "held" | "unavailable") => {
+  const localStatus = async (
+    outcome: "status" | "released" | "held" | "unavailable",
+    recovery?: z.input<typeof MachineJoinLocalScreenStatusSchema>["recovery"],
+  ) => {
     const raw = await body.dispatch(localIdentity(), { action: "status" });
     const status = z
       .object({ busy: z.boolean(), allowInput: z.boolean(), inputReady: z.boolean(), lease: z.unknown() })
@@ -341,14 +387,56 @@ export function createJoinedScreenPorts(options: {
       lease,
       outcome,
       available: native.available,
+      ...(recovery ? { recovery } : {}),
     });
   };
+  // Parent-owned control channel only. The remote screen wire never reaches this decision.
+  const ownerRecover = async (decision: MachineJoinScreenRecovery) => {
+    const idle = await native.ownerIdle();
+    if (!idle)
+      return localStatus("held", {
+        kind: "refused",
+        reason: "native_input_active",
+        detail: "The screen helper is unavailable or still reports running, pending or held input.",
+        next: "Wait for it to settle, or restart clankie join, then read screen_status and retry.",
+      });
+    const authority: OwnerComputerRecovery = {
+      operatorId: "lent-host-local-owner",
+      authorize: async () => native.available,
+      holderIdle: () => native.available,
+    };
+    const result = await body.dispatch(
+      localIdentity(),
+      { action: "recover", ownerRecovery: decision },
+      authority,
+    );
+    const released = z
+      .object({
+        outcome: z.literal("released"),
+        recovery: z.object({ auditId: z.string().uuid() }).optional(),
+      })
+      .safeParse(result);
+    if (released.success) {
+      // The old helper's session can never end cleanly after input; only a fresh one can consent again.
+      if (released.data.recovery) native.restart();
+      conversation = "";
+      return localStatus(
+        "released",
+        released.data.recovery
+          ? { kind: "owner_override", auditId: released.data.recovery.auditId }
+          : undefined,
+      );
+    }
+    const refused = z.object({ reason: z.string(), detail: z.string(), next: z.string() }).safeParse(result);
+    return localStatus("held", refused.success ? { kind: "refused", ...refused.data } : undefined);
+  };
   return {
-    async localScreen(action) {
+    async localScreen(action, recovery) {
       if (action === "screen_status") return localStatus("status");
       native.fence(); // Immediate, ahead of every queued effect and any awaited provider reply.
       void native.stop(async () => {}).catch(() => {});
       const run = async () => {
+        if (action === "screen_recover") return ownerRecover(MachineJoinScreenRecoverySchema.parse(recovery));
         const result = await body.dispatch(localIdentity(), { action: "recover" });
         const released = z.object({ outcome: z.literal("released") }).safeParse(result).success;
         if (released && conversation) {

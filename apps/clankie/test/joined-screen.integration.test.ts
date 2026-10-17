@@ -236,6 +236,7 @@ async function screenFixture(choice: string, proof = "certain", json = false, ma
   return {
     ...f,
     credential,
+    ports,
     request,
     abort,
     running,
@@ -254,6 +255,15 @@ async function screenFixture(choice: string, proof = "certain", json = false, ma
       if (failure) throw failure;
     },
   };
+}
+
+async function localControl(f: Awaited<ReturnType<typeof screenFixture>>, command: Record<string, unknown>) {
+  const id = randomUUID();
+  f.controls.write(JSON.stringify({ id, ...command }) + "\n");
+  await until(() => f.events.some((event) => event.event === "screen" && event.id === id));
+  const event = f.events.find((value) => value.event === "screen" && value.id === id);
+  if (event?.event !== "screen") throw Error("Missing local screen receipt");
+  return event.result;
 }
 
 test("real encrypted computer API requires local session consent, preserves read-only and reassembles bounded PNG chunks", async () => {
@@ -377,9 +387,10 @@ test("input opt-in supports one exact receipt, refuses unbounded primitives, and
     expect((await f.request(command)).body).toEqual(first.body);
     expect((await f.actions()).filter((value) => value.action === "input")).toHaveLength(1);
     await f.machines.setAccess(f.credential.lease.machineId, { accessLevel: "portal" });
-    expect((await f.request({ action: "revoke", leaseId })).body).toEqual({
+    expect((await f.request({ action: "revoke", leaseId })).body).toMatchObject({
       outcome: "rejected",
       reason: "recovery_required",
+      next: expect.stringContaining("screen_recover"),
     });
     expect((await f.request({ action: "status" })).body.lease.state).toBe("recovery_required");
     expect((await f.request(command)).status).toBe(403);
@@ -464,9 +475,10 @@ test("local pet Stop fences a queued fresh-frame input before dispatch and uncer
     expect((await queued).status).toBe(409);
     expect((await f.actions()).filter((value) => value.action === "input")).toHaveLength(0);
     expect((await f.request({ action: "status" })).body.lease.state).toBe("recovery_required");
-    expect((await f.request({ action: "recover" })).body).toEqual({
+    expect((await f.request({ action: "recover" })).body).toMatchObject({
       outcome: "rejected",
       reason: "recovery_required",
+      next: expect.stringContaining("screen_recover"),
     });
   } finally {
     await f.stop();
@@ -517,7 +529,7 @@ test("a restarted native process cannot clear an older uncertain session by clai
           },
         ),
       );
-      expect(reply).toEqual({ outcome: "rejected", reason: "recovery_required" });
+      expect(reply).toMatchObject({ outcome: "rejected", reason: "recovery_required" });
     } finally {
       await ports.closeScreen!();
     }
@@ -725,6 +737,121 @@ test("the supervised parent Stop reaches an in-flight synthetic drag before its 
     expect(
       (await f.actions()).filter((value) => value.action === "native_step").map((value) => value.step),
     ).toEqual(["down", "cleanup"]);
+  } finally {
+    await f.stop();
+  }
+});
+
+test("the lent host's owner releases an expired post-input session only locally, audited, and a fresh helper asks consent again", async () => {
+  const f = await screenFixture("drive", "uncertain", true);
+  try {
+    const leaseId = (await f.request({ action: "acquire", ttlMs: 3000 })).body.lease.leaseId;
+    const shot = (await f.request({ action: "capture", leaseId, target: { appId: "123", windowId: "456" } }))
+      .body;
+    const typed = await f.request({
+      action: "input",
+      leaseId,
+      screenshotId: shot.screenshotId,
+      requestId: randomUUID(),
+      inputs: [
+        {
+          kind: "type",
+          text: "after",
+          foreground: true,
+          expect: { field: "document_text", equals: "after" },
+        },
+      ],
+    });
+    expect(typed.body.outcome).toBe("confirmed");
+    const stopped = await localControl(f, { action: "screen_stop" });
+    expect(stopped).toMatchObject({ outcome: "held", lease: { state: "recovery_required" } });
+    const recovery = {
+      reason: "I took over the lent screen and accept its unproven native drain",
+      expectedHolder: stopped.lease!.conversationId,
+      expectedExpiresAt: stopped.lease!.expiresAt,
+    };
+    expect(await localControl(f, { action: "screen_recover", recovery })).toMatchObject({
+      outcome: "held",
+      lease: { state: "recovery_required" },
+      recovery: { kind: "refused", reason: "recovery_not_expired" },
+    });
+    await until(() => Date.now() > recovery.expectedExpiresAt);
+    // Neither the authenticated API nor the encrypted screen wire carries the owner's decision.
+    expect((await f.request({ action: "recover", ownerRecovery: recovery })).body).toMatchObject({
+      reason: "owner_recovery_unsupported",
+      next: expect.any(String),
+    });
+    const wire = JSON.parse(
+      await f.ports.screen!(
+        JSON.stringify({
+          op: "command",
+          conversationId: "owner-session",
+          command: { action: "recover", ownerRecovery: recovery },
+        }),
+        new AbortController().signal,
+        () => {},
+      ),
+    );
+    expect(wire).toMatchObject({ reason: "owner_recovery_unsupported" });
+    expect(
+      await localControl(f, {
+        action: "screen_recover",
+        recovery: { ...recovery, expectedHolder: "another-session" },
+      }),
+    ).toMatchObject({ outcome: "held", recovery: { kind: "refused", reason: "recovery_not_idle" } });
+    const auditPath = join(f.root, "body", "lent-screen", "computer-recoveries.jsonl");
+    await mkdir(auditPath);
+    expect(await localControl(f, { action: "screen_recover", recovery })).toMatchObject({
+      outcome: "held",
+      recovery: { kind: "refused", reason: "owner_recovery_refused" },
+    });
+    await rm(auditPath, { recursive: true });
+    const released = await localControl(f, { action: "screen_recover", recovery });
+    expect(released).toMatchObject({
+      outcome: "released",
+      lease: null,
+      recovery: { kind: "owner_override" },
+    });
+    if (released.recovery?.kind !== "owner_override") throw Error("Missing override receipt");
+    const audit = JSON.parse((await readFile(auditPath, "utf8")).trim());
+    expect(audit).toMatchObject({
+      auditId: released.recovery.auditId,
+      decision: "owner_override_authorized",
+      operatorId: "lent-host-local-owner",
+      originalHolder: "owner-session",
+      expiresAt: recovery.expectedExpiresAt,
+      reason: recovery.reason,
+    });
+    expect(audit.bodyId).toMatch(/^lent:/u);
+    expect(JSON.stringify(audit)).not.toContain(leaseId);
+    const next = await f.request({ action: "acquire" });
+    expect(next.body).toMatchObject({ outcome: "acquired" });
+    expect(next.body.lease.leaseId).not.toBe(leaseId);
+    const actions = await f.actions();
+    expect(actions.filter((value) => value.action === "consent")).toHaveLength(2);
+    expect(actions.filter((value) => value.action === "input")).toHaveLength(1);
+  } finally {
+    await f.stop();
+  }
+});
+
+test("lent owner recovery refuses while the native helper still reports running input", async () => {
+  const f = await screenFixture("drive", "busy", true);
+  try {
+    expect((await f.request({ action: "acquire", ttlMs: 1000 })).body.outcome).toBe("acquired");
+    const stopped = await localControl(f, { action: "screen_stop" });
+    expect(stopped).toMatchObject({ outcome: "held" });
+    const recovery = {
+      reason: "Owner accepts unproven drain",
+      expectedHolder: stopped.lease!.conversationId,
+      expectedExpiresAt: stopped.lease!.expiresAt,
+    };
+    await until(() => Date.now() > recovery.expectedExpiresAt);
+    expect(await localControl(f, { action: "screen_recover", recovery })).toMatchObject({
+      outcome: "held",
+      recovery: { kind: "refused", reason: "native_input_active" },
+    });
+    expect((await f.request({ action: "status" })).body.lease.state).toBe("recovery_required");
   } finally {
     await f.stop();
   }

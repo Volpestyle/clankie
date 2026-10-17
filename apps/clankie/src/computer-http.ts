@@ -60,8 +60,8 @@ export function registerComputerRoutes(
           {
             outcome: "rejected",
             reason: "owner_recovery_unsupported",
-            detail:
-              "Owner recovery is only available for the local macOS computer. Use the joined host's stop-proof recovery.",
+            detail: "A lent screen accepts owner recovery only from its own host, never through this API.",
+            next: "The owner at that machine sends screen_recover through its clankie join control.",
           },
           200,
         );

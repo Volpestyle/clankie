@@ -404,7 +404,9 @@ For a lent screen, use the same `clankie computer request` API with an explicit
 registered `machineId: "join-UUID"`. Screen level does not grant local session
 consent or input. The host asks its owner and shows a pet with Stop; observation
 is the default. Desktop parents can supervise `join resume --json` with local
-`screen_status` / `screen_stop` stdin controls; neither can enable input.
+`screen_status` / `screen_stop` / `screen_recover` stdin controls. None can
+grant consent or enable input. `screen_recover` is the owner's audited release of
+an expired held session after taking over; never send it on their behalf.
 `join status --json` reads registration and `join leave --json` revokes it.
 An unavailable or held Stop is not quiescence proof. See the
 [CLI contract](../../../docs/cli.md#lent-computer-selection).
