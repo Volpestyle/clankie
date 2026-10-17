@@ -222,6 +222,22 @@ function buildNetworkRows() {
     ],
 
     [
+      "GET /v1/operator/http-settings",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read the exact browser-origin allowlist shared by self-hosted core and relay, and its revision.",
+      },
+    ],
+    [
+      "POST /v1/operator/http-settings",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Replace the browser-origin allowlist with revision fencing; empty disables browser access. Pairing and bearer grants remain authoritative.",
+      },
+    ],
+    [
       "GET /v1/operator/host-settings",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
