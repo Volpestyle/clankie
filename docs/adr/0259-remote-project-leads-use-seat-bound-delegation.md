@@ -97,8 +97,28 @@ that same tracker-only catalog, including tools beyond the initial list. They
 cannot reach other connected services. Raw GraphQL, owner repository overrides and persona-selectable
 worker publishing are excluded; the head writes as Clankie, attributed to its
 lead chat, rather than choosing another author. This retains the connected
-account's existing tracker access; project leadership is not a provider-level
-project ACL.
+account identity. The service now fences the delegated tools to the lead's
+registered tracker project (VUH-1968 amendment, 2026-10-16); the provider account
+itself still retains its existing access.
+
+The owner-configured project-to-chat route, or the registered remote workspace
+when no route exists, selects one project. Conflicting or missing bindings refuse.
+The saved `linearProjectBinding.projectId` or `trackerProjectId` supplies its
+tracker UUID; the caller cannot select it. Settings are fenced for each call and
+rechecked at dispatch. Both initial and deferred tools share this policy.
+
+Issue listings inject the project filter. Individual issue reads, updates and
+comments prove current membership; issue moves, parent/duplicate/relationship
+writes cannot target another project. Existing comment edits and replies prove
+that comment belongs to the supplied scoped target. Project reads/updates,
+status updates, milestone reads and document reads follow the same target checks.
+`get_user` accepts only `me`. Tools without a project authorization policy are
+omitted from discovery, including workspace-wide project listings, attachments,
+raw GraphQL and persona-selectable publishing. Expanded issue relations/releases
+are refused because they can expose other projects. These restrictions apply to
+remote delegation; ordinary local operator access is unchanged. Provider-side
+concurrent edits cannot be made atomic with the service's pre-dispatch membership
+check; an issue read also verifies the returned record before exposing it.
 
 Every tracker call carries the bound conversation's authority. The MCP host
 rechecks the delegation after asynchronous setup and at the actual write

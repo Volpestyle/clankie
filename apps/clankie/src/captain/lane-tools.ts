@@ -1,3 +1,4 @@
+import { authorizeProjectTrackerCall, assertTrackerProject } from "./project-tracker-access.ts";
 import { workerReportTools, type WorkerReportActions } from "./worker-report-tools.ts";
 import { randomUUID } from "node:crypto";
 import { questionTools } from "./question-tools.ts";
@@ -33,6 +34,7 @@ interface ServiceAccess {
   server: string;
   allows(tool: McpToolDescriptor): boolean;
   authority: ConversationAuthority;
+  project(): Promise<{ id: string; assertCurrent(): void }>;
 }
 
 /**
@@ -366,31 +368,69 @@ function mcpLaneTool(
           ],
           isError: true,
         };
-      const result = await deps.mcp.call({
-        lane,
-        server: tool.server,
-        tool: tool.name,
-        arguments: args,
-        ...(turn.conversationAuthority ? { conversationAuthority: turn.conversationAuthority } : {}),
-        ...(serviceAccess
-          ? {
-              requireConversationAttribution: true,
-              fence: async () => {
-                await assertConversationAuthority(serviceAccess.authority);
-                return () => {
-                  if (!serviceAccess.authority.current()) throw new Error("remote_lead_revoked");
-                };
-              },
-            }
-          : {}),
-      });
-      if (result.outcome === "ok" && result.isError) {
-        return {
-          content: [{ type: "text", text: result.content || `${tool.qualifiedName} failed` }],
-          isError: true,
+      try {
+        const scope = serviceAccess ? await serviceAccess.project() : undefined;
+        const read = async (name: string, parameters: Record<string, unknown>) => {
+          const result = await deps.mcp.call({
+            lane,
+            server: tool.server,
+            tool: name,
+            arguments: parameters,
+            resultMode: "data",
+            ...(turn.conversationAuthority ? { conversationAuthority: turn.conversationAuthority } : {}),
+            requireConversationAttribution: true,
+            fence: async () => {
+              await assertConversationAuthority(serviceAccess!.authority);
+              scope!.assertCurrent();
+              return () => {
+                scope!.assertCurrent();
+                if (!serviceAccess!.authority.current()) throw new Error("remote_lead_revoked");
+              };
+            },
+          });
+          if (result.outcome !== "ok" || result.isError)
+            throw new Error("remote_lead_tracker_project_denied");
+          return JSON.parse(result.content) as unknown;
         };
+        const parameters = scope ? await authorizeProjectTrackerCall(tool.name, args, scope.id, read) : args;
+        const result = await deps.mcp.call({
+          lane,
+          server: tool.server,
+          tool: tool.name,
+          arguments: parameters,
+          ...(turn.conversationAuthority ? { conversationAuthority: turn.conversationAuthority } : {}),
+          ...(serviceAccess
+            ? {
+                requireConversationAttribution: true,
+                fence: async () => {
+                  await assertConversationAuthority(serviceAccess.authority);
+                  scope!.assertCurrent();
+                  // Membership and settings can change while a write waits for
+                  // credentials or provider admission. Reprove at dispatch too.
+                  await authorizeProjectTrackerCall(tool.name, parameters, scope!.id, read);
+                  return () => {
+                    scope!.assertCurrent();
+                    if (!serviceAccess.authority.current()) throw new Error("remote_lead_revoked");
+                  };
+                },
+              }
+            : {}),
+        });
+        if (scope && result.outcome === "ok" && !result.isError) {
+          scope.assertCurrent();
+          if (tool.name === "get_issue") assertTrackerProject(JSON.parse(result.content), scope.id);
+        }
+        if (scope && result.outcome !== "ok") return { content: toolJson(result).content, isError: true };
+        if (result.outcome === "ok" && result.isError) {
+          return {
+            content: [{ type: "text", text: result.content || `${tool.qualifiedName} failed` }],
+            isError: true,
+          };
+        }
+        return { content: toolJson(result).content };
+      } catch (error) {
+        return { content: [{ type: "text", text: errorText(error) }], isError: true };
       }
-      return { content: toolJson(result).content };
     },
   };
 }

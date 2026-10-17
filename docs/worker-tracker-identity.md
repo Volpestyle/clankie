@@ -82,6 +82,12 @@ connected account's Linear notifications are only marked read after that chat
 confirms the wake. Self-filtering compares stable provider user IDs, regardless
 of which fleet member made the write.
 
+Remote project heads use the same connected Clankie identity through their
+seat-bound bridge. Their tracker access is restricted to the registered project's
+UUID: direct and deferred reads/writes check the same scope, and a missing or
+conflicting project binding refuses. See [ADR 0259](adr/0259-remote-project-leads-use-seat-bound-delegation.md#tracker-delegation-vuh-1968)
+for supported operations and the dispatch fence.
+
 ## Remaining isolation work
 
 Native Claude and Codex launch paths deny recognized inherited Linear connectors.

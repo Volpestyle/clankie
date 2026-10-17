@@ -1,3 +1,4 @@
+import { projectTrackerTool } from "./project-tracker-access.ts";
 import { readFleetSeatCapabilities } from "./fleet-seat-capabilities.ts";
 import {
   fleetProjectionDiagnostics,
@@ -251,7 +252,6 @@ import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
 import { readIssueMetrics } from "./issue-metrics.ts";
 import { LaneLog } from "./lane-log.ts";
 import { buildLaneToolBank, laneAuthoredTools, laneAuthoredToolsNamed } from "./lane-tools.ts";
-import { isLinearWorkerTool } from "../linear-publishing.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
 import {
   ModelCredentialHealthLog,
@@ -3528,9 +3528,33 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       delegation
         ? {
             server: "linear",
-            allows: (tool) =>
-              tool.server === "linear" && tool.name !== "graphql" && !isLinearWorkerTool(tool.name),
+            allows: (tool) => tool.server === "linear" && projectTrackerTool(tool.name),
             authority: delegation,
+            project: async () => {
+              const snapshot = await settingsStore.loadFenced();
+              const current = snapshot.settings;
+              const binding = seatContext(conversationId);
+              if (!binding?.machineId) throw new Error("remote_lead_tracker_project_denied");
+              const configured = configuredLeadHireProject(
+                current.projects,
+                current.linearWebhook.projectChats,
+                conversationId,
+              );
+              const workspace = remoteWorkspaceProject(
+                current,
+                current.projects,
+                binding.machineId,
+                binding.cwd,
+              );
+              if (configured !== undefined && workspace !== undefined && configured !== workspace)
+                throw new Error("remote_lead_tracker_project_denied");
+              const project = current.projects.projects.find(
+                (entry) => entry.id === (configured ?? workspace),
+              );
+              const id = project?.linearProjectBinding?.projectId ?? project?.trackerProjectId;
+              if (!id) throw new Error("remote_lead_tracker_project_denied");
+              return { id, assertCurrent: snapshot.assertCurrent };
+            },
           }
         : undefined,
     );

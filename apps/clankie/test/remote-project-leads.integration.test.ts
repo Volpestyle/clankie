@@ -1,3 +1,4 @@
+import { createLocalTracker } from "@clankie/work-items";
 import { harnessAccountKey } from "../src/captain/harness-account-identities.ts";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -102,6 +103,45 @@ it("launches an approved Windows workspace through the real conversation store w
     onboarded: true,
   };
   const identityKey = harnessAccountKey(nativeAccount)!;
+  const tracker = createLocalTracker({ directory: join(root, "tracker"), team: "VUH" });
+  const ownProject = (await tracker.call("save_project", { name: "KH2", addTeams: ["VUH"] })) as {
+    id: string;
+  };
+  const otherProject = (await tracker.call("save_project", { name: "Other", addTeams: ["VUH"] })) as {
+    id: string;
+  };
+  const ownIssue = (await tracker.call("save_issue", {
+    title: "Own issue",
+    team: "VUH",
+    project: ownProject.id,
+  })) as { id: string };
+  const otherIssue = (await tracker.call("save_issue", {
+    title: "Other issue private title",
+    team: "VUH",
+    project: otherProject.id,
+  })) as { id: string };
+  const foreignComment = (await tracker.call("save_comment", {
+    issueId: otherIssue.id,
+    body: "Foreign comment",
+  })) as { id: string };
+  await settings.update((current) => ({
+    ...current,
+    machines: [{ id: "pc", ssh: "pc", shell: "powershell", aliases: [] }],
+    projects: {
+      ...current.projects,
+      projects: [
+        {
+          id: "kh2",
+          name: "KH2",
+          trackerProjectId: ownProject.id,
+          workspaces: [{ id: "pc", machineId: "pc", platform: "windows", path: cwd }],
+          roles: [],
+          labelRoleMap: [],
+          grants: [],
+        },
+      ],
+    },
+  }));
   const providerCalls: string[] = [];
   const observed: { tool: string; owner?: { conversationId: string }; recipient?: unknown }[] = [];
   const mcp = createMcpHost({
@@ -136,16 +176,25 @@ it("launches an approved Windows workspace through the real conversation store w
     connect: async (server) => ({
       listTools: async () =>
         (server.id === "linear"
-          ? ["get_issue", "get_project", "save_comment", "save_issue", "graphql", "create_worker_comment"]
+          ? [
+              "get_issue",
+              "get_project",
+              "save_comment",
+              "save_issue",
+              "list_issues",
+              "list_comments",
+              "graphql",
+              "create_worker_comment",
+            ]
           : ["send"]
         ).map((name) => ({
           name,
           description: name,
           inputSchema: { type: "object", properties: {}, additionalProperties: true },
         })),
-      callTool: async (name) => {
+      callTool: async (name, args) => {
         providerCalls.push(name);
-        return { content: JSON.stringify({ id: "fixture", result: name }), isError: false };
+        return { content: JSON.stringify(await tracker.call(name, args)), isError: false };
       },
       close: async () => {},
     }),
@@ -367,16 +416,79 @@ it("launches an approved Windows workspace through the real conversation store w
     expect(catalog).not.toContain("linear_graphql");
     expect(catalog).not.toContain("linear_create_worker_comment");
     expect(
-      (await client.callTool({ name: "linear_get_issue", arguments: { id: "VUH-1510" } })).isError,
+      (await client.callTool({ name: "linear_get_issue", arguments: { id: ownIssue.id } })).isError,
     ).not.toBe(true);
     expect(
       (
         await client.callTool({
           name: "linear_save_comment",
-          arguments: { issueId: "VUH-1510", body: "Project lead evidence" },
+          arguments: { issueId: ownIssue.id, body: "Project lead evidence" },
         })
       ).isError,
     ).not.toBe(true);
+    // VUH-1968: real tracker records behind the provider fixture, through the
+    // real launch/delegation/captain/HTTP MCP path, including deferred calls.
+    for (const [name, arguments_] of [
+      ["linear_get_issue", { id: otherIssue.id }],
+      ["linear_save_comment", { issueId: otherIssue.id, body: "Denied" }],
+      ["linear_save_comment", { id: foreignComment.id, issueId: ownIssue.id, body: "Denied" }],
+      ["linear_save_comment", { parentId: foreignComment.id, issueId: ownIssue.id, body: "Denied" }],
+      ["linear_get_project", { query: otherProject.id }],
+      ["linear_list_issues", { project: otherProject.id }],
+      ["linear_save_issue", { id: otherIssue.id, description: "Denied" }],
+      ["linear_save_issue", { id: ownIssue.id, project: otherProject.id }],
+      ["linear_save_issue", { id: ownIssue.id, project: null }],
+      ["linear_save_issue", { id: ownIssue.id, relatedTo: [otherIssue.id] }],
+      ["linear_get_issue", { id: ownIssue.id, includeRelations: true }],
+    ] as const) {
+      if (["linear_get_issue", "linear_save_comment"].includes(name)) {
+        const direct = await client.callTool({ name, arguments: arguments_ });
+        expect(direct.isError).toBe(true);
+        expect(JSON.stringify(direct.content)).not.toContain("Other issue private title");
+      }
+      const result = await client.callTool({
+        name: "mcp_tool_call",
+        arguments: { name, arguments: arguments_ },
+      });
+      expect(result.isError, JSON.stringify({ name, arguments_, result })).toBe(true);
+      expect(JSON.stringify(result.content)).not.toContain("Other issue private title");
+    }
+    const listed = await client.callTool({
+      name: "mcp_tool_call",
+      arguments: { name: "linear_list_issues", arguments: {} },
+    });
+    expect(listed.isError).not.toBe(true);
+    expect(JSON.stringify(listed.content)).toContain("Own issue");
+    expect(JSON.stringify(listed.content)).not.toContain("Other issue private title");
+    expect(await tracker.call("get_issue", { id: otherIssue.id })).not.toHaveProperty(
+      "description",
+      "Denied",
+    );
+    expect(await tracker.call("list_comments", { issueId: otherIssue.id })).toMatchObject({
+      comments: [{ body: "Foreign comment" }],
+    });
+    expect(await tracker.call("list_comments", { issueId: ownIssue.id })).toMatchObject({
+      comments: [{ body: "Project lead evidence" }],
+    });
+    const savedProjects = (await settings.load()).projects;
+    await settings.update((current) => ({
+      ...current,
+      projects: { ...current.projects, projects: [] },
+    }));
+    const beforeUnbound = providerCalls.length;
+    expect(
+      (await client.callTool({ name: "linear_get_issue", arguments: { id: ownIssue.id } })).isError,
+    ).toBe(true);
+    expect(
+      (
+        await client.callTool({
+          name: "linear_save_comment",
+          arguments: { issueId: ownIssue.id, body: "Unbound" },
+        })
+      ).isError,
+    ).toBe(true);
+    expect(providerCalls).toHaveLength(beforeUnbound);
+    await settings.update((current) => ({ ...current, projects: savedProjects }));
     const found = await client.callTool({
       name: "mcp_tool_search",
       arguments: {
@@ -402,7 +514,7 @@ it("launches an approved Windows workspace through the real conversation store w
           name: "mcp_tool_call",
           arguments: {
             name: "linear_save_issue",
-            arguments: { id: "VUH-1510", description: "Updated evidence" },
+            arguments: { id: ownIssue.id, description: "Updated evidence" },
           },
         })
       ).isError,
@@ -429,7 +541,7 @@ it("launches an approved Windows workspace through the real conversation store w
       (
         await client.callTool({
           name: "linear_get_issue",
-          arguments: { id: "VUH-1510", repo: "/owner/private" },
+          arguments: { id: ownIssue.id, repo: "/owner/private" },
         })
       ).isError,
     ).toBe(true);
@@ -468,7 +580,7 @@ it("launches an approved Windows workspace through the real conversation store w
       expect(await admitted!.authorize()).toBe(true);
       expect((await client.listTools()).tools.some((tool) => tool.name === "linear_get_issue")).toBe(true);
       expect(
-        (await client.callTool({ name: "linear_get_issue", arguments: { id: "VUH-2189" } })).isError,
+        (await client.callTool({ name: "linear_get_issue", arguments: { id: ownIssue.id } })).isError,
       ).not.toBe(true);
     }
     const leadRequest = () =>
@@ -571,13 +683,13 @@ it("launches an approved Windows workspace through the real conversation store w
       "private-fixture-secret",
     );
     // Revoke while the real MCP host awaits credentials, before its dispatch fence.
-    const callsBeforeRevoke = providerCalls.length;
+    const writesBeforeRevoke = providerCalls.filter((name) => name === "save_comment").length;
     const cancelled = new AbortController();
     const pendingWrite = client
       .callTool(
         {
           name: "linear_save_comment",
-          arguments: { issueId: "VUH-1510", body: "Must not dispatch" },
+          arguments: { issueId: ownIssue.id, body: "Must not dispatch" },
         },
         undefined,
         { signal: cancelled.signal },
@@ -591,7 +703,7 @@ it("launches an approved Windows workspace through the real conversation store w
     // the host refusal above, not a transport receipt, proves no dispatch.
     cancelled.abort();
     await pendingWrite;
-    expect(providerCalls).toHaveLength(callsBeforeRevoke);
+    expect(providerCalls.filter((name) => name === "save_comment")).toHaveLength(writesBeforeRevoke);
   } finally {
     release();
     await client.close();

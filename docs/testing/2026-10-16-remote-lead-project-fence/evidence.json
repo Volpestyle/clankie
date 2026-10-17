@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "evidence/checks.txt",
+      "size": 24757,
+      "sha256": "77ca19b94319221a7d2a5099ddf5566d215f168399cfe794cb8a3b4489bf4f8d",
+      "url": "clankie://evidence/sha256/77ca19b94319221a7d2a5099ddf5566d215f168399cfe794cb8a3b4489bf4f8d"
+    }
+  ]
+}

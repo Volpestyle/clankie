@@ -94,6 +94,15 @@ tools, or `clankie_tools` / `clankie_call` for a worker), never a harness's own
 connector, and load `linear-issues` before writing; it owns read-before-write,
 media publication and result-update mechanics.
 Inspect the existing project, issues and workflow before creating anything.
+Remote project heads reach only their registered tracker project through the
+seat-bound bridge. Use `mcp_tool_search` for its supported tracker tools; both
+direct and deferred calls enforce the same project fence. Lists default to that
+project. Reads/writes of another project's issues, moves out of the project and
+cross-project relations refuse. Comment edits/replies need the explicit scoped
+issue/project/status-update target as well as their comment ID. `get_user` accepts
+`me` only. A missing/conflicting binding needs the owner's project configuration;
+do not substitute an inherited tracker connector or `repo` override. Expanded
+issue relations/releases and tools without a safe project policy are unavailable.
 
 | Work concept                                  | Linear representation                                               |
 | --------------------------------------------- | ------------------------------------------------------------------- |
