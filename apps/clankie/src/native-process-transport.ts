@@ -128,12 +128,19 @@ class NativeProcessTransport {
     if (!this.child) {
       const child = spawn(this.helper, ["--serve"], { stdio: "pipe" });
       this.child = child;
+      // A fork may terminate before async teardown. Kill only this owned child;
+      // pipe EOF is insufficient when a stalled helper keeps its own handles.
+      const onParentExit = () => {
+        child.kill("SIGKILL");
+      };
+      process.once("exit", onParentExit);
       // The body owns shutdown; this helper must not keep a finished CLI/test alive.
       child.unref();
       for (const stream of [child.stdin, child.stdout, child.stderr])
         (stream as typeof stream & { unref?(): void }).unref?.();
       this.closed = new Promise((resolve) => {
         child.once("close", () => {
+          process.off("exit", onParentExit);
           this.failed = true;
           if (transports.get(this.helper) === this) transports.delete(this.helper);
           if (this.active) this.finish(this.active, undefined, this.failureReason);

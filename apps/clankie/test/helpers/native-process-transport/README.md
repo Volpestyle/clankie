@@ -9,7 +9,12 @@ reply while independent queued work survives on the same helper. A stalled
 proof fails alone: its helper is killed and queued, never-dispatched jobs run
 unreplayed on a fresh helper (VUH-2015). Malformed or exited helpers still fail
 closed for every job. `close-driver.mjs` runs separately so test-runner timers cannot conceal
-an unsettled top-level await when closing an idle helper.
+an unsettled top-level await when closing an idle helper. Its
+`exit-without-close` mode terminates the parent with a helper that deliberately
+keeps a timer alive after its reply; the real transport must terminate that owned
+child on parent exit (VUH-2346). Shared test teardown also explicitly closes native
+observers before removing fixture roots. Removal retries are bounded; exhausted
+cleanup still fails the run.
 
 `codex-recovery-fixture.mjs` is an ordinary Node Unix WebSocket server and
 foreground process. The manual recovery test copies the installed Node executable

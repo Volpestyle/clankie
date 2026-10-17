@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { afterEach, aroundEach, beforeAll, expect, it } from "vitest";
+import { afterEach, aroundEach, beforeAll, expect, it, vi } from "vitest";
 import { IntegrationRunSchema } from "@clankie/protocol/integrate";
 import { DeployHolds, durableJson, withDirectoryLock } from "../src/deploy-holds.ts";
 import { IntegrationQueue, integrationSources } from "../src/integrate.ts";
@@ -32,6 +32,32 @@ import { deployHoldPresence } from "../src/deploy-hold-presence.ts";
 import { createIntegrationRoutes } from "../src/integrate-routes.ts";
 import { runIntegrationCommand } from "../../tui/src/command/integrate.ts";
 import { fixtureWork, withFixtureWork } from "../../../scripts/testing/fixture-work.ts";
+
+// Keep the real kernel proof, including every pre-deletion recheck. Churn is
+// unknown, never deletion authority; wait boundedly for a complete observation.
+// This test-only adapter also covers the queue's automatic cleanup path.
+vi.mock("../src/process-working-directories.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/process-working-directories.ts")>();
+  return {
+    ...actual,
+    async processWorkingDirectories() {
+      const deadline = performance.now() + 10_000;
+      for (;;) {
+        fixtureWork().signal.throwIfAborted();
+        try {
+          return await actual.processWorkingDirectories();
+        } catch (error) {
+          if (
+            !String(error).includes("Incomplete account process cwd census:") ||
+            performance.now() >= deadline
+          )
+            throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    },
+  };
+});
 
 aroundEach(withFixtureWork);
 const nativeExecute = promisify(execFile);
@@ -66,10 +92,12 @@ afterEach(async (context) => {
   for (const root of roots)
     for await (const link of glob("**/isolation/*/tmp", { cwd: root }))
       await readlink(join(root, link)).then(
-        (target) => rm(target, { recursive: true, force: true }),
+        (target) => rm(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
         () => undefined,
       );
-  await Promise.all(roots.splice(0).map((p) => rm(p, { recursive: true, force: true })));
+  await Promise.all(
+    roots.splice(0).map((p) => rm(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })),
+  );
 });
 async function git(directory: string, ...args: string[]): Promise<string> {
   // Pushed history remains inspectable in the private commit store after scratch cleanup.

@@ -50,7 +50,7 @@ afterEach(async () => {
   for (const close of resources.splice(0).reverse()) await close();
   for (const f of fixtures.splice(0)) {
     await f.captain.close();
-    await rm(f.root, { recursive: true, force: true });
+    await rm(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -1354,7 +1354,7 @@ it("a held fleet refresh cannot recreate efficiency persistence after Captain cl
     await held.started;
     f.rows[0]!.agent_status = "idle";
     await f.captain.close();
-    await rm(f.root, { recursive: true, force: true });
+    await rm(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     held.release();
     await refresh;
     expect(existsSync(f.root)).toBe(false);

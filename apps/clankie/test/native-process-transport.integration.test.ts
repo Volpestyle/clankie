@@ -357,6 +357,32 @@ pipeIt(
   },
 );
 
+pipeIt("a fork exit kills its owned idle helper even when the helper ignores pipe EOF", async () => {
+  const f = await fixture();
+  const driver = fileURLToPath(
+    new URL("./helpers/native-process-transport/close-driver.mjs", import.meta.url),
+  );
+  const transport = fileURLToPath(new URL("../src/native-process-transport.ts", import.meta.url));
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    [driver, transport, f.helper, "exit-without-close"],
+    { timeout: 5_000 },
+  );
+  const result = JSON.parse(stdout);
+  try {
+    expect(result.completed).toBe(true);
+    await until(
+      async () => alive(result.helperPid),
+      (value) => !value,
+      "owned helper exits with fork",
+    );
+    expect(alive(result.helperPid)).toBe(false);
+  } finally {
+    // The deliberately stalled fixture belongs to this test even if the assertion fails.
+    if (alive(result.helperPid)) process.kill(result.helperPid, "SIGKILL");
+  }
+});
+
 it.skipIf(process.platform !== "darwin" || process.env.FLEET_PROOF_NATIVE_TEST !== "1")(
   "reads the actual calling process birth through the compiled helper's persistent pipe",
   async () => {

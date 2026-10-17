@@ -47,6 +47,11 @@ for await (const line of createInterface({ input: process.stdin })) {
       await new Promise(() => {});
       break;
     }
+    case "idle-with-keepalive":
+      send(reply(id, mode));
+      setInterval(() => {}, 1000);
+      await new Promise(() => {});
+      break;
     case "timeout":
       await new Promise(() => {});
       break;

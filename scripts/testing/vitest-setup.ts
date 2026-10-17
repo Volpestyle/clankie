@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach } from "vitest";
+import { closeNativeProcessObservers } from "../../apps/clankie/src/native-process-transport.ts";
 
 // Paths only, for the regression's access trap; never open the original stores.
 export const ownerConfigRoots = [
@@ -68,5 +69,9 @@ if (process.env.CLANKIE_TEST_LIVE_STORES !== "1") {
   afterEach(({ signal }) => {
     abandoned ||= signal.aborted;
   });
-  afterAll(() => (abandoned ? undefined : rm(root, { recursive: true, force: true })));
+  afterAll(async () => {
+    // Idle native pipes belong to this fork, including a failed test’s helper.
+    await closeNativeProcessObservers();
+    if (!abandoned) await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  });
 }
