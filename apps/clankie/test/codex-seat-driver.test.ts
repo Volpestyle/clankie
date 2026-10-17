@@ -6,7 +6,10 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { startCodexAppServerSeat } from "../src/captain/codex-app-server.ts";
 
 const { spawn } = vi.hoisted(() => ({ spawn: vi.fn() }));
-vi.mock("node:child_process", () => ({ spawn }));
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  spawn,
+}));
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
