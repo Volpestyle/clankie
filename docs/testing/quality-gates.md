@@ -17,6 +17,12 @@ imports), with serial compiler execution. Compiler/dependency configuration
 changes check all projects. Vitest's existing `--changed` selection is unchanged.
 The compiler-input hash participates in Turbo's cache key, including imports
 across package boundaries that are absent from package manifests.
+Its static checks include `scripts/check-swallowed-rejections.mjs`: a line the
+change adds may not drop a rejection silently (`.catch(() => undefined)`,
+`.catch(() => {})`, `.catch(() => null)`) unless it or the line above carries
+`// allow-swallowed-rejection -- REASON`. Tests, docs and evals are exempt, and
+existing sites are not flagged until a change rewrites them; on 2026-10-17 there
+were 604 outside tests, 398 of them in `apps/clankie/src` (VUH-2396).
 The checked HEAD, base, source fingerprint, compiler scope, phase times and exit
 are saved to `.local/landing-gate.json`; source changes during the run fail it.
 Pass Vitest reporter options after `--`, for example `pnpm check:landing --

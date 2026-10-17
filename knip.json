@@ -25,6 +25,7 @@
         "scripts/evals/codex.mjs",
         "scripts/evals/report.mjs",
         "scripts/testing/evidence-landing-guard.mjs",
+        "scripts/check-swallowed-rejections.mjs",
         "scripts/testing/landing-graph-reporter.mjs",
         "scripts/testing/release-test-reporter.mjs",
         "docs/testing/2026-10-12-vuh-2163/flows/prove.mjs",
