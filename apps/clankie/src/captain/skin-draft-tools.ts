@@ -10,12 +10,15 @@ export function skinDraftTool(service: SkinDraftService | undefined, turn: TurnC
     name: "skin_draft",
     label: "Prepare a lead-skin draft",
     description:
-      "Create, inspect, revise or cancel the owner's durable key-pose draft without spending or changing the live look. " +
+      "Create, inspect, revise or cancel the owner's durable key-pose draft without changing the live look. " +
       "Use a UUID requestId for create and the returned exact expectedRevision for edits. Pose input names a committed owner attachment by conversationId/artifactId, never a file path or URL. " +
       "Supply an explicit sampling grid and import rest first; work/comms keep its native dimensions and palette. Replacing rest clears the other poses. " +
-      "This tool cannot approve poses, animate, generate or publish. Ask the owner to inspect source/native previews and approve the exact revision through the owner API or clankie skin draft approve.",
+      "Generate requires a UUID requestId and host credit admission (currently closed pending the owner's credit policy). Read a request's retained generation journal after a lost reply; never replay uncertain work with a new UUID. " +
+      "This tool cannot approve poses, animate or publish. Ask the owner to inspect source/native previews and approve the exact revision through the owner API or clankie skin draft approve.",
     parameters: Type.Object({
-      action: Type.Union(["create", "list", "get", "pose", "revise", "cancel"].map((v) => Type.Literal(v))),
+      action: Type.Union(
+        ["create", "list", "get", "pose", "revise", "generate", "cancel"].map((v) => Type.Literal(v)),
+      ),
       requestId: Type.Optional(Type.String()),
       draftId: Type.Optional(Type.String()),
       expectedRevision: Type.Optional(Type.String()),
@@ -23,7 +26,15 @@ export function skinDraftTool(service: SkinDraftService | undefined, turn: TurnC
       version: Type.Optional(Type.Number()),
       pose: Type.Optional(Type.Union([Type.Literal("rest"), Type.Literal("work"), Type.Literal("comms")])),
       reference: Type.Optional(Type.Object({ conversationId: Type.String(), artifactId: Type.String() })),
-      source: Type.Optional(Type.Object({ conversationId: Type.String(), artifactId: Type.String() })),
+      source: Type.Optional(
+        Type.Union([
+          Type.Object({ conversationId: Type.String(), artifactId: Type.String() }),
+          Type.Object({
+            generationRequestId: Type.String(),
+            pose: Type.Union([Type.Literal("rest"), Type.Literal("work"), Type.Literal("comms")]),
+          }),
+        ]),
+      ),
       sampling: Type.Optional(
         Type.Object({
           grid: Type.Object({

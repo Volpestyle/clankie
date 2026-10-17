@@ -19,11 +19,13 @@ export interface OwnerSettingsApi {
 }
 class OwnerSettingsApiError extends Error {
   public readonly status: number;
+  public readonly code: string;
   public constructor(status: number, detail: string) {
     super(
       status === 409 ? "Settings changed. Read the current settings and review your change again." : detail,
     );
     this.status = status;
+    this.code = detail;
   }
 }
 /** One owner route for CLI/TUI settings; no file fallback or automatic retry. */

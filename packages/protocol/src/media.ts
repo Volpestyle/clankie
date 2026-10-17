@@ -72,6 +72,7 @@ export const GenerateImageResultSchema = z.discriminatedUnion("outcome", [
       byteLength: z.number().int().positive(),
       provider: z.string().min(1).max(64),
       model: z.string().min(1).max(200),
+      providerRequestId: z.string().min(1).max(500).optional(),
     })
     .strict(),
   z

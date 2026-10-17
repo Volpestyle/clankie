@@ -95,10 +95,13 @@ limits and runtime verification API.
 `clankie skin draft` uses the owner-authenticated service for durable briefs,
 native rest/work/comms poses and exact-revision owner approval. Use `create
 SENTENCE [--request UUID]`, `list`, `get ID [--version N]`, `pose COMMAND.json`,
-`revise ID REVISION SENTENCE`, or `approve|decline|cancel ID REVISION`.
+`revise ID REVISION SENTENCE`, `generate ID REVISION --request UUID`, or
+`approve|decline|cancel ID REVISION`.
 See [owner key-pose drafts](skin-drafts.md) for owned attachments, sampling,
-preview routes, approval provenance and cancellation. Draft operations make no
-generation request and leave the live look unchanged.
+preview routes, approval provenance and cancellation. Generation retains a
+restart-safe media journal, but paid requests refuse until the owner credit
+policy exists. Uncertain provider work is never replayed. Draft operations
+leave the live look unchanged.
 
 ## Conventions
 

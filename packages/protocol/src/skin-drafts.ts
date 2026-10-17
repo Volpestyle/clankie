@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GenerateImageResultSchema } from "./media.ts";
 
 export const SKIN_DRAFTS_PATH = "/v1/operator/skin-drafts";
 export const SKIN_KEY_POSES = ["rest", "work", "comms"] as const;
@@ -33,7 +34,7 @@ export const SkinPoseSamplingSchema = z
     colors: z.number().int().min(1).max(64).optional(),
   })
   .strict();
-export const SkinDraftSourceSchema = SkinDraftReferenceSchema.extend({
+const SourceBytes = {
   sha256: Sha,
   mediaType: z.enum(["image/png", "image/jpeg"]),
   byteCount: z
@@ -41,7 +42,43 @@ export const SkinDraftSourceSchema = SkinDraftReferenceSchema.extend({
     .int()
     .positive()
     .max(16 * 1024 * 1024),
-});
+};
+export const SkinGeneratedReferenceSchema = z
+  .object({
+    generationRequestId: Id,
+    pose: SkinKeyPoseSchema,
+  })
+  .strict();
+export const SkinDraftSourceSchema = z.union([
+  SkinDraftReferenceSchema.extend(SourceBytes).strict(),
+  SkinGeneratedReferenceSchema.extend({
+    ...SourceBytes,
+    provider: z.string().min(1).max(128),
+    model: z.string().min(1).max(256),
+  }).strict(),
+]);
+export const SkinGenerationSchema = z
+  .object({
+    requestId: Id,
+    inputRevision: Sha,
+    description: Description,
+    state: z.enum(["running", "complete", "refused", "uncertain"]),
+    createdAt: z.iso.datetime(),
+    steps: z
+      .array(
+        z
+          .object({
+            pose: SkinKeyPoseSchema,
+            state: z.enum(["dispatching", "complete", "refused", "uncertain"]),
+            source: SkinDraftSourceSchema.optional(),
+            receipt: GenerateImageResultSchema.optional(),
+            detail: z.string().max(500).optional(),
+          })
+          .strict(),
+      )
+      .max(3),
+  })
+  .strict();
 const Pose = z
   .object({
     source: SkinDraftSourceSchema,
@@ -61,7 +98,8 @@ export const SkinDraftSchema = z
     revision: Sha,
     description: Description,
     state: z.enum(["awaiting_poses", "awaiting_approval", "approved", "declined", "cancelled"]),
-    generation: z.literal("not_requested"),
+    generation: z.enum(["not_requested", "running", "complete", "refused", "uncertain"]),
+    generations: z.array(SkinGenerationSchema).max(16).optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
     reference: SkinDraftSourceSchema.optional(),
@@ -97,11 +135,12 @@ export const SkinDraftCommandSchema = z.discriminatedUnion("action", [
       action: z.literal("pose"),
       ...Fenced,
       pose: SkinKeyPoseSchema,
-      source: SkinDraftReferenceSchema,
+      source: z.union([SkinDraftReferenceSchema, SkinGeneratedReferenceSchema]),
       sampling: SkinPoseSamplingSchema,
     })
     .strict(),
   z.object({ action: z.literal("revise"), ...Fenced, description: Description }).strict(),
+  z.object({ action: z.literal("generate"), ...Fenced, requestId: Id }).strict(),
   z.object({ action: z.enum(["approve", "decline", "cancel"]), ...Fenced }).strict(),
 ]);
 export const SkinDraftResultSchema = z.discriminatedUnion("outcome", [
@@ -111,6 +150,9 @@ export const SkinDraftResultSchema = z.discriminatedUnion("outcome", [
 export type SkinDraft = z.infer<typeof SkinDraftSchema>;
 export type SkinDraftCommand = z.infer<typeof SkinDraftCommandSchema>;
 export type SkinDraftReference = z.infer<typeof SkinDraftReferenceSchema>;
+export type SkinDraftSource = z.infer<typeof SkinDraftSourceSchema>;
+export type SkinPoseInput = SkinDraftReference | z.infer<typeof SkinGeneratedReferenceSchema>;
+export type SkinGeneration = z.infer<typeof SkinGenerationSchema>;
 export type SkinDraftResult = z.infer<typeof SkinDraftResultSchema>;
 export type SkinKeyPose = z.infer<typeof SkinKeyPoseSchema>;
 

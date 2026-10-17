@@ -304,6 +304,7 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
         byteLength: result.bytes,
         provider: model.providerId,
         model: model.modelId,
+        ...(result.providerRequestId ? { providerRequestId: result.providerRequestId } : {}),
       });
     } catch (error) {
       return GenerateImageResultSchema.parse({ outcome: "refused", schemaVersion: 1, ...refusal(error) });

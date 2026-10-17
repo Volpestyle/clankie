@@ -1,10 +1,12 @@
 # Owner key-pose drafts
 
 The service can keep an owner's brief and already-owned reference/key-pose
-images as a durable draft. This stage makes no image-generation request, spends
-no credits, and changes no live appearance. Sentence-to-generated art, animation,
-independent visual review, catalog publication and UI presentation are separate
-stages. A pose approval is not publication approval.
+images as a durable draft. Generation can join the configured media seam to that
+same draft through a durable request journal. **Paid generation remains closed**
+until the host has an approved credit-admission policy; neither a request nor a
+pose approval enables spending. Animation, independent visual review, catalog
+publication and live selection remain separate. A pose approval is not
+publication approval. The private app's draft review uses this same owner API.
 
 ## Prepare and approve
 
@@ -80,8 +82,56 @@ commands except create require `draftId` and `expectedRevision`. A stale revisio
 changed artifact, cancelled edit, conflicting request UUID or incomplete approval
 returns 409. Missing owner proof/authority, unknown drafts/references, invalid
 input and exceeded limits fail closed. An uncertain edit is reconciled with
-`get`, never automatically replayed. No field can request a provider, budget,
-publication or live setting change. `generation` remains `not_requested`.
+`get`, never automatically replayed. No field can select a provider, model,
+budget, publication or live setting change.
+
+## Generation journal and admission
+
+`clankie skin draft generate ID REVISION --request UUID` (API/tool action
+`generate`) uses the brief already stored on that revision. It returns
+`skin_generation_credit_policy_required` without changing the draft or making a
+provider call when host admission is closed. Production currently always closes
+this policy; there is no environment variable, model field or UI switch to open
+it. Local integration fixtures explicitly admit only their loopback provider.
+
+When admitted, generation requests rest, work and comms in sequence, using the
+authorized draft reference (or retained prior rest source) for rest and the new
+rest source for the other poses. The configured media adapter supplies provider
+and model. Native sampling preserves the source aspect ratio, with work/comms
+using rest's dimensions and palette. The source and native bytes stay in the
+owner's private blob store. Generated pose sources use
+`{generationRequestId,pose}` instead of pretending to be conversation uploads;
+that same reference can be used by `pose` to correct sampling.
+
+The draft keeps up to 16 generation journals within its existing 64-revision
+limit and a 256 KiB record bound. Every individual dispatch is atomically saved
+as `dispatching` before the media call. Completed steps retain the exact media
+result (including the provider request ID when supplied) and source digest.
+Reusing a request UUID with its original input revision returns its saved result;
+it does not draw again. A different revision with the same UUID conflicts.
+
+An interrupted dispatch becomes `uncertain` when reconciled with the original
+generate request. It is never replayed, and another generation is refused while
+that uncertainty remains. There is deliberately no claim that a provider failure
+response proves no charge: ambiguous refusals such as `provider_failed` are
+retained as `uncertain`, and automatic work stops. Only known pre-dispatch
+refusals (missing model/credentials, unsupported provider or denied authority)
+are final refusals. A killed service can leave a `running` journal visible to `get`;
+reading does not dispatch work. No automatic provider recovery or spend follows
+a reconnect. Provider-side reconciliation and approved credit admission remain
+required before production generation can open.
+
+Owner edits and cancellation remain available while media is pending. A late
+receipt is retained but cannot overwrite the newer draft. Any generated pose or
+brief edit invalidates approval. The result stops at `awaiting_approval`; only
+the direct authenticated owner operation can approve the exact revision.
+
+The app shows originals, native rest/work/comms and Classic at equal native
+scale, with description and sampling edits, approval, changes requested and
+cancellation. An unconfirmed write requires an explicit refresh before further
+editing or approval. Private previews are read through the authenticated device
+transport and removed from the review when the connection changes. This is
+review of draft poses, not ready-pack selection or hosted/physical-device proof.
 
 The public repository contains only the generic contract, service and deterministic
 tools. Actual owner art and reference-derived palettes belong in private owner

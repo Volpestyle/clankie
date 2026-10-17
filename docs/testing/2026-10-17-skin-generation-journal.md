@@ -1,0 +1,11 @@
+# VUH-2114: durable sentence-to-pose draft boundary
+
+The draft service now journals each generation intent before provider dispatch, retains media receipts and private source bytes, and installs rest/work/comms native-grid poses for exact owner review. API, CLI and captain tools share this contract. Production admission always refuses generation until James approves the credit policy; the implementation was exercised with a loopback provider and no spend.
+
+The real HTTP/CLI regression uses a forked service with its actual configured media adapter and a loopback provider returning a mathematical 32×64 sentinel PNG. It proves sentence-only poses, exact owner approval, retained history, no repeated accepted work after restart, owner cancellation during a request, and fail-closed credit admission. A SIGKILL during the second request leaves the first receipt durable and the in-flight request uncertain. Both its original intent and a new intent are blocked from replay. A provider 503 follows the same no-replay boundary.
+
+Final focused result: two files, nine passing tests, 16.97 seconds. The existing authority suite additionally covers stale, foreign and revoked owner requests and unchanged live appearance. Source and test typechecks passed; final landing evidence is attached to [VUH-2114](https://linear.app/vuhlp/issue/VUH-2114).
+
+The private app increment adds original/native/Classic comparison, description and grid edits, exact revision approval, decline and cancellation. Its real browser fixture passed at phone and tablet widths, including service restart and stale approval. A native Codex child reviewed all six final captures and found no visual blockers after contrast and caption corrections. This is fixture presentation proof, not owner approval of art or native-device proof. Captures and the full visual review remain in the private app's dated testing report and on the issue; no private Classic art is copied into this public repository.
+
+Remaining boundaries: the production spending cap is unset, so paid generation is closed. Uncertain provider requests require future reconciliation and are never automatically replayed. Real hosted/paired-device proof, animation, pack publication and live appearance selection remain follow-on work. No deployment or shared-service restart occurred.

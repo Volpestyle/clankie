@@ -14,7 +14,7 @@ import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
 import { JoinedComputer } from "./joined-computer.ts";
 import { ComputerBody } from "./computer-body.ts";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createLocalCodexCatalogCoordinator } from "./captain/local-codex-catalog-coordinator.ts";
 import { createWorkerToolRefresh } from "./worker-tool-refresh.ts";
 import { startHostedActivityRuntime } from "./activity-runtime.ts";
@@ -128,6 +128,7 @@ import {
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { SkinDraftService } from "./skin-drafts.ts";
+import { skinDraftGenerator } from "./skin-draft-generation.ts";
 import { RemoteProjectLeads } from "./remote-project-leads.ts";
 import { RuntimeHealthObserver } from "./runtime-health.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
@@ -572,10 +573,28 @@ const memory = createFileMemory({ dataDir: defaultMemoryDir(process.env) });
 // that serves the bytes back resolves the same directory this wrote them to.
 const attachmentRoot = discordAttachmentRoot(process.env);
 const deliveredFiles = new DeliveredFileStore(attachmentRoot);
+const skinDraftOwner = hostedBody?.bootstrap.accountId ?? process.env.CLANKIE_OPERATOR_ID ?? "local-operator";
+const skinMediaRoot = join(
+  stateRoot,
+  "skin-drafts-media",
+  createHash("sha256").update(skinDraftOwner).digest("hex"),
+);
+const skinMediaGenerator = new ConfiguredMediaGenerator({
+  credentials: operatorCredentialStore,
+  attachmentRoot: skinMediaRoot,
+  configCwd: repoRoot,
+});
 const skinDrafts = new SkinDraftService({
   root: join(stateRoot, "skin-drafts"),
-  ownerId: hostedBody?.bootstrap.accountId ?? process.env.CLANKIE_OPERATOR_ID ?? "local-operator",
+  ownerId: skinDraftOwner,
   files: deliveredFiles,
+  generator: skinDraftGenerator({
+    media: skinMediaGenerator,
+    attachmentRoot: skinMediaRoot,
+    // VUH-2041: hosted credit admission is still an owner decision. Neither
+    // a model command nor a pose approval can open this paid route.
+    admit: async () => false,
+  }),
 });
 const personaImages = createPersonaImageSource(settingsStore, repoRoot);
 // Snapshot on startup without holding service readiness behind a caption call.
