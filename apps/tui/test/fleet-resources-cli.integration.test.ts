@@ -773,7 +773,9 @@ it("native child heavy CLIs under the same pane keep separate holder labels and 
       ],
       {
         HERDR_PANE_ID: "parent-seat",
-        CLANKIE_RESOURCE_HOLDER: "claude:parent:agent:dock",
+        CLANKIE_RESOURCE_HOLDER: "claude:stale-operator",
+        CLAUDE_SESSION_ID: "parent",
+        CLAUDE_AGENT_ID: "dock",
         CODEX_THREAD_ID: undefined,
       },
     );
@@ -781,9 +783,9 @@ it("native child heavy CLIs under the same pane keep separate holder labels and 
     const second = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"], {
       HERDR_PANE_ID: "parent-seat",
       CLANKIE_RESOURCE_HOLDER: "",
-      CODEX_THREAD_ID: "cards-thread",
+      CODEX_THREAD_ID: "invalid\nthread",
     });
-    // Empty explicit identity fails closed instead of merging with the parent.
+    // Invalid native metadata fails closed instead of merging with the parent.
     expect(await second.done).toBe(1);
     const third = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"], {
       HERDR_PANE_ID: "parent-seat",

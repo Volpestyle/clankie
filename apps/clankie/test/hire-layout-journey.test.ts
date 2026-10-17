@@ -2,6 +2,8 @@ import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createResourceGovernor } from "@clankie/fleet-resources";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { SpawnOperatorSeatSchema, effectiveHireProfile } from "@clankie/protocol";
@@ -34,6 +36,11 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     HERDR_SOCKET_PATH: socketPath,
     TERM: "xterm-256color",
     SHELL: "/bin/sh",
+    // The isolated Herdr server inherits an operator hook's command environment.
+    CLANKIE_RESOURCE_HOLDER: "claude:operator-session",
+    CODEX_THREAD_ID: "operator-thread",
+    CLAUDE_SESSION_ID: "operator-session",
+    CLAUDE_AGENT_ID: "operator-agent",
   };
   const calls: { args: readonly string[]; result: unknown }[] = [];
   const run = async (args: readonly string[]) => {
@@ -119,11 +126,60 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       processHelper: "unused-capture-helper",
     });
     const firstRunner = createHerdrWatchRunner(undefined, run, firstNative.createCommandTab);
+    const holderProof = join(root, "worker-holder.json");
+    const holderReady = join(root, "worker-ready");
+    const holderRelease = join(root, "worker-release");
+    const holderRegistry = join(root, "worker-registry");
+    const workerScript = join(root, "worker-holder.mjs");
+    await writeFile(
+      workerScript,
+      `
+      import { writeFile } from "node:fs/promises";
+      import { createResourceGovernor } from ${JSON.stringify(new URL("../../../packages/fleet-resources/src/index.ts", import.meta.url).href)};
+      import { runHeavyCommand } from ${JSON.stringify(new URL("../../tui/src/command/heavy.ts", import.meta.url).href)};
+      const inherited = Object.fromEntries(["CLANKIE_RESOURCE_HOLDER", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID", "CLAUDE_AGENT_ID"].map(k => [k, process.env[k]]));
+      // Native protocol fixture supplies its own executing thread, as Codex does.
+      process.env.CODEX_THREAD_ID = "hired-worker-thread";
+      const governor = createResourceGovernor({ directory: ${JSON.stringify(holderRegistry)}, probe: async () => ({loadRatio: 0, availableMemoryMb: 1000000}) });
+      await writeFile(${JSON.stringify(holderProof)}, JSON.stringify(inherited));
+      try {
+        const code = await runHeavyCommand(["--", process.execPath, "-e", ${JSON.stringify("const fs=require('node:fs');fs.writeFileSync(process.argv[1],'ready');const timer=setInterval(()=>{if(fs.existsSync(process.argv[2]))clearInterval(timer)},20)")}, ${JSON.stringify(holderReady)}, ${JSON.stringify(holderRelease)}], {governor});
+        if (code !== 0) throw new Error("Worker heavy child failed");
+      } finally { await governor.close(); }
+      setInterval(() => {}, 1000);
+    `,
+    );
     const firstPrepared = await firstRunner.createTab!({
       cwd: plain,
       label: "First prepared hire",
-      command: ["/bin/sh", "-c", "sleep 60"],
+      env: { CLANKIE_RESOURCE_HOLDER: "claude:operator-session" },
+      command: [process.execPath, "--import", fileURLToPath(import.meta.resolve("tsx")), workerScript],
     });
+    const workerGovernor = createResourceGovernor({ directory: holderRegistry });
+    try {
+      let leases: Awaited<ReturnType<typeof workerGovernor.snapshot>>["leases"] = [];
+      for (let i = 0; i < 200; i++) {
+        leases = (await workerGovernor.snapshot()).leases;
+        if (leases.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(JSON.parse(await readFile(holderProof, "utf8"))).toEqual({
+        CLANKIE_RESOURCE_HOLDER: "",
+        CODEX_THREAD_ID: "",
+        CLAUDE_SESSION_ID: "",
+        CLAUDE_AGENT_ID: "",
+      });
+      expect(leases).toHaveLength(1);
+      expect(leases[0]).toMatchObject({ holderId: "codex:hired-worker-thread" });
+      if (process.env.VUH1550_EVIDENCE)
+        await writeFile(
+          join(process.env.VUH1550_EVIDENCE, "worker-holder-lease.json"),
+          JSON.stringify({ inherited: JSON.parse(await readFile(holderProof, "utf8")), leases }, null, 2),
+        );
+    } finally {
+      await writeFile(holderRelease, "done");
+      await workerGovernor.close();
+    }
     const firstSnapshot = await snapshot();
     firstHireSnapshot = firstSnapshot;
     const firstMember = firstSnapshot.panes.find((p: any) => p.pane_id === firstPrepared);
@@ -284,14 +340,19 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     });
     // VUH-2242: the hire's process starts in its final pane, so the pane ID it
     // claims in fleet proofs is its own, and its launch environment arrived.
-    await run(["pane", "send-text", soloPane, 'echo "claim=$HERDR_PANE_ID launch=$CLANKIE_FIXTURE_LAUNCH"']);
+    await run([
+      "pane",
+      "send-text",
+      soloPane,
+      'echo "claim=$HERDR_PANE_ID launch=$CLANKIE_FIXTURE_LAUNCH holder=[$CLANKIE_RESOURCE_HOLDER] codex=[$CODEX_THREAD_ID] claude=[$CLAUDE_SESSION_ID]"',
+    ]);
     await run(["pane", "send-keys", soloPane, "Enter"]);
     let soloShell = "";
     for (let i = 0; i < 100 && !/claim=\S+ launch=/u.test(soloShell); i++) {
       await new Promise((resolve) => setTimeout(resolve, 50));
       soloShell = await run(["pane", "read", soloPane, "--source", "recent-unwrapped", "--lines", "20"]);
     }
-    expect(soloShell).toContain(`claim=${soloPane} launch=solo`);
+    expect(soloShell).toContain(`claim=${soloPane} launch=solo holder=[] codex=[] claude=[]`);
     expect(
       JSON.parse(await run(["pane", "process-info", "--pane", soloPane])).result.process_info.pane_id,
     ).toBe(soloPane);

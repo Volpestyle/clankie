@@ -68,6 +68,19 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
       throw new Error(
         "Split placement requires a named pipeline; provide pipeline or choose new-tab. No pane was opened.",
       );
+    // Panes inherit Herdr's server environment, not the hire RPC process's.
+    // A new native seat must establish its own task identity. Empty overrides
+    // also scrub servers started inside an operator's resource-hook subshell.
+    input = {
+      ...input,
+      env: {
+        ...input.env,
+        CLANKIE_RESOURCE_HOLDER: "",
+        CODEX_THREAD_ID: "",
+        CLAUDE_SESSION_ID: "",
+        CLAUDE_AGENT_ID: "",
+      },
+    };
     const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
     let repo: { key: string; cwd: string; label: string };
     let defaultGroup: string;

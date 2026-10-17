@@ -699,7 +699,7 @@ it("Claude Bash hook child IDs survive the CLI, verified seat, HTTP and journal 
         session_id: "parent",
         agent_id: agentId,
         tool_input: {
-          command: "node -e 'process.stdout.write(process.env.CLANKIE_RESOURCE_HOLDER)'",
+          command: `node -e 'process.stdout.write(JSON.stringify(Object.fromEntries(["CLANKIE_RESOURCE_HOLDER","CLAUDE_SESSION_ID","CLAUDE_AGENT_ID"].map(k=>[k,process.env[k]]))))'`,
           timeout: 10000,
         },
       }),
@@ -720,16 +720,30 @@ it("Claude Bash hook child IDs survive the CLI, verified seat, HTTP and journal 
       },
     );
     expect(stdout.endsWith("|parent-holder|ancestor-thread")).toBe(true);
-    return stdout.split("|")[0]!;
+    return JSON.parse(stdout.split("|")[0]!) as NodeJS.ProcessEnv;
   };
-  const holderIds = await Promise.all([hook("dock", false), hook("cards", true)]);
+  const hookEnvs = await Promise.all([hook("dock", false), hook("cards", true)]);
+  const holderIds = hookEnvs.map((env) => env.CLANKIE_RESOURCE_HOLDER!);
   expect(holderIds).toEqual(["claude:parent:agent:dock", "claude:parent:agent:cards"]);
   const options = (holderId: string) => ({
     host: f.host,
     operatorCredentialStore: credentials,
-    env: { CLANKIE_OPERATOR_TOKEN: bearer, CLANKIE_RESOURCE_HOLDER: holderId },
+    env: {
+      ...hookEnvs[holderIds.indexOf(holderId)],
+      CLANKIE_OPERATOR_TOKEN: bearer,
+      CLANKIE_RESOURCE_HOLDER: "claude:stale-operator",
+    },
   });
   const { holderId: _holder, ...nativeAcquire } = f.acquire;
+  // No native caller metadata: a raw inherited operator label cannot acquire.
+  expect(
+    await runSimulatorCommand(["acquire", JSON.stringify(nativeAcquire), "--wait", "0"], {
+      host: f.host,
+      operatorCredentialStore: credentials,
+      env: { CLANKIE_OPERATOR_TOKEN: bearer, CLANKIE_RESOURCE_HOLDER: "claude:stale-operator" },
+    }),
+  ).toMatchObject({ outcome: "rejected", reason: "owner_unavailable" });
+  expect((await f.commands()).some((command) => command[0] === "boot")).toBe(false);
   const results = await Promise.all(
     holderIds.map((id) =>
       runSimulatorCommand(["acquire", JSON.stringify(nativeAcquire), "--wait", "0"], options(id)).then(

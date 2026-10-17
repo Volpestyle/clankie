@@ -22,7 +22,8 @@ if (
   process.exit(0);
 const holder = `claude:${hook.session_id}${hook.agent_id ? `:agent:${hook.agent_id}` : ""}`;
 if (holder.length > 256 || /\p{Cc}/u.test(holder)) process.exit(2);
-const quoted = "'" + holder.replaceAll("'", "'\"'\"'") + "'";
+const quote = (value) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+const quoted = quote(holder);
 process.stdout.write(
   JSON.stringify({
     hookSpecificOutput: {
@@ -31,7 +32,7 @@ process.stdout.write(
         ...hook.tool_input,
         // A subshell prevents a persistent Bash session from exporting one
         // child's identity into sibling calls. Ignore an ancestor Codex thread.
-        command: `(unset CODEX_THREAD_ID\nexport CLANKIE_RESOURCE_HOLDER=${quoted}\n${hook.tool_input.command}\n)`,
+        command: `(unset CODEX_THREAD_ID\nexport CLAUDE_SESSION_ID=${quote(hook.session_id)}\nexport CLAUDE_AGENT_ID=${quote(hook.agent_id ?? "")}\nexport CLANKIE_RESOURCE_HOLDER=${quoted}\n${hook.tool_input.command}\n)`,
       },
     },
   }) + "\n",

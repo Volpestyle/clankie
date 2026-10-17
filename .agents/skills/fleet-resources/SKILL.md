@@ -255,8 +255,10 @@ refresh that linked profile with the approved harness setup route. Installing a
 new hook does not update an existing session that has cached hook definitions. Status names `holderId` beside the seat. A child cannot
 touch or release a sibling holder’s lease. Other harnesses must supply a stable
 `holderId` in every simulator request (including touch/release), and `--holder ID`
-for heavy commands. `CLANKIE_RESOURCE_HOLDER` supplies the identity outside Codex; a Codex thread
-takes precedence. An explicit simulator `holderId` or heavy `--holder` overrides
+for heavy commands. Automatic identity comes from the executing Codex thread or the Claude Bash
+hook's session/agent fields. `CLANKIE_RESOURCE_HOLDER` alone is ignored; a stale
+inherited label cannot select a lead's lease. New hired panes clear these fields
+until their own harness supplies its invocation metadata. An explicit simulator `holderId` or heavy `--holder` overrides
 that automatic choice for an owned task. These labels do not grant seat authority. Never choose your lead’s or a
 sibling’s identity. Outcomes:
 

@@ -267,9 +267,13 @@ exact model or runtime. Busy explicit UDIDs wait without selecting an idle
 alternative. The CLI validates successful grants against holder and selection.
 Heavy lease and queue metadata retain it. Older journal claims without
 a holder stay root-owned. Claude Bash hooks carry session plus `agent_id` in
-`CLANKIE_RESOURCE_HOLDER`; Codex CLI calls prefer the executing `CODEX_THREAD_ID` over inherited holder
-labels. Claude scopes its holder to a command subshell and clears ancestor
-Codex metadata, so a persistent shell cannot retain a sibling identity. Other harnesses
+`CLANKIE_RESOURCE_HOLDER` alongside `CLAUDE_SESSION_ID` and `CLAUDE_AGENT_ID`.
+Automatic CLI labels derive from the executing `CODEX_THREAD_ID` or those
+per-invocation Claude fields; an inherited holder alone is ignored. Claude scopes
+these fields to a command subshell and clears ancestor Codex metadata, so a
+persistent shell cannot retain a sibling identity. Hire allocation overrides all
+four fields with empty values before creating a shell or prepared command pane,
+including when the Herdr server inherited an operator's environment. Other harnesses
 can pass explicit holder labels. The host still proves the original seat, occupant,
 binding and live processes; a holder label grants no authority. A seat
 observation that fails is unproven, not disproven: a waiting acquire keeps its
