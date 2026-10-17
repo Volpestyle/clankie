@@ -55,8 +55,22 @@ export interface UpdateAuthority {
   /** Exact registry snapshots admitted under the deploy-hold lock, retained before scheduling. */
   readonly overriddenHolds?: readonly DeployHold[];
 }
+/** An update that follows `main`, recorded to apply with the next batch (VUH-2393). */
+export interface DeferredRuntimeUpdate {
+  readonly ref: "main";
+  readonly firstRequestedAt: string;
+  readonly lastRequestedAt: string;
+  /** When the batch applies even if the body is still busy. */
+  readonly dueAt: string;
+  /** Requests folded into this batch. */
+  readonly requests: number;
+  /** Who asked last; the batch applies under the service's own authority. */
+  readonly initiator: RuntimeUpdateInitiator;
+}
 export interface RuntimeUpdateStatus {
   readonly runtime: RuntimeBootIdentity;
+  /** A source checkout's pending batched update, if any. */
+  readonly deferred?: DeferredRuntimeUpdate;
   readonly phase?: RuntimeUpdateResult["phase"] | "canary-failed" | "canary-pending";
   readonly canary?: RuntimeUpdateResult["canary"];
   readonly latest?: RuntimeUpdateResult;
@@ -83,10 +97,17 @@ export interface RuntimeUpdater {
     summary: string[];
     warning?: RuntimeUpdateResult["warning"];
   }>;
+  /**
+   * `now` bypasses a batching updater, which otherwise may record an update
+   * that follows `main` for later and answer `accepted: false` with `deferred`.
+   */
   request(
     ref: string,
     authority: UpdateAuthority,
+    options?: { readonly now?: boolean },
   ): Promise<RuntimeUpdateStatus & { readonly accepted: boolean }>;
+  /** Drops a pending batched update; false when there was none. */
+  cancelDeferred?(): boolean;
   /**
    * Retire an operation that ended uncertain once this running service proves
    * the outcome: its helper wrote a final result and this process booted from

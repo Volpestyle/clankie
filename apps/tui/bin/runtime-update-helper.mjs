@@ -215,7 +215,7 @@ const result = await executeRuntimeUpdate(plan, {
     writeFileSync(receipt, JSON.stringify(result) + "\n", { mode: 0o600, flag: "wx" });
     return { ok: result.ok === true, receipt };
   },
-  services: (runtime, action) => runtimeUpdateServices(runtime, action, cli),
+  services: (runtime, action, keep) => runtimeUpdateServices(runtime, action, cli, process.env, keep),
 });
 process.stdout.write(JSON.stringify(result) + "\n");
 process.exitCode = result.phase === "healthy" && result.harnessRefresh?.ok !== false ? 0 : 1;

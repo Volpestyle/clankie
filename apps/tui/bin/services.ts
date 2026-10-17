@@ -720,16 +720,29 @@ function failureFrom(id: ServiceId, error: unknown): ServiceOutcome {
 export async function restartTarget(
   target: ServiceTarget,
   options: ServiceRegistryOptions,
+  keep: readonly ServiceId[] = [],
 ): Promise<readonly ServiceOutcome[]> {
-  return await locked(options, () => restartTargetHoldingLock(target, options));
+  return await locked(options, () => restartTargetHoldingLock(target, options, keep));
 }
+
+/**
+ * Dependents that hold no state the service's restart invalidates, so a caller
+ * may leave them running: the relay re-authorizes every request upstream, and
+ * the keep-awake and activity surfaces never talk to the service. The Discord
+ * bodies are never keepable: their live presence claim dies with the service
+ * instance that issued it.
+ */
+export const KEEPABLE_SERVICES: ReadonlySet<ServiceId> = new Set(["relay", "activity", "awake"]);
 
 /** {@link restartTarget} for a caller that already holds the service lock (crash recovery). */
 export async function restartTargetHoldingLock(
   target: ServiceTarget,
   options: ServiceRegistryOptions,
+  keep: readonly ServiceId[] = [],
 ): Promise<readonly ServiceOutcome[]> {
-  const ids = resolveRestartTargets(target);
+  const ids = resolveRestartTargets(target).filter(
+    (id) => id === target || !keep.includes(id) || !KEEPABLE_SERVICES.has(id),
+  );
   const stopFailures: ServiceOutcome[] = [];
   for (const id of [...ids].reverse()) {
     try {

@@ -25,6 +25,31 @@ Sleep costs time, not messages or the sign-in. After a wake:
 Those are tested with fakes. A real sleep and wake is a human check:
 [the wake test](testing/2026-09-30-host-sleep-awake/README.md).
 
+## What keeps a running Mac's Clankie healthy
+
+With [`clankie autostart enable`](cli.md#autostart-enable--autostart-disable--autostart-status),
+launchd runs one [`clankie recover`](cli.md#recover) pass every 30 seconds. Each
+pass:
+
+- restarts a service whose process died, with backoff, giving up after five
+  crashes in 30 minutes;
+- restarts a service that is alive but has failed its loopback health probe for
+  three minutes (the service, relay, lab body and activity surface), recorded
+  with the reason;
+- keeps every service log under 64 MiB plus three compressed archives.
+
+The login agent records a Node that survives `brew upgrade node`;
+`clankie doctor` names `clankie autostart enable` when an older agent pinned a
+versioned one.
+
+A source checkout updates itself in batches. Every update restarts the service
+and drops Discord and the relay for about a minute, so an update that follows
+`main` waits until nothing is busy (no turn, voice call or working worker) or
+until the service has run for two hours. The relay, activity surface and
+keep-awake keep running through an update that does not change them.
+`clankie update now` applies at once; `clankie update status` shows a pending
+batch ([batched checkout updates](cli.md#batched-checkout-updates)).
+
 ## Telling when this Mac may sleep
 
 `clankie doctor` reports `power` and, when the Mac can sleep, a remediation naming

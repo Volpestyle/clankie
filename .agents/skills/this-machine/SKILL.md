@@ -166,6 +166,18 @@ means pending: finish the turn, then read `clankie update status` and report the
 old/new commit and actual health, canary or rollback. Never repeat an uncertain
 update; inspect its existing operation.
 
+Every update restarts you and drops Discord, the relay and in-flight worker
+reports for a minute, so do not update after each landing. A source checkout
+batches updates that follow `main`: while you or a worker is busy and you have
+run for under two hours, `clankie update` answers `accepted: false` with
+`deferred` (its `dueAt`), and the newest `main` installs itself once everything
+is idle or the batch is due. That is success; ask once after a run of landings,
+not per landing, and do not route around it with `--ref` to a landed commit.
+Use `clankie update now` (`now: true`) only when the owner asks for an
+immediate update or the landing fixes something broken in the running service
+now; `clankie update cancel` drops a pending batch. An explicit `--ref` (a
+rollback target, an unpushed commit of your own) applies at once.
+
 A failed canary reports top-level `phase: canary-failed`; status exits 1 and
 names the measurements, budgets, hold UUID and explicit rollback target.
 Clankie receives the failure in the initiating lead conversation, or the default
@@ -240,8 +252,9 @@ only an explicit owner release clears historical holds.
 Your source is yours. On a self-hosted source checkout you can fix, improve and
 reshape your own code, skills and instructions whenever that makes you better,
 not only after a trace finds a bug. Work in that checkout, never in the pinned
-`repoRoot`: a dirty pin refuses every update. Commit there and install with
-`clankie update --ref FULL_SHA`, which restarts you; see
+`repoRoot`: a dirty pin refuses every update. Land it on `main` and let the
+batched update take it, or install an unpushed commit with
+`clankie update --ref FULL_SHA`, which restarts you at once; see
 [changing yourself](reference/launcher.md#changing-yourself).
 
 When a restart is authorized, run `clankie restart` from your own bash tool.

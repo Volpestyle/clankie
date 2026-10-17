@@ -336,6 +336,20 @@ export function createRuntimeUpdateRoutes(options: {
       );
     }
   });
+  app.delete("/v1/runtime-update/deferred", async (context) => {
+    const authority = await options.authorize(context.req.raw);
+    if (!authority) return context.json({ error: "operator_required" }, 403);
+    if (!options.updater?.cancelDeferred) return context.json({ error: "update_batching_unavailable" }, 503);
+    try {
+      await authority.guard();
+    } catch {
+      return context.json({ error: "operator_revoked" }, 403);
+    }
+    if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+    return context.json({ cancelled: options.updater.cancelDeferred() }, 200, {
+      "Cache-Control": "no-store",
+    });
+  });
   app.post("/v1/runtime-update", async (context) => {
     const authority = await options.authorize(context.req.raw);
     if (!authority) return context.json({ error: "operator_required" }, 403);
@@ -346,6 +360,8 @@ export function createRuntimeUpdateRoutes(options: {
         overrides: z.array(HoldOverrideSchema).max(32).default([]),
         overrideHolds: z.boolean().optional(),
         reason: HoldOverrideSchema.shape.reason.optional(),
+        /** Apply at once instead of joining a source checkout's batch (VUH-2393). */
+        now: z.boolean().optional(),
       })
       .strict()
       .refine((input) =>
@@ -367,7 +383,11 @@ export function createRuntimeUpdateRoutes(options: {
       };
       const deploy = async (overriddenHolds: DeployHeldError["holds"] = []) => {
         await guard();
-        return options.updater!.request(parsed.data.ref ?? "main", { ...authority, overriddenHolds });
+        return options.updater!.request(
+          parsed.data.ref ?? "main",
+          { ...authority, overriddenHolds },
+          { now: parsed.data.now === true },
+        );
       };
       if (!options.holds && (parsed.data.overrideHolds || parsed.data.overrides.length))
         throw Error("Deploy holds unavailable");
@@ -384,7 +404,10 @@ export function createRuntimeUpdateRoutes(options: {
             },
           )
         : await deploy();
-      return context.json(result, result.accepted ? 202 : result.upToDate ? 200 : 409);
+      return context.json(
+        result,
+        result.accepted || result.deferred !== undefined ? 202 : result.upToDate ? 200 : 409,
+      );
     } catch (error) {
       return context.json(
         {

@@ -28,7 +28,12 @@ import { writeRuntimeUpdate, readRuntimeUpdate, runtimeUpdateServices } from "..
 import { createRuntimeUpdateRoutes } from "../../clankie/src/runtime-update-routes.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
 import { runDownCommand, runRestartCommand, runStartCommand } from "../src/command/restart.ts";
-import { inspectService, listProcessCommands } from "../bin/service-supervisor.ts";
+import {
+  inspectService,
+  listProcessCommands,
+  readRecordedServicePid,
+  serviceProcessIsAlive,
+} from "../bin/service-supervisor.ts";
 import { managedService, stopTarget } from "../bin/services.ts";
 
 import { createClankieApp } from "../../clankie/src/app.ts";
@@ -447,6 +452,19 @@ it("cuts over isolated launcher services while a real unowned activity tunnel su
       const limited = await runtimeUpdateServices(root, "restart", cli, env);
       expect(limited.ok).toBe(true);
       expect(limited.services.map((entry) => entry.id)).toEqual(["clankie", "relay"]);
+      // VUH-2393: a cutover keeps a relay none of whose code changed. It is
+      // neither stopped nor restarted, while the service restarts around it.
+      const relay = readRecordedServicePid("relay", env);
+      const service = readRecordedServicePid("clankie", env);
+      const keptDown = await runtimeUpdateServices(root, "down", cli, env, ["relay"]);
+      expect(keptDown.ok).toBe(true);
+      expect(keptDown.services.map((entry) => entry.id)).not.toContain("relay");
+      const kept = await runtimeUpdateServices(root, "restart", cli, env, ["relay"]);
+      expect(kept.ok).toBe(true);
+      expect(kept.services.map((entry) => entry.id)).toEqual(["clankie"]);
+      expect(readRecordedServicePid("relay", env)).toBe(relay);
+      expect(serviceProcessIsAlive(relay!)).toBe(true);
+      expect(readRecordedServicePid("clankie", env)).not.toBe(service);
       expect((await runtimeUpdateServices(root, "down", cli, env)).ok).toBe(true);
       expect(tunnel.exitCode).toBeNull();
       process.kill(tunnel.pid!, 0);

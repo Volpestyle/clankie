@@ -3,8 +3,8 @@
  * The helper runs a private copy of this file beside `pinned-runtime.ts` and `update-files.ts`, outside
  * any workspace, so it may import only `node:` builtins and those copies.
  */
-import { appendFileSync, existsSync, lstatSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { appendFileSync, existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   readPrivateJson,
@@ -239,6 +239,8 @@ export interface RuntimeUpdateResult {
   readonly reconciled?: RuntimeUpdateReconciliation;
   /** Release installs: the official versions behind `oldCommit` and `newCommit`. */
   readonly versions?: { readonly old: string; readonly new: string };
+  /** Services left running across the cutover because none of their code changed. */
+  readonly keptServices?: readonly string[];
 }
 interface RuntimeUpdateReconciliation {
   readonly at: string;
@@ -246,27 +248,251 @@ interface RuntimeUpdateReconciliation {
   readonly commit: string;
   readonly instanceId: string;
 }
+/**
+ * Services a cutover may leave running when none of their code changed. The
+ * Discord bodies are absent: their live presence claim is only valid against
+ * the service instance that issued it, so they restart with every clankie
+ * restart. `awake` is a `caffeinate`, which no update changes.
+ */
+const KEEPABLE_SERVICES: Readonly<Record<string, string | undefined>> = {
+  relay: "apps/relay/src/index.ts",
+  activity: "apps/discord-activity/src/index.ts",
+  awake: undefined,
+};
+/** Whether the target runtime's `clankie restart` accepts `--keep`; an older one would refuse it. */
+function restartKeeps(stage: string): boolean {
+  try {
+    return readFileSync(join(stage, "apps/tui/src/command/restart.ts"), "utf8").includes(`"--keep"`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Which keepable services may stay up across `oldCommit..newCommit`: those whose
+ * entrypoint can load no file the range changed (VUH-2393). Every update used
+ * to restart the relay and keep-awake with the service; 303 Discord bridge and
+ * relay restarts in two weeks of October came from self-updates. Any doubt — an
+ * import it cannot follow, a dependency manifest or lockfile change, a failed
+ * diff — restarts the service, as before.
+ */
+function unchangedServices(
+  stage: string,
+  oldCommit: string,
+  newCommit: string,
+  run: InstallCommand,
+  repository: string,
+): readonly string[] {
+  if (!restartKeeps(stage)) return [];
+  let changed: readonly string[];
+  try {
+    changed = run("git", ["diff", "--name-only", "--no-renames", oldCommit, newCommit, "--"], repository)
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+  const packages = workspacePackages(stage);
+  return Object.entries(KEEPABLE_SERVICES).flatMap(([id, entry]) => {
+    if (entry === undefined) return [id];
+    const sources = serviceSources(stage, entry, packages);
+    return sources !== undefined && !changed.some((path) => sources(path)) ? [id] : [];
+  });
+}
+
+const ROOT_INPUTS = new Set([
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  ".npmrc",
+  ".node-version",
+]);
+const CODE = /\.(?:[cm]?[jt]s|tsx)$/u;
+
+interface WorkspacePackage {
+  readonly name: string;
+  readonly directory: string;
+  readonly exports: unknown;
+}
+
+function workspacePackages(root: string): readonly WorkspacePackage[] {
+  const found: WorkspacePackage[] = [];
+  for (const group of ["apps", "integrations", "packages"]) {
+    let entries: string[];
+    try {
+      entries = readdirSync(join(root, group));
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      try {
+        const manifest = JSON.parse(readFileSync(join(root, group, entry, "package.json"), "utf8")) as {
+          name?: unknown;
+          exports?: unknown;
+          main?: unknown;
+        };
+        if (typeof manifest.name === "string")
+          found.push({
+            name: manifest.name,
+            directory: `${group}/${entry}`,
+            exports: manifest.exports ?? manifest.main ?? "./src/index.ts",
+          });
+      } catch {
+        // Not a package.
+      }
+    }
+  }
+  return found;
+}
+
+/** The export target for `./sub` (or `.`), following the `import`/`default` condition. */
+function exportTarget(exports: unknown, subpath: string): string | undefined {
+  const pick = (value: unknown): string | undefined => {
+    if (typeof value === "string") return value;
+    if (value !== null && typeof value === "object") {
+      const conditions = value as Record<string, unknown>;
+      return pick(conditions.import ?? conditions.node ?? conditions.default);
+    }
+    return undefined;
+  };
+  if (typeof exports === "string") return subpath === "." ? exports : undefined;
+  if (exports === null || typeof exports !== "object") return undefined;
+  const map = exports as Record<string, unknown>;
+  if (!Object.keys(map).some((key) => key.startsWith("."))) return subpath === "." ? pick(map) : undefined;
+  if (map[subpath] !== undefined) return pick(map[subpath]);
+  for (const [key, value] of Object.entries(map)) {
+    const star = key.indexOf("*");
+    if (star === -1 || !subpath.startsWith(key.slice(0, star)) || !subpath.endsWith(key.slice(star + 1)))
+      continue;
+    const match = subpath.slice(star, subpath.length - (key.length - star - 1));
+    return pick(value)?.replaceAll("*", match);
+  }
+  return undefined;
+}
+
+function sourceFile(path: string): string | undefined {
+  const candidates = /\.[cm]?js$/u.test(path)
+    ? [path, path.replace(/js$/u, "ts")]
+    : CODE.test(path) || path.endsWith(".json")
+      ? [path]
+      : [`${path}.ts`, `${path}.js`, join(path, "index.ts"), join(path, "index.js")];
+  return candidates.find((candidate) => {
+    try {
+      return lstatSync(candidate).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * Follows a service's static and literal dynamic imports through the workspace
+ * and returns a predicate over repository paths that could change what it
+ * runs: every file it can load, the assets and manifests of the packages those
+ * live in, and the root dependency inputs. External packages are covered by the
+ * lockfile. Undefined when an import cannot be followed.
+ */
+function serviceSources(
+  root: string,
+  entry: string,
+  packages: readonly WorkspacePackage[],
+): ((path: string) => boolean) | undefined {
+  const files = new Set<string>();
+  const opaque = new Set<string>();
+  const queue = [join(root, entry)];
+  const owner = (path: string) =>
+    packages.find((candidate) => path === candidate.directory || path.startsWith(`${candidate.directory}/`));
+  const specifiers =
+    /(?:\bimport|\bexport)\s+(?:type\s+)?(?:[\w*{}\s,$]+?\s+from\s+)?["']([^"'\n]+)["']|\bimport\s*\(\s*["']([^"'\n]+)["']\s*\)|\brequire(?:\.resolve)?\s*\(\s*["']([^"'\n]+)["']\s*\)|new\s+URL\(\s*["']([^"'\n]+)["']\s*,\s*import\.meta\.url/gu;
+  while (queue.length > 0) {
+    const file = queue.pop()!;
+    const path = relative(root, file).split(sep).join("/");
+    if (path.startsWith("..") || files.has(path)) continue;
+    if (files.size >= 5_000) return undefined;
+    files.add(path);
+    if (!CODE.test(file)) continue;
+    const text = readFileSync(file, "utf8");
+    // A computed specifier can load any module of its package.
+    if (/\bimport\s*\(\s*(?!["'\s])/u.test(text)) {
+      const pkg = owner(path);
+      if (pkg === undefined) return undefined;
+      opaque.add(pkg.directory);
+    }
+    for (const match of text.matchAll(specifiers)) {
+      const specifier = match[1] ?? match[2] ?? match[3] ?? match[4]!;
+      // Builtins, and absolute paths, which only appear inside strings such as a sandbox profile.
+      if (specifier.startsWith("node:") || specifier.startsWith("/")) continue;
+      if (specifier.startsWith(".")) {
+        const target = sourceFile(resolve(dirname(file), specifier));
+        if (target === undefined) {
+          // A missing asset or an optional sibling is a change only if the range touches it.
+          if (match[4] !== undefined || match[3] !== undefined) continue;
+          return undefined;
+        }
+        queue.push(target);
+        continue;
+      }
+      const pkg = packages
+        .filter((candidate) => specifier === candidate.name || specifier.startsWith(`${candidate.name}/`))
+        .sort((a, b) => b.name.length - a.name.length)[0];
+      if (pkg === undefined) continue;
+      const subpath = specifier === pkg.name ? "." : `.${specifier.slice(pkg.name.length)}`;
+      const exported = exportTarget(pkg.exports, subpath);
+      const target = exported === undefined ? undefined : sourceFile(join(root, pkg.directory, exported));
+      if (target === undefined) return undefined;
+      queue.push(target);
+    }
+  }
+  const directories = new Set([...files].flatMap((path) => owner(path)?.directory ?? []));
+  return (path) => {
+    if (files.has(path) || ROOT_INPUTS.has(path) || path.startsWith("patches/")) return true;
+    const pkg = owner(path);
+    if (pkg === undefined || !directories.has(pkg.directory)) return false;
+    const inside = path.slice(pkg.directory.length + 1);
+    if (inside === "package.json") return true;
+    if (/(?:^|\/)test\//u.test(inside) || /\.test\.[cm]?[jt]s$/u.test(inside) || inside.endsWith(".md"))
+      return false;
+    return !CODE.test(inside) || opaque.has(pkg.directory);
+  };
+}
+
 /** Pin cutover leaves the external activity tunnel running under its current owner. */
 export async function runtimeUpdateServices(
   runtime: string,
   action: "down" | "restart",
   cli: (runtime: string, args: readonly string[]) => Promise<unknown>,
   env: NodeJS.ProcessEnv = process.env,
+  keep: readonly string[] = [],
 ): Promise<RuntimeServiceReceipt> {
   // This helper is copied without workspace dependencies. Respect the same
   // image loadout the existing supervisor receives, including disabled activity.
   const loadout = env.CLANKIE_SERVICES?.trim();
-  const activity = !loadout || loadout.split(",").some((id) => id.trim() === "activity");
+  const activity =
+    (!loadout || loadout.split(",").some((id) => id.trim() === "activity")) && !keep.includes("activity");
+  // A kept service keeps running from the previous runtime's files, which retention retains while it does.
+  const kept = keep.filter((id) => id !== "activity");
   const targets =
     action === "down"
-      ? ["activity", "discord-user-session", "discord-bridge", "relay", "clankie"]
+      ? [
+          ...(keep.includes("activity") ? [] : ["activity"]),
+          "discord-user-session",
+          "discord-bridge",
+          ...(keep.includes("relay") ? [] : ["relay"]),
+          "clankie",
+        ]
       : ["clankie", ...(activity ? ["activity"] : [])];
   const services: RuntimeServiceReceipt["services"][number][] = [];
   let ok = true;
   for (const target of targets) {
     let outcome: unknown;
     try {
-      outcome = await cli(runtime, [action, target]);
+      outcome = await cli(runtime, [
+        action,
+        target,
+        ...(action === "restart" && target === "clankie" && kept.length > 0
+          ? ["--keep", kept.join(",")]
+          : []),
+      ]);
     } catch (error) {
       const stdout = (error as { stdout?: unknown }).stdout;
       if (typeof stdout !== "string") throw Error("Service result unavailable");
@@ -284,8 +510,16 @@ export async function runtimeUpdateServices(
 }
 export interface RuntimeUpdatePorts {
   readonly run: InstallCommand;
-  /** Existing CLI service supervisor; a successful stop means all exact owned pin-dependent services stopped. */
-  readonly services: (runtime: string, action: "down" | "restart") => Promise<RuntimeServiceReceipt>;
+  /**
+   * Existing CLI service supervisor; a successful stop means all exact owned
+   * pin-dependent services stopped, except the `keep` set, which neither stops
+   * nor restarts.
+   */
+  readonly services: (
+    runtime: string,
+    action: "down" | "restart",
+    keep: readonly string[],
+  ) => Promise<RuntimeServiceReceipt>;
   readonly now?: () => Date;
   readonly refreshHarnesses?: (runtime: string) => Promise<{ ok: boolean }>;
   /** Waits before retrying an unconfirmed stop or restart; defaults to 10 s, then 30 s. */
@@ -369,6 +603,13 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
             old: boundedString(object(value.versions).old, 64),
             new: boundedString(object(value.versions).new, 64),
           },
+        }),
+    ...(value.keptServices === undefined
+      ? {}
+      : {
+          keptServices: (Array.isArray(value.keptServices) ? value.keptServices : [])
+            .slice(0, 8)
+            .map((id) => boundedString(id, 64)),
         }),
   };
 }
@@ -542,8 +783,11 @@ export async function executeRuntimeUpdate(
   const stage = join(plan.directory, "staged");
   const backup = join(plan.directory, "previous");
   const serviceReceipts: RuntimeServiceReceipt[] = [];
+  // Set once the new runtime is installed; a rollback restarts everything.
+  let keep: readonly string[] = [];
   const attempt = async (action: "down" | "restart", expectedCommit: string, retry: boolean) => {
-    const receipt = parseServiceReceipt(await ports.services(plan.runtime, action));
+    const keeping = action === "restart" && expectedCommit !== plan.newCommit ? [] : keep;
+    const receipt = parseServiceReceipt(await ports.services(plan.runtime, action, keeping));
     // The record keeps one receipt per step, its latest; every attempt stays in the log.
     if (retry) serviceReceipts.pop();
     serviceReceipts.push(receipt);
@@ -593,6 +837,7 @@ export async function executeRuntimeUpdate(
       phase,
       updatedAt: (ports.now?.() ?? new Date()).toISOString(),
       ...(serviceReceipts.length === 0 ? {} : { serviceReceipts: [...serviceReceipts] }),
+      ...(keep.length === 0 ? {} : { keptServices: keep }),
       ...fields,
     };
     writeRuntimeUpdate(plan.directory, result);
@@ -641,6 +886,7 @@ export async function executeRuntimeUpdate(
     )
       return persist("refused", { reason: "runtime-changed-during-install" });
     if (existsSync(backup)) throw Error("Previous runtime destination already exists");
+    keep = unchangedServices(stage, plan.oldCommit, plan.newCommit, run, plan.checkout);
     persist("stopping");
     stopAttempted = true;
     if (!(await service("down", plan.oldCommit)))

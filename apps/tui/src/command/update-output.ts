@@ -35,6 +35,8 @@ interface View {
   detail?: string;
   needsReconciliation?: boolean;
   appliesTo?: string;
+  deferred?: import("../../bin/runtime-updater.ts").DeferredRuntimeUpdate;
+  cancelled?: boolean;
 }
 // oxlint-disable-next-line no-control-regex -- terminal output must strip every C0/C1 control
 const clean = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ");
@@ -252,12 +254,18 @@ export function formatUpdateOutput(input: unknown): string {
       "Each hold gets its own audited override. Verified canary holds are released after the admitted canary passes; independent holds require an explicit release.",
     );
   }
+  if (view.deferred)
+    lines.push(
+      `Batched: ${view.deferred.requests} update request${view.deferred.requests === 1 ? "" : "s"} since ${clean(view.deferred.firstRequestedAt)}. The newest main applies once the body is idle, or at ${clean(view.deferred.dueAt)}. clankie update now applies it at once; clankie update cancel drops it.`,
+    );
+  if (view.cancelled !== undefined)
+    lines.push(view.cancelled ? "Dropped the batched update." : "No batched update was pending.");
   if (view.upToDate) lines.push("Already running the requested official release. No update was scheduled.");
   else if (view.accepted && !view.needsReconciliation)
     lines.push(
       "Update accepted. Finish this turn, then run clankie update status to check health and canary.",
     );
-  if (view.accepted === false && view.blockedReason)
+  if (view.accepted === false && view.blockedReason && !view.deferred)
     lines.push(
       view.blockedReason === "runtime-maintenance-busy"
         ? "No update was scheduled: runtime retention maintenance is busy. Let maintenance finish, then retry."
@@ -293,9 +301,15 @@ export async function runUpdateCli(
     if (json) outputJson(stdout, result);
     else stdout.write(`${formatUpdateOutput(result)}\n`);
     const view = result as View;
-    return view.error || view.phase === "canary-failed" || (view.accepted === false && !view.upToDate)
+    return view.error ||
+      view.phase === "canary-failed" ||
+      (view.accepted === false && !view.upToDate && !view.deferred)
       ? 1
       : 0;
+  }
+  if (rest[0] === "cancel") {
+    stdout.write(`${formatUpdateOutput(await runUpdateCommand(rest, options))}\n`);
+    return 0;
   }
   const { status, ref } = parseUpdateArgs(rest);
   const preview = (await runUpdateCommand(["status"], { ...options, previewRef: ref })) as View;
@@ -325,5 +339,5 @@ export async function runUpdateCli(
   }
   const result = (await runUpdateCommand(updateArgs, options)) as View;
   stdout.write(`${formatUpdateOutput(result)}\n`);
-  return result.error || (result.accepted === false && !result.upToDate) ? 1 : 0;
+  return result.error || (result.accepted === false && !result.upToDate && !result.deferred) ? 1 : 0;
 }

@@ -21,12 +21,16 @@ export function runtimeUpdateTools(updater: RuntimeUpdater | undefined, turn: Tu
       name: "update_runtime",
       label: "Update Clankie",
       description:
-        "Update this install, then detach a guarded restart: a source checkout fetches origin/main (or an explicit branch, SHA or refs/tags/... ref); a release install takes the latest official release (or ref vX.Y.Z) and reports upToDate when already current. The result names the exact target commit and warns of rollback or divergence. Accepted means pending, not healthy. Read runtime_update_status on the next turn; never repeat an uncertain request.",
+        "Update this install, then detach a guarded restart: a source checkout fetches origin/main (or an explicit branch, SHA or refs/tags/... ref); a release install takes the latest official release (or ref vX.Y.Z) and reports upToDate when already current. A source checkout batches updates that follow main: while the body is busy and the service has run under two hours, the result is accepted:false with `deferred` (when it applies), and the newest main applies on its own once the body is idle or the batch is due. Set now:true only when the owner asks for an immediate update or the change fixes something broken right now. The result names the exact target commit and warns of rollback or divergence. Accepted means pending, not healthy. Read runtime_update_status on the next turn; never repeat an uncertain request.",
       parameters: Type.Object(
-        { ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) },
+        {
+          ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+          now: Type.Optional(Type.Boolean()),
+        },
         { additionalProperties: false },
       ),
-      execute: async (_id, params) => toolJson(await updater.request(params.ref ?? "main", authority())),
+      execute: async (_id, params) =>
+        toolJson(await updater.request(params.ref ?? "main", authority(), { now: params.now === true })),
     }),
     defineTool({
       name: "runtime_update_status",

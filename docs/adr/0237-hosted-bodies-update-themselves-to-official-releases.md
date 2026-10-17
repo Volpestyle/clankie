@@ -83,3 +83,25 @@ without the body changing.
 - The public half (archives, release root, provider API check, approved-release
   cap, idle scheduling) lives here; the managed provider location and the fleet
   route live in the private hosted service.
+
+## Amendment: source checkouts batch their own updates, 2026-10-17
+
+A self-hosted source checkout followed `main` by updating whenever asked, and
+its lead asked after nearly every landing: 250 cutovers from 2026-10-06 to
+2026-10-17, each restarting the service and the Discord bodies (VUH-2393).
+
+A checkout now uses the same idea of idle as a hosted body, with one
+difference: idle panes do not count, only a worker agent that is `working`.
+An update that follows `main` applies at once when the body is idle or the
+service has run for two hours (`CLANKIE_UPDATE_BATCH_MINUTES`). Otherwise it is
+recorded in `~/.clankie/updates/deferred.json` and the service applies the
+newest `main` once idle or due, under its own authority, as a scheduled install
+does here, and through the same holds, canary and rollback. `clankie update now`,
+an explicit ref and a hold override apply at once; `clankie update cancel` drops
+the batch.
+
+A cutover also leaves the relay, activity surface and keep-awake running when
+the range changes none of the files their entrypoints can load, nor their
+packages' manifests and assets or the root lockfile. The Discord bodies still
+restart with the service: their live presence claim is bound to the service
+instance. A rollback restarts everything.

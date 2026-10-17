@@ -12,10 +12,12 @@ import {
 const AUTO_USAGE = "Usage: clankie update auto [status|on|off]";
 
 export const UPDATE_USAGE =
-  "Usage: clankie update [--ref REF] [--override-holds --reason TEXT] [--json]\n       clankie update status [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\n       clankie update auto [status|on|off] [--json]\nTerminal output explains holds and update progress; --json or piped output stays structured.\nVerified superseded canary holds release after a full passing replacement canary; independent holds remain blocking until explicitly released or overridden. Owner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.\nUse status after acceptance or a disconnect. Do not resend an uncertain update or restart services. A recorded pre-cutover failure may retry, subject to holds.";
+  "Usage: clankie update [now] [--ref REF] [--override-holds --reason TEXT] [--json]\n       clankie update status|cancel [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\n       clankie update auto [status|on|off] [--json]\nTerminal output explains holds and update progress; --json or piped output stays structured.\nVerified superseded canary holds release after a full passing replacement canary; independent holds remain blocking until explicitly released or overridden. Owner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.\nUse status after acceptance or a disconnect. Do not resend an uncertain update or restart services. A recorded pre-cutover failure may retry, subject to holds.\nA source checkout batches updates that follow main: while the body is busy and the service has run under two hours (CLANKIE_UPDATE_BATCH_MINUTES), the request is deferred and the newest main applies once the body is idle or the batch is due. `now` applies at once; `cancel` drops a deferred batch. An explicit --ref or a hold override always applies at once.";
 
 export function parseUpdateArgs(args: readonly string[]) {
   args = args.filter((arg) => arg !== "--json");
+  const now = args[0] === "now";
+  if (now) args = args.slice(1);
   const canary = args[0] === "canary";
   const status = args.length === 1 && args[0] === "status";
   const policy: Record<string, number> = {};
@@ -68,7 +70,8 @@ export function parseUpdateArgs(args: readonly string[]) {
     HoldOverrideSchema.parse({ holdId, actor: actor ?? "authenticated-owner", reason }),
   );
   if (overrideHolds) HoldOverrideSchema.shape.reason.parse(reason);
-  return { canary, status, policy, ref, overrides, overrideHolds, reason };
+  if (now && (status || canary)) throw Error(UPDATE_USAGE);
+  return { canary, status, policy, ref, overrides, overrideHolds, reason, now };
 }
 
 export async function runUpdateCommand(
@@ -107,13 +110,35 @@ export async function runUpdateCommand(
       effective: updated.autoUpdateEffective,
     };
   }
+  if (args[0] === "cancel") {
+    if (args.length !== 1) throw Error(UPDATE_USAGE);
+    const env = options.env ?? process.env;
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+    if (!credential?.token) throw Error("No operator credential is available");
+    const response = await (options.fetchImpl ?? fetch)(
+      new URL("/v1/runtime-update/deferred", commandHost(options)),
+      {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${credential.token}`, "x-clankie-client": "cli" },
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    // allow-swallowed-rejection -- an unreadable body still reports its HTTP status below
+    const result = (await response.json().catch(() => undefined)) as unknown;
+    if (!response.ok)
+      throw Error(`Batched update cancel unavailable (${response.status}): ${JSON.stringify(result)}`);
+    return result;
+  }
   let cutover: { operationId: string; instanceId: string } | undefined;
   if (args[0] === "cutover") {
     if (args.length !== 5 || args[1] !== "--operation" || args[3] !== "--instance")
       throw Error("Usage: clankie update cutover --operation UUID --instance UUID");
     cutover = ScheduledReleaseCutoverRequestSchema.parse({ operationId: args[2], instanceId: args[4] });
   }
-  const { canary, status, policy, ref, overrides, overrideHolds, reason } = parseUpdateArgs(
+  const { canary, status, policy, ref, overrides, overrideHolds, reason, now } = parseUpdateArgs(
     cutover ? [] : args,
   );
   const env = options.env ?? process.env;
@@ -156,6 +181,7 @@ export async function runUpdateCommand(
                         ref,
                         ...(overrides.length ? { overrides } : {}),
                         ...(overrideHolds ? { overrideHolds, reason } : {}),
+                        ...(now ? { now } : {}),
                       }),
               ),
             }),

@@ -5,6 +5,7 @@ import { StringDecoder } from "node:string_decoder";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   createServiceOptions,
+  KEEPABLE_SERVICES,
   parseServiceTarget,
   resolveRestartTargets,
   resolveTargets,
@@ -15,6 +16,7 @@ import {
   type ServiceOutcome,
   type ServiceTarget,
 } from "../../bin/services.ts";
+import type { ServiceId } from "../../bin/service-supervisor.ts";
 import { updateHoldingServices } from "../../bin/runtime-updater.ts";
 import { clearRecoveryIntent } from "../../bin/service-recovery.ts";
 import { commandHost, outputJson } from "./io.ts";
@@ -184,10 +186,32 @@ function scheduleRestartAfterTurn(
   return logPath;
 }
 
+/**
+ * `--keep relay,awake`: dependents of the target to leave running. A runtime
+ * update passes the services none of whose code changed (VUH-2393).
+ */
+function parseKeep(args: readonly string[]): { args: readonly string[]; keep: readonly ServiceId[] } {
+  const at = args.indexOf("--keep");
+  if (at === -1) return { args, keep: [] };
+  const value = args[at + 1];
+  if (value === undefined || value.startsWith("-"))
+    throw new Error("Usage: clankie restart [service] [--keep SERVICE,...]");
+  const keep = value.split(",").map((raw) => {
+    const id = parseServiceTarget(raw.trim());
+    if (id === "all" || !KEEPABLE_SERVICES.has(id))
+      throw new Error(
+        `${raw} cannot be kept running through a restart; only ${[...KEEPABLE_SERVICES].join(", ")} can.`,
+      );
+    return id;
+  });
+  return { args: [...args.slice(0, at), ...args.slice(at + 2)], keep };
+}
+
 export async function runRestartCommand(
-  args: readonly string[],
+  rawArgs: readonly string[],
   options: RestartCommandOptions,
 ): Promise<number> {
+  const { args, keep } = parseKeep(rawArgs);
   const target = parseServiceTarget(args[0]);
   const afterTurn =
     args.length === 4 &&
@@ -200,8 +224,8 @@ export async function runRestartCommand(
           ...(args[1] === RESTART_AFTER_PI_FLAG ? { kind: "pi" as const } : {}),
         }
       : undefined;
-  if (args.length > 1 && afterTurn === undefined) {
-    throw new Error("Usage: clankie restart [service]");
+  if ((args.length > 1 && afterTurn === undefined) || (afterTurn !== undefined && keep.length > 0)) {
+    throw new Error("Usage: clankie restart [service] [--keep SERVICE,...]");
   }
   if (
     afterTurn?.kind === "pi" &&
@@ -230,9 +254,10 @@ export async function runRestartCommand(
   }
   refuseDuringUpdate(options);
   const registryOptions = await createServiceOptions(options);
+  const restarted = resolveRestartTargets(target).filter((id) => !keep.includes(id));
   // The owner's restart ends any crash backoff or give-up for these services.
-  clearRecoveryIntent(resolveRestartTargets(target), options.env ?? process.env);
-  const outcomes = await restartTarget(target, registryOptions);
+  clearRecoveryIntent(restarted, options.env ?? process.env);
+  const outcomes = await restartTarget(target, registryOptions, keep);
   const clankie = outcomes.find((outcome) => outcome.id === "clankie");
   const ok = outcomes.length > 0 && outcomes.every((outcome) => outcome.ok);
   stderr.write(`${describeOutcomes(outcomes)}\n`);
@@ -243,6 +268,7 @@ export async function runRestartCommand(
     host: commandHost(options),
     ...(clankie === undefined ? {} : { owned: clankie.ok }),
     services: outcomes,
+    ...(keep.length === 0 ? {} : { kept: keep }),
   });
   return ok ? 0 : 1;
 }

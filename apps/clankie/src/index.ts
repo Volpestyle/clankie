@@ -217,6 +217,7 @@ import {
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { loadRuntimeProvider } from "./runtime-provider.ts";
 import { bodyIdleCheck, startScheduledUpdates, withBodyActivity } from "./scheduled-update.ts";
+import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
 import { startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
 import { HarnessSignIns } from "./harness-logins.ts";
 import { BrokerCredentialStore } from "./captain/model.ts";
@@ -1235,18 +1236,18 @@ const minecraft = minecraftRuntime.service;
 // A checkout follows origin/main; an installed release (`<root>/releases/<version>`)
 // follows official releases. A release run from elsewhere, like an image's seed
 // tree, is replaced by its deployment instead.
-const runtimeUpdater =
-  hostedBody === undefined && existsSync(join(repoRoot, ".git"))
-    ? createRuntimeUpdater({
-        repoRoot,
-        retentionHolds: async () =>
-          (await deployHolds.list())
-            .filter((hold) => hold.holder === RUNTIME_CANARY_HOLDER)
-            .map((hold) => hold.id),
-      })
-    : existsSync(join(repoRoot, "release.json")) && basename(dirname(realpathSync(repoRoot))) === "releases"
-      ? releaseUpdaterOrNone()
-      : undefined;
+const checkoutRuntime = hostedBody === undefined && existsSync(join(repoRoot, ".git"));
+const installedUpdater = checkoutRuntime
+  ? createRuntimeUpdater({
+      repoRoot,
+      retentionHolds: async () =>
+        (await deployHolds.list())
+          .filter((hold) => hold.holder === RUNTIME_CANARY_HOLDER)
+          .map((hold) => hold.id),
+    })
+  : existsSync(join(repoRoot, "release.json")) && basename(dirname(realpathSync(repoRoot))) === "releases"
+    ? releaseUpdaterOrNone()
+    : undefined;
 /** A release that cannot update (say, a local image built without a revision) still runs. */
 function releaseUpdaterOrNone() {
   try {
@@ -1279,6 +1280,38 @@ const scheduledUpdateIdle = bodyIdleCheck({
     return agents;
   },
 });
+// A checkout batches the updates that follow main (VUH-2393): at once when the
+// body is idle, otherwise at most one per CLANKIE_UPDATE_BATCH_MINUTES (two
+// hours) of uptime. Busy means a captain turn, a share or voice call, or a
+// worker agent that is working; idle panes do not hold an update back.
+const updateBatchIdle = bodyIdleCheck({
+  activity: bodyActivity,
+  voiceHeld: () => bodyLeaseStore.status("voice") !== undefined,
+  agentPanes: async () => {
+    let working = 0;
+    for (const fleet of await runtimes.fleets())
+      working += parseHerdrPaneList(await runtimes.fleetRun(fleet)(["pane", "list"]), true).filter(
+        (pane) => pane.agent !== "unknown" && pane.status === "working",
+      ).length;
+    return working;
+  },
+});
+const updateBatching =
+  checkoutRuntime && installedUpdater !== undefined
+    ? batchRuntimeUpdates({
+        updater: installedUpdater,
+        path: join(process.env.HOME || homedir(), ".clankie", "updates", "deferred.json"),
+        intervalMs:
+          parsePositiveInt(process.env.CLANKIE_UPDATE_BATCH_MINUTES, DEFAULT_UPDATE_BATCH_MS / 60_000) *
+          60_000,
+        bootedAt: Date.now() - process.uptime() * 1_000,
+        idle: async () => await updateBatchIdle().catch(() => false),
+        apply: (ref, authority) =>
+          deployHolds.landing(`runtime-batch:${ref}`, [], () => installedUpdater.request(ref, authority)),
+        logger,
+      })
+    : undefined;
+const runtimeUpdater = updateBatching ?? installedUpdater;
 const scheduledUpdates =
   runtimeUpdater !== undefined && process.env.CLANKIE_SCHEDULED_UPDATES === "1"
     ? startScheduledUpdates({
@@ -1406,8 +1439,14 @@ const captain = createCaptain(
           runtimeUpdater: {
             runtime: runtimeUpdater.runtime,
             status: runtimeUpdater.status,
-            request: (ref: string, authority: import("../../tui/bin/runtime-updater.ts").UpdateAuthority) =>
-              deployHolds.landing(`runtime-tool:${ref}`, [], () => runtimeUpdater.request(ref, authority)),
+            request: (
+              ref: string,
+              authority: import("../../tui/bin/runtime-updater.ts").UpdateAuthority,
+              options?: { readonly now?: boolean },
+            ) =>
+              deployHolds.landing(`runtime-tool:${ref}`, [], () =>
+                runtimeUpdater.request(ref, authority, options),
+              ),
           },
         }),
     deployHolds: () => deployHolds.list(),
@@ -2514,6 +2553,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   const closeLocalFleetConnections =
     localFleetServer === undefined ? undefined : drainHttpServer(localFleetServer);
   scheduledUpdates?.close();
+  updateBatching?.close();
   clearInterval(serviceLogRotation);
   void ownerCheckoutSync.close();
   harnessLogins.close();

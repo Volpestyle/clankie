@@ -99,7 +99,19 @@ restart. Default is fetched `origin/main`, never the local `main` branch. A fail
 fetch refuses the operation. Full SHAs, `HEAD` and `refs/tags/TAG` are explicit
 local targets. Review `resolvedRef`, `newCommit` and any older/diverged warning;
 update does not merge or publish your working branch. The external activity
-tunnel survives cutover under its current owner.
+tunnel survives cutover under its current owner, and so do the relay, activity
+surface and keep-awake when none of their code changed (`keptServices`); the
+Discord bodies always restart with you.
+
+Updates that follow `main` batch (VUH-2393). Unless the body is idle (no turn,
+share, voice call or `working` worker in any fleet) or this service has run for
+two hours (`CLANKIE_UPDATE_BATCH_MINUTES`), the request is recorded instead:
+`accepted: false`, HTTP 202, with `deferred` (`requests`, `firstRequestedAt`,
+`dueAt`, `initiator`). The service checks each minute and installs the newest
+`main` once idle or due, through the same holds, canary and rollback, and drops a
+batch with no new commits. Report a deferral as "batched for <dueAt>", not as a
+failure, and do not resend it. `clankie update now` / `now: true` and an explicit
+`--ref` or hold override apply at once; `clankie update cancel` drops the batch.
 
 `accepted: true` means pending, not completed. Finish the turn, then read
 `runtime_update_status` or `clankie update status` on your next turn and report

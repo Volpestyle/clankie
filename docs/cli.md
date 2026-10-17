@@ -471,7 +471,7 @@ underneath it. The same object is on the service's `/health` as `power`.
 
 <a id="service-lifecycle"></a>
 
-### `update [--ref REF]` / `update status` / `update canary`
+### `update [now] [--ref REF]` / `update status` / `update cancel` / `update canary`
 
 In a terminal, update shows the live commit, the fetched target, its new commit
 count and latest commit summaries, then groups holds by cause with CPU and
@@ -530,10 +530,42 @@ process group. The current
 service must be running the exact pinned checkout. Dirty tracked or untracked
 files in that checkout refuse the operation before any service stop.
 
+#### Batched checkout updates
+
+A source checkout batches the updates that follow `main` (`main`, `origin/main`,
+`refs/heads/main` or `refs/remotes/origin/main`; VUH-2393). Every cutover
+restarts the service and the Discord bodies with it, and Clankie used to update
+after nearly every landing: 250 cutovers in eleven days. A request applies at
+once when the body is idle (no captain turn, activity share or voice call, and
+no worker agent `working` in any fleet) or when the running service has been up
+for the batching interval, two hours by default (`CLANKIE_UPDATE_BATCH_MINUTES`
+on the service). Otherwise it answers HTTP 202 with `accepted: false` and
+`deferred` (`requests`, `firstRequestedAt`, `dueAt`, `initiator`), and the CLI
+exits 0. The service checks every minute and applies the newest `main` once the
+body is idle or `dueAt` passes, under its own authority and through the same
+deploy holds, canary and rollback; a batch whose `main` has no new commits is
+dropped without a restart. A hold or a failed fetch keeps the batch waiting.
+`update status` shows a pending batch as `deferred`.
+
+`clankie update now` (`{"now": true}`, or `now: true` on `update_runtime`)
+applies at once. So do an explicit `--ref` (a commit, tag or other branch, such
+as a rollback target) and a hold override. `clankie update cancel`
+(`DELETE /v1/runtime-update/deferred`) drops a pending batch and reports
+`cancelled`. The record lives at `~/.clankie/updates/deferred.json`.
+
 The helper installs before stopping anything, rechecks the pin, stops through
 the existing service supervisor, retains the previous worktree, activates the new
 pin and restarts the pin-dependent services. The external activity tunnel stays
-running under its current owner; an unowned tunnel cannot block the update. Failed new health checks trigger a
+running under its current owner; an unowned tunnel cannot block the update.
+The relay, the activity surface and keep-awake stay running when none of their
+code changed: the helper follows each entrypoint's static and literal dynamic
+imports through the workspace and keeps the service when the range touches none
+of those files, their packages' manifests or assets, or the root lockfile and
+manifests. Any import it cannot follow restarts the service. A kept service
+keeps running from the previous worktree, which retention keeps while it runs;
+the record lists it in `keptServices`. The Discord bodies always restart with
+the service, because their live presence claim is only valid against the
+service instance that issued it. A rollback restarts everything. Failed new health checks trigger a
 confirmed-stop rollback. Unknown shutdown never authorizes a worktree move.
 Generated pnpm wrappers and known workspace metadata are relocated before cutover;
 committed source, lockfiles and global package-store files are not rewritten.

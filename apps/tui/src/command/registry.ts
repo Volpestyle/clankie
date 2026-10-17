@@ -70,6 +70,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["update"],
     lines: [
       "  update [--ref REF] | status [--json]  Explain the live runtime, target and deploy holds; JSON when piped",
+      "  update now | cancel  Apply a batched checkout update at once, or drop it (updates that follow main batch while the body is busy)",
       "  update --override-holds --reason TEXT  Owner-only update with one audited override per hold",
       "  update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N]  Read or configure post-update health budgets (CPU is advisory)",
     ],
@@ -210,7 +211,9 @@ const HEADLESS_COMMAND_HELP = [
   },
   {
     nouns: ["restart"],
-    lines: ["  restart [service]        Restart in dependency order (JSON; progress on stderr)"],
+    lines: [
+      "  restart [service] [--keep relay,activity,awake]  Restart in dependency order, leaving named dependents up (JSON; progress on stderr)",
+    ],
   },
   {
     nouns: ["start"],
