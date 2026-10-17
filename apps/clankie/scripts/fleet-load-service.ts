@@ -166,11 +166,9 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     hires: captain,
   });
   let admissions = 0;
-  const diagnostics: NonNullable<Parameters<typeof proofModule.localFleetProof>[0]["diagnostics"]> = (
-    event,
-    pane,
-    context,
-  ) => {
+  const diagnostics: NonNullable<
+    Parameters<typeof proofModule.localFleetAdmissionProof>[0]["diagnostics"]
+  > = (event, pane, context) => {
     if (event.source === "proof_success" || event.source === "socket_owner") return;
     // Keep refusal evidence outside the rolling service-log tail. No socket,
     // credentials, question input or caller-supplied process identity is serialized.
@@ -185,7 +183,9 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
   const link = new linkModule.LocalFleetLink({
     directory: join(config.root, "state", "links"),
     binding,
-    prove: proofModule.localFleetProof({ binding, herdrBinary: config.herdr, diagnostics }),
+    // Match the production listener: unavailable observations are a retryable
+    // pre-dispatch refusal, not proof that a legitimate worker left the fleet.
+    prove: proofModule.localFleetAdmissionProof({ binding, herdrBinary: config.herdr, diagnostics }),
     projectProof: proofModule.localProjectProof({ binding, herdrBinary: config.herdr, diagnostics }),
   });
   const auth = (request: Request) => request.headers.get("authorization") === `Bearer ${config.bearer}`;

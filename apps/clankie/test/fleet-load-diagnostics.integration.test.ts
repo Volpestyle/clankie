@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { startLinearFixture } from "../scripts/fleet-load-fixtures.ts";
 
-it("retains a real load-service proof refusal over IPC, independently of its rolling logs", async () => {
+it("retains proof diagnostics and distinguishes unavailable observations from refused membership", async () => {
   const root = await mkdtemp(join(tmpdir(), "fleet-load-diagnostics-"));
   const provider = await startLinearFixture();
   const sourceRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -80,6 +80,18 @@ it("retains a real load-service proof refusal over IPC, independently of its rol
       ]);
     const diagnostics = messages.filter((message) => message.kind === "proof_diagnostic");
     expect(new Set(diagnostics.map((message) => message.requestId)).size).toBe(2);
+    // This syntactically valid pane cannot be observed: the fixture has no
+    // Herdr listener. Production must refuse it as retryable unavailability,
+    // rather than declaring that the caller permanently lost membership.
+    const callsBeforeUnavailable = provider.calls.length;
+    const unavailable = await fetch(`http://127.0.0.1:${ready.localPort}/v1/fleet/seats/w1:p1/events`, {
+      headers: { "x-clankie-pane": "w1:p1" },
+      signal: AbortSignal.timeout(5_000),
+    });
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get("retry-after")).toBe("1");
+    expect(await unavailable.json()).toMatchObject({ error: "fleet_admission_unavailable", retryable: true });
+    expect(provider.calls).toHaveLength(callsBeforeUnavailable);
     expect(JSON.stringify(messages)).not.toContain("fixture-only");
   } finally {
     if (child.exitCode === null) {

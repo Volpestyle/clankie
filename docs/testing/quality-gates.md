@@ -57,6 +57,10 @@ with the pane, request and connection IDs, independently of the rolling service
 log tail. Recoverable native diagnostics can also appear in a passing run;
 correlate them with the final proof refusal and the gate's errors. Diagnostic
 capture does not change admission or any gate budget.
+The load service uses production's admission proof: a temporarily unavailable
+observation returns a pre-dispatch retryable 503; a proven membership refusal
+returns 403. The shipped worker bridge retains its one-retry contract for the
+explicit unavailable response.
 
 The host-integration command selects tests already in the full gate. The eval
 command is separate and never runs implicitly. Vitest retries remain zero. Manual
