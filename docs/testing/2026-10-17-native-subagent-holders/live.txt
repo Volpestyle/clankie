@@ -1,0 +1,35 @@
+VUH-1888 live check, 2026-10-17 ~04:13-04:20Z. Installed runtime and worker plugin: cc2eb50e5
+(contains 050aeba51), clankie-worker 0.6.17. Seat term_65debb4028cbe7b (Claude Code, wren-68b0).
+Pool before: {"leases":[],"inventory":"available","externalActive":0,"external":[],"simulatorSlots":1}
+Parent session Bash: holder=claude:e6f827b6-094b-493d-af60-b46ffad75d04
+No command below passes a holderId; the subagents ran exactly these commands in their own Bash.
+
+== Subagent A (Claude Agent tool, background)
+$ echo "holder=$CLANKIE_RESOURCE_HOLDER"
+holder=claude:e6f827b6-094b-493d-af60-b46ffad75d04:agent:a831e73a5d711bbf0
+$ clankie simulator acquire '{"seatId":"term_65debb4028cbe7b","deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974"}' --wait 600
+{"outcome":"acquired","lease":{"id":"b0741452-2854-4cb4-a1bc-e6dbc90f6d20","seatId":"term_65debb4028cbe7b","holderId":"claude:e6f827b6-094b-493d-af60-b46ffad75d04:agent:a831e73a5d711bbf0","phase":"booted","deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974","deviceName":"iPhone 17 Pro","deviceType":"com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro","runtime":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","origin":"existing"}}
+  (occupantId and timestamps omitted)
+
+== Subagent B (Claude Agent tool, background), while A held the lease
+$ echo "holder=$CLANKIE_RESOURCE_HOLDER"
+holder=claude:e6f827b6-094b-493d-af60-b46ffad75d04:agent:ab32ca81db9f35066
+$ clankie simulator acquire '{"seatId":"term_65debb4028cbe7b","deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974"}' --wait 20
+waiting (simulator_capacity): Requested device iPhone 17 Pro (ECF31A58-614F-40A7-87C9-914A4930D974) is leased to seat term_65debb4028cbe7b holder claude:e6f827b6-094b-493d-af60-b46ffad75d04:agent:a831e73a5d711bbf0. Wait for that exact device; no alternative will be used.
+Ticket 00b0b748-983c-47bb-9442-dd1f03054e86, position 1; cancel it with simulator cancel JSON or resume with its ticketId.
+{"outcome":"waiting","ticket":{"id":"00b0b748-983c-47bb-9442-dd1f03054e86","kind":"simulator","seatId":"term_65debb4028cbe7b","holderId":"claude:e6f827b6-094b-493d-af60-b46ffad75d04:agent:ab32ca81db9f35066","deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974","exact":false,"position":1,"estimatedWaitMs":null},"reason":"simulator_capacity","blockers":{"simulatorSlots":1,"leases":[{"id":"b0741452-2854-4cb4-a1bc-e6dbc90f6d20","seatId":"term_65debb4028cbe7b","holderId":"claude:e6f827b6-094b-493d-af60-b46ffad75d04:agent:a831e73a5d711bbf0","phase":"booted","deviceName":"iPhone 17 Pro","deviceId":"ECF31A58-614F-40A7-87C9-914A4930D974"}],"external":[]}}
+  (pid, timestamps and heavy-lane blockers omitted)
+$ clankie simulator status            -> one lease, b0741452, holder ...agent:a831e73a5d711bbf0
+$ clankie simulator cancel '{"seatId":"term_65debb4028cbe7b","id":"00b0b748-983c-47bb-9442-dd1f03054e86"}'
+{"outcome":"cancelled"}
+$ clankie simulator status            -> still one lease, b0741452; no ticket for B
+
+== Subagent A, resumed (same agent)
+$ echo "holder=$CLANKIE_RESOURCE_HOLDER"
+holder=claude:e6f827b6-094b-493d-af60-b46ffad75d04:agent:a831e73a5d711bbf0
+$ clankie simulator release '{"seatId":"term_65debb4028cbe7b","id":"b0741452-2854-4cb4-a1bc-e6dbc90f6d20"}'
+{"outcome":"released"}
+$ clankie simulator status
+{"schemaVersion":1,"leases":[],"inventory":"available","externalActive":0,"external":[],"simulatorSlots":1}
+
+Afterwards: xcrun simctl list devices -> iPhone 17 Pro (ECF31A58-...) (Shutdown)
