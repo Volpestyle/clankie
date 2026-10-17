@@ -3634,8 +3634,8 @@ state without acquiring or touching a lease. Use it before install, launch and
 drive operations; refuse means stop that operation. Raw simctl, Xcode and external
 MCP calls must invoke this preflight themselves; this API cannot intercept them
 or make their later command atomic. Native Claude Bash hooks provide each
-subagent's holder in a command-scoped subshell; Codex prefers its executing
-thread over an inherited holder. Explicit task holder arguments retain precedence.
+subagent's session/agent metadata in a command-scoped subshell; Codex uses its
+executing thread. Automatic holder resolution ignores inherited holder labels. Explicit task holder arguments retain precedence.
 The CLI validates successful acquire/verify grants against that holder and the
 requested device. A different exact selection cannot reuse an existing lease or
 a concurrent acquire result. Busy explicit UDIDs wait without substituting another
@@ -3659,8 +3659,13 @@ never substitutes a different model; an explicit `deviceId` remains strict.
 Missing or malformed metadata is unknown, never proof of a previous boot.
 
 Native Claude Bash hooks supply a holder from their session and subagent ID;
-Codex prefers its executing `CODEX_THREAD_ID` over an inherited holder. Outside
-Codex, both CLIs accept `CLANKIE_RESOURCE_HOLDER`.
+Codex uses its executing `CODEX_THREAD_ID`. Claude hooks supply
+`CLAUDE_SESSION_ID` and `CLAUDE_AGENT_ID` alongside the compatibility
+`CLANKIE_RESOURCE_HOLDER`. The CLIs derive automatic identity from native
+metadata; a raw inherited holder alone is ignored. Hired panes clear these
+fields before their own harness starts, even if Herdr inherited a lead's
+environment. Worker plugin 0.6.18 and operator plugin 0.3.7 carry this scoped
+metadata; existing sessions need a native hook refresh.
 Heavy commands accept `--holder ID`; simulator JSON accepts `holderId`, which
 must stay the same for acquire, verify, touch and release. Missing task metadata
 refuses acquire/plan instead of falling back to a seat-level lease. A different child holder
