@@ -335,7 +335,9 @@ export interface DiscordTextIngressEvidence {
     | "settled"
     | "declined"
     | "absorbed"
-    | "failed";
+    | "failed"
+    /** Recovery stopped for a permanent reason; nothing was or will be posted. */
+    | "abandoned";
   readonly deliveryId: string;
   readonly correlationId: string;
   readonly presenceSessionId: string;
@@ -355,6 +357,8 @@ export interface DiscordTextIngressPort {
   executeDiscordPresenceAction(write: DiscordPresenceWrite): Promise<DiscordPresenceWriteResult>;
   reconcileDiscordPresenceAction?(write: DiscordPresenceWrite): Promise<DiscordPresenceWriteResult | null>;
   deferFailureNotice?(deliveryId: string): boolean;
+  /** The durable inbox settled this delivery terminally; why. */
+  abandoned?(deliveryId: string): string | undefined;
 }
 
 interface RetainedDelivery {
@@ -569,6 +573,8 @@ export class DiscordTextIngress {
       if (this.deliveries.get(message.id)?.result === result) this.deliveries.delete(message.id);
       const code = error instanceof Error ? error.message : "discord_text_ingress_failed";
       event("failed", { reason: code });
+      const abandoned = this.port.abandoned?.(message.id);
+      if (abandoned !== undefined) event("abandoned", { reason: abandoned });
       return { state: "failed", code };
     }
   }

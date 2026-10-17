@@ -182,8 +182,10 @@ pending: recovery checks existing replies, then durably claims one retry of the 
 its own recovery delivery ID. A second failure gets a confirmed short notice for its asker. A
 completed model result replays only its saved answer to the original room. Read-only reply
 reconciliation settles an abandoned write or proves absence before the existing mouth-lease
-recovery releases it; unavailable history never clears uncertainty. Room health and doctor count
-unrecovered failures separately from historical failures ([recovery contract](discord-rooms.md)).
+recovery releases it; unavailable history never clears uncertainty. Transient failures back off to
+at most ten minutes. A reply the service refuses because it holds no origin for the message closes
+as `abandoned` after three refusals, with nothing posted. Room health and doctor count unrecovered
+failures separately from abandoned and historical ones ([recovery contract](discord-rooms.md)).
 Before dispatch, the service atomically
 records the exact ID, request fingerprint and authorized lane in `discord-turn-receipts.json`
 under its state directory. Completed results remain deduplicated. An unresolved receipt after restart,

@@ -100,6 +100,7 @@ cannot establish either of the latter claims.
 `CLANKIE_API_URL` defaults to `http://127.0.0.1:4310`.
 `DISCORD_BRIDGE_RECEIPT_PATH` may select an absolute receipt path; otherwise it
 uses `${XDG_STATE_HOME:-~/.local/state}/clankie/discord-live-receipts.jsonl`.
+Past 8 MiB the journal drops repeated retry receipts and keeps its newest 4 MiB.
 When the owner enables full transcript logging in `/discord`, exact consented
 final speech and Clankie's generated reply wording from either body are appended
 to the mode-0600 `${XDG_STATE_HOME:-~/.local/state}/clankie/discord-voice-transcripts.jsonl`.

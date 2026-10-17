@@ -843,6 +843,7 @@ async function handleDiscordMessage(message: Message, recovering = false): Promi
       if (result.state !== "failed" && result.state !== "buffered" && result.state !== "absorbed")
         textInbox!.finish(message.id);
       if (result.state === "failed") {
+        textInbox!.retryLater(message.id);
         console.error(
           { deliveryId: message.id, channelId: message.channelId, code: result.code },
           "Discord text ingress failed",
@@ -1654,10 +1655,8 @@ async function recoverTextInbox(full = false): Promise<void> {
   fullRecoveryRequested = false;
   try {
     // The gateway handles live traffic. Routine recovery only scans rooms with
-    // unfinished deliveries, always reconciling replies before retrying them.
-    const channelIds = new Set(
-      scanAll ? textInbox.channels() : textInbox.pending().map((row) => row.channel_id),
-    );
+    // deliveries due a retry, always reconciling replies before retrying them.
+    const channelIds = new Set(scanAll ? textInbox.channels() : textInbox.due().map((row) => row.channel_id));
     const reconciled = new Set<string>();
     for (const guild of scanAll ? client.guilds.cache.values() : []) {
       if (!ingressGuildIds.has(guild.id)) continue;
@@ -1699,7 +1698,7 @@ async function recoverTextInbox(full = false): Promise<void> {
         );
       }
     }
-    for (const delivery of textInbox.pending()) {
+    for (const delivery of textInbox.due()) {
       if (shuttingDown) return;
       if (!reconciled.has(delivery.channel_id)) continue;
       try {
@@ -1710,11 +1709,13 @@ async function recoverTextInbox(full = false): Promise<void> {
       } catch (error) {
         // Deleted messages cannot be answered. Permission/network failures remain pending.
         if ((error as { code?: number }).code === 10008) textInbox.finish(delivery.id);
-        else
+        else {
+          textInbox.retryLater(delivery.id);
           console.error(
             { deliveryId: delivery.id, error: error instanceof Error ? error.message : String(error) },
             "Discord inbox retry failed",
           );
+        }
       }
     }
   } catch (error) {

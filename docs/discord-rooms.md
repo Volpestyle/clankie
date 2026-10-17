@@ -49,10 +49,28 @@ the saved request once. If that retry fails, the accepted message gets
 one short failure notice asking the sender to resend. Legacy failures with no
 saved request are reopened from the ingress receipts and get that notice without
 rerunning tools from a possibly edited message. Neither a model result nor an attempted notice closes
-the delivery; Discord confirmation does. `unrecoveredFailed` counts failed
-messages without a confirmed reply or notice, and `failed` reflects that current unresolved count. Durable service turn and
+the delivery; Discord confirmation does. A failed attempt waits before the next:
+30 seconds, doubling to at most ten minutes, and a restarted bridge retries at
+once. Only a permanent refusal ends recovery. The service refuses a reply
+(`identity_required`) or its reconciliation
+(`discord_reply_reconciliation_origin_required`) before touching Discord when it
+holds no origin for that message, as for messages from before it kept delivery
+origins. After three refusals the delivery closes as
+`abandoned` with that code. Nothing is posted, so the asker never gets a late
+answer or notice, and it is never retried (VUH-2394).
+
+`unrecoveredFailed` counts failed messages still owed a confirmed reply or
+notice, and `failed` reflects that current unresolved count. A recovery that
+chose silence has answered. `abandoned` counts failures closed by a permanent
+refusal, separately. Durable service turn and
 confirmed reply receipts repair the projection after lost bridge observations;
-a recovery reply clears pending and failed instead of leaving old failures displayed. `clankie doctor` also reports these unresolved room deliveries.
+a recovery reply clears pending and failed instead of leaving old failures displayed.
+`clankie doctor` reports unresolved room deliveries as a next step and abandoned
+ones beside them as a record.
+
+The ingress receipts are the bridge's content-free journal,
+`discord-live-receipts.jsonl`. Past 8 MiB it drops each repeated retry receipt
+but the latest and keeps its newest 4 MiB, weeks of ordinary traffic. A rebuilt inbox seeds only from the last day of it.
 
 A completed handoff's saved answer is replayed to its original room without
 running its tools again. Before replaying an uncertain write, the authenticated

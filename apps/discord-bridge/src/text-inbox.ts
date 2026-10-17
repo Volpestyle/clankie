@@ -21,12 +21,24 @@ interface Delivery {
   outgoing: string | null;
   done: number;
   retries: number;
+  /** Permanent service refusals of this delivery's reply or reply reconciliation. */
+  refusals: number;
+  /** Why recovery stopped for good, never answered and never acknowledged. */
+  terminal: string | null;
 }
+
+/** Permanent refusals a delivery may meet before recovery stops retrying it. */
+const RECOVERY_REFUSALS_MAX = 3;
+/** A transiently failed delivery waits from one round, doubling, up to this cap. */
+const RETRY_BASE_MS = 30_000;
+const RETRY_MAX_MS = 10 * 60_000;
 
 /** A completed model turn is not a delivered reply. Attention metadata survives restarts too. */
 export class DiscordTextInbox {
   private readonly db: DatabaseSync;
   private readonly running = new Set<string>();
+  /** Per-process, so a restarted bridge retries everything once at once. */
+  private readonly backoff = new Map<string, { attempts: number; at: number }>();
 
   constructor(path: string, initialAfter: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -47,31 +59,24 @@ export class DiscordTextInbox {
       CREATE INDEX IF NOT EXISTS deliveries_request_id
         ON deliveries(json_extract(request, '$.deliveryId'));
     `);
-    if (
-      !this.db
+    const columns = new Set(
+      this.db
         .prepare("PRAGMA table_info(deliveries)")
         .all()
-        .some((column) => column.name === "outgoing")
-    ) {
-      this.db.exec("ALTER TABLE deliveries ADD COLUMN outgoing TEXT");
-    }
-    if (
-      !this.db
-        .prepare("PRAGMA table_info(deliveries)")
-        .all()
-        .some((column) => column.name === "retries")
-    )
-      this.db.exec("ALTER TABLE deliveries ADD COLUMN retries INTEGER NOT NULL DEFAULT 0");
-    if (
-      !this.db
-        .prepare("PRAGMA table_info(deliveries)")
-        .all()
-        .some((column) => column.name === "acknowledged")
-    )
-      this.db.exec("ALTER TABLE deliveries ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 0");
+        .map((column) => column.name),
+    );
+    for (const [name, definition] of [
+      ["outgoing", "TEXT"],
+      ["retries", "INTEGER NOT NULL DEFAULT 0"],
+      ["acknowledged", "INTEGER NOT NULL DEFAULT 0"],
+      ["refusals", "INTEGER NOT NULL DEFAULT 0"],
+      ["terminal", "TEXT"],
+    ])
+      if (!columns.has(name)) this.db.exec(`ALTER TABLE deliveries ADD COLUMN ${name} ${definition}`);
     // Repair legacy failures closed before the failure notice was confirmed.
+    // A terminal failure was closed on purpose and stays closed.
     this.db.exec(
-      "UPDATE deliveries SET done = 0 WHERE json_extract(result, '$.state') = 'failed' AND reply IS NULL AND acknowledged = 0",
+      "UPDATE deliveries SET done = 0 WHERE json_extract(result, '$.state') = 'failed' AND reply IS NULL AND acknowledged = 0 AND terminal IS NULL",
     );
     this.db.prepare("INSERT OR IGNORE INTO metadata VALUES ('initial_after', ?)").run(initialAfter);
     // If the combined answer was never saved, replay its absorbed messages
@@ -112,6 +117,11 @@ export class DiscordTextInbox {
             .prepare("INSERT OR IGNORE INTO deliveries (id, channel_id, guild_id) VALUES (?, ?, ?)")
             .run(deliveryId, channelId, guildId ?? null);
         if (["settled", "declined"].includes(outcome)) this.finish(deliveryId);
+        if (outcome === "abandoned")
+          this.abandon(
+            deliveryId,
+            typeof receipt.data.reason === "string" ? receipt.data.reason : "abandoned",
+          );
         // Legacy absorbed receipts have no owning-delivery link. Reconsider
         // the message independently after a restart rather than lose it.
         if (outcome === "absorbed")
@@ -124,7 +134,7 @@ export class DiscordTextInbox {
         if (outcome === "failed")
           this.db
             .prepare(
-              "UPDATE deliveries SET done = 0, result = ?, retries = 1 WHERE id = ? AND (request IS NULL OR json_type(request, '$.trigger') IS NULL) AND reply IS NULL AND acknowledged = 0",
+              "UPDATE deliveries SET done = 0, result = ?, retries = 1 WHERE id = ? AND (request IS NULL OR json_type(request, '$.trigger') IS NULL) AND reply IS NULL AND acknowledged = 0 AND terminal IS NULL",
             )
             .run(JSON.stringify({ state: "failed", code: "discord_saved_request_missing" }), deliveryId);
         // Keep accepted failures pending: a returned failure is not a delivered notice.
@@ -269,6 +279,25 @@ export class DiscordTextInbox {
     ).filter((row) => !this.running.has(row.id));
   }
 
+  /** Pending deliveries whose retry backoff has elapsed. */
+  due(now = Date.now()): readonly Delivery[] {
+    const pending = this.pending();
+    const ids = new Set(pending.map((row) => row.id));
+    for (const id of this.backoff.keys()) if (!ids.has(id) && !this.running.has(id)) this.backoff.delete(id);
+    return pending.filter((row) => (this.backoff.get(row.id)?.at ?? 0) <= now);
+  }
+
+  /** A failed attempt that may still succeed: back off, never give up. */
+  retryLater(id: string, now = Date.now()): void {
+    const row = this.row(id);
+    if (row === undefined || row.done === 1) return;
+    const attempts = (this.backoff.get(row.id)?.attempts ?? 0) + 1;
+    this.backoff.set(row.id, {
+      attempts,
+      at: now + Math.min(RETRY_BASE_MS * 2 ** (attempts - 1), RETRY_MAX_MS),
+    });
+  }
+
   async handle(id: string, run: () => Promise<void>): Promise<void> {
     const row = this.row(id);
     if (this.running.has(id) || row === undefined || row.done === 1) return;
@@ -285,6 +314,7 @@ export class DiscordTextInbox {
     return {
       getHealth: () => delegate.getHealth(),
       deferFailureNotice: (id) => this.row(id)?.reply == null && (this.row(id)?.retries ?? 0) === 0,
+      abandoned: (id) => this.row(id)?.terminal ?? undefined,
 
       submitDiscordCaptainChannelTurn: async (incoming) => {
         this.enqueue(incoming.deliveryId, incoming.trigger.channelId, incoming.trigger.guildId);
@@ -317,23 +347,26 @@ export class DiscordTextInbox {
           {
             if (delegate.reconcileDiscordPresenceAction === undefined)
               throw new Error("discord_reply_reconciliation_unavailable");
-            const reply = await delegate.reconcileDiscordPresenceAction(
-              row.outgoing === null
-                ? {
-                    schemaVersion: 1,
-                    idempotencyKey: `${incoming.deliveryId}:reply`,
-                    sourceDeliveryId: incoming.deliveryId,
-                    action: "discord.presence.reply",
-                    identity: incoming.identity,
-                    content: "Reply reconciliation",
-                    payload: {
-                      kind: "reply",
-                      channelId: incoming.trigger.channelId,
-                      messageId: incoming.deliveryId,
+            const reconcileReply = delegate.reconcileDiscordPresenceAction;
+            const reply = await this.refusable(incoming.deliveryId, () =>
+              reconcileReply(
+                row.outgoing === null
+                  ? {
+                      schemaVersion: 1,
+                      idempotencyKey: `${incoming.deliveryId}:reply`,
+                      sourceDeliveryId: incoming.deliveryId,
+                      action: "discord.presence.reply",
+                      identity: incoming.identity,
                       content: "Reply reconciliation",
-                    },
-                  }
-                : JSON.parse(row.outgoing),
+                      payload: {
+                        kind: "reply",
+                        channelId: incoming.trigger.channelId,
+                        messageId: incoming.deliveryId,
+                        content: "Reply reconciliation",
+                      },
+                    }
+                  : JSON.parse(row.outgoing),
+              ),
             );
             if (reply !== null) {
               this.db
@@ -413,7 +446,9 @@ export class DiscordTextInbox {
         if (row?.outgoing != null) {
           if (delegate.reconcileDiscordPresenceAction === undefined)
             throw new Error("discord_reply_reconciliation_unavailable");
-          const confirmed = await delegate.reconcileDiscordPresenceAction(JSON.parse(row.outgoing));
+          const reconcileReply = delegate.reconcileDiscordPresenceAction;
+          const outgoing = row.outgoing;
+          const confirmed = await this.refusable(id, () => reconcileReply(JSON.parse(outgoing)));
           if (confirmed !== null) {
             this.db
               .prepare("UPDATE deliveries SET reply = ?, done = 1 WHERE id = ?")
@@ -423,7 +458,7 @@ export class DiscordTextInbox {
           }
         }
         this.db.prepare("UPDATE deliveries SET outgoing = ? WHERE id = ?").run(JSON.stringify(write), id);
-        const reply = await delegate.executeDiscordPresenceAction(write);
+        const reply = await this.refusable(id, () => delegate.executeDiscordPresenceAction(write));
         if (reply.messageId !== undefined)
           this.db
             .prepare("UPDATE deliveries SET reply = ?, done = 1 WHERE id = ?")
@@ -438,6 +473,34 @@ export class DiscordTextInbox {
     this.db.close();
   }
 
+  /**
+   * The service refuses a reply or its reconciliation before touching Discord
+   * when it holds no matching origin for the message. That never changes on
+   * retry, so a bounded number of refusals closes the delivery unanswered.
+   */
+  private async refusable<T>(id: string, call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (error) {
+      const code = permanentRefusal(error);
+      const row = this.row(id);
+      if (code !== undefined && row !== undefined) {
+        this.db.prepare("UPDATE deliveries SET refusals = refusals + 1 WHERE id = ?").run(row.id);
+        if (row.refusals + 1 >= RECOVERY_REFUSALS_MAX) this.abandon(row.id, code);
+      }
+      throw error;
+    }
+  }
+
+  /** Closed without a reply or notice, and never acknowledged: health still counts it. */
+  private abandon(id: string, code: string): void {
+    this.db
+      .prepare(
+        "UPDATE deliveries SET done = 1, terminal = ? WHERE done = 0 AND (id = ? OR json_extract(result, '$.replyDeliveryId') IN (?, (SELECT json_extract(request, '$.deliveryId') FROM deliveries WHERE id = ?)))",
+      )
+      .run(code, id, id, id);
+  }
+
   /** The run a message was folded into settled as failed, so it answered nothing. */
   private ownerFailed(id: string): boolean {
     const result = this.row(id)?.result;
@@ -449,6 +512,27 @@ export class DiscordTextInbox {
       .prepare("SELECT * FROM deliveries WHERE id = ? OR json_extract(request, '$.deliveryId') = ?")
       .get(id, id) as unknown as Delivery | undefined;
   }
+}
+
+/**
+ * Origin refusals from `/v1/discord/presence-actions`: the write was rejected
+ * before dispatch (`identity_required`) or its reconciliation before any read.
+ */
+function permanentRefusal(error: unknown): string | undefined {
+  const match = /^Clankie API (403|409): (.*)$/su.exec(error instanceof Error ? error.message : "");
+  if (match === null) return undefined;
+  let body: unknown;
+  try {
+    body = JSON.parse(match[2]!);
+  } catch {
+    return undefined;
+  }
+  if (body === null || typeof body !== "object") return undefined;
+  const { error: code, outcome, reason } = body as Record<string, unknown>;
+  if (match[1] === "403" && code === "discord_reply_reconciliation_origin_required") return code;
+  if (match[1] === "409" && outcome === "rejected" && reason === "identity_required")
+    return "discord_reply_identity_required";
+  return undefined;
 }
 
 export function discordSnowflakeAt(milliseconds: number): string {

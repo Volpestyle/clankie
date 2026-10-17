@@ -32,6 +32,7 @@ export const DiscordRoomEvidenceSchema = z
       "failed",
       "missed",
       "escalated",
+      "abandoned",
     ]),
     reason: Reason.optional(),
     replyDeliveryId: Id.optional(),
@@ -70,6 +71,8 @@ export const DiscordRoomStatusSchema = z
     failed: Count,
     /** Failed deliveries without a confirmed reply or room notice. */
     unrecoveredFailed: Count.optional(),
+    /** Failed deliveries recovery closed for a permanent reason, unanswered and never retried. */
+    abandoned: Count.optional(),
     pending: Count,
     absorbedUnknown: Count,
     lastReason: Reason.optional(),

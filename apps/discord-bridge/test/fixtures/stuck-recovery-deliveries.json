@@ -1,0 +1,122 @@
+{
+  "source": "Two of the 41 deliveries the live discord-text-inbox.sqlite replayed every minute on 2026-10-17 (VUH-2394), copied as stored. Message bodies, generated answers, room names, context, attachments and guild, channel and actor ids are replaced; delivery ids, states and the failure notice are real.",
+  "rows": [
+    {
+      "id": "1551841084403875931",
+      "channel_id": "50000",
+      "guild_id": "40000",
+      "request": {
+        "schemaVersion": 1,
+        "deliveryId": "1551841084403875931",
+        "identity": {
+          "presenceSessionId": "discord:40000:50000",
+          "correlationId": "discord-message:1551841084403875931",
+          "profileHash": "unversioned",
+          "characterId": "clankie",
+          "credentialRef": "discord_bot",
+          "transportKind": "bot"
+        },
+        "trigger": {
+          "kind": "message",
+          "id": "1551841084403875931",
+          "guildId": "40000",
+          "channelId": "50000",
+          "messageId": "1551841084403875931",
+          "actorId": "30001",
+          "attachments": [],
+          "unprompted": true
+        },
+        "contextMessages": []
+      },
+      "result": {
+        "state": "failed",
+        "code": "discord_saved_request_missing"
+      },
+      "reply": null,
+      "done": 0,
+      "outgoing": {
+        "schemaVersion": 1,
+        "sourceDeliveryId": "1551841084403875931",
+        "idempotencyKey": "1551841084403875931:reply",
+        "action": "discord.presence.reply",
+        "identity": {
+          "presenceSessionId": "discord:40000:50000",
+          "correlationId": "discord-message:1551841084403875931",
+          "profileHash": "unversioned",
+          "characterId": "clankie",
+          "credentialRef": "discord_bot",
+          "transportKind": "bot"
+        },
+        "content": "I missed this while I was having trouble answering. Please resend it so I can pick it up.",
+        "payload": {
+          "kind": "reply",
+          "channelId": "50000",
+          "messageId": "1551841084403875931",
+          "content": "I missed this while I was having trouble answering. Please resend it so I can pick it up."
+        }
+      },
+      "retries": 1,
+      "acknowledged": 0
+    },
+    {
+      "id": "1555606245279277177",
+      "channel_id": "50000",
+      "guild_id": "40000",
+      "request": {
+        "schemaVersion": 1,
+        "deliveryId": "1555606245279277177:recovery",
+        "identity": {
+          "presenceSessionId": "discord:40000:50000",
+          "correlationId": "discord-message:1555606245279277177",
+          "profileHash": "unversioned",
+          "characterId": "clankie",
+          "credentialRef": "discord_bot",
+          "transportKind": "bot"
+        },
+        "trigger": {
+          "kind": "message",
+          "id": "1555606245279277177",
+          "guildId": "40000",
+          "channelId": "50000",
+          "messageId": "1555606245279277177",
+          "actorId": "30002",
+          "attachments": [],
+          "unprompted": true
+        },
+        "contextMessages": []
+      },
+      "result": {
+        "state": "settled",
+        "deliveryStage": "responded",
+        "captainSessionId": "discord:clankie:discord:40000:50000:handoff:handoff-6275ca674631adfe68afe4a3a88de6fc",
+        "turnId": "turn-1-1555606245279277177:recovery",
+        "response": "[stripped]"
+      },
+      "reply": null,
+      "done": 0,
+      "outgoing": {
+        "schemaVersion": 1,
+        "sourceDeliveryId": "1555606245279277177",
+        "idempotencyKey": "1555606245279277177:reply",
+        "action": "discord.presence.reply",
+        "identity": {
+          "presenceSessionId": "discord:40000:50000",
+          "correlationId": "discord-message:1555606245279277177",
+          "profileHash": "unversioned",
+          "characterId": "clankie",
+          "credentialRef": "discord_bot",
+          "transportKind": "bot"
+        },
+        "content": "[stripped]",
+        "payload": {
+          "kind": "reply",
+          "channelId": "50000",
+          "messageId": "1555606245279277177",
+          "content": "[stripped]"
+        }
+      },
+      "retries": 0,
+      "acknowledged": 0
+    }
+  ]
+}

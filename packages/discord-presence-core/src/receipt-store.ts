@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
+import { createInterface } from "node:readline";
 import { z } from "zod";
 
 const currentReceiptTypes = [
@@ -123,13 +124,22 @@ export interface DiscordBridgeReceiptStoreOptions {
   readonly path: string;
   readonly clock?: () => Date;
   readonly idFactory?: () => string;
+  /** Past this size the journal compacts to at most half of it. */
+  readonly maxBytes?: number;
 }
+
+/**
+ * Stays under {@link readDiscordBridgeReceipts}' proof limit and holds weeks of
+ * ordinary traffic, well past the day an inbox rebuild seeds from.
+ */
+const DISCORD_RECEIPT_JOURNAL_MAX_BYTES = 8 * 1024 * 1024;
 
 /** Single-writer, mode-0600 JSONL evidence with no Discord message bodies or names. */
 export class DiscordBridgeReceiptStore {
   private readonly path: string;
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
+  private readonly maxBytes: number;
   private readonly pending: {
     receipt: DiscordBridgeReceipt;
     resolve: (receipt: DiscordBridgeReceipt) => void;
@@ -142,6 +152,7 @@ export class DiscordBridgeReceiptStore {
     this.path = options.path;
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
+    this.maxBytes = options.maxBytes ?? DISCORD_RECEIPT_JOURNAL_MAX_BYTES;
   }
 
   public append(
@@ -180,6 +191,7 @@ export class DiscordBridgeReceiptStore {
             constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW,
             0o600,
           );
+          let size: number;
           try {
             await handle.chmod(0o600);
             await handle.appendFile(
@@ -187,9 +199,17 @@ export class DiscordBridgeReceiptStore {
               "utf8",
             );
             await handle.sync();
+            size = (await handle.stat()).size;
           } finally {
             await handle.close();
           }
+          if (size > this.maxBytes)
+            await this.compact().catch((error: unknown) => {
+              console.error(
+                { error: error instanceof Error ? error.message : String(error) },
+                "Discord receipt journal compaction failed",
+              );
+            });
           // Every caller still waits for durable data, including the shutdown receipt.
           for (const item of batch) item.resolve(item.receipt);
         } catch (error) {
@@ -198,6 +218,60 @@ export class DiscordBridgeReceiptStore {
       }
     } finally {
       this.flushing = false;
+    }
+  }
+
+  /**
+   * Bound the journal. A retry repeats its text-ingress receipt word for word,
+   * so only each one's latest copy stays, then the newest receipts that fit in
+   * half the budget. Readers see the old file or the new one.
+   */
+  private async compact(): Promise<void> {
+    const lines = () => createInterface({ input: createReadStream(this.path), crlfDelay: Infinity });
+    // Everything after the unique id and timestamp; written in schema key order.
+    const repeatKey = (line: string) => {
+      const type = line.indexOf('"type":"discord.text.ingress"');
+      return type === -1 ? undefined : line.slice(type);
+    };
+    const latest = new Map<string, number>();
+    let index = 0;
+    for await (const line of lines()) {
+      const key = repeatKey(line);
+      if (key !== undefined) latest.set(key, index);
+      index += 1;
+    }
+    let kept: string[] = [];
+    let first = 0;
+    let bytes = 0;
+    index = 0;
+    for await (const line of lines()) {
+      const key = repeatKey(line);
+      if (line.length > 0 && (key === undefined || latest.get(key) === index)) {
+        kept.push(line);
+        bytes += Buffer.byteLength(line) + 1;
+        while (bytes > this.maxBytes / 2 && first < kept.length)
+          bytes -= Buffer.byteLength(kept[first++]!) + 1;
+        if (first > 4096) {
+          kept = kept.slice(first);
+          first = 0;
+        }
+      }
+      index += 1;
+    }
+    const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      const handle = await open(temporary, "wx", 0o600);
+      try {
+        const retained = kept.slice(first);
+        await handle.writeFile(retained.length === 0 ? "" : `${retained.join("\n")}\n`);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await rename(temporary, this.path);
+    } finally {
+      // allow-swallowed-rejection -- after a rename it is gone; this only clears a failed write
+      await unlink(temporary).catch(() => undefined);
     }
   }
 

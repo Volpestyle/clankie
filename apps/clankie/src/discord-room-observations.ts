@@ -103,8 +103,22 @@ export class DiscordRoomObservations {
     status.missed = room.deliveries.filter((entry) => has(entry, "missed")).length;
     status.failed = this.unrecovered(room);
     status.unrecoveredFailed = this.unrecovered(room);
+    status.abandoned = room.deliveries.filter(
+      (entry) => has(entry, "abandoned") && !has(entry, "settled"),
+    ).length;
     status.pending = room.deliveries.filter(
-      (entry) => !has(entry, "settled", "declined", "missed", "failed", "absorbed", "dropped", "escalated"),
+      (entry) =>
+        !has(
+          entry,
+          "settled",
+          "declined",
+          "missed",
+          "failed",
+          "absorbed",
+          "dropped",
+          "escalated",
+          "abandoned",
+        ),
     ).length;
     status.absorbedUnknown = room.deliveries.filter(
       (entry) =>
@@ -115,11 +129,15 @@ export class DiscordRoomObservations {
         ),
     ).length;
   }
+  /**
+   * Failures recovery still owes a reply or notice. A retry that chose silence
+   * answered, and an abandoned delivery is counted on its own.
+   */
   private unrecovered(room: Room): number {
     return room.deliveries.filter(
       (entry) =>
         entry.outcomes.includes("failed") &&
-        !entry.outcomes.includes("settled") &&
+        !entry.outcomes.some((outcome) => ["settled", "declined", "abandoned"].includes(outcome)) &&
         !(
           entry.replyDeliveryId &&
           room.deliveries.some(

@@ -1,6 +1,6 @@
 import { formatAutonomyDrift } from "@clankie/protocol";
 import { stripVTControlCharacters } from "node:util";
-import type { UnreconciledWorktree } from "@clankie/protocol";
+import type { DiscordRoomStatus, UnreconciledWorktree } from "@clankie/protocol";
 import type { InstallDoctorReport } from "./install-doctor.ts";
 import { formatWorkingPreferences } from "./command/working-preferences.ts";
 import { formatRuntimeHealth } from "./command/runtime-health.ts";
@@ -18,6 +18,11 @@ const age = (seconds: number | undefined) =>
     : seconds >= 86_400
       ? `${Math.floor(seconds / 86_400)}d`
       : `${Math.floor(seconds / 3_600)}h`;
+/** Closed unanswered after a permanent refusal: a record, not a next step (VUH-2394). */
+function abandonedDeliveries(rooms: readonly DiscordRoomStatus[]): string {
+  const count = rooms.reduce((sum, room) => sum + (room.abandoned ?? 0), 0);
+  return count === 0 ? "" : ` · ${count} abandoned after permanent refusal`;
+}
 /** Unlanded or uncommitted work in linked worktrees, oldest first, by owner (VUH-1814). */
 function formatUnreconciled(worktrees: readonly UnreconciledWorktree[]): string[] {
   const shown = worktrees
@@ -172,7 +177,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
         ]),
     ...(report.discordRoomDelivery && "rooms" in report.discordRoomDelivery
       ? [
-          `  Discord delivery · ${report.discordRoomDelivery.rooms.some((room) => room.coverage === "observed" && room.unrecoveredFailed === undefined) ? "unknown" : report.discordRoomDelivery.rooms.reduce((sum, room) => sum + (room.unrecoveredFailed ?? 0), 0)} unrecovered failures`,
+          `  Discord delivery · ${report.discordRoomDelivery.rooms.some((room) => room.coverage === "observed" && room.unrecoveredFailed === undefined) ? "unknown" : report.discordRoomDelivery.rooms.reduce((sum, room) => sum + (room.unrecoveredFailed ?? 0), 0)} unrecovered failures${abandonedDeliveries(report.discordRoomDelivery.rooms)}`,
         ]
       : report.discordRoomDelivery
         ? [`  Discord delivery · unavailable: ${report.discordRoomDelivery.detail}`]
