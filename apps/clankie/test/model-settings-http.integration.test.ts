@@ -172,3 +172,74 @@ it("reads hosted settings and options without probing policy-refused subscriptio
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("migrates legacy tier writes through the shared eligible choice and refuses unavailable included mappings", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "model-alias-http-"));
+  const env = {
+    XDG_CONFIG_HOME: dir,
+    CLANKIE_DISABLE_MODELS_FETCH: "1",
+    CLANKIE_HOSTED_BOOTSTRAP_FILE: join(dir, "bootstrap.json"),
+  };
+  await updateGlobalConfig(
+    (config) => {
+      config.enabled_providers = ["clankie"];
+      config.model = "clankie/routine";
+      config.provider = {
+        clankie: {
+          name: "Included",
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "http://127.0.0.1:1/v1" },
+          models: Object.fromEntries(
+            ["default", "routine", "escalation"].map((id) => [
+              id,
+              { name: id, limit: { context: 32000, output: 512 } },
+            ]),
+          ),
+        },
+      };
+    },
+    { env },
+  );
+  let available = true;
+  const models = createModelKeys({
+    env,
+    cwd: dir,
+    store: new FileCredentialStore(join(dir, "keys.json")),
+    includedMappings: async () => ({
+      mappings: ["default", "routine", "escalation"].map((id) => ({
+        ref: `clankie/${id}`,
+        actual: { providerId: "openai", providerName: "OpenAI", modelId: "fixture", modelName: "Fixture" },
+        available,
+        reason: available ? null : "plan_unavailable",
+      })),
+    }),
+  });
+  const app = createModelKeyRoutes(models, async (request) =>
+    request.headers.get("authorization") === "Bearer owner" ? true : "forbidden",
+  );
+  const select = (path: string, model: string, auth = true) =>
+    app.request(path, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(auth ? { authorization: "Bearer owner" } : {}) },
+      body: JSON.stringify({ model }),
+    });
+  try {
+    expect((await models.settings!()).selected).toBe("clankie/routine");
+    expect((await models.settings!()).choices.map((c) => c.ref)).toEqual(["clankie/default"]);
+    expect((await select("/v1/model-settings", "clankie/escalation")).status).toBe(400);
+    expect(await (await select("/v1/model-keys/select", "clankie/escalation")).json()).toEqual({ ok: true });
+    expect((await loadConfig({ env })).config.model).toBe("clankie/default");
+    available = false;
+    for (const model of ["clankie/default", "clankie/routine", "clankie/escalation"]) {
+      expect(await (await select("/v1/model-keys/select", model)).json()).toEqual({
+        ok: false,
+        error: "unsupported_model",
+      });
+    }
+    expect((await select("/v1/model-keys/select", "clankie/default", false)).status).toBe(403);
+    expect((await loadConfig({ env })).config.model).toBe("clankie/default");
+  } finally {
+    models.close?.();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

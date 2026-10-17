@@ -176,7 +176,15 @@ export function createModelKeyRoutes(
             if (parsed.success) return models!.validate(parsed.data.providerId, parsed.data.modelId);
           } else if (path === MODEL_SELECT_PATH) {
             const parsed = ModelSelectRequestSchema.safeParse(body);
-            if (parsed.success) return models!.select(parsed.data.model);
+            if (parsed.success) {
+              if (!models?.settings) return { ok: false, error: "unavailable" } as const;
+              // Older clients can still submit routing aliases. They express an
+              // included preference now; automatic routing chooses the tier.
+              const model = ["clankie/routine", "clankie/escalation"].includes(parsed.data.model)
+                ? "clankie/default"
+                : parsed.data.model;
+              return models.select(model);
+            }
           } else if (path === MODEL_EFFORT_SET_PATH) {
             const parsed = ModelEffortSetRequestSchema.safeParse(body);
             if (parsed.success)

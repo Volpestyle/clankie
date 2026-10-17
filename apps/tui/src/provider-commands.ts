@@ -1230,7 +1230,7 @@ async function runModelWizard(
         options: choices.map((entry) => ({
           value: providerId === undefined ? entry.ref : parseModelRef(entry.ref)!.modelId,
           label: entry.actual ? `${entry.actual.modelName} · ${entry.actual.providerName}` : "Unknown model",
-          hint: `${entry.funding === "included" ? "Included AI credits" : "Your own provider"} · Credit rate unavailable`,
+          hint: `${entry.funding === "included" ? "Included AI credits" : "Your own provider"} · Rates not published yet`,
         })),
         statusActions: [{ value: "__refresh__", label: "refresh model catalogs" }],
         ...(settings.selected === null

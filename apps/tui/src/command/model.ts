@@ -122,7 +122,7 @@ export function modelSettingsSummary(settings: ModelSettingsResponse): string[] 
     entry?.actual ? `${entry.actual.modelName} · ${entry.actual.providerName}` : "Model unavailable";
   return [
     `${name(settings.effective)} · ${settings.effective?.funding === "included" ? "Included AI credits" : settings.effective ? "Your own provider" : "Funding unavailable"}`,
-    "Credit rates are unavailable. Input, output and cached usage rates cannot be compared yet.",
+    "Rates not published yet. Input, output and cached usage rates cannot be compared yet.",
     ...(settings.openItems.includes("included_catalog_policy")
       ? ["Included model choices are unavailable."]
       : []),

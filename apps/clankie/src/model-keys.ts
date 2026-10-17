@@ -218,7 +218,7 @@ export function createModelKeys(options: {
           throw Error("principal_revoked");
       }),
   });
-  return {
+  const port: ModelKeysPort = {
     close: () => signIns.close(),
     async subscriptionMethods() {
       const state = await snapshot();
@@ -508,6 +508,13 @@ export function createModelKeys(options: {
           }
           if (!modelCredentialAllowed(providerId, await store.get(providerId), { env }))
             return { ok: false, error: "unsupported_model" };
+          // Selection from every caller, including the compatibility endpoint,
+          // obeys the same availability and hosted mapping as the settings API.
+          const settings = await port.settings!();
+          if (!settings.choices.some((choice) => choice.ref === model && choice.available)) {
+            report("model-selected", "unsupported_model", providerId, ref.modelId);
+            return { ok: false, error: "unsupported_model" };
+          }
           try {
             resolvePiModelSelection({ ...state.config, model }, state.models, {
               catalog: state.catalog,
@@ -547,4 +554,5 @@ export function createModelKeys(options: {
       }
     },
   };
+  return port;
 }

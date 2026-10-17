@@ -20,6 +20,13 @@ operation before a service exists.
 
 Included default/routine/escalation references remain compatible runtime inputs;
 routine and escalation are read-only routing information in the new picker.
+Existing persisted tier preferences stay readable and keep their established
+runtime configuration until the owner chooses an eligible model. An older
+client writing routine/escalation through `/v1/model-keys/select` migrates that
+preference to `clankie/default`, only when that included choice is currently
+eligible. Both selection endpoints enforce the shared settings eligibility;
+a legacy alias cannot select an unavailable included model. The new endpoint
+rejects tier aliases outright.
 Included identities come from the hosted provider mapping, never alias names.
 Missing mappings or response identity headers mean **unknown**, including when
 an older proxy serves a turn. New completed conversation messages optionally

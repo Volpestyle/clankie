@@ -164,7 +164,8 @@ describe("owner model keys", () => {
 
   it("omits custom or unrecognized ids, even from an owner-supplied catalog", async () => {
     const marker = "private-marker-pretending-to-be-a-model";
-    const { call, telemetry, runtime, env } = await setup({ modelId: marker });
+    const { call, telemetry, runtime, env, store } = await setup({ modelId: marker });
+    await store.set("openai", { type: "api", key: "fixture-key" });
     const emit = vi.spyOn(telemetry, "emit");
     await call("/v1/model-keys/select", { model: `openai/${marker}` });
     await call("/v1/model-keys/select", { model: `openai/${marker}-missing` });
