@@ -236,7 +236,7 @@ it("preflights browser Work routes through the real relay and preserves authenti
       ["/operator/v1/tail", "POST"],
       ["/v1/huddles", "GET"],
       ["/v1/operator/projects", "GET"],
-    ]) {
+    ] as const) {
       const allowed = await fetch(
         base + path,
         preflight(APP, method, "authorization, cache-control, content-type"),
