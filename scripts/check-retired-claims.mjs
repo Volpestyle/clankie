@@ -14,7 +14,6 @@ const history = [
   // Tests may assert a retired behavior stays gone.
   /(^|\/)test\//u,
   /\.test\.[cm]?[jt]sx?$/u,
-  /^vendor\//u,
   /^evals\//u,
   /^scripts\/evals\//u,
   /CHANGELOG/u,
