@@ -398,7 +398,7 @@ management across conversations is in [launcher details](reference/launcher.md#m
   rounds, watching workers, cost evidence, `work-on`, turning Auto on, tidying,
   project onboarding and worktree roots.
 - [Fleet, hires and agent history](reference/fleet.md): working preferences,
-  `hire_agent` outcomes, roles, skill selection, Codex accounts, Codex, Claude,
+  `hire_agent` outcomes, roles, skill selection, worker MCP servers, Codex accounts, Codex, Claude,
   Pi, OpenCode and Grok workers, uncertain hires, worker locations, history.
 - [Worker bridges and fleet tools](reference/fleet-tools.md): connected tools,
   bridge health in doctor and the roster, report routing, preparing linked

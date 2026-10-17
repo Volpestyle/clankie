@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { HarnessSeatAdapter, SeatControl, SeatEvent, SeatStartResult } from "@clankie/agent-hosts";
-import { OperatorSeatSpawnResultSchema } from "@clankie/protocol";
+import { OperatorSeatSpawnResultSchema, type HireProfile, type SpawnOperatorSeat } from "@clankie/protocol";
 import {
   claudeWorkerLaunchArgs,
   createClaudeWorkerSeatAdapter,
@@ -35,7 +35,10 @@ function deferred<T>() {
 
 async function fixture(
   start: (view: Parameters<HarnessSeatAdapter["start"]>[1]) => Promise<SeatStartResult>,
-  options: { readonly maximumTrustMode?: () => Promise<boolean> } = {},
+  options: {
+    readonly maximumTrustMode?: () => Promise<boolean>;
+    readonly hireDefaults?: () => Promise<HireProfile>;
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "seat-adapter-hire-"));
   roots.push(root);
@@ -108,7 +111,7 @@ async function fixture(
     seatAdapters: [adapter],
     ...options,
   });
-  const hire = (brief?: string) =>
+  const hire = (brief?: string, request: Partial<SpawnOperatorSeat> = {}) =>
     store.spawnSeat(
       {
         schemaVersion: 1,
@@ -117,6 +120,7 @@ async function fixture(
         harness: "claude",
         title: "worker",
         workingDirectory: root,
+        ...request,
       },
       undefined,
       brief,
@@ -159,6 +163,22 @@ it("a hire launches under the owner's maximum trust mode only while it is on (VU
     const launch = vi.mocked(adapter.start).mock.calls[0]![0];
     expect(launch.maximumTrust).toBe(enabled ? true : undefined);
     expect(claudeWorkerLaunchArgs(launch).includes("--dangerously-skip-permissions")).toBe(enabled);
+  }
+});
+
+it("a local hire starts only the owner MCP servers its fleet and hire opt in (VUH-2388)", async () => {
+  for (const [fleet, request, expected] of [
+    [undefined, undefined, []],
+    [["github"], ["xcode", "github"], ["github", "xcode"]],
+  ] as const) {
+    const { adapter, hire } = await fixture(
+      async () => ({ outcome: "started", control: {} as SeatControl }),
+      {
+        hireDefaults: async () => (fleet === undefined ? {} : { mcpServers: [...fleet] }),
+      },
+    );
+    await hire("the brief", request === undefined ? {} : { mcpServers: [...request] });
+    expect(vi.mocked(adapter.start).mock.calls[0]![0].mcpServers).toEqual(expected);
   }
 });
 

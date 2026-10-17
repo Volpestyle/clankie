@@ -4271,7 +4271,11 @@ releases. See [ADR 0230](adr/0230-fleet-responsibility-is-owner-settings.md).
 
 `--harness`, `--model` and `--account` update default workers one field at a time
 (`fleet.hire`), preserving native subagents, delegation and placement.
-`auto` removes a field so Clankie chooses it per job. `--hire-profile FILE.json`
+`auto` removes a field so Clankie chooses it per job. `--mcp-servers NAME,...`
+names the owner's own MCP servers every local hire may start; `none` clears it.
+A local Claude or Codex hire otherwise starts only Clankie's worker bridge and
+the servers its checkout declares. Role and per-hire `mcpServers` add to this
+list ([agent hosts](../packages/agent-hosts/README.md#worker-mcp-servers)). `--hire-profile FILE.json`
 replaces the whole profile; use it separately from the field flags. Explicit
 per-hire choices override project roles, which override fleet defaults. These
 settings affect new hires. `fleet clear` also removes worker defaults.
@@ -4772,7 +4776,8 @@ compensation.
 `clankie agents role ROLE --project PROJECT` edits a project hire profile through
 its revision-bearing owner API. Set any of `--harness`, `--model`, `--effort`,
 `--subagent-model`, `--subagent-effort`, `--delegation native-first|panes`,
-`--account LABEL`, `--placement new-tab|split`, `--cap N` and `--naming TEXT`.
+`--account LABEL`, `--placement new-tab|split`, `--cap N`, `--naming TEXT` and
+`--mcp-servers NAME,...` (owner MCP servers this role's local hires may start).
 `auto` for harness, model, effort, account, subagent model or subagent effort means no
 preference: the field is saved unset, so the fleet default applies and, with
 none, Clankie chooses per hire or leaves it to the harness. `inherit` clears any

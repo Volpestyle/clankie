@@ -3329,6 +3329,11 @@ paths:
                       delegation: { type: string, enum: [native-first, panes] }
                       account: { type: string, pattern: "^[a-z][a-z0-9_-]{0,63}$" }
                       placement: { type: string, enum: [new-tab, split] }
+                      mcpServers:
+                        type: array
+                        maxItems: 32
+                        description: Owner MCP servers a local hire in this role may start besides Clankie's worker bridge and its checkout's own (VUH-2388); opt-ins add up across fleet, role and hire.
+                        items: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
                       concurrencyCap: { type: [integer, "null"], minimum: 0, maximum: 1000 }
                       hireNaming: { type: string, minLength: 1, maxLength: 500 }
                 workerCap: { type: [integer, "null"], minimum: 0, maximum: 1000 }

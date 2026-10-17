@@ -536,6 +536,33 @@ is needed for these local launches after the service reloads the change.
 Remote hires have their own coverage limits documented there;
 do not infer full-bundle delivery from a successful local canary.
 
+## Worker MCP servers
+
+A local Claude or Codex hire starts Clankie's worker bridge, the MCP servers its
+checkout declares (`.mcp.json` for Claude, `.codex/config.toml` for Codex), and
+only the owner's own servers its hire profile names in `mcpServers`. Opt-ins add
+up across `fleet.hire`, the project role and the hire. Every other server in the
+owner's configuration stays off for that session; the owner's files and their
+own sessions are untouched (VUH-2388).
+
+- Every worker: `clankie fleet set --mcp-servers github,xcode` (`none` clears).
+  One role: `clankie agents role ROLE --project ID --mcp-servers NAME,...`
+  (`inherit` clears). One job: `hire_agent`'s `mcpServers`.
+- Names are the harness's config keys, as `claude mcp list` or `codex mcp list`
+  prints them.
+- Claude enforces the list through `allowedMcpServers` in the launch settings,
+  so other plugins' servers and claude.ai connectors stay off too; a
+  `plugin:…` server cannot be named. Built-ins such as Claude in Chrome work.
+- Codex switches off each user-level `[mcp_servers]` entry the list leaves out.
+  Servers a Codex plugin contributes follow the owner's plugin settings. Codex
+  computer use and its browser run through `node_repl`, so the reach card says
+  to hire those seats with `mcpServers: ["node_repl"]`.
+- Each Codex thread, native subagents included, starts its own copy of the
+  hire's servers and keeps it while the thread stays loaded. A config reload
+  restarts only a changed server. Running workers keep the servers they started
+  with until they restart.
+- Remote hires read their own machine's configuration and are unchanged.
+
 Hires and watches belong to the exact conversation that admitted them. The host
 persists that source before launch and routes completion there with current
 grants. A worker persona, an inspected room, and a default conversation confer

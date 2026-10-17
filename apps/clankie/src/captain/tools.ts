@@ -1058,6 +1058,15 @@ function hireAgentTool(
             "(claude's --chrome; codex follows its own settings). Your reach card says which harness needs it.",
         }),
       ),
+      mcpServers: Type.Optional(
+        Type.Array(Type.String({ pattern: "^[A-Za-z0-9_-]{1,64}$" }), {
+          maxItems: 32,
+          description:
+            "The owner's own MCP servers, by harness config name, that this job needs, added to the fleet's and role's " +
+            "opt-ins. A local hire otherwise starts only your worker tools and the servers its checkout declares. " +
+            "Your reach card names the one a Codex computer-use hire needs.",
+        }),
+      ),
       fleet: Type.Optional(
         Type.String({
           pattern: "^[a-z][a-z0-9-]{0,63}$",

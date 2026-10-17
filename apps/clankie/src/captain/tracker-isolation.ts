@@ -24,7 +24,8 @@ const CODEX_LIST_TIMEOUT_MS = 15_000;
 /** The claude.ai account connector, which Claude Code loads on its own when signed in. */
 const CLAUDE_AI_TRACKER_RULE = "mcp__claude_ai_Linear";
 
-interface McpServerEntry {
+export interface McpServerEntry {
+  readonly type?: unknown;
   readonly url?: unknown;
   readonly command?: unknown;
   readonly args?: unknown;
@@ -73,29 +74,43 @@ function ancestors(cwd: string): string[] {
 }
 
 /**
- * Claude permission deny rules for every tracker connector a session started
- * in `cwd` would load: user and local scope from `.claude.json`, project
- * scope from `.mcp.json`, and the claude.ai account connector.
+ * The MCP server maps a Claude session started in `cwd` would load: the
+ * owner's user and local scope from `.claude.json`, and the checkout's
+ * project scope from `.mcp.json`.
  */
-export function claudeTrackerDenyRules(cwd: string, env: NodeJS.ProcessEnv = process.env): string[] {
+export function claudeMcpServerSources(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { readonly owner: Record<string, McpServerEntry>[]; readonly project: Record<string, McpServerEntry>[] } {
   // A worker's pane may not share the service's CLAUDE_CONFIG_DIR, so both the
   // configured and the default config count; a rule for an absent server is inert.
   const configFiles = new Set([
     ...(env.CLAUDE_CONFIG_DIR ? [join(env.CLAUDE_CONFIG_DIR, ".claude.json")] : []),
     join(env.HOME ?? homedir(), ".claude.json"),
   ]);
-  const sources: Record<string, McpServerEntry>[] = [];
+  const owner: Record<string, McpServerEntry>[] = [];
+  const project: Record<string, McpServerEntry>[] = [];
   for (const file of configFiles) {
     const state = readJson(file);
     const projects = serversOf(state?.projects) as Record<string, { mcpServers?: unknown }>;
-    sources.push(serversOf(state?.mcpServers));
-    for (const path of ancestors(cwd)) sources.push(serversOf(projects[path]?.mcpServers));
+    owner.push(serversOf(state?.mcpServers));
+    for (const path of ancestors(cwd)) owner.push(serversOf(projects[path]?.mcpServers));
   }
   for (const path of ancestors(cwd)) {
     const projectFile = join(path, ".mcp.json");
-    if (existsSync(projectFile)) sources.push(serversOf(readJson(projectFile)?.mcpServers));
+    if (existsSync(projectFile)) project.push(serversOf(readJson(projectFile)?.mcpServers));
   }
-  return claudeTrackerRulesFor(sources);
+  return { owner, project };
+}
+
+/**
+ * Claude permission deny rules for every tracker connector a session started
+ * in `cwd` would load: user and local scope from `.claude.json`, project
+ * scope from `.mcp.json`, and the claude.ai account connector.
+ */
+export function claudeTrackerDenyRules(cwd: string, env: NodeJS.ProcessEnv = process.env): string[] {
+  const { owner, project } = claudeMcpServerSources(cwd, env);
+  return claudeTrackerRulesFor([...owner, ...project]);
 }
 
 /**
@@ -117,7 +132,7 @@ interface CodexListedServer {
   readonly transport?: { readonly url?: unknown; readonly command?: unknown; readonly args?: unknown };
 }
 
-function tomlKey(name: string): string {
+export function tomlKey(name: string): string {
   return /^[A-Za-z0-9_-]+$/u.test(name) ? name : JSON.stringify(name);
 }
 

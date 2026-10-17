@@ -4108,6 +4108,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
           detail: "Claude profile home is unavailable; no account fallback was attempted.",
         };
     }
+    // A local hire starts only the owner MCP servers its profile opts in, beside
+    // Clankie's worker bridge and its checkout's own (VUH-2388). A remote
+    // machine's configuration is read there and stays unchanged.
+    const workerMcp = remote === undefined ? { mcpServers: input.mcpServers ?? [] } : {};
     let paneId: string;
     let nativePrepared: PreparedSeatLaunch | undefined;
     let nativeLaunch: SeatLaunch | undefined;
@@ -4193,6 +4197,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
           harnessArgs: skillLaunch.args,
           ...((await this.maximumTrustMode?.()) === true ? { maximumTrust: true } : {}),
+          ...workerMcp,
         };
         await this.assertRemoteHireAuthority(input, receiptKey, authority);
         nativePrepared = await adapter.prepare(nativeLaunch);
@@ -4437,6 +4442,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
                 ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
                 harnessArgs: [...skillLaunch.args, ...chromeArgs],
                 ...((await this.maximumTrustMode?.()) === true ? { maximumTrust: true } : {}),
+                ...workerMcp,
               },
               launchView,
             );

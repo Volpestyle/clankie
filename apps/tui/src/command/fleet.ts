@@ -39,7 +39,7 @@ import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH]]",
-  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]`,
+  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
   "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N] [--minimum-free-disk-gb N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet room [--older CURSOR] [--limit N] [--follow]",
@@ -110,14 +110,18 @@ function store(options: FleetCommandOptions): SettingsStore {
   return options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
 }
 
-/** Worker defaults set one field at a time; `auto` leaves the choice to Clankie. */
-type HirePatch = { [K in "harness" | "model" | "effort" | "account"]?: string };
+/**
+ * Worker defaults set one field at a time; `auto` leaves the choice to Clankie.
+ * `mcpServers` is a comma-separated list, and `none` clears it.
+ */
+type HirePatch = { [K in "harness" | "model" | "effort" | "account" | "mcpServers"]?: string };
 
 function patchHireDefaults(current: HireProfile | undefined, patch: HirePatch): HireProfile {
   const next: Record<string, unknown> = { ...current };
   delete next.effort;
   for (const [field, value] of Object.entries(patch))
-    if (value === "auto") delete next[field];
+    if (value === "auto" || (field === "mcpServers" && value === "none")) delete next[field];
+    else if (field === "mcpServers") next[field] = value!.split(",").map((name) => name.trim());
     else next[field] = value;
   return HireProfileSchema.parse(next);
 }
@@ -136,6 +140,7 @@ function formatHireProfile(profile: HireProfile): string {
     profile.placement,
     profile.account === undefined ? undefined : `account ${profile.account}`,
     subagents ? `subagents ${[subagents.model, subagents.effort].filter(Boolean).join(" ")}` : undefined,
+    profile.mcpServers === undefined ? undefined : `mcp ${profile.mcpServers.join(",")}`,
   ]
     .filter((value) => value !== undefined && value !== "")
     .join(" · ");
@@ -478,12 +483,14 @@ async function parseSet(
       hire.account = value;
     } else if ((flag === "--model" || flag === "--effort") && !(flag.slice(2) in hire) && value) {
       hire[flag.slice(2) as keyof HirePatch] = value;
+    } else if (flag === "--mcp-servers" && !("mcpServers" in hire) && value) {
+      hire.mcpServers = value;
     } else {
       throw new Error(FLEET_USAGE);
     }
   }
   if (change.hire !== undefined && Object.keys(hire).length)
-    throw new Error("Use --hire-profile or --harness/--model/--effort/--account, not both.");
+    throw new Error("Use --hire-profile or --harness/--model/--effort/--account/--mcp-servers, not both.");
   if (releaseMode !== undefined || releaseRule !== undefined)
     change.release = FleetReleasePolicySchema.parse({
       mode: releaseMode,

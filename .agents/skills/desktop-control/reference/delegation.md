@@ -23,7 +23,10 @@ sessions and apps.
   drives tabs without taking the pointer, so prefer it whenever the person may
   be at the machine.
 - A harness marked "hire with `chrome: true`" (claude) gets that flag on
-  `hire_agent`, or it starts without its browser.
+  `hire_agent`, or it starts without its browser. A local Codex hire marked
+  "hire with `mcpServers: ["node_repl"]`" gets that list: Codex runs its
+  browser and computer use through that server, and a hire starts none of the
+  owner's own MCP servers it does not name.
 - Each run spends that harness's plan, such as the owner's Codex weekly limit.
   Read `fleet.notes` for their preference, and say which you picked when it
   isn't obvious.
@@ -35,7 +38,7 @@ the window they're working in.
 ## Brief and hire
 
 Hire with `hire_agent`: harness, a short human title, role, working directory,
-`chrome: true` when the card says so, and the brief. For a long brief or
+`chrome: true` or `mcpServers` when the card says so, and the brief. For a long brief or
 retained evidence, put a file in the owned workspace and point to it, so the
 seat can re-read it and the person can inspect it. The brief covers:
 

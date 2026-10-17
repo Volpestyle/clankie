@@ -60,6 +60,13 @@ export interface SeatLaunch {
    * the harness starts without its own permission and command guardrails.
    */
   readonly maximumTrust?: boolean;
+  /**
+   * A local hire's worker MCP profile (VUH-2388): the harness starts Clankie's
+   * worker bridge, the servers its checkout declares and these owner servers,
+   * and no other server from the owner's own configuration. Absent, the
+   * harness configuration applies unchanged.
+   */
+  readonly mcpServers?: readonly string[];
 }
 
 /**

@@ -121,6 +121,40 @@ is still unverified. See the
 Work records stay in the repo's [tracker or files](../work-items/README.md).
 Remote agents use the per-fleet link and native adapters.
 
+### Worker MCP servers
+
+`SeatLaunch.mcpServers` is a local hire's MCP profile (VUH-2388). The hire
+starts Clankie's worker bridge, the servers its checkout declares, and only the
+owner's own servers named there; the service sets it from the effective hire
+profile, where `mcpServers` opt-ins add up across `fleet.hire`, the project
+role and the hire. Absent (remote hires), the harness configuration applies
+unchanged. Owners opt a server into every worker with
+`clankie fleet set --mcp-servers NAME,...` (`none` clears), into one role with
+`clankie agents role ROLE --project ID --mcp-servers NAME,...`, and the lead
+names one for a single job in `hire_agent`. Names are the harness's own config
+keys.
+
+- **Claude** gets `allowedMcpServers` in its launch settings: the worker
+  plugin's bridge by its exact command, each `.mcp.json` server the checkout
+  declares, and the named servers (stdio by command, others by name). Claude
+  then starts nothing else: not the owner's user or local servers, other
+  plugins' servers or claude.ai connectors. Built-ins such as Claude in Chrome
+  are unaffected. `--strict-mcp-config` was not used: it also drops the worker
+  plugin's own server, and with it the channel.
+- **Codex** has no allowlist. Before launch the adapter reads Codex's own config
+  layers (`config/read` on a short-lived app-server, no thread) and passes
+  `mcp_servers.NAME.enabled=false` for every enabled user-layer server not
+  named, not Clankie's `worker` and not declared by a project `.codex` layer.
+  Servers contributed by Codex plugins follow the owner's plugin choices.
+
+Each Codex thread owns its MCP connections, so a worker with three native
+subagents ran four copies of every server. On the owner's Mac (2026-10-17), one
+Codex thread started 8 owner-server processes (about 545 MB at startup) before
+this profile and none after; a Claude worker went from 8 MCP child processes to
+the worker bridge alone. `config/mcpServer/reload` restarts only a changed server
+and did not leave duplicates. Workers started before the change keep their
+servers until they restart.
+
 `SeatLaunch.resumeSessionId` continues an exact session in the native view.
 The normal hire path resolves its transcript, reuses a live seat on that host,
 and confirms native identity before delivering a brief. Transcript hosts remain

@@ -42,6 +42,7 @@ import {
 } from "@clankie/protocol";
 import { resolveHerdrSeatTranscriptPath, type HerdrSeatTranscript } from "./herdr-transcript.ts";
 import { claudeTrackerDenyRules } from "./tracker-isolation.ts";
+import { claudeWorkerMcpAllowlist, type ClaudeMcpPolicyEntry } from "./worker-mcp-profile.ts";
 
 const defaultTrackerDeny = (cwd: string, env?: Readonly<Record<string, string>>) =>
   claudeTrackerDenyRules(cwd, { ...process.env, ...env });
@@ -125,13 +126,18 @@ const WORKER_SERVER_RULES = [
   `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_clankie`,
 ];
 
-function claudeWorkerSettings(trackerDeny: readonly string[] = []): string {
+function claudeWorkerSettings(
+  trackerDeny: readonly string[] = [],
+  allowedMcpServers?: readonly ClaudeMcpPolicyEntry[],
+): string {
   // Hired workers use Claude's auto classifier for routine work (James,
   // 2026-10-09). Blanket ask rules override auto mode and stall every command.
   // Managed denies, tracker denies and the permission hook remain authoritative;
   // auto mode does not blanket-allow Bash or approve gated calls.
   return JSON.stringify({
     enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
+    // A local hire's MCP profile (VUH-2388): Claude starts no other server.
+    ...(allowedMcpServers === undefined ? {} : { allowedMcpServers }),
     permissions: {
       allow: WORKER_SERVER_RULES,
       defaultMode: "auto",
@@ -843,7 +849,12 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
       try {
         const trackerDeny = await (deps.trackerDeny ?? defaultTrackerDeny)(launch.cwd, launch.env);
-        const settings = claudeWorkerSettings(trackerDeny);
+        const settings = claudeWorkerSettings(
+          trackerDeny,
+          launch.mcpServers === undefined
+            ? undefined
+            : claudeWorkerMcpAllowlist(launch.cwd, launch.env ?? {}, launch.mcpServers),
+        );
         await view.start(
           "claude",
           claudeWorkerLaunchArgs(

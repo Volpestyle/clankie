@@ -153,3 +153,17 @@ the owner's to give (ADR 0194). If that warning ever appears, the hire fails
 `not_ready` with detail `consent_required: …` naming the managed-policy fix,
 and closes its pane. Without a channel, fallback seats get their messages
 through Herdr's paste-aware prompt, verified in the transcript.
+
+## Amendment: a hire starts only the MCP servers it needs (VUH-2388, 2026-10-17)
+
+A local hire no longer inherits every MCP server the owner registered for their
+own sessions. It starts Clankie's worker bridge, the servers its checkout
+declares, and the owner servers its hire profile names in `mcpServers`, opt-ins
+adding up across `fleet.hire`, the project role and the hire. Claude enforces
+that list through `allowedMcpServers` in the launch settings; Codex switches its
+other user-layer servers off for the session. The owner's configuration files
+are not edited, remote hires are unchanged, and the operator seat keeps its own
+launch. Before the change, 27 Codex worker app-servers and their MCP children
+held about 16.8 GB, mostly copies of the owner's video, IDE and 3D servers, one
+set per loaded Codex thread. Details and the opt-in commands are in
+[agent hosts](../../packages/agent-hosts/README.md#worker-mcp-servers).

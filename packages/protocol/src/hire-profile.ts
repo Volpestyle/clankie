@@ -20,6 +20,16 @@ export const HireProfileSchema = z
       .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
       .optional(),
     placement: z.enum(["new-tab", "split"]).optional(),
+    /**
+     * The owner's own MCP servers, by their name in the harness config, that a
+     * local hire may start besides Clankie's worker bridge and the servers its
+     * checkout declares; every other user-level server stays off (VUH-2388).
+     * Opt-ins add up across fleet, role and hire. Narrows the harness; grants nothing.
+     */
+    mcpServers: z
+      .array(z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u))
+      .max(32)
+      .optional(),
   })
   .strict();
 export type HireProfile = z.infer<typeof HireProfileSchema>;
@@ -69,5 +79,10 @@ export function effectiveHireProfile(
   const subagents = request.subagents === null ? {} : { ...inherited, ...request.subagents };
   delete result.subagents;
   if (Object.keys(subagents).length) result.subagents = subagents;
+  const mcpServers = [
+    ...new Set([...(fleet.mcpServers ?? []), ...(role.mcpServers ?? []), ...(request.mcpServers ?? [])]),
+  ].sort();
+  delete result.mcpServers;
+  if (mcpServers.length) result.mcpServers = mcpServers.slice(0, 32);
   return HireProfileSchema.parse(result) as EffectiveHireProfile;
 }

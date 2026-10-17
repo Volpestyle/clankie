@@ -209,7 +209,14 @@ export function renderComputerUseReach(harnesses: readonly ComputerUseHarness[])
           : SURFACE_WORDS[surface],
       )
       .join(" and ");
-    return `- ${name}: ${surfaces}${entry.chromeNeedsHireFlag ? " (hire with `chrome: true`)" : ""}`;
+    // A local hire starts none of the owner's MCP servers it does not ask for
+    // (VUH-2388); Codex's browser and computer use run through `node_repl`.
+    const hint = entry.chromeNeedsHireFlag
+      ? " (hire with `chrome: true`)"
+      : entry.harness === "codex" && entry.machineId === undefined
+        ? ' (hire with `mcpServers: ["node_repl"]`)'
+        : "";
+    return `- ${name}: ${surfaces}${hint}`;
   });
   return [
     "# Computer use through a harness",

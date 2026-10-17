@@ -22,6 +22,7 @@ import {
   type CodexServerLauncher,
 } from "./codex-app-server.ts";
 import { codexTrackerOverrides } from "./tracker-isolation.ts";
+import { codexWorkerMcpOverrides } from "./worker-mcp-profile.ts";
 import { codexAsyncQuestion, codexQuestion } from "./codex-user-input.ts";
 import type { CodexToolCatalogReport } from "../../../../integrations/claude-plugin/worker/bin/codex-tool-catalog.mjs";
 import { MAXIMUM_TRUST_CODEX_CONFIG, type FleetGates } from "@clankie/protocol";
@@ -43,6 +44,8 @@ export function createCodexSeatAdapter(
     localProcess?: (pid: number, pane: string) => LocalCodexRegistration;
     herdr?: (args: readonly string[]) => Promise<unknown>;
     trackerOverrides?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<string[]>;
+    /** A local hire's MCP profile overrides (`codexWorkerMcpOverrides`). */
+    workerMcpOverrides?: typeof codexWorkerMcpOverrides;
     server?: CodexServerLauncher;
     serverForView?: (view: SeatView) => CodexServerLauncher;
     listenTimeoutMs?: number;
@@ -327,6 +330,15 @@ export function createCodexSeatAdapter(
               'mcp_servers.worker.args=["mcp","--fleet"]',
               'mcp_servers.worker.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
             );
+          // Each Codex thread, subagents included, starts its own set of every
+          // enabled server; a local hire keeps only its profile's (VUH-2388).
+          if (options.localProcess && launch.mcpServers !== undefined)
+            for (const override of await (options.workerMcpOverrides ?? codexWorkerMcpOverrides)(
+              launch.cwd,
+              launch.env ?? {},
+              launch.mcpServers,
+            ))
+              if (!trackerOverrides.includes(override)) trackerOverrides.push(override);
           await view.guard?.();
           seat = await (options.start ?? startCodexAppServerSeat)({
             cwd: launch.cwd,

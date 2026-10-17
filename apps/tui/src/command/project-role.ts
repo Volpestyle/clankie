@@ -26,6 +26,7 @@ export async function runProjectRoleCommand(
     "placement",
     "cap",
     "naming",
+    "mcp-servers",
   ];
   for (let i = 1; i < args.length; i += 2) {
     const key = args[i]!.replace(/^--/u, "");
@@ -66,6 +67,14 @@ export async function runProjectRoleCommand(
   if (flags.has("naming")) {
     if (flags.get("naming") === "inherit") delete value.hireNaming;
     else value.hireNaming = flags.get("naming");
+  }
+  if (flags.has("mcp-servers")) {
+    if (flags.get("mcp-servers") === "inherit") delete value.mcpServers;
+    else
+      value.mcpServers = flags
+        .get("mcp-servers")!
+        .split(",")
+        .map((name) => name.trim());
   }
   const parsed = ProjectRoleSchema.parse(value);
   const catalog = await createModelRegistry({ env: options.env ?? process.env }).catalog();

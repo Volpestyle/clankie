@@ -133,7 +133,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["agents", "sessions"],
     lines: [
       "  agents contacts          Known agent identities and availability (JSON)",
-      "  agents role ROLE --project PROJECT [--harness KIND --model NAME --effort LEVEL --subagent-model NAME --subagent-effort LEVEL --delegation native-first|panes --account LABEL --placement new-tab|split]\n  agents role NAME|ID ROLE|none [--project PROJECT] | roles | rename NAME|ID NEW_NAME",
+      "  agents role ROLE --project PROJECT [--harness KIND --model NAME --effort LEVEL --subagent-model NAME --subagent-effort LEVEL --delegation native-first|panes --account LABEL --placement new-tab|split --mcp-servers NAME,...|inherit]\n  agents role NAME|ID ROLE|none [--project PROJECT] | roles | rename NAME|ID NEW_NAME",
       '                           Built-in (planner, builder, ...) or "custom role"; roles lists in use (JSON)',
       "  sessions                 Alias for agents session commands",
       "  agents [list] [--host ID] [--limit N] | read HOST:SESSION [--tail N | --after CURSOR]",
@@ -451,7 +451,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["fleet"],
     lines: [
       "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear",
-      "          [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]",
+      "          [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]",
       "                           Read or set fleet routing, budget, autonomy and connected tools",
     ],
   },
