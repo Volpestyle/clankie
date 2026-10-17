@@ -242,6 +242,56 @@ it("returns a known allowance refusal for local recovery while server uncertaint
   expect(readdirSync(join(f.root, "composer/audio"))).toEqual([]);
 });
 
+it("bounds new uploads per device, per minute and machine-wide before any provider spend, and frees them on cancel or after a minute", async () => {
+  const f = await fixture();
+  // Each paired device calls the body with its own session, as its app does.
+  const call = async (token: string, action: "begin" | "cancel", requestId: string) => {
+    const response = await fetch(`${f.bodyUrl}/v1/composer/transcription/${action}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(action === "begin" ? { requestId, audioBytes: 46 } : { requestId }),
+    });
+    return { status: response.status, body: (await response.json()) as { error?: string; state?: string } };
+  };
+  const begin = (token: string, requestId = randomUUID()) => call(token, "begin", requestId);
+  const owner = f.device.token;
+
+  // Two uploads at once per device; the encrypted app transport sees the same refusal.
+  const first = randomUUID(),
+    held = randomUUID();
+  expect((await begin(owner, first)).body.state).toBe("uploading");
+  expect((await begin(owner, held)).body.state).toBe("uploading");
+  await expect(f.api.begin({ requestId: randomUUID(), audioBytes: 46 })).rejects.toMatchObject({
+    status: 429,
+    message: "capacity",
+  });
+  expect((await call(owner, "cancel", first)).body.state).toBe("cancelled");
+  // Six starts per device per minute, counted even when cancelled; refusals do not count.
+  for (let started = 3; started <= 6; started++) {
+    const id = randomUUID();
+    expect((await begin(owner, id)).body.state).toBe("uploading");
+    expect((await call(owner, "cancel", id)).status).toBe(200);
+  }
+  expect(await begin(owner)).toEqual({ status: 429, body: { error: "capacity" } });
+  f.advance(59_999);
+  expect((await begin(owner)).status).toBe(429);
+  f.advance(1);
+  expect((await begin(owner)).body.state).toBe("uploading");
+
+  // Eight uploads at once across the machine: with the owner's two, three more devices
+  // fill it, and a fifth device is refused until one finishes.
+  for (let device = 0; device < 3; device++) {
+    const { token } = await f.pair();
+    expect((await begin(token)).body.state).toBe("uploading");
+    expect((await begin(token)).body.state).toBe("uploading");
+  }
+  const late = await f.pair();
+  expect(await begin(late.token)).toEqual({ status: 429, body: { error: "capacity" } });
+  expect((await call(owner, "cancel", held)).body.state).toBe("cancelled");
+  expect((await begin(late.token)).body.state).toBe("uploading");
+  expect(f.spent()).toBe(0);
+});
+
 it("rechecks the live support window after hosted publication before minting a session", async () => {
   for (const end of ["revoked", "expired"] as const) {
     const f = await fixture(),

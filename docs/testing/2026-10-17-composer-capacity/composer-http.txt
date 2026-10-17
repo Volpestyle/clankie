@@ -1,0 +1,12 @@
+ ✓ |parallel| apps/clankie/test/composer-transcription.test.ts > transcribes bounded WAV chunks through genuine paired-device encryption, preserves private content and dispatches a UUID once 458ms
+ ✓ |parallel| apps/clankie/test/composer-transcription.test.ts > refuses malformed audio, expired/read-only/revoked sessions before spend and suppresses cancelled late drafts 450ms
+ ✓ |parallel| apps/clankie/test/composer-transcription.test.ts > reclaims the SQLite request capacity at 24 hours while keeping the ten-minute audio lifetime 270ms
+ ✓ |parallel| apps/clankie/test/composer-transcription.test.ts > confirms the real support marker in signed fleet state before session mint, restores it and refuses composer authority 55ms
+ ✓ |parallel| apps/clankie/test/composer-transcription.test.ts > cleans restart/TTL captures and never resends audio after a lost provider receipt or body restart 173ms
+ ✓ |parallel| apps/clankie/test/composer-transcription.test.ts > returns a known allowance refusal for local recovery while server uncertainty never resends audio 65ms
+ ✓ |parallel| apps/clankie/test/composer-transcription.test.ts > bounds new uploads per device, per minute and machine-wide before any provider spend, and frees them on cancel or after a minute 155ms
+ ✓ |parallel| apps/clankie/test/composer-transcription.test.ts > rechecks the live support window after hosted publication before minting a session 102ms
+ ✓ |parallel| apps/clankie/test/composer-transcription.test.ts > denies GET /v1/devices/self when the device is revoked during signed provenance publication 47ms
+ ✓ |parallel| apps/clankie/test/composer-transcription.test.ts > denies POST /v1/devices/self/session/refresh when the device is revoked during signed provenance publication 37ms
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
