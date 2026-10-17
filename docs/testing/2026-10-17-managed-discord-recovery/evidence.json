@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "local-stack-proof.json",
+      "size": 29855,
+      "sha256": "f72ca1cb5c2b55a52fde25a862cca117514c374053b484fd22b50540b0e9932b",
+      "url": "clankie://evidence/sha256/f72ca1cb5c2b55a52fde25a862cca117514c374053b484fd22b50540b0e9932b"
+    }
+  ]
+}

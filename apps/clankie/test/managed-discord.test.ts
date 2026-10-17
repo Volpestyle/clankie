@@ -59,7 +59,7 @@ async function listen(server: Server) {
   });
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture() {
+async function fixture(options: { runtimePolicy?: boolean; unavailable?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "managed-discord-http-"));
   cleanups.push(async () => rmSync(root, { recursive: true, force: true }));
   const now = 1_800_000_000_000;
@@ -95,7 +95,7 @@ async function fixture() {
     sequence = 0,
     legacyFence = false,
     active = true,
-    unavailable = false,
+    unavailable = options.unavailable ?? false,
     badProof = false;
   let authorizationCalls = 0;
   let authorizationHold:
@@ -279,10 +279,13 @@ async function fixture() {
   const ecdh = createECDH("prime256v1");
   ecdh.generateKeys();
   let service: ClankieApp | undefined;
+  let runtimePolicy: ManagedDiscord | undefined;
   cleanups.push(async () => service?.close());
   const makeBody = async () => {
     service?.close();
+    runtimePolicy = options.runtimePolicy ? manager() : undefined;
     service = await createClankieApp({
+      ...(runtimePolicy ? { managedDiscord: runtimePolicy } : {}),
       settings,
       captain: createStubCaptain(),
       eventLogPath: join(root, "events.jsonl"),
@@ -397,6 +400,7 @@ async function fixture() {
     prepare,
     send,
     makeBody,
+    policyStatus: () => runtimePolicy?.status(),
     applied,
     policyRequests,
     revoke: () => {
@@ -568,3 +572,38 @@ it("discards revision-only disk acknowledgements and refuses revision-only wire 
   expect(JSON.parse(readFileSync(path, "utf8")).sequence).toBe(1);
   expect(f.policyRequests).toHaveLength(count);
 });
+
+it("the service runtime retries a failed startup with the newest durable room policy and does not replay it after reboot", async () => {
+  const f = await fixture({ runtimePolicy: true, unavailable: true });
+  await expect.poll(() => f.policyStatus()).toMatchObject({ state: "unavailable" });
+  for (const channelId of ["20001", "20002"]) {
+    await f.settings.update((current) => ({
+      ...current,
+      discord: discordServerSettings(
+        DiscordSettingsSchema.parse({
+          ...current.discord,
+          serverId: "10001",
+          roomSkills: [{ serverId: "10001", channelId, skill: "house-hunting" }],
+        }),
+        current.discord,
+      ),
+    }));
+  }
+  const latest = (await f.settings.load()).discord;
+  const expected = discordSettingsRevision(DiscordSettingsSchema.parse(latest));
+  await f.makeBody();
+  await expect.poll(() => f.policyStatus()).toMatchObject({ state: "unavailable" });
+  expect(f.policyRequests).toHaveLength(0);
+  f.unavailable(false);
+  // Only the actual service's periodic reconciler can send this signed HTTP
+  // request: the test makes no sync call, settings read or dashboard refresh.
+  await expect.poll(() => f.applied.at(-1)?.revision, { timeout: 15_000 }).toBe(expected);
+  expect(f.applied.map((policy) => policy.settings.roomSkills)).toEqual([
+    [{ serverId: "10001", channelId: "20002", skill: "house-hunting" }],
+  ]);
+  expect(f.policyRequests).toHaveLength(1);
+  await f.makeBody();
+  await expect.poll(() => f.policyStatus()).toMatchObject({ state: "synced", appliedRevision: expected });
+  expect(f.policyRequests).toHaveLength(1);
+  expect((await f.settings.load()).discord).toEqual(latest);
+}, 30_000);
