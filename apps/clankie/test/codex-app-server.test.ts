@@ -598,7 +598,14 @@ describe("trusted native seat policy", () => {
       expect(f.launches).toEqual([
         expect.objectContaining({
           inheritEnvironment: false,
-          env: { PATH: "/trusted/bin", HOME: "/protected/home" },
+          env: {
+            PATH: "/trusted/bin",
+            HOME: "/protected/home",
+            CLANKIE_RESOURCE_HOLDER: "",
+            CODEX_THREAD_ID: "",
+            CLAUDE_SESSION_ID: "",
+            CLAUDE_AGENT_ID: "",
+          },
           socketRoot: "/protected/socket",
           configArgs: ["-c", "features.multi_agent=false"],
         }),

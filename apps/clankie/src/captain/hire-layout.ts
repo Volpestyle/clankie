@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { RESOURCE_HOLDER_RESET_ENV } from "@clankie/fleet-resources";
 import type { PreparedCommandTab } from "./prepared-native-host.ts";
 
 const Tokens = z.record(z.string(), z.string()).default({});
@@ -75,10 +76,7 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
       ...input,
       env: {
         ...input.env,
-        CLANKIE_RESOURCE_HOLDER: "",
-        CODEX_THREAD_ID: "",
-        CLAUDE_SESSION_ID: "",
-        CLAUDE_AGENT_ID: "",
+        ...RESOURCE_HOLDER_RESET_ENV,
       },
     };
     const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]);

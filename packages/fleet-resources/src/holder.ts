@@ -1,3 +1,11 @@
+/** Deny inherited task identity at each new native process/pane boundary. */
+export const RESOURCE_HOLDER_RESET_ENV = Object.freeze({
+  CLANKIE_RESOURCE_HOLDER: "",
+  CODEX_THREAD_ID: "",
+  CLAUDE_SESSION_ID: "",
+  CLAUDE_AGENT_ID: "",
+});
+
 /** Native session/subagent label only; never grants seat or cleanup authority. */
 export function resourceHolderIdentity(env: NodeJS.ProcessEnv = process.env): string | undefined {
   // Codex injects the executing thread, including native spawn_agent children.

@@ -1,3 +1,4 @@
+import { RESOURCE_HOLDER_RESET_ENV } from "@clankie/fleet-resources";
 import type { StopNativeTaskResult } from "@clankie/protocol";
 import type { RemoteCodexRegistration } from "../remote-codex-seats.ts";
 import { spawn } from "node:child_process";
@@ -640,15 +641,11 @@ export async function startCodexAppServerSeat(options: {
     ...(catalogConfig === undefined ? {} : { catalogRefresh: true as const }),
     cwd: options.cwd,
     configArgs,
-    ...(launch === undefined
-      ? options.env === undefined
-        ? {}
-        : { env: options.env }
-      : {
-          env: { ...launch.environment },
-          inheritEnvironment: false as const,
-          socketRoot: launch.socketRoot,
-        }),
+    // The app-server executes native tools outside the Herdr TUI process.
+    // Scrubbing only the pane leaves the service's operator holder inherited
+    // by this detached server, including on remote launcher transports.
+    env: { ...(launch === undefined ? options.env : launch.environment), ...RESOURCE_HOLDER_RESET_ENV },
+    ...(launch === undefined ? {} : { inheritEnvironment: false as const, socketRoot: launch.socketRoot }),
     onExit: (code) => {
       stoppedServer();
       client?.close();

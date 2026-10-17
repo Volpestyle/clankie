@@ -28,5 +28,5 @@ export type {
 } from "./simulators.ts";
 export { createSimctlAdapter } from "./simctl.ts";
 export type { SimulatorAdapter, SimulatorDevice, SimctlRun } from "./simctl.ts";
-export { resourceHolderIdentity } from "./holder.ts";
+export { resourceHolderIdentity, RESOURCE_HOLDER_RESET_ENV } from "./holder.ts";
 export { heavyJobLane, longHeldJobMs, type HeavyJobLane } from "./parallelism.ts";

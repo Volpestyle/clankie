@@ -3664,7 +3664,9 @@ Codex uses its executing `CODEX_THREAD_ID`. Claude hooks supply
 `CLANKIE_RESOURCE_HOLDER`. The CLIs derive automatic identity from native
 metadata; a raw inherited holder alone is ignored. Hired panes clear these
 fields before their own harness starts, even if Herdr inherited a lead's
-environment. Worker plugin 0.6.18 and operator plugin 0.3.7 carry this scoped
+environment. Dedicated Codex servers execute tools outside the TUI pane and
+clear the service's inherited identity at their own launch boundary too.
+Worker plugin 0.6.18 and operator plugin 0.3.7 carry this scoped
 metadata; existing sessions need a native hook refresh.
 Heavy commands accept `--holder ID`; simulator JSON accepts `holderId`, which
 must stay the same for acquire, verify, touch and release. Missing task metadata

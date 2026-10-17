@@ -273,7 +273,10 @@ per-invocation Claude fields; an inherited holder alone is ignored. Claude scope
 these fields to a command subshell and clears ancestor Codex metadata, so a
 persistent shell cannot retain a sibling identity. Hire allocation overrides all
 four fields with empty values before creating a shell or prepared command pane,
-including when the Herdr server inherited an operator's environment. Other harnesses
+including when the Herdr server inherited an operator's environment. Dedicated
+Codex app-servers execute tools outside that pane: their launch also resets these
+fields after merging the selected environment. This prevents the service's own
+operator identity from leaking through its detached native server process. Other harnesses
 can pass explicit holder labels. The host still proves the original seat, occupant,
 binding and live processes; a holder label grants no authority. A seat
 observation that fails is unproven, not disproven: a waiting acquire keeps its
