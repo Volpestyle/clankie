@@ -14,4 +14,28 @@ CLI/TUI now say “Rates not published yet” before selection. No approved rate
 - CLI/provider consumers: 35 passed on unchanged source inputs (7 CLI, 28 provider-command cases).
 - An existing telemetry fixture now supplies an available fixture credential before selecting, so it still proves custom IDs and key material never enter telemetry while obeying the new eligibility boundary.
 - Initial dependency-copy failures were setup failures (missing integration links and a copied lead-skin link to another app worktree), not passing product evidence. Repaired only this isolated worktree's links/copies; the held `~/dev/clankie` remained untouched.
-- Root landing gate and current-turn HTTP proof pending. App/device evidence is retained in the private app's same dated folder.
+- Real source-service turn HTTP integration: 1 passed, covering escalation, fallback identity, refusal, token reconciliation, authentication and retained history without a paid provider.
+- The required root landing gate's checked HEAD, base and actual result are posted to the issue. App/device evidence is retained in the private app's same dated folder.
+
+## Focused result output
+
+```text
+RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-2108-night
+
+
+ Test Files  2 passed (2)
+      Tests  17 passed (17)
+   Start at  00:33:55
+   Duration  5.15s (transform 3.88s, setup 67ms, import 6.47s, tests 807ms, environment 0ms)
+RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-2108-night
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  00:34:30
+   Duration  14.60s (transform 731ms, setup 28ms, import 1.14s, tests 13.33s, environment 0ms)
+```
+
+## Retained API observations
+
+[Authenticated turn events and metrics](clankie://evidence/sha256/a5867cf53c8e728278093f8d9585beeb0d4dbe89ffccd8ddf3c2dfbaece2e8a8) and [controlled provider requests](clankie://evidence/sha256/9eaf9a24aa42d95dca5c751f3f4ebc05e49b2db5625f27724afaf25063a63540) come from the production source service, Pi transport and durable journal against an owned streaming provider. They prove integration behavior, not cloud model quality or commercial billing. The provider never receives real owner context or a paid credential.

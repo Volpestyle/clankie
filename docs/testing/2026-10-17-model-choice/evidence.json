@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "provider-requests.json",
+      "size": 75927,
+      "sha256": "9eaf9a24aa42d95dca5c751f3f4ebc05e49b2db5625f27724afaf25063a63540",
+      "url": "clankie://evidence/sha256/9eaf9a24aa42d95dca5c751f3f4ebc05e49b2db5625f27724afaf25063a63540"
+    },
+    {
+      "path": "turn-events.json",
+      "size": 67336,
+      "sha256": "a5867cf53c8e728278093f8d9585beeb0d4dbe89ffccd8ddf3c2dfbaece2e8a8",
+      "url": "clankie://evidence/sha256/a5867cf53c8e728278093f8d9585beeb0d4dbe89ffccd8ddf3c2dfbaece2e8a8"
+    }
+  ]
+}
