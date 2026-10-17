@@ -135,6 +135,7 @@ it("launches an approved Windows workspace through the real conversation store w
           name: "KH2",
           trackerProjectId: ownProject.id,
           workspaces: [{ id: "pc", machineId: "pc", platform: "windows", path: cwd }],
+          worktreeRoots: [],
           roles: [],
           labelRoleMap: [],
           grants: [],
