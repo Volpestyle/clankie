@@ -32,6 +32,7 @@ import { deployHoldPresence } from "../src/deploy-hold-presence.ts";
 import { createIntegrationRoutes } from "../src/integrate-routes.ts";
 import { runIntegrationCommand } from "../../tui/src/command/integrate.ts";
 import { fixtureWork, withFixtureWork } from "../../../scripts/testing/fixture-work.ts";
+import { fixtureGovernor } from "../../../scripts/testing/fixture-governor.ts";
 
 // Keep the real kernel proof, including every pre-deletion recheck. Churn is
 // unknown, never deletion authority; wait boundedly for a complete observation.
@@ -180,14 +181,20 @@ ${typeof extra === "function" ? extra(root) : extra}
     const app = withApp ? await repo("app") : undefined;
     const directory = join(root, "integration");
     const holds = new DeployHolds(directory);
+    // The enclosing check owns the host permit. These fixtures exercise real
+    // Git, locks and native runners, rather than ambient machine pressure.
+    const work = fixtureWork();
+    const governor = fixtureGovernor(join(root, "resources"), work.signal);
+    cleanups.push(() => governor.close());
     const rawQueue = new IntegrationQueue({
       directory,
       core: core.source,
       ...(app ? { app: app.source } : {}),
+      governor: () => governor,
     });
     queues.push(rawQueue);
     const queue = fixtureWork().wrap(rawQueue);
-    return { root, core, app, directory, holds, queue };
+    return { root, core, app, directory, holds, queue, governor };
   });
 }
 async function commit(source: string, file: string, value: string) {
@@ -199,6 +206,27 @@ async function commit(source: string, file: string, value: string) {
 const guard = async () => {
   fixtureWork().signal.throwIfAborted();
 };
+
+it("cancels a queued native gate before draining its expired fixture", async () => {
+  const f = await fixture();
+  const policy = (await f.governor.snapshot()).policy;
+  // Refuse admission through the real policy/journal boundary; no runner may start.
+  await f.governor.configure({ ...policy, minAvailableMemoryMb: 1_048_576 });
+  const change = await commit(f.core.source, "feature", "queued");
+  await f.queue.start(IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [change] }), guard);
+  let finished = false;
+  const waiting = f.queue.wait().finally(() => (finished = true));
+  try {
+    await until(async () => (await f.governor.snapshot()).queue.length === 1);
+    fixtureWork().stop();
+    await expect.poll(() => finished, { timeout: 3_000 }).toBe(true);
+    await waiting;
+    expect(await f.governor.snapshot()).toMatchObject({ queue: [], leases: [] });
+  } finally {
+    await f.governor.close();
+    await waiting;
+  }
+});
 
 it("composes in order on fresh origin, installs real siblings, gates privately and durably reloads exact HEAD", async () => {
   const f = await fixture(

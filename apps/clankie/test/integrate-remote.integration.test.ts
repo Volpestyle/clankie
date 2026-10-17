@@ -5,16 +5,29 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, aroundEach, expect, it } from "vitest";
 import { IntegrationRunSchema } from "@clankie/protocol/integrate";
 import { IntegrationQueue } from "../src/integrate.ts";
 import { gitBundle, wslGateRunner } from "../src/integrate-remote.ts";
+import { fixtureGovernor } from "../../../scripts/testing/fixture-governor.ts";
+import { fixtureWork, withFixtureWork } from "../../../scripts/testing/fixture-work.ts";
 
 const execute = promisify(execFile);
 const roots: string[] = [];
+const governors: ReturnType<typeof fixtureGovernor>[] = [];
+const queues: IntegrationQueue[] = [];
+aroundEach(withFixtureWork);
 afterEach(async () => {
+  fixtureWork().stop();
+  await Promise.all(governors.splice(0).map((governor) => governor.close()));
+  await Promise.all(queues.splice(0).map((queue) => queue.wait()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+function createQueue(options: ConstructorParameters<typeof IntegrationQueue>[0]) {
+  const queue = new IntegrationQueue(options);
+  queues.push(queue);
+  return queue;
+}
 const git = async (directory: string, ...args: string[]) =>
   (await execute("git", ["-c", "core.hooksPath=/dev/null", "-C", directory, ...args])).stdout.trim();
 const guard = async () => {};
@@ -29,9 +42,10 @@ it("remote stdout and stderr reset the silence deadline without losing the exact
     await new Promise(resolve => setTimeout(resolve, 3500)); clearInterval(pulse);
   }\n${original}`,
   );
-  const queue = new IntegrationQueue({
+  const queue = createQueue({
     directory: join(f.root, "integration"),
     core: f.source,
+    governor: () => f.governor,
     remoteExecutionTimeoutMs: 30_000,
     remoteNoOutputTimeoutMs: 3_000,
     placeGate: async (batch) =>
@@ -68,9 +82,10 @@ it.each(["silent", "chatty", "report"] as const)(
     const started = new Promise<void>((resolve) => {
       ready = resolve;
     });
-    const queue = new IntegrationQueue({
+    const queue = createQueue({
       directory: join(f.root, "integration"),
       core: f.source,
+      governor: () => f.governor,
       remoteExecutionTimeoutMs: 5_000,
       remotePreparationTimeoutMs: 5_000,
       remoteNoOutputTimeoutMs: mode === "silent" ? 1_000 : 2_000,
@@ -162,6 +177,8 @@ it.each(["silent", "chatty", "report"] as const)(
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-remote-gate-")));
   roots.push(root);
+  const governor = fixtureGovernor(join(root, "resources"), fixtureWork().signal);
+  governors.push(governor);
   const source = join(root, "clankie");
   const origin = join(root, "clankie.git");
   await mkdir(source);
@@ -214,16 +231,17 @@ console.log('gated-in', process.env.HOME);
     await git(source, "commit", "-m", file);
     return git(source, "rev-parse", "HEAD");
   };
-  return { root, source, origin, machine, stream, commit };
+  return { root, source, origin, machine, stream, commit, governor };
 }
 
 it("a core batch gates on the linked machine at its exact HEAD, recorded as a local gate is, and lands from here", async () => {
   const f = await fixture();
   const change = await f.commit("feature", "remote");
   const placed: string[] = [];
-  const queue = new IntegrationQueue({
+  const queue = createQueue({
     directory: join(f.root, "integration"),
     core: f.source,
+    governor: () => f.governor,
     placeGate: async (batch) => {
       placed.push(batch.id);
       return wslGateRunner({
@@ -279,9 +297,10 @@ it("a bundle stages on the linked machine even when its stdin EOF never arrives"
     child.once("close", () => stdin.destroy());
     return child;
   };
-  const queue = new IntegrationQueue({
+  const queue = createQueue({
     directory: join(f.root, "integration"),
     core: f.source,
+    governor: () => f.governor,
     remotePreparationTimeoutMs: 30_000,
     placeGate: async (batch) =>
       wslGateRunner({
@@ -305,9 +324,10 @@ it("a bundle stages on the linked machine even when its stdin EOF never arrives"
 it("a linked machine that cannot take the batch leaves the gate here, with the reason recorded", async () => {
   const f = await fixture();
   const change = await f.commit("feature", "local");
-  const queue = new IntegrationQueue({
+  const queue = createQueue({
     directory: join(f.root, "integration"),
     core: f.source,
+    governor: () => f.governor,
     placeGate: async (batch) =>
       wslGateRunner({
         machine: "pc",
@@ -337,9 +357,10 @@ it("a linked machine's green that skipped darwin-only tests gates again here, ke
     "darwin-only.test.ts",
     'it.skipIf(process.platform !== "darwin")("mac only", () => {});\n',
   );
-  const queue = new IntegrationQueue({
+  const queue = createQueue({
     directory: join(f.root, "integration"),
     core: f.source,
+    governor: () => f.governor,
     placeGate: async (batch) =>
       wslGateRunner({
         machine: "pc",
@@ -395,9 +416,10 @@ it.each(["placement", "stage"])(
       return child;
     };
     let placements = 0;
-    const queue = new IntegrationQueue({
+    const queue = createQueue({
       directory: join(f.root, "integration"),
       core: f.source,
+      governor: () => f.governor,
       remotePreparationTimeoutMs: 5_000,
       remoteCleanupTimeoutMs: 100,
       placeGate: async (batch, signal) => {
