@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CLANKIE_ACCOUNT_PROVIDER_ID, FileCredentialStore } from "@clankie/credential-broker";
-import { AccountsResponseSchema } from "@clankie/protocol/accounts";
+import {
+  ACCOUNT_EMAIL_CONNECT_PATH,
+  AccountEmailConnectResultSchema,
+  AccountsResponseSchema,
+} from "@clankie/protocol/accounts";
 import { HOSTED_MAIL_ACCOUNT_PATH, HostedMailRequestSchema } from "@clankie/protocol/hosted-mail";
 import { SettingsStore } from "@clankie/settings";
 import { createAccountRoutes } from "../src/account-routes.ts";
@@ -114,7 +118,15 @@ async function setup(options: { signedIn: boolean; token?: string }) {
     AccountsResponseSchema.parse(await (await routes.request("/v1/accounts")).json()).connections.find(
       (connection) => connection.provider === "email",
     );
-  return { email, settings, service, row };
+  const connect = async (body: unknown = {}) => {
+    const response = await routes.request(ACCOUNT_EMAIL_CONNECT_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, result: AccountEmailConnectResultSchema.parse(await response.json()) };
+  };
+  return { email, settings, service, row, connect };
 }
 
 describe("his Clankie mailbox", () => {
@@ -164,6 +176,85 @@ describe("his Clankie mailbox", () => {
       reason: "sign_in_rejected",
     });
     expect(await lapsed.row()).toMatchObject({ status: "reconnect_required", reason: "sign_in_rejected" });
+  });
+
+  it("switches an owner from his IMAP mailbox to the Clankie one in one call any surface can make", async () => {
+    const { email, settings, connect } = await setup({ signedIn: true });
+    const imap = {
+      imapHost: "imap.example.com",
+      username: "owner@example.com",
+      fromAddress: "owner@example.com",
+    };
+    await settings.update((current) => ({
+      ...current,
+      email: { ...current.email, ...imap, provider: "imap" },
+    }));
+
+    expect(await connect({ provider: "imap" })).toEqual({
+      status: 400,
+      result: { ok: false, error: "malformed" },
+    });
+    expect((await settings.load()).email).toMatchObject({
+      provider: "imap",
+      fromAddress: "owner@example.com",
+    });
+
+    // The answer is the row after the switch: his Clankie address, from the service's first answer.
+    expect(await connect()).toMatchObject({
+      status: 200,
+      result: { ok: true, connection: { provider: "email", status: "connected", account: ADDRESS } },
+    });
+    // His IMAP server stays configured for a switch back; only the signing address changes.
+    expect((await settings.load()).email).toMatchObject({
+      provider: "clankie",
+      fromAddress: ADDRESS,
+      imapHost: "imap.example.com",
+      username: "owner@example.com",
+    });
+    await expect(email.list()).resolves.toMatchObject({ outcome: "ok", messages: [{ subject: "Welcome" }] });
+  });
+
+  it("refuses the switch when the mail service rejects his Clankie account, and keeps his IMAP mailbox", async () => {
+    const { settings, connect } = await setup({ signedIn: true, token: "expired-token" });
+    const imap = {
+      imapHost: "imap.example.com",
+      username: "owner@example.com",
+      fromAddress: "owner@example.com",
+    };
+    await settings.update((current) => ({
+      ...current,
+      email: { ...current.email, ...imap, provider: "imap" },
+    }));
+
+    expect(await connect()).toEqual({ status: 400, result: { ok: false, error: "account_required" } });
+    expect((await settings.load()).email).toMatchObject({ provider: "imap", ...imap });
+  });
+
+  it("keeps his address when the owner connects again right after reading the row", async () => {
+    const { settings, row, connect } = await setup({ signedIn: true });
+    expect(await row()).toMatchObject({ status: "connected", account: ADDRESS });
+    expect(await connect()).toMatchObject({
+      status: 200,
+      result: { ok: true, connection: { account: ADDRESS } },
+    });
+    expect((await settings.load()).email).toMatchObject({ provider: "clankie", fromAddress: ADDRESS });
+  });
+
+  it("refuses the switch on an install with no Clankie account, and leaves his IMAP mailbox alone", async () => {
+    const { settings, service, connect } = await setup({ signedIn: false });
+    const imap = {
+      imapHost: "imap.example.com",
+      username: "owner@example.com",
+      fromAddress: "owner@example.com",
+    };
+    await settings.update((current) => ({
+      ...current,
+      email: { ...current.email, ...imap, provider: "imap" },
+    }));
+
+    expect(await connect()).toEqual({ status: 400, result: { ok: false, error: "account_required" } });
+    expect((await settings.load()).email).toMatchObject({ provider: "imap", ...imap });
+    expect(service.requests).toEqual([]);
   });
 
   it("leaves an owner's own IMAP mailbox in charge when one is configured", async () => {

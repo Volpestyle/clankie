@@ -346,6 +346,7 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  accounts [list] | connect github|linear | complete linear --json-stdin | disconnect github|linear   Body account connections (JSON)",
       "  accounts start github | poll github --flow-id ID   Start and check GitHub device authorization separately",
+      "  accounts connect email   Choose his Clankie mailbox in one step (needs a Clankie account sign-in)",
       "  accounts connect linear-app --client-id ID --secret-stdin   Connect a workspace-owned Clankie app",
       "  accounts codex [list | add HOME --label LABEL | remove LABEL]   Local Codex homes and headroom",
       "  accounts claude [list | add HOME --label LABEL | remove LABEL]   Register existing local Claude profiles",

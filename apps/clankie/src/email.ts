@@ -59,7 +59,8 @@ type MailboxStatus =
       readonly checkedAt: string;
     };
 
-export type EmailPort = {
+/** One mail backend: the owner's IMAP server or his Clankie mailbox. */
+type MailBackend = {
   status(): Promise<MailboxStatus>;
   /** Forgets the stored sign-in; host settings stay for a reconnect. */
   disconnect(): Promise<void>;
@@ -77,6 +78,15 @@ export type EmailPort = {
     subject: string;
     text: string;
   }): Promise<{ outcome: "ok"; messageId: string } | EmailRefusal>;
+};
+
+export type EmailPort = MailBackend & {
+  /**
+   * Choose his Clankie mailbox (ADR 0242): the one step behind `/connect email`
+   * and the account API. Refused, with settings untouched, unless Clankie's mail
+   * service answers this install's Clankie account with his address first.
+   */
+  useClankieMailbox(): Promise<"ok" | "unconfigured" | "unavailable" | "account_required">;
 };
 
 type ImapSession = {
@@ -125,7 +135,7 @@ export function createEmailPort(options: {
 }): EmailPort {
   const imap = createImapPort(options);
   const hosted = options.hosted === undefined ? undefined : createHostedPort(options.hosted, options);
-  async function backend(): Promise<EmailPort> {
+  async function backend(): Promise<MailBackend> {
     const email = (await options.settings.load()).email;
     if (email.provider === "imap" || hosted === undefined) return imap;
     if (email.provider === "clankie") return hosted;
@@ -140,13 +150,28 @@ export function createEmailPort(options: {
     read: async (uid, folder) => (await backend()).read(uid, folder),
     search: async (query, input) => (await backend()).search(query, input),
     send: async (input) => (await backend()).send(input),
+    async useClankieMailbox() {
+      if (options.hosted === undefined || hosted === undefined) return "unconfigured";
+      if (!(await options.hosted.available())) return "account_required";
+      // Ask the service before switching: an expired or unprovisioned account must not
+      // take an owner off a working IMAP mailbox.
+      const status = await hosted.probe();
+      if (status.state === "unavailable") return "unavailable";
+      if (status.state !== "connected") return "account_required";
+      // His Clankie address replaces one set for an IMAP mailbox, which would sign his mail wrongly.
+      await options.settings.update((current) => ({
+        ...current,
+        email: { ...current.email, provider: "clankie", fromAddress: status.address },
+      }));
+      return "ok";
+    },
   };
 }
 
 function createHostedPort(
   mailbox: HostedMailbox,
   options: { settings: SettingsStore; now?: () => number },
-): EmailPort {
+): MailBackend & { probe(): Promise<MailboxStatus> } {
   const now = options.now ?? Date.now;
   let observed:
     | { readonly address?: string; readonly status: MailboxStatus; readonly at: number }
@@ -222,11 +247,18 @@ function createHostedPort(
       detail: "his Clankie mailbox has two folders: INBOX and Sent",
     };
 
+  async function status(): Promise<MailboxStatus> {
+    if (observed === undefined || now() - observed.at > STATUS_FRESH_MS)
+      await call(hostedMailParsers.status, { op: "status" });
+    return observed?.status ?? { state: "not_connected" };
+  }
+
   return {
-    async status() {
-      if (observed === undefined || now() - observed.at > STATUS_FRESH_MS)
-        await call(hostedMailParsers.status, { op: "status" });
-      return observed?.status ?? { state: "not_connected" };
+    status,
+    /** A fresh exchange with the mail service, whichever mailbox is chosen now. */
+    async probe() {
+      observed = undefined;
+      return status();
     },
     async disconnect() {
       // The address belongs to the account; choosing IMAP is how an owner stops using it.
@@ -313,7 +345,7 @@ function createImapPort(options: {
   settings: SettingsStore;
   adapters?: EmailAdapters;
   now?: () => number;
-}): EmailPort {
+}): MailBackend {
   const adapters = options.adapters ?? defaultEmailAdapters();
   const now = options.now ?? Date.now;
   let observed:

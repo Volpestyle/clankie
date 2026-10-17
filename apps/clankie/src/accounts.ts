@@ -17,6 +17,7 @@ import {
 import type {
   AccountConnection,
   AccountDisconnectResult,
+  AccountEmailConnectResult,
   AccountGithubPollResult,
   AccountGithubStartResult,
   AccountLinearCompleteResult,
@@ -79,6 +80,8 @@ export interface AccountsPort {
     guard?: () => Promise<void>,
   ): Promise<AccountLinearCompleteResult>;
   disconnect(provider: AccountProvider, guard?: () => Promise<void>): Promise<AccountDisconnectResult>;
+  /** Choose his Clankie mailbox (ADR 0242) and return the `email` row it now shows. */
+  connectMailbox(guard?: () => Promise<void>): Promise<AccountEmailConnectResult>;
 }
 
 export interface AccountsOptions {
@@ -87,7 +90,7 @@ export interface AccountsOptions {
   readonly hosted?: boolean;
   readonly store: CredentialStore;
   /** His mailbox (`/connect email`); listed with its last observed sign-in. */
-  readonly mailbox?: Pick<EmailPort, "status" | "disconnect">;
+  readonly mailbox?: Pick<EmailPort, "status" | "disconnect" | "useClankieMailbox">;
   /** Read for every request, so a client ID set with the CLI applies without a restart. */
   readonly apps: () => Promise<OauthApps>;
   readonly fetch?: typeof fetch;
@@ -556,6 +559,14 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
       return { ok: true, connection: await linearConnection(await options.apps()) };
     },
 
+    async connectMailbox(guard) {
+      if (options.mailbox === undefined) return { ok: false, error: "unconfigured" };
+      await guard?.();
+      const outcome = await options.mailbox.useClankieMailbox();
+      if (outcome !== "ok") return { ok: false, error: outcome };
+      return { ok: true, connection: await mailboxConnection(options.mailbox) };
+    },
+
     async disconnect(provider, guard) {
       if (provider === "email") {
         if (options.mailbox === undefined) return { ok: false, error: "unconfigured" };
@@ -634,5 +645,6 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
       serialize("linear", () => service.completeLinear(state, code, guard)),
     connectLinearApp: (client, guard) => serialize("linear", () => service.connectLinearApp(client, guard)),
     disconnect: (provider, guard) => serialize(provider, () => service.disconnect(provider, guard)),
+    connectMailbox: (guard) => serialize("email", () => service.connectMailbox(guard)),
   };
 }

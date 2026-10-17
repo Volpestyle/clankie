@@ -17,7 +17,7 @@ import {
   type RedactedCredential,
 } from "@clankie/credential-broker";
 import { LINEAR_WEBHOOK_PATH } from "@clankie/protocol/public-gateway";
-import { AccountsResponseSchema } from "@clankie/protocol/accounts";
+import { AccountEmailConnectResultSchema, type AccountConnection } from "@clankie/protocol/accounts";
 import { runLinearCommand } from "./command/linear.ts";
 import { describeRedactedCredential, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
@@ -752,25 +752,29 @@ async function connectLinearApplication(
  */
 async function connectClankieMailbox(shell: ClankieFaceShell, services: ConnectCommandServices) {
   const flow = shell.setupFlow;
-  if ((await services.getCredential(CLANKIE_ACCOUNT_PROVIDER_ID))?.type !== "oauth") {
+  const signInFirst = () =>
     flow.renderLine(
       "Sign this install in to a Clankie account first: run clankie login, then /connect email.",
       "error",
     );
-    return;
+  let mailbox: AccountConnection | undefined;
+  if (services.accounts !== undefined) {
+    // The same account API the app and every other surface use (ADR 0242).
+    const result = AccountEmailConnectResultSchema.safeParse(await services.accounts(["connect", "email"]));
+    if (result.success && !result.data.ok && result.data.error === "account_required") return signInFirst();
+    if (!result.success || !result.data.ok) {
+      flow.renderLine("Clankie's mailbox could not be chosen. Check clankie accounts list.", "error");
+      return;
+    }
+    mailbox = result.data.connection;
+  } else {
+    if ((await services.getCredential(CLANKIE_ACCOUNT_PROVIDER_ID))?.type !== "oauth") return signInFirst();
+    await services.settings.update((current) => {
+      // A from-address set for an IMAP mailbox would sign Clankie mail with the wrong name.
+      const { fromAddress: _imapIdentity, ...email } = current.email;
+      return { ...current, email: { ...email, provider: "clankie" } };
+    });
   }
-  await services.settings.update((current) => {
-    // A from-address set for an IMAP mailbox would sign Clankie mail with the wrong name.
-    const { fromAddress: _imapIdentity, ...email } = current.email;
-    return { ...current, email: { ...email, provider: "clankie" } };
-  });
-  const listed =
-    services.accounts === undefined
-      ? undefined
-      : AccountsResponseSchema.safeParse(await services.accounts([]));
-  const mailbox = listed?.success
-    ? listed.data.connections.find((item) => item.provider === "email")
-    : undefined;
   if (mailbox?.status === "connected") {
     shell.insertCommandResult(
       "/connect email",

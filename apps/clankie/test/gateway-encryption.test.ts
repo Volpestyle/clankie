@@ -427,6 +427,7 @@ it("carries account-connection codes only in the encrypted envelope and never re
     startLinear: async () => ({ ok: false, error: "unconfigured" }),
     completeLinear,
     disconnect: async () => ({ ok: true, revoked: true }),
+    connectMailbox: async () => ({ ok: false, error: "unconfigured" }),
   };
   const state = "s".repeat(32);
   for (const grants of [SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS]) {

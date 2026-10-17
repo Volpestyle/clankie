@@ -5,6 +5,7 @@ import { runClaudeAccountsCommand } from "./claude-accounts.ts";
 import { runCodexAccountsCommand } from "./codex-accounts.ts";
 import { text } from "node:stream/consumers";
 import {
+  ACCOUNT_EMAIL_CONNECT_PATH,
   AccountGithubPollRequestSchema,
   AccountGithubPollResultSchema,
   AccountGithubStartResultSchema,
@@ -16,7 +17,6 @@ import {
   AccountGoogleStartResultSchema,
   AccountGoogleCompleteRequestSchema,
   AccountGoogleCompleteResultSchema,
-  AccountsResponseSchema,
   GoogleAccountProviderSchema,
 } from "@clankie/protocol/accounts";
 import {
@@ -228,23 +228,10 @@ export async function runAccountsCommand(
     if (!parsed.success) throw new Error("Invalid Linear app credentials");
     return request("/v1/accounts/linear/app", parsed.data);
   }
-  if (args.length === 2 && args[0] === "connect" && args[1] === "email") {
+  if (args.length === 2 && args[0] === "connect" && args[1] === "email")
     // His Clankie mailbox (ADR 0242): the install's account authorizes it, so
-    // connecting is choosing it. A hosted body already uses it.
-    if (!options.request) {
-      const settings = options.settings ?? new SettingsStore(defaultSettingsPath(env));
-      await settings.update((current) => {
-        const { fromAddress: _imapIdentity, ...email } = current.email;
-        return { ...current, email: { ...email, provider: "clankie" as const } };
-      });
-    }
-    const listed = AccountsResponseSchema.safeParse(await request("/v1/accounts"));
-    const connection = listed.success
-      ? listed.data.connections.find((item) => item.provider === "email")
-      : undefined;
-    if (connection === undefined) throw new Error("Mailbox status unavailable");
-    return { ok: connection.status === "connected", connection };
-  }
+    // connecting is choosing it, through the same API every surface uses.
+    return request(ACCOUNT_EMAIL_CONNECT_PATH, {});
   if (
     args.length === 2 &&
     args[0] === "disconnect" &&

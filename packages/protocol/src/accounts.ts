@@ -13,6 +13,8 @@ export const ACCOUNT_LINEAR_START_PATH = "/v1/accounts/linear/start";
 export const ACCOUNT_LINEAR_COMPLETE_PATH = "/v1/accounts/linear/complete";
 export const ACCOUNT_LINEAR_APP_PATH = "/v1/accounts/linear/app";
 export const ACCOUNT_DISCONNECT_PATH = "/v1/accounts/disconnect";
+/** Choose his Clankie mailbox (ADR 0242). The install's Clankie account authorizes it, so it is one step. */
+export const ACCOUNT_EMAIL_CONNECT_PATH = "/v1/accounts/email/connect";
 export const ACCOUNT_GOOGLE_START_PATH = "/v1/accounts/google/start";
 export const ACCOUNT_GOOGLE_COMPLETE_PATH = "/v1/accounts/google/complete";
 export const ACCOUNT_GOOGLE_CHECK_PATH = "/v1/accounts/google/check";
@@ -51,6 +53,7 @@ export const AccountLinearCompleteRequestSchema = z
   })
   .strict();
 export const AccountDisconnectRequestSchema = z.object({ provider: AccountProviderSchema }).strict();
+export const AccountEmailConnectRequestSchema = z.object({}).strict();
 
 /** What a connection may show: who, which scopes, since when. Never a token, prefix or suffix. */
 export const AccountConnectionSchema = z
@@ -118,6 +121,8 @@ const Failure = z
       "denied",
       "provider_rejected",
       "unavailable",
+      /** His Clankie mailbox needs this install signed in to a Clankie account first (`clankie login`). */
+      "account_required",
     ]),
   })
   .strict();
@@ -171,6 +176,10 @@ export const AccountLinearCompleteResultSchema = z.discriminatedUnion("ok", [
   Failure,
 ]);
 export type AccountLinearCompleteResult = z.infer<typeof AccountLinearCompleteResultSchema>;
+
+/** The `email` row after the switch, with the status of its first real exchange. */
+export const AccountEmailConnectResultSchema = AccountLinearCompleteResultSchema;
+export type AccountEmailConnectResult = AccountLinearCompleteResult;
 
 export const AccountDisconnectResultSchema = z.discriminatedUnion("ok", [
   z

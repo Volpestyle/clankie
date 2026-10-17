@@ -174,6 +174,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/accounts/linear/complete",
       "/v1/accounts/linear/app",
       "/v1/accounts/disconnect",
+      "/v1/accounts/email/connect",
       "/v1/accounts/google/start",
       "/v1/accounts/google/complete",
       "/v1/accounts/google/check",

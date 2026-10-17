@@ -2239,9 +2239,13 @@ when it could not be reached. The mailbox is his Clankie address on Clankie's
 mail service ([ADR 0242](adr/0242-every-clankie-has-a-mailbox-we-run.md)), or
 the owner's own IMAP/SMTP server. A hosted body has the Clankie address with no
 setup. On a self-hosted install signed in to a Clankie account,
-`accounts connect email` (or `/connect email` → Clankie mailbox) chooses it in
-one step and returns the row; `settings.email.provider` records `clankie` or
-`imap`, and unset means a configured IMAP server wins. Sends through the Clankie
+`accounts connect email` (or `/connect email` → Clankie mailbox, or the app's
+Connect Email) chooses it in one step through `POST /v1/accounts/email/connect`
+and returns the row. It asks the mail service first: without a Clankie account,
+or when the service refuses it, it answers `account_required` (`unavailable` when
+the service can't be reached) and changes nothing. `settings.email.provider` records `clankie` or `imap`, and
+unset means a configured IMAP server wins; a stored IMAP password is kept for a
+switch back. Sends through the Clankie
 mailbox have hourly, daily and different-recipient limits; a refusal at one is
 `limit_reached` and names it. `accounts disconnect email` forgets a stored IMAP
 password (`revoked: false`; an app password is withdrawn at the provider) or
