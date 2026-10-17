@@ -124,7 +124,7 @@ Remote agents use the per-fleet link and native adapters.
 `SeatLaunch.resumeSessionId` continues an exact session in the native view.
 The normal hire path resolves its transcript, reuses a live seat on that host,
 and confirms native identity before delivering a brief. Transcript hosts remain
-read-only. See [native continuation](../../docs/adr/0189-agent-sessions-read-from-their-transcripts.md#native-continuation)
+read-only. See [native continuation](../../docs/adr/0276-agent-sessions-read-from-their-transcripts.md#native-continuation)
 for host matching, original Codex account selection, and uncertain-start behavior.
 
 An adapter contract is not proof of restart recovery: the current Codex adapter's

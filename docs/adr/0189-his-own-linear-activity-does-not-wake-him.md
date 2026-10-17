@@ -2,7 +2,7 @@
 
 Status: accepted (James, 2026-09-25, VUH-1362). Amends [ADR 0168](0168-linear-awareness-is-opt-in.md).
 Amended by [ADR 0214](0214-linear-wakes-require-attribution-and-rules.md): attributed notifications and configurable wake rules replace the unconditional self filter and unknown-actor wakes.
-Amended by [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md).
+Amended by [ADR 0277](0277-a-reply-to-his-post-goes-to-whoever-owns-the-work.md).
 Amended 2026-09-30 (VUH-1382): the pre-wake compaction below is retired. Pi's
 fixed prompt, tools and skills already exceeded 30k, so every wake spent minutes
 compacting to the same size, and since 2026-09-27 wakes reach the main

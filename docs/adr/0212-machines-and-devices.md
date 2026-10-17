@@ -7,7 +7,7 @@ and real Mac/Windows captures remain pending (VUH-1800). `join` is decided by
 [ADR 0244](0244-machines-join-clankie-at-an-access-level.md), which also adds
 per-machine access levels. Amends the onboarding and writer sections of
 [ADR 0184](0184-clankie-leads-more-than-one-fleet.md) and the agent-host list of
-[ADR 0189](0189-agent-sessions-read-from-their-transcripts.md). The connection
+[ADR 0276](0276-agent-sessions-read-from-their-transcripts.md). The connection
 contract of [ADR 0181](0181-clankie-is-independent-of-his-connections.md), the
 binding rules of [ADR 0157](0157-herdr-is-an-owned-runtime.md) and
 [ADR 0172](0172-herdr-sessions-follow-official-releases.md), and pairing in

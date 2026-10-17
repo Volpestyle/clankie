@@ -67,7 +67,7 @@ subscribers as it happens, so its retention stays at zero. What a possessor then
 holds is bounded, its own, and discarded when the lease ends. Nothing captured
 outside the existing consent registry crosses the seam, and raw audio never
 does. Which lines qualify is widened by
-[ADR 0098 (room text)](0098-the-room-can-type-to-a-playthrough.md) to include admitted text;
+[ADR 0275](0275-the-room-can-type-to-a-playthrough.md) to include admitted text;
 the retention floor and the audio fence are unchanged.
 
 ### Rate-limiting narration, not narration's content

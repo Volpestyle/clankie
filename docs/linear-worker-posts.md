@@ -4,7 +4,7 @@ Clankie connects one workspace-owned Linear app. A worker's issue or comment
 shows its existing fleet name and colored Clankie portrait, **via Clankie**.
 These are author appearances on posts, not separate email accounts, seats,
 assignees, or mentionable Linear users. Regular updates use the app identity.
-[ADR 0207](adr/0207-workers-publish-through-one-clankie-app.md) records the choice.
+[ADR 0278](adr/0278-workers-publish-through-one-clankie-app.md) records the choice.
 
 ## Connect the application
 

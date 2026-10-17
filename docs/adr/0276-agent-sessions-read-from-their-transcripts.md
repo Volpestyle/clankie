@@ -1,4 +1,7 @@
-# ADR 0189: Agent sessions read from their transcripts, on any host
+# ADR 0276: Agent sessions read from their transcripts, on any host
+
+Formerly ADR 0189; renumbered 2026-10-17 ([VUH-2396](https://linear.app/vuhlp/issue/VUH-2396)) to end a
+number collision ([renumbered records](README.md#renumbered-records)).
 
 Status: proposed (Claude and Codex, 2026-09-25). Step 2 (resumed turns) retired
 2026-09-30 under [ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md):

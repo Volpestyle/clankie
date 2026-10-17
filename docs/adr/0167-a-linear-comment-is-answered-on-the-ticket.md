@@ -2,7 +2,7 @@
 
 Status: accepted. Activity awareness follows
 [ADR 0168](0168-linear-awareness-is-opt-in.md). Replies to his own posts are routed
-to the work's owner by [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md).
+to the work's owner by [ADR 0277](0277-a-reply-to-his-post-goes-to-whoever-owns-the-work.md).
 
 ## Context
 

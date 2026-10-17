@@ -1,4 +1,7 @@
-# ADR 0098: The room can type to a playthrough
+# ADR 0275: The room can type to a playthrough
+
+Formerly ADR 0098; renumbered 2026-10-17 ([VUH-2396](https://linear.app/vuhlp/issue/VUH-2396)) to end a
+number collision ([renumbered records](README.md#renumbered-records)).
 
 Status: accepted (James, 2026-08-15). Amends
 [ADR 0064](0064-possessor-voice-seam.md), whose hearing half carried voice

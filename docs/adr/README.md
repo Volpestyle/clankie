@@ -18,21 +18,30 @@ below identifies decisions whose former implementation or scope is historical.
   phrasing to [retired-claims.json](retired-claims.json). `pnpm docs:check` then
   fails wherever live code, skills or guides still repeat it.
 - Link ADRs by stable filename, not by number alone. Accepted ADRs are never
-  renumbered.
+  renumbered, except once to end the four historical collisions below.
 - Allocate the next unused number after checking fetched main. `pnpm docs:check` and
-  `pnpm check:landing` reject duplicate numbers, except the exact historical pairs below.
-- Numbers 0098, 0189, 0191 and 0207 each identify two records. Use these disambiguating aliases:
+  `pnpm check:landing` reject duplicate numbers.
 
-| Alias                          | Stable record                                                                                                  |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| ADR 0098 (room text)           | [The room can type to a playthrough](0098-the-room-can-type-to-a-playthrough.md)                               |
-| ADR 0098 (user-session shares) | [The lab user body watches Discord shares through ClankVox](0098-user-session-watches-discord-shares.md)       |
-| ADR 0189 (agent sessions)      | [Agent sessions read from their transcripts](0189-agent-sessions-read-from-their-transcripts.md)               |
-| ADR 0189 (Linear echoes)       | [His own Linear activity does not wake him](0189-his-own-linear-activity-does-not-wake-him.md)                 |
-| ADR 0191 (reply routing)       | [A reply to his post goes to whoever owns the work](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) |
-| ADR 0191 (work tracking)       | [Work is tracked where the repo tracks it](0191-work-is-tracked-where-the-repo-tracks-it.md)                   |
-| ADR 0207 (native delivery)     | [Work records and native agent delivery](0207-work-records-and-native-agent-delivery.md)                       |
-| ADR 0207 (worker publishing)   | [Workers publish through one Clankie app](0207-workers-publish-through-one-clankie-app.md)                     |
+### Renumbered records
+
+Until 2026-10-17 numbers 0098, 0189, 0191 and 0207 each named two records.
+[VUH-2396](https://linear.app/vuhlp/issue/VUH-2396) moved one of each pair to a
+new number: a proposed record gave way to an accepted one, otherwise the later
+one moved, and the less-cited one when both landed in the same commit. Links and
+citations written before then may use the former number; this table resolves them.
+
+| Former number and file                                           | Now                                                                                                                      |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 0098 `0098-the-room-can-type-to-a-playthrough.md`                | [ADR 0275: The room can type to a playthrough](0275-the-room-can-type-to-a-playthrough.md)                               |
+| 0189 `0189-agent-sessions-read-from-their-transcripts.md`        | [ADR 0276: Agent sessions read from their transcripts](0276-agent-sessions-read-from-their-transcripts.md)               |
+| 0191 `0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md` | [ADR 0277: A reply to his post goes to whoever owns the work](0277-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) |
+| 0207 `0207-workers-publish-through-one-clankie-app.md`           | [ADR 0278: Workers publish through one Clankie app](0278-workers-publish-through-one-clankie-app.md)                     |
+
+The other record of each pair keeps its number:
+[ADR 0098](0098-user-session-watches-discord-shares.md) (user-session shares),
+[ADR 0189](0189-his-own-linear-activity-does-not-wake-him.md) (Linear echoes),
+[ADR 0191](0191-work-is-tracked-where-the-repo-tracks-it.md) (work tracking) and
+[ADR 0207](0207-work-records-and-native-agent-delivery.md) (native delivery).
 
 ## Diagrams
 
@@ -154,7 +163,7 @@ scope is archived; readers should follow the successor for its implementation.
 | [ADR 0059: Lease expiry pauses the body; only revocation is final](0059-lease-expiry-pauses-the-body.md)                | Archived: Possession and cross-process body lock.                        | Internal action/lease recovery is retained in its applicable scope; independent body ownership follows [ADR 0129: Each player owns a body](0129-each-player-owns-a-body.md).             |
 | [ADR 0129: Each player owns a body](0129-each-player-owns-a-body.md)                                                    | Archived: Local emulator body.                                           | Independent player identity remains; the Pokémon body follows [ADR 0145: The world is the only body](0145-the-world-is-the-only-body.md).                                                |
 | [ADR 0170: A session that stops is unbound](0170-a-session-that-stops-is-unbound.md)                                    | Archived: Ambient selection and automatic replacement of a lost session. | Explicit binding and its current CLI contract follow [0181. Clankie is independent of his connections](0181-clankie-is-independent-of-his-connections.md).                               |
-| [ADR 0189: Agent sessions read from their transcripts, on any host](0189-agent-sessions-read-from-their-transcripts.md) | Archived: Headless resumed turns and Swarm identity proposals.           | Transcript reading remains; native interactive work follows [0203 — Clankie keeps what better models cannot absorb](0203-clankie-keeps-what-better-models-cannot-absorb.md).             |
+| [ADR 0276: Agent sessions read from their transcripts, on any host](0276-agent-sessions-read-from-their-transcripts.md) | Archived: Headless resumed turns and Swarm identity proposals.           | Transcript reading remains; native interactive work follows [0203 — Clankie keeps what better models cannot absorb](0203-clankie-keeps-what-better-models-cannot-absorb.md).             |
 | [ADR 0208: Agents carry a role; the world reads it](0208-agents-carry-a-role-the-world-reads-it.md)                     | Archived: Identity-role storage.                                         | Roles move into project policy under [ADR 0216: Projects own agent roles and tool policy](0216-projects-own-agent-roles-and-tool-policy.md).                                             |
 | [ADR 0216: Projects own agent roles and tool policy](0216-projects-own-agent-roles-and-tool-policy.md)                  | Archived: Fleet tool gate tied to project membership.                    | Project roles, caps, hiring, and tracker binding remain; connected tool access follows [ADR 0217: Fleet membership gets connected tools](0217-fleet-membership-gets-connected-tools.md). |
 

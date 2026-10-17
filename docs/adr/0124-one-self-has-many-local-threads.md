@@ -5,7 +5,7 @@ Status: accepted (James, 2026-08-18). Extends
 [ADR 0057](0057-realtime-voice-with-captain-handoff.md) (the realtime room owns
 conversation), [ADR 0118](0118-a-text-room-is-a-durable-lane.md) (text rooms
 are continuing threads), and
-[ADR 0098](0098-the-room-can-type-to-a-playthrough.md) (typed room input is an
+[ADR 0275](0275-the-room-can-type-to-a-playthrough.md) (typed room input is an
 experience available to another body).
 
 ## Current status (2026-08-19)

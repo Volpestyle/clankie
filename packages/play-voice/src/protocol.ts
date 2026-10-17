@@ -49,7 +49,7 @@ export type PlayClientMessage = z.infer<typeof PlayClientMessageSchema>;
  * would force the bridge to retain transcripts, and it retains none.
  *
  * Two sources, one message: a voice-transcript line from inside the consent
- * registry, and — since ADR 0098 — a text message the ingress allowlist already
+ * registry, and — since ADR 0275 — a text message the ingress allowlist already
  * admits. Speaking in the channel he plays in front of and typing in it are the
  * same act, and play cannot tell which it received.
  *

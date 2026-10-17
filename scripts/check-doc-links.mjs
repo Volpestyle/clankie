@@ -33,29 +33,8 @@ const archivedEvidence = async (target) => {
     return false;
   }
 };
-// Stable historical aliases documented in docs/adr/README.md. Match exact
-// filenames so another collision under an old number cannot inherit an exemption.
-const legacyAdrPairs = new Map([
-  [
-    "0207",
-    ["0207-work-records-and-native-agent-delivery.md", "0207-workers-publish-through-one-clankie-app.md"],
-  ],
-  ["0098", ["0098-the-room-can-type-to-a-playthrough.md", "0098-user-session-watches-discord-shares.md"]],
-  [
-    "0189",
-    [
-      "0189-agent-sessions-read-from-their-transcripts.md",
-      "0189-his-own-linear-activity-does-not-wake-him.md",
-    ],
-  ],
-  [
-    "0191",
-    [
-      "0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md",
-      "0191-work-is-tracked-where-the-repo-tracks-it.md",
-    ],
-  ],
-]);
+// Every ADR number names one record; the former collisions were renumbered
+// (docs/adr/README.md, "Renumbered records").
 const adrNumbers = new Map();
 for (const name of (await readdir(resolve(root, "docs/adr"))).sort()) {
   const number = /^(\d{4})-.+\.md$/u.exec(name)?.[1];
@@ -66,7 +45,6 @@ for (const name of (await readdir(resolve(root, "docs/adr"))).sort()) {
 }
 for (const [number, names] of adrNumbers) {
   if (names.length < 2) continue;
-  if (JSON.stringify(names) === JSON.stringify(legacyAdrPairs.get(number))) continue;
   failures.push(`Duplicate ADR ${number}: ${names.join(", ")}`);
 }
 

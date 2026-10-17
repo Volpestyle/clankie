@@ -1,7 +1,7 @@
 # Linear worker appearances and compact handoffs — 2026-10-02
 
 Work: [VUH-1518](https://linear.app/vuhlp/issue/VUH-1518/give-worker-results-compact-handoffs-and-their-clankie-character).
-Decision: [ADR 0207](../../adr/0207-workers-publish-through-one-clankie-app.md).
+Decision: [ADR 0278](../../adr/0278-workers-publish-through-one-clankie-app.md).
 Setup: [worker posts](../../linear-worker-posts.md).
 
 ## Boundary

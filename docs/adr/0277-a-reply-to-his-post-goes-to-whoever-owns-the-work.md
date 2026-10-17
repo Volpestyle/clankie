@@ -1,4 +1,7 @@
-# ADR 0191: A reply to his post goes to whoever owns the work
+# ADR 0277: A reply to his post goes to whoever owns the work
+
+Formerly ADR 0191; renumbered 2026-10-17 ([VUH-2396](https://linear.app/vuhlp/issue/VUH-2396)) to end a
+number collision ([renumbered records](README.md#renumbered-records)).
 
 Status: proposed (VUH-1365; the intent is James's, stated on the issue).
 Amends [ADR 0167](0167-a-linear-comment-is-answered-on-the-ticket.md),

@@ -86,7 +86,7 @@ export interface LinearActivityEvent {
   /** Exact parent update's host-stamped author recipient, correlated from a retained write. */
   readonly replyRecipient?: LinearReplyRecipient | undefined;
   readonly worker?: { grantId: string; principalId: string; workId: string } | undefined;
-  /** Set when another actor comments on content his verified account posted (ADR 0191). */
+  /** Set when another actor comments on content his verified account posted (ADR 0277). */
   readonly replyTo?: LinearReplyTo | undefined;
   readonly actorName: string | undefined;
   readonly actorEmail: string | undefined;

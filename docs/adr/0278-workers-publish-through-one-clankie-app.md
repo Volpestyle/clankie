@@ -1,4 +1,7 @@
-# ADR 0207: Workers publish through one Clankie app
+# ADR 0278: Workers publish through one Clankie app
+
+Formerly ADR 0207; renumbered 2026-10-17 ([VUH-2396](https://linear.app/vuhlp/issue/VUH-2396)) to end a
+number collision ([renumbered records](README.md#renumbered-records)).
 
 Status: accepted (2026-10-02), authorized by James. Extends
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md) and

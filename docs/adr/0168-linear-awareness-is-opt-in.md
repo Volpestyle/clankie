@@ -1,7 +1,7 @@
 # ADR 0168: Linear awareness is opt-in
 
 Status: accepted (James, 2026-09-08, operator conversation). Amended by
-[ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) (headlines name a comment's parent; replies to his posts are routed).
+[ADR 0277](0277-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) (headlines name a comment's parent; replies to his posts are routed).
 
 Amended 2026-10-04 by
 [ADR 0214's VUH-1678 decision](0214-linear-wakes-require-attribution-and-rules.md#amendment--one-ordinary-chat-receives-signed-linear-activity-2026-10-04):
@@ -37,7 +37,7 @@ swarm, including every hired worker. No particular account, email or display
 name is a product default. Following means that connected identity’s notification
 inbox, with no issue-by-issue conversation binding.
 This supersedes the workspace-wide and issue-routed wake behavior below and
-ADR 0191's binding route. Existing bindings remain stored and inspectable but
+ADR 0277's binding route. Existing bindings remain stored and inspectable but
 are inert for wakes; no automatic deletion or rebinding occurs.
 
 Signed workspace webhooks remain passive, durable external history. The service

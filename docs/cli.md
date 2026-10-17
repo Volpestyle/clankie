@@ -4594,7 +4594,7 @@ Clankie reads any Claude Code, Codex, Grok, Pi or Prime Agent session from the
 agent's own transcript, on this machine or an owner-configured SSH host. No
 terminal host is involved: a session in Herdr, tmux, or a bare PowerShell tab
 reads the same way
-([ADR 0189](adr/0189-agent-sessions-read-from-their-transcripts.md)).
+([ADR 0276](adr/0276-agent-sessions-read-from-their-transcripts.md)).
 
 ```sh
 clankie agents hosts add pc --ssh volpe@supedupsilly --shell powershell
