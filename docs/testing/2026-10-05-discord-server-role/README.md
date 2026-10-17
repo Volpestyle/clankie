@@ -4,6 +4,11 @@
 [role decision](../../adr/0227-discord-connects-a-server-with-a-role.md) ·
 [setup contract](../../cli.md#discord-setup)
 
+Historical implementation record. App and dashboard code subsequently landed;
+the [October 17 fixture proof](../2026-10-17-discord-role-fixtures/README.md)
+records the current audit and additional tracking matrix. The live checks below
+remain owner-only and are not claimed by either fixture run.
+
 The core is ready for Pell's integration batch on `feat/vuh-1622` in
 `~/dev/clankie-wt/vuh-1622`. This evidence covers local code and HTTP contracts,
 not live Discord grants. No live messages, bot/application changes, sign-ins or

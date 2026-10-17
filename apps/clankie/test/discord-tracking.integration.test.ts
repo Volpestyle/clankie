@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -365,6 +365,149 @@ async function fixture() {
     },
   };
 }
+
+it.each(["channel", "forum"] as const)(
+  "%s mirrors deliver exactly the selected tracking level through signed HTTP, including milestones and project status",
+  async (mode) => {
+    const f = await fixture();
+    await f.tracking.configureProject("alpha", mode);
+    const outcomes: unknown[] = [];
+    for (const level of ["off", "project_updates", "project_activity", "all_issues"] as const) {
+      await f.settings.update((current) => ({
+        ...current,
+        discord: { ...current.discord, fleetEnabled: false, trackingLevel: level },
+      }));
+      const cases = [
+        {
+          name: "published project update",
+          required: "project_updates",
+          type: "ProjectUpdate",
+          action: "create",
+          data: { id: randomUUID(), projectId: f.projectId },
+        },
+        {
+          name: "project status",
+          required: "project_activity",
+          type: "Project",
+          action: "update",
+          data: { id: f.projectId, name: "Alpha Project", status: { name: "Started" } },
+          extra: { updatedFrom: { statusId: randomUUID() } },
+        },
+        {
+          name: "project milestone",
+          required: "project_activity",
+          type: "ProjectMilestone",
+          action: "create",
+          data: { id: randomUUID(), projectId: f.projectId, name: "Milestone" },
+        },
+        {
+          name: "new issue",
+          required: "project_activity",
+          type: "Issue",
+          action: "create",
+          data: f.issue(),
+        },
+        {
+          name: "issue status",
+          required: "project_activity",
+          type: "Issue",
+          action: "update",
+          data: { ...f.issue(), state: { type: "started", name: "In Review" } },
+          extra: { updatedFrom: { stateId: randomUUID() } },
+        },
+        {
+          name: "finished issue",
+          required: "project_activity",
+          type: "Issue",
+          action: "update",
+          data: { ...f.issue(), state: { type: "completed", name: "Done" } },
+          extra: { updatedFrom: { stateId: randomUUID() } },
+        },
+        {
+          name: "issue comment",
+          required: "all_issues",
+          type: "Comment",
+          action: "create",
+          data: { id: randomUUID(), issueId: f.issueId },
+        },
+        {
+          name: "issue edit",
+          required: "all_issues",
+          type: "Issue",
+          action: "update",
+          data: f.issue("Edited issue"),
+          extra: { updatedFrom: { title: "Tracked issue" } },
+        },
+        {
+          name: "project rename",
+          required: undefined,
+          type: "Project",
+          action: "update",
+          data: { id: f.projectId, name: "Renamed project" },
+          extra: { updatedFrom: { name: "Alpha Project" } },
+        },
+        {
+          name: "untracked project",
+          required: undefined,
+          type: "ProjectUpdate",
+          action: "create",
+          data: { id: randomUUID(), projectId: randomUUID() },
+        },
+      ];
+      for (const sample of cases) {
+        const marker = `${mode}: ${level}: ${sample.name}`;
+        const event = f.payload(sample.type, sample.action, { ...sample.data, body: marker }, sample.extra);
+        const before = f.effects.length;
+        expect((await f.post(event)).status).toBe(200);
+        const delivered = f.effects.slice(before);
+        const expected =
+          sample.required !== undefined &&
+          (level === "all_issues" ||
+            (level === "project_activity" && sample.required !== "all_issues") ||
+            (level === "project_updates" && sample.required === "project_updates"));
+        const messages = delivered.flatMap((effect) => {
+          const body = effect.body as { content?: string; message?: { content?: string } };
+          return [body.content, body.message?.content].filter((content) => content?.includes(marker));
+        });
+        expect(messages, marker).toHaveLength(expected ? 1 : 0);
+        if (!expected) expect(delivered, marker).toHaveLength(0);
+        const after = f.effects.length;
+        await f.restart();
+        expect((await f.post(event)).status).toBe(200);
+        expect(f.effects, `${marker}: no replay after restart`).toHaveLength(after);
+        outcomes.push({
+          level,
+          name: sample.name,
+          expected,
+          event,
+          nativeWrites: delivered,
+          replayWrites: f.effects.length - after,
+        });
+      }
+    }
+    const creations = f.effects.filter((effect) => effect.path === "/guilds/10001/channels");
+    expect(creations).toHaveLength(1);
+    expect(creations[0]?.body).toMatchObject({
+      type: mode === "forum" ? 15 : 0,
+      permission_overwrites: f.privateOverwrites,
+    });
+    const projection = f.tracking.snapshot().projections[0]!;
+    const issueThread = projection.issues[f.issueId]!;
+    expect(issueThread).toBeDefined();
+    expect(
+      f.effects.filter((effect) => effect.path === `/channels/${issueThread}/messages`).length,
+    ).toBeGreaterThan(0);
+    expect(f.tracking.snapshot().projections).toHaveLength(1);
+    const directory = process.env.SETUP_PERMISSIONS_EVIDENCE_DIR;
+    if (directory) {
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        join(directory, `tracking-${mode}.json`),
+        JSON.stringify({ mode, outcomes, journal: f.tracking.snapshot(), nativeWrites: f.effects }, null, 2),
+      );
+    }
+  },
+);
 
 it("signed activity follows saved project scope and level, with one durable issue thread and reversible off", async () => {
   const f = await fixture();
