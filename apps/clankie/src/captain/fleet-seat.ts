@@ -24,7 +24,13 @@ export type FleetSeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
       readonly state?: "queued" | "started" | "steered";
     }
   | { readonly outcome: "unconfirmed"; readonly detail: string; readonly messageId?: string }
-  | { readonly outcome: "undelivered"; readonly detail: string }
+  | {
+      readonly outcome: "undelivered";
+      readonly detail: string;
+      /** The original an explicit lead settle recorded as not delivered (VUH-2358). */
+      readonly messageId?: string;
+      readonly settled?: "not_delivered";
+    }
   | { readonly outcome: "offline"; readonly detail: string }
 );
 

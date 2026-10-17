@@ -321,6 +321,16 @@ can settle an unknowable original with `seat-delivery settle ID
 abandoned-unknown --conversation ID`; it retains unknown evidence and frees
 new intent without replaying the original.
 
+If an unresolved original refuses your new messages to a seat ("A different
+original delivery … is unresolved for this recipient"), first check the
+recipient's pane or transcript. If the original never arrived, settle it yourself:
+`reconcile_seat_call({deliveryId, settle: "not_delivered"})`. Proven arrival
+(an exact ACK or the original in the recipient's session) is recorded as
+delivered instead. Either way nothing is sent and the original is never resent;
+send what still matters as a new message. Unattended, an original the idle
+recipient's own session never shows stops blocking different messages after
+five minutes (VUH-2358).
+
 ## Claude permission questions
 
 Use `message_seat` with the pending `questionAnswer` IDs from your existing

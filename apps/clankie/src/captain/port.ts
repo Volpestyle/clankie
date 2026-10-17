@@ -501,6 +501,11 @@ export interface CaptainPort {
   /** Read-only exact native delivery reconciliation; operator conversation only. */
   reconcileSeatDelivery?(id: string, conversationId?: string): Promise<FleetSeatDelivery | undefined>;
   /**
+   * The lead settles an unresolved original by ID (VUH-2358): proven arrival is
+   * recorded delivered, anything else not delivered. Never dispatches or resends.
+   */
+  settleSeatDelivery?(id: string, conversationId?: string): Promise<FleetSeatDelivery | undefined>;
+  /**
    * The in-flight owner-directed room turn (`room_turn`, ADR 0218) a Discord
    * route names by fork ID. Its authority replaces a delivery receipt.
    */

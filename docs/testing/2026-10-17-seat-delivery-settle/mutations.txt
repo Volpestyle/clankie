@@ -1,0 +1,8 @@
+== bounded settle removed
+   × an original that never arrived settles on its own after a bounded wait while the recipient is idle 1064ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 4 passed (5)
+== idle-recipient guard removed
+   × an original that never arrived settles on its own after a bounded wait while the recipient is idle 179ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 4 passed (5)

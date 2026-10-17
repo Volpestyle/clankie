@@ -105,6 +105,21 @@ fingerprint tombstones survive result-body expiry and service restart. Reconcili
 reports what the original receipt proves, preserving the distinction between
 native delivery, uncertainty and completed work.
 
+**Amendment (VUH-2358, 2026-10-17).** A lost acknowledgment had refused every
+later lead message to its recipient, with only an owner settle to recover. Two
+settle paths now exist; neither sends anything or resends the original:
+
+- The lead settles by ID with `reconcile_seat_call({deliveryId, settle: "not_delivered"})`
+  in the owning conversation. An exact acknowledgment, or the original in the
+  recipient's session, is still recorded as delivered.
+- Unattended, a native fence stops blocking a _different_ message after five
+  minutes. This applies only when the recipient is idle and its exact original
+  session was read and does not show the original.
+
+Both keep the original as `abandoned-unknown` evidence. If it does arrive late,
+the recipient may see both messages; that is accepted over losing lead control
+of the seat.
+
 ## An uncertain delivery fences only itself (VUH-1779)
 
 "Never duplicate an uncertain dispatch" protects that original, not the

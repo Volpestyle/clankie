@@ -1154,6 +1154,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return this.seatControl.reconcileDelivery(id);
   }
 
+  /** The lead's explicit settle (VUH-2358), scoped like owner settlement. */
+  public async settleSeatDelivery(id: string, conversationId: string) {
+    if (!(await this.scopedDelivery(id, conversationId, true))) return undefined;
+    return this.seatControl.settleDelivery(id);
+  }
+
   public async abandonSeatDelivery(
     id: string,
     conversationId: string,

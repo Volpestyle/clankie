@@ -62,7 +62,7 @@ export function createLaneMcpEndpoint({
   captain,
   receiptPath,
 }: {
-  captain: Pick<CaptainPort, "laneToolBank" | "reconcileSeatDelivery">;
+  captain: Pick<CaptainPort, "laneToolBank" | "reconcileSeatDelivery" | "settleSeatDelivery">;
   receiptPath?: string;
 }): LaneMcpEndpoint {
   const sessions = new Map<string, LaneMcpSession>();
@@ -76,12 +76,15 @@ export function createLaneMcpEndpoint({
     name: RECONCILE_SEAT_CALL,
     description:
       "Read the original operator message_seat or hire_agent receipt by its MCP deliveryId, native channel event ID, or hireId. " +
-      "Read-only: never dispatches, retries, or starts an agent. Use the same conversation as the original call.",
+      "Read-only: never dispatches, retries, or starts an agent. Use the same conversation as the original call. " +
+      'With settle: "not_delivered" and a deliveryId, settle an unresolved original that blocks a seat: proven arrival is recorded delivered, ' +
+      "otherwise it is recorded not delivered and kept as abandoned-unknown. Nothing is sent, and the original is never resent.",
     inputSchema: {
       type: "object" as const,
       properties: {
         deliveryId: { type: "string", minLength: 1, maxLength: 256 },
         hireId: { type: "string", format: "uuid" },
+        settle: { type: "string", enum: ["not_delivered"] },
       },
       oneOf: [{ required: ["deliveryId"] }, { required: ["hireId"] }],
       additionalProperties: false,
@@ -134,6 +137,43 @@ export function createLaneMcpEndpoint({
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (request.params.name === RECONCILE_SEAT_CALL && lane === "operator") {
         const args = request.params.arguments ?? {};
+        if (args.settle !== undefined) {
+          if (
+            args.settle !== "not_delivered" ||
+            Object.keys(args).some((name) => name !== "deliveryId" && name !== "settle") ||
+            typeof args.deliveryId !== "string" ||
+            args.deliveryId.length > 256
+          )
+            return failure(
+              'Settle takes exactly one deliveryId and settle: "not_delivered". Nothing dispatched.',
+            );
+          if (captain.settleSeatDelivery === undefined)
+            return failure("Settling a delivery is unavailable here. Nothing dispatched.");
+          try {
+            // An MCP deliveryId names its native original through the seat-call receipt.
+            let native = await captain.settleSeatDelivery(args.deliveryId, conversationId);
+            const id = SeatCallIdSchema.safeParse(args.deliveryId);
+            if (!native && id.success) {
+              const original = receipts.read(id.data, "message_seat", lane, conversationId);
+              for (const block of original.isError ? [] : original.content) {
+                if (block.type !== "text" || native) continue;
+                let body;
+                try {
+                  body = JSON.parse(block.text);
+                } catch {
+                  continue;
+                }
+                if (typeof body?.messageId === "string")
+                  native = await captain.settleSeatDelivery(body.messageId, conversationId);
+              }
+            }
+            return native
+              ? { content: [{ type: "text", text: JSON.stringify(native) }] }
+              : failure("No unresolved original delivery has that ID. Nothing dispatched.");
+          } catch (error) {
+            return failure(error);
+          }
+        }
         const keys = Object.keys(args);
         const key = keys[0];
         if (keys.length !== 1 || (key !== "deliveryId" && key !== "hireId"))

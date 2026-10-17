@@ -46,7 +46,11 @@ export function createFleetSeatControl(
     | undefined
   >,
   receiver?: (agent: HerdrAgentSnapshot) => FleetSeatMessageReceiver,
+  /** How long an original absent from its idle recipient's session blocks a different message (VUH-2358). */
+  settlement: { readonly unarrivedSettleMs?: number; readonly now?: () => number } = {},
 ) {
+  const now = settlement.now ?? Date.now;
+  const unarrivedSettleMs = settlement.unarrivedSettleMs ?? UNARRIVED_SETTLE_MS;
   const fence = new DeliveryFence(uncertaintyPath);
   const questionFence = new DeliveryFence(
     uncertaintyPath === undefined ? undefined : `${uncertaintyPath}.questions.json`,
@@ -353,6 +357,52 @@ export function createFleetSeatControl(
     // which dispatch was acknowledged; expose their internal ID for owner settlement.
     return undefined;
   };
+  // The recipient's own record of an original: its exact session, pane and
+  // occupant, read fresh. `undefined` means that record could not be read, so
+  // it proves neither arrival nor absence.
+  const sessionArrival = async (pending: UncertainReceipt, agent: HerdrAgentSnapshot | undefined) => {
+    const session = agent?.session;
+    const pi = agent?.agent === "pi" || session?.source === "herdr:pi";
+    const sessionId =
+      agent === undefined || session === undefined
+        ? undefined
+        : pi
+          ? nativeSessionId(agent)
+          : (nativeSessionId(agent) ?? basename(session.value, ".jsonl"));
+    const occupantId = session === undefined ? undefined : occupantIdForHerdrSession(session);
+    const exact =
+      agent !== undefined &&
+      sessionId !== undefined &&
+      sessionId === pending.sessionId &&
+      agent.paneId === pending.paneId &&
+      (pending.occupantId === undefined || pending.occupantId === occupantId) &&
+      (!(pi || pending.nativeSessionPath !== undefined) ||
+        (pi &&
+          session?.source === "herdr:pi" &&
+          session.kind === "path" &&
+          session.value === pending.nativeSessionPath &&
+          pending.nativeMessageId !== undefined)) &&
+      pending.beforeIds !== undefined;
+    const transcript = exact ? await runner.transcript?.(agent).catch(() => undefined) : undefined;
+    if (transcript === undefined) return undefined;
+    return {
+      matched: transcript.entries.find(
+        (entry) =>
+          entry.type === "message" &&
+          entry.role === "operator" &&
+          (!(pi || pending.nativeSessionPath !== undefined) ||
+            entry.nativeRequestId === pending.nativeMessageId) &&
+          !pending.beforeIds?.includes(entry.id) &&
+          deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
+      ),
+    };
+  };
+  // Settled as not delivered: retained as abandoned-unknown evidence and never sent again.
+  const settleUnarrived = (key: string, pending: UncertainReceipt) => {
+    const evidence = fence.abandonUnknown(key, pending.messageId, now());
+    if (!pending.seatId) fence.archiveAbandoned(key, pending.messageId);
+    return evidence;
+  };
   const reconcileDelivery = async (id: string) => {
     const original = await locateDelivery(id);
     if (!original) return undefined;
@@ -424,9 +474,50 @@ export function createFleetSeatControl(
       if (active.has(original.seatId ?? key)) throw new Error("Original native delivery is still active");
       await beforeSettlement?.();
       if (active.has(original.seatId ?? key)) throw new Error("Original native delivery is still active");
-      const evidence = fence.abandonUnknown(key, original.messageId, Date.now());
-      if (!original.seatId) fence.archiveAbandoned(key, original.messageId);
-      return evidence;
+      return settleUnarrived(key, original);
+    },
+    /**
+     * The lead's explicit settle by ID (VUH-2358). Proven arrival still wins: an
+     * exact channel acknowledgment or the original in the recipient's session
+     * records it delivered. Otherwise it is settled as not delivered. Either
+     * way nothing is sent, and the original is never resent.
+     */
+    async settleDelivery(id: string): Promise<FleetSeatDelivery | undefined> {
+      const entry = await locateDelivery(id);
+      if (!entry) return undefined;
+      const [key, original] = entry;
+      const seatId = original.seatId ?? key;
+      if (active.has(seatId)) throw new Error("Original native delivery is still active");
+      const reconciled = await reconcileDelivery(id);
+      if (reconciled?.outcome === "delivered") return reconciled;
+      const agent = await runner.resolveTerminal(seatId).catch(() => undefined);
+      const matched = (await sessionArrival(original, agent))?.matched;
+      if (active.has(seatId)) throw new Error("Original native delivery is still active");
+      if (matched !== undefined) {
+        if (original.seatId)
+          fence.complete(key, original.messageId, {
+            messageId: matched.id,
+            state: "started",
+            deliveryStage: "consumed",
+          });
+        else fence.reconcile(key, original.messageId);
+        return {
+          outcome: "delivered",
+          deliveryStage: "consumed",
+          messageId: matched.id,
+          state: "started",
+          detail: "The original was found in the recipient's session; nothing was sent.",
+        };
+      }
+      settleUnarrived(key, original);
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        messageId: original.nativeDeliveryId ?? original.messageId,
+        settled: "not_delivered",
+        detail:
+          "Settled by the lead as not delivered: no acknowledgment or session arrival proves it. It is kept as abandoned-unknown and never resent; new messages to this seat go through.",
+      };
     },
     async deliverToSeat(
       seatId: string,
@@ -509,31 +600,8 @@ export function createFleetSeatControl(
           };
         // Only a newly observed, complete operator message in the original session
         // can reconcile a lost receipt. Inspection never sends a replacement.
-        const transcript =
-          !active.has(seatId) &&
-          agent !== undefined &&
-          sessionId !== undefined &&
-          sessionId === pending.sessionId &&
-          agent.paneId === pending.paneId &&
-          (pending.occupantId === undefined || pending.occupantId === occupantId) &&
-          (!(pi || pending.nativeSessionPath !== undefined) ||
-            (pi &&
-              session?.source === "herdr:pi" &&
-              session.kind === "path" &&
-              session.value === pending.nativeSessionPath &&
-              pending.nativeMessageId !== undefined)) &&
-          pending.beforeIds !== undefined
-            ? await runner.transcript?.(agent).catch(() => undefined)
-            : undefined;
-        const matched = transcript?.entries.find(
-          (entry) =>
-            entry.type === "message" &&
-            entry.role === "operator" &&
-            (!(pi || pending.nativeSessionPath !== undefined) ||
-              entry.nativeRequestId === pending.nativeMessageId) &&
-            !pending.beforeIds?.includes(entry.id) &&
-            deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
-        );
+        const observed = active.has(seatId) ? undefined : await sessionArrival(pending, agent);
+        const matched = observed?.matched;
         if (matched !== undefined && pending.seatId) {
           fence.complete(pendingKey, pending.messageId, {
             messageId: matched.id,
@@ -570,6 +638,20 @@ export function createFleetSeatControl(
             detail:
               "The original uncertain message was found in its native session; no new message was sent.",
           };
+        }
+        // VUH-2358: the recipient's exact session was read and does not show the
+        // original, the recipient is idle (nothing queued is about to be taken)
+        // and the bound has passed. It was not delivered. A different message
+        // goes through; the original itself is never resent.
+        if (
+          !same &&
+          observed !== undefined &&
+          (agent?.status === "idle" || agent?.status === "done") &&
+          pending.beganAt !== undefined &&
+          now() - pending.beganAt >= unarrivedSettleMs
+        ) {
+          settleUnarrived(pendingKey, pending);
+          return "settled";
         }
         if (foreign) return owned;
         if (!same)
@@ -636,7 +718,7 @@ export function createFleetSeatControl(
         };
       const receiptData = {
         fingerprint: deliveryFingerprint(text),
-        beganAt: Date.now(),
+        beganAt: now(),
         ...(options?.conversationId === undefined ? {} : { conversationId: options.conversationId }),
         ...(options?.recipientBinding === undefined ? {} : { recipientBinding: options.recipientBinding }),
         ...(stableReceiptKey === undefined ? {} : { seatId }),
@@ -717,6 +799,9 @@ export function createFleetSeatControl(
     },
   };
 }
+
+/** An original absent from its idle recipient's session stops blocking a different message after this. */
+const UNARRIVED_SETTLE_MS = 5 * 60_000;
 
 export function isMessageableSeat(agent: HerdrAgentSnapshot | undefined): agent is HerdrAgentSnapshot {
   return agent !== undefined && agent.agent !== "shell" && agent.agent !== "unknown";

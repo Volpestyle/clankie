@@ -1011,6 +1011,14 @@ or the original MCP dispatch UUID, in the original conversation. An exact
 retained ACK reconciles the native fence without sending anything. A bridge
 ACK proves transport delivery, not that the model consumed or acted on it.
 
+A native fence also blocks different messages to that recipient. The lead can
+settle it with `reconcile_seat_call({deliveryId, settle: "not_delivered"})`.
+Proven arrival is recorded as delivered. Anything else is recorded as not
+delivered (`settled: "not_delivered"`) and kept as `abandoned-unknown` evidence.
+Without any settle, an original that the idle recipient's exact session does not
+show stops blocking different messages after five minutes. Neither path sends
+anything or resends the original (VUH-2358).
+
 `clankie seat-delivery settle RECEIPT_ID abandoned-unknown [--conversation ID]`
 (default `global-default`) calls `settle_seat_delivery`. It is the owner's
 explicit decision that the event's fate is unknown: the original stays retained

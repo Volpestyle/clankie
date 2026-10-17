@@ -6950,6 +6950,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       return herdrWatches.reconcileSeatDelivery(id, binding.conversationId);
     },
+    async settleSeatDelivery(id, conversationId) {
+      const binding = seatContext(conversationId);
+      if (!binding || conversations.conversation(binding.conversationId)?.scope.kind === "room")
+        throw new Error("Private operator conversation is required");
+      const result = await herdrWatches.settleSeatDelivery(id, binding.conversationId);
+      if (result?.outcome === "undelivered" && result.settled === "not_delivered") {
+        // The recipient's mailbox keeps its own copy of the receipt; settle that too.
+        for (const [, mailbox] of fleetSeatOutboxes())
+          if (mailbox.unresolvedDeliveries().some((entry) => entry.receiptId === id))
+            try {
+              mailbox.abandonUnknown(id);
+            } catch {
+              /* Still in flight there: it stays uncertain and is never resent. */
+            }
+      }
+      return result;
+    },
     roomForkGrant,
 
     releaseJoinedSeat(conversationId) {
