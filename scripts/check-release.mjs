@@ -85,15 +85,16 @@ function summary(
   message,
   summaryFile = process.env.GITHUB_STEP_SUMMARY,
   purpose = "release",
+  cases = new Map(),
 ) {
+  // Each file with the exact cases that failed on the first attempt.
+  const list = (file) => [`- \`${file}\``, ...(cases.get(file) ?? []).map((name) => `  - ${name}`)];
   const text = [
     "## Flaky on first attempt",
     "",
-    ...(flaky.length ? flaky.map((file) => `- \`${file}\``) : ["None."]),
+    ...(flaky.length ? flaky.flatMap(list) : ["None."]),
     "",
-    ...(blocked.length
-      ? ["### Failed isolated reruns", "", ...blocked.map((file) => `- \`${file}\``), ""]
-      : []),
+    ...(blocked.length ? ["### Failed isolated reruns", "", ...blocked.flatMap(list), ""] : []),
     message,
     "",
   ].join("\n");
@@ -116,7 +117,8 @@ export async function retryFailedFiles({
 }) {
   mkdirSync(join(root, ".data/qa"), { recursive: true });
   const flaky = [],
-    blocked = [];
+    blocked = [],
+    cases = new Map();
   try {
     if (!Number.isSafeInteger(retryTimeoutMs) || retryTimeoutMs <= 0 || retryTimeoutMs > 5 * 60_000)
       throw new Error("Retry deadline must be a positive integer of at most five minutes.");
@@ -125,6 +127,11 @@ export async function retryFailedFiles({
     const failed = first.files.filter((file) => file.state === "failed");
     if (first.reason !== "failed" || !failed.length)
       throw new Error("Failure is outside Vitest test files; release blocked.");
+    for (const file of failed)
+      cases.set(
+        file.path,
+        file.tests.filter((test) => test.state === "failed").map((test) => test.name),
+      );
     for (const [index, file] of failed.entries()) {
       await beforeRetry();
       const remainingMs = Math.floor(deadline - performance.now());
@@ -190,6 +197,7 @@ export async function retryFailedFiles({
       (passed ? flaky : blocked).push(file.path);
       await onRetry({
         file: file.path,
+        cases: cases.get(file.path),
         report: retryReport,
         exitCode: outcome.code,
         signal: outcome.signal,
@@ -211,13 +219,16 @@ export async function retryFailedFiles({
       blocked,
       ok
         ? "Every failed file passed its one isolated rerun."
-        : `${purpose} blocked: a rerun failed or the flaky-file limit was exceeded.`,
+        : blocked.length
+          ? `${purpose} blocked: an isolated rerun failed.`
+          : `${purpose} blocked: ${flaky.length} flaky files exceed the limit of ${maxFlakyFiles}.`,
       summaryFile,
       purpose,
+      cases,
     );
     return ok;
   } catch (error) {
-    summary(root, flaky, blocked, error.message, summaryFile, purpose);
+    summary(root, flaky, blocked, error.message, summaryFile, purpose, cases);
     return false;
   }
 }

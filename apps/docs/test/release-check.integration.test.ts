@@ -98,6 +98,8 @@ it("reruns only each failed file once and accepts two recovered files", async ()
   expect(proof.summary()).toContain(proof.paths[0]);
   expect(proof.summary()).toContain(proof.paths[2]);
   expect(proof.summary()).not.toContain(proof.paths[1]);
+  // VUH-2396: the summary names each case that failed, under its file.
+  expect(proof.summary()).toContain(`- \`${proof.paths[0]}\`\n  - first failed case`);
 });
 
 it("still reruns every file but blocks more than two recovered flakes", async () => {
@@ -105,6 +107,7 @@ it("still reruns every file but blocks more than two recovered flakes", async ()
   expect(await retryFailedFiles(proof)).toBe(false);
   expect(proof.counts()).toEqual([2, 2, 2]);
   for (const path of proof.paths) expect(proof.summary()).toContain(path);
+  expect(proof.summary()).toContain("release blocked: 3 flaky files exceed the limit of 2.");
 });
 
 it("persistent failures and real timed-out tests block without skipping later files", async () => {

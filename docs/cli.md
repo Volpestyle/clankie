@@ -1091,8 +1091,11 @@ isolation on the same composed tree before isolating batch members. The first at
 original selection. The entire isolated retry pass has a five-minute deadline;
 a timeout kills the Vitest runner, blocks the gate and retains the failed rerun
 receipt and log. The enclosing heavy permit drains leftover forks. Recovery
-requires complete accounted results and every rerun passing. Non-test failures,
-repeated failures, interruptions and changed sources still block. `status UUID` includes `repos[].gate.testRecovery` with
+requires complete accounted results and every rerun passing. As in release,
+more than two recovered files blocks the gate. Non-test failures,
+repeated failures, interruptions and changed sources still block. The gate log
+and `.data/qa/landing-check-summary.md` list each failed file with its exact
+failed cases. `status UUID` includes `repos[].gate.testRecovery` with
 the flaky files, first failure and rerun receipts. The direct root gate uses
 this policy only with `pnpm check:landing --retry-failed-tests`. An app
 `check:landing` receives the same flag only when the composed app tree's

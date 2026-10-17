@@ -216,7 +216,8 @@ if (retryTests && exit && report.phases.at(-1)?.name === "tests" && !report.phas
     firstReport,
     runId: testRunId,
     purpose: "landing",
-    maxFlakyFiles: Infinity,
+    // The release cap of two recovered files applies. No queue recovery through
+    // 2026-10-17 recovered more than two (17 recoveries in 670 batches; VUH-2396).
     beforeRetry: stable,
     onRetry: (receipt) => {
       report.testRecovery.reruns.push(receipt);

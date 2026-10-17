@@ -67,8 +67,9 @@ command is separate and never runs implicitly. Vitest retries remain zero. Manua
 macOS CI and tag releases use `node scripts/check-release.mjs`: it first runs the
 full `pnpm check`, then reruns every failed Vitest file once, in a fresh one-worker
 process, with file parallelism disabled. Every rerun must pass, including each
-previously executed case. More than two recovered files blocks the release.
-The job summary lists `Flaky on first attempt`; the original report and isolated
+previously executed case. More than two recovered files blocks the release, and
+the queue's `check:landing --retry-failed-tests` applies the same cap.
+The job summary lists `Flaky on first attempt` with each file's failed cases; the original report and isolated
 rerun reports remain in `.data/qa/`. Missing, incomplete, interrupted or unhandled-error
 reports block recovery. A successful recovery also runs the original Vox tests
 and IPC smoke check that the failed Vitest command prevented from running.
