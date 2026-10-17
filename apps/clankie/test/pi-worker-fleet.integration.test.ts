@@ -1,6 +1,5 @@
 import { mkdtemp, writeFile, readFile, rename, rm } from "node:fs/promises";
-import { join, dirname, delimiter } from "node:path";
-import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -8,11 +7,16 @@ import { afterEach, expect, it } from "vitest";
 import { createPiWorkerFleet } from "../src/captain/pi-worker-fleet.mjs";
 import { bundlePiWorkerFleet } from "../../../scripts/release/pi-worker-fleet.mjs";
 import { discoverPiNativeCapability } from "../src/captain/pi-native-capability.ts";
+import { supportedPiUnavailable } from "./fixtures/supported-pi.ts";
 
-const nativeIt = it.skipIf(
-  !["darwin", "linux"].includes(process.platform) ||
-    !(process.env.PATH ?? "").split(delimiter).some((path) => existsSync(join(path, "pi"))),
-);
+// These cases drive the installed native Pi. They run only when native control's
+// own check accepts it, and otherwise skip naming what they found (VUH-2414).
+const nativePi = await supportedPiUnavailable();
+const nativeIt = (name: string, run: () => Promise<void>) =>
+  it(name, async ({ skip }) => {
+    skip(nativePi !== undefined, nativePi);
+    await run();
+  });
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanups.splice(0).reverse()) await close();

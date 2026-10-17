@@ -5,6 +5,7 @@ import { delimiter, join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { integrationEnvironment, ownerPath } from "../src/integrate-environment.ts";
 import { discoverPiNativeCapability } from "../src/captain/pi-native-capability.ts";
+import { supportedPiUnavailable } from "./fixtures/supported-pi.ts";
 
 /**
  * The integrate queue's sandbox PATH (VUH-2057). The service runs under pnpm,
@@ -76,35 +77,32 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
-const ownerPi = (originalPath ?? "")
-  .split(delimiter)
-  .filter((entry) => ownerPath(entry) === entry)
-  .some((entry) => {
-    try {
-      execFileSync("/bin/test", ["-x", join(entry, "pi")]);
-      return true;
-    } catch {
-      return false;
-    }
-  });
+// Native control's own check must accept the owner's first Pi; otherwise this
+// skips naming what it found (VUH-2414).
+const ownerPi = await supportedPiUnavailable(
+  (originalPath ?? "")
+    .split(delimiter)
+    .filter((entry) => ownerPath(entry) === entry)
+    .join(delimiter),
+);
 
 // The real thing: the installed Pi passes native capability discovery from the
 // sandbox, even when the service's PATH leads with a bundled Pi SDK shim.
-it.skipIf(!ownerPi || !["darwin", "linux"].includes(process.platform))(
-  "a batch sandbox discovers the owner's supported native Pi through the service's PATH",
-  async () => {
-    const base = await root();
-    process.env.PATH = servicePath();
-    await expect(
-      discoverPiNativeCapability({ harness: "pi", cwd: base, brief: "", env: {} }),
-    ).rejects.toThrow("Unsupported Pi executable layout");
-    const env = await integrationEnvironment(join(base, "batch"));
-    const capability = await discoverPiNativeCapability({
-      harness: "pi",
-      cwd: base,
-      brief: "",
-      env: { PATH: env.PATH! },
-    });
-    expect(capability.cli).toMatch(/[\\/]dist[\\/]bundle[\\/]cli\.js$/u);
-  },
-);
+it("a batch sandbox discovers the owner's supported native Pi through the service's PATH", async ({
+  skip,
+}) => {
+  skip(ownerPi !== undefined, ownerPi);
+  const base = await root();
+  process.env.PATH = servicePath();
+  await expect(discoverPiNativeCapability({ harness: "pi", cwd: base, brief: "", env: {} })).rejects.toThrow(
+    "Unsupported Pi executable layout",
+  );
+  const env = await integrationEnvironment(join(base, "batch"));
+  const capability = await discoverPiNativeCapability({
+    harness: "pi",
+    cwd: base,
+    brief: "",
+    env: { PATH: env.PATH! },
+  });
+  expect(capability.cli).toMatch(/[\\/]dist[\\/]bundle[\\/]cli\.js$/u);
+});

@@ -1,6 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { delimiter, join } from "node:path";
-import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { mintOperatorToken } from "@clankie/credential-broker";
@@ -12,6 +11,7 @@ import { createWorkerAccountHoldsRoutes } from "../src/worker-account-holds-rout
 import { chooseWorkerHarness, createWorkerAccountsReader } from "../src/captain/harness-accounts.ts";
 import { createPiWorkerStatusReader, localPiWorkerModelStatus } from "../src/captain/pi-worker-account.ts";
 import { runAccountsCommand } from "../../tui/src/command/accounts.ts";
+import { supportedPiUnavailable } from "./fixtures/supported-pi.ts";
 
 let root: string;
 let previous: string | undefined;
@@ -120,138 +120,135 @@ it("exposes the same disabled Pi status and revision-fenced owner hold through A
   }
 });
 
-// This acceptance slice uses the actual pinned Pi installed on the worker machine.
-// CI without that native prerequisite still runs the API/auth refusal boundaries above.
-const nativePiInstalled = (process.env.PATH ?? "")
-  .split(delimiter)
-  .some((path) => existsSync(join(path, "pi")));
-it.skipIf(!nativePiInstalled || !["darwin", "linux"].includes(process.platform))(
-  "only makes verified native Pi eligible and excludes held/model/account scopes",
-  async () => {
-    const settings = new SettingsStore(join(root, "settings.json"));
-    const reader = createWorkerAccountsReader({
-      settings: () => settings.load(),
-      fleet: async () => undefined,
-      piStatus: createPiWorkerStatusReader({ enabled: () => true, cwd: root }),
-    });
-    const report = await reader(undefined, ["pi"]);
-    expect(MachineWorkerAccountsSchema.parse(report)).toEqual(report);
-    expect(report.accounts).toEqual([
-      {
-        harness: "pi",
-        label: "default",
-        home: join(root, "pi"),
-        signedIn: true,
-        usable: true,
-        headroom: null,
-        models: ["openai/gpt-4o"],
+// This acceptance slice uses the actual Pi installed on the worker machine. It
+// runs only when native control's own check accepts that Pi, and otherwise skips
+// naming what it found (VUH-2414); the API/auth refusal boundaries above still run.
+const nativePi = await supportedPiUnavailable();
+it("only makes verified native Pi eligible and excludes held/model/account scopes", async ({ skip }) => {
+  skip(nativePi !== undefined, nativePi);
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const reader = createWorkerAccountsReader({
+    settings: () => settings.load(),
+    fleet: async () => undefined,
+    piStatus: createPiWorkerStatusReader({ enabled: () => true, cwd: root }),
+  });
+  const report = await reader(undefined, ["pi"]);
+  expect(MachineWorkerAccountsSchema.parse(report)).toEqual(report);
+  expect(report.accounts).toEqual([
+    {
+      harness: "pi",
+      label: "default",
+      home: join(root, "pi"),
+      signedIn: true,
+      usable: true,
+      headroom: null,
+      models: ["openai/gpt-4o"],
+    },
+  ]);
+  expect(chooseWorkerHarness("local", report)).toMatchObject({ harness: "pi" });
+  expect(chooseWorkerHarness("local", report, ["claude", "codex"])).toHaveProperty("refused");
+  expect(chooseWorkerHarness("local", report, ["pi"], "another-profile")).toHaveProperty("refused");
+  await settings.update((current) => ({
+    ...current,
+    workerAccountHolds: [{ machine: "local", harness: "pi", label: "default" }],
+  }));
+  expect(chooseWorkerHarness("local", await reader(undefined, ["pi"]))).toHaveProperty("refused");
+  const unavailable = await createPiWorkerStatusReader({
+    enabled: () => true,
+    cwd: root,
+    seatModel: async () => undefined,
+  })();
+  expect(unavailable).toMatchObject({ usable: false, signedIn: false });
+  const bareModel = await createPiWorkerStatusReader({
+    enabled: () => true,
+    cwd: root,
+    seatModel: async () => ({ model: "openai/gpt-4o" }),
+  })();
+  expect(bareModel).toMatchObject({ usable: false, signedIn: false });
+  const configured = await createPiWorkerStatusReader({
+    enabled: () => true,
+    cwd: root,
+    seatModel: async () => ({
+      model: "clankie/default",
+      provider: {
+        id: "clankie",
+        config: {
+          baseUrl: "http://127.0.0.1:1234/v1",
+          apiKey: "local",
+          models: [{ id: "default" }, { id: "routine" }, { id: "escalation" }, { id: "invalid model" }],
+        },
       },
-    ]);
-    expect(chooseWorkerHarness("local", report)).toMatchObject({ harness: "pi" });
-    expect(chooseWorkerHarness("local", report, ["claude", "codex"])).toHaveProperty("refused");
-    expect(chooseWorkerHarness("local", report, ["pi"], "another-profile")).toHaveProperty("refused");
-    await settings.update((current) => ({
-      ...current,
-      workerAccountHolds: [{ machine: "local", harness: "pi", label: "default" }],
-    }));
-    expect(chooseWorkerHarness("local", await reader(undefined, ["pi"]))).toHaveProperty("refused");
-    const unavailable = await createPiWorkerStatusReader({
-      enabled: () => true,
-      cwd: root,
-      seatModel: async () => undefined,
-    })();
-    expect(unavailable).toMatchObject({ usable: false, signedIn: false });
-    const bareModel = await createPiWorkerStatusReader({
-      enabled: () => true,
-      cwd: root,
-      seatModel: async () => ({ model: "openai/gpt-4o" }),
-    })();
-    expect(bareModel).toMatchObject({ usable: false, signedIn: false });
-    const configured = await createPiWorkerStatusReader({
-      enabled: () => true,
-      cwd: root,
-      seatModel: async () => ({
-        model: "clankie/default",
-        provider: {
-          id: "clankie",
-          config: {
-            baseUrl: "http://127.0.0.1:1234/v1",
-            apiKey: "local",
-            models: [{ id: "default" }, { id: "routine" }, { id: "escalation" }, { id: "invalid model" }],
-          },
+    }),
+  })();
+  expect(configured).toMatchObject({
+    usable: true,
+    models: ["clankie/default", "clankie/routine", "clankie/escalation"],
+  });
+  expect(configured.models).not.toContain("clankie/invalid model");
+  const customer = await createPiWorkerStatusReader({
+    enabled: () => true,
+    cwd: root,
+    seatModel: async () => ({
+      model: "clankie-customer/qwen/model-v1",
+      provider: {
+        id: "clankie-customer",
+        config: {
+          baseUrl: "http://127.0.0.1:1234/v1",
+          apiKey: "local",
+          models: [{ id: "qwen/model-v1" }, { id: "qwen/model:v2" }, { id: "invalid model" }],
         },
-      }),
-    })();
-    expect(configured).toMatchObject({
-      usable: true,
-      models: ["clankie/default", "clankie/routine", "clankie/escalation"],
-    });
-    expect(configured.models).not.toContain("clankie/invalid model");
-    const customer = await createPiWorkerStatusReader({
-      enabled: () => true,
-      cwd: root,
-      seatModel: async () => ({
-        model: "clankie-customer/qwen/model-v1",
-        provider: {
-          id: "clankie-customer",
-          config: {
-            baseUrl: "http://127.0.0.1:1234/v1",
-            apiKey: "local",
-            models: [{ id: "qwen/model-v1" }, { id: "qwen/model:v2" }, { id: "invalid model" }],
-          },
-        },
-      }),
-    })();
-    expect(customer).toMatchObject({
-      usable: true,
-      models: ["clankie-customer/qwen/model-v1", "clankie-customer/qwen/model:v2"],
-    });
-    expect(customer.models).not.toContain("clankie-customer/invalid model");
-    expect(JSON.stringify(configured)).not.toContain("127.0.0.1");
-    expect(JSON.stringify(report)).not.toContain("fixture-only-key");
-  },
-);
+      },
+    }),
+  })();
+  expect(customer).toMatchObject({
+    usable: true,
+    models: ["clankie-customer/qwen/model-v1", "clankie-customer/qwen/model:v2"],
+  });
+  expect(customer.models).not.toContain("clankie-customer/invalid model");
+  expect(JSON.stringify(configured)).not.toContain("127.0.0.1");
+  expect(JSON.stringify(report)).not.toContain("fixture-only-key");
+});
 
-it.skipIf(!nativePiInstalled || !["darwin", "linux"].includes(process.platform))(
-  "exposes expired native OAuth through the owner API and CLI without refresh or auto admission",
-  async () => {
-    const authPath = join(root, "pi", "auth.json");
-    const expired = JSON.stringify({
-      openai: { type: "oauth", access: "fixture-access", refresh: "fixture-refresh", expires: 1 },
+it("exposes expired native OAuth through the owner API and CLI without refresh or auto admission", async ({
+  skip,
+}) => {
+  skip(nativePi !== undefined, nativePi);
+  const authPath = join(root, "pi", "auth.json");
+  const expired = JSON.stringify({
+    openai: { type: "oauth", access: "fixture-access", refresh: "fixture-refresh", expires: 1 },
+  });
+  await writeFile(authPath, expired);
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const reader = createWorkerAccountsReader({
+    settings: () => settings.load(),
+    fleet: async () => undefined,
+    piStatus: createPiWorkerStatusReader({ enabled: () => true, cwd: root }),
+  });
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    workerAccounts: () => reader(undefined, ["pi"]),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer fixture-owner" ? { operatorId: "owner" } : undefined,
+  });
+  try {
+    const request = async (path: string) =>
+      (await (
+        await app.app.request(path, { headers: { authorization: "Bearer fixture-owner" } })
+      ).json()) as Record<string, unknown>;
+    const result = MachineWorkerAccountsSchema.parse(await runAccountsCommand(["workers"], { request }));
+    expect(result.accounts[0]).toMatchObject({
+      harness: "pi",
+      usable: false,
+      signedIn: false,
+      reason: "The native Pi profile’s OAuth credential has expired; refresh it in Pi before hiring",
     });
-    await writeFile(authPath, expired);
-    const settings = new SettingsStore(join(root, "settings.json"));
-    const reader = createWorkerAccountsReader({
-      settings: () => settings.load(),
-      fleet: async () => undefined,
-      piStatus: createPiWorkerStatusReader({ enabled: () => true, cwd: root }),
-    });
-    const app = await createClankieApp({
-      captain: createStubCaptain(),
-      workerAccounts: () => reader(undefined, ["pi"]),
-      authenticateOperator: async (request) =>
-        request.headers.get("authorization") === "Bearer fixture-owner" ? { operatorId: "owner" } : undefined,
-    });
-    try {
-      const request = async (path: string) =>
-        (await (
-          await app.app.request(path, { headers: { authorization: "Bearer fixture-owner" } })
-        ).json()) as Record<string, unknown>;
-      const result = MachineWorkerAccountsSchema.parse(await runAccountsCommand(["workers"], { request }));
-      expect(result.accounts[0]).toMatchObject({
-        harness: "pi",
-        usable: false,
-        signedIn: false,
-        reason: "The native Pi profile’s OAuth credential has expired; refresh it in Pi before hiring",
-      });
-      const producer = await reader(undefined, ["pi"]);
-      expect(result.accounts).toEqual(producer.accounts);
-      expect(chooseWorkerHarness("local", producer, ["pi"])).toHaveProperty("refused");
-      expect(await readFile(authPath, "utf8")).toBe(expired);
-      expect(JSON.stringify(result)).not.toContain("fixture-access");
-      expect(JSON.stringify(result)).not.toContain("fixture-refresh");
-    } finally {
-      await app.close();
-    }
-  },
-);
+    const producer = await reader(undefined, ["pi"]);
+    expect(result.accounts).toEqual(producer.accounts);
+    expect(chooseWorkerHarness("local", producer, ["pi"])).toHaveProperty("refused");
+    expect(await readFile(authPath, "utf8")).toBe(expired);
+    expect(JSON.stringify(result)).not.toContain("fixture-access");
+    expect(JSON.stringify(result)).not.toContain("fixture-refresh");
+  } finally {
+    await app.close();
+  }
+});

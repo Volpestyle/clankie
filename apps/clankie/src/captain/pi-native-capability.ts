@@ -88,6 +88,23 @@ async function executableOnPath(
   throw new Error(`Native ${name} executable unavailable`);
 }
 
+/**
+ * The Pi CLI this PATH selects, refused unless native control supports that
+ * release. Discovery applies exactly this check; tests that need the installed
+ * Pi skip on its refusal (VUH-2414). PINNED below hashes the supported files.
+ */
+export async function supportedPiOnPath(
+  env: Readonly<Record<string, string | undefined>>,
+): Promise<{ cli: string; packageRoot: string }> {
+  const cli = await executableOnPath("pi", env);
+  const packageRoot = dirname(dirname(dirname(cli)));
+  if (cli !== join(packageRoot, "dist/bundle/cli.js")) throw new Error("Unsupported Pi executable layout");
+  z.object({ name: z.literal("@earendil-works/pi-coding-agent"), version: z.literal("0.87.1") }).parse(
+    JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")),
+  );
+  return { cli, packageRoot };
+}
+
 export async function discoverPiNativeCapability(launch: SeatLaunch): Promise<PiNativeCapability> {
   if (!["darwin", "linux"].includes(process.platform))
     throw new Error("Native Pi control requires macOS or Linux");
@@ -95,13 +112,8 @@ export async function discoverPiNativeCapability(launch: SeatLaunch): Promise<Pi
   const roots = piSessionRoots();
   if (JSON.stringify(piSessionRoots(env)) !== JSON.stringify(roots))
     throw new Error("Per-hire Pi profile differs from the active native transcript source");
-  const cli = await executableOnPath("pi", env);
+  const { cli, packageRoot } = await supportedPiOnPath(env);
   const executable = await executableOnPath("node", env);
-  const packageRoot = dirname(dirname(dirname(cli)));
-  if (cli !== join(packageRoot, "dist/bundle/cli.js")) throw new Error("Unsupported Pi executable layout");
-  z.object({ name: z.literal("@earendil-works/pi-coding-agent"), version: z.literal("0.87.1") }).parse(
-    JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")),
-  );
   const nodeFile = await open(executable, "r");
   try {
     const magic = Buffer.alloc(4);
