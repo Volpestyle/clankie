@@ -34,6 +34,11 @@ export interface ManagedWorktreeProtection {
   readonly runtimePath?: string;
   /** A recorded safe_to_drop decision for exactly this worktree HEAD (VUH-1814). */
   readonly dropDecided?: (path: string, head: string) => boolean;
+  /**
+   * Inspect only this registered path; every other tree is left out of the result. The
+   * inventory, pane census and refresh checks still cover the whole repository (VUH-2392).
+   */
+  readonly only?: string;
 }
 
 export async function managedWorktreePaths(options: ManagedWorktreeProtection): Promise<string[]> {
@@ -185,6 +190,7 @@ export async function listTidyWorktrees(
     const managedPaths = await managedWorktreePaths(protection);
     const result: TidyWorktreesResult = { outcome: "listed", mergedInto, candidates: [], excluded: [] };
     for (const entry of inventory) {
+      if (protection.only !== undefined && entry.path !== protection.only) continue;
       let reason: string | undefined;
       let landedBy: "content" | "decision" | undefined;
       if (entry.bare || entry.path === inventory[0]!.path) reason = "main_worktree";

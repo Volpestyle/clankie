@@ -15,6 +15,16 @@ status is a cue to inspect, not proof of completion. Keep a worker around when
 follow-up work would benefit from its live context. You can tidy after harvesting
 without waiting for the owner to list panes or approve each close.
 
+The service also tidies on its own under the owner's `autoTidy` fleet setting
+(default `1h`): a hire whose pane has sat idle that long, with a kept report,
+every report acknowledged and its work landed, is closed through the same checks
+below, and landed, clean worktrees idle for a day in enrolled roots are pruned.
+Acknowledge a report only once you have its result; that is what lets the pane
+go. When a worker's live context is worth keeping, or the owner asks, call
+`keep_worker_pane({ pane, reason })` (CLI `clankie agents keep PANE --conversation ID`);
+`keep: false` (or `clankie agents unkeep`) releases it. A keep never closes
+anything and never stops your own `close_worker_pane`.
+
 Use `close_worker_pane` for each pane you judge finished, with a short one-line
 reason and its saved report path when available. The service preserves its last
 output and report in `worker_pane_history`, and returns an undo ID with a short

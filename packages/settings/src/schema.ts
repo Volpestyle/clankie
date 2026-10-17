@@ -5,6 +5,7 @@ import { DesktopSettingsSchema } from "./desktop.ts";
 import { AutonomySettingsSchema, FLEET_WORKING_PREFERENCE_FIELDS } from "@clankie/protocol/autonomy";
 import { EmbodimentBudgetSchema } from "@clankie/protocol/embodiment";
 import { HireProfileSchema } from "@clankie/protocol/hire-profile";
+import { FLEET_AUTO_TIDY } from "@clankie/protocol/fleet-settings";
 import { FleetResourcePolicySchema, FleetResourceMachineIdSchema } from "@clankie/protocol/fleet-resources";
 import { z } from "zod";
 import { ProjectsSettingsSchema, RetiredWorkingPreferencesSchema } from "@clankie/protocol/projects";
@@ -393,6 +394,12 @@ export const FleetSettingsSchema = z
      * brief, once its session grows large or old (VUH-2274, ADR 0271).
      */
     leadRestarts: z.enum(["on", "off"]).default("on"),
+    /**
+     * Clankie closes a finished hire's pane once it has sat idle this long with its reports
+     * read and its work landed, and removes landed, clean, idle worktrees in enrolled roots
+     * (VUH-2392). "off" leaves both to the lead.
+     */
+    autoTidy: z.enum(FLEET_AUTO_TIDY).default("1h"),
     /** Physical machine capacity is separate from the fleet-size staffing preference. */
     resources: FleetResourcePolicySchema.optional(),
     machineResources: z.record(FleetResourceMachineIdSchema, FleetResourcePolicySchema).optional(),

@@ -1502,6 +1502,34 @@ function herdrWatchTools(
             },
           }),
           defineTool({
+            name: "keep_worker_pane",
+            label: "Keep a worker pane open",
+            description:
+              "Keep one worker pane's current native session open, or release it (keep: false), with a one-line reason. " +
+              "Automatic tidy (fleet autoTidy, default 1h) closes a hire's pane once it has sat idle that long with a kept report, every report acknowledged and its work landed; a kept pane is skipped until released. " +
+              "Use it when the owner asks to keep a pane, or when follow-up work needs the worker's live context. A new session in the pane is not kept. " +
+              "Keeping closes nothing; close_worker_pane still closes a kept pane. Returns every current keep.",
+            parameters: Type.Object({
+              pane: Type.String({ minLength: 1, maxLength: 256 }),
+              keep: Type.Optional(
+                Type.Boolean({ description: "false releases the keep; defaults to true." }),
+              ),
+              reason: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+            }),
+            executionMode: "sequential",
+            execute: async (_id, input) =>
+              json(
+                await watches.tidy!.keep(
+                  {
+                    pane: input.pane,
+                    keep: input.keep ?? true,
+                    ...(input.reason === undefined ? {} : { reason: input.reason }),
+                  },
+                  captureConversationAuthority(turn.conversationAuthority),
+                ),
+              ),
+          }),
+          defineTool({
             name: "undo_worker_pane",
             label: "Reopen and resume a closed worker pane",
             description:

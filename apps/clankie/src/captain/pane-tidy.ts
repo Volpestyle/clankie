@@ -37,6 +37,7 @@ import type { SavedAgentSession } from "../agent-sessions.ts";
 import { paneInputLine } from "./pane-draft.ts";
 import { describeRetainedWorktrees, listTidyWorktrees, type TidyWorktreesResult } from "./tidy-worktrees.ts";
 import { WorktreeDecisions, workerWorktreeHold } from "./worktree-decisions.ts";
+import { PaneKeeps, type PaneKeep } from "./pane-keeps.ts";
 
 const UNDO_MS = 5 * 60_000;
 const HandoffSchema = z
@@ -130,7 +131,8 @@ const errorText = (error: unknown) =>
   (error instanceof Error ? error.message : String(error)).replace(/\s+/gu, " ").slice(0, 512);
 const validReason = (reason: string) =>
   reason.length > 0 && reason.length <= 512 && !/[\r\n]/u.test(reason) && !reason.includes("\0");
-function sessionKey(agent: HerdrAgentSnapshot): string {
+/** One native session in one fleet; reports, keeps and close fences use it. */
+export function tidySessionKey(agent: HerdrAgentSnapshot): string {
   return JSON.stringify([
     splitFleetQualified(agent.paneId)?.fleet ?? "local",
     agent.agent,
@@ -168,6 +170,8 @@ export class PaneTidy {
   private readonly path: string;
   /** Recorded lead decisions about unlanded worktree work, beside this history. */
   readonly decisions: WorktreeDecisions;
+  /** Panes kept open on request; automatic tidy skips them (VUH-2392). */
+  readonly keeps: PaneKeeps;
   private readonly ports: {
     runner: HerdrWatchRunner;
     commitHandoffs?(
@@ -202,6 +206,7 @@ export class PaneTidy {
     this.path = path;
     this.ports = ports;
     this.decisions = new WorktreeDecisions(join(dirname(path), "worktree-decisions.json"));
+    this.keeps = new PaneKeeps(join(dirname(path), "pane-keeps.json"));
     // Corrupt history blocks construction; it must never become an empty journal.
     this.state = existsSync(path)
       ? PaneTidyStateSchema.parse(JSON.parse(readFileSync(path, "utf8")))
@@ -213,6 +218,53 @@ export class PaneTidy {
   /** History for the lead's own tools, keeping input lines and Undo failures. */
   leadHistory(): readonly ClosedWorkerPaneHistory[] {
     return this.state.entries.slice(-128).map(leadEntry).reverse();
+  }
+  /** Whether an authenticated report from this exact session was kept (results are not lost by a close). */
+  hasKeptReport(agent: HerdrAgentSnapshot): boolean {
+    const key = tidySessionKey(agent);
+    return this.state.reports.some((report) => report.sessionKey === key);
+  }
+  /** The keep recorded for this exact session, if any. */
+  keptPane(agent: HerdrAgentSnapshot): PaneKeep | undefined {
+    return this.keeps.kept(tidySessionKey(agent));
+  }
+  /**
+   * Keep a worker pane open, or release it, so automatic tidy skips or considers it again.
+   * Any authenticated conversation may ask: keeping closes nothing, and releasing only
+   * returns the pane to the ordinary close checks.
+   */
+  async keep(
+    input: { pane: string; keep: boolean; reason?: string },
+    source: ConversationAuthority,
+  ): Promise<
+    | { outcome: "kept"; keep: PaneKeep; keeps: readonly PaneKeep[] }
+    | { outcome: "released" | "not_kept"; paneId: string; keeps: readonly PaneKeep[] }
+    | TidyFailure
+  > {
+    try {
+      const authority = captureConversationAuthority(source);
+      await this.authority(authority);
+      const reason = input.reason?.trim() || (input.keep ? "Kept open" : "Released");
+      if (!validReason(reason)) return fail("invalid_reason");
+      const agent = await this.fresh(input.pane);
+      if (!input.keep)
+        return {
+          outcome: this.keeps.release(tidySessionKey(agent)) ? "released" : "not_kept",
+          paneId: agent.paneId,
+          keeps: this.keeps.list(),
+        };
+      const keep = this.keeps.keep({
+        sessionKey: tidySessionKey(agent),
+        paneId: agent.paneId,
+        title: agent.title.slice(0, 512),
+        reason,
+        by: authority.owner.conversationId,
+      });
+      this.ports.changed();
+      return { outcome: "kept", keep, keeps: this.keeps.list() };
+    } catch (error) {
+      return error instanceof Failure ? error.result : { outcome: "failed", reason: "history_unavailable" };
+    }
   }
   /** List merged, clean, unused linked worktrees; never remove one. */
   worktrees(repositoryPath: string, mergedInto = "origin/main"): Promise<TidyWorktreesResult> {
@@ -326,8 +378,8 @@ export class PaneTidy {
       closeSync(directory);
     }
     this.state.reports = [
-      ...this.state.reports.filter((report) => report.sessionKey !== sessionKey(agent)),
-      { sessionKey: sessionKey(agent), reportPath },
+      ...this.state.reports.filter((report) => report.sessionKey !== tidySessionKey(agent)),
+      { sessionKey: tidySessionKey(agent), reportPath },
     ];
     this.save();
   }
@@ -496,7 +548,7 @@ export class PaneTidy {
       if (!validReason(reason) || (unlandedReason !== undefined && !validReason(unlandedReason)))
         return fail("invalid_reason");
       const agent = await this.fresh(input.pane);
-      const key = sessionKey(agent);
+      const key = tidySessionKey(agent);
       if (
         input.expected &&
         (agent.terminalId !== input.expected.terminalId || key !== input.expected.sessionKey)
@@ -565,7 +617,7 @@ export class PaneTidy {
         if (input.idleOnly && !["idle", "waiting", "done"].includes(latest.status)) return fail("busy");
         if (
           latest.terminalId !== agent.terminalId ||
-          sessionKey(latest) !== key ||
+          tidySessionKey(latest) !== key ||
           JSON.stringify(this.ports.provenance(latest)) !== JSON.stringify(owner) ||
           !(await this.ports.ownerValid(owner))
         )
@@ -754,7 +806,7 @@ export class PaneTidy {
           reason: "Restart worker tools on the same native thread",
           idleOnly: true,
           nativeOnly: true,
-          expected: { terminalId: original.terminalId, sessionKey: sessionKey(original) },
+          expected: { terminalId: original.terminalId, sessionKey: tidySessionKey(original) },
         },
         source,
       );

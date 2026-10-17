@@ -285,6 +285,13 @@ one-line comment. The result's `issue` field says what was set.
 `worker_pane_history({})` lists closes and `undo_worker_pane({ id })` reopens one
 within five minutes. Load `tidy` for the cleanup flow.
 
+The owner's `autoTidy` fleet setting (default `1h`) closes a hire through this
+same path once its pane has sat idle that long with a kept report, every report
+acknowledged and its work landed, and prunes landed, clean worktrees idle a day
+in enrolled roots. `keep_worker_pane({ pane, reason, keep? })` keeps a pane's
+current session out of it; `keep: false` releases. Each automatic close leaves a
+notice in your conversation with its undo ID.
+
 `list_tidy_worktrees({ repository, mergedInto? })` (CLI
 `clankie agents tidy-worktrees --repo PATH [--merged-into REF]`) lists landed,
 clean candidates against `origin/main` by default (merged, by content, or a

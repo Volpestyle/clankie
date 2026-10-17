@@ -9,6 +9,7 @@ import {
 } from "./command/fleet.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import {
+  FLEET_AUTO_TIDY,
   FLEET_AUTONOMY_GUIDANCE,
   FLEET_GATE_CATEGORIES,
   FLEET_GATE_PRESETS,
@@ -21,6 +22,7 @@ import {
   FleetReleasePolicySchema,
   FleetResourcePolicySchema,
   type FleetAutonomy,
+  type FleetAutoTidy,
 } from "@clankie/protocol";
 import { formatWorkingPreferences } from "./command/working-preferences.ts";
 
@@ -280,6 +282,21 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       allowBack: true,
     });
     if (leadRestarts !== "on" && leadRestarts !== "off") return;
+    const autoTidy = await flow.readSelect({
+      message: "Fleet — automatic tidy of finished hires",
+      options: FLEET_AUTO_TIDY.map((value) => ({
+        value,
+        label: value,
+        description:
+          value === "off"
+            ? "Finished panes and landed worktrees wait for the lead to tidy them."
+            : `Close a hire's pane after ${value} idle once its reports are read and its work landed; remove landed, clean worktrees untouched for a day.`,
+      })),
+      initialValue: current.autoTidy ?? "1h",
+      currentValue: current.autoTidy ?? "1h",
+      allowBack: true,
+    });
+    if (!(FLEET_AUTO_TIDY as readonly (string | undefined)[]).includes(autoTidy)) return;
     const closure = await flow.readSelect({
       message: "Fleet — who accepts and closes completed tracked work",
       options: (["lead", "owner"] as const).map((value) => ({
@@ -399,6 +416,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
         tools,
         peerMessages,
         leadRestarts,
+        autoTidy: autoTidy as FleetAutoTidy,
         closure,
         machineSetup,
         notes: notes.trim(),

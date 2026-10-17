@@ -1,0 +1,64 @@
+[
+  {
+    "repo": "core",
+    "path": "/Users/james/dev/clankie-wt/urgent-closeout",
+    "sha": "c7cd00c80b348d351ec1eee5fcae12c2b043a0d2",
+    "outcome": "removed"
+  },
+  {
+    "repo": "core",
+    "path": "/Users/james/dev/clankie-wt/vuh-1616-rowan",
+    "sha": "475651a67fd0bdd25560783aeaf54439b4acf118",
+    "outcome": "removed",
+    "archivedLocal": "/Users/james/.clankie/captain/worktree-evidence/vuh-2392-backlog-2026-10-17-pass2/core/dev__clankie-wt__vuh-1616-rowan/.local"
+  },
+  {
+    "repo": "core",
+    "path": "/Users/james/dev/clankie-wt/vuh-1927",
+    "sha": "9e6a4ce31f5fe14fbd19ae2edc00ca8b4286e16e",
+    "outcome": "removed",
+    "archivedLocal": "/Users/james/.clankie/captain/worktree-evidence/vuh-2392-backlog-2026-10-17-pass2/core/dev__clankie-wt__vuh-1927/.local"
+  },
+  {
+    "repo": "core",
+    "path": "/Users/james/dev/clankie-wt/vuh-2216-heap",
+    "sha": "6edbcf19df9d7ddab28bbd25328d448cbf183204",
+    "outcome": "removed",
+    "archivedLocal": "/Users/james/.clankie/captain/worktree-evidence/vuh-2392-backlog-2026-10-17-pass2/core/dev__clankie-wt__vuh-2216-heap/.local"
+  },
+  {
+    "repo": "core",
+    "path": "/Users/james/dev/clankie-wt/vuh-2244",
+    "sha": "194da072f13f4fab1070f9af10b926578f5c1bf5",
+    "outcome": "removed",
+    "archivedLocal": "/Users/james/.clankie/captain/worktree-evidence/vuh-2392-backlog-2026-10-17-pass2/core/dev__clankie-wt__vuh-2244/.local"
+  },
+  {
+    "repo": "core",
+    "path": "/Users/james/dev/clankie-wt/vuh-2274",
+    "sha": "df3ad2ef1ff636f4ed5ad82631a7781dd47fab3c",
+    "outcome": "removed",
+    "archivedLocal": "/Users/james/.clankie/captain/worktree-evidence/vuh-2392-backlog-2026-10-17-pass2/core/dev__clankie-wt__vuh-2274/.local"
+  },
+  {
+    "repo": "core",
+    "path": "/Users/james/dev/clankie-wt/vuh-2279",
+    "sha": "0aa133389668c629b118804eb1f9a8793f289a84",
+    "outcome": "removed",
+    "archivedLocal": "/Users/james/.clankie/captain/worktree-evidence/vuh-2392-backlog-2026-10-17-pass2/core/dev__clankie-wt__vuh-2279/.local"
+  },
+  {
+    "repo": "core",
+    "path": "/Users/james/dev/clankie-wt/vuh-2282",
+    "sha": "890deb485b1fd3a722e6f160f90dfc7523b24930",
+    "outcome": "removed",
+    "archivedLocal": "/Users/james/.clankie/captain/worktree-evidence/vuh-2392-backlog-2026-10-17-pass2/core/dev__clankie-wt__vuh-2282/.local"
+  },
+  {
+    "repo": "app",
+    "path": "/Users/james/dev/clankie-app-wt/vuh-1873",
+    "sha": "32cac0da289ab3bdb60ab87bbec4c97340acb8e6",
+    "outcome": "removed",
+    "archivedLocal": "/Users/james/.clankie/captain/worktree-evidence/vuh-2392-backlog-2026-10-17-pass2/app/dev__clankie-app-wt__vuh-1873/.local"
+  }
+]

@@ -141,6 +141,21 @@ human confirmation, and do not enroll or move owner keys without authorization.
 Load `tidy`; `lead`'s [fleet tools](../../lead/reference/fleet-tools.md#closing-panes-and-tidying-worktrees)
 covers `list_tidy_worktrees`, pane closes and what makes a worktree safe to remove.
 
+Tidying also runs on its own under the owner's fleet setting `autoTidy`
+(`off`, `30m`, `1h` default, `4h`, `1d`; `clankie fleet set --auto-tidy`, `/fleet`,
+or `POST /v1/operator/fleet-settings` with `changes.autoTidy`). Every five
+minutes the service closes a local hire's pane once it has sat idle or done for
+that long, its authenticated report is kept, every report it sent is
+acknowledged, and nobody kept it with `keep_worker_pane`. The close goes through
+`close_worker_pane`'s own checks: landed worktrees, no unsent draft, still idle.
+Hand-started and owner-interactive panes are never closed this way. Each close
+lands in `worker_pane_history` with the usual five-minute Undo, settles its seat
+issue as a close would, and leaves one notice per sweep in the hiring lead's
+conversation. Hourly, linked worktrees in enrolled worktree roots whose HEAD is
+in `origin/main`, clean, with no pane or process inside and untouched for a day
+are removed through `prune_tidy_worktree`'s path, at most 16 per repository
+per sweep. `off` stops both.
+
 ## Project onboarding and membership
 
 For an unassigned owner workspace conversation, use `propose_project_defaults`

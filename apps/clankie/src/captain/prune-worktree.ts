@@ -25,7 +25,7 @@ export async function pruneTidyWorktree(
   try {
     await guard();
     await fetchCheckoutMain(repository);
-    const first = await listTidyWorktrees(repository, "origin/main", runner, protection);
+    const first = await listTidyWorktrees(repository, "origin/main", runner, { ...protection, only: path });
     if (first.outcome !== "listed")
       return { outcome: "unavailable", path, reason: first.excluded[0]?.reason ?? "inventory_unavailable" };
     const candidate = first.candidates.find((entry) => entry.path === path);
@@ -58,7 +58,7 @@ export async function pruneTidyWorktree(
         verbatimSymlinks: true,
       });
     }
-    const fresh = await listTidyWorktrees(repository, "origin/main", runner, protection);
+    const fresh = await listTidyWorktrees(repository, "origin/main", runner, { ...protection, only: path });
     const current = fresh.candidates.find(
       (entry) => entry.path === path && entry.sha === candidate.sha && entry.branch === candidate.branch,
     );

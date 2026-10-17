@@ -3883,7 +3883,7 @@ channel or Discord.
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
@@ -3937,6 +3937,22 @@ brief, which becomes the new session's first message; the old session stays
 resumable and each restart leaves a notice in the conversation. Only a seat
 started with `clankie <command>` from the pane's shell is restarted. `off`
 leaves the seat's session alone ([ADR 0271](adr/0271-the-lead-seat-restarts-fresh-in-its-own-pane.md)).
+
+`--auto-tidy 1h` (the default; also `30m`, `4h`, `1d`) lets the service tidy
+finished hires on its own (VUH-2392). Every five minutes it closes a local hire's
+pane once the pane has sat idle or done for that long, its authenticated report
+is kept, every report it sent has been acknowledged, and no one kept it with
+`keep_worker_pane` (`clankie agents keep`). The close runs `close_worker_pane`'s
+checks unchanged: landed worktrees, no unsent draft, still idle; hand-started
+and owner-interactive panes are never closed. A refused close waits another
+period before it is tried again. Each close is in `worker_pane_history` with the
+usual five-minute Undo, settles its seat issue as a close does, and the hiring
+lead's conversation gets one notice per sweep. Hourly, linked worktrees in
+enrolled worktree roots whose HEAD is in `origin/main`, clean, with no live pane
+or process inside and no checkout activity for a day are removed through the
+`clankie checkouts prune` path (`.local` evidence kept, merged branch deleted),
+at most 16 per repository per sweep. `off` stops both; the setting applies
+without a restart.
 
 `--remote-gates on` lets an integrate batch gate on a linked machine while this
 one is saturated; it defaults to off. Remote placement/staging times out after two minutes and falls back to the local gate with the reason recorded; cleanup is bounded to ten seconds. See [gates on a linked machine](integration.md#gates-on-a-linked-machine).
@@ -6592,6 +6608,14 @@ overridden by a reason. After guarded retirement, complete successful inventory
 must prove the original pane absent before the allocation releases. No brief is
 replayed and no allocation is freed merely because delivery was abandoned.
 
+`clankie agents keep PANE --conversation ID [--reason TEXT]` and `clankie agents
+unkeep PANE --conversation ID [--reason TEXT]` invoke `keep_worker_pane` the same
+way. A kept pane's current native session is skipped by automatic tidy (the
+fleet `autoTidy` setting) until it is released; a new session in that pane is
+not kept. Any authenticated conversation may keep or release a pane: keeping
+closes nothing, and a lead's own `close_worker_pane` still closes a kept pane.
+The result lists every current keep.
+
 Without persisted adoption, the host reads the actual census parent/launcher
 edge and routes to that exact native lead or its attached conversation. Explicit
 adoption wins; tabs, titles and report text establish no ownership. The parent
@@ -8452,7 +8476,9 @@ managed pinned/runtime/update namespaces, the running service checkout, locked,
 dirty, unmerged, and live trees stay regardless of developer-root enrollment. Git
 removal is never forced; local branches are deleted only if merged. Evidence
 is retained under `worktree-evidence/` in Clankie’s configured state directory
-(default `~/.clankie/captain/worktree-evidence/`).
+(default `~/.clankie/captain/worktree-evidence/`). Under the fleet `autoTidy`
+setting the service runs this same prune hourly for trees whose HEAD is in
+`origin/main` and that have had no checkout activity for a day (see `fleet set`).
 
 New local and SSH hires fetch and verify their start checkout on that machine.
 A clean behind-only checkout, including detached HEAD, fast-forwards to fetched

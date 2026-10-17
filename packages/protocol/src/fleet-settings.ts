@@ -14,6 +14,18 @@ import { HireProfileSchema, HIRE_NO_PREFERENCE } from "./hire-profile.ts";
 import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
 import { RetiredWorkingPreferencesSchema } from "./project-work-policy.ts";
 
+/**
+ * How long a finished hire's pane may sit idle, its reports read and its work landed, before
+ * Clankie closes it; "off" leaves pane and worktree tidying to the lead (VUH-2392).
+ */
+export const FLEET_AUTO_TIDY = ["off", "30m", "1h", "4h", "1d"] as const;
+export type FleetAutoTidy = (typeof FLEET_AUTO_TIDY)[number];
+export const FLEET_AUTO_TIDY_MS: Readonly<Record<Exclude<FleetAutoTidy, "off">, number>> = {
+  "30m": 30 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+};
 export const FLEET_SETTINGS_PATH = "/v1/operator/fleet-settings";
 export const FLEET_SETTINGS_CONTEXT_PATH = `${FLEET_SETTINGS_PATH}/context`;
 const FleetPolicySchema = z
@@ -27,6 +39,7 @@ const FleetPolicySchema = z
     peerMessages: z.enum(["on", "off"]).optional(),
     remoteGates: z.enum(["on", "off"]).optional(),
     leadRestarts: z.enum(["on", "off"]).optional(),
+    autoTidy: z.enum(FLEET_AUTO_TIDY).optional(),
     hire: HireProfileSchema.optional(),
     ...FleetAutonomyWireSchema.shape,
   })

@@ -102,3 +102,18 @@ Old unreconciled trees reach the owner only when the lead mails them with
 `mail_owner_update`. ADR 0245 keeps owner updates deliberate ("no event, worker
 result or commit automatically publishes mail"), so the service does not
 publish them on its own.
+
+## Amendment: finished hires are tidied automatically (James, 2026-10-17; VUH-2392)
+
+On 2026-10-17, 33 of 45 panes were done and 575 core worktrees filled an 88%
+full disk, because every close and prune waited for a lead to judge it. James
+asked for automatic tidy, so status may now feed one service policy, the owner's
+`autoTidy` fleet setting (default `1h`; `off` restores lead-only tidy). It
+closes a local hire only after its pane has sat idle or done that long, with a
+kept report and every report acknowledged. The acknowledgment is the lead's
+judgment that the result was harvested. The close goes through
+`close_worker_pane` unchanged: all three policy refusals, `unlanded_work` and the
+technical failures still hold. A `keep_worker_pane` keep skips the session.
+Landed worktrees (HEAD in `origin/main`, clean, a day idle, enrolled roots) are
+pruned through the same exact-tree removal. The lead's own tidy and judgment are
+unchanged; the policy only stops finished, harvested work from waiting on it.

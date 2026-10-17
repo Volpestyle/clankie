@@ -27,6 +27,7 @@ import { text } from "node:stream/consumers";
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
   "       clankie agents retire PANE --conversation ID --reason TEXT [--report PATH] [--unlanded-reason TEXT]\n" +
+  "       clankie agents keep|unkeep PANE --conversation ID [--reason TEXT]\n" +
   "       clankie agents processes [retire] (local host; own confirmed closed hires only)\n" +
   "       clankie agents message-status DELIVERY_ID (current native seat)\n" +
   "       clankie agents readopt SEAT --conversation ID\n" +
@@ -95,34 +96,46 @@ export async function runAgentsCommand(
     stdin?: Parameters<typeof text>[0];
   } = {},
 ): Promise<unknown> {
-  if (args[0] === "retire") {
-    const pane = args[1];
-    const parsed = flags(args.slice(2), ["--conversation", "--reason", "--report", "--unlanded-reason"]);
-    if (!pane || !parsed.get("--conversation") || !parsed.get("--reason")) throw new Error(AGENTS_USAGE);
+  // Pane tidy runs as the conversation's own tool, with its checks and receipts.
+  const conversationTool = async (conversationId: string, name: string, input: Record<string, unknown>) => {
     const env = options.env ?? process.env;
     const credential = await resolveOperatorCredential({
       env,
       ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
     });
-    if (!credential) throw new Error("Retirement needs the operator credential. Run clankie doctor.");
+    if (!credential) throw new Error("Pane tidy needs the operator credential. Run clankie doctor.");
     const upstream = await connectLaneUpstream({
       host: commandHost({ env, ...(options.host ? { host: options.host } : {}) }),
       bearer: credential.token,
-      conversationId: parsed.get("--conversation")!,
+      conversationId,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     });
     try {
-      return decodeMcpResult(
-        await upstream.callTool("close_worker_pane", {
-          pane,
-          reason: parsed.get("--reason"),
-          ...(parsed.has("--report") ? { reportPath: parsed.get("--report") } : {}),
-          ...(parsed.has("--unlanded-reason") ? { unlandedReason: parsed.get("--unlanded-reason") } : {}),
-        }),
-      );
+      return decodeMcpResult(await upstream.callTool(name, input));
     } finally {
       await upstream.close();
     }
+  };
+  if (args[0] === "retire") {
+    const pane = args[1];
+    const parsed = flags(args.slice(2), ["--conversation", "--reason", "--report", "--unlanded-reason"]);
+    if (!pane || !parsed.get("--conversation") || !parsed.get("--reason")) throw new Error(AGENTS_USAGE);
+    return conversationTool(parsed.get("--conversation")!, "close_worker_pane", {
+      pane,
+      reason: parsed.get("--reason"),
+      ...(parsed.has("--report") ? { reportPath: parsed.get("--report") } : {}),
+      ...(parsed.has("--unlanded-reason") ? { unlandedReason: parsed.get("--unlanded-reason") } : {}),
+    });
+  }
+  if (args[0] === "keep" || args[0] === "unkeep") {
+    const pane = args[1];
+    const parsed = flags(args.slice(2), ["--conversation", "--reason"]);
+    if (!pane || !parsed.get("--conversation")) throw new Error(AGENTS_USAGE);
+    return conversationTool(parsed.get("--conversation")!, "keep_worker_pane", {
+      pane,
+      keep: args[0] === "keep",
+      ...(parsed.has("--reason") ? { reason: parsed.get("--reason") } : {}),
+    });
   }
   if (args[0] === "processes") {
     if (args.length > 2 || (args.length === 2 && args[1] !== "retire")) throw new Error(AGENTS_USAGE);

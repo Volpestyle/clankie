@@ -1027,7 +1027,12 @@ owner refs every five seconds and fetches once a minute: direct pushes trigger
 the same safe sync, including catch-up on startup. Blocking edits and ages
 produce a service notice and structured log. Tidy's exact-worktree removal preserves `.local`
 evidence in the configured state directory and rechecks complete local pane
-and Git inventories. Managed pin/runtime/update namespaces and the running
+and Git inventories. `captain/auto-tidy.ts` runs the owner's `autoTidy` fleet
+setting on two timers: every five minutes it closes settled local hires whose
+reports are kept and acknowledged through `PaneTidy.close` (same landed-work,
+draft and idle checks; kept panes in `pane-keeps.json` are skipped), and hourly
+it prunes enrolled worktrees whose HEAD is in `origin/main` and that have been
+idle a day through the same exact-worktree removal. Managed pin/runtime/update namespaces and the running
 service checkout are protected independently of developer-root enrollment. Source runtime
 retention is separate: after a passed and released canary, `runtime-retention.ts`
 keeps current/previous and live/canary/recovery dependencies, then releases only

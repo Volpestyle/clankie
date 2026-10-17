@@ -10,6 +10,7 @@ import { nativeHerdrRead } from "../src/herdr-native-read.ts";
 import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import { afterEach, expect, it } from "vitest";
 import { PaneTidy } from "../src/captain/pane-tidy.ts";
+import { createAutoTidy } from "../src/captain/auto-tidy.ts";
 import { paneDraftState } from "../src/captain/pane-draft.ts";
 import {
   createHerdrWatchRunner,
@@ -1228,5 +1229,67 @@ it("holds a merge's unique resolution even when git cherry says every patch land
   });
   expect(f.closes()).toBe(0);
   expect(await readFile(join(w.tree, "resolution.txt"), "utf8")).toBe("only in the merge\n");
+  f.watch.close();
+});
+
+// VUH-2392 acceptance: automatic tidy closes a hire only after its idle period, with its
+// report kept and read and its work landed. A kept pane, an unread report, unlanded work
+// or an unsent draft keeps it open, each through the production close checks.
+it("automatic tidy closes a harvested, landed hire only after its idle period", async () => {
+  const w = await workerWorktree();
+  await writeFile(join(w.tree, "feature.txt"), "unlanded\n");
+  await git(w.tree, "add", "feature.txt");
+  await git(w.tree, "commit", "--quiet", "-m", "unlanded feature");
+  const f = await fixture({ cwd: w.tree });
+  f.setStatus("done");
+  f.tidy.keepReport(await f.ports.runner.get("w1:p1"), "Pip's report: the feature is done.");
+  let clock = 0;
+  let unread = 1;
+  const notices: string[][] = [];
+  const auto = createAutoTidy({
+    setting: async () => "1h",
+    runner: f.ports.runner,
+    tidy: f.tidy,
+    provenance: (agent) => f.watch.tidyProvenance(agent),
+    unreadReports: () => unread,
+    ownerValid: async () => true,
+    closed: async (owner, entries) => {
+      notices.push([owner.conversationId, ...entries.map((entry) => entry.reason)]);
+    },
+    checkouts: async () => [],
+    prune: async () => {
+      throw new Error("No worktree sweep in a pane sweep");
+    },
+    stopped: () => false,
+    now: () => clock,
+  });
+  const sweep = async (minutes: number) => {
+    clock += minutes * 60_000;
+    return (await auto.panes()).length;
+  };
+  expect(await sweep(0)).toBe(0);
+  expect(await sweep(59)).toBe(0);
+  // Past the hour, but its report is still unread.
+  expect(await sweep(2)).toBe(0);
+  unread = 0;
+  expect(
+    await f.tidy.keep({ pane: "w1:p1", keep: true, reason: "Owner wants its context" }, authority),
+  ).toMatchObject({
+    outcome: "kept",
+  });
+  expect(await sweep(1)).toBe(0);
+  expect(await f.tidy.keep({ pane: "w1:p1", keep: false }, authority)).toMatchObject({ outcome: "released" });
+  // Its commit is not on origin/main yet; the close refuses and waits another period.
+  expect(await sweep(1)).toBe(0);
+  await git(w.repo, "update-ref", "refs/remotes/origin/main", await git(w.tree, "rev-parse", "HEAD"));
+  f.setAnsi(await golden("codex", "draft"));
+  expect(await sweep(61)).toBe(0);
+  f.setAnsi(await golden("codex", "empty"));
+  expect(await sweep(30)).toBe(0);
+  expect(f.closes()).toBe(0);
+  expect(await sweep(31)).toBe(1);
+  expect(f.closes()).toBe(1);
+  expect(notices).toEqual([["lead", "Auto-tidy: idle 1h with its reports read and its work landed"]]);
+  expect(f.tidy.history()[0]).toMatchObject({ state: "closed", reason: notices[0]![1] });
   f.watch.close();
 });

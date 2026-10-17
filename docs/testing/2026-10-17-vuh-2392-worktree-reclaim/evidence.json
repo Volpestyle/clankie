@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "census-after.json",
+      "size": 84879,
+      "sha256": "5afc63de0e9bf750ad2e02b82cb9b66142e5f0a84afe56342031212b8db78491",
+      "url": "clankie://evidence/sha256/5afc63de0e9bf750ad2e02b82cb9b66142e5f0a84afe56342031212b8db78491"
+    },
+    {
+      "path": "census-before.json",
+      "size": 131593,
+      "sha256": "7a302c11bf6094bd5b7261d7fa937c1beeb83654d0b065e2ce3adf390823ff44",
+      "url": "clankie://evidence/sha256/7a302c11bf6094bd5b7261d7fa937c1beeb83654d0b065e2ce3adf390823ff44"
+    },
+    {
+      "path": "removal-log.json",
+      "size": 57746,
+      "sha256": "858261c1c5a406a3858dd4fdf23f3590798ed344656e324e40479c76f959f001",
+      "url": "clankie://evidence/sha256/858261c1c5a406a3858dd4fdf23f3590798ed344656e324e40479c76f959f001"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -585,4 +585,61 @@ it("prune refuses evidence aliases, an archive inside the retiring tree, and cop
   }
   expect(existsSync(path)).toBe(true);
   expect(await readFile(join(path, ".local", "proof.txt"), "utf8")).toBe("must survive\n");
+});
+
+// VUH-2392 acceptance: automatic tidy removes enrolled worktrees whose HEAD is in origin/main,
+// that are clean and a day idle, through the guarded prune; every other tree stays.
+it("automatic tidy removes only landed, clean, idle worktrees in enrolled roots", async () => {
+  const { createAutoTidy } = await import("../src/captain/auto-tidy.ts");
+  const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+  const f = await fixture();
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--quiet", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  await git(f.repo, ["fetch", "--quiet", "origin"]);
+  const enrolled = join(f.root, "trees");
+  await mkdir(enrolled);
+  const landed = await f.worktree("trees/landed");
+  const recent = await f.worktree("trees/recent");
+  const unlanded = await f.worktree("trees/unlanded");
+  const dirty = await f.worktree("trees/dirty");
+  const outside = await f.worktree("outside");
+  await writeFile(join(unlanded, "feature.txt"), "unlanded\n");
+  await git(unlanded, ["add", "feature.txt"]);
+  await git(unlanded, ["commit", "--quiet", "-m", "unlanded feature"]);
+  await writeFile(join(dirty, "notes.txt"), "untracked\n");
+  // As in the product repositories, ignored .local evidence leaves a tree clean.
+  await writeFile(join(f.repo, ".git", "info", "exclude"), ".local/\n");
+  await mkdir(join(landed, ".local"));
+  await writeFile(join(landed, ".local", "proof.txt"), "kept evidence\n");
+  const dayAgo = new Date(Date.now() - 2 * 24 * 60 * 60_000);
+  for (const tree of [landed, unlanded, dirty, outside]) {
+    const gitDir = await git(tree, ["rev-parse", "--path-format=absolute", "--git-dir"]);
+    for (const path of [join(gitDir, "index"), join(gitDir, "HEAD"), join(gitDir, "logs", "HEAD"), tree])
+      await utimes(path, dayAgo, dayAgo);
+  }
+  const { runner } = inventory(() => []);
+  const evidence = join(f.root, "evidence");
+  const auto = createAutoTidy({
+    setting: async () => "1h",
+    runner,
+    tidy: tidy(f.root, runner),
+    provenance: () => "unknown",
+    unreadReports: () => 0,
+    ownerValid: async () => false,
+    closed: async () => {
+      throw new Error("A worktree sweep closes no pane");
+    },
+    checkouts: async () => [{ repository: f.repo, roots: [enrolled] }],
+    prune: (repository, path) => pruneTidyWorktree(repository, path, evidence, runner, async () => {}),
+    stopped: () => false,
+  });
+  const removed = await auto.worktrees();
+  expect(removed.map((result) => result.path)).toEqual([landed]);
+  expect(existsSync(landed)).toBe(false);
+  for (const tree of [recent, unlanded, dirty, outside]) expect(existsSync(tree)).toBe(true);
+  expect(await readFile(join(removed[0]!.evidencePath!, "proof.txt"), "utf8")).toBe("kept evidence\n");
+  expect(await readFile(join(dirty, "notes.txt"), "utf8")).toBe("untracked\n");
+  expect(await git(f.repo, ["rev-parse", "trees/unlanded"])).toBe(await git(unlanded, ["rev-parse", "HEAD"]));
+  expect(await auto.worktrees()).toEqual([]);
 });

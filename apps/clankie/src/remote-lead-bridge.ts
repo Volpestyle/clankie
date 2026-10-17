@@ -27,6 +27,7 @@ const PROJECT_TOOLS = new Set([
   "mail_owner_update",
   "refresh_worker_tools",
   "close_worker_pane",
+  "keep_worker_pane",
   "mcp_tool_search",
   "mcp_tool_call",
 ]);

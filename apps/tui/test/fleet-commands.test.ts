@@ -79,11 +79,24 @@ describe("clankie fleet", () => {
         peerMessages: "on",
         remoteGates: "off",
         leadRestarts: "on",
+        autoTidy: "1h",
       },
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
     const selects: Parameters<SetupFlow["readSelect"]>[0][] = [];
-    const picks = ["codex", "off", "off", "off", "owner", "owner", "hands-off", "owner", "lead", "owner"];
+    const picks = [
+      "codex",
+      "off",
+      "off",
+      "off",
+      "4h",
+      "owner",
+      "owner",
+      "hands-off",
+      "owner",
+      "lead",
+      "owner",
+    ];
     const flow = {
       begin: () => undefined,
       end: () => undefined,
@@ -111,6 +124,7 @@ describe("clankie fleet", () => {
       { currentValue: "connected" },
       { currentValue: "on" },
       { currentValue: "on" },
+      { currentValue: "1h" },
       { currentValue: "lead" },
       { currentValue: "lead" },
       { currentValue: "hands-off" },
@@ -132,6 +146,7 @@ describe("clankie fleet", () => {
       peerMessages: "off",
       remoteGates: "off",
       leadRestarts: "off",
+      autoTidy: "4h",
     });
     expect(read().autonomy.fleet).toEqual(
       FleetAutonomySchema.parse({
@@ -163,6 +178,7 @@ describe("clankie fleet budget", () => {
       peerMessages: "on",
       remoteGates: "off",
       leadRestarts: "on",
+      autoTidy: "1h",
       ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain("fleet tool access disabled");
@@ -216,6 +232,7 @@ describe("clankie fleet peer messages", () => {
       peerMessages: "off",
       remoteGates: "off",
       leadRestarts: "on",
+      autoTidy: "1h",
       ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain(

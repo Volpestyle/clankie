@@ -280,6 +280,7 @@ import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
 import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { PaneTidy } from "./pane-tidy.ts";
+import { AUTO_TIDY_PANE_CHECK_MS, AUTO_TIDY_WORKTREE_CHECK_MS, createAutoTidy } from "./auto-tidy.ts";
 import { SeatIssueKeeper, liveSeatIssue, prepareSeatIssueAttribution } from "./seat-issue-status.ts";
 import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { createHuddleService, HuddleStore, type HuddleSeatTarget } from "./huddles.ts";
@@ -5441,6 +5442,49 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // Reports left pending by an earlier process run without waiting for a seat.
   setTimeout(() => recoverAllWorkerReports(), 0).unref?.();
 
+  // VUH-2392: finished, harvested, landed hires close on their own, and landed worktrees in
+  // enrolled roots go, through the same guarded close and prune a lead uses.
+  const autoTidy = createAutoTidy({
+    setting: async () => (await settings()).fleet.autoTidy,
+    runner: herdrRunner,
+    tidy: paneTidy,
+    provenance: (agent) => herdrWatches.tidyProvenance(agent),
+    unreadReports: (agent) => reportSummaries(undefined, agent).length,
+    ownerValid: validateConversationOwner,
+    closed: async (owner, entries) => {
+      for (const entry of entries) {
+        const issue = await herdrWatches.issueStatus?.closed({ seatId: entry.seatId, reason: entry.reason });
+        if (issue?.outcome === "failed")
+          console.warn("Seat issue status unavailable", issue.issue, issue.detail);
+      }
+      const panes =
+        entries
+          .slice(0, 20)
+          .map((entry) => `${entry.title || entry.harness} (${entry.paneId}, undo ${entry.id})`)
+          .join(", ") +
+        (entries.length > 20 ? ` and ${entries.length - 20} more in worker_pane_history` : "");
+      conversations.recordServiceNotice(
+        owner.conversationId,
+        `Auto-tidy closed ${entries.length === 1 ? "a finished hire" : `${entries.length} finished hires`} whose reports you read and whose work landed: ${panes}. undo_worker_pane reopens one within five minutes; later, resume its saved session. keep_worker_pane keeps a pane open; \`clankie fleet set --auto-tidy off\` stops this.`,
+      );
+    },
+    checkouts: async () => {
+      const roots = new Map<string, string[]>();
+      for (const root of (await settings()).projects.projects.flatMap((project) => project.worktreeRoots))
+        if (root.machineId === "local")
+          roots.set(root.repoPath, [...(roots.get(root.repoPath) ?? []), root.path]);
+      return [...roots].map(([repository, paths]) => ({ repository, roots: paths }));
+    },
+    prune: (repository, path) => pruneWorktree(repository, path),
+    stopped: () => shutdown.signal.aborted,
+  });
+  const stopAutoTidyPanes = startFleetRounds(async () => {
+    await autoTidy.panes();
+  }, options.autoTidyPaneCheckMs ?? AUTO_TIDY_PANE_CHECK_MS);
+  const stopAutoTidyWorktrees = startFleetRounds(async () => {
+    await autoTidy.worktrees();
+  }, options.autoTidyWorktreeCheckMs ?? AUTO_TIDY_WORKTREE_CHECK_MS);
+
   const inboundReceipts = new InboundSeatReceipts(
     join(options.stateDir, "delivery-receipts", "inbound.json"),
     conversations,
@@ -7778,6 +7822,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       stopAutoRounds();
       stopLeadRestarts();
       stopLeadFailbacks();
+      stopAutoTidyPanes();
+      stopAutoTidyWorktrees();
       unsubscribeFleets?.();
       censusBreaker.close();
       evaluator.close();

@@ -2897,6 +2897,7 @@ paths:
                       tools: { type: string, enum: [connected, off] }
                       peerMessages: { type: string, enum: [on, off] }
                       leadRestarts: { type: string, enum: [on, off] }
+                      autoTidy: { type: string, enum: ["off", 30m, 1h, 4h, 1d] }
                       hire: { type: object, description: Full HireProfileSchema; null clears on write }
                       everydayWork: { type: string, enum: [allow, lead, owner] }
                       leavesMac: { type: string, enum: [allow, lead, owner] }
@@ -2938,6 +2939,7 @@ paths:
                     tools: { type: string, enum: [connected, off] }
                     peerMessages: { type: string, enum: [on, off] }
                     leadRestarts: { type: string, enum: [on, off] }
+                    autoTidy: { type: string, enum: ["off", 30m, 1h, 4h, 1d] }
                     hire: { type: object, description: Full HireProfileSchema; null clears on write }
                     everydayWork: { type: string, enum: [allow, lead, owner] }
                     leavesMac: { type: string, enum: [allow, lead, owner] }
