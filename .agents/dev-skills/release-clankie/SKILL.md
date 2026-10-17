@@ -112,9 +112,10 @@ Read the resolved workspace working preferences with `clankie fleet status`
 before publishing. Follow the resolved commit, push and verification preferences
 for that work too. Global `autonomy.fleet.release` asks before official releases;
 the registered `clankie` project may override it with an owner-authored time rule.
-For the migrated weekly rule, verify that the last `v*` tag is more than one week
-old and `main` has user-visible changes worth shipping. Churn with nothing an
-operator would notice waits. Check current tag history rather than substituting
+The Clankie project uses `release: lead`; routine `rt_5e57aab32a7d` carries
+the weekly Friday cadence (owner instruction, 2026-10-17). Release when `main`
+has user-visible changes worth shipping, with no minimum spacing from the
+previous tag. Churn with nothing an operator would notice waits. Check current tag history rather than substituting
 the date of a GitHub release record. When the effective rule permits release,
 bump the root `package.json` version in a release commit, then tag. When it says
 ask first, obtain owner authorization. Explicit task and integrator gates take

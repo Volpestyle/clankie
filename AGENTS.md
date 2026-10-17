@@ -85,9 +85,9 @@ This repository is public. Both neighbors are private and consume
 - Read resolved owner working preferences through `clankie fleet status` or
   `clankie doctor --json` for this workspace before committing, pushing or releasing.
   Global defaults permit commit/push without asking and require asking before
-  official releases. The registered `clankie` project's migrated release override
-  permits release when the last `v*` tag is more than one week old and `main` has
-  user-visible changes worth shipping (`release-clankie`). Explicit task and
+  official releases. Clankie releases weekly on Fridays (routine `rt_5e57aab32a7d`,
+  James 2026-10-17) when `main` has user-visible changes worth shipping
+  (`release-clankie`). Explicit task and
   integrator gates take precedence; the private app reads its own project policy.
 - Land clankie and clankie-app changes directly on `main`
   ([ADR 0240](docs/adr/0240-changes-land-directly-on-main.md)): stage only your

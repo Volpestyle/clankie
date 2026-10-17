@@ -6941,7 +6941,7 @@ accepts the same syntax as `/project settings PROJECT ...`.
 clankie project settings garden --closure owner
 clankie project settings garden --machine-setup lead
 clankie project settings garden --closure inherit
-clankie project settings clankie --release time_rule --release-rule "Release without asking when the last v* tag is more than one week old and main has user-visible changes worth shipping."
+clankie project settings clankie --release time_rule --release-rule "Release without asking every Friday when main has user-visible changes worth shipping."
 clankie project settings garden --commit owner --push inherit
 clankie project settings garden --wip-cap 6 --owner-loop milestones
 ```
