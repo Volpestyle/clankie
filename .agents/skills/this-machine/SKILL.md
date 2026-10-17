@@ -208,8 +208,11 @@ seat bridge status (`reconnecting`, then `current`) and verify a tool call/chann
 never allocate another pane to recover it. Explicit delegation revocation remains
 permanent. See [lead](../lead/SKILL.md) and the `conversations lead` CLI contract.
 
-Remote lead transcript hooks share a two-second upload budget and retain only
-acknowledged entry IDs locally; the next hook resumes remaining native records.
+Remote lead transcript hooks retain only acknowledged entry IDs locally.
+SessionStart retries restart failures within a 50-second budget, leaving time
+inside the native hook's 60-second limit. Explicit delegation revocation aborts
+that retry. Other hooks share a two-second upload budget; the next hook resumes
+remaining native records.
 Read `~/.clankie/remote-leads/hooks.log` on that machine for hook/request duration
 and the service's `authMs` (including fresh native proof) and `storeMs`. A short
 hook timeout does not retire or restart the lead. Missing checkpoints replay

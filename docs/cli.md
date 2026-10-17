@@ -5376,9 +5376,12 @@ after an earlier bridge timed out, which would otherwise skip the bridge in
 every later session of that profile. A profile that has not finished Claude's
 first run (`hasCompletedOnboarding`) refuses before allocating a pane, naming
 the owner step: run `claude` once under that `CLAUDE_CONFIG_DIR` and complete
-its first screens. The lead starts with `--no-chrome`, so a detected Claude in
-Chrome extension never holds its first screen. Its SessionStart hooks keep
-retrying a service that is restarting, within their 60-second budget.
+its first screens. The lead starts with `--no-chrome` to disable browser tools;
+fresh-profile first-screen behavior remains a separate live verification.
+SessionStart prompt and transcript hooks retry a restarting service for up to
+50 seconds, inside the native hook's 60-second budget. Explicit revocation
+stops the retry. Other transcript hooks retain a two-second upload budget and
+leave unacknowledged records for the next hook.
 
 `launch --json-stdin` reads an object with a fresh UUID `requestId`, `fleet`,
 `workingDirectory`, `title`, and optional `account` and `conversationId`. Omit the conversation
@@ -5389,7 +5392,11 @@ Herdr workspace. The result includes the conversation, pane and `delegationId`.
 are ready. Inspect the chat and its native head. An `unconfirmed` result must be
 reconciled using the same request ID; repeating it reads the original journal and
 never launches again. Do not substitute a fresh ID for uncertain intent. An
-`unconfirmed` result's `detail` names the pane it left open, if any. A result
+`unconfirmed` result's `detail` names the pane it left open, if any. The remote
+helper reports a created pane before native shell inspection; a failed
+inspection still retains that pane in the receipt, without issuing a delegation.
+If transport fails before any pane report arrives, allocation remains unknown;
+the receipt must be reconciled rather than replayed. A result
 also lists in `leftBehind` the panes that earlier launches for the same
 conversation left in the past day; close any whose head never attached.
 

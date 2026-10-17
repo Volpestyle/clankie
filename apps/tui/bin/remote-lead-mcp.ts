@@ -214,7 +214,6 @@ try {
  */
 async function syncQuietly(): Promise<number> {
   const started = Date.now();
-  const signal = AbortSignal.timeout(SYNC_BUDGET_MS);
   let input = "";
   let event = "unknown";
   let failure: unknown;
@@ -224,6 +223,13 @@ async function syncQuietly(): Promise<number> {
       if (Buffer.byteLength(input) > 65536) throw new Error("Seat hook input exceeds 64 KiB");
     }
     event = String((JSON.parse(input) as { hook_event_name?: unknown }).hook_event_name ?? "unknown");
+    // Startup must survive a home-service restart without relying on another
+    // hook. Mid-turn/Stop uploads keep their short interactive budget.
+    const startup = event === "SessionStart";
+    const signal = AbortSignal.any([
+      closing.signal,
+      AbortSignal.timeout(startup ? PROMPT_RETRY_BUDGET_MS : SYNC_BUDGET_MS),
+    ]);
     await runSeatSyncCommand([], {
       env: { ...process.env, CLANKIE_OPERATOR_TOKEN: token },
       host: "http://127.0.0.1",
@@ -232,6 +238,7 @@ async function syncQuietly(): Promise<number> {
         yield input;
       })(),
       signal,
+      ...(startup ? { retryDelaysMs: [2_000, 5_000, 10_000, 10_000, 10_000, 10_000] } : {}),
       checkpointPath: join(
         tmpdir(),
         `clankie-remote-lead-transcript-${conversationId}-${process.env.CLANKIE_SEAT_SESSION_ID}.json`,

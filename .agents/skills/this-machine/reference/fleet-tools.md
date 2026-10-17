@@ -21,6 +21,13 @@ delegation remains revoked; any cleanup is a separate owner decision.
 Runtime updates build the standalone bridge before cutover; a source-only
 missing-bridge refusal names `clankie heavy -- node scripts/build-remote-lead.mjs`.
 
+SessionStart transcript sync retries a restarting home service within its
+startup budget; ordinary hooks keep their short upload deadline. A launch
+reports a created pane before inspecting its native shell, so failed inspection
+still names the pane left open. That early pane report is cleanup information,
+not native admission or permission to replay the launch. Inspect the original
+receipt and coordinate cleanup; do not close another lead's pane as a probe.
+
 Remote heads get ordinary `linear_*` tracker tools from the bound lead chat.
 Use their tracker-only `mcp_tool_search` / `mcp_tool_call` for tools beyond the
 initial list. Writes require current seat delegation and chat attribution; do

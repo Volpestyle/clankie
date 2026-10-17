@@ -408,12 +408,22 @@ process.stdin.on('end', () => {
           maximumTrust,
         }) + "\n",
       );
-      const allocated = await nextFrame(lines);
+      let allocated = await nextFrame(lines);
+      let createdPane: string | undefined;
+      if (allocated.stage === "created" && /^w[\w]+:p[\w]+$/u.test(allocated.pane)) {
+        createdPane = allocated.pane;
+        // Informational only: an observed shell is still required before a
+        // grant exists. Retain this pane if observation/transport fails next.
+        record.pane = `${input.fleet}/${createdPane}`;
+        await writeFile(path, JSON.stringify(record));
+        allocated = await nextFrame(lines);
+      }
       if (allocated.stage === "refused" && typeof allocated.error === "string")
         throw new Error(allocated.error.slice(0, 1024));
       if (
         allocated.stage !== "allocated" ||
         !/^w[\w]+:p[\w]+$/u.test(allocated.pane) ||
+        (createdPane !== undefined && allocated.pane !== createdPane) ||
         !Number.isSafeInteger(allocated.shell?.pid) ||
         typeof allocated.shell?.startTime !== "string"
       )

@@ -237,6 +237,7 @@ it("launches an approved Windows workspace through the real conversation store w
   let approved = false;
   let transportCalls = 0;
   let malformedReply = false;
+  let failAfterPaneCreation = false;
   const connections = new ExecutionConnections({
     settings,
     primary: { binding: () => undefined, status: () => "disabled" },
@@ -284,6 +285,10 @@ it("launches an approved Windows workspace through the real conversation store w
               if(input.cwd!==${JSON.stringify(cwd)}) process.exit(2);
               if(input.account!==${JSON.stringify(identityKey)} || input.profileHome!==${JSON.stringify(nativeAccount.home)} || input.expectedIdentity.email!==${JSON.stringify(nativeAccount.identity)}) process.exit(4);
               if(input.maximumTrust!==true) process.exit(5);
+              if(${failAfterPaneCreation}) {
+                process.stdout.write(JSON.stringify({stage:'created',pane:'wnew:p1'})+'\\n',()=>process.exit(1));
+                return;
+              }
               console.log(JSON.stringify({stage:'allocated',pane:'w1:p1',shell:{pid:123,startTime:'2026-10-09T00:00:00Z'}}));
             } else {
               if(typeof input.token!=='string'||!input.conversationId) process.exit(3);
@@ -640,6 +645,24 @@ it("launches an approved Windows workspace through the real conversation store w
       const events = await readFile(join(root, "conversations", conversationId, "events.jsonl"), "utf8");
       expect(events).toContain("local captain fallback is forbidden");
     });
+    // VUH-2075: process inspection can fail after Herdr created the pane,
+    // before native shell proof exists. Report cleanup information without
+    // issuing any delegation for this incomplete allocation.
+    failAfterPaneCreation = true;
+    const grantsBeforeEarlyFailure = issue.mock.calls.length;
+    const earlyInput = { ...input, requestId: randomUUID(), conversationId };
+    const early = await leads.launch(earlyInput, async () => {});
+    expect(early).toMatchObject({
+      stage: "unconfirmed",
+      failedStage: "allocating",
+      pane: "pc/wnew:p1",
+      detail: expect.stringContaining("left pane pc/wnew:p1 open"),
+    });
+    expect(issue.mock.calls).toHaveLength(grantsBeforeEarlyFailure);
+    expect(
+      JSON.parse(await readFile(join(root, "launches", `${earlyInput.requestId}.json`), "utf8")),
+    ).toMatchObject({ pane: "pc/wnew:p1", stage: "unconfirmed" });
+    failAfterPaneCreation = false;
     malformedReply = true;
     // A relaunch into the same conversation, whose first head never attached.
     const { account: _account, ...relaunchInput } = input;
@@ -651,7 +674,10 @@ it("launches an approved Windows workspace through the real conversation store w
       account: identityKey,
       error: "Remote lead reply is not valid JSON",
       // VUH-2075: the lead hears which panes were left behind, this one included.
-      leftBehind: [{ requestId: input.requestId, pane: "pc/w1:p1", stage: "dispatched" }],
+      leftBehind: expect.arrayContaining([
+        { requestId: input.requestId, pane: "pc/w1:p1", stage: "dispatched" },
+        { requestId: earlyInput.requestId, pane: "pc/wnew:p1", stage: "unconfirmed" },
+      ]),
       detail: expect.stringContaining("left pane pc/w1:p1 open"),
     });
     const failedGrant = await issue.mock.results[1]!.value;

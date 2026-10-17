@@ -136,6 +136,9 @@ if (process.argv[2] === "--head") {
     "--no-focus",
   ]);
   const pane = created.result.root_pane.pane_id;
+  // Cleanup information is available before native shell observation. This
+  // frame grants no delegation; the allocated frame still requires proof.
+  process.stdout.write(JSON.stringify({ stage: "created", pane }) + "\n");
   const info = (await herdr(["pane", "process-info", "--pane", pane])).result.process_info;
   const shell = {
     pid: info.shell_pid,
