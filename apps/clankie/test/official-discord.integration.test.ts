@@ -263,6 +263,7 @@ async function routeFixture() {
     registrations: 0,
     blocked: undefined as OfficialDiscordStatus["blocked"],
     usage: undefined as OfficialDiscordStatus["usage"],
+    statusError: undefined as string | undefined,
   };
   let gatewayUrl = "";
   const server = createServer(async (request: IncomingMessage, response) => {
@@ -295,6 +296,11 @@ async function routeFixture() {
       return;
     }
     if (request.url === OFFICIAL_DISCORD_PATHS.status && request.method === "GET") {
+      if (fleet.statusError) {
+        response.statusCode = fleet.statusError === "not_found" ? 404 : 503;
+        response.end(JSON.stringify({ error: fleet.statusError }));
+        return;
+      }
       const status: OfficialDiscordStatus = {
         registered: fleet.registered,
         ...(fleet.registered ? { routeId, installationId } : {}),
@@ -456,3 +462,31 @@ it("refuses to turn on while this machine's own bot is the official application,
   expect(f.fleet.registrations).toBe(0);
   expect(await f.ingress()).toBe(404);
 });
+
+it.each(["not_found", "unavailable"])(
+  "recovers from fleet status %s through the same API and CLI without changing BYO settings",
+  async (code) => {
+    const f = await routeFixture();
+    await f.settings.update((value) => ({
+      ...value,
+      discord: { ...value.discord, applicationId: "123456", activeBody: "bot" },
+    }));
+    const before = (await f.settings.load()).discord;
+    f.fleet.statusError = code;
+    const status = await f.cli("status");
+    expect(status).toMatchObject({ enabled: false, running: false, fleetError: code });
+    expect(status.next).toContain(code === "not_found" ? "isn’t available" : "Refresh to try again");
+    await expect(f.cli("on")).rejects.toThrow(status.next);
+    expect((await f.settings.load()).discord).toEqual(before);
+    expect(f.fleet.registrations).toBe(0);
+    f.fleet.statusError = undefined;
+    expect(await f.cli("on")).toMatchObject({ enabled: true, running: true });
+    f.fleet.statusError = code;
+    const unavailable = await f.cli("status");
+    expect(unavailable).toMatchObject({ enabled: true, running: true, fleetError: code });
+    expect(unavailable).not.toHaveProperty("official");
+    // The local ingress can still be stopped while the remote report is unavailable.
+    expect(await f.cli("off")).toMatchObject({ enabled: false, running: false, fleetError: code });
+    expect((await f.settings.load()).discord).toEqual(before);
+  },
+);

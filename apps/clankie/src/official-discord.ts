@@ -211,7 +211,15 @@ export class OfficialDiscordControl implements DiscordIngressPort {
         await this.fleet(account, OFFICIAL_DISCORD_PATHS.status, "GET"),
       );
     } catch (error) {
-      return { ...base, fleetError: errorCode(error) };
+      const code = errorCode(error);
+      return {
+        ...base,
+        fleetError: code,
+        next:
+          code === "not_found"
+            ? "The official bot isn’t available from your Clankie account yet. Try again later."
+            : "Clankie couldn’t check your account for the official bot. Refresh to try again.",
+      };
     }
     const next = official.blocked
       ? `The official bot is blocked for this ${official.blocked.scope}: ${official.blocked.reason}`
@@ -220,7 +228,7 @@ export class OfficialDiscordControl implements DiscordIngressPort {
         : !base.running
           ? "This machine is still registering with your account."
           : !official.discord.connected
-            ? "Open installUrl and choose Add to Discord."
+            ? "Add Clankie to a server you manage from your account page."
             : undefined;
     return {
       ...base,
@@ -258,7 +266,13 @@ export class OfficialDiscordControl implements DiscordIngressPort {
         await this.fleet(account, OFFICIAL_DISCORD_PATHS.status, "GET"),
       );
     } catch (error) {
-      return { error: "fleet_unavailable", detail: `Clankie account: ${errorCode(error)}` };
+      return {
+        error: "fleet_unavailable",
+        detail:
+          errorCode(error) === "not_found"
+            ? "The official bot isn’t available from your Clankie account yet. Try again later."
+            : "Clankie couldn’t check your account for the official bot. Refresh to try again.",
+      };
     }
     // One gateway connection per bot token: a bring-your-own bot stays on its own
     // token, but this machine must not also run the official application's token.

@@ -78,6 +78,12 @@ The edge's `owner` flag grants nothing on this route: the machine's own Discord
 settings decide authority, exactly as for a bring-your-own bot. Contracts are in
 `@clankie/protocol/official-discord`.
 
+If the fleet report is unavailable, the status retains the local `enabled` and
+`running` facts, omits `official`, and returns `fleetError` plus a plain-language
+`next` step. This does not establish which server is connected. A refused `on`
+leaves the settings unchanged; `off` still stops the local ingress even when
+the account report cannot be read. Clients refresh through the same route.
+
 Voice callbacks use `kind: "voice"` and one strict `voice.action`: `briefing`,
 `handoff`, or `self_tool`. Briefing and the three existing voice self-tools use
 the service's existing voice routes; they grant no general captain or operator

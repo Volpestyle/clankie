@@ -7186,6 +7186,12 @@ both through the hosted operator bridge. A hosted body answers 404
 `official_bot_unavailable`; it already uses the official bot. Contracts are in
 `@clankie/protocol/official-discord`.
 
+When the account report cannot be read, `fleetError` and `next` explain the
+unavailable report. The local `enabled`/`running` values remain local facts,
+not proof that the bot is connected to a server. Refresh `status` after fixing
+account availability; a refused `on` changes no settings, and `off` can stop the
+local route while the report is unavailable.
+
 ### `discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]`
 
 Read the names, IDs and kinds the active Discord account can see. The default
