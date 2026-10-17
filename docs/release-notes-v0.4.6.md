@@ -1,4 +1,9 @@
-# Clankie v0.4.5
+# Clankie v0.4.6
+
+This replaces the unpublished v0.4.5 release. Its macOS release checks timed
+out twice. The release fixtures now cancel expired work and use controlled
+pressure readings, keeping production resource limits unchanged.
+[VUH-2346](https://linear.app/vuhlp/issue/VUH-2346)
 
 Clankie keeps a clearer account of what his fleet accomplishes, follows each
 project's work rules, and recovers more reliably when machines, workers or
@@ -57,6 +62,19 @@ accounts stop answering.
   [VUH-2208](https://linear.app/vuhlp/issue/VUH-2208),
   [VUH-2200](https://linear.app/vuhlp/issue/VUH-2200),
   [VUH-2311](https://linear.app/vuhlp/issue/VUH-2311)
+- **Remote leads regain contact.** Temporary startup failures can be retried,
+  and early orphan panes remain visible for recovery. A message whose arrival
+  is unknown can be settled without resending it, so it does not block every
+  later message to that worker.
+  [VUH-2075](https://linear.app/vuhlp/issue/VUH-2075),
+  [VUH-2358](https://linear.app/vuhlp/issue/VUH-2358)
+- **Worker resource use stays with the worker.** Hired workers and operator
+  sessions keep distinct resource identities, including on dedicated Codex
+  servers.
+  [VUH-2336](https://linear.app/vuhlp/issue/VUH-2336)
+- **An OpenCode turn can fail without losing the worker.** Slow context reads
+  and model errors fail the affected turn while keeping the seat available.
+  [VUH-2348](https://linear.app/vuhlp/issue/VUH-2348)
 - **The right signed-in account.** Harness accounts are discovered by identity,
   and Claude hires use the credential that admission checked. Recovered usage
   refreshes staffing capacity and is announced to the lead.
@@ -75,6 +93,21 @@ accounts stop answering.
 
 ## Easier setup, evidence and everyday use
 
+- **Choose his Clankie mailbox in one step.** Self-hosted installs signed in
+  to a Clankie account can choose his mailbox from connected surfaces. The
+  service confirms his address before switching; a failed connection leaves
+  the current mailbox in charge and keeps stored IMAP settings for a return.
+  [VUH-1764](https://linear.app/vuhlp/issue/VUH-1764)
+- **Clearer Discord setup and recovery.** Paired devices can read official-bot
+  setup status through the service. Pending disconnects survive interrupted
+  replies and can be retried explicitly; unavailable setup explains its cause.
+  [VUH-1766](https://linear.app/vuhlp/issue/VUH-1766)
+- **Sharing recognizes recorded media.** MP4, WAV and MP3 files delivered in
+  a conversation, including native Discord room artifacts, can be selected as
+  Activity sources. Switching sources keeps an active share marked busy until
+  it succeeds or fails. These paths have fixture coverage; live app setup and
+  Discord acceptance remain pending.
+  [VUH-1481](https://linear.app/vuhlp/issue/VUH-1481)
 - **A better Mac handoff.** The installer starts the local service before
   handing off to the companion app. Custom install roots skip live harness
   linking. The companion app still has its own artifact and release gate.
