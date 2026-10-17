@@ -1102,7 +1102,7 @@ it("plays exact delivered WAV and MP3 through scoped audio-only demos, switches 
     ],
     { timeout: 20_000, maxBuffer: 16 * 1024 },
   );
-  const conversationId = randomUUID();
+  const conversationId = `room-${"a".repeat(24)}`;
   const wav = await f.files.publish({
     conversationId,
     sourceRoot: f.root,

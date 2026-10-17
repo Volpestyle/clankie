@@ -15,7 +15,9 @@ const FRAME_RATE = 5;
 const SAMPLE_RATE = 32_000;
 const AUDIO_FRAMES = SAMPLE_RATE / 50;
 const AUDIO_BYTES = AUDIO_FRAMES * 4;
-const ID = /^artifact:([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}):([a-f0-9]{48})$/u;
+// Native room IDs and the default operator conversation are not UUIDs. Keep
+// the two segments unambiguous and within the existing 128-character source ID.
+const ID = /^artifact:([A-Za-z0-9_-]{1,70}):([a-f0-9]{48})$/u;
 interface ArtifactSourceOptions {
   files: Pick<DeliveredFileStore, "read">;
   temporaryRoot?: string;

@@ -1,9 +1,11 @@
 # Activity media publication and source transitions — VUH-1481
 
-Two product gaps were reproduced before implementation:
+Three product gaps were reproduced before implementation:
 
 - Normally published MP4/WAV/MP3 files were inferred as `application/octet-stream`. Activity source selection refused them; existing media tests supplied MIME overrides. Normal publication now infers `video/mp4`, `audio/wav`, and `audio/mpeg`. Real decoder tests retain size/duration/content refusal and cleanup checks.
 - Closing the previous generation during a source switch emitted a false idle transition before the replacement attached. The body now retains its busy hold across that transfer and releases it in failure/shutdown paths. Successful and failed attachment cases exercise the real private HTTP/media boundary.
+
+- Native Discord room conversations use `room-…` identities, while registered artifact sources accepted only UUIDs. The source parser now admits the bounded conversation-ID segment within the existing 128-character source limit. Normal file storage, exact conversation ownership and live audience checks remain in force. Core official-turn/media cases and the managed WAV switch failed first with native room IDs.
 
 ## Checks before landing
 
@@ -13,6 +15,8 @@ Two product gaps were reproduced before implementation:
 - Bundled Embedded App SDK/native Chromium: **1/1 pass**, 7.00 s. Desktop, phone and tablet captures were inspected: isolated red/blue fixture sources, green replacement source, sound control and terminal revocation state. These are fixture-colored frames, not actual Pokémon gameplay or Discord recordings.
 
 The two-customer journey uses one gateway, edge and fleet with two isolated body runtimes/private producers, current signed installation requests, SQLite, delivered artifact storage, real WebSockets, the production play-source fanout and real WAV decoding. It checks game frame/PCM projection, nonzero decoded non-game PCM, source generations, stale admission refusal, foreign tenant control/viewer/publisher refusal, and independent stop/busy cleanup.
+
+Native-room follow-up: core **18/18 pass** (9.57 s), and the composed managed customer case **1/1 passes** (11.02 s) with native-format room IDs. Both were red before the parser fix. The unchanged browser captures above remain viewer-fixture evidence.
 
 ## Scope and remaining acceptance
 

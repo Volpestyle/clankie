@@ -27,8 +27,9 @@ hosted commands use the existing encrypted paired-device connection. Follow
 
 Start `sourceId:"play"` for Clankie's current authorized Pokémon/Minecraft
 producer. An image uses exact delivered conversation/artifact IDs. Registered
-`artifact:<conversationUUID>:<artifact48hex>` sources accept hash-checked PNG,
-GIF animation or finite MP4 demo; never substitute a path, URL or new capture
+`artifact:<conversationId>:<artifact48hex>` sources accept hash-checked PNG,
+GIF animation, finite MP4 demos and WAV/MP3 audio. Use the current conversation
+ID, including native `room-…` IDs; never substitute a path, URL or new capture
 grant. Switch selects one registered source or exact artifact pair. Use the
 returned share ID and generation for switch/stop.
 

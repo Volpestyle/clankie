@@ -170,7 +170,7 @@ async function fixture(options: { local?: boolean } = {}) {
   const runtime = await startHostedActivityRuntime();
   cleanup.push(() => runtime.close());
   const files = new DeliveredFileStore(join(root, "files"));
-  const conversationId = options.local ? randomUUID() : "owner-conversation";
+  const conversationId = options.local ? randomUUID() : `room-${"a".repeat(24)}`;
   await writeFile(join(root, "picture.png"), PNG);
   const artifact = await files.publish({
     conversationId,
@@ -316,7 +316,7 @@ it("uses signed body HTTP, fleet media permits and an embedded private producer;
     (
       await f.owner({
         action: "image",
-        conversationId: "owner-conversation",
+        conversationId: f.conversationId,
         artifactId: f.artifact.artifactId,
         guildId: "999",
         channelId: "456",
@@ -380,7 +380,7 @@ it("captain sharing pins artifact ownership and rejects a foreign server or stal
   const turn = {
     conversationAuthority: {
       owner: {
-        conversationId: "owner-conversation",
+        conversationId: f.conversationId,
         discord: {
           baseSessionKey: "discord:123",
           targetId: "456",
@@ -413,8 +413,8 @@ it("captain sharing pins artifact ownership and rejects a foreign server or stal
       .details,
   ).toMatchObject({ outcome: "refused", reason: "activity_destination_refused" });
   const result = await invoke({
-    action: "image",
-    artifactId: f.artifact.artifactId,
+    action: "start",
+    sourceId: `artifact:${f.conversationId}:${f.artifact.artifactId}`,
     guildId: "123",
     channelId: "456",
   });

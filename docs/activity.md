@@ -11,11 +11,11 @@ device connection. `ClankieApiClient.activityShares(request)` exposes its typed
 request and response schemas. [The CLI reference](cli.md#activity-shares) gives
 complete examples.
 
-| Source                            | Request selection                                                   | Boundary                                                               |
-| --------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Current Pokémon or Minecraft play | `action:"start", sourceId:"play"`                                   | Existing authorized producer; no new player or capture grant           |
-| Delivered PNG                     | `action:"image", conversationId, artifactId`                        | Exact delivered conversation/artifact and stored digest                |
-| Delivered PNG/GIF/MP4/WAV/MP3     | `action:"start", sourceId:"artifact:CONVERSATION_UUID:ARTIFACT_ID"` | Registered artifact ID; GIF/MP4/WAV/MP3 at most 32 MiB and 120 seconds |
+| Source                            | Request selection                                                 | Boundary                                                               |
+| --------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Current Pokémon or Minecraft play | `action:"start", sourceId:"play"`                                 | Existing authorized producer; no new player or capture grant           |
+| Delivered PNG                     | `action:"image", conversationId, artifactId`                      | Exact delivered conversation/artifact and stored digest                |
+| Delivered PNG/GIF/MP4/WAV/MP3     | `action:"start", sourceId:"artifact:CONVERSATION_ID:ARTIFACT_ID"` | Registered artifact ID; GIF/MP4/WAV/MP3 at most 32 MiB and 120 seconds |
 
 `list` returns active session metadata. `switch` names the current share ID and
 generation and chooses one registered source or exact conversation/artifact

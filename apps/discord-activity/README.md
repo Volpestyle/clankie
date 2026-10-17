@@ -43,7 +43,7 @@ appears on public legacy `/frames`. Self-host launcher/tunnel transport stays.
 The owner's `clankie share` / `/share` controls use the same request on local
 and hosted connections. `sourceId:"play"` selects the existing authorized game
 producer. An image names its delivered conversation/artifact exactly;
-`artifact:<conversationUUID>:<artifact48hex>` also registers PNG, GIF animation
+`artifact:<conversationId>:<artifact48hex>` also registers PNG, GIF animation
 or finite MP4 demo sources. No URL, path or new capture permission is accepted.
 See [Activity sharing](../../docs/activity.md) and the
 [CLI](../../docs/cli.md#activity-shares).

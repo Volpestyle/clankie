@@ -8239,12 +8239,12 @@ clankie share request '{"action":"image","conversationId":"CONVERSATION_ID","art
 ```
 
 An existing delivered GIF, MP4, WAV or MP3 uses its registered artifact source ID:
-`artifact:CONVERSATION_UUID:ARTIFACT_ID`. GIF is an animation; MP4 is a finite demo.
+`artifact:CONVERSATION_ID:ARTIFACT_ID`. GIF is an animation; MP4 is a finite demo.
 PNG is also accepted through this source form. Files are checked against the
 stored digest; animations/demos are bounded to 32 MiB and 120 seconds.
 
 ```bash
-clankie share request '{"action":"start","sourceId":"artifact:CONVERSATION_UUID:ARTIFACT_ID","guildId":"GUILD_ID","channelId":"CHANNEL_ID"}'
+clankie share request '{"action":"start","sourceId":"artifact:CONVERSATION_ID:ARTIFACT_ID","guildId":"GUILD_ID","channelId":"CHANNEL_ID"}'
 clankie share request '{"action":"switch","shareId":"SHARE_ID","generation":1,"sourceId":"play"}'
 clankie share request '{"action":"switch","shareId":"SHARE_ID","generation":2,"conversationId":"CONVERSATION_ID","artifactId":"OTHER_ARTIFACT_ID"}'
 clankie share request '{"action":"stop","shareId":"SHARE_ID","generation":3}'

@@ -8,6 +8,12 @@
       "url": "clankie://evidence/sha256/1e260e59f5ca9254626ccadf494edbd57b043885eb91c743ba444ca6e0d8d375"
     },
     {
+      "path": "native-room-proof.json",
+      "size": 49897,
+      "sha256": "06f7339475cd469986b1836ba34882fd33caabd7796accd5622f55e7e00efd1e",
+      "url": "clankie://evidence/sha256/06f7339475cd469986b1836ba34882fd33caabd7796accd5622f55e7e00efd1e"
+    },
+    {
       "path": "phone-animation.png",
       "size": 7614,
       "sha256": "f2c7bb78864763f4fa3536724d6ecf0d8f79c271aea9579825c6653208c90253",
