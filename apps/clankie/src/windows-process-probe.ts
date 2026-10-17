@@ -2,16 +2,20 @@ import { powershellLiteral, powershellScriptCommand } from "./herdr-fleet.ts";
 import { gzipSync } from "node:zlib";
 import { WINDOWS_CODEX_ARGV, windowsCodexArgvSet } from "./windows-codex-argv.ts";
 
-/** Windows caps a process command line at 32,767 characters; expand larger probes only in memory. */
+/**
+ * Windows caps a process command line at 32,767 characters; expand larger probes only in memory.
+ * Construct the streams with `::new`: inside the resident relay, `New-Object` with arguments costs
+ * about two seconds in every new script block, and these probes are new on almost every call.
+ */
 function probeCommand(script: string): string {
   const command = powershellScriptCommand(script);
   if (command.length < 32_000) return command;
   const compressed = gzipSync(Buffer.from(script, "utf8")).toString("base64");
   const bounded = powershellScriptCommand(`$ErrorActionPreference='Stop'
 $bytes=[Convert]::FromBase64String('${compressed}')
-$memory=New-Object IO.MemoryStream(,$bytes)
-$gzip=New-Object IO.Compression.GZipStream($memory,[IO.Compression.CompressionMode]::Decompress)
-$reader=New-Object IO.StreamReader($gzip,[Text.Encoding]::UTF8)
+$memory=[System.IO.MemoryStream]::new($bytes)
+$gzip=[System.IO.Compression.GZipStream]::new($memory,[System.IO.Compression.CompressionMode]::Decompress)
+$reader=[System.IO.StreamReader]::new($gzip,[System.Text.Encoding]::UTF8)
 try { & ([ScriptBlock]::Create($reader.ReadToEnd())) } finally { $reader.Dispose(); $gzip.Dispose(); $memory.Dispose() }`);
   if (bounded.length >= 32_000)
     throw new Error("Windows process probe exceeds the native command-line bound");
