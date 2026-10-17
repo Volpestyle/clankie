@@ -8,8 +8,8 @@ Clankie treats that as a normal condition to recover from, not a fault
 
 | Choice            | What it means                                                                  | Use it when                                                    |
 | ----------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| Let the Mac sleep | The default. Clankie recovers on wake (below). Nothing to set up.              | The Mac is a laptop you carry, or you can wait for it to wake. |
-| An awake Mac      | `clankie awake on`: the launcher holds the Mac awake while it is plugged in.   | The Mac is your always-plugged-in home machine.                |
+| An awake Mac      | The default: the launcher holds the Mac awake while it is plugged in.          | The Mac is your always-plugged-in home machine.                |
+| Let the Mac sleep | `clankie awake off`. Clankie recovers on wake (below).                         | The Mac is a laptop you carry, or you can wait for it to wake. |
 | A hosted Clankie  | His body runs on Clankie's service, not your Mac. The Mac can sleep or be off. | You want him reachable without keeping a computer running.     |
 
 ## What recovers on its own
@@ -76,24 +76,27 @@ went, and `lastSleep` is what it says on waking.
 ## An awake Mac
 
 ```sh
-clankie awake on      # store the opt-in and start the keep-awake now
-clankie awake status  # the opt-in, the launcher's process, and the power state
-clankie awake off
+clankie awake status  # the choice, the launcher's process, and the power state
+clankie awake off     # store "let it sleep" and stop the keep-awake now
+clankie awake on
 ```
 
-The console has the same command as `/awake`. `on` stores `host.keepAwake` and the
-launcher supervises `caffeinate -s` like any other service (`clankie status` lists
-it as `awake`). Three properties are deliberate:
+A self-hosted Mac keeps itself awake by default (owner decision, 2026-10-17,
+VUH-2393): with no stored choice, the launcher supervises `caffeinate -s` like any
+other service (`clankie status` lists it as `awake`). The console has the same
+command as `/awake`; `on` and `off` store `host.keepAwake`, and a stored choice,
+including one an older install saved as `false`, always wins over the default.
+Three properties are deliberate:
 
 - **Plugged in only.** macOS holds a `-s` assertion only on AC power. Unplug and
   the Mac sleeps as its own settings say; nothing here watches the charger, and
   `doctor` says "on battery" so the owner knows.
 - **It changes no power setting.** It never writes `pmset`. Turn it off and the
   Mac is exactly as it was.
-- **Opt-in, and it survives restarts.** The launcher restarts `awake` with the
-  clankie service, so [`clankie autostart enable`](cli.md#service-lifecycle)
-  brings it back at login. Without autostart, a rebooted Mac stays down until you
-  log in and run `clankie`.
+- **It survives restarts.** The launcher restarts `awake` with the clankie
+  service, crash recovery restarts a `caffeinate` that died, and
+  [`clankie autostart enable`](cli.md#service-lifecycle) brings it back at login.
+  Without autostart, a rebooted Mac stays down until you log in and run `clankie`.
 
 A `caffeinate -s` you started yourself is left alone and is never mistaken for
 the launcher's. Amphetamine and other tools that hold a sleep assertion count in

@@ -5,6 +5,14 @@ code is proven with fakes. **Real sleep/wake recovery is not proven yet: it is a
 human check, and the steps are below.** No power setting was changed, no `caffeinate`
 was started, and the Mac was never put to sleep while building this.
 
+**2026-10-17 (VUH-2393): keep-awake is now on by default for a self-hosted Mac.**
+On this Mac, a scratch launcher with no stored choice started `caffeinate -s`
+(`clankie status`: "holding this Mac awake while plugged in"), `pmset -g assertions`
+showed its `PreventSystemSleep` on AC power, crash recovery restarted it after it
+was killed, and `clankie awake off` stored `false` and stopped it. Real sleep, wake
+and lid-closed behaviour are still unproven: the live Mac was not put to sleep, and
+Amphetamine was holding it awake throughout. The steps below remain the human check.
+
 ## Evidence (fakes)
 
 - [Protocol](evidence/protocol-tests.log): 14 tests. `pmset` parsing on the real
@@ -46,7 +54,9 @@ send to Clankie in Discord.
 
 1. Confirm the baseline: `clankie doctor | jq .power`. On battery you should see
    `"state": "sleep_allowed"` with `advice`. Note `clankie status` is `ready`.
-2. Make sure `clankie awake status` says `"keepAwake": false`.
+2. Keep-awake is on by default (VUH-2393): run `clankie awake off`, then make sure
+   `clankie awake status` says `"keepAwake": false`. Run `clankie awake on` after
+   this test if you want the default back.
 3. Note the time, then `pmset sleepnow` (or close the lid on battery).
 4. From the second device, wait two minutes, then send a Discord message that
    addresses Clankie (a mention or DM). Also send one more a minute later.
@@ -67,7 +77,8 @@ send to Clankie in Discord.
 
 ### B. The awake Mac
 
-1. Plug in. `clankie awake on`. Expect `"keepAwake": true`, `service.state`
+1. Plug in. With no stored choice keep-awake is already on; otherwise
+   `clankie awake on`. Expect `"keepAwake": true`, `service.state`
    `healthy`, and `pmset -g assertions | grep -B1 -A1 caffeinate` showing
    `PreventSystemSleep` for a `caffeinate` you did not start by hand.
 2. `clankie doctor | jq .power`: `state` `always_on`, `heldAwakeBy` includes

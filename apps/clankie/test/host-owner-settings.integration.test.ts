@@ -77,10 +77,8 @@ it("rejects stale/revoked authority, unsupported Macs and managed update opt-out
     expect((await write({ autoUpdate: false })).status).toBe(400);
     checks = 2;
     expect((await write({ keepAwake: false })).status).toBe(409);
-    expect((await new SettingsStore(settings.path).load()).host).toEqual({
-      keepAwake: false,
-      autoUpdate: true,
-    });
+    // Nothing stored: keep-awake is still the default and the refused writes changed nothing.
+    expect((await new SettingsStore(settings.path).load()).host).toEqual({ autoUpdate: true });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -144,4 +142,41 @@ it("refuses incomplete explicit revisions and local-setup revision bypasses befo
   await expect(
     runAwakeCommand(["on", "--local-setup", "--expected-revision", "a".repeat(64)], options),
   ).rejects.toThrow("Usage");
+});
+
+// VUH-2393, owner decision 2026-10-17: a self-hosted Mac keeps itself awake by default.
+it("keeps a self-hosted Mac awake by default while a stored choice, even an old saved false, still wins", async () => {
+  const root = await mkdtemp(join(tmpdir(), "host-owner-default-"));
+  try {
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const snapshot = async (platform: NodeJS.Platform) =>
+      HostSettingsSnapshotSchema.parse(
+        await (
+          await createHostSettingsRoutes(async () => true, settings, { platform }).request(HOST_SETTINGS_PATH)
+        ).json(),
+      );
+    const mac = await snapshot("darwin");
+    expect(mac.host.keepAwake).toBe(true);
+    expect((await snapshot("linux")).host.keepAwake).toBe(false);
+    // Choosing what the default already gives is still a change other writers must see.
+    const chosen = await createHostSettingsRoutes(async () => true, settings, { platform: "darwin" }).request(
+      HOST_SETTINGS_PATH,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          expectedRevision: mac.revision,
+          changes: { keepAwake: true },
+        }),
+      },
+    );
+    expect(chosen.status).toBe(200);
+    expect(HostSettingsSnapshotSchema.parse(await chosen.json()).revision).not.toBe(mac.revision);
+    // An install from before the default saved `false` with every settings write; that stays off.
+    await settings.update((current) => ({ ...current, host: { ...current.host, keepAwake: false } }));
+    expect((await snapshot("darwin")).host.keepAwake).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { probeHostPower, type HostPowerReport } from "@clankie/protocol/host-power";
-import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
+import { SettingsStore, defaultSettingsPath, keepAwakeEnabled } from "@clankie/settings";
 import {
   KEEP_AWAKE_ENV,
   managedService,
@@ -35,7 +35,7 @@ export interface AwakeCommandOptions extends CreateServiceOptionsInput, OwnerSet
 export interface AwakeCommandResult {
   readonly ok: true;
   readonly revision?: string;
-  /** The owner's stored opt-in. */
+  /** The owner's choice, or the default (on for a self-hosted Mac). */
   readonly keepAwake: boolean;
   /** The launcher's caffeinate, as `clankie status` shows it. */
   readonly service: Pick<ServiceStatus, "state" | "detail" | "pid">;
@@ -128,7 +128,7 @@ export async function runAwakeCommand(
     if (verb === "on" && process.platform !== "darwin") throw new Error("Keep-awake is macOS only");
     await store.update((current) => ({ ...current, host: { ...current.host, keepAwake: verb === "on" } }));
   }
-  const keepAwake = (await store.load()).host.keepAwake;
+  const keepAwake = keepAwakeEnabled(await store.load());
   // The stored opt-in decides, not whatever env this shell happened to inherit.
   const serviceEnv = { ...env, [KEEP_AWAKE_ENV]: keepAwake ? "1" : "0" };
   const serviceOptions = registryOptions(options, serviceEnv);
@@ -170,7 +170,7 @@ export async function savedKeepAwakeStatus(
 ): Promise<AwakeCommandResult["service"]> {
   const env = options.env ?? process.env;
   const settings = options.settings ?? new SettingsStore(defaultSettingsPath(env));
-  const keepAwake = (await settings.load()).host.keepAwake;
+  const keepAwake = keepAwakeEnabled(await settings.load());
   const status = await inspectService(
     managedService("awake"),
     registryOptions(options, { ...env, [KEEP_AWAKE_ENV]: keepAwake ? "1" : "0" }),
@@ -186,7 +186,7 @@ export async function savedKeepAwakeStatus(
 export async function applySavedKeepAwake(options: AwakeCommandOptions): Promise<void> {
   const env = options.env ?? process.env;
   const settings = options.settings ?? new SettingsStore(defaultSettingsPath(env));
-  const keepAwake = (await settings.load()).host.keepAwake;
+  const keepAwake = keepAwakeEnabled(await settings.load());
   await startOne("awake", registryOptions(options, { ...env, [KEEP_AWAKE_ENV]: keepAwake ? "1" : "0" }));
 }
 

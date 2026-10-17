@@ -121,6 +121,7 @@ import {
   applyRelaySettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
   discordAttachmentRoot,
+  keepAwakeEnabled,
   parsePositiveInt,
   serviceInLoadout,
   SettingsStore,
@@ -384,7 +385,7 @@ let accountGatewayRoute:
 let publicGatewaySignInRequiredSince: string | undefined;
 // A sleeping host is a normal condition (ADR 0203): report it, never treat it as a fault.
 const hostPower = createHostPowerMonitor({
-  keepAwakeRequested: async () => (await settingsStore.load()).host.keepAwake,
+  keepAwakeRequested: async () => keepAwakeEnabled(await settingsStore.load()),
   onSleep: (sleep) => logger.info({ event: "host.slept", ...sleep }, "the host slept underneath the service"),
 });
 if (hostedBody !== undefined) {

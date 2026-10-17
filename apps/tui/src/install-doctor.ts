@@ -34,6 +34,7 @@ import {
   bundledSkills,
   SettingsStore,
   defaultSettingsPath,
+  keepAwakeEnabled,
   linearFollowStatus,
   type ClankieSettings,
 } from "@clankie/settings";
@@ -393,7 +394,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   });
   const power = await probeHostPower({
     exec: execute,
-    keepAwakeRequested: settings.host.keepAwake,
+    keepAwakeRequested: keepAwakeEnabled(settings),
     ...(lastSleep === undefined ? {} : { lastSleep }),
   });
   const model = unsetToNull(config.config.model);

@@ -118,7 +118,8 @@ acknowledgments cannot prove queue drain, so Stop retains a post-input lease. Re
 ## Where the service and data live
 
 Locally, the service keeps running after the console closes, as long as the Mac
-stays awake and online ([`clankie awake on`](/cli/#awake) helps). Hosted, closing
+stays awake and online; by default a self-hosted Mac keeps itself awake while
+plugged in ([`clankie awake`](/cli/#awake)). Hosted, closing
 a client leaves his work running within the plan's limits.
 
 The host keeps service state and credentials: Keychain on macOS, a private file

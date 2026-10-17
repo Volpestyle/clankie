@@ -8,7 +8,7 @@ import {
   ensureCaptainCredential,
   ensureOperatorCredential,
 } from "@clankie/credential-broker";
-import { discordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
+import { discordSettingsToEnvironment, keepAwakeEnabled, SettingsStore } from "@clankie/settings";
 import packageMetadata from "../../../package.json" with { type: "json" };
 import {
   isHeadlessCaptainCommand,
@@ -77,8 +77,9 @@ async function applyLauncherDiscordEnvironment(): Promise<void> {
     const value = configured[name];
     if ((process.env[name]?.length ?? 0) === 0 && value !== undefined) process.env[name] = value;
   }
-  // The owner's always-on opt-in decides whether the launcher runs `caffeinate`.
-  if ((process.env[KEEP_AWAKE_ENV]?.length ?? 0) === 0 && stored.host.keepAwake) {
+  // The owner's always-on choice (on by default for a self-hosted Mac) decides
+  // whether the launcher runs `caffeinate`.
+  if ((process.env[KEEP_AWAKE_ENV]?.length ?? 0) === 0 && keepAwakeEnabled(stored)) {
     process.env[KEEP_AWAKE_ENV] = "1";
   }
 }

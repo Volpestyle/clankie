@@ -194,7 +194,10 @@ it("pairs the Mac with signed operator authority; encrypted reconnect shares the
   expect(await hostedCommand(["update", "auto", "off"], transport)).toMatchObject({ autoUpdate: false });
   expect((await f.serviceSettings.load()).host.autoUpdate).toBe(false);
   expect((await f.settings.load()).host.autoUpdate).toBe(true);
-  expect(await hostedCommand(["awake", "status"], transport)).toMatchObject({ keepAwake: false });
+  // The fixture body runs on this machine; a real hosted body is Linux, where keep-awake is off.
+  expect(await hostedCommand(["awake", "status"], transport)).toMatchObject({
+    keepAwake: process.platform === "darwin",
+  });
   await expect(hostedCommand(["awake", "off", "--local-setup"], transport)).rejects.toThrow();
   await expect(hostedCommand(["update"], transport)).rejects.toThrow("managed");
   const conversation = (await client.list())[0]!;

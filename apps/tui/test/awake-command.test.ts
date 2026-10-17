@@ -69,7 +69,8 @@ describe.skipIf(process.platform !== "darwin")("clankie awake", () => {
     ).rejects.toThrow(/Usage: clankie awake/u);
   });
 
-  it("reports off by default with the sleep warning, and starts nothing", async () => {
+  // VUH-2393: owner decision, a self-hosted Mac keeps itself awake unless told otherwise.
+  it("reports on by default, with the battery sleep warning, and status starts nothing", async () => {
     const { env, settings } = await fixture();
     const pmset = fakePmset();
     const spawned: string[] = [];
@@ -88,12 +89,14 @@ describe.skipIf(process.platform !== "darwin")("clankie awake", () => {
     });
 
     expect(spawned).toEqual([]);
+    expect((await settings.load()).host.keepAwake).toBeUndefined();
     expect(result).toMatchObject({
-      keepAwake: false,
-      service: { state: "healthy" },
-      power: { state: "sleep_allowed", source: "battery", sleepAfterMinutes: 1 },
+      keepAwake: true,
+      // Requested by default but not yet started: `status` reads, it never spawns.
+      service: { state: "unreachable" },
+      power: { state: "sleep_allowed", source: "battery", sleepAfterMinutes: 1, keepAwakeRequested: true },
     });
-    expect(result.power.advice).toContain("clankie awake on");
+    expect(result.power.advice).toContain("keep-awake only holds while plugged in");
   });
 
   it("on stores the opt-in, runs `caffeinate -s`, and never writes a power setting", async () => {
@@ -154,6 +157,8 @@ describe.skipIf(process.platform !== "darwin")("clankie awake", () => {
     expect(killed).toEqual([6_001]);
     expect((await settings.load()).host.keepAwake).toBe(false);
     expect(result).toMatchObject({ keepAwake: false, service: { state: "healthy" } });
+    // A stored choice outlasts the default.
+    expect(await runAwakeCommand(["status"], shared)).toMatchObject({ keepAwake: false });
   });
 
   it("dispatches through the headless launcher as JSON", async () => {
@@ -168,6 +173,6 @@ describe.skipIf(process.platform !== "darwin")("clankie awake", () => {
       listProcessCommandsImpl: () => [],
     });
     expect(code).toBe(0);
-    expect(JSON.parse(out)).toMatchObject({ ok: true, keepAwake: false, power: { source: "battery" } });
+    expect(JSON.parse(out)).toMatchObject({ ok: true, keepAwake: true, power: { source: "battery" } });
   });
 });

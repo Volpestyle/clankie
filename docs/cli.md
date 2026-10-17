@@ -211,9 +211,9 @@ the clankie row has them. The payload never includes fingerprints or secret
 values.
 
 Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,
-`discord-user-session`, `activity`, `tunnel`, `awake`. `awake` is the owner's
-keep-awake ([`awake`](#awake)); it reads healthy and "off" until
-they opt in.
+`discord-user-session`, `activity`, `tunnel`, `awake`. `awake` is the
+keep-awake ([`awake`](#awake)), on by default on a self-hosted Mac; it reads
+healthy and "off" when the owner chose to let the Mac sleep.
 
 `status` and `doctor --json` include `runtimeHealth` when the service exposes it:
 process CPU percentage, `/health` latency, fixed CPU/health reasons, alarm state,
@@ -1537,11 +1537,13 @@ from a systemd user timer (or cron) every 30 seconds for the same behaviour.
 
 Keep this Mac awake while it is plugged in, so Discord and the app stay reachable
 ([always-on guide](always-on.md), [ADR 0203](adr/0203-clankie-keeps-what-better-models-cannot-absorb.md)).
-`on` writes the opt-in through the revision-fenced owner host-settings API;
-the local launcher starts a
-launcher-supervised `caffeinate -s` now; `off` clears it and stops that process.
+A self-hosted Mac does this by default; `host.keepAwake` unset means on there and
+off on Linux or a Mac that only reaches a hosted Clankie (VUH-2393).
+`on` and `off` store the choice through the revision-fenced owner host-settings
+API, which reports the effective value; a stored choice always wins over the
+default. `on` starts a launcher-supervised `caffeinate -s` now; `off` stops it.
 macOS holds a `-s` assertion only on AC power, so unplugging lets the Mac sleep as
-its own settings say. The opt-in survives a restart: the launcher restarts
+its own settings say. The choice survives a restart: the launcher restarts
 `awake` with the clankie service, so [`autostart`](#service-lifecycle)
 brings it back at login. It never runs `pmset` with anything but `-g` and never
 changes a power setting. Local only; hosted mode and non-macOS hosts refuse

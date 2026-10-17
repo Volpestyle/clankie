@@ -33,6 +33,7 @@ export {
   PersonaSettingsSchema,
   PublicGatewaySettingsSchema,
   HostSettingsSchema,
+  keepAwakeEnabled,
   RelaySettingsSchema,
   SETTINGS_SCHEMA_VERSION,
   VoiceSettingsSchema,

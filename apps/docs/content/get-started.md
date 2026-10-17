@@ -103,8 +103,9 @@ remains available separately.
 1. **Pick a route.** `/remote-access` signs the Mac in with an emailed code so
    the app can reach it from anywhere. `clankie gateway direct` instead
    advertises a route on a network your phone can reach, with no account.
-2. **Keep him running.** `clankie autostart enable` starts him at login, and
-   [`clankie awake on`](/cli/#awake) keeps the Mac awake while plugged in.
+2. **Keep him running.** `clankie autostart enable` starts him at login. The Mac
+   stays awake while plugged in by default; [`clankie awake off`](/cli/#awake)
+   lets it sleep.
 3. **Pair.** Run `clankie pair`, then scan the QR or paste the complete secure
    link into the app.
 

@@ -7,7 +7,7 @@ import {
   type HostSettingsSnapshot,
 } from "@clankie/protocol/owner-settings";
 import type { HostPowerReport } from "@clankie/protocol/host-power";
-import type { ClankieSettings, SettingsStore } from "@clankie/settings";
+import { keepAwakeEnabled, type ClankieSettings, type SettingsStore } from "@clankie/settings";
 
 export function createHostSettingsRoutes(
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
@@ -24,11 +24,17 @@ export function createHostSettingsRoutes(
   const managed = options.autoUpdateManaged === true;
   const supported = !managed && (options.platform ?? process.platform) === "darwin";
   const snapshot = (current: ClankieSettings): HostSettingsSnapshot => {
-    const host = { keepAwake: current.host.keepAwake, autoUpdate: current.host.autoUpdate };
+    // Unset is the default (on for a self-hosted Mac); the snapshot reports the effective choice.
+    const host = {
+      keepAwake: managed ? (current.host.keepAwake ?? false) : keepAwakeEnabled(current, options.platform),
+      autoUpdate: current.host.autoUpdate,
+    };
     const power = options.power?.();
+    // The revision covers what is stored, so choosing the value a default already gives still moves it.
+    const stored = { keepAwake: current.host.keepAwake ?? null, autoUpdate: current.host.autoUpdate };
     return {
       schemaVersion: 1,
-      revision: createHash("sha256").update(JSON.stringify(host)).digest("hex"),
+      revision: createHash("sha256").update(JSON.stringify(stored)).digest("hex"),
       host,
       keepAwakeSupported: supported,
       autoUpdateManaged: managed,

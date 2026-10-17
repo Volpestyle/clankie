@@ -544,15 +544,15 @@ const TUNNEL: ManagedService = {
   },
 };
 
-/** Set to 1 by the launcher when the owner opted in (`clankie awake on`); macOS only. */
+/** Set to 1 by the launcher when keep-awake is on (the default on a self-hosted Mac); macOS only. */
 export const KEEP_AWAKE_ENV = "CLANKIE_KEEP_AWAKE";
 
 /**
  * The owner's always-on Mac (VUH-1461): `caffeinate -s` under the launcher.
  * macOS holds a `-s` assertion only while the Mac is on AC power, so unplugging
  * lets it sleep like any laptop and nothing here has to watch the charger.
- * Opt-in and off by default; the sleep-and-wake recovery elsewhere stays the
- * baseline either way.
+ * On by default for a self-hosted Mac (VUH-2393) unless the owner stored `off`;
+ * the sleep-and-wake recovery elsewhere stays the baseline either way.
  *
  * It restarts with the clankie service, so the login-time autostart
  * (`restart clankie`) brings it back after a reboot. A `caffeinate -s` the owner

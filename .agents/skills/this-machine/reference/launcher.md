@@ -459,7 +459,8 @@ Host sleep is a normal condition (ADR 0203). `doctor` reports `power` (`always_o
 `sleep_allowed`, `unknown`) and the same object is on `/health`; `sleep_allowed`
 carries advice, and `lastSleep` is what the service noticed on waking. The owner's
 always-on Mac is `clankie awake on|off|status` (`/awake`): a launcher-supervised
-`caffeinate -s`, AC power only, opt-in, never a `pmset` write. Do not run
+`caffeinate -s`, AC power only, on by default for a self-hosted Mac unless the
+owner stored `off`, never a `pmset` write. Do not run
 `caffeinate` or change power settings for them; suggest `awake` or a hosted body
 (`docs/always-on.md`).
 

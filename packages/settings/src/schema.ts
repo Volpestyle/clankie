@@ -59,19 +59,33 @@ export const RelaySettingsSchema = z
 export type RelaySettings = z.infer<typeof RelaySettingsSchema>;
 
 /**
- * This host's own behavior. `keepAwake` is the owner's opt-in to an always-on
- * Mac (VUH-1461): the launcher supervises `caffeinate -s`, which macOS holds
- * only while the Mac is plugged in. Off by default; sleep stays a normal
- * condition to recover from. `autoUpdate` lets a self-run hosted body install
- * official releases while idle (ADR 0237); managed bodies always do.
+ * This host's own behavior. `keepAwake` keeps an always-on Mac reachable
+ * (VUH-1461): the launcher supervises `caffeinate -s`, which macOS holds only
+ * while the Mac is plugged in, so a laptop on battery still sleeps. Unset means
+ * the default, which is on for a self-hosted Mac (owner decision, 2026-10-17,
+ * VUH-2393); a stored `true` or `false` is the owner's choice and is kept.
+ * `autoUpdate` lets a self-run hosted body install official releases while idle
+ * (ADR 0237); managed bodies always do.
  */
 export const HostSettingsSchema = z
   .object({
-    keepAwake: z.boolean().default(false),
+    keepAwake: z.boolean().optional(),
     autoUpdate: z.boolean().default(true),
   })
   .strict();
 export type HostSettings = z.infer<typeof HostSettingsSchema>;
+
+/**
+ * Whether this host keeps itself awake: the owner's stored choice, or by
+ * default yes on a self-hosted Mac and no anywhere else (Linux, or a Mac that
+ * only reaches a hosted Clankie).
+ */
+export function keepAwakeEnabled(
+  settings: { readonly host: HostSettings; readonly client?: { readonly mode: string } | undefined },
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return settings.host.keepAwake ?? (platform === "darwin" && settings.client?.mode !== "hosted");
+}
 
 /** Public AWS doorway used by App Store builds; the host bearer stays in Keychain. */
 export const PublicGatewaySettingsSchema = z
