@@ -194,7 +194,9 @@ export function staffingTotals(
   context?: { seats: readonly StaffingSeat[]; projects: readonly Project[] },
 ): AutoStaffingTotals {
   const snapshots = projects.flatMap((project) => (project.staffing ? [project.staffing] : []));
-  const sum = (field: "activeSeats" | "idleSeats" | "occupiedSeats" | "spareSeats") =>
+  const sum = (
+    field: "activeSeats" | "idleSeats" | "occupiedSeats" | "spareSeats" | "workerCap" | "wipCap" | "started",
+  ) =>
     snapshots.length === projects.length && snapshots.every((s) => s[field] !== null)
       ? snapshots.reduce((total, s) => total + s[field]!, 0)
       : null;
@@ -227,6 +229,9 @@ export function staffingTotals(
         : sum("idleSeats"),
     occupiedSeats: !censusKnown ? null : coveredSeats ? coveredSeats.length : sum("occupiedSeats"),
     spareSeats: sum("spareSeats"),
+    workerCap: sum("workerCap"),
+    wipCap: sum("wipCap"),
+    started: sum("started"),
     plans: [...plans],
   };
 }

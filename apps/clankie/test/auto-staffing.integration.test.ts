@@ -158,7 +158,14 @@ it("replays the 10-17 overnight capacity fault, retains its record, and verifies
   const previous = new AutoRoundRecord(join(root, "rounds")).read()[0]!;
   expect(
     AutoRoundsResponseSchema.parse({ schemaVersion: 1, rounds: [previous] }).rounds[0]!.staffing,
-  ).toMatchObject({ activeSeats: 1, idleSeats: 32, readyIssues: 1 });
+  ).toMatchObject({
+    activeSeats: 1,
+    idleSeats: 32,
+    readyIssues: 1,
+    workerCap: 33,
+    wipCap: 40,
+    started: velocity.started.state === "known" ? velocity.started.total : null,
+  });
   const service = await createClankieApp({
     captain: createStubCaptain(),
     autoRounds: record,

@@ -159,6 +159,9 @@ export type AutoProjectStaffing = z.infer<typeof AutoProjectStaffingSchema>;
 export const AutoStaffingTotalsSchema = z
   .object({
     readyIssues: z.number().int().nonnegative().nullable(),
+    workerCap: z.number().int().nonnegative().nullable(),
+    wipCap: z.number().int().nonnegative().nullable(),
+    started: z.number().int().nonnegative().nullable(),
     activeSeats: z.number().int().nonnegative().nullable(),
     idleSeats: z.number().int().nonnegative().nullable(),
     occupiedSeats: z.number().int().nonnegative().nullable(),

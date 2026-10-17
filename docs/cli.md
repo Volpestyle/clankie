@@ -3970,7 +3970,8 @@ service measured before waking the lead, and whether that wake was delivered
   coexist. `backlog_not_ready` asks the lead to plan ready slices rather than idle.
   The next recorded round checks increased active staffing or records `cap_reached`,
   `no_ready_work`, `plan_reserve`, `unresolved` or `unknown`.
-- Round-level `staffing`: ready-work and seat totals plus the plan snapshots.
+- Round-level `staffing`: ready-work, seat and Started-issue totals, summed worker/WIP caps
+  (null when any contributing project leaves that cap unset), and the plan snapshots.
   Unknown sources stay unknown/null; unset caps are null. Plan headroom requires
   fresh usage within five minutes, sign-in, no owner hold, more than 10% remaining
   in every general window, and positive spare capacity at the observed pace.
