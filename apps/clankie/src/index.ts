@@ -153,6 +153,10 @@ import { createEmailPort } from "./email.ts";
 import { accountMailbox, bodyMailbox, DEFAULT_CLANKIE_GATEWAY_URL } from "./hosted-mailbox.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
+import { NativeFixtureAdmissions } from "./native-fixture-admissions.ts";
+import { createFixtureOriginalVerifier } from "./fixture-original-verifier.ts";
+import { createFixtureBootstrap } from "./fixture-admission-bootstrap.ts";
+import { fleetProcessHelper } from "./local-fleet-process.ts";
 import { createProjectProcessObserver, HarnessBinaryObservations } from "./project-process-proof.ts";
 import { createGrokNativeHost } from "./captain/grok-native-host.ts";
 import { createPrimeNativeHost } from "./captain/prime-native-host.ts";
@@ -1694,7 +1698,26 @@ const fleetLinks = new FleetLinks({
 });
 proofFleetLinks = fleetLinks;
 runtimes.linkStatus = (fleet) => fleetLinks.status(fleet);
+const nativeFixtureAdmissions = new NativeFixtureAdmissions({
+  stateRoot,
+  processHelper: fleetProcessHelper(repoRoot),
+  bootstrap: await createFixtureBootstrap(repoRoot, join(stateRoot, "fixture-admission-scratch")),
+  verifier: createFixtureOriginalVerifier({
+    settings: settingsStore,
+    seats: localCodexSeats,
+    binding: localFleetBinding,
+    observe: localProjectProcessObserver,
+    hire: (proof) => captain.lookupProjectHire(proof),
+  }),
+});
+if (nativeFixtureAdmissions.unavailable)
+  logger.warn(
+    { event: "fixture_admission.unavailable", reason: nativeFixtureAdmissions.unavailable },
+    "Native fixture admission refuses on this host; the service continues",
+  );
 const localFleet = new LocalFleetLink({
+  fixtureAdmission: (request, proof, socket, current) =>
+    nativeFixtureAdmissions.handleOriginal(request, proof, socket, current),
   directory: join(stateRoot, "links"),
   binding: localFleetBinding,
   projectProof: localProjectProof({
@@ -2406,6 +2429,11 @@ let shutdownStarted = false;
 function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   if (shutdownStarted) return;
   shutdownStarted = true;
+  // Fence new admissions immediately; retain rejection until the existing drain chain awaits it.
+  const admissionsClosed = nativeFixtureAdmissions.close().then(
+    () => ({ ok: true as const }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
   linearRequestBudget.close();
 
   workerToolRefresh.close();
@@ -2466,6 +2494,15 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
       logger.warn({ error }, "Body lease operations remain unresolved at shutdown");
     }
     await mcpHost.close().catch(() => undefined);
+    const admissionsResult = await admissionsClosed;
+    if (!admissionsResult.ok) {
+      process.exitCode = 1;
+      logger.error(
+        { signal, event: "fixture_admission.shutdown_unresolved", error: admissionsResult.error },
+        "Native fixture cleanup unresolved; shutdown not settled",
+      );
+      return;
+    }
     await closeNativeProcessObservers();
     clankie.close();
     await activityRuntime?.close();

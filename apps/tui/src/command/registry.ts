@@ -3,6 +3,12 @@ import { operatorHarness } from "./harness-command.ts";
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["fixture-admission"],
+    lines: [
+      "  fixture-admission request|status|revoke FLAGS | read|read-status --fixture PRIVATE_FILE FLAGS  Single-use host-seat fixture get_user admission; native account unverified",
+    ],
+  },
+  {
     nouns: ["skin"],
     lines: [
       "  skin draft create SENTENCE [--request UUID] | list | get ID [--version N] | pose COMMAND.json | revise ID REV SENTENCE | approve|decline|cancel ID REV  Owner key-pose drafts; no generation or live-look change",

@@ -94,6 +94,15 @@ mirror on demand. Issue gaps come from matching local evidence README sections,
 not a tracker query; missing gaps stay labelled. Feed image previews are capped
 at 64 KiB, so large captures download only when opened.
 
+The source-only `fixture-admission` candidate is a separate, single-use private
+get_user route, not general fleet membership or positive original proof. Its
+original-facing route requires admittedProjectProof; its separate callback
+requires the host-minted fixture capability and actual fixture lifetime.
+Fixture `read`/`read-status` require the private `--fixture` descriptor and never
+discover installed links/defaults. Native login account stays unverified under
+host-seat/v1. Follow `docs/native-fixture-admission.md` and the current owner
+scope; an available command never clears held original/LOCAL13/UNKNOWN work.
+
 ## Find the usable route
 
 Local Linux workers require kernel-backed admission on a host in its initial PID

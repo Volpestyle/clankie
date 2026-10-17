@@ -24,6 +24,7 @@ export interface LocalFleetProofRequestContext {
     | "peers"
     | "peer-messages"
     | "tool-catalog"
+    | "fixture-admissions"
     | "receipt";
   readonly method: "GET" | "POST" | "other";
   readonly bridgeId?: string;
@@ -72,6 +73,12 @@ export class LocalFleetLink {
       signal?: AbortSignal,
       context?: LocalFleetProofRequestContext,
     ): Promise<ProjectProcessProof | undefined>;
+    fixtureAdmission?(
+      request: Request,
+      proof: ProjectProcessProof,
+      socket: Socket,
+      current: () => boolean,
+    ): Promise<Response>;
   };
   constructor(options: LocalFleetLink["options"]) {
     this.options = options;
@@ -97,7 +104,8 @@ export class LocalFleetLink {
           ));
       const ack =
         request.method === "POST" && /^\/v1\/fleet\/seats\/([^/]+)\/events\/[^/]+\/ack$/u.exec(path);
-      const seat = seatRoute || receipt || ack;
+      const fixtureAdmission = /^\/v1\/fleet\/seats\/([^/]+)\/fixture-admissions(?:\/.*)?$/u.exec(path);
+      const seat = seatRoute || receipt || ack || fixtureAdmission;
       if (path !== "/v1/fleet/mcp" && !seat) return Response.json({ error: "not_found" }, { status: 404 });
       const pane = request.headers.get("x-clankie-pane") ?? "";
       if (seat && decodeURIComponent(seat[1]!) !== pane)
@@ -112,8 +120,9 @@ export class LocalFleetLink {
       const context: LocalFleetProofRequestContext = {
         requestId: randomUUID(),
         connectionId,
-        route:
-          path === "/v1/fleet/mcp"
+        route: fixtureAdmission
+          ? "fixture-admissions"
+          : path === "/v1/fleet/mcp"
             ? "mcp"
             : receipt
               ? "receipt"
@@ -158,6 +167,19 @@ export class LocalFleetLink {
           return current() ? proof : undefined;
         },
       };
+      // Admission is original project proof, never broad pane membership or generic forwarding.
+      if (fixtureAdmission) {
+        if (!this.options.fixtureAdmission || !this.options.projectProof)
+          return Response.json({ error: "fixture_admission_unavailable" }, { status: 404 });
+        try {
+          const proof = await identity.admittedProjectProof();
+          if (!proof || proof.nativeSessionPending || proof.pane !== pane || !current())
+            return Response.json({ error: "fixture_original_required" }, { status: 403 });
+          return await this.options.fixtureAdmission(request, proof, socket, current);
+        } catch {
+          return Response.json({ error: "fixture_original_unavailable" }, { status: 403 });
+        }
+      }
       // These routes authenticate the candidate with admittedProjectProof before
       // reading peers, sending or reconciling. Other seat routes still require
       // broad fleet admission here; a missing project prover never bypasses it.

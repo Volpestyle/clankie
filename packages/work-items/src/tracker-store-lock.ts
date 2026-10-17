@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { lstat, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 
@@ -8,6 +8,7 @@ const queues = new Map<string, Promise<void>>();
 export async function withTrackerStoreLock<T>(
   storePath: string,
   operation: (assertHeld: () => void) => Promise<T>,
+  options: { existingOnly?: boolean } = {},
 ): Promise<T> {
   const path = resolve(storePath);
   const previous = queues.get(path) ?? Promise.resolve();
@@ -20,7 +21,9 @@ export async function withTrackerStoreLock<T>(
   await previous;
   let release: (() => Promise<void>) | undefined;
   try {
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    if (options.existingOnly) {
+      if (!(await lstat(path)).isFile()) throw new Error("Existing tracker store required");
+    } else await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     // Same heartbeat policy as the credential broker. A sibling ancillary
     // store uses a different path and can be accessed while this lock is held.
     let compromised: Error | undefined;

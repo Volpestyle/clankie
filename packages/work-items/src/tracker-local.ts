@@ -6,6 +6,7 @@ import {
   type TrackerSyncResult,
 } from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
+import { constants, lstatSync, realpathSync, readFileSync } from "node:fs";
 import { open, readFile, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { compareVersions, type ReleaseHistory } from "./releases.ts";
@@ -329,6 +330,14 @@ interface WriteContext {
 /** Live delivery of newly committed item events, after their write is durable. */
 export type TrackerEventListener = (event: TrackerItemEvent) => void;
 export interface LocalTrackerBackend extends TrackerToolBackend {
+  /** Fixture-only existing-store read. Never enters ordinary dispatch, seed or rollover. */
+  strictGetUser(
+    beforeRead: (snapshot: { storeId: string; storeDigest: string }) => Promise<() => void>,
+  ): Promise<{
+    user: unknown;
+    storeId: string;
+    storeDigest: string;
+  }>;
   sync(
     command: TrackerSyncCommand,
     options?: TrackerToolCallOptions,
@@ -3275,6 +3284,82 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
   };
   return {
     catalog: () => TRACKER_TOOLS,
+    async strictGetUser(beforeRead) {
+      if (
+        options.clock ||
+        options.runner ||
+        options.issueResolver ||
+        options.assertIssueWrite ||
+        options.validateEvidence
+      )
+        throw new Error("Strict fixture read forbids custom callbacks");
+      const privateFile = (target: string, directoryOnly = false) => {
+        const stat = lstatSync(target, { bigint: true });
+        if (
+          realpathSync(target) !== target ||
+          stat.uid !== BigInt(process.getuid!()) ||
+          (stat.mode & 0o077n) !== 0n ||
+          stat.isSymbolicLink() ||
+          (directoryOnly ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1n)
+        )
+          throw new Error("Strict fixture read requires private nonsymlink store");
+        return stat;
+      };
+      const originalDirectory = privateFile(directory, true);
+      privateFile(path);
+      return withTrackerStoreLock(
+        path,
+        async (assertHeld) => {
+          const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+          try {
+            const initial = await file.stat({ bigint: true });
+            const bytes = await file.readFile();
+            const store = parseStore(bytes.toString("utf8"));
+            const storeId = store.storeId ?? store.team.id;
+            if (!storeId || cyclesDue(store, new Date().toISOString()))
+              throw new Error("Strict fixture store identity or rollover refusal");
+            const same = (a: typeof initial, b: typeof initial) =>
+              a.dev === b.dev &&
+              a.ino === b.ino &&
+              a.birthtimeNs === b.birthtimeNs &&
+              a.size === b.size &&
+              a.mtimeNs === b.mtimeNs &&
+              a.ctimeNs === b.ctimeNs;
+            const assertCurrent = () => {
+              assertHeld();
+              const currentDirectory = privateFile(directory, true);
+              if (
+                currentDirectory.dev !== originalDirectory.dev ||
+                currentDirectory.ino !== originalDirectory.ino ||
+                currentDirectory.birthtimeNs !== originalDirectory.birthtimeNs ||
+                !same(initial, privateFile(path)) ||
+                !readFileSync(path).equals(bytes) ||
+                !same(initial, privateFile(path)) ||
+                cyclesDue(store, new Date().toISOString())
+              )
+                throw new Error("Strict fixture read target changed");
+            };
+            assertCurrent();
+            const final = await beforeRead({
+              storeId,
+              storeDigest: createHash("sha256").update(bytes).digest("hex"),
+            });
+            assertCurrent();
+            final();
+            assertCurrent();
+            // Pure backend-owned branch, with no await or ordinary dispatcher fallback.
+            return {
+              user: structuredClone(findUser(store, "me")),
+              storeId,
+              storeDigest: createHash("sha256").update(bytes).digest("hex"),
+            };
+          } finally {
+            await file.close();
+          }
+        },
+        { existingOnly: true },
+      );
+    },
     async sync(input, callOptions, signal) {
       const command = TrackerSyncCommandSchema.parse(input);
       signal?.throwIfAborted();

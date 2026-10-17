@@ -132,10 +132,11 @@ export async function observeNativeCwd(
 export async function observeNativeBirth(
   processPid: number,
   signal?: AbortSignal,
+  processHelper = fleetProcessHelper(),
 ): Promise<NativeBirth | undefined> {
   if (!["darwin", "linux"].includes(process.platform) || !pid.safeParse(processPid).success) return undefined;
   try {
-    const reply = await nativeProcessRequest(fleetProcessHelper(), ["--birth", String(processPid)], signal);
+    const reply = await nativeProcessRequest(processHelper, ["--birth", String(processPid)], signal);
     if (!reply) return undefined;
     const result = ProcessBirthSchema.parse(JSON.parse(reply.stdout)).process;
     if (

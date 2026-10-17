@@ -12,6 +12,7 @@
         "scripts/evals/run.mjs",
         "docs/testing/evidence-viewer.js",
         "scripts/build-remote-lead.mjs",
+        "scripts/build-fixture-read.mjs",
         "integrations/remote-lead/bootstrap.mjs",
         "integrations/remote-lead/claude-setup.mjs",
         "integrations/remote-lead/claude-setup.d.mts",
@@ -81,6 +82,7 @@
     },
     "apps/clankie": {
       "entry": [
+        "src/fixture-read-worker.ts",
         "scripts/fleet-load.ts",
         "scripts/fleet-resource-burst.ts",
         "scripts/fleet-load-worker.mjs",

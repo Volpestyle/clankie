@@ -705,6 +705,18 @@ export async function runHeadlessCaptainCommand(
         stderr,
       });
     }
+    if (command === "fixture-admission") {
+      outputJson(
+        stdout,
+        await (
+          await import("../src/command/fixture-admission.ts")
+        ).runFixtureAdmission(rest, {
+          repoRoot: options.repoRoot,
+          ...(options.env ? { env: options.env } : {}),
+        }),
+      );
+      return 0;
+    }
     if (command === "mcp") {
       return await (await import("../src/command/mcp.ts")).runMcpCommand(rest, { ...options, stderr });
     }
