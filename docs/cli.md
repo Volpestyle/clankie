@@ -7181,8 +7181,9 @@ server.
 `POST /v1/discord/official` with `{"enabled": true|false}` (operator access,
 Take Control in the app) changes it and returns the new status. A refused `on`
 changes nothing and answers 409 `{error, detail}` with `not_signed_in` or
-`official_application_is_local_bot`, or 502 `fleet_unavailable`. The app reaches
-both through the hosted operator bridge. A hosted body answers 404
+`official_application_is_local_bot`, or 502 `fleet_unavailable`. The app reads
+through the encrypted gateway to the service's observe-authorized route and
+writes through the hosted operator bridge. A hosted body answers 404
 `official_bot_unavailable`; it already uses the official bot. Contracts are in
 `@clankie/protocol/official-discord`.
 

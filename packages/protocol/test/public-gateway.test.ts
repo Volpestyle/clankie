@@ -65,6 +65,9 @@ describe("public gateway protocol", () => {
   });
 
   it("keeps one shared allowlist for cloud and Mac routing", () => {
+    expect(publicGatewayTargetFor("GET", "/v1/discord/official")).toBe("control");
+    expect(publicGatewayTargetFor("POST", "/v1/discord/official")).toBeUndefined();
+    expect(publicGatewayTargetFor("GET", "/v1/discord/official?enabled=true")).toBeUndefined();
     expect(publicGatewayTargetFor("GET", "/v1/model-settings")).toBe("control");
     expect(publicGatewayTargetFor("POST", "/v1/model-settings")).toBe("control");
     // @ts-expect-error Exercise a method refused by both the typed and runtime allowlist.

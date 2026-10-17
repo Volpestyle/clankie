@@ -11,6 +11,7 @@ import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
 import { ACCOUNT_DIAGNOSTICS_PATH } from "./account-diagnostics.ts";
 import { CAPTAIN_READINESS_PATH } from "./captain-readiness.ts";
 import { DISCORD_INGRESS_PATH } from "./discord-ingress.ts";
+import { OFFICIAL_DISCORD_BODY_PATH } from "./official-discord.ts";
 import {
   ACCOUNT_GOOGLE_START_PATH,
   ACCOUNT_GOOGLE_COMPLETE_PATH,
@@ -184,6 +185,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: BODY_LEASE_STATUS_PATH, target: "relay" },
   { method: "GET", path: DISCORD_ROOMS_PATH, target: "relay" },
   { method: "GET", path: DISCORD_SETTINGS_PATH, target: "relay" },
+  // The service itself authorizes observe access; writes use the operator bridge.
+  { method: "GET", path: OFFICIAL_DISCORD_BODY_PATH, target: "control" },
   { method: "GET", path: DISCORD_DIRECTORY_PATH, target: "relay" },
   { method: "GET", path: DISCORD_ROOM_VOICE_PATH, target: "relay" },
   { method: "GET", path: DISCORD_VOICE_TRANSCRIPTS_PATH, target: "relay" },

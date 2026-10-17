@@ -348,6 +348,10 @@ authority still come from this machine's settings, so the edge's owner flag
 grants nothing. Limits apply per account and per server; a refusal or block
 names its reason in `clankie discord official`. A bring-your-own bot can run
 beside it, but never the official application's own token.
+If account status is unavailable, `status` keeps the local on/running facts and
+returns `fleetError` with a plain-language `next` step; that does not confirm a
+server connection. A refused `on` changes nothing, and `off` still stops local
+ingress. Refresh after the account route recovers.
 `discord.wakeTrigger` (`mention`, `name`, `any`) sets what wakes him for text:
 `mention` is an @mention, DM, reply or command and ignores his plain name,
 `name` adds it, `any` is every message; unset keeps `persona.replyPolicy`, and a
