@@ -784,7 +784,12 @@ it("an isolated Auto runtime records the lead's drift choice and checks started 
   };
   const rounds = async () =>
     AutoRoundsResponseSchema.parse(
-      await (await f.request("/v1/auto/rounds?project=led&includeWorkPolicy=true", "fixture-owner")).json(),
+      await (
+        await f.request(
+          "/v1/auto/rounds?project=led&includeWorkPolicy=true&includeStaffing=true",
+          "fixture-owner",
+        )
+      ).json(),
     ).rounds;
   await f.command({
     schemaVersion: 1,

@@ -192,6 +192,9 @@ async function fixture(
       initialization = module.default.tui(api, config.plugin.at(-1)[1]).then(() => {
         ready = true;
       });
+      // Startup runs beside the controller hire. Observe early disconnects now;
+      // the original promise below still rejects when the fixture awaits it.
+      void initialization.catch(() => {});
       return { result: { layout: { root: { type: "pane", pane_id: pane.pane_id } } } };
     }
     if (!present) throw new Error("pane_not_found");

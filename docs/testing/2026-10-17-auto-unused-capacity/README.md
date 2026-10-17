@@ -30,3 +30,7 @@ This is a replay of the issue's reported aggregate, not a new live overnight obs
 The source change adds measurement and a prompt in the existing Auto wake, never automatic hiring, issue mutation, cap changes or extra owner notifications. The next installed/live Auto round is unobserved because deployment was outside this assignment.
 
 Raw CLI output, replay inputs/script, source producer files and decisive check output are retained together in the evidence store (`evidence.json`).
+
+## Landing-check repairs
+
+The first completed root gate exited 1: the existing drift-proof fixture compared the newly opted-in CLI result with a legacy HTTP view, so their staffing fields differed. Its HTTP read now requests the same `includeStaffing=true` view; exact equality remains. The run also exposed an OpenCode fixture startup rejection before its later await. The fixture now observes that promise immediately while retaining the original rejecting promise for its existing await. No product assertion, timeout or retry was weakened. Both complete affected fixture files subsequently pass, 28/28; this is not a waiver of the root gate. The failed gate and focused repair checks are retained as separate evidence.
