@@ -190,3 +190,55 @@ picker reads it on open.
 
 A custom role's station reads work items labelled with that role, using the
 same case-insensitive label match.
+
+## Amendment: roles are not a pipeline (James, 2026-10-14)
+
+James asked whether planner, builder and tester roles are backed by agent
+coordination research. As a relay of personas handing work down a chain, they
+are not. What the research does support is splitting work into separable results
+under one coordinator, verification that brings new information, and review
+that does not share the producer's context or model.
+
+- Roles stay what this ADR made them: a station, a backlog label and, under
+  [ADR 0216](0216-projects-own-agent-roles-and-tool-policy.md), a hire profile.
+  They define no coordination protocol. The `lead` skill splits work by
+  separable result, not by phase, and the `hire_agent` role description says so.
+- Project proposals no longer add `tester` because a repository has a test
+  suite. The suite is the builder's own check; independent review is the
+  reviewer's. `tester` remains a built-in for an owner who wants one, for
+  example live play-testing that needs its own seat or device.
+- The lead's review guidance defines independence by mechanism: brief the
+  reviewer from the acceptance and the artifact rather than the producer's
+  transcript, settle behavior by running the real thing, and prefer another
+  model family for a consequential change when usage allows.
+
+Evidence as of this amendment:
+
+- Persona prompts alone do not improve accuracy
+  ([Zheng et al., Findings of EMNLP 2024](https://arxiv.org/abs/2311.10054)).
+- Across 1,600+ traces from seven multi-agent frameworks, including role-based
+  MetaGPT and ChatDev, failures came mostly from system design and inter-agent
+  misalignment rather than model limits
+  ([Cemri et al., NeurIPS 2025](https://arxiv.org/abs/2503.13657)). In
+  multi-agent code generation, 75.3% of failures trace to the planner-to-coder
+  handoff ([arXiv 2510.10460](https://arxiv.org/abs/2510.10460)).
+- Across 180 configurations, a central orchestrator gained 80.8% on
+  parallelizable tasks, while every multi-agent variant degraded sequential
+  reasoning by 39–70%. Independent agents amplified errors 17.2×, against 4.4×
+  with an orchestrator checking outputs
+  ([Google Research, arXiv 2512.08296](https://arxiv.org/abs/2512.08296)).
+  Anthropic reports its orchestrator-worker research system beat a single agent
+  by 90.2% at about 15× the tokens of a chat, and that most coding tasks are
+  less parallelizable than research
+  ([2025](https://www.anthropic.com/engineering/multi-agent-research-system)).
+- Verification helps when it adds information: tests written apart from the
+  code and actually executed ([AgentCoder](https://arxiv.org/abs/2312.13010)).
+  Self-correction without external feedback does not
+  ([Huang et al., ICLR 2024](https://arxiv.org/abs/2310.01798)), and LLM
+  evaluators favor their own generations
+  ([Panickssery et al., 2024](https://arxiv.org/abs/2404.13076)).
+
+Most of these results come from function-level benchmarks or the authors' own
+evaluations. Long-running repository work by frontier-model fleets is barely
+studied, so Clankie's own delivery outcomes (rework, missed defects, accepted
+results) should revise this when they disagree.

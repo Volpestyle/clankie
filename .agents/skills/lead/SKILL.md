@@ -148,6 +148,13 @@ Use project lead/worker profiles and allowed/excluded plans/models as constraint
 Fresh work hires need a per-job effort choice and `effortReason` explaining why
 it is the smallest effort that meets acceptance; no fleet-wide effort is applied.
 
+A role is a hire profile and a station in the owner's world, not a stage in a
+relay. Split work by separable result, never by phase: a planner, builder and
+tester chain loses intent at every handoff and makes sequential work worse, so
+the worker that builds a result also plans and proves it. Parallel workers pay
+off when their results really are independent and you check each before it
+joins the rest.
+
 ## Work-project boundaries
 
 For a work repo, read its owner overrides for push, release and closure. Keep

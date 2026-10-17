@@ -6844,8 +6844,10 @@ I picked” proposal through `propose_project_defaults`. He follows saved tracki
 first, then detects Linear from repo links, branches and commits, GitHub issues,
 or an existing file tracker; no tracker defaults to local work records. Competing
 trackers or missing Linear scope produce one question. Builder and reviewer are
-the baseline; an app UI adds designer, and a test suite adds tester. Each role
-has a one-line reason in the proposal evidence.
+the baseline, and an app UI adds designer. A test suite adds no tester: it is
+the builder's own check, and review stays independent
+([ADR 0208](adr/0208-agents-carry-a-role-the-world-reads-it.md#amendment-roles-are-not-a-pipeline-james-2026-10-14)).
+Each role has a one-line reason in the proposal evidence.
 
 The default numeric worker cap is two. Repos with at least 1,000 source files
 and 50 commits in the last 14 days can propose four. The numeric worker cap never

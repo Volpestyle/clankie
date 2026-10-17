@@ -1006,7 +1006,7 @@ function hireAgentTool(
       role: Type.String({
         minLength: 1,
         maxLength: OPERATOR_AGENT_ROLE_MAX,
-        description: `Its team role, where the owner's world places it and whose backlog (work items labelled with it) its station reads: one of ${OPERATOR_AGENT_ROLES.join(", ")}, or a custom role of letters, digits, spaces and hyphens. Choose the role for this assignment.`,
+        description: `Its team role, where the owner's world places it and whose backlog (work items labelled with it) its station reads: one of ${OPERATOR_AGENT_ROLES.join(", ")}, or a custom role of letters, digits, spaces and hyphens. Choose the role for this assignment. A role is a station and hire profile, not a stage in a plan-build-test relay: the worker still owns its whole result and proves it.`,
       }),
       workingDirectory: Type.String({
         minLength: 1,

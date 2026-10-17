@@ -70,7 +70,6 @@ export async function inferProjectDefaults(
           return parsed as {
             dependencies?: Record<string, unknown>;
             devDependencies?: Record<string, unknown>;
-            scripts?: Record<string, unknown>;
           };
         } catch {
           return {};
@@ -101,10 +100,6 @@ export async function inferProjectDefaults(
         ["react", "react-native", "vue", "svelte", "next", "expo", "@angular/core"].includes(name),
       ),
     );
-  const hasTests =
-    files.some(
-      (file) => /(?:^|\/)(?:tests?|__tests__|spec)\//u.test(file) || /\.(?:test|spec)\.[^/]+$/u.test(file),
-    ) || manifests.some((m) => typeof m.scripts?.test === "string");
   const sourceCount = files.filter((file) =>
     /\.(?:[cm]?[jt]sx?|swift|rs|go|py|java|kt|vue|svelte|cpp|c|h)$/u.test(file),
   ).length;
@@ -121,11 +116,11 @@ export async function inferProjectDefaults(
   const available =
     resources?.pressure.healthy === true ? Math.max(0, Math.floor(resources.capacity.heavySlots)) : 0;
   const workerCap = Math.min(desired, available);
+  // A test suite is the builder's own check, not a separate station (ADR 0208).
   const roleReasons = [
     "builder: Implement changes in this repository.",
     "reviewer: Review changes before they land.",
     ...(hasUi ? ["designer: The repository contains an app UI."] : []),
-    ...(hasTests ? ["tester: The repository contains a test suite."] : []),
   ];
   const name = basename(workspace).trim().slice(0, 100) || "Project";
   const projectId = (

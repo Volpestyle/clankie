@@ -95,7 +95,7 @@ it("no tracker proposes local work, baseline roles and small fleet without writi
   expect(existsSync(join(root, ".clankie"))).toBe(false);
 });
 
-it("saved config wins; UI and suite propose designer/tester with reasons", async () => {
+it("saved config wins; UI proposes designer with a reason and a suite adds no tester", async () => {
   const saved = {
     schemaVersion: 1,
     backend: "linear",
@@ -110,36 +110,41 @@ it("saved config wins; UI and suite propose designer/tester with reasons", async
   });
   const { draft } = await inferProjectDefaults(root, resources);
   expect(draft!.trackerSetup).toBeUndefined();
-  expect(draft!.roles!.map((role) => role.role)).toEqual(["builder", "reviewer", "designer", "tester"]);
+  expect(draft!.roles!.map((role) => role.role)).toEqual(["builder", "reviewer", "designer"]);
   expect(draft!.evidence).toContain("designer: The repository contains an app UI.");
-  expect(draft!.evidence).toContain("tester: The repository contains a test suite.");
+  expect(draft!.evidence.some((line) => line.startsWith("tester:"))).toBe(false);
   expect(JSON.parse(await readFile(join(root, ".clankie/tracking.json"), "utf8"))).toEqual(saved);
 });
 
-it("native SwiftUI and manifest-declared suites produce roles; malformed manifests stay untrusted data", async () => {
+it("native SwiftUI produces designer; malformed manifests stay untrusted data", async () => {
   const root = await repo({
     "Sources/App.swift": "import SwiftUI\nstruct App {}",
     "package.json": JSON.stringify({ scripts: { test: "swift test" } }),
     "nested/package.json": "null",
   });
   const { draft } = await inferProjectDefaults(root, resources);
-  expect(draft!.roles!.map((role) => role.role)).toEqual(["builder", "reviewer", "designer", "tester"]);
+  expect(draft!.roles!.map((role) => role.role)).toEqual(["builder", "reviewer", "designer"]);
 });
 
 it("bounded inference preserves UTF-16 character limits for multibyte manifests and Swift prefixes", async () => {
-  const root = await repo({
-    "package.json": JSON.stringify({ note: "€".repeat(40_000), scripts: { test: "swift test" } }),
-    "Sources/App.swift": `// ${"€".repeat(70_000)}\nimport SwiftUI\n`,
+  const manifest = await repo({
+    "package.json": JSON.stringify({ note: "€".repeat(40_000), dependencies: { react: "1" } }),
   });
+  expect((await inferProjectDefaults(manifest, resources)).draft!.roles!.map((role) => role.role)).toEqual([
+    "builder",
+    "reviewer",
+    "designer",
+  ]);
+  const root = await repo({ "Sources/App.swift": `// ${"€".repeat(70_000)}\nimport SwiftUI\n` });
   // Large sparse generated tails must not be allocated just to inspect the prefix.
   await truncate(join(root, "Sources/App.swift"), 128 * 1024 * 1024);
   const { draft } = await inferProjectDefaults(root, resources);
-  expect(draft!.roles!.map((role) => role.role)).toEqual(["builder", "reviewer", "designer", "tester"]);
+  expect(draft!.roles!.map((role) => role.role)).toEqual(["builder", "reviewer", "designer"]);
 });
 
 it("oversized manifests and Swift imports beyond the character prefix do not infer roles", async () => {
   const root = await repo({
-    "package.json": `${JSON.stringify({ dependencies: { react: "1" }, scripts: { test: "test" } })}${" ".repeat(100_000)}`,
+    "package.json": `${JSON.stringify({ dependencies: { react: "1" } })}${" ".repeat(100_000)}`,
     "Sources/App.swift": `// ${"€".repeat(100_000)}\nimport SwiftUI\n`,
   });
   await truncate(join(root, "Sources/App.swift"), 128 * 1024 * 1024);
@@ -363,7 +368,7 @@ it("one inferred proposal → one-field tweak → exact accept saves tracker and
   expect("result" in accepted && accepted.result).toMatchObject({ status: "created" });
   const saved = (await f.settings.load()).projects.projects[0]!;
   expect(saved.name).toBe("Reviewed name");
-  expect(saved.roles.map((role) => role.role)).toEqual(["builder", "reviewer", "designer", "tester"]);
+  expect(saved.roles.map((role) => role.role)).toEqual(["builder", "reviewer", "designer"]);
   expect(JSON.parse(await readFile(join(root, ".clankie/tracking.json"), "utf8"))).toMatchObject({
     backend: "default",
   });

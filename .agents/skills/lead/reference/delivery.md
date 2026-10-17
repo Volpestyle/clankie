@@ -9,6 +9,13 @@ give one bounded pass after the producer's checks: inspect the artifact itself
 (for code, its scoped diff) and the integration boundary that could break,
 without rerunning the producer's suite or becoming a second implementer.
 
+Independence is what makes that pass worth having. Re-reading the producer's
+reasoning mostly confirms it, so brief the reviewer from the acceptance and the
+artifact, not the producer's transcript, and settle a behavioral question by
+running the real thing. Models rate output like their own more favorably: for a
+consequential change, prefer a reviewer from another model family when usage
+allows.
+
 Ask for coverage of the changed boundary in this order: full E2E with real
 dependencies and nothing mocked, integration across data, API and schema
 boundaries, then goldens grounded in real examples. Push back on new unit-test
