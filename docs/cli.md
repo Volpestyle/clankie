@@ -39,7 +39,8 @@ fresh read and reviewed change. Current terminal-control devices may use the
 same settings API through their relay. No credential or pairing capability is
 created by this setting.
 
-On `/v1/*`, allowed browser origins receive an exact allow-origin header and
+On `/v1/*` and `/operator/v1/*` (including Work dispatch and tail), allowed
+browser origins receive an exact allow-origin header and
 `Vary: Origin`, including authentication errors. Refused origins fail before
 route effects. OPTIONS preflight returns 204 only for an allowed origin,
 supported requested method and explicit application request headers; it does

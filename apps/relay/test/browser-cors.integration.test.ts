@@ -226,3 +226,47 @@ it("fails closed for browser requests when the saved allowlist cannot be read", 
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
   }
 });
+
+it("preflights browser Work routes through the real relay and preserves authentication and foreign-origin refusal", async () => {
+  const f = await fixture();
+  await runHttpCommand(["allow-origins", APP], { ownerFetcher: f.ownerFetcher });
+  for (const base of [f.relay, f.base]) {
+    for (const [path, method] of [
+      ["/operator/v1/dispatch", "POST"],
+      ["/operator/v1/tail", "POST"],
+      ["/v1/huddles", "GET"],
+      ["/v1/operator/projects", "GET"],
+    ]) {
+      const allowed = await fetch(
+        base + path,
+        preflight(APP, method, "authorization, cache-control, content-type"),
+      );
+      expect(allowed.status, `${base}${path}`).toBe(204);
+      expect(allowed.headers.get("access-control-allow-origin")).toBe(APP);
+      expect(allowed.headers.get("access-control-allow-methods")).toBe(method);
+      expect(allowed.headers.get("access-control-allow-credentials")).toBeNull();
+      expect(allowed.headers.get("access-control-allow-headers")).toBe(
+        "authorization, cache-control, content-type",
+      );
+      const foreign = await fetch(base + path, preflight("https://evil.test", method));
+      expect(foreign.status).toBe(403);
+      expect(foreign.headers.get("access-control-allow-origin")).toBeNull();
+      if (base === f.relay) {
+        const unauthenticated = await fetch(base + path, {
+          method,
+          headers: json(APP),
+          ...(method === "POST" ? { body: JSON.stringify({ op: "list", schemaVersion: 1 }) } : {}),
+        });
+        expect(unauthenticated.status).toBe(401);
+        expect(unauthenticated.headers.get("access-control-allow-origin")).toBe(APP);
+      }
+      const denied = await fetch(base + path, {
+        method,
+        headers: json("https://evil.test"),
+        ...(method === "POST" ? { body: "{}" } : {}),
+      });
+      expect(denied.status).toBe(403);
+      expect(denied.headers.get("access-control-allow-origin")).toBeNull();
+    }
+  }
+});

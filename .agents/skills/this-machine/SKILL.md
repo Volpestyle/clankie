@@ -64,7 +64,8 @@ leave` to forget it, or join again with fresh owner approval.
 
 For the browser app reaching a self-hosted service, read `clankie http show`.
 The owner-configured `http.allowedOrigins` is empty by default and applies to
-both core and relay. `clankie http allow-origins https://app.example.test`
+both core and relay, including `/v1/*` and Work’s `/operator/v1/*` transport.
+`clankie http allow-origins https://app.example.test`
 replaces the exact-origin list; include each app origin and its port, with no
 path or trailing slash. With no origins it clears access. This uses the
 revision-checked owner API, not a file edit. Never add an untrusted origin as a

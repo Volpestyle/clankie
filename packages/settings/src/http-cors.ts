@@ -4,6 +4,7 @@ const methods = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
 const requestHeaders = new Set([
   "accept",
   "authorization",
+  "cache-control",
   "content-type",
   "if-match",
   "if-none-match",
@@ -20,7 +21,8 @@ export async function httpCors(input: {
   headers: Headers;
   settings: () => Promise<unknown>;
 }): Promise<{ headers: Record<string, string>; status?: 204 | 400 | 403 | 503 }> {
-  if (!(input.path === "/v1" || input.path.startsWith("/v1/"))) return { headers: {} };
+  if (!["/v1", "/operator/v1"].some((prefix) => input.path === prefix || input.path.startsWith(`${prefix}/`)))
+    return { headers: {} };
   const headers: Record<string, string> = { vary: "Origin" };
   const origin = input.headers.get("origin");
   if (origin === null) return { headers };

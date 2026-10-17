@@ -18,7 +18,8 @@ non-default port. The default is empty. Paths, trailing slashes, opaque `null`
 origins, credentials, patterns and wildcards are rejected. Neither a request's
 Host/Origin headers nor an advertised relay address adds an origin to settings.
 
-Core and relay apply one policy to `/v1` and `/v1/*`, reading current settings
+Core and relay apply one policy to `/v1`, `/v1/*`, `/operator/v1` and
+`/operator/v1/*`, reading current settings
 for each browser request. An allowed Origin receives that exact value in
 `Access-Control-Allow-Origin`; a refused Origin is rejected before a handler
 can consume pairing state or perform a write. Responses vary on Origin.
@@ -53,3 +54,17 @@ LAN doorway followed by signed-device relay access. It checks exact origins,
 preflight method/header rejection, policy revocation/unavailability, unchanged
 401 authentication and single-use pairing. Browser proof and landing receipts
 are linked on VUH-2349; an HTTP-only check is not called a Chrome proof.
+
+## Amendment: Work uses the operator transport (2026-10-17, VUH-2365)
+
+Pairing alone did not prove browser app access: Work also sends authenticated
+requests through `/operator/v1/dispatch` and the operator tail transport. The
+original `/v1`-only policy left these requests without a preflight response or
+CORS headers. Both API namespaces now use the same exact-origin policy before
+routing and authentication. `/v1/huddles` remains covered by that policy. This
+also explicitly permits the app’s `Cache-Control: no-store` request header;
+the original header list caused huddles and body-lease preflight failures. It
+adds no authentication bypass or authority; browser requests still need their
+normal device grants. Preflights and foreign-origin requests never dispatch an
+operator action. Real relay TCP regression coverage and normal-Chrome Work
+load evidence are recorded on VUH-2365.
