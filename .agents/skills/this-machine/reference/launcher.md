@@ -60,7 +60,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Rotate operator credential             | `clankie operator-credential rotate --json`                                                                                                                        |
 | Restart / stop a service               | `clankie start`, `stop` or `restart [service]`                                                                                                                     |
 | Play session                           | `clankie play status` / `clankie play stop`                                                                                                                        |
-| Spider-Man gameplay skill              | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                                                                               |
+| Installed game extensions              | `clankie games extensions`; `games extensions add MODULE [KEY=VALUE...]` / `remove MODULE`, then restart                                                           |
 
 JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 `operator-credential rotate` default to human text — pass `--json`.
@@ -519,24 +519,12 @@ existing wizards, or the credential broker — never flags.
 
 `play stop` prints `Nothing is playing.` (not JSON) when idle.
 
-The Spider-Man bridge is off until the owner configures it (`/rivals connect URL`,
-`/auth rivals-agent`). Do not deploy, reconnect or start sittings on your own:
-those wait for the lead's schedule and verification of the explicit cooldown
-argument; see `{repoRoot}/docs/rivals.md`.
-
-The Spider-Man `rivals` tool supports status, start, objective, observe, share,
-stop. Rivals Agent owns tactics and reflexes; you own the sitting and conversation.
-Only `running` means playing, and `execution: replay` means recorded footage with
-a fake pad. Notes are retained context (`noteApplied: false`); the scripted policy
-acts on `autonomous`, `combat`, or `disengage`. Observe for real game pixels before
-describing play. Keep a start's requestId across retries and use the returned
-session ID for later commands. The watch link grants viewing only; a Go Live
-request is not proof of delivered video. Rivals shares the durable `play` lease
-with Pokémon/Minecraft; only the original owner can steer or request stop. A stop
-reply or HTTP deadline does not free that lease. Exact native `stopped` and
-post-cleanup `endedAt` for the saved original session/request/start time are
-required. Missing/replacement sessions remain held for the existing body recovery
-path. Status/discovery never starts a controller. Setup: `{repoRoot}/docs/rivals.md`.
+Spider-Man (Rivals) is an external game extension that lives in the Rivals Agent
+repository; it is not installed by default and its bridge is disabled
+(VUH-1325). Do not install, deploy, reconnect or start sittings on your own: those
+wait for the lead's schedule and verification of the explicit cooldown argument.
+Once the owner installs it, its own `rivals` tool description and skill carry the
+rules; `{repoRoot}/docs/rivals.md` says where it lives.
 
 ## Conflicts
 

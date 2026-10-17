@@ -396,6 +396,8 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  games status|set on|off  Read or set PokeAgent gameplay availability",
       "  games budget max-tokens|max-cost-usd|max-turns|max-duration-ms <value|default>",
+      "  games extensions [add MODULE [KEY=VALUE...] | remove MODULE]",
+      "                           Registered games, or install an external game extension (restart)",
     ],
   },
   {
@@ -405,16 +407,6 @@ const HEADLESS_COMMAND_HELP = [
       "  browser harnesses | delegate on|off",
       "                           Computer-use harnesses he can hire, and whether he is offered them (JSON)",
       "  browser tools | call TOOL JSON  Inspect or call Browser Use Pi tools",
-    ],
-  },
-  {
-    nouns: ["rivals"],
-    lines: [
-      "  rivals connect URL [--token-stdin] | disconnect | status",
-      "  rivals start autonomous|combat|disengage [NOTE]",
-      "  rivals objective SESSION MODE [NOTE]",
-      "  rivals observe|stop SESSION | share SESSION [GUILD CHANNEL]",
-      "                           Play Spider-Man through the Rivals Agent bridge (JSON)",
     ],
   },
   {
@@ -686,7 +678,7 @@ export function commandHelp(): string {
     "  operator, discord_voice, discord_presence, gameplay (default: operator).",
     "claude / codex / opencode / grok / prime need a TTY and that harness on PATH; mcp speaks JSON-RPC and is",
     "  for a harness's MCP config, not for people.",
-    "Secret entry uses /auth, /discord, /connect, /voice, or rivals connect --token-stdin. The",
+    "Secret entry uses /auth, /discord, /connect, or /voice. The",
     "credential store is shared — what /auth writes is what this CLI's services read.",
     "Local LLM servers are not launcher-owned; start them yourself.",
     "",

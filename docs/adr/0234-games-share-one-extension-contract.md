@@ -3,7 +3,9 @@
 Status: proposed implementation, 2026-10-06; lifecycle registration and Minecraft
 adoption implemented under [VUH-1616](https://linear.app/vuhlp/issue/VUH-1616),
 2026-10-08. Rivals exact-stop and lease adoption is implemented under
-[VUH-1849](https://linear.app/vuhlp/issue/VUH-1849). Extends
+[VUH-1849](https://linear.app/vuhlp/issue/VUH-1849). Owner-installed external
+modules added 2026-10-17 ([VUH-2419](https://linear.app/vuhlp/issue/VUH-2419)); see
+the amendment below. Extends
 [ADR 0145](0145-the-world-is-the-only-body.md),
 [ADR 0175](0175-rivals-agent-is-a-gameplay-skill.md), and
 [ADR 0219](0219-minecraft-is-an-mcp-connected-body.md).
@@ -92,11 +94,11 @@ another ledger or release a claim itself.
 
 ## Adoption
 
-| Game      | Extension-owned implementation                                                                                                                                                                      | Host boundary / remaining work                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pokémon   | `integrations/pokemon`: existing typed native factory, connector, executor and journal production; registered runtime persists across sittings                                                      | Core keeps authenticated entry, play lease, world-session receipt and exact restart recovery. Existing settings key is `gameplay`, skill is `pokeagents`, Activity surface is `gba_emulator`.                                                                                                                                                                                                                                                                                                 |
-| Minecraft | `integrations/minecraft`: native port schemas, MCP adapter, persisted connector state machine, driver handoffs, play host, capture, domain tools and routes; factory owns activation and quiescence | Core supplies the durable play ledger, current conversation authority, owner/admin checks, fresh DNS/profile policy, broker-private MCP capability, persona/model selection and approved sinks. Existing key/skill/surface remain `minecraft`.                                                                                                                                                                                                                                                |
-| Rivals    | Mapped to a skill/session-server connector, `gameplay.rivalsUrl`, high-level objective requests, native sitting IDs, bounded status/frame replies and read-only watch surface (ADR 0175)            | `integrations/rivals` supplies the registered high-level lifecycle. Core captures authenticated conversation authority, persists the original origin/request/session receipt, and holds the shared play lease until matching native `stopped` plus post-cleanup `endedAt`. Stop requests, failed cleanup, missing/replacement sessions and HTTP deadlines retain uncertainty. Recovery uses the exact saved receipt. The native fast policy remains outside the turn-based kernel (VUH-1849). |
+| Game      | Extension-owned implementation                                                                                                                                                                                                                                                                     | Host boundary / remaining work                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Pokémon   | `integrations/pokemon`: existing typed native factory, connector, executor and journal production; registered runtime persists across sittings                                                                                                                                                     | Core keeps authenticated entry, play lease, world-session receipt and exact restart recovery. Existing settings key is `gameplay`, skill is `pokeagents`, Activity surface is `gba_emulator`.                                                                                                                                                                                                                                                                                  |
+| Minecraft | `integrations/minecraft`: native port schemas, MCP adapter, persisted connector state machine, driver handoffs, play host, capture, domain tools and routes; factory owns activation and quiescence                                                                                                | Core supplies the durable play ledger, current conversation authority, owner/admin checks, fresh DNS/profile policy, broker-private MCP capability, persona/model selection and approved sinks. Existing key/skill/surface remain `minecraft`.                                                                                                                                                                                                                                 |
+| Rivals    | External since 2026-10-17: `clankie-extension/` in the Rivals Agent repository implements the module contract below (ADR 0175 amendment). It keeps the skill/session-server connector, high-level objective requests, native sitting IDs, bounded status/frame replies and read-only watch surface | Loaded from `gameplay.extensions`. Core supplies authenticated conversation authority, the durable play ledger, the lifecycle wrapper, its own broker credentials and the Go Live port; the extension persists the original origin/request/session receipt and holds the play lease until matching native `stopped` plus post-cleanup `endedAt`. Host recovery runs its `play.recover`, then `reconcileStopped`. The native fast policy remains outside the turn-based kernel. |
 
 Minecraft's compatibility files re-export the integration implementation. Its
 persisted session/connection generation, guard at final dispatch, worker-driver
@@ -114,3 +116,43 @@ owner-authenticated HTTP/CLI and settings projection checks. Earlier
 [Pokémon adoption evidence](../testing/2026-10-06-game-extension/README.md)
 remains valid for unchanged execution behavior. These fixtures do not prove a
 live game body, paid model, Discord stream or deployment.
+
+## Amendment: owner-installed external extensions (2026-10-17, VUH-2419)
+
+James moved Rivals out of core (ADR 0175 amendment), so a game must be able to
+live in another repository and be enabled without a core change. The registry
+above stays an in-process boundary for trusted code, and descriptor metadata
+still imports nothing. What changes is who chooses the code: besides the bundled
+Pokémon and Minecraft compositions, the owner may install modules by absolute
+path in `gameplay.extensions` (`clankie games extensions add MODULE [KEY=VALUE...]`,
+`/games extensions add`, or the existing owner-authorized games configuration
+API). The service imports them at start, like its runtime provider module; a
+tool argument or model output never names a module. A module that fails to load
+is logged and skipped without affecting other games.
+
+```mermaid
+flowchart LR
+  Owner["Owner: games extensions add"] --> Settings["gameplay.extensions"]
+  Settings -->|"service start"| Loader["Module loader"]
+  Loader -->|"host ports"| Module["External module: gameExtension + projectGameExtension"]
+  Loader --> Registry["GameExtensionRegistry"]
+  Module -->|"tools, paths + fetch, play.recover"| Registry
+  Registry --> Entry["Captain tools / operator API / discovery / recovery"]
+```
+
+The public contract is `@clankie/game-extension`'s `src/module.ts`. A module
+imports only its types and exports `gameExtensionApis` (including API 1),
+`gameExtension` and `projectGameExtension(runtime)`. The host ports are the
+owner's non-secret options, a private state directory, the durable play ledger,
+the shared lifecycle wrapper, API keys in the extension's own broker namespace
+(`ID` or `ID-*`) and a Go Live request for a read-only snapshot capability. The
+projection returns JSON Schema tools, exact paths with a `fetch` handler, and
+optional `play` recovery and `close`. The host binds tools and routes to the
+authenticated conversation, refuses unauthenticated requests, and runs
+`play.recover` inside its incarnation-fenced recovery before `reconcileStopped`;
+only that operation releases the ledger claim. Bundled games are unchanged.
+
+[Integration evidence](../../apps/clankie/test/game-extension-modules.integration.test.ts)
+installs a fixture module through the CLI writer, loads it beside a missing one,
+and checks owner-authenticated discovery, routes and tools, scoped credentials,
+and play recovery across a real ledger restart.

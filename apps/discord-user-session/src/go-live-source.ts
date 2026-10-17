@@ -1,8 +1,11 @@
 import { resolveActivityProducerCredential } from "@clankie/credential-broker";
 import { createHash } from "node:crypto";
 
-/** A read-only, session-scoped Rivals frame URL; never a control bearer. */
-export async function fetchRivalsSnapshot(
+/**
+ * A read-only, session-scoped game frame capability (`/frame.png?key=KEY`), as
+ * supplied by a game extension through the host's Go Live port; never a control bearer.
+ */
+export async function fetchSnapshotCapability(
   url: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ActivitySnapshotFrame | undefined> {

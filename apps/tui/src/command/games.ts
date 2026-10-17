@@ -7,10 +7,15 @@ import {
 } from "@clankie/protocol";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
-import { SettingsStore, defaultSettingsPath, type GameplaySettings } from "@clankie/settings";
+import {
+  GameExtensionModuleEntrySchema,
+  SettingsStore,
+  defaultSettingsPath,
+  type GameplaySettings,
+} from "@clankie/settings";
 
 const GAMES_USAGE =
-  "Usage: clankie games [status|extensions]\n       clankie games set on|off\n       clankie games budget max-tokens|max-cost-usd|max-turns|max-duration-ms <positive number|default>";
+  "Usage: clankie games [status|extensions]\n       clankie games set on|off\n       clankie games budget max-tokens|max-cost-usd|max-turns|max-duration-ms <positive number|default>\n       clankie games extensions add MODULE [KEY=VALUE...] | remove MODULE";
 
 export interface GamesCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -98,12 +103,75 @@ export async function gamesBudgetSet(
   return { ok: true, games: updated.gameplay, settingsFile: settings.path, restart: "clankie restart" };
 }
 
+/**
+ * Install or replace an external game extension by its absolute module path
+ * (ADR 0234). Options are non-secret values for that module; credentials go
+ * through `/auth`. Applies on `clankie restart`.
+ */
+export async function gamesExtensionAdd(
+  module: string,
+  options: Readonly<Record<string, string>>,
+  command: GamesCommandOptions = {},
+): Promise<GamesCommandResult> {
+  const entry = GameExtensionModuleEntrySchema.parse({
+    module,
+    ...(Object.keys(options).length === 0 ? {} : { options }),
+  });
+  const settings = store(command);
+  const updated = await settings.update((current) => ({
+    ...current,
+    gameplay: {
+      ...current.gameplay,
+      extensions: [
+        ...(current.gameplay.extensions ?? []).filter((installed) => installed.module !== entry.module),
+        entry,
+      ],
+    },
+  }));
+  return { ok: true, games: updated.gameplay, settingsFile: settings.path, restart: "clankie restart" };
+}
+
+export async function gamesExtensionRemove(
+  module: string,
+  command: GamesCommandOptions = {},
+): Promise<GamesCommandResult> {
+  const settings = store(command);
+  const updated = await settings.update((current) => {
+    const extensions = (current.gameplay.extensions ?? []).filter((installed) => installed.module !== module);
+    if (extensions.length === (current.gameplay.extensions ?? []).length)
+      throw new Error(`No installed game extension has module ${module}`);
+    const { extensions: _old, ...gameplay } = current.gameplay;
+    return { ...current, gameplay: extensions.length === 0 ? gameplay : { ...gameplay, extensions } };
+  });
+  return { ok: true, games: updated.gameplay, settingsFile: settings.path, restart: "clankie restart" };
+}
+
+/** `extensions add MODULE [KEY=VALUE...]` or `extensions remove MODULE`; undefined when not that shape. */
+export async function runGameExtensionInstallCommand(
+  args: readonly string[],
+  options: GamesCommandOptions = {},
+): Promise<GamesCommandResult | undefined> {
+  const [noun, verb, module, ...rest] = args;
+  if (noun !== "extensions" || module === undefined) return undefined;
+  if (verb === "remove" && rest.length === 0) return gamesExtensionRemove(module, options);
+  if (verb !== "add") return undefined;
+  const values: Record<string, string> = {};
+  for (const pair of rest) {
+    const split = pair.indexOf("=");
+    if (split < 1) throw new Error(GAMES_USAGE);
+    values[pair.slice(0, split)] = pair.slice(split + 1);
+  }
+  return gamesExtensionAdd(module, values, options);
+}
+
 export async function runGamesCommand(
   args: readonly string[],
   options: GamesCommandOptions = {},
 ): Promise<GamesCommandResult> {
   const verb = args[0];
   if (verb === undefined || verb === "status") return await gamesStatus(options);
+  const installed = await runGameExtensionInstallCommand(args, options);
+  if (installed !== undefined) return installed;
   if (verb === "set" && args.length === 2 && (args[1] === "on" || args[1] === "off")) {
     return await gamesSet(args[1] === "on", options);
   }

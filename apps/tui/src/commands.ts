@@ -18,8 +18,7 @@ import { runProjectCommand } from "./command/project.ts";
 import { runMachinesCommand } from "./command/machines.ts";
 import { runProjectSettingsCommand } from "./command/project-settings.ts";
 import { planSeat, parseSeatArgs } from "./command/seat.ts";
-import { formatRivals, formatSeatPlan } from "./command-format.ts";
-import { runRivalsMenu } from "./rivals-menu.ts";
+import { formatSeatPlan } from "./command-format.ts";
 import { onOff, runSettingsMenu } from "./settings-menu.ts";
 import { autoCommand, autonomyCommand } from "./autonomy-command.ts";
 import type { AutonomyCommandResult } from "./command/fleet.ts";
@@ -95,8 +94,13 @@ import {
   type BrowserHarnessesResult,
 } from "./command/browser.ts";
 import { runSkillsCommand } from "./command/skills.ts";
-import { gamesSet, gamesStatus, gamesBudgetSet, runGameExtensionsCommand } from "./command/games.ts";
-import { runRivalsCommand } from "./command/rivals.ts";
+import {
+  gamesSet,
+  gamesStatus,
+  gamesBudgetSet,
+  runGameExtensionInstallCommand,
+  runGameExtensionsCommand,
+} from "./command/games.ts";
 import { runMinecraftCommand } from "./command/minecraft.ts";
 import { runMinecraftDriverMenu } from "./minecraft-driver-menu.ts";
 import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
@@ -1419,7 +1423,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       name: "games",
       aliases: ["gameplay"],
       description: "Configure play defaults and discover registered games",
-      argumentHint: "[on|off|status|extensions]",
+      argumentHint: "[on|off|status|extensions [add|remove MODULE]]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         if (argument.trim() === "extensions") {
@@ -1452,6 +1456,25 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           shell.insertCommandResult("/games", "Gameplay settings are unavailable.", "error");
           return;
         }
+        try {
+          // Module paths are case-sensitive, so this reads the argument as typed.
+          const installed = await runGameExtensionInstallCommand(argument.trim().split(/\s+/u), { settings });
+          if (installed !== undefined) {
+            shell.insertCommandResult(
+              "/games",
+              `${(installed.games.extensions ?? []).map((entry) => entry.module).join("\n") || "No external game extensions are installed."}\n\nApplies after clankie restart.`,
+              "success",
+            );
+            return;
+          }
+        } catch (error) {
+          shell.insertCommandResult(
+            "/games",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+          return;
+        }
         const words = argument.trim().toLowerCase().split(/\s+/u).filter(Boolean);
         if (words.length === 0) {
           await runGameplayWizard(shell, settings);
@@ -1464,7 +1487,11 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         }
         const [state] = words;
         if ((state !== "on" && state !== "off") || words.length !== 1) {
-          shell.insertCommandResult("/games", "Usage: /games [on|off|status|extensions]", "error");
+          shell.insertCommandResult(
+            "/games",
+            "Usage: /games [on|off|status|extensions [add MODULE [KEY=VALUE...]|remove MODULE]]",
+            "error",
+          );
           return;
         }
         const next = await gamesSet(state === "on", { settings });
@@ -1573,34 +1600,6 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           `${formatBrowserSettings(next.browser)}\n\nApplies from his next burst of browsing.`,
           "success",
         );
-      },
-    },
-    {
-      name: "rivals",
-      aliases: [],
-      description: "Connect, play, observe, and share Spider-Man",
-      argumentHint: "[status|connect URL|start MODE|objective|observe|share|stop]",
-      takesArgument: true,
-      async run(argument, shell): Promise<void> {
-        const options = settings === undefined ? {} : { settings };
-        if (!argument.trim()) {
-          await runRivalsMenu(shell, (args) => runRivalsCommand(args, options));
-          return;
-        }
-        try {
-          const result = await runRivalsCommand(argument.trim().split(/\s+/u).filter(Boolean), options);
-          shell.insertCommandResult(
-            "/rivals",
-            formatRivals(result),
-            result.outcome === "refused" ? "error" : "success",
-          );
-        } catch (error) {
-          shell.insertCommandResult(
-            "/rivals",
-            error instanceof Error ? error.message : String(error),
-            "error",
-          );
-        }
       },
     },
     {

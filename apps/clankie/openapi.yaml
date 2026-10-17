@@ -6198,7 +6198,21 @@ paths:
               additionalProperties: false
               properties:
                 pokeagentMmoEnabled: { type: boolean, default: false }
-                rivalsUrl: { type: string, format: uri }
+                extensions:
+                  type: array
+                  maxItems: 16
+                  description: External game-extension modules loaded at service start. Each is trusted code the owner installed; options are non-secret values for it.
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [module]
+                    properties:
+                      module:
+                        { type: string, minLength: 2, maxLength: 1024, description: Absolute module path }
+                      options:
+                        type: object
+                        maxProperties: 32
+                        additionalProperties: { type: string, maxLength: 2048 }
                 pokemonBudget:
                   type: object
                   additionalProperties: false

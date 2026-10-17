@@ -38,7 +38,6 @@ export * from "./discord-attention.ts";
 export * from "./worker-accounts.ts";
 export * from "./huddles.ts";
 export { OPERATOR_SEAT_HARNESSES, type OperatorSeatHarness } from "./seat-harnesses.ts";
-export { RivalsCommandSchema, RivalsStatusSchema, type RivalsCommand, type RivalsStatus } from "./rivals.ts";
 export {
   MachineSchema,
   MachineSessionSchema,

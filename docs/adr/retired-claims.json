@@ -52,6 +52,11 @@
       "now": "Release and expiry stop and retain leased simulator devices for reuse; deletion requires an explicit owner tidy."
     },
     {
+      "pattern": "clankie rivals |/rivals (connect|start|status|stop|observe|share|objective)\\b|gameplay\\.rivalsUrl|integrations/rivals",
+      "adr": "0175 (VUH-2419 amendment)",
+      "now": "Rivals is an external game extension in the rivals-agent repository; install it with clankie games extensions add MODULE url=ORIGIN."
+    },
+    {
       "pattern": "\\b(create_goal|note_goal_decision|update_goal|get_goal)\\b|/goal accept|conversations goal ",
       "adr": "0264",
       "now": "Projects on Auto carry standing work; clankie auto / /auto is the switch, get_wake reads the pending wake."

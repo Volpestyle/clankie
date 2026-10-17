@@ -3,7 +3,7 @@ import type { ClankieApiClient } from "@clankie/api-client";
 import type { DiscordActiveStream, DiscordStreamWatchReport } from "@clankie/protocol";
 import type { VoxStreamClient } from "@clankie/vox-client";
 import type { DiscordUserGateway } from "./gateway.ts";
-import { fetchActivitySnapshot, fetchRivalsSnapshot } from "./go-live-source.ts";
+import { fetchActivitySnapshot, fetchSnapshotCapability } from "./go-live-source.ts";
 import {
   buildDiscordStreamKey,
   createDiscordStreamDiscovery,
@@ -427,7 +427,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
     const pull =
       snapshotUrl === undefined
         ? (options.fetchActivitySnapshot ?? (() => fetchActivitySnapshot()))
-        : () => fetchRivalsSnapshot(snapshotUrl);
+        : () => fetchSnapshotCapability(snapshotUrl);
     let pulling = false;
     publishPump = setInterval(() => {
       if (pulling) return;

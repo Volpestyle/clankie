@@ -39,4 +39,36 @@ registration guard so a stale reference cannot join after removal.
 `reconcileStopped(id, proof)` is host-only. Use it inside the existing durable,
 incarnation-fenced recovery operation after exact connector termination. A
 failed proof or still-running executor cannot clear uncertainty. It does not
-release the host ledger. Rivals lifecycle adoption remains VUH-1849.
+release the host ledger.
+
+## External extensions
+
+A game can live outside this repository and be installed by the owner, with no
+change here: `clankie games extensions add MODULE [KEY=VALUE...]` records the
+absolute module path in `gameplay.extensions`, and the service loads it at start
+(`apps/clankie/src/game-extension-modules.ts`). The path comes from owner
+settings, never a tool argument or model output. The module is trusted,
+in-process code; a module that fails to load is logged and skipped.
+
+The module imports only types from this package (`src/module.ts`) and exports:
+
+- `gameExtensionApis`, including `GAME_EXTENSION_MODULE_API` (1);
+- `gameExtension`, a `GameExtension` whose `create(host)` receives a
+  `GameExtensionModuleHost`;
+- `projectGameExtension(runtime)`, called with the registered runtime (so starts
+  keep the registry's admission fence), returning its captain tools (JSON Schema
+  parameters), exact operator paths with a `fetch` handler, optional `play`
+  recovery (`owns`, `recover`) and `close`.
+
+The host supplies the owner's non-secret `options`, a private `stateDirectory`
+(`<state>/game-extensions/<id>`), the core's durable play ledger (`leases`),
+`createRuntime` (the lifecycle wrapper above), `credential(name)` for broker API
+keys in the extension's own namespace (`ID` or `ID-*`), and `goLive` for a
+read-only `/frame.png?key=` snapshot capability through the active Discord
+user-session body. The host binds tools and routes to the authenticated
+conversation, refuses unauthenticated requests, and runs `play.recover` inside
+its incarnation-fenced recovery before `reconcileStopped`; only that outer
+operation releases the ledger claim.
+
+[Rivals](https://github.com/Volpestyle/rivals-agent) (`clankie-extension/`) is
+the first external extension ([ADR 0175](../../docs/adr/0175-rivals-agent-is-a-gameplay-skill.md)).

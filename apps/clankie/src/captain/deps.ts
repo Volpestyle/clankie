@@ -34,7 +34,6 @@ import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { McpHost } from "../mcp-host.ts";
 import type { FinishedRender } from "../media-generation.ts";
 import type { TldrawHost } from "../tldraw-host.ts";
-import type { RivalsClient } from "../rivals.ts";
 import type { WorkItemsService } from "../work-items.ts";
 import type { DiscordTracking } from "../discord-tracking.ts";
 
@@ -123,7 +122,6 @@ export interface CaptainDeps {
     shell?(fleet: HerdrFleet): FleetShellRun;
     remoteWorkspace(fleet: string, directory: string): Promise<boolean>;
   };
-  readonly rivals?: RivalsClient;
   /** Claude/Codex transcripts on this machine and owner-configured SSH hosts. */
   readonly agentSessions?: Pick<AgentSessions, "list" | "read"> &
     Partial<Pick<AgentSessions, "resolve" | "subagents" | "readSubagent">>;

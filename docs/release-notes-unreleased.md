@@ -1,5 +1,17 @@
 # Unreleased
 
+## Rivals moves out of core; external game extensions (VUH-2419)
+
+Spider-Man (Rivals) is now an external game extension in the Rivals Agent
+repository (`clankie-extension/`). `clankie rivals`, `/rivals`, the bundled
+`rivals` skill and the `gameplay.rivalsUrl` setting are removed; a saved
+`rivalsUrl` is dropped on load. The bridge stays disabled (VUH-1325).
+
+Any game can now live outside this repository: `clankie games extensions add
+MODULE [KEY=VALUE...]` installs one by absolute module path and `remove MODULE`
+uninstalls it, applying on restart. See `docs/rivals.md` and
+`packages/game-extension/README.md`.
+
 ## Working preferences (VUH-2256)
 
 Projects gain a started-issue WIP cap, owner-loop cadence (silent, milestones or

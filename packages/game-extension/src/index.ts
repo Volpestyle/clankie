@@ -1,5 +1,17 @@
 /** Host-owned authority. None of these callbacks are model arguments or credentials. */
 export { GameExtensionRegistry } from "./registry.ts";
+export {
+  GAME_EXTENSION_MODULE_API,
+  type GameConversationIdentity,
+  type GameExtensionModule,
+  type GameExtensionModuleHost,
+  type GameExtensionModuleProjection,
+  type GameOwnerRoute,
+  type GameTool,
+  type GameToolResult,
+  type PlayLeaseAuthority,
+  type PlayLeaseRef,
+} from "./module.ts";
 export interface GameRunControl {
   stopRequested(): boolean;
   guard(): Promise<void>;

@@ -786,24 +786,21 @@ call-time revocation checks still apply.
   PokeAgents owns player leases and action/session fencing. Clankie's play
   package retains typed body-action refusals beside its driver interface;
   the retired local environment lifecycle engine has no role in hosted play.
-- **Spider-Man (disabled bridge).** The integration is not currently available
-  for live play; [setup](rivals.md) records the re-enablement requirements.
-  Its interface delegates tactical decisions and the guarded real-time
-  pad loop to Rivals Agent. Clankie's `rivals` tool and operator API manage bounded sittings,
-  objectives, fresh observations, and read-only sharing; the existing Go Live
-  PNG publisher carries its video. The Pokémon seam remains unchanged in scope.
-  See [ADR 0175](adr/0175-rivals-agent-is-a-gameplay-skill.md) and [setup](rivals.md).
+- **Spider-Man (external, disabled).** Rivals is an owner-installed game
+  extension in the Rivals Agent repository, not core code; [the pointer](rivals.md)
+  says how to install it. Its bridge stays disabled for live play
+  ([ADR 0175](adr/0175-rivals-agent-is-a-gameplay-skill.md)).
 - **Game extensions.** [ADR 0234](adr/0234-games-share-one-extension-contract.md)
   defines typed connector, skill, settings, Activity and lifecycle composition.
-  `integrations/pokemon` and `integrations/minecraft` implement it; core retains play leases, authority and
+  `integrations/pokemon` and `integrations/minecraft` implement it, and owner-installed
+  modules outside this repository (`gameplay.extensions`, `game-extension-modules.ts`)
+  implement its module contract; core retains play leases, authority and
   recovery, persona/model selection, Discord/Activity destinations and evidence
   projections. Pokémon's existing API/CLI/TUI enter that extension through a
   compatibility composition point. Pokémon and Minecraft share the turn scheduler, streamed model transport and journal envelope in `packages/play` ([ADR 0254](adr/0254-turn-based-games-share-a-play-kernel.md)); `integrations/minecraft` owns its native connector lifecycle, play host, capture,
   domain tools and routes. The trusted in-process registry exposes owner-authenticated
   discovery through `/v1/games/extensions`, CLI and TUI, and removes idle tool/route
-  projections without core edits while retaining uncertain ownership. Rivals is
-  mapped in ADR 0234; shared play ownership and exact controller recovery remain
-  [VUH-1849](https://linear.app/vuhlp/issue/VUH-1849).
+  projections without core edits while retaining uncertain ownership.
 - **PokeAgents boundary.** The sibling PokeAgents repository owns the
   `WORLD_OPERATIONS` catalog, capability schemas, native client transport, and
   the MCP projection derived from that catalog. MCP carries calls; the world

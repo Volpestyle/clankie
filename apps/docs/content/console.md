@@ -35,7 +35,7 @@ footer names it, such as `claude seat`, in place of the model.
 
 `$` opens the skill picker, and `/skill-name task` runs a skill directly. A
 command typed bare opens its menu (`/project`, `/access`, `/accounts`,
-`/devices`, `/machines`, `/minecraft`, `/rivals`, `/update`), and settings
+`/devices`, `/machines`, `/minecraft`, `/update`), and settings
 commands such as `/autonomy`, `/awake`, `/browser`, and `/routing` list each
 setting with its value. With arguments, a command runs the same code as the
 CLI. This table is generated from the console's command registry.

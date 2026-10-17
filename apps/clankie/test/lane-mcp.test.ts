@@ -875,7 +875,6 @@ it.each(CaptainSessionLaneV2Schema.options)("strict client contract: %s lane too
     ...bankDeps(),
     desktop: catalogOnly,
     bodyLeases: catalogOnly,
-    rivals: catalogOnly,
     minecraft: catalogOnly,
     minecraftHost: catalogOnly,
     agentSessions: catalogOnly,

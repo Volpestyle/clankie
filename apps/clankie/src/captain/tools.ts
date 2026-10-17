@@ -59,7 +59,6 @@ import { SeatQuestionAnswerSchema } from "./codex-user-input.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { desktopTools } from "./desktop.ts";
-import { rivalsTools } from "./rivals-tools.ts";
 import { activityTools } from "./activity-tools.ts";
 import { minecraftTools } from "./minecraft-tools.ts";
 import { fleetEfficiencyTools } from "./fleet-efficiency-tools.ts";
@@ -279,9 +278,6 @@ export function captainTools(
             },
           },
         ]),
-    ...(deps.gameExtensions !== undefined || deps.rivals === undefined
-      ? []
-      : rivalsTools(deps.rivals, turn.bodyIdentity)),
     ...(deps.gameExtensions === undefined
       ? [
           ...(deps.minecraft === undefined ? [] : minecraftTools(deps.minecraft, turn)),
@@ -732,7 +728,7 @@ export function captainTools(
         "been talking, and play commentary is trigger 'narration'.",
       parameters: Type.Object({}),
       execute: async () => {
-        const [live, sessions, voiceHistory, voiceSpeech, renders, shares, rivals] = await Promise.all([
+        const [live, sessions, voiceHistory, voiceSpeech, renders, shares] = await Promise.all([
           deps.embodiment.getLiveSession(),
           deps.presence.listSessions(),
           deps.presence.listVoiceHistory(5),
@@ -741,12 +737,10 @@ export function captainTools(
           // not this room's business, same rule as `observe_room`.
           turn.room === undefined ? [] : deps.media.finishedRenders(turn.room),
           deps.streamWatch?.current(),
-          deps.rivals?.call({ action: "status" }),
         ]);
         return json({
           liveSession: live,
           ...(lane === "operator" && turn.leadChats ? { leadChats: await turn.leadChats() } : {}),
-          ...(rivals === undefined ? {} : { rivals }),
           presenceSessions: sessions,
           voiceHistory,
           recentVoiceSpeech: voiceSpeech,

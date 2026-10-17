@@ -11,6 +11,7 @@ import { z } from "zod";
 import { ProjectsSettingsSchema, RetiredWorkingPreferencesSchema } from "@clankie/protocol/projects";
 import { MinecraftPlaySettingsSchema, MinecraftServerProfileIdSchema } from "@clankie/protocol/minecraft";
 import { isIP } from "node:net";
+import { isAbsolute } from "node:path";
 
 /**
  * Operator settings: **non-secret** configuration only.
@@ -268,6 +269,20 @@ export const BrowserSettingsSchema = z
   .strict();
 export type BrowserSettings = z.infer<typeof BrowserSettingsSchema>;
 
+/** One installed external game-extension module (`clankie games extensions add`). */
+export const GameExtensionModuleEntrySchema = z.strictObject({
+  module: z
+    .string()
+    .min(2)
+    .max(1024)
+    .refine((value) => isAbsolute(value) && !value.includes("\0"), "must be an absolute module path"),
+  options: z
+    .record(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/u), z.string().max(2048))
+    .refine((value) => Object.keys(value).length <= 32, "at most 32 options")
+    .optional(),
+});
+export type GameExtensionModuleEntry = z.infer<typeof GameExtensionModuleEntrySchema>;
+
 /** Whether the captain may offer play at all. */
 export const GameplaySettingsSchema = z
   .object({
@@ -275,21 +290,12 @@ export const GameplaySettingsSchema = z
     pokeagentMmoEnabled: z.boolean().default(false),
     /** Per-session Pokémon limits; omitted token cap uses 250,000 tokens. */
     pokemonBudget: EmbodimentBudgetSchema.optional(),
-    /** Rivals Agent session API; its bearer lives under rivals-agent in the broker. */
-    rivalsUrl: z
-      .url()
-      .refine((value) => {
-        const url = new URL(value);
-        return (
-          ["http:", "https:"].includes(url.protocol) &&
-          !url.username &&
-          !url.password &&
-          !url.search &&
-          !url.hash &&
-          url.pathname === "/"
-        );
-      }, "Rivals URL must be an HTTP(S) origin without credentials")
-      .optional(),
+    /**
+     * Game extensions installed outside this repository, loaded at service
+     * start (ADR 0234). Each module is trusted code the owner chose; options
+     * are non-secret values for it. Credentials stay in the broker.
+     */
+    extensions: z.array(GameExtensionModuleEntrySchema).max(16).optional(),
   })
   .strict();
 export type GameplaySettings = z.infer<typeof GameplaySettingsSchema>;
@@ -935,7 +941,8 @@ export function migrateLegacyFleetWorkingPreferences(parsed: unknown): unknown {
  */
 const RETIRED_SETTINGS_KEYS: readonly string[] = ["linear", "swarm", "skills"];
 const RETIRED_DISCORD_SETTINGS_KEYS: readonly string[] = ["possessorVoiceEnabled"];
-const RETIRED_GAMEPLAY_SETTINGS_KEYS: readonly string[] = ["pokemonEmulatorEnabled"];
+// rivalsUrl: Rivals became an external extension (VUH-2419); its URL is now an extension option.
+const RETIRED_GAMEPLAY_SETTINGS_KEYS: readonly string[] = ["pokemonEmulatorEnabled", "rivalsUrl"];
 
 /**
  * Drops sections this version has retired, so an owner whose file predates the

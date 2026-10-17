@@ -6,8 +6,6 @@ import type { OwnerPersonaSnapshot } from "@clankie/protocol/owner-settings";
 import type { SeatPlan } from "./command/seat.ts";
 
 const home = (path: string) => path.replace(/^\/(?:Users|home)\/[^/]+/u, "~");
-type Json = Record<string, unknown>;
-const record = (value: unknown): Json => (value !== null && typeof value === "object" ? (value as Json) : {});
 
 /** Aligned `label  value` rows, skipping rows with nothing to say. */
 function rows(entries: readonly (readonly [string, string | undefined])[]): string[] {
@@ -41,26 +39,6 @@ export function formatPersonaImages(images: OwnerPersonaSnapshot["images"]): str
   return [
     `${images.count} images from ${images.directory ? home(images.directory) : "no folder"} · ${images.vibeCount} vibe · ${images.appearanceCount} appearance`,
     ...failed.map((file) => `  ${file.status} ${file.name}${file.reason ? ` · ${file.reason}` : ""}`),
-  ].join("\n");
-}
-
-/** `/rivals` results: a status, a watch link, a connection change or a refusal. */
-export function formatRivals(result: Json): string {
-  if (result.outcome === "refused") return `Refused: ${String(result.reason ?? "unknown")}`;
-  if (result.outcome === "watch")
-    return `Watch: ${String(result.watchUrl)}${result.publishing ? ` · Discord ${String(result.publishing)}` : ""}`;
-  if ("url" in result)
-    return `${result.url ? `Connected to ${String(result.url)}` : "Disconnected"}. ${String(result.setup ?? "")}`.trim();
-  const session = record(result.session);
-  if (session.phase === undefined) return `Rivals · idle · ${String(result.execution ?? "live")}`;
-  const objective = record(session.objective);
-  return [
-    `Rivals · ${String(session.phase)} · ${String(objective.mode)}${objective.note ? ` · ${String(objective.note)}` : ""}`,
-    ...rows([
-      ["session", String(session.id)],
-      ["execution", String(result.execution)],
-      ["error", typeof session.error === "string" ? session.error : undefined],
-    ]),
   ].join("\n");
 }
 

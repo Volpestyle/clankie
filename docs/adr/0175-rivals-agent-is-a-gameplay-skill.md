@@ -1,6 +1,7 @@
 # ADR 0175: Rivals Agent is a gameplay skill
 
-Status: accepted (James, 2026-09-20).
+Status: accepted (James, 2026-09-20). Amended 2026-10-17 (VUH-2419): the Clankie
+side moved out of core into an external game extension; see the amendment below.
 
 ## Decision
 
@@ -69,3 +70,33 @@ integration, not closed-loop gameplay skill. Live PC and Discord delivery need
 their own evidence. Only one operator may own the PC desktop at a time, including
 other Rivals development scripts. See [setup](../rivals.md) and
 [VUH-1316](https://linear.app/vuhlp/issue/VUH-1316).
+
+## Amendment: Rivals is an external game extension (James, 2026-10-17, VUH-2419)
+
+James moved Rivals out of Clankie's core. The client, command schema, sitting
+service, `rivals` tool, `POST /v1/rivals` route and gameplay skill now live in
+the [Rivals Agent repository](https://github.com/Volpestyle/rivals-agent) under
+`clankie-extension/`, beside the session server they drive. Core keeps no Rivals
+code, settings, credentials wiring, CLI/TUI commands or skill: `gameplay.rivalsUrl`
+is retired (dropped on load), `clankie rivals` and `/rivals` are gone, and
+`docs/rivals.md` is a pointer.
+
+The boundary above is unchanged. Clankie still owns the sitting's purpose,
+conversation and memory; Rivals Agent owns perception, tactics and the guarded
+pad loop. The extension keeps the same contract, exact-stop rules and receipt
+recovery, and its fault-injection suite runs against a real Clankie core.
+
+It implements the public module contract that ADR 0234's amendment adds to
+`@clankie/game-extension`: the owner installs it with
+`clankie games extensions add MODULE url=ORIGIN`, which records the module path
+in `gameplay.extensions`; the service loads it at start and hands it the durable
+play ledger, lifecycle wrapper, its own broker credentials (`rivals-agent`), a
+state directory and the Go Live port. Re-enabling under
+[VUH-1325](https://linear.app/vuhlp/issue/VUH-1325) therefore needs only
+installing or registering the extension, never a core change. The bridge stays
+disabled; installing it authorizes no sitting.
+
+The old core record `<state>/body/rivals-session.json` is not migrated; the
+extension keeps its own under `<state>/game-extensions/rivals/`. When it moved,
+the owner's state root had no such record and no `play` claim (checked
+2026-10-17), so nothing was held across the move.

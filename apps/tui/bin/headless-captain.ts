@@ -313,11 +313,6 @@ export async function runHeadlessCaptainCommand(
       );
       return 0;
     }
-    if (command === "rivals") {
-      const result = await (await import("../src/command/rivals.ts")).runRivalsCommand(rest, options);
-      outputJson(stdout, result);
-      return result.outcome === "refused" ? 1 : 0;
-    }
     if (command === "model") {
       const result = await (await import("../src/command/model.ts")).runModelCommand(rest, options);
       outputJson(stdout, result);

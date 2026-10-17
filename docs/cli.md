@@ -116,8 +116,6 @@ leave the live look unchanged.
 
 `--json` is required only where the default is human-readable (pairing QR,
 device and machine tables, credential-rotate sentence). Everything else is already JSON.
-`rivals connect --token-stdin` reads its bridge token from a pipe into the broker;
-the token is never an argument, settings value, or printed result.
 
 | Command                                                                                                                       | stdout                                                                                       |
 | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
@@ -3059,17 +3057,6 @@ checks the selected conversation's play ownership again before queueing it.
 Clankie can use `pokeagent_guide` from that conversation; the mind still chooses
 its objective and actions. This does not start a sitting or affect another game.
 
-### `rivals`
-
-`rivals connect URL [--token-stdin]` / `disconnect` configure the Rivals Agent origin live; its
-token is broker-owned under `rivals-agent` (`/auth rivals-agent`). `rivals status`
-reads the current sitting. `rivals start autonomous|combat|disengage [NOTE]` starts
-a bounded sitting. `rivals objective SESSION MODE [NOTE]`, `observe SESSION`,
-`share SESSION [GUILD CHANNEL]`, and `stop SESSION` require its observed ID.
-All return JSON; a refusal exits 1. `/rivals` exposes the same commands in the TUI.
-Notes are context, not instructions the current scripted policy understands.
-See [Rivals setup and verification](rivals.md).
-
 ### `minecraft`
 
 `minecraft host status|start|stop|restart|backup` manages the integration-owned
@@ -3459,6 +3446,16 @@ extension's connector kind, skill, settings key, Activity surface, local lifecyc
 state and health. The command never joins a game or calls a model. `ready` is local
 lifecycle health; it does not prove a reachable world or visible stream. An
 uncertain connector remains registered until exact host recovery proves it ended.
+
+`games extensions add MODULE [KEY=VALUE...]` installs a game extension that lives
+outside this repository, such as Rivals Agent's Spider-Man bridge, by its absolute
+module path; running it again replaces that module's options. `games extensions
+remove MODULE` uninstalls it. Both write `gameplay.extensions` in the settings file,
+print the same JSON as `games status`, and apply on `clankie restart`; the TUI
+accepts `/games extensions add|remove ...`. Options are non-secret values for the
+module; store any credential it needs with `/auth`. A module that fails to load is
+logged as `game_extension.module_unavailable` and skipped without affecting other
+games. The module contract is in [`packages/game-extension`](../packages/game-extension/README.md).
 
 ### `games [status]` / `games set on|off` / `games budget`
 

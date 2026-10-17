@@ -59,7 +59,6 @@ import type { ModelKeysPort } from "../model-keys.ts";
 import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } from "../pairing.ts";
 import type { PersonaImageSource } from "../persona-images.ts";
 import { type PushWakeSender } from "../push.ts";
-import type { RivalsClient } from "../rivals.ts";
 import type { RuntimeProvider } from "../runtime-provider.ts";
 import { type VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
 import { type WorkItemsService } from "../work-items.ts";
@@ -319,7 +318,6 @@ export interface ClankieAppDependencies {
    * Absent on a hosted body; the route then answers an empty list.
    */
   computerUseHarnesses?: { refresh(): Promise<readonly ComputerUseHarness[]> };
-  rivals?: RivalsClient;
   mediaGenerator?: MediaGeneratorPort;
   /** Private exact Discord transcript log, injected by tests when needed. */
   voiceTranscriptStore?: DiscordVoiceTranscriptStore;

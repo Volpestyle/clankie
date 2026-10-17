@@ -100,7 +100,7 @@ function fakeGateway(): DiscordUserGateway & {
 describe("stream watch / publish controller", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("closes Go Live when a Rivals sitting revokes its frame capability", async () => {
+  it("closes Go Live when a game sitting revokes its frame capability", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", async () => new Response("revoked", { status: 401 }));
     const vox = fakeVox();

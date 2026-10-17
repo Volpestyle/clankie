@@ -145,7 +145,7 @@ import { FleetHarnessProcesses } from "./fleet-harness-processes.ts";
 import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
 import { parseHerdrPaneList } from "./captain/herdr-watch.ts";
 import { linearFollowStatus } from "@clankie/settings";
-import { RivalsService } from "./rivals-service.ts";
+import { loadGameExtensionModules, recoverExternalPlay } from "./game-extension-modules.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import {
@@ -1146,13 +1146,6 @@ const computer =
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
 const gameExtensions = new GameExtensionRegistry<GameExtensionProjection>();
-const rivals = new RivalsService({
-  settings: settingsStore,
-  credentials: operatorCredentialStore,
-  store: bodyLeaseStore,
-  path: join(stateRoot, "body", "rivals-session.json"),
-  registry: gameExtensions,
-});
 const minecraftRuntime: MinecraftExtensionRuntime = gameExtensions.register(
   minecraftExtension,
   {
@@ -1233,6 +1226,22 @@ const minecraftRuntime: MinecraftExtensionRuntime = gameExtensions.register(
   (runtime) => minecraftProjection(runtime, () => minecraftHost),
 );
 const minecraft = minecraftRuntime.service;
+const externalGames = await loadGameExtensionModules({
+  entries: startupSettings.gameplay.extensions ?? [],
+  registry: gameExtensions,
+  leases: bodyLeaseStore,
+  stateRoot,
+  credentials: operatorCredentialStore,
+  onError: (module, error) =>
+    logger.warn(
+      {
+        event: "game_extension.module_unavailable",
+        module,
+        error: error instanceof Error ? error.message : "",
+      },
+      "Installed game extension did not load",
+    ),
+});
 
 // A checkout follows origin/main; an installed release (`<root>/releases/<version>`)
 // follows official releases. A release run from elsewhere, like an image's seed
@@ -1493,7 +1502,6 @@ const captain = createCaptain(
     skinDrafts,
     mcp: mcpHost,
     email,
-    rivals,
     minecraft,
     minecraftHost,
     gameExtensions,
@@ -2126,7 +2134,8 @@ const clankie = await createClankieApp({
         return bodyVoiceStays.reconcile(reconcileDiscordVoice, guard);
       }
       if (resource === "play") {
-        if (rivals.ownsPlay()) return rivals.recover(guard);
+        const external = await recoverExternalPlay(externalGames, gameExtensions, guard);
+        if (external !== undefined) return external;
         if (minecraft.ownsPlay()) {
           if (!(await minecraft.recover(guard))) return false;
           return gameExtensions.reconcileStopped("minecraft", async () => {
@@ -2311,7 +2320,6 @@ const clankie = await createClankieApp({
   },
   playSight,
   startPlayHost: () => playHost.start(playAbort.signal),
-  rivals,
   machineJoins,
   gameExtensions,
   joinedComputer: new JoinedComputer(machineJoins, settingsStore),
@@ -2576,7 +2584,20 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     await herdr.close();
     await browserHost?.close().catch(() => undefined);
     await bodyRequestsStopped;
-    await rivals.close();
+    await Promise.all(
+      externalGames.map((game) =>
+        game.close().catch((error: unknown) =>
+          logger.warn(
+            {
+              event: "game_extension.close_failed",
+              id: game.id,
+              error: error instanceof Error ? error.message : "",
+            },
+            "Installed game extension did not close cleanly",
+          ),
+        ),
+      ),
+    );
     if (minecraft.ownsPlay()) {
       await minecraft.close().catch(() => false);
     }
