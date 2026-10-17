@@ -90,6 +90,7 @@ async function gate() {
   let admissionRefusals = 0;
   const workerPaths: string[] = [];
   const logs: string[] = [];
+  const proofDiagnostics: unknown[] = [];
   const abort = new AbortController();
   const signal = abort.signal;
   const stop = () => abort.abort(new Error("Fleet load interrupted"));
@@ -239,6 +240,7 @@ async function gate() {
           resolve(value as unknown as { port: number; pid: number });
         }
         if (value.kind === "sample") samples.push(value as Sample);
+        if (value.kind === "proof_diagnostic") proofDiagnostics.push(value);
         if (value.kind === "admission") admissionRefusals = (value as unknown as { count: number }).count;
       });
     });
@@ -503,6 +505,7 @@ async function gate() {
       metrics,
       errors: [...new Set(errors)],
       samples,
+      proofDiagnostics,
       logs: logs.join("").slice(-8000),
     };
     await mkdir(dirname(output), { recursive: true });

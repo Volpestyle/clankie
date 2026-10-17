@@ -166,11 +166,27 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     hires: captain,
   });
   let admissions = 0;
+  const diagnostics: NonNullable<Parameters<typeof proofModule.localFleetProof>[0]["diagnostics"]> = (
+    event,
+    pane,
+    context,
+  ) => {
+    if (event.source === "proof_success" || event.source === "socket_owner") return;
+    // Keep refusal evidence outside the rolling service-log tail. No socket,
+    // credentials, question input or caller-supplied process identity is serialized.
+    process.send?.({
+      kind: "proof_diagnostic",
+      at: Date.now(),
+      pane,
+      ...(context ? { requestId: context.requestId, connectionId: context.connectionId } : {}),
+      diagnostic: event,
+    });
+  };
   const link = new linkModule.LocalFleetLink({
     directory: join(config.root, "state", "links"),
     binding,
-    prove: proofModule.localFleetProof({ binding, herdrBinary: config.herdr }),
-    projectProof: proofModule.localProjectProof({ binding, herdrBinary: config.herdr }),
+    prove: proofModule.localFleetProof({ binding, herdrBinary: config.herdr, diagnostics }),
+    projectProof: proofModule.localProjectProof({ binding, herdrBinary: config.herdr, diagnostics }),
   });
   const auth = (request: Request) => request.headers.get("authorization") === `Bearer ${config.bearer}`;
   const app = await appModule.createClankieApp({
