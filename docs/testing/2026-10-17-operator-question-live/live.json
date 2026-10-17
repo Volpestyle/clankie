@@ -1,0 +1,104 @@
+{
+  "runtime": "5cfcdc2e9cf22ad43346bed9e235b2de2dbf7774",
+  "claudeVersion": "2.1.302",
+  "pane": "w55:pJ",
+  "session": "ed0b3bad-5a22-494b-8fb7-8f4cc2d0ca8e",
+  "conversation": "conv-10e5c886-9516-47ac-b365-34d99ebe8f6a",
+  "answersEnteredBy": "Ash, using native fixture controls; not James",
+  "nativeTranscript": [
+    {
+      "timestamp": "2026-10-17T05:30:38.258Z",
+      "content": {
+        "type": "tool_use",
+        "id": "toolu_01Sy1JkEyjgQUGwHF1ZVjxcQ",
+        "name": "AskUserQuestion",
+        "input": {
+          "questions": [
+            {
+              "question": "Which fixture marker should be captured for Marker A?",
+              "header": "Marker A",
+              "multiSelect": false,
+              "options": [
+                {
+                  "label": "Alpha",
+                  "description": "Capture marker Alpha."
+                },
+                {
+                  "label": "Beta",
+                  "description": "Capture marker Beta."
+                }
+              ]
+            },
+            {
+              "question": "Which fixture marker should be captured for Marker B?",
+              "header": "Marker B",
+              "multiSelect": false,
+              "options": [
+                {
+                  "label": "Alpha",
+                  "description": "Capture marker Alpha."
+                },
+                {
+                  "label": "Beta",
+                  "description": "Capture marker Beta."
+                }
+              ]
+            },
+            {
+              "question": "Which fixture marker should be captured for Marker C?",
+              "header": "Marker C",
+              "multiSelect": false,
+              "options": [
+                {
+                  "label": "Alpha",
+                  "description": "Capture marker Alpha."
+                },
+                {
+                  "label": "Beta",
+                  "description": "Capture marker Beta."
+                }
+              ]
+            },
+            {
+              "question": "Which fixture marker should be captured for Marker D?",
+              "header": "Marker D",
+              "multiSelect": false,
+              "options": [
+                {
+                  "label": "Alpha",
+                  "description": "Capture marker Alpha."
+                },
+                {
+                  "label": "Beta",
+                  "description": "Capture marker Beta."
+                }
+              ]
+            }
+          ]
+        },
+        "caller": {
+          "type": "direct"
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-17T05:31:13.525Z",
+      "content": {
+        "type": "tool_result",
+        "content": "Your questions have been answered: \"Which fixture marker should be captured for Marker A?\"=\"Alpha\", \"Which fixture marker should be captured for Marker B?\"=\"Alpha\", \"Which fixture marker should be captured for Marker C?\"=\"Alpha\", \"Which fixture marker should be captured for Marker D?\"=\"Alpha\". You can now continue with these answers in mind.",
+        "tool_use_id": "toolu_01Sy1JkEyjgQUGwHF1ZVjxcQ"
+      }
+    }
+  ],
+  "serviceWarning": "Claude question notification failed {\"paneId\":\"w55:pJ\",\"requestId\":\"claude-hook:dea32c751e34c31150e68c2d424931ba6ecc3117e8c52795c3a8ce8bc1e7fc60\",\"reason\":\"claude_hook_question_notify_failed: NativeQuestionUnownedError: Native question has no exact hiring conversation\",\"nativeFallback\":true}",
+  "hookAddition": {
+    "matcher": "AskUserQuestion",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/worker/bin/seat-hook.mjs\"",
+        "timeout": 600
+      }
+    ]
+  }
+}
