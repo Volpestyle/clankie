@@ -12,11 +12,11 @@ if (process.argv[2] === "run") {
     throw new Error("Expected run DIRECTORY clankie|relay|cli [CLI arguments]");
   const env = parseEnv(await readFile(join(resolve(process.argv[3]), "stack.env"), "utf8"));
   const root = fileURLToPath(new URL("../", import.meta.url));
+  // Plain Node, as the launcher runs the installed services (VUH-2393).
   const child = spawn(
     process.execPath,
     [
-      "--import",
-      join(root, `apps/${service === "cli" ? "tui" : service}/node_modules/tsx/dist/loader.mjs`),
+      ...(service === "cli" ? [] : ["--import", join(root, "scripts/dependency-types.mjs")]),
       join(root, service === "cli" ? "apps/tui/bin/clankie.ts" : `apps/${service}/src/index.ts`),
       ...(service === "cli" ? process.argv.slice(5) : []),
     ],

@@ -3,18 +3,26 @@ import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
+  createWriteStream,
+  fstatSync,
+  ftruncateSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
+import { createGzip } from "node:zlib";
 import { clankieStateHome } from "../src/state-home.ts";
-import { localSandboxControl, localSandboxLaunch } from "@clankie/settings";
+import { localSandboxControl, localSandboxLaunch, parsePositiveInt } from "@clankie/settings";
 
 /**
  * Generic supervision for the long-lived local services the operator launcher
@@ -72,17 +80,18 @@ interface ServiceProbeInput {
    * some earlier process left behind.
    */
   readonly matchingPids: readonly number[];
+  /** Per-request budget for an HTTP probe; crash recovery allows more than a status read. */
+  readonly timeoutMs: number;
 }
 
 export interface ManagedService {
   readonly id: ServiceId;
   readonly label: string;
   /**
-   * Executable to spawn. Defaults to `pnpm` for source checkouts; installed
-   * services override it through `resolveProcess`. Named so the registry can
-   * also own a process that is not one of ours
-   * — the activity tunnel is a `cloudflared` binary and was the last thing an
-   * operator had to start, remember, and notice the death of by hand.
+   * Executable to spawn when `resolveProcess` is absent. Named so the registry
+   * can also own a process that is not one of ours — the activity tunnel is a
+   * `cloudflared` binary and was the last thing an operator had to start,
+   * remember, and notice the death of by hand.
    */
   readonly command?: string;
   /**
@@ -93,13 +102,19 @@ export interface ManagedService {
    */
   readonly spawnArgs: readonly string[] | ((env: NodeJS.ProcessEnv) => readonly string[]);
   /**
-   * Installed releases run compiled entrypoints with their bundled Node binary;
-   * source checkouts keep using the workspace command above.
+   * The process for a package service: installed releases run compiled
+   * entrypoints with their bundled Node binary, source checkouts run the
+   * TypeScript entrypoint under plain Node. `cwd` defaults to the runtime root
+   * and `env` to the service environment.
    */
   readonly resolveProcess?: (input: { readonly env: NodeJS.ProcessEnv; readonly repoRoot: string }) => {
     readonly command: string;
     readonly args: readonly string[];
+    readonly cwd?: string;
+    readonly env?: NodeJS.ProcessEnv;
   };
+  /** One-time preparation before a spawn, run in the launcher rather than in the service. */
+  readonly prepare?: (input: { readonly repoRoot: string }) => Promise<void>;
   /**
    * Whether this service should run at all in this environment. A service that
    * answers false is never spawned and reports its own reason from `probe`,
@@ -128,6 +143,13 @@ export interface ManagedService {
   readonly restartsWith?: readonly ServiceId[];
   /** Time after SIGTERM before this service is force-killed. */
   readonly stopGraceMs?: (env: NodeJS.ProcessEnv) => number;
+  /**
+   * Crash recovery also restarts this service when its live process keeps
+   * failing its probe. Only services whose probe asks the process itself over
+   * loopback opt in: a liveness-only probe cannot see a hang, and the tunnel's
+   * public probe also fails when the internet does.
+   */
+  readonly restartWhenUnhealthy?: boolean;
   /** Extra environment the service needs, merged over the caller's env. */
   readonly serviceEnv?: (input: {
     readonly env: NodeJS.ProcessEnv;
@@ -161,6 +183,8 @@ export interface ServiceCommandOptions {
   readonly listPortOwnersImpl?: (port: number) => readonly number[] | undefined;
   readonly spawnImpl?: typeof spawn;
   readonly timeoutMs?: number;
+  /** Budget for each HTTP probe; 750 ms unless a caller allows more. */
+  readonly probeTimeoutMs?: number;
 }
 
 export interface ServiceStatus {
@@ -173,6 +197,7 @@ export interface ServiceStatus {
 }
 
 const DEFAULT_SERVICE_STARTUP_TIMEOUT_MS = 60_000;
+const PROBE_TIMEOUT_MS = 750;
 /**
  * `-b` skips kernel calls that can block; without it a port query took about
  * 3 s at load 12 (0.07 s with it), and `-w` keeps its warnings off stderr.
@@ -416,6 +441,98 @@ export function serviceLogFile(id: ServiceId, env: NodeJS.ProcessEnv = process.e
   return serviceLogPath(id, env);
 }
 
+/** A service log past this size is rotated; 64 MiB unless `CLANKIE_SERVICE_LOG_MAX_BYTES` says otherwise. */
+const SERVICE_LOG_MAX_BYTES = 64 * 1024 * 1024;
+/** Compressed generations kept beside each log: `<id>.log.1.gz` (newest) to `.3.gz`. */
+const SERVICE_LOG_ARCHIVES = 3;
+const LOG_COPY_CHUNK_BYTES = 1024 * 1024;
+
+/**
+ * Bounds every log the launcher owns (VUH-2393). Services write theirs through
+ * an inherited `O_APPEND` descriptor that nothing here can make them reopen, so
+ * a rotation copies the file's newest `maxBytes` into a compressed archive and
+ * then truncates it in place; with `O_APPEND`, the next write lands at the new
+ * end. Lines written in the instant between the final copy and the truncate are
+ * lost. An oversized log keeps only its newest `maxBytes`, so one rotation costs
+ * the same whatever the file grew to. Returns the logs it rotated.
+ */
+export async function rotateServiceLogs(env: NodeJS.ProcessEnv = process.env): Promise<readonly string[]> {
+  const maxBytes = parsePositiveInt(env.CLANKIE_SERVICE_LOG_MAX_BYTES, SERVICE_LOG_MAX_BYTES);
+  const rotated: string[] = [];
+  // autostart.log is launchd's stdout for `clankie recover --autostart`, opened for append on each run.
+  const paths = [
+    ...SERVICE_ORDER.map((id) => serviceLogPath(id, env)),
+    join(clankieStateDirectory(env), "autostart.log"),
+  ];
+  for (const path of paths) {
+    try {
+      if (await rotateLog(path, maxBytes, SERVICE_LOG_ARCHIVES)) rotated.push(path);
+    } catch {
+      // A log that cannot be rotated this time is retried on the next pass.
+    }
+  }
+  return rotated;
+}
+
+async function rotateLog(path: string, maxBytes: number, archives: number): Promise<boolean> {
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    return false;
+  }
+  if (!stat.isFile() || stat.size <= maxBytes) return false;
+  const archive = `${path}.1.gz`;
+  const temporary = `${archive}.${String(process.pid)}.${randomUUID()}.tmp`;
+  const fd = openSync(path, "r+");
+  try {
+    const gzip = createGzip();
+    const output = createWriteStream(temporary, { flags: "wx", mode: 0o600 });
+    gzip.pipe(output);
+    const closed = once(output, "close");
+    const buffer = Buffer.alloc(LOG_COPY_CHUNK_BYTES);
+    let position = Math.max(0, fstatSync(fd).size - maxBytes);
+    let partialHead = position > 0;
+    // Copy until the file stops growing between passes, so the truncate cuts as little as possible.
+    for (let pass = 0; pass < 4; pass += 1) {
+      const end = fstatSync(fd).size;
+      if (end <= position) break;
+      while (position < end) {
+        const read = readSync(fd, buffer, 0, Math.min(buffer.length, end - position), position);
+        if (read === 0) break;
+        let chunk = buffer.subarray(0, read);
+        position += read;
+        if (partialHead) {
+          // The cut lands mid-line; the archive starts at the next whole one.
+          const newline = chunk.indexOf(10);
+          if (newline === -1) continue;
+          chunk = chunk.subarray(newline + 1);
+          partialHead = false;
+        }
+        if (!gzip.write(Buffer.from(chunk))) await once(gzip, "drain");
+      }
+    }
+    ftruncateSync(fd, 0);
+    gzip.end();
+    await closed;
+    for (let index = archives; index >= 1; index -= 1) {
+      const generation = `${path}.${String(index)}.gz`;
+      if (index === archives) rmSync(generation, { force: true });
+      else
+        try {
+          renameSync(generation, `${path}.${String(index + 1)}.gz`);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+    }
+    renameSync(temporary, archive);
+    return true;
+  } finally {
+    closeSync(fd);
+    rmSync(temporary, { force: true });
+  }
+}
+
 export function serviceProcessIsAlive(pid: number): boolean {
   return processIsAlive(pid);
 }
@@ -559,6 +676,7 @@ export async function inspectService(
     operatorToken: options.operatorToken,
     record,
     matchingPids: findServiceProcessPids(service, options),
+    timeoutMs: options.probeTimeoutMs ?? PROBE_TIMEOUT_MS,
   });
   return {
     id: service.id,
@@ -658,6 +776,11 @@ export async function startService(
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   chmodSync(stateDir, 0o700);
   const logPath = serviceLogPath(service.id, env);
+  await rotateLog(
+    logPath,
+    parsePositiveInt(env.CLANKIE_SERVICE_LOG_MAX_BYTES, SERVICE_LOG_MAX_BYTES),
+    SERVICE_LOG_ARCHIVES,
+  ).catch(() => false);
   const logFd = openSync(logPath, "a", 0o600);
   chmodSync(logPath, 0o600);
 
@@ -682,18 +805,20 @@ export async function startService(
       command: service.command ?? "pnpm",
       args: fallbackArgs,
     };
+    await service.prepare?.({ repoRoot: options.repoRoot });
     const launch =
       service.id === "clankie"
         ? await localSandboxLaunch({
             control: localSandboxControl(env),
-            ...resolved,
-            env: serviceEnv,
+            command: resolved.command,
+            args: resolved.args,
+            env: resolved.env ?? serviceEnv,
             ...(options.operatorToken === undefined ? {} : { operatorToken: options.operatorToken }),
             runtimeRoot: options.repoRoot,
           })
-        : { ...resolved, env: serviceEnv };
+        : { command: resolved.command, args: resolved.args, env: resolved.env ?? serviceEnv };
     child = (options.spawnImpl ?? spawn)(launch.command, [...launch.args], {
-      cwd: options.repoRoot,
+      cwd: resolved.cwd ?? options.repoRoot,
       detached: true,
       env: launch.env,
       stdio: ["ignore", logFd, logFd],
@@ -719,6 +844,7 @@ export async function startService(
       operatorToken: options.operatorToken,
       record,
       matchingPids: findServiceProcessPids(service, options),
+      timeoutMs: options.probeTimeoutMs ?? PROBE_TIMEOUT_MS,
     });
     if (probe.state === "healthy") {
       // Never hold the launcher's event loop open on a detached service, or

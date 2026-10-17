@@ -9,6 +9,7 @@ import type { ProjectProcessProof } from "../project-process-proof.ts";
 import type { HerdrWatchStore } from "./herdr-watch.ts";
 import type { WorkItemsService } from "../work-items.ts";
 import type { LinearRequestPriority } from "../linear-request-budget.ts";
+import { RepeatedWarnings } from "@clankie/observability";
 
 /**
  * Linear status stays true to the fleet (VUH-1990): In Progress only while a live
@@ -27,6 +28,24 @@ export interface SeatIssueSettlement {
   /** The status actually set, which differs from intended while a status is missing. */
   readonly status?: string;
   readonly detail?: string;
+}
+const unavailableWarnings = new RepeatedWarnings();
+
+/**
+ * One line per distinct failure per window. Each fleet projection re-observes
+ * every live issue, so an unresolvable one used to warn every few seconds.
+ */
+export function warnSeatIssueUnavailable(settlement: SeatIssueSettlement): void {
+  const { write, suppressed } = unavailableWarnings.admit(
+    `${settlement.issue ?? ""}\0${settlement.detail ?? ""}`,
+  );
+  if (!write) return;
+  console.warn(
+    "Seat issue status unavailable",
+    settlement.issue,
+    settlement.detail,
+    ...(suppressed > 0 ? [`(repeated ${String(suppressed)} times since the last report)`] : []),
+  );
 }
 export interface LiveSeatIssue {
   readonly seatId: string;

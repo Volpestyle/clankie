@@ -359,7 +359,8 @@ export class RemoteFleetRelay {
       const queueMs = bytes.readDoubleLE(0),
         executionMs = bytes.readDoubleLE(8);
       if (![queueMs, executionMs].every((value) => Number.isFinite(value) && value >= 0)) return;
-      logger.info(
+      // Per-request telemetry, several a second on a busy fleet: debug only (VUH-2393).
+      logger.debug(
         {
           event: "remote.observation.timings",
           phases: [

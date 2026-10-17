@@ -433,9 +433,11 @@ describe("headless clankie commands", () => {
       listPortOwnersImpl: () => [],
       processIsAliveImpl: () => true,
       spawnImpl: ((_command: string, args: string[]) => {
-        spawned.push(args);
-        if (args.includes("@clankie/clankie")) clankieUp = true;
-        if (args.includes("@clankie/relay")) relayUp = true;
+        // A checkout service is spawned as Node on `apps/<package>/src/index.ts`.
+        const pkg = `@clankie/${/\/apps\/([^/]+)\/src\/index\.ts$/u.exec(args.at(-1) ?? "")?.[1] ?? "unknown"}`;
+        spawned.push([pkg]);
+        if (pkg === "@clankie/clankie") clankieUp = true;
+        if (pkg === "@clankie/relay") relayUp = true;
         return runningChild(9_000 + spawned.length);
       }) as unknown as typeof spawn,
       stdout: stdout.stream,
@@ -445,7 +447,7 @@ describe("headless clankie commands", () => {
     expect(exitCode).toBe(0);
     // The captain restart fans out to the relay holding its bearer and the
     // bridge, whose live presence claim the restarted service no longer honors.
-    expect(spawned.map((args) => args[1])).toEqual([
+    expect(spawned.map(([pkg]) => pkg)).toEqual([
       "@clankie/clankie",
       "@clankie/relay",
       "@clankie/discord-bridge",

@@ -16,13 +16,17 @@ import { randomUUID } from "node:crypto";
 import { clankieStateHome } from "../src/state-home.ts";
 import { updateHoldingServices } from "./runtime-updater.ts";
 import {
+  inspectService,
+  listProcessCommands,
   readRecordedServicePid,
+  rotateServiceLogs,
   SERVICE_LOCK_BUSY,
   SERVICE_ORDER,
   serviceLogFile,
   serviceProcessIsAlive,
   withServiceLock,
   type ServiceId,
+  type ServiceStatus,
 } from "./service-supervisor.ts";
 import {
   managedService,
@@ -42,6 +46,13 @@ import {
  * another launcher operation holds the service lock, and a deliberate stop has
  * already removed the record. A crash loop backs off and then gives up, leaving
  * the service stopped with a reason in `clankie status` and `clankie doctor`.
+ *
+ * A live process can also be gone in every way that matters: wedged on a
+ * blocked event loop or a lost listener, it answers nothing and never exits
+ * (VUH-2393). A service whose probe asks the process itself fails that probe on
+ * every pass for {@link UNHEALTHY_RESTART_AFTER_MS}, and is then restarted as a
+ * crash with the probe's verdict as its reason, under the same backoff and
+ * give-up.
  */
 
 /** Crashes inside this window count toward backoff and giving up. */
@@ -52,16 +63,37 @@ const RESTART_BACKOFF_MS = [0, 30_000, 2 * 60_000, 5 * 60_000] as const;
 export const GIVE_UP_AFTER = 5;
 const LOG_TAIL_BYTES = 4_096;
 const KEPT_CRASHES = 20;
+/** How long a live service must keep failing its probe before recovery restarts it. */
+const UNHEALTHY_RESTART_AFTER_MS = 3 * 60_000;
+/** Failed probes that must span that time; one slow answer never restarts anything. */
+const UNHEALTHY_MIN_PROBES = 4;
+/** A longer gap between failed probes (the Mac slept, passes were skipped) starts the count again. */
+const UNHEALTHY_STREAK_GAP_MS = 2 * 60_000;
+/** Each probe's budget here; a loaded Mac can take seconds to answer a healthy `/health`. */
+const RECOVERY_PROBE_TIMEOUT_MS = 5_000;
 
 interface CrashEntry {
-  /** The dead process, or 0 for a recovery restart that failed before it was healthy. */
+  /** The dead or unresponsive process, or 0 for a recovery restart that failed before it was healthy. */
   readonly pid: number;
   readonly detectedAt: string;
   /** The last lines its log held when the crash was noticed. */
   readonly logTail: string;
+  /** `unhealthy`: the process was alive but kept failing its probe. Absent means it exited. */
+  readonly cause?: "unhealthy";
+  /** Why recovery acted, when the log cannot say: the failed probe and for how long. */
+  readonly reason?: string;
   /** What recovery did about it. */
   readonly restart?: "restarted" | "failed" | "waiting" | "gave_up";
   readonly error?: string;
+}
+
+/** Consecutive failed probes of one live process. */
+interface UnhealthyStreak {
+  readonly pid: number;
+  readonly since: string;
+  readonly lastAt: string;
+  readonly probes: number;
+  readonly state: string;
 }
 
 export interface RecoveryRecord {
@@ -76,6 +108,8 @@ export interface RecoveryRecord {
   readonly notifiedAt?: string;
   /** The owner's last deliberate start, restart or stop; crashes before it no longer count. */
   readonly resetAt?: string;
+  /** A live process failing its probe, not yet long enough to restart. */
+  readonly unhealthy?: UnhealthyStreak;
 }
 
 interface RecoveryAction {
@@ -100,6 +134,8 @@ export interface RecoveryOptions {
   readonly updateHeld?: () => boolean;
   /** Test seam: restart in place of the supervisor's dependency-ordered restart. */
   readonly restart?: (id: ServiceId) => Promise<readonly ServiceOutcome[]>;
+  /** Test seam: a live service's probe verdict in place of its real probe. */
+  readonly probe?: (id: ServiceId) => Promise<ServiceStatus["state"]>;
 }
 
 function recoveryDirectory(env: NodeJS.ProcessEnv): string {
@@ -235,23 +271,36 @@ async function recoveryPass(
 ): Promise<RecoveryPass> {
   const actions: RecoveryAction[] = [];
   const covered = new Set<ServiceId>();
+  // Every pass bounds the logs; under the service lock, no start reopens one mid-rotation.
+  await rotateServiceLogs(env);
+  const hung = await observeHealth(registry, env, now, options);
   for (const id of SERVICE_ORDER) {
     if (covered.has(id)) continue;
     if (managedService(id).enabled?.(env) === false) continue;
     const pid = readRecordedServicePid(id, env);
-    const record = readRecoveryRecord(id, env);
+    // Acting on the service ends its probe streak; waiting out a backoff keeps it.
+    const { unhealthy: streak, ...record } = readRecoveryRecord(id, env);
     const died = pid !== undefined && !serviceProcessIsAlive(pid);
-    if (!died && record.pending !== true) continue;
+    const unresponsive = hung.get(id);
+    if (!died && unresponsive === undefined && record.pending !== true) continue;
     // A pending retry with a live record means something else already started it.
-    if (!died && pid !== undefined) continue;
+    if (!died && unresponsive === undefined && pid !== undefined) continue;
     if (record.gaveUpAt !== undefined) continue;
 
     const at = now();
     const detectedAt = new Date(at).toISOString();
     const last = record.crashes.at(-1);
-    const fresh = died && last?.pid !== pid;
-    let crashes = fresh
-      ? [...record.crashes, { pid: pid!, detectedAt, logTail: logTail(id, env) }]
+    const fresh = (died || unresponsive !== undefined) && last?.pid !== pid;
+    let crashes: CrashEntry[] = fresh
+      ? [
+          ...record.crashes,
+          {
+            pid: pid!,
+            detectedAt,
+            logTail: logTail(id, env),
+            ...(unresponsive === undefined ? {} : { cause: "unhealthy" as const, reason: unresponsive }),
+          },
+        ]
       : [...record.crashes];
     const recent = windowed({ ...record, crashes }, at);
 
@@ -259,7 +308,7 @@ async function recoveryPass(
       crashes = mark(crashes, "gave_up");
       const text =
         `${managedService(id).label} crashed ${recent.length} times in ${CRASH_WINDOW_MS / 60_000} minutes ` +
-        `and was left stopped. Last error: ${crashSummary(crashes.at(-1)?.logTail ?? "")}. ` +
+        `and was left stopped. Last error: ${lastError(crashes.at(-1))}. ` +
         "Run `clankie status`, then `clankie restart`.";
       const notifiedAt = record.notifiedAt ?? detectedAt;
       writeRecoveryRecord(
@@ -280,7 +329,14 @@ async function recoveryPass(
     const wait = RESTART_BACKOFF_MS[Math.min(recent.length, RESTART_BACKOFF_MS.length) - 1] ?? 0;
     const since = at - Date.parse(crashes.at(-1)?.detectedAt ?? detectedAt);
     if (since < wait) {
-      writeRecoveryRecord({ ...record, crashes: mark(crashes, "waiting").slice(-KEPT_CRASHES) }, env);
+      writeRecoveryRecord(
+        {
+          ...record,
+          ...(streak === undefined ? {} : { unhealthy: streak }),
+          crashes: mark(crashes, "waiting").slice(-KEPT_CRASHES),
+        },
+        env,
+      );
       actions.push({
         id,
         action: "waiting",
@@ -337,6 +393,83 @@ async function recoveryPass(
   return { ok: true, actions };
 }
 
+/**
+ * Probes every live, launcher-started service that opted in, concurrently, and
+ * keeps each one's streak of failed probes in its recovery record. Returns the
+ * services whose streak is now long enough to restart, with the reason.
+ */
+async function observeHealth(
+  registry: ServiceRegistryOptions,
+  env: NodeJS.ProcessEnv,
+  now: () => number,
+  options: RecoveryOptions,
+): Promise<ReadonlyMap<ServiceId, string>> {
+  let processes: readonly (readonly [number, string])[] | undefined;
+  const probeOptions = {
+    ...registry,
+    probeTimeoutMs: RECOVERY_PROBE_TIMEOUT_MS,
+    // One process-table read for every probe in this pass.
+    listProcessCommandsImpl: () =>
+      (processes ??= (registry.listProcessCommandsImpl ?? listProcessCommands)()),
+  };
+  const candidates = SERVICE_ORDER.flatMap((id) => {
+    const service = managedService(id);
+    if (service.restartWhenUnhealthy !== true || service.enabled?.(env) === false) return [];
+    // Left stopped (or wedged) after giving up: the owner's next start clears it.
+    if (readRecoveryRecord(id, env).gaveUpAt !== undefined) return [];
+    const pid = readRecordedServicePid(id, env);
+    return pid !== undefined && serviceProcessIsAlive(pid) ? [{ id, pid }] : [];
+  });
+  const verdicts = await Promise.all(
+    candidates.map(async ({ id, pid }) => {
+      let state: ServiceStatus["state"];
+      try {
+        state = await (options.probe?.(id) ??
+          inspectService(managedService(id), probeOptions).then((status) => status.state));
+      } catch {
+        state = "unreachable";
+      }
+      return { id, pid, state };
+    }),
+  );
+  const hung = new Map<ServiceId, string>();
+  for (const { id, pid, state } of verdicts) {
+    const record = readRecoveryRecord(id, env);
+    const previous = record.unhealthy;
+    if (state === "healthy") {
+      if (previous !== undefined) {
+        const { unhealthy: _cleared, ...rest } = record;
+        writeRecoveryRecord(rest, env);
+      }
+      continue;
+    }
+    const at = now();
+    const continues =
+      previous !== undefined &&
+      previous.pid === pid &&
+      at - Date.parse(previous.lastAt) <= UNHEALTHY_STREAK_GAP_MS;
+    const streak: UnhealthyStreak = {
+      pid,
+      since: continues ? previous.since : new Date(at).toISOString(),
+      lastAt: new Date(at).toISOString(),
+      probes: continues ? previous.probes + 1 : 1,
+      state,
+    };
+    writeRecoveryRecord({ ...record, unhealthy: streak }, env);
+    const failingMs = at - Date.parse(streak.since);
+    if (streak.probes >= UNHEALTHY_MIN_PROBES && failingMs >= UNHEALTHY_RESTART_AFTER_MS)
+      hung.set(
+        id,
+        `health probe ${state} for ${String(Math.round(failingMs / 1_000))} s (${String(streak.probes)} probes) while the process was alive`,
+      );
+  }
+  return hung;
+}
+
+function lastError(crash: CrashEntry | undefined): string {
+  return crash?.reason ?? crashSummary(crash?.logTail ?? "");
+}
+
 function mark(
   crashes: readonly CrashEntry[],
   restart: NonNullable<CrashEntry["restart"]>,
@@ -377,7 +510,7 @@ export function summarizeRecovery(
       state: record.gaveUpAt !== undefined ? "gave_up" : record.pending === true ? "retrying" : "recovered",
       crashes: recentDay.length,
       lastCrashAt: last.detectedAt,
-      lastError: crashSummary(last.logTail),
+      lastError: lastError(last),
     });
   }
   return summaries;

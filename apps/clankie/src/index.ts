@@ -35,6 +35,7 @@ import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createReleaseUpdater } from "../../tui/bin/release-updater.ts";
 import { applySavedKeepAwake, savedKeepAwakeStatus } from "../../tui/src/command/awake.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
+import { rotateServiceLogs, withServiceLock } from "../../tui/bin/service-supervisor.ts";
 import { RuntimeCanary, RUNTIME_CANARY_HOLDER } from "./runtime-canary.ts";
 import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
 import { IntegrationQueue, integrationSources } from "./integrate.ts";
@@ -231,8 +232,9 @@ import {
   type TrackerActor,
 } from "@clankie/work-items";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
+import { CLANKIE_VERSION } from "./app/log.ts";
 
-const logger = createLogger({ service: "clankie", version: "0.2.0" });
+const logger = createLogger({ service: "clankie", version: CLANKIE_VERSION });
 /** Hosted bodies only: `clankie-body` names the spool; a Mac never does. */
 const rawBodyTelemetry = bodyTelemetryFromEnv(process.env, "service");
 const accountDiagnostics = createBodyDiagnostics({
@@ -1290,6 +1292,14 @@ const scheduledUpdates =
         logger,
       })
     : undefined;
+// The launcher's recovery pass bounds every service log each 30 s under
+// autostart; this covers an install without it (VUH-2393).
+const serviceLogRotation = setInterval(() => {
+  void withServiceLock(process.env, () => rotateServiceLogs(process.env), { wait: false }).catch(
+    () => undefined,
+  );
+}, 10 * 60_000);
+serviceLogRotation.unref();
 try {
   const reconciled = runtimeUpdater?.reconcile?.();
   if (reconciled)
@@ -2504,6 +2514,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   const closeLocalFleetConnections =
     localFleetServer === undefined ? undefined : drainHttpServer(localFleetServer);
   scheduledUpdates?.close();
+  clearInterval(serviceLogRotation);
   void ownerCheckoutSync.close();
   harnessLogins.close();
   fleetLinks.close();

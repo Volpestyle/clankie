@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createServer, type AddressInfo } from "node:net";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,11 +38,24 @@ async function sandbox() {
     HOME: join(root, "home"),
     CLANKIE_STATE_HOME: join(root, "state"),
     PATH: process.env.PATH ?? "",
+    // Probes of a live stub must never reach an installed service's default ports.
+    CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${String(await closedPort())}`,
+    CLANKIE_RELAY_PORT: String(await closedPort()),
+    CLANKIE_ACTIVITY_PORT: String(await closedPort()),
   };
   await mkdir(join(root, "state", "clankie"), { recursive: true });
   await mkdir(join(root, "home"), { recursive: true });
   const registry: ServiceRegistryOptions = { repoRoot: root, env };
   return { root, env, registry };
+}
+
+/** A loopback port nothing listens on: a probe there is refused at once. */
+async function closedPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
 }
 
 /** A real service process: runs until killed, or exits at once like a crash. */
@@ -180,6 +194,46 @@ describe("launcher crash recovery", () => {
     clock += 1_000;
     const resumed = await recoverServices(registry, { ...options, restart: healthy.restart });
     expect(resumed.actions.map((action) => action.action)).toEqual(["restarted"]);
+  });
+
+  // VUH-2393: a live process that answers nothing is as gone as a dead one.
+  it("restarts a live service whose real probe keeps failing, only after a bounded streak, and says why", async () => {
+    const { env, registry } = await sandbox();
+    let clock = Date.parse("2026-10-17T12:00:00Z");
+    const stub = restarter(env);
+    const options = { restart: stub.restart, updateHeld: () => false, now: () => clock };
+    // The relay's process is alive, but nothing answers its health endpoint.
+    const wedged = await runStub(false);
+    await record(env, "relay", wedged);
+
+    const actions: string[] = [];
+    for (let pass = 0; pass < 3; pass++) {
+      actions.push(...(await recoverServices(registry, options)).actions.map((action) => action.action));
+      clock += 60_000;
+    }
+    // Three failed probes over two minutes are not yet a hang.
+    expect(actions).toEqual([]);
+    expect(readRecoveryRecord("relay", env).unhealthy).toMatchObject({ pid: wedged, probes: 3 });
+
+    // A pass skipped for longer than the streak gap (the Mac slept) starts the count again.
+    clock += 5 * 60_000;
+    await recoverServices(registry, options);
+    expect(readRecoveryRecord("relay", env).unhealthy).toMatchObject({ probes: 1 });
+    for (let pass = 0; pass < 3; pass++) {
+      clock += 60_000;
+      actions.push(...(await recoverServices(registry, options)).actions.map((action) => action.action));
+    }
+    expect(actions).toEqual(["restarted"]);
+    expect(stub.calls).toEqual(["relay"]);
+    const crash = readRecoveryRecord("relay", env).crashes.at(-1)!;
+    expect(crash).toMatchObject({ pid: wedged, cause: "unhealthy", restart: "restarted" });
+    expect(crash.reason).toMatch(
+      /^health probe unreachable for 180 s \(4 probes\) while the process was alive$/u,
+    );
+    expect(readRecoveryRecord("relay", env).unhealthy).toBeUndefined();
+    expect(summarizeRecovery(env, clock)).toEqual([
+      expect.objectContaining({ id: "relay", state: "recovered", lastError: crash.reason }),
+    ]);
   });
 
   it("the restarted service reports each crash to the owner exactly once", async () => {

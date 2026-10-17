@@ -63,7 +63,7 @@ async function refusalCaller(socket: Socket) {
 
 /** Fixed proof vocabulary; bounded private request attribution excludes paths, argv and credentials. */
 export function localProofDiagnostics(
-  logger: Pick<ReturnType<typeof createLogger>, "warn">,
+  logger: Pick<ReturnType<typeof createLogger>, "warn" | "debug">,
   operation: "fleet" | "project",
   metrics?: Pick<FleetHealthMetrics, "observeProof">,
 ) {
@@ -86,7 +86,9 @@ export function localProofDiagnostics(
     if (observation.source === "proof_success" && context) failures.delete(context.requestId);
     metrics?.observeProof(operation, observation, pane);
     if (observation.source === "proof_success") return;
-    logger.warn(
+    // A refusal is a warning. Native and project checkpoints arrive on every
+    // proof request, several a second on a busy fleet, so they are debug (VUH-2393).
+    logger[observation.source === "proof" ? "warn" : "debug"](
       {
         event: observation.source === "proof" ? "fleet.local_proof.refused" : "fleet.local_proof.diagnostic",
         operation,

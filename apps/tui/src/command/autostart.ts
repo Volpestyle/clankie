@@ -1,8 +1,8 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type ExecFileImpl } from "../install-doctor.ts";
 import { clankieStateHome } from "../state-home.ts";
@@ -152,7 +152,72 @@ async function resolveLauncherCommand(
   if (entrypoint === undefined || entrypoint.length === 0) {
     throw new Error("Cannot locate the clankie launcher for autostart.");
   }
-  return [process.execPath, resolve(entrypoint)];
+  return [await stableNodePath(env), resolve(entrypoint)];
+}
+
+/**
+ * The Node launchd runs for a checkout. `process.execPath` is the versioned
+ * binary itself, `/opt/homebrew/Cellar/node/26.7.0/bin/node` on Homebrew, which
+ * `brew upgrade node` removes, silently ending autostart (VUH-2393). A link on
+ * PATH that resolves to the same binary, like `/opt/homebrew/bin/node`, is
+ * repointed by the upgrade instead. With none, the running binary is used.
+ */
+export async function stableNodePath(
+  env: NodeJS.ProcessEnv,
+  executable: string = process.execPath,
+): Promise<string> {
+  let target: string;
+  try {
+    target = await realpath(executable);
+  } catch {
+    return executable;
+  }
+  for (const directory of (env.PATH ?? "").split(delimiter)) {
+    if (!isAbsolute(directory)) continue;
+    const candidate = join(directory, "node");
+    try {
+      if ((await lstat(candidate)).isSymbolicLink() && (await realpath(candidate)) === target)
+        return candidate;
+    } catch {
+      // Not on this PATH entry.
+    }
+  }
+  return executable;
+}
+
+export interface AutostartNodeHealth {
+  /** The Node the installed agent runs; absent for a release launcher, which carries its own. */
+  readonly node: string;
+  readonly executable: boolean;
+  /** A link on PATH to the same Node that survives upgrades, when the agent pins the versioned binary. */
+  readonly stable?: string;
+}
+
+/**
+ * What `clankie doctor` checks: whether the installed agent's Node still exists,
+ * and whether it pins a versioned binary an upgrade would remove.
+ */
+export async function inspectAutostartNode(
+  options: Pick<AutostartCommandOptions, "env"> = {},
+): Promise<AutostartNodeHealth | undefined> {
+  const env = options.env ?? process.env;
+  const home = env.HOME?.trim() || homedir();
+  let plist: string;
+  try {
+    plist = await readFile(join(home, "Library", "LaunchAgents", `${AUTOSTART_LABEL}.plist`), "utf8");
+  } catch {
+    return undefined;
+  }
+  const program = /<key>ProgramArguments<\/key>\s*<array>\s*<string>([^<]*)<\/string>/u.exec(plist)?.[1];
+  if (program === undefined) return undefined;
+  const node = program.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+  if (!/(?:^|\/)node$/u.test(node)) return undefined;
+  const executable = await access(node, fsConstants.X_OK).then(
+    () => true,
+    () => false,
+  );
+  const stable = executable ? await stableNodePath(env, node) : undefined;
+  return { node, executable, ...(stable === undefined || stable === node ? {} : { stable }) };
 }
 
 /** Prefer the install's `current` link so the agent follows upgrades instead of pinning one release. */

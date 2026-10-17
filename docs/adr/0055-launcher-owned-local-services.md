@@ -119,3 +119,31 @@ a detached service is not observable, so the log tail stands in for it; a
 logout that ends the session's processes is recovered and reported as a crash
 at the next login tick; and a service that hangs without exiting is not
 detected (that remains the runtime-health observer's job).
+
+## Amendment: hung services, plain Node and bounded logs, 2026-10-17
+
+Found on the live Mac (VUH-2393): `clankie.log` had grown to 2.4 GB, each
+service ran under a `pnpm → sh → tsx → node` chain holding about 460 MB of
+wrappers, the login agent pinned a versioned Homebrew Node, and recovery could
+not see a service that was alive but answered nothing.
+
+- **A live but unresponsive service is restarted.** Services whose probe asks
+  the process itself over loopback (the service, the relay, the lab body and the
+  activity surface) are probed on every recovery pass with a 5-second budget.
+  Three minutes of failed probes, at least four of them with no gap over two
+  minutes, count as a crash with `cause: "unhealthy"` and the probe's verdict as
+  the reason, under the same backoff, give-up and owner notice. This closes the
+  hang limit noted above for those services; the bridge, tunnel and keep-awake
+  still cannot be judged this way.
+- **Services are plain Node.** A checkout spawns the package's TypeScript
+  entrypoint directly with the package as working directory and its bins on
+  `PATH`; a small load hook strips types from dependencies that publish
+  TypeScript. The recorded pid is the service itself. Production starts pass
+  `--disable-sigusr1`, so a signal cannot open an inspector. Older launchers'
+  `pnpm --filter … start` processes are still recognised for stopping.
+- **Logs are bounded.** Each launcher-owned log is rotated past 64 MiB by
+  copying its newest 64 MiB into a gzip archive and truncating the live file,
+  which the service's append-only descriptor survives; three archives are kept.
+- **The login agent names a stable Node.** A checkout's agent records a PATH
+  link to the running Node instead of the versioned binary an upgrade deletes,
+  and `doctor` flags an agent whose Node is missing or pinned.

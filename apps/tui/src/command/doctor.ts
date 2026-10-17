@@ -25,6 +25,7 @@ import { readWorkingPreferences } from "./working-preferences.ts";
 import { runResourceStatusCommand, runSimulatorCommand } from "./fleet-resources.ts";
 import { formatSeatDeliveryAge, readSeatDeliveries, readSeatBridges } from "./seat-delivery.ts";
 import { summarizeRecovery } from "../../bin/service-recovery.ts";
+import { inspectAutostartNode } from "./autostart.ts";
 import {
   createCaptainOperatorConversationClient,
   createCaptainRouteClient,
@@ -84,6 +85,10 @@ function doctorSummary(report: InstallDoctorReport): string {
   if (stopped !== undefined) {
     return `${stopped.id} crashed ${String(stopped.crashes)} times and crash recovery left it stopped (${stopped.lastError}) — run \`clankie restart\`.`;
   }
+  if (report.autostart?.executable === false)
+    return `Autostart runs ${report.autostart.node}, which no longer exists, so Clankie will not start or recover — run \`clankie autostart enable\`.`;
+  if (report.autostart?.stable !== undefined)
+    return `Autostart pins ${report.autostart.node}; a Node upgrade removes it — run \`clankie autostart enable\` to use ${report.autostart.stable}.`;
   if (report.doorway.state === "unreachable") {
     return "Clankie is not answering — run `clankie`.";
   }
@@ -227,6 +232,11 @@ export async function doctorCommand(
     ]);
   const { workerTools, workerReports } = workerObservations;
   const serviceRecovery = summarizeRecovery(options.env ?? process.env);
+  const autostart =
+    process.platform === "darwin"
+      ? // allow-swallowed-rejection -- an unreadable login agent only omits this optional check from the card
+        await inspectAutostartNode({ env: options.env ?? process.env }).catch(() => undefined)
+      : undefined;
   const workingPreferences = await readWorkingPreferences({
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.host === undefined ? {} : { host: options.host }),
@@ -389,6 +399,7 @@ export async function doctorCommand(
     linearRequestBudget,
     evidenceStore,
     ...(serviceRecovery.length === 0 ? {} : { serviceRecovery }),
+    ...(autostart === undefined ? {} : { autostart }),
   };
 }
 

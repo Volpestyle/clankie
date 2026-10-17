@@ -11,7 +11,7 @@ it("writes content-free phase diagnostics across real file reads without changin
   const destination = createWriteStream(join(root, "diagnostic.jsonl"));
   try {
     const diagnostics = fleetProjectionDiagnostics(
-      createLogger({ service: "clankie-test" }, { level: "info" }, destination),
+      createLogger({ service: "clankie-test" }, { level: "debug" }, destination),
     );
     const path = join(root, "private-content.txt");
     const content = "private-result-and-path-must-not-be-logged";

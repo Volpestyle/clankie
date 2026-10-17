@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parsePositiveInt, resolveDiscordActiveBody, serviceInLoadout } from "@clankie/settings";
 import {
   ensureCaptainCredential,
@@ -73,34 +74,71 @@ const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
 };
 
 /**
+ * Node flags for every launcher-started Node service. `--disable-sigusr1` keeps
+ * a production service from opening an unauthenticated inspector on
+ * 127.0.0.1:9229 when any local process signals it: the live service logged
+ * "Debugger listening" mid-run nine times between 2026-09-06 and 2026-10-17,
+ * never at start (VUH-2393). Profiling uses `CLANKIE_CPU_PROFILE_DIR` instead.
+ */
+const SERVICE_NODE_FLAGS = ["--disable-sigusr1"] as const;
+
+/**
  * How a package service is spawned, and how to recognize that spawn in the
  * process table.
  *
- * The matcher looks for the launcher's own argv (`--filter <pkg> start`), not
- * for the package name alone. A bare name matches every process that merely
- * mentions it — an agent running `pnpm --filter @clankie/clankie test`, a grep,
- * the shell wrapper around either — and the launcher then reports the service
- * as "running but not launcher-owned" and refuses to start or stop the real
- * one. With a fleet of agents working in this repo that fires constantly.
+ * A checkout runs the package's TypeScript entrypoint under plain Node, which
+ * strips types itself (`scripts/dependency-types.mjs` does it for dependencies
+ * that publish TypeScript), with the package directory as its working directory
+ * and the package's `node_modules/.bin` first on PATH, as `pnpm start` gave it. The
+ * `pnpm --filter … start → sh → tsx → node` chain this replaced cost about
+ * 460 MB of wrapper processes on the live Mac (VUH-2393). An installed release
+ * runs its compiled entrypoint with its bundled Node.
+ *
+ * The matcher looks for the launcher's own argv (the absolute entrypoint, or
+ * `--filter <pkg> start` from an older launcher), not for the package name
+ * alone. A bare name matches every process that merely mentions it — an agent
+ * running `pnpm --filter @clankie/clankie test`, a grep, the shell wrapper
+ * around either — and the launcher then reports the service as "running but
+ * not launcher-owned" and refuses to start or stop the real one. With a fleet
+ * of agents working in this repo that fires constantly.
  */
 function workspaceStart(
   pkg: string,
-  installedEntrypoint: string,
+  directory: string,
 ): Pick<ManagedService, "spawnArgs" | "resolveProcess" | "commandMatches"> {
-  const argv = ["--filter", pkg, "start"];
-  const spawnShape = argv.join(" ");
+  const legacyShape = ["--filter", pkg, "start"].join(" ");
+  const sourceEntrypoint = `${directory}/src/index.ts`;
+  const installedEntrypoint = `${directory}/src/index.js`;
   return {
-    spawnArgs: argv,
-    resolveProcess: ({ repoRoot }) => {
-      const entrypoint = join(repoRoot, installedEntrypoint);
+    spawnArgs: [],
+    resolveProcess: ({ env, repoRoot }) => {
       const node = join(repoRoot, "libexec", "node");
-      return existsSync(node) && existsSync(entrypoint)
-        ? { command: node, args: [entrypoint] }
-        : { command: "pnpm", args: argv };
+      const installed = join(repoRoot, installedEntrypoint);
+      if (existsSync(node) && existsSync(installed))
+        return { command: node, args: [...SERVICE_NODE_FLAGS, installed] };
+      const packageRoot = join(repoRoot, directory);
+      return {
+        command: process.execPath,
+        args: [
+          ...SERVICE_NODE_FLAGS,
+          // Strips the TypeScript a few dependencies publish, which Node refuses to.
+          "--import",
+          join(repoRoot, "scripts", "dependency-types.mjs"),
+          join(repoRoot, sourceEntrypoint),
+        ],
+        cwd: packageRoot,
+        env: {
+          ...env,
+          PATH: [join(packageRoot, "node_modules", ".bin"), join(repoRoot, "node_modules", ".bin"), env.PATH]
+            .filter((entry) => entry !== undefined && entry.length > 0)
+            .join(delimiter),
+        },
+      };
     },
     commandMatches: (command) =>
-      command.includes(spawnShape) ||
-      (command.includes("/libexec/node ") && command.includes(`/${installedEntrypoint}`)),
+      command.includes(legacyShape) ||
+      (/(?:^|\/)node /u.test(command) &&
+        (command.includes(`/${sourceEntrypoint}`) || command.includes(`/${installedEntrypoint}`))),
   };
 }
 
@@ -193,11 +231,11 @@ async function readPresenceDetail(input: {
 }
 
 /**
- * The single clankie service. A checkout runs it through pnpm; an installed
- * release runs its bundled entrypoint with its bundled Node. `/health`
- * answering on its port is what "up" means.
+ * The single clankie service. A checkout runs its TypeScript entrypoint under
+ * plain Node; an installed release runs its bundled entrypoint with its bundled
+ * Node. `/health` answering on its port is what "up" means.
  */
-const CLANKIE_START = workspaceStart("@clankie/clankie", "apps/clankie/src/index.js");
+const CLANKIE_START = workspaceStart("@clankie/clankie", "apps/clankie");
 const CLANKIE: ManagedService = {
   id: "clankie",
   label: "Clankie",
@@ -208,22 +246,29 @@ const CLANKIE: ManagedService = {
     if (directory === undefined || directory.length === 0) return ordinary;
     const profileDirectory = resolve(repoRoot, directory);
     mkdirSync(profileDirectory, { recursive: true, mode: 0o700 });
-    return ordinary.command === "pnpm"
-      ? {
-          command: process.execPath,
-          args: [join(repoRoot, "scripts", "profile-clankie.mjs"), profileDirectory],
-        }
-      : {
-          command: ordinary.command,
-          args: ["--cpu-prof", `--cpu-prof-dir=${profileDirectory}`, ...ordinary.args],
-        };
+    return { ...ordinary, args: ["--cpu-prof", `--cpu-prof-dir=${profileDirectory}`, ...ordinary.args] };
   },
+  /**
+   * A checkout's native fleet proof helper is compiled from source. The build is
+   * a no-op once its hashed artifact exists, so only the first start after a
+   * change to the helper pays for it, and never inside the service or its profile.
+   */
+  prepare: async ({ repoRoot }) => {
+    const builder = join(repoRoot, "scripts", "build-fleet-proof.mjs");
+    if (existsSync(join(repoRoot, "libexec", "node")) || !existsSync(builder)) return;
+    const { buildFleetProof } = (await import(pathToFileURL(builder).href)) as {
+      buildFleetProof: () => Promise<string | undefined>;
+    };
+    await buildFleetProof();
+  },
+  // An older launcher's checkout profiling controller is still this service.
   commandMatches: (command) =>
     CLANKIE_START.commandMatches(command) || command.includes("/scripts/profile-clankie.mjs "),
   // Match the service's listen port, not a potentially remote probe URL.
   conflictingPids: ({ env, matchingPids, listPortOwners }) =>
     listPortOwners(Number(env.PORT ?? "4310")) ?? matchingPids,
   stopGraceMs: clankieStopGraceMs,
+  restartWhenUnhealthy: true,
   /**
    * The presence runtime module is a repository path, not a preference, so the
    * launcher supplies it rather than making the operator remember an env
@@ -245,11 +290,11 @@ const CLANKIE: ManagedService = {
       env.CLANKIE_CRASH_REPORT ?? join(clankieStateHome(env), "clankie", "clankie-recovery.json"),
     ...(captainToken === undefined ? {} : { CLANKIE_CAPTAIN_TOKEN: captainToken }),
   }),
-  probe: async ({ env, fetchImpl }) => {
+  probe: async ({ env, fetchImpl, timeoutMs }) => {
     try {
       const response = await fetchImpl(new URL("/health", serviceUrl(env)), {
         redirect: "error",
-        signal: AbortSignal.timeout(750),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       return response.ok ? { state: "healthy" } : { state: "unhealthy" };
     } catch {
@@ -274,21 +319,22 @@ function relayPort(env: NodeJS.ProcessEnv): string {
 const RELAY: ManagedService = {
   id: "relay",
   label: "App relay",
-  ...workspaceStart("@clankie/relay", "apps/relay/src/index.js"),
+  ...workspaceStart("@clankie/relay", "apps/relay"),
   conflictingPids: ({ env, matchingPids, listPortOwners }) =>
     listPortOwners(Number(relayPort(env))) ?? matchingPids,
   restartsWith: ["clankie"],
+  restartWhenUnhealthy: true,
   serviceEnv: ({ env, captainToken }) => ({
     ...env,
     CLANKIE_RELAY_PORT: relayPort(env),
     ...(captainToken === undefined ? {} : { CLANKIE_CAPTAIN_TOKEN: captainToken }),
   }),
-  probe: async ({ env, fetchImpl }) => {
+  probe: async ({ env, fetchImpl, timeoutMs }) => {
     const port = relayPort(env);
     try {
       const response = await fetchImpl(`http://127.0.0.1:${port}/health`, {
         redirect: "error",
-        signal: AbortSignal.timeout(750),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       return response.ok
         ? { state: "healthy", detail: `devices on 127.0.0.1:${port}` }
@@ -302,7 +348,7 @@ const RELAY: ManagedService = {
 const DISCORD_BRIDGE: ManagedService = {
   id: "discord-bridge",
   label: "Discord bridge",
-  ...workspaceStart("@clankie/discord-bridge", "apps/discord-bridge/src/index.js"),
+  ...workspaceStart("@clankie/discord-bridge", "apps/discord-bridge"),
   enabled: (env) => resolveDiscordActiveBody(env) === "bot",
   // Its live presence claim is only valid against the service instance that
   // issued it, so a clankie restart requires a bridge restart.
@@ -353,8 +399,9 @@ const DISCORD_BRIDGE: ManagedService = {
 const DISCORD_USER_SESSION: ManagedService = {
   id: "discord-user-session",
   label: "Discord lab body",
-  ...workspaceStart("@clankie/discord-user-session", "apps/discord-user-session/src/index.js"),
+  ...workspaceStart("@clankie/discord-user-session", "apps/discord-user-session"),
   restartsWith: ["clankie"],
+  restartWhenUnhealthy: true,
   enabled: (env) =>
     env.DISCORD_USER_SESSION_ENABLED === "true" && resolveDiscordActiveBody(env) === "user_session",
   serviceEnv: ({ env, repoRoot }) => {
@@ -370,7 +417,7 @@ const DISCORD_USER_SESSION: ManagedService = {
         env.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE ?? runtimeModule(repoRoot, "discord-user-session"),
     };
   },
-  probe: async ({ env, fetchImpl, record, matchingPids }) => {
+  probe: async ({ env, fetchImpl, record, matchingPids, timeoutMs }) => {
     if (env.DISCORD_USER_SESSION_ENABLED !== "true") {
       return { state: "healthy", detail: "lab body off" };
     }
@@ -381,7 +428,7 @@ const DISCORD_USER_SESSION: ManagedService = {
     try {
       const response = await fetchImpl(`http://127.0.0.1:${port}/health`, {
         redirect: "error",
-        signal: AbortSignal.timeout(750),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       return response.ok ? { state: "healthy", detail: "user session connected" } : { state: "unhealthy" };
     } catch {
@@ -403,15 +450,18 @@ const DISCORD_USER_SESSION: ManagedService = {
 const ACTIVITY: ManagedService = {
   id: "activity",
   label: "Activity surface",
-  ...workspaceStart("@clankie/discord-activity", "apps/discord-activity/src/index.js"),
+  ...workspaceStart("@clankie/discord-activity", "apps/discord-activity"),
+  restartWhenUnhealthy: true,
   conflictingPids: ({ env, matchingPids, listPortOwners }) => [
     ...(listPortOwners(Number(env.CLANKIE_ACTIVITY_PORT ?? "4320")) ?? matchingPids),
     ...(listPortOwners(Number(env.CLANKIE_ACTIVITY_PRODUCER_PORT ?? "4322")) ?? matchingPids),
   ],
-  probe: async ({ env, fetchImpl }) => {
+  probe: async ({ env, fetchImpl, timeoutMs }) => {
     const port = env["CLANKIE_ACTIVITY_PORT"] ?? "4320";
     try {
-      const response = await fetchImpl(`http://127.0.0.1:${port}/`);
+      const response = await fetchImpl(`http://127.0.0.1:${port}/`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
       return response.ok
         ? { state: "healthy", detail: `viewer on 127.0.0.1:${port}` }
         : { state: "unhealthy" };

@@ -229,7 +229,7 @@ import {
   type EdgeSeat,
 } from "./fleet-edges.ts";
 import { FleetRoomJournal, inboundFleetRoomRecord, type FleetRoomRecord } from "./fleet-room.ts";
-import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.js";
+import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.ts";
 import {
   deliverFleetSeatMessage,
   fleetSeatMailbox,
@@ -281,7 +281,12 @@ import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
 import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { PaneTidy } from "./pane-tidy.ts";
 import { AUTO_TIDY_PANE_CHECK_MS, AUTO_TIDY_WORKTREE_CHECK_MS, createAutoTidy } from "./auto-tidy.ts";
-import { SeatIssueKeeper, liveSeatIssue, prepareSeatIssueAttribution } from "./seat-issue-status.ts";
+import {
+  SeatIssueKeeper,
+  liveSeatIssue,
+  prepareSeatIssueAttribution,
+  warnSeatIssueUnavailable,
+} from "./seat-issue-status.ts";
 import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { createHuddleService, HuddleStore, type HuddleSeatTarget } from "./huddles.ts";
 import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
@@ -4298,9 +4303,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     await diagnostics
       .measure("issue_keeper", () => issueStatus.observe(liveIssues))
       .then((results) => {
-        for (const result of results)
-          if (result.outcome === "failed")
-            console.warn("Seat issue status unavailable", result.issue, result.detail);
+        for (const result of results) if (result.outcome === "failed") warnSeatIssueUnavailable(result);
       });
     stopIssues();
     return projected;

@@ -221,7 +221,9 @@ const HEADLESS_COMMAND_HELP = [
   { nouns: ["stop"], lines: ["  stop [service]           Stop in reverse order (JSON; progress on stderr)"] },
   {
     nouns: ["recover"],
-    lines: ["  recover [--autostart]    Restart launcher-owned services that crashed, with backoff (JSON)"],
+    lines: [
+      "  recover [--autostart]    Restart launcher-owned services that crashed or stopped answering, with backoff (JSON)",
+    ],
   },
   {
     nouns: ["autostart"],

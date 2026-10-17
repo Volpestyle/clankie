@@ -629,6 +629,9 @@ export async function executeRuntimeUpdate(
     // Build source-only projected artifacts before stopping the old service.
     if (existsSync(join(stage, "scripts/build-remote-lead.mjs")))
       run(process.execPath, ["scripts/build-remote-lead.mjs"], stage);
+    // The checkout's native fleet proof helper, so the first start after cutover compiles nothing.
+    if (existsSync(join(stage, "scripts/build-fleet-proof.mjs")))
+      run(process.execPath, ["scripts/build-fleet-proof.mjs"], stage);
     linkPinnedState(plan.checkout, stage, run);
     relocatePinnedDependencies(stage, plan.runtime, undefined, plan.checkout);
     // Installation may take minutes; do not stop a runtime edited or replaced meanwhile.

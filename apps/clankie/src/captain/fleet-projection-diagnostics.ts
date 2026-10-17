@@ -27,7 +27,7 @@ type Outcome = "ok" | "error";
 type Interval = { start: number; end: number; outcome: Outcome };
 
 /** One content-free log per projection, including overlapping native observations. */
-export function fleetProjectionDiagnostics(log: Pick<typeof logger, "info"> = logger) {
+export function fleetProjectionDiagnostics(log: Pick<typeof logger, "debug"> = logger) {
   const started = performance.now();
   let completed = false;
   const phases = new Map<FleetProjectionPhase, Interval[]>();
@@ -96,7 +96,8 @@ export function fleetProjectionDiagnostics(log: Pick<typeof logger, "info"> = lo
         };
       });
       try {
-        log.info(
+        // Every projection reports; debug only (VUH-2393).
+        log.debug(
           {
             event: "fleet.projection.timings",
             durationMs: round(performance.now() - started),

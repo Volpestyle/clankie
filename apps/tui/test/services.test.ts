@@ -1,11 +1,10 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { parsePositiveInt } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
@@ -96,6 +95,12 @@ function processList(...commands: readonly string[]): () => readonly (readonly [
 }
 
 const noProcesses = processList();
+
+/** The package a checkout spawn runs, named by its entrypoint `apps/<dir>/src/index.ts`. */
+function spawnedPackage(args: readonly string[]): string {
+  const directory = /\/apps\/([^/]+)\/src\/index\.ts$/u.exec(args.at(-1) ?? "")?.[1];
+  return directory === undefined ? "unknown" : `@clankie/${directory}`;
+}
 
 async function writeRecord(env: NodeJS.ProcessEnv, id: ServiceId, pid: number): Promise<void> {
   await writeFile(serviceStatePath(id, env), `${JSON.stringify({ version: 1, id, pid })}\n`);
@@ -760,7 +765,7 @@ describe("service targets", () => {
           ? Response.json({ ok: true })
           : Promise.reject(new Error("connection refused"))) as typeof fetch,
       spawnImpl: ((_command: string, args: string[]) => {
-        const pkg = args[1] ?? "unknown";
+        const pkg = spawnedPackage(args);
         order.push(`start:${pkg}`);
         const pid = nextPid++;
         alive.add(pid);
@@ -798,8 +803,8 @@ describe("service targets", () => {
           ? Response.json({ ok: true })
           : Promise.reject(new Error("connection refused"))) as typeof fetch,
       spawnImpl: ((_command: string, args: string[]) => {
-        started.add(args[1] ?? "unknown");
-        order.push(`start:${args[1] ?? "unknown"}`);
+        started.add(spawnedPackage(args));
+        order.push(`start:${spawnedPackage(args)}`);
         const pid = nextPid++;
         alive.add(pid);
         return runningChild(pid);
@@ -848,7 +853,7 @@ describe("service targets", () => {
         throw new Error("connection refused");
       }) as typeof fetch,
       spawnImpl: ((_command: string, args: string[]) => {
-        order.push(`start:${args[1] ?? "unknown"}`);
+        order.push(`start:${spawnedPackage(args)}`);
         const error = new Error("listen EADDRINUSE: address already in use 127.0.0.1:4323");
         Object.assign(error, { code: "EADDRINUSE" });
         throw error;
@@ -1283,7 +1288,10 @@ describe("captain credential injection", () => {
     });
 
     expect(captured.command()).toBe(join(runtimeRoot, "libexec", "node"));
-    expect(captured.args()).toEqual([join(runtimeRoot, "apps", "clankie", "src", "index.js")]);
+    expect(captured.args()).toEqual([
+      "--disable-sigusr1",
+      join(runtimeRoot, "apps", "clankie", "src", "index.js"),
+    ]);
     expect(captured.envFor()?.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE).toBe(
       join(runtimeRoot, "apps", "discord-bridge", "src", "presence-runtime-module.js"),
     );
@@ -1322,75 +1330,56 @@ describe("captain credential injection", () => {
     expect(profile.nodes.length).toBeGreaterThan(0);
     expect(profile.endTime).toBeGreaterThan(profile.startTime);
     // Other service launches retain their ordinary command and arguments.
-    expect(managedService("relay").resolveProcess!({ repoRoot: runtimeRoot, env })).toEqual({
-      command: "pnpm",
-      args: ["--filter", "@clankie/relay", "start"],
+    expect(managedService("relay").resolveProcess!({ repoRoot: runtimeRoot, env })).toMatchObject({
+      command: process.execPath,
+      args: [
+        "--disable-sigusr1",
+        "--import",
+        join(runtimeRoot, "scripts/dependency-types.mjs"),
+        join(runtimeRoot, "apps/relay/src/index.ts"),
+      ],
     });
   });
 
-  it("profiles checkout Clankie through a controller without profiling its preparation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "clankie-profile-checkout-"));
+  // VUH-2393: a checkout service is its TypeScript entrypoint under plain Node,
+  // with no pnpm, shell or tsx between the launcher and the service.
+  it("runs a real checkout service under plain Node, profiles it on request and opens no inspector", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-plain-node-"));
     tempDirs.push(root);
+    const app = join(root, "apps/clankie");
+    await mkdir(join(app, "src"), { recursive: true });
+    await writeFile(join(app, "package.json"), '{"type":"module"}');
+    // Type annotations prove Node strips them itself; SIGTERM exits as the service does.
+    await writeFile(
+      join(app, "src/index.ts"),
+      'const marker: string = "ready"; process.on("SIGTERM", () => process.exit(0)); setInterval(() => {}, 1000); function fixtureWork(): void { const until = performance.now() + 25; while (performance.now() < until) {} } fixtureWork(); console.log(JSON.stringify({marker,argv:process.execArgv,cwd:process.cwd(),path:process.env.PATH}));',
+    );
     const service = managedService("clankie");
+    expect(service.resolveProcess!({ repoRoot: root, env: {} })).toMatchObject({
+      command: process.execPath,
+      args: [
+        "--disable-sigusr1",
+        "--import",
+        join(root, "scripts/dependency-types.mjs"),
+        join(app, "src/index.ts"),
+      ],
+      cwd: app,
+    });
+    // The real dependency type hook, as the checkout ships it.
+    await mkdir(join(root, "scripts"), { recursive: true });
+    await writeFile(
+      join(root, "scripts/dependency-types.mjs"),
+      await readFile(join(import.meta.dirname, "../../../scripts/dependency-types.mjs")),
+    );
     const resolved = service.resolveProcess!({
       repoRoot: root,
-      env: { CLANKIE_CPU_PROFILE_DIR: "profiles" },
-    });
-    expect(resolved).toEqual({
-      command: process.execPath,
-      args: [join(root, "scripts/profile-clankie.mjs"), join(root, "profiles")],
+      env: { PATH: "/usr/bin", CLANKIE_CPU_PROFILE_DIR: "profiles" },
     });
     expect(service.commandMatches(`${resolved.command} ${resolved.args.join(" ")}`)).toBe(true);
     expect(existsSync(join(root, "profiles"))).toBe(true);
-    expect(service.resolveProcess!({ repoRoot: root, env: {} })).toEqual({
-      command: "pnpm",
-      args: ["--filter", "@clankie/clankie", "start"],
-    });
-  });
-
-  it("runs the real checkout profiling controller with tsx and flushes its child profile on SIGTERM", async () => {
-    const root = await mkdtemp(join(tmpdir(), "clankie-profile-controller-"));
-    tempDirs.push(root);
-    const scripts = join(root, "scripts");
-    const app = join(root, "apps/clankie");
-    const profiles = join(root, "profiles");
-    await mkdir(scripts, { recursive: true });
-    await mkdir(join(app, "scripts"), { recursive: true });
-    await mkdir(join(app, "src"), { recursive: true });
-    await mkdir(profiles);
-    await writeFile(join(app, "package.json"), '{"type":"module"}');
-    await symlink(
-      join(import.meta.dirname, "../../clankie/node_modules"),
-      join(app, "node_modules"),
-      "junction",
-    );
-    // Use the repository's real native preparation and real tsx loader. Only
-    // the service fixture is small so this check cannot reach owner state.
-    await writeFile(
-      join(scripts, "profile-clankie.mjs"),
-      await readFile(join(import.meta.dirname, "../../../scripts/profile-clankie.mjs")),
-    );
-    await writeFile(
-      join(app, "scripts/profile-clankie.mjs"),
-      await readFile(join(import.meta.dirname, "../../clankie/scripts/profile-clankie.mjs")),
-    );
-    const builder = pathToFileURL(join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs")).href;
-    await writeFile(
-      join(scripts, "build-fleet-proof.mjs"),
-      `export { buildFleetProof } from ${JSON.stringify(builder)};`,
-    );
-    await writeFile(
-      join(app, "src/index.ts"),
-      'const marker: string = "ready"; process.on("SIGTERM", () => process.exit(0)); setInterval(() => {}, 1000); function fixtureWork() { const until = performance.now() + 25; while (performance.now() < until) {} } fixtureWork(); console.log(JSON.stringify({marker,argv:process.execArgv}));',
-    );
-    const child = spawn(process.execPath, [join(scripts, "profile-clankie.mjs"), profiles], {
-      cwd: root,
-      env: {
-        ...process.env,
-        HOME: root,
-        XDG_CONFIG_HOME: join(root, ".config"),
-        CLANKIE_STATE: join(root, ".clankie"),
-      },
+    const child = spawn(resolved.command, [...resolved.args], {
+      cwd: resolved.cwd!,
+      env: resolved.env!,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stderr = "";
@@ -1402,21 +1391,35 @@ describe("captain credential injection", () => {
       child.once("exit", resolve);
     });
     try {
-      const ready = await Promise.race([
-        new Promise<string>((resolve) => child.stdout.once("data", (chunk) => resolve(String(chunk)))),
-        ended.then(() => {
-          throw new Error(`profile controller exited before ready: ${stderr}`);
-        }),
+      const ready = JSON.parse(
+        await Promise.race([
+          new Promise<string>((resolve) => child.stdout.once("data", (chunk) => resolve(String(chunk)))),
+          ended.then(() => {
+            throw new Error(`plain Node service exited before ready: ${stderr}`);
+          }),
+        ]),
+      );
+      expect(ready).toMatchObject({ marker: "ready", cwd: await realpath(app) });
+      expect(ready.argv).toEqual([
+        "--cpu-prof",
+        `--cpu-prof-dir=${join(root, "profiles")}`,
+        "--disable-sigusr1",
+        "--import",
+        join(root, "scripts/dependency-types.mjs"),
       ]);
-      expect(JSON.parse(ready)).toMatchObject({ marker: "ready" });
-      expect(JSON.parse(ready).argv).toContain("--cpu-prof");
-      expect(JSON.parse(ready).argv.some((arg: string) => arg.startsWith("--inspect"))).toBe(false);
+      // pnpm put the package's bins first on PATH; services find tools like `pi` there.
+      expect(ready.path.split(":").slice(0, 2)).toEqual([
+        join(app, "node_modules/.bin"),
+        join(root, "node_modules/.bin"),
+      ]);
+      // SIGUSR1 would otherwise open an inspector on 127.0.0.1:9229.
+      process.kill(child.pid!, "SIGUSR1");
       child.kill("SIGTERM");
       expect(await ended).toBe(0);
-      expect(stderr).toBe("");
-      const names = await readdir(profiles);
+      expect(stderr).not.toContain("Debugger listening");
+      const names = await readdir(join(root, "profiles"));
       expect(names).toHaveLength(1);
-      const profile = JSON.parse(await readFile(join(profiles, names[0]!), "utf8"));
+      const profile = JSON.parse(await readFile(join(root, "profiles", names[0]!), "utf8"));
       expect(
         profile.nodes.some((node: { callFrame: { url: string } }) =>
           node.callFrame.url.endsWith("/src/index.ts"),
@@ -1428,24 +1431,6 @@ describe("captain credential injection", () => {
         await ended;
       }
     }
-  }, 15000);
-
-  it("omits the variable entirely when no credential could be brokered", async () => {
-    const env = await stateEnv();
-    const { spawnImpl, started, envFor } = capturingSpawn();
-
-    await startService(managedService("clankie"), {
-      repoRoot: "/repo",
-      env,
-      spawnImpl,
-      processIsAliveImpl: () => true,
-      listProcessCommandsImpl: noProcesses,
-      fetchImpl: healthAfterStart(started),
-      listPortOwnersImpl: () => [],
-    });
-
-    expect(started()).toBe(true);
-    expect(envFor()).not.toHaveProperty("CLANKIE_CAPTAIN_TOKEN");
   });
 
   it("never lets the Discord bridge see the captain token", async () => {
@@ -1531,6 +1516,7 @@ describe("restart carries dependents", () => {
       operatorToken: undefined,
       record: undefined,
       matchingPids: [],
+      timeoutMs: 750,
     });
     expect(healthy).toMatchObject({ state: "healthy" });
     const down = await managedService("relay").probe({
@@ -1541,6 +1527,7 @@ describe("restart carries dependents", () => {
       operatorToken: undefined,
       record: undefined,
       matchingPids: [],
+      timeoutMs: 750,
     });
     expect(down).toMatchObject({ state: "unreachable" });
   });

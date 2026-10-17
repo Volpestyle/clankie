@@ -554,7 +554,8 @@ export function createRemoteProjectObserver(options: Options) {
         response = await shell(command, 10_000);
         shellOutcome = "ok";
       } finally {
-        logger.info(
+        // Per-request telemetry: debug only (VUH-2393).
+        logger.debug(
           {
             event: "remote.proof.timings",
             phases: [{ phase: "shell", durationMs: performance.now() - shellStarted, outcome: shellOutcome }],

@@ -39,6 +39,7 @@ import { waitForConversationRun } from "./conversation-run.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import { type SeatLedger } from "./seat-ledger.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
+import { warnSeatIssueUnavailable } from "./seat-issue-status.ts";
 import type { createStanceStore } from "./stances.ts";
 import { UNANSWERED_REPORTS_INSTRUCTION } from "./worker-report-tools.ts";
 
@@ -783,8 +784,7 @@ export function createOperatorService(
           reason: request.unlandedReason ?? "closed by the owner",
           unlanded: held.length > 0,
         });
-        if (issue?.outcome === "failed")
-          console.warn("Seat issue status unavailable", issue.issue, issue.detail);
+        if (issue?.outcome === "failed") warnSeatIssueUnavailable(issue);
       }
       return {
         op: "close_seat",

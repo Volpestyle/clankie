@@ -1227,8 +1227,8 @@ falling back to the installed ports.
 Start the scratch relay before `scratch-stack.mjs run DIR cli pair`. Pairing
 guarantees a relay, and with none healthy the launcher starts a detached one
 outside `clankie heavy` that survives the proof. If that happened, stop its
-process group (working directory is the checkout, command
-`pnpm --filter @clankie/relay start`).
+process group (working directory `apps/relay` in the checkout, command
+`node … apps/relay/src/index.ts`).
 
 `CLANKIE_SCRATCH=1` enables the startup guard. Scratch/dev harnesses must set
 this flag; a custom state directory or `NODE_ENV` alone does not imply a scratch
@@ -1303,12 +1303,41 @@ Restart launcher-owned services in dependency order
 ```
 
 Naming a service restarts it **and** anything that holds a live claim against
-it. `clankie` (`captain`) also restarts `relay` and the Discord body, because
-those processes cache presence and bearer state from this service instance.
+it. `clankie` (`captain`) also restarts `relay`, keep-awake and the Discord body.
+The Discord body must restart: its live presence claim is only valid against
+the service instance that issued it. `--keep relay,activity,awake` leaves those
+dependents running, which a runtime update does when their code did not change;
+the JSON then lists them in `kept`. The Discord bodies cannot be kept.
 Stopping is different: `stop` names one service and stops only that service.
 
+A checkout runs each service as plain Node on the package's TypeScript
+entrypoint (`node --disable-sigusr1 --import scripts/dependency-types.mjs
+apps/<package>/src/index.ts`, working directory the package, its
+`node_modules/.bin` first on `PATH`); an installed release runs its compiled
+entrypoint with its bundled Node. No pnpm, shell or tsx sits between the
+launcher and the service (VUH-2393): on 2026-10-17 those wrappers held about
+460 MB across the live services, and a scratch Clankie service started in
+3.1–4.6 s at about 510 MB against 4.7–12.9 s and about 1,330 MB with the
+wrappers. `scripts/dependency-types.mjs` strips types from the few dependencies
+that publish TypeScript, which Node refuses to do under `node_modules`.
+`--disable-sigusr1` keeps a signal from opening an unauthenticated inspector on
+`127.0.0.1:9229`; the live service had one opened that way mid-run nine times.
+The native fleet proof helper a checkout compiles is built by the update helper
+before cutover and checked by the launcher before each start, so a start
+compiles nothing unless its source changed.
+
+Each service writes `~/.local/state/clankie/<service>.log`. A log past 64 MiB
+(`CLANKIE_SERVICE_LOG_MAX_BYTES`) is rotated while the service keeps writing:
+its newest 64 MiB is compressed to `<service>.log.1.gz` (older generations
+shift to `.2.gz` and `.3.gz`, the oldest is dropped) and the live file is
+truncated in place, so the service's append-only descriptor carries on at its
+start. Lines written in the instant between the last copy and the truncate are
+lost. Rotation runs on every [`recover`](#recover) pass, before each start, and
+every ten minutes in the service, and also covers `autostart.log`. Read an
+archive with `gzip -dc`.
+
 A stop sends SIGTERM to the service's process group and waits for every process
-in it, not just the recorded pnpm leader, escalating to SIGKILL for the group
+in it, not just the recorded leader, escalating to SIGKILL for the group
 after the grace (Clankie: its play shutdown deadline plus two seconds). A
 stopping Clankie answers seat event polls and acknowledgments
 `503 service_shutting_down`, stops keeping connections alive, closes the rest
@@ -1323,8 +1352,8 @@ if inspection fails, the launcher conservatively refuses matching unowned
 processes. Named activity tunnels check their configured tunnel name. Foreign
 processes are never signalled. A process counts as this runtime's service only
 when it belongs to this runtime: a release `libexec/node` under the runtime
-root, or a workspace `pnpm --filter … start` whose working directory is the
-runtime. Another checkout's service or a test fixture's look-alike under a
+root, or a checkout's Node entrypoint (or an older launcher's
+`pnpm --filter … start`) whose working directory is in the runtime. Another checkout's service or a test fixture's look-alike under a
 temporary directory never blocks a stop or start (VUH-2293).
 
 Use plain `clankie restart` for a normal restart. The optional service target
@@ -1339,9 +1368,8 @@ and `clankie status`, including the Discord bridge. The helper cancels if the
 turn has not settled within ten minutes. No hired worker or custom sleep script
 is needed; a hired worker's backend may share the service's process lifetime.
 
-New service processes clear inherited pnpm lifecycle and Pi session markers.
-Otherwise a restart launched from a running package script can be mistaken for
-a recursive `start` and skipped by pnpm, leaving all stopped dependents offline.
+New service processes clear inherited pnpm lifecycle and Pi session markers, so
+a restart launched from a running package script starts a fresh lifecycle.
 
 For CPU attribution on the next planned service start, set
 `CLANKIE_CPU_PROFILE_DIR` in that launcher's environment. For example, when a
@@ -1353,7 +1381,8 @@ CLANKIE_CPU_PROFILE_DIR="$PWD/.local/cpu-profiles" clankie restart clankie
 
 The directory is created if absent; relative paths resolve against the runtime
 checkout or install root. Only the Clankie service receives Node's `--cpu-prof`
-flags; checkout preparation, bridges and launcher helpers are unaffected.
+flags, checkout or release alike; the launcher's fleet proof build, bridges and
+launcher helpers are unaffected.
 Existing `NODE_OPTIONS` remain intact. Profiling is off when the variable is
 unset or empty and opens no inspector port. Node writes a uniquely named
 `.cpuprofile` there when the service exits normally, including its graceful
@@ -1415,6 +1444,16 @@ disagree, or the file was written by an older install (a one-shot login
 restart with no crash recovery). Run `enable` to repair either. The job's own
 output lands in `log`; the services keep their usual per-process logs.
 
+A checkout's agent runs its launcher under Node, and launchd's bare environment
+has none on `PATH`. `enable` records a link on your `PATH` that resolves to the
+running Node, such as Homebrew's `/opt/homebrew/bin/node`, rather than the
+versioned binary behind it (`/opt/homebrew/Cellar/node/26.7.0/bin/node`), which
+`brew upgrade node` deletes and with it every later login start and crash
+recovery (VUH-2393). With no such link it records the running binary.
+`clankie doctor` reports the agent's Node as `autostart` (`node`, `executable`,
+and `stable` when a link exists for a pinned versioned binary) and names
+`clankie autostart enable` as the fix when the Node is gone or pinned.
+
 <a id="recover"></a>
 
 ### `recover [--autostart]`
@@ -1429,6 +1468,19 @@ mid-cutover owns the services (`"skipped": "update"`), and another `start`,
 `stop`, `restart` or recovery holding the service lock is left alone
 (`"skipped": "busy"`). `start`, `stop` and `restart` wait for that lock rather
 than race each other.
+
+A live process can be just as gone: wedged, it answers nothing and never exits.
+For the services whose probe asks the process itself over loopback (the
+service's `/health`, the relay's and the lab body's `/health`, the activity
+viewer), each pass also probes the live recorded process with a 5-second
+budget. One that keeps failing for three minutes across at least four probes is
+restarted like a crash (VUH-2393); its crash entry has `cause: "unhealthy"` and a
+`reason` such as `health probe unreachable for 182 s (4 probes) while the
+process was alive`, which `status`, `doctor` and the owner notice show in place
+of a log line. A gap of more than two minutes between failed probes (the Mac
+slept, passes were skipped) starts the count again, and a healthy answer clears
+it. The Discord bridge, tunnel and keep-awake are not probed this way: their
+probes cannot see a hang, or also fail when the internet does.
 
 A crash loop backs off: restart attempts within 30 minutes wait 0 s, 30 s,
 2 min, then 5 min, and a restart that dies before it is healthy counts as

@@ -77,7 +77,7 @@ message `stored`, delete runtime state, or send a replacement to bypass this gap
 - User-session Discord actions: `~/.local/state/clankie/discord-user-session-receipts.jsonl` (override: `DISCORD_USER_SESSION_RECEIPT_PATH`)
 - Opt-in development voice transcript: `~/.local/state/clankie/discord-voice-transcripts.jsonl`
 - Browser recordings (opt-in): `~/.clankie/runner/browser/recordings/*.webm`, named by start time
-- Service stdout + lifecycle: `~/.local/state/clankie/<id>.log`, `<id>-service.json`
+- Service stdout + lifecycle: `~/.local/state/clankie/<id>.log`, `<id>-service.json`; older lines in the rotated `<id>.log.1.gz`…`.3.gz` (`gzip -dc`). Per-request timing events (`remote.observation.timings`, `remote.proof.timings`, `fleet.projection.timings`, local proof checkpoints) are debug-level: start the service with `CLANKIE_LOG_LEVEL=debug` to see them.
 - Live status: `clankie status` / `/trace` in the face
 - Opt-in service CPU profiles: set `CLANKIE_CPU_PROFILE_DIR` in the actual launcher's environment for the next planned start/restart; Node writes `.cpuprofile` on graceful service exit. Only Clankie is profiled, not preparation or helpers. Relative directories resolve against the runtime root. Existing live processes are unchanged; a prefixed `clankie update` does not forward this variable into its live-service-owned update helper. Arrange it for the next planned deployment with the operator; do not introduce an extra restart. See `docs/cli.md` under service lifecycle.
 - What's on the TUI screen right now: `herdr pane read <pane> --source visible`

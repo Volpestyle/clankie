@@ -9,6 +9,9 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 interface CrashEntry {
   readonly detectedAt: string;
   readonly logTail?: string;
+  /** `unhealthy`: the launcher restarted a live process that kept failing its health probe. */
+  readonly cause?: string;
+  readonly reason?: string;
 }
 
 const MAX_RECORD_BYTES = 256 * 1024;
@@ -33,9 +36,15 @@ function crashAlertText(
     lines.find((line) => /^(?:[A-Z][A-Za-z]*Error|Error)\b|Unhandled|FATAL|panic/u.test(line)) ??
     lines.at(-1) ??
     "no log output";
-  const error = named.length > 240 ? `${named.slice(0, 237)}…` : named;
+  const reason = typeof last.reason === "string" ? last.reason : named;
+  const error = reason.length > 240 ? `${reason.slice(0, 237)}…` : reason;
   const service = typeof record.id === "string" ? record.id : "A service";
-  const count = crashes.length === 1 ? "crashed" : `crashed ${String(crashes.length)} times`;
+  const count =
+    last.cause === "unhealthy" && crashes.length === 1
+      ? "stopped answering"
+      : crashes.length === 1
+        ? "crashed"
+        : `crashed ${String(crashes.length)} times`;
   return {
     text: `${service} ${count} and the launcher restarted it (last at ${last.detectedAt}). Last error: ${error}. \`clankie status\` shows the history.`,
     through: last.detectedAt,

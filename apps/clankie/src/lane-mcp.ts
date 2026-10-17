@@ -26,6 +26,7 @@ import {
 import type { CaptainPort, LaneTool } from "./captain/port.ts";
 import { assertMcpToolsList } from "./mcp-tool-schema.ts";
 import { SeatCallReceipts } from "./seat-call-receipts.ts";
+import { CLANKIE_VERSION } from "./app/log.ts";
 
 /** How long an untouched session survives. Swept lazily, on the next request. */
 const SESSION_IDLE_MS = 60 * 60_000;
@@ -115,7 +116,7 @@ export function createLaneMcpEndpoint({
     const bank = await captain.laneToolBank(lane, conversationId);
     const byName = new Map<string, LaneTool>(bank.tools.map((tool) => [tool.name, tool]));
     const server = new Server(
-      { name: "clankie", version: "0.2.0" },
+      { name: "clankie", version: CLANKIE_VERSION },
       { capabilities: { tools: {} }, instructions: instructionsFor(lane) },
     );
     server.setRequestHandler(ListToolsRequestSchema, () => {

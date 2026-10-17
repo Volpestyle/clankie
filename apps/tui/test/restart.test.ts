@@ -90,7 +90,10 @@ it.each(["rooms/trusted-room", "turns/discord_presence~guild%3Achannel", "voice/
           return Response.json({ ok: true });
         }) as typeof fetch,
         spawnImpl: ((_command: string, args: string[]) => {
-          started.push(args[1]!);
+          // A checkout service is spawned as Node on `apps/<package>/src/index.ts`.
+          started.push(
+            `@clankie/${/\/apps\/([^/]+)\/src\/index\.ts$/u.exec(args.at(-1) ?? "")?.[1] ?? "unknown"}`,
+          );
           return child(9200 + started.length);
         }) as typeof spawn,
         stdout: {
