@@ -275,3 +275,21 @@ Lead decisions for VUH-2284:
   `includeStaffing=true`; historical records remain readable. Velocity replay
   cannot reconstruct census and account usage from git/tracker state alone; a
   staffing replay needs retained historical inputs and labels reconstructed facts.
+
+## Amendment: census identity and bounded queue reads (VUH-2335, 2026-10-17)
+
+The census joins enrolled workspaces and worktree roots by canonical machine ID:
+`local` for local runtime routes, and the fleet route ID for remote runtimes.
+The roster's display hostname is not a project machine ID. Project counts,
+round totals and worker counts in the wake use the same seat projection and
+workspace matching. Repeated projections of the same native occupant on the
+same machine count once. An unavailable machine or unknown seat status leaves
+its census unknown and cannot establish either staffing signal.
+
+Linear project issue pages contain at most ten issues with the existing bounded
+nested blocker selections. The original fifty-issue selection exceeded the live
+provider's complexity limit. Every issue cursor and any overflow relation cursor
+is still followed; limiting page size does not truncate the queue. A failed,
+partial or nonadvancing read remains unknown. The first live check of the smaller
+selection read all fifty current KH2 issues across five pages; deployed Auto-round
+counts remain a separate verification requirement.

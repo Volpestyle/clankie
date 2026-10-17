@@ -38,6 +38,7 @@ export async function readProjectWorkQueue(
         field: string,
         fields: string,
         filter = "",
+        pageSize = 50,
       ): Promise<Row[]> => {
         const rows: Row[] = [],
           seen = new Set<string>();
@@ -45,7 +46,7 @@ export async function readProjectWorkQueue(
         for (;;) {
           if (Date.now() >= deadline) throw new Error("Tracker queue measurement exceeded 30 seconds");
           const result = await query(
-            `query($id:String!, $after:String) { ${owner}(id:$id) { ${field}(first:50, after:$after${filter}) { ${connection(fields)} } } }`,
+            `query($id:String!, $after:String) { ${owner}(id:$id) { ${field}(first:${pageSize}, after:$after${filter}) { ${connection(fields)} } } }`,
             { id, after },
           );
           const data = node(node(result[owner])[field]);
@@ -65,6 +66,9 @@ export async function readProjectWorkQueue(
         "issues",
         `id identifier state { name type } labels(first:50) { ${connection("name")} } relations(first:50) { ${connection(relationFields)} } inverseRelations(first:50) { ${connection(relationFields)} }`,
         ', filter:{ state:{ type:{ nin:["completed","canceled","duplicate"] } } }',
+        // The same nested graph at 50 costs 35,346 (provider maximum 10,000).
+        // Bound outer pages; continue every cursor and overflow edge page.
+        10,
       );
       const relations = new Map<string, Row>();
       const held = new Map<string, string>();

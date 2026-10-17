@@ -1,6 +1,8 @@
 import { projectTrackerTool } from "./project-tracker-access.ts";
 import {
   autoPlanCapacity,
+  autoStaffingSeats,
+  projectStaffingSeats,
   projectStaffing,
   staffingSection,
   staffingSignals,
@@ -4886,13 +4888,38 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       console.warn("Auto cadence settlement unavailable", roundId, String(error));
     }
   };
-  const readAutoRounds = async () => {
+  const unavailableAutoMachines = () =>
+    new Set(
+      [...unansweredFleetSources, ...pendingFleetSources]
+        .filter((source) => source.startsWith("herdr:"))
+        .map((source) => {
+          const fleet = source.slice(6);
+          return fleet === "default" || namedLocal.some((entry) => entry.id === fleet) ? "local" : fleet;
+        }),
+    );
+  const readAutoStaffingCensus = async () => {
+    const seats = autoStaffingSeats(
+      await refreshFleet(),
+      namedLocal.map((fleet) => fleet.id),
+    );
+    return { seats, unavailableMachines: unavailableAutoMachines() };
+  };
+  const readAutoRounds = async (snapshot?: Awaited<ReturnType<typeof readAutoStaffingCensus>>) => {
     const current = await settings();
+    const { seats, unavailableMachines } = snapshot ?? (await readAutoStaffingCensus());
+    const workerCounts = new Map(
+      current.projects.projects.map((project) => {
+        const workers = projectStaffingSeats(project, seats);
+        const unknown =
+          [...project.workspaces, ...project.worktreeRoots].some((root) =>
+            unavailableMachines.has(root.machineId),
+          ) || workers.some((seat) => seat.status === "unknown");
+        return [project.id, unknown ? null : workers.length] as const;
+      }),
+    );
     return autoProjectRounds(
       current.projects.projects,
-      (await refreshFleet())
-        .filter((seat) => seat.fleet === undefined && seat.workingDirectory !== undefined)
-        .map((seat) => seat.workingDirectory!),
+      workerCounts,
       await leadChats(),
       conversations.defaultGlobalConversationId(),
     );
@@ -4963,7 +4990,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     await projectMirrors
       .refresh((await settings()).projects.projects)
       .catch((error: unknown) => console.warn("Project mirrors unavailable", String(error)));
-    const rounds = await readAutoRounds();
+    const census = await readAutoStaffingCensus();
+    const { seats } = census;
+    const rounds = await readAutoRounds(census);
     if (shutdown.signal.aborted) return;
     autoCadence.retain(new Set(rounds.keys()));
     // Velocity and drift (ADR 0270): measured every tick, so new drift changes the fingerprint.
@@ -4987,11 +5016,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }),
     );
     const plans = autoPlanCapacity(reports.flatMap((report) => (report ? [report] : [])));
-    const seats = (await refreshFleet()).map((seat) => ({
-      machine: seat.machine ?? seat.fleet ?? "local",
-      directory: seat.workingDirectory,
-      status: seat.status,
-    }));
     await Promise.all(
       autoProjects.map(async (project) => {
         const velocity = autoMeasurements.get(project.id);
@@ -5015,11 +5039,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             seats,
             plans,
             started: velocity.started,
-            unavailableMachines: new Set(
-              [...unansweredFleetSources, ...pendingFleetSources]
-                .filter((source) => source.startsWith("herdr:"))
-                .map((source) => (source === "herdr:default" ? "local" : source.slice(6))),
-            ),
+            unavailableMachines: census.unavailableMachines,
             ...(previous ? { previous } : {}),
           }),
         });

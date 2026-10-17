@@ -15,8 +15,8 @@ export interface AutoProjectState {
   readonly focus?: string;
   readonly trackerProjectId?: string;
   readonly linearProjectBinding?: Project["linearProjectBinding"];
-  /** Live seats working in one of the project's local workspaces or worktree roots. */
-  readonly workers: number;
+  /** Occupied project seats; null when its current census is unavailable. */
+  readonly workers: number | null;
 }
 
 function localRoots(project: Project): string[] {
@@ -33,10 +33,10 @@ function countInside(project: Project, directories: readonly (string | undefined
   ).length;
 }
 
-/** Projects on Auto with the live seats working in each; remote workspaces are their own lead's to count. */
+/** Projects on Auto with their measured census, grouped by the selected lead. */
 function autoProjectStates(
   projects: readonly Project[],
-  seatDirectories: readonly string[],
+  workers: ReadonlyMap<string, number | null>,
 ): AutoProjectState[] {
   return projects
     .filter((project) => project.auto === true)
@@ -48,14 +48,14 @@ function autoProjectStates(
       ...(project.linearProjectBinding === undefined
         ? {}
         : { linearProjectBinding: project.linearProjectBinding }),
-      workers: countInside(project, seatDirectories),
+      workers: workers.get(project.id) ?? null,
     }));
 }
 
 /** Explicit tracker ownership wins; assigned leads never take another project by workspace. */
 export function autoProjectRounds(
   projects: readonly Project[],
-  seatDirectories: readonly string[],
+  workers: ReadonlyMap<string, number | null>,
   leads: readonly {
     conversationId: string;
     workspace: string;
@@ -65,7 +65,7 @@ export function autoProjectRounds(
   defaultConversationId: string,
 ): Map<string, AutoProjectState[]> {
   const rounds = new Map<string, AutoProjectState[]>();
-  for (const state of autoProjectStates(projects, seatDirectories)) {
+  for (const state of autoProjectStates(projects, workers)) {
     const project = projects.find((candidate) => candidate.id === state.id)!;
     const boundIds = [project.trackerProjectId, project.linearProjectBinding?.projectId];
     const explicit = leads.filter((lead) => lead.projects.some((entry) => boundIds.includes(entry.id)));
@@ -196,7 +196,7 @@ export function autoRoundPrompt(
     "Projects on Auto (owner settings):",
     ...states.map(
       (state) =>
-        `- ${state.name} (${state.id}): ${state.focus === undefined ? "no focus set" : `focus: ${state.focus}`}; built-in tracker project: ${state.trackerProjectId ?? "none bound"}; Linear project: ${state.linearProjectBinding?.projectId ?? "none bound"}; workers in its workspaces now: ${state.workers}`,
+        `- ${state.name} (${state.id}): ${state.focus === undefined ? "no focus set" : `focus: ${state.focus}`}; built-in tracker project: ${state.trackerProjectId ?? "none bound"}; Linear project: ${state.linearProjectBinding?.projectId ?? "none bound"}; workers in its workspaces now: ${state.workers ?? "unknown"}`,
     ),
     ...(velocity.length
       ? [

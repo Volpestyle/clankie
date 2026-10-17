@@ -7,6 +7,7 @@ import type {
   ProjectVelocity,
 } from "@clankie/protocol/auto-rounds";
 import type { Project } from "@clankie/protocol/projects";
+import type { OperatorFleetSeat } from "@clankie/protocol";
 import { usageWindowPace } from "@clankie/protocol/worker-accounts";
 import { accountTier } from "./account-allocation.ts";
 import type { MachineWorkerAccounts } from "./harness-accounts.ts";
@@ -76,6 +77,24 @@ export interface StaffingSeat {
   readonly directory?: string | undefined;
   readonly status: string;
 }
+/** Project machine IDs are routing IDs, never the census's display hostname. */
+export function autoStaffingSeats(
+  seats: readonly Pick<
+    OperatorFleetSeat,
+    "seatId" | "occupantId" | "fleet" | "machine" | "workingDirectory" | "status"
+  >[],
+  localFleets: readonly string[] = [],
+): StaffingSeat[] {
+  const seen = new Set<string>();
+  return seats.flatMap((seat) => {
+    const machine =
+      !seat.fleet || seat.fleet === "default" || localFleets.includes(seat.fleet) ? "local" : seat.fleet;
+    const key = JSON.stringify([machine, seat.occupantId ?? seat.seatId]);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ machine, directory: seat.workingDirectory, status: seat.status }];
+  });
+}
 const inside = (root: string, directory: string, windows: boolean) => {
   const clean = (value: string) => {
     const normalized = value.replace(/\\/gu, "/").replace(/\/+$/u, "");
@@ -85,6 +104,19 @@ const inside = (root: string, directory: string, windows: boolean) => {
     b = clean(directory);
   return b === a || b.startsWith(`${a}/`);
 };
+
+/** Shared workspace attribution for each project, the prompt and aggregate census. */
+export function projectStaffingSeats(project: Project, seats: readonly StaffingSeat[]): StaffingSeat[] {
+  const roots = [...project.workspaces, ...project.worktreeRoots];
+  return seats.filter(
+    (seat) =>
+      seat.directory !== undefined &&
+      roots.some(
+        (root) =>
+          root.machineId === seat.machine && inside(root.path, seat.directory!, root.platform === "windows"),
+      ),
+  );
+}
 
 /** A measured tick, not an agent's assessment. Missing sources stay unknown. This never hires or parks work. */
 export function projectStaffing(input: {
@@ -98,14 +130,7 @@ export function projectStaffing(input: {
 }): AutoProjectStaffing {
   const { project, queue } = input;
   const roots = [...project.workspaces, ...project.worktreeRoots];
-  const seats = input.seats.filter(
-    (seat) =>
-      seat.directory !== undefined &&
-      roots.some(
-        (root) =>
-          root.machineId === seat.machine && inside(root.path, seat.directory!, root.platform === "windows"),
-      ),
-  );
+  const seats = projectStaffingSeats(project, input.seats);
   const censusKnown =
     !roots.some((root) => input.unavailableMachines?.has(root.machineId)) &&
     !seats.some((seat) => seat.status === "unknown");
@@ -157,7 +182,7 @@ export function projectStaffing(input: {
   const signal =
     reason === "capacity_available"
       ? "under_staffed"
-      : headroom && queue.state === "known" && queue.ready.length === 0
+      : censusKnown && headroom && queue.state === "known" && queue.ready.length === 0
         ? "backlog_not_ready"
         : null;
   const previous = input.previous?.projects.find((entry) => entry.projectId === project.id)?.staffing;
@@ -200,16 +225,8 @@ export function staffingTotals(
     snapshots.length === projects.length && snapshots.every((s) => s[field] !== null)
       ? snapshots.reduce((total, s) => total + s[field]!, 0)
       : null;
-  const coveredSeats = context?.seats.filter(
-    (seat) =>
-      seat.directory !== undefined &&
-      context.projects.some((project) =>
-        [...project.workspaces, ...project.worktreeRoots].some(
-          (root) =>
-            root.machineId === seat.machine &&
-            inside(root.path, seat.directory!, root.platform === "windows"),
-        ),
-      ),
+  const coveredSeats = context?.seats.filter((seat) =>
+    context.projects.some((project) => projectStaffingSeats(project, [seat]).length > 0),
   );
   const censusKnown = snapshots.every((s) => s.activeSeats !== null);
   return {

@@ -11,6 +11,7 @@ import { ProjectSchema } from "@clankie/protocol/projects";
 import { createLocalTracker, TRACKER_LEAD, TRACKER_OWNER } from "@clankie/work-items";
 import {
   autoPlanCapacity,
+  autoStaffingSeats,
   projectStaffing,
   staffingSection,
   staffingSignals,
@@ -216,6 +217,103 @@ it("replays the 10-17 overnight capacity fault, retains its record, and verifies
       if ("closeAllConnections" in server) server.closeAllConnections();
     });
   }
+  // Reconstruct the reported post-deploy fault: active Mac hires were projected
+  // under a display hostname while enrolled project roots used "local".
+  const linked = ProjectSchema.parse({
+    ...project,
+    workerCap: 9,
+    worktreeRoots: [
+      {
+        id: "linked",
+        machineId: "local",
+        platform: "posix",
+        path: "/fixture/worktrees",
+        repoPath: "/fixture/core",
+        commonDirectory: "/fixture/core/.git",
+      },
+    ],
+  });
+  const native = Array.from({ length: 12 }, (_, index) => ({
+    seatId: `terminal-${index}`,
+    occupantId: `native-${index}`,
+    machine: "builder-mac.local",
+    workingDirectory: `/fixture/worktrees/night-${index}`,
+    status: index < 9 ? "working" : index === 9 ? "done" : "idle",
+  }));
+  const census = autoStaffingSeats(
+    [
+      ...native,
+      { ...native[0]!, fleet: "mac-alias", seatId: "mac-alias/terminal-0" },
+      {
+        seatId: "remote",
+        occupantId: "remote-native",
+        fleet: "pc",
+        machine: "builder@remote-host",
+        workingDirectory: "C:\\Repos\\KH2\\work",
+        status: "working",
+      },
+      {
+        seatId: "unrelated",
+        occupantId: "unrelated-native",
+        machine: "builder-mac.local",
+        workingDirectory: "/fixture/worktrees-other",
+        status: "working",
+      },
+    ],
+    ["mac-alias"],
+  );
+  const corrected = {
+    ...velocity,
+    staffing: projectStaffing({
+      project: linked,
+      queue,
+      seats: census,
+      plans,
+      started: velocity.started,
+    }),
+  };
+  expect(corrected.staffing).toMatchObject({
+    activeSeats: 9,
+    idleSeats: 3,
+    occupiedSeats: 12,
+    reason: "cap_reached",
+    signal: null,
+  });
+  const correctedId = record.measured(
+    "lead",
+    [corrected],
+    at,
+    staffingTotals([corrected], plans, { seats: census, projects: [linked] }),
+  );
+  const stored = new AutoRoundRecord(join(root, "rounds"))
+    .read()
+    .find((round) => round.roundId === correctedId)!;
+  expect(
+    AutoRoundsResponseSchema.parse({ schemaVersion: 1, rounds: [stored] }).rounds[0]!.staffing,
+  ).toMatchObject({ activeSeats: 9, idleSeats: 3, occupiedSeats: 12 });
+  const remoteProject = ProjectSchema.parse({
+    id: "pc-work",
+    name: "PC",
+    workspaces: [{ id: "pc", machineId: "pc", platform: "windows", path: "c:/repos/kh2" }],
+  });
+  expect(
+    projectStaffing({ project: remoteProject, queue, seats: census, plans, started: velocity.started }),
+  ).toMatchObject({ activeSeats: 1, occupiedSeats: 1 });
+  for (const state of [
+    { seats: [...census, { machine: "local", directory: "/fixture/worktrees/unknown", status: "unknown" }] },
+    { seats: census, unavailableMachines: new Set(["local"]) },
+  ]) {
+    expect(
+      projectStaffing({
+        project: linked,
+        queue: { ...queue, ready: [] },
+        plans,
+        started: velocity.started,
+        ...state,
+      }),
+    ).toMatchObject({ activeSeats: null, signal: null, reason: "unknown" });
+  }
+
   const unresolved = projectStaffing({ project, queue, seats, plans, started: velocity.started, previous });
   expect(unresolved.check?.state).toBe("unresolved");
   const states = [{ id: project.id, name: project.name, workers: 33 }];
@@ -329,7 +427,7 @@ it("never treats stale, held, signed-out, reset or unknown usage as hiring headr
   expect(readings[0]!.windows[0]!.left).toBeCloseTo(0.58);
 });
 
-it("pages the connected project's blocker graph without letting an owner blocker hide unrelated ready work", async () => {
+it("stays under the recorded Linear complexity limit and pages every issue and blocker edge", async () => {
   const edge = {
     id: "edge",
     type: "blocks",
@@ -354,22 +452,59 @@ it("pages the connected project's blocker graph without letting an owner blocker
     relations: connection(relations),
     inverseRelations: connection(inverse),
   });
+  const lateEdge = {
+    id: "late-edge",
+    type: "blocks",
+    issue: { id: "external", identifier: "VUH-EXTERNAL", state: { type: "unstarted" } },
+    relatedIssue: { id: "ready-0", identifier: "VUH-READY-0", state: { type: "unstarted" } },
+  };
+  const allIssues = [
+    issue("owner", "VUH-1", ["Needs owner"], [edge]),
+    issue("child", "VUH-2", [], [], [edge]),
+    ...Array.from({ length: 11 }, (_, n) => issue(`ready-${n}`, `VUH-READY-${n}`, [])),
+  ];
+  allIssues[2]!.inverseRelations = connection([], true, "overflow");
   const server = serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch: async (request) => {
-      const body = (await request.json()) as { variables: { id: string; after: string | null } };
-      if (body.variables.id !== "11111111-1111-4111-8111-111111111111")
-        return Response.json({ error: "Wrong project" }, { status: 403 });
-      const data =
-        body.variables.after === null
-          ? connection(
-              [issue("owner", "VUH-1", ["Needs owner"], [edge]), issue("child", "VUH-2", [], [], [edge])],
-              true,
-              "next",
-            )
-          : connection([issue("ready", "VUH-3", [])]);
-      return Response.json({ data: { project: { issues: data } } });
+      const body = (await request.json()) as {
+        query: string;
+        variables: { id: string; after: string | null };
+      };
+      if (body.variables.id === "11111111-1111-4111-8111-111111111111") {
+        const size = Number(body.query.match(/\bissues\s*\(\s*first\s*:\s*(\d+)/u)?.[1]);
+        // Replay the recorded 35,346-cost refusal at 50 issues, scaling nested work per issue.
+        const complexity = Math.ceil((35346 * size) / 50);
+        if (!Number.isFinite(size) || size < 1 || complexity > 10000)
+          return Response.json(
+            { errors: [{ message: `Query too complex: ${complexity}. Maximum complexity is 10000.` }] },
+            { status: 400 },
+          );
+        const start = Number(body.variables.after ?? 0),
+          end = start + size;
+        return Response.json({
+          data: {
+            project: {
+              issues: connection(
+                allIssues.slice(start, end),
+                end < allIssues.length,
+                end < allIssues.length ? String(end) : null,
+              ),
+            },
+          },
+        });
+      }
+      if (body.variables.id === "ready-0")
+        return Response.json({
+          data: {
+            issue: {
+              inverseRelations:
+                body.variables.after === null ? connection([], true, "last-edge") : connection([lateEdge]),
+            },
+          },
+        });
+      return Response.json({ error: "Wrong project or issue" }, { status: 403 });
     },
   });
   await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
@@ -401,13 +536,18 @@ it("pages the connected project's blocker graph without letting an owner blocker
     });
     expect(queue).toEqual({
       state: "known",
-      ready: ["VUH-3"],
+      ready: expect.arrayContaining(Array.from({ length: 10 }, (_, n) => `VUH-READY-${n + 1}`)),
       backlog: [],
-      blocked: [
+      blocked: expect.arrayContaining([
         { issue: "VUH-1", blocks: ["VUH-2"], reason: "owner dependency" },
         { issue: "VUH-2", blocks: [], reason: "blocked by VUH-1" },
-      ],
+        { issue: "VUH-READY-0", blocks: [], reason: "blocked by VUH-EXTERNAL" },
+      ]),
     });
+    if (queue.state === "known") {
+      expect(queue.ready).toHaveLength(10);
+      expect(queue.blocked).toHaveLength(3);
+    }
     const unavailable = await readProjectWorkQueue(project, {
       route: async () => undefined,
       linearQuery: async () => async () => {
