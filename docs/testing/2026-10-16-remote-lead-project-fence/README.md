@@ -36,13 +36,21 @@ conversation store, captain bank, launch delegation and HTTP/MCP client:
 - The existing wake fixtures pass. They establish local routing behavior, not a
   real KH2 owner event or live remote continuity.
 
-Explicit touched-source lint passed. Root landing-gate revision, base and result
-are recorded in the issue's landing report; retained raw gate evidence is added
-below when available.
+Explicit touched-source lint passed. The source landed on main at `e13c5770c3a691320318255ab74322be6acdc00e`.
+Its root `clankie heavy -- pnpm check:landing` passed against
+`3a233db920e3f7f4a80497a19c123ff6d8b5f754`: exit 0, `sourceStable: true`,
+84 selected files, 581 tests passed / 1 skipped, all three affected package
+typechecks passed. Elapsed gate time: 459.22 seconds. Final pull was unchanged;
+push to main succeeded. No timing exception was used.
+
+The first root gate stopped before tests: the new fixture's project literal
+lacked the required `worktreeRoots` field (`TS2741`). It was corrected with an
+empty worktree-root list and the full root gate rerun. The nonzero first gate and
+passing source gate reports/logs are retained in this folder's evidence manifest.
 
 ## Boundaries
 
-No PC operation, live-service mutation or deployment was performed. Native
+No PC interaction, live runtime change, restart or deployment was performed. Native
 Windows process/transport observation and the upstream provider transport are
 fixture seams; the tracker records and service-side authorization are real.
 The connected account is fixture-only. Existing live app-identity proof remains
