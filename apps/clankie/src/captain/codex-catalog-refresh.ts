@@ -1,5 +1,28 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** A hired Codex seat's worker bridge: Node runs this install's entry, with no CLI wrapper (VUH-2390). */
+export const CODEX_WORKER_BRIDGE = {
+  command: "node",
+  args: [
+    fileURLToPath(
+      new URL("../../../../integrations/claude-plugin/worker/bin/fleet-mcp.mjs", import.meta.url),
+    ),
+  ],
+} as const;
+// Seats hired before VUH-2390 keep the wrapper until they are relaunched.
+const LEGACY_CODEX_WORKER_BRIDGE = { command: "clankie", args: ["mcp", "--fleet"] } as const;
+
+/** The managed bridge transport a Codex registration names, or undefined for any other server. */
+export function managedCodexWorkerBridge(
+  command: unknown,
+  args: unknown,
+): { command: string; args: readonly string[] } | undefined {
+  return [CODEX_WORKER_BRIDGE, LEGACY_CODEX_WORKER_BRIDGE].find(
+    (bridge) => command === bridge.command && JSON.stringify(args) === JSON.stringify(bridge.args),
+  );
+}
 
 /** A copied worker config, never the owner's home or a symlink into it. */
 export async function isolatedCodexConfig(home: string): Promise<string> {

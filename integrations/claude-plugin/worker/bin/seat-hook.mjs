@@ -59,8 +59,6 @@ async function reportOverLink(link, pane) {
       "StopFailure",
       "PreToolUse",
       "PermissionRequest",
-      "Notification",
-      "PostToolUse",
       "SessionEnd",
     ].includes(event)
   )
@@ -94,7 +92,6 @@ async function reportOverLink(link, pane) {
         ? { toolUseId: hook.tool_use_id }
         : {}),
     ...(hook.tool_input && typeof hook.tool_input === "object" ? { toolInput: hook.tool_input } : {}),
-    ...(typeof hook.notification_type === "string" ? { notificationType: hook.notification_type } : {}),
     ...(lastMessage ? { lastMessage: lastMessage.slice(0, TEXT_MAX) } : {}),
     ...(event === "StopFailure"
       ? { error: (typeof hook.error === "string" ? hook.error : "error").slice(0, SUMMARY_MAX) }

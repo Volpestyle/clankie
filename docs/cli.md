@@ -6460,6 +6460,9 @@ Register `clankie mcp --fleet` in Codex with `env_vars = ["HERDR_PANE_ID",
 "HERDR_SOCKET_PATH"]`, or install the `clankie-worker@clankie` Claude plugin.
 Preserve generated/symlinked harness configuration: inspect
 `doctor.harnessBridges.codex.configSource` and edit its owning source.
+Codex seats Clankie hires into a dedicated app-server run the bridge this command
+spawns, `node INSTALL/integrations/claude-plugin/worker/bin/fleet-mcp.mjs`,
+directly, so no wrapper CLI process stays resident for each one (VUH-2390).
 
 Admitted fleet panes receive every connected MCP tool whose account is verified,
 except persona-bound Linear worker-publishing tools. Admission uses the pinned

@@ -104,9 +104,6 @@ describe("fleet seat hook route", () => {
     expect(await ok.json()).toEqual({ schemaVersion: 1, recorded: true });
     expect(recorded).toEqual([{ requestedPaneId: paneId, hook }]);
     expect((await post("gone", hook)).status).toBe(404);
-    const notification = { ...hook, event: "Notification", notificationType: "permission_prompt" };
-    expect((await post(paneId, notification)).status).toBe(200);
-    expect(recorded.at(-1)).toEqual({ requestedPaneId: paneId, hook: notification });
     const beforeRefused = recorded.length;
     expect((await post(paneId, { ...hook, event: "UnknownHook" })).status).toBe(400);
     expect((await post(paneId, { ...hook, sessionId: "" })).status).toBe(400);

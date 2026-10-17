@@ -103,6 +103,8 @@ async function fixture(
   const metrics = new FleetHealthMetrics();
   const conversations = new ConversationStore(join(root, "conversations"), runner ?? (async () => {}));
   const receiver = new InboundSeatReceipts(join(root, "inbound.json"), conversations);
+  // The service's native publication boundary: a seat mid-turn holds a changed catalog.
+  let busy = false;
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,
@@ -111,6 +113,7 @@ async function fixture(
     fleetTools: async () => (await settings.load()).fleet.tools,
     fleetPeerMessages: async () => (await settings.load()).fleet.peerMessages,
     reportBridgeObserved: (fleet, pane, report) => metrics.observeReport(fleet, pane, report),
+    catalogRefreshPending: async () => busy,
   });
   let seatPolls = 0;
   let bindingSlow = slowBinding;
@@ -151,6 +154,7 @@ async function fixture(
   let mailboxAcks = 0;
   let requests = 0;
   let catalogLists = 0;
+  let catalogWaits = 0;
   const requestAttributions: { path: string; bridgeId: string | null }[] = [];
   const server = serve({
     hostname: "127.0.0.1",
@@ -160,6 +164,10 @@ async function fixture(
       const path = new URL(request.url).pathname;
       requestAttributions.push({ path, bridgeId: request.headers.get("x-clankie-bridge-id") });
       if (seatEvents && path.endsWith("/events")) return receiptApp.app.fetch(request);
+      if (seatEvents && path.endsWith("/tool-catalog") && request.method === "GET") {
+        catalogWaits++;
+        return receiptApp.app.fetch(request);
+      }
       if (path === "/v1/fleet/mcp" && request.method === "POST") {
         const rpc = await request
           .clone()
@@ -284,6 +292,10 @@ async function fixture(
     mailboxPolls: () => mailboxPolls,
     seatPolls: () => seatPolls,
     catalogLists: () => catalogLists,
+    catalogWaits: () => catalogWaits,
+    setBusy(value: boolean) {
+      busy = value;
+    },
     mailboxAcks: () => mailboxAcks,
     requests: () => requests,
     requestAttributions: () => requestAttributions,
@@ -304,6 +316,7 @@ async function startBridge(
   polling = false,
   harness = "test",
   notifications?: string[],
+  initialized = polling,
 ) {
   const socket = join(f.root, "herdr.sock");
   await mkdir(join(f.root, ".clankie", "links"), { recursive: true });
@@ -362,7 +375,7 @@ async function startBridge(
     clientInfo: { name: "test", version: "1" },
   });
   await call("tools/list", {});
-  if (polling)
+  if (initialized)
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
   await expect.poll(() => f.status().status).toBe("ready");
   return call;
@@ -388,6 +401,55 @@ it("lists an idle channel bridge's catalog only when the seat long poll pushes a
   expect(f.catalogLists()).toBe(listed + 2);
   const tools = (await call("tools/list", {})) as { result?: { tools?: { name: string }[] } };
   expect(tools.result?.tools?.map((tool) => tool.name)).not.toContain("clankie_tools");
+}, 20_000);
+
+it("lists a channel-less bridge's catalog only when its catalog wait returns a new revision", async () => {
+  const f = await fixture(false, "w1:p1", undefined, undefined, true);
+  const notifications: string[] = [];
+  const call = await startBridge(f, false, "codex app-server", notifications, true);
+  await expect.poll(() => f.catalogWaits()).toBe(1);
+  const listed = f.catalogLists();
+  const requests = f.requests();
+  // Longer than the five-second list a Codex bridge used to make (VUH-2390):
+  // one parked wait, no list and no mailbox read.
+  await new Promise((resolve) => setTimeout(resolve, 6_000));
+  expect(f.catalogLists()).toBe(listed);
+  expect(f.requests()).toBe(requests);
+  expect(f.seatPolls()).toBe(0);
+  // A refresh request ends the parked wait at once.
+  f.worker.requestCatalogRefresh("default", f.pane, "refresh-1");
+  await expect.poll(() => f.catalogLists(), { timeout: 2_000 }).toBe(listed + 1);
+  await expect.poll(() => notifications).toContain("notifications/tools/list_changed");
+  notifications.length = 0;
+  // Revoking the fleet's tools reaches the running seat the same way.
+  await f.settings.update((current) => ({ ...current, fleet: { ...current.fleet, tools: "off" } }));
+  await expect.poll(() => notifications, { timeout: 7_000 }).toContain("notifications/tools/list_changed");
+  expect(f.catalogLists()).toBe(listed + 2);
+  const tools = (await call("tools/list", {})) as { result?: { tools?: { name: string }[] } };
+  expect(tools.result?.tools?.map((tool) => tool.name)).not.toContain("clankie_tools");
+  expect(f.seatPolls()).toBe(0);
+}, 20_000);
+
+it("holds only a changed catalog while the seat is mid-turn, and publishes it once the turn settles", async () => {
+  const f = await fixture(false, "w1:p1", undefined, undefined, true);
+  const notifications: string[] = [];
+  const call = await startBridge(f, false, "codex app-server", notifications, true);
+  await expect.poll(() => f.catalogWaits()).toBe(1);
+  // A working seat listed with an unchanged catalog has nothing to hold: no
+  // five-second list for the length of its turn (VUH-2390).
+  f.setBusy(true);
+  await call("tools/list", {});
+  const listed = f.catalogLists();
+  await new Promise((resolve) => setTimeout(resolve, 6_000));
+  expect(f.catalogLists()).toBe(listed);
+  // A change mid-turn is listed and held, never published into the turn.
+  f.worker.requestCatalogRefresh("default", f.pane, "refresh-busy");
+  await expect.poll(() => f.catalogLists(), { timeout: 2_000 }).toBe(listed + 1);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(notifications).not.toContain("notifications/tools/list_changed");
+  // Once the turn settles, the held catalog is published.
+  f.setBusy(false);
+  await expect.poll(() => notifications, { timeout: 7_000 }).toContain("notifications/tools/list_changed");
 }, 20_000);
 
 it("records a real subprocess binding timeout independently of its healthy tool catalog", async () => {

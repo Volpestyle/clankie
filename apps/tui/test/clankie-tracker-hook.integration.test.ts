@@ -17,39 +17,45 @@ async function hook(input: Record<string, unknown>) {
   return output ? JSON.parse(output) : undefined;
 }
 
+const denied = [
+  "mcp__linear-server__create_comment",
+  "mcp__linear-server___create_comment",
+  "mcp__linear-server__get_issue",
+  "mcp__claude_ai_Linear__create_issue",
+  "mcp__plugin_external_Linear__save_comment",
+];
+const retained = [
+  "mcp__plugin_clankie-worker_worker__clankie_call",
+  "mcp__plugin_clankie_lead__linear_create_comment",
+  "mcp__github__create_issue",
+  "Bash",
+];
+
 it("plugin-local guard denies inherited Linear tools without a pane or live bridge, retaining Clankie and other tools", async () => {
-  for (const name of [
-    "mcp__linear-server__create_comment",
-    "mcp__linear-server___create_comment",
-    "mcp__linear-server__get_issue",
-    "mcp__claude_ai_Linear__create_issue",
-    "mcp__plugin_external_Linear__save_comment",
-  ]) {
+  for (const name of denied) {
     expect(
       await hook({ hook_event_name: "PreToolUse", tool_name: name, permission_mode: "bypassPermissions" }),
     ).toMatchObject({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" } });
   }
-  for (const name of [
-    "mcp__plugin_clankie-worker_worker__clankie_call",
-    "mcp__plugin_clankie_lead__linear_create_comment",
-    "mcp__github__create_issue",
-    "Bash",
-  ]) {
+  for (const name of retained) {
     expect(await hook({ hook_event_name: "PreToolUse", tool_name: name })).toBeUndefined();
   }
   expect(await hook({ hook_event_name: "SessionStart" })).toMatchObject({
     systemMessage: expect.stringContaining("clankie_tools / clankie_call"),
   });
   // Hooks reside only in these plugins. Loading neither plugin adds no deny to
-  // a plain session, and no hook writes owner profile configuration.
+  // a plain session, and no hook writes owner profile configuration. Claude
+  // tests a hook matcher as an unanchored RegExp; the guard starts for every
+  // Linear-named server and for no other Clankie or plain tool (VUH-2390).
   for (const path of ["hooks/hooks.json", "worker/hooks/hooks.json"]) {
     const config = JSON.parse(await readFile(root + path, "utf8"));
-    expect(config.hooks.PreToolUse).toContainEqual(
-      expect.objectContaining({
-        matcher: "mcp__.*",
-        hooks: [expect.objectContaining({ command: expect.stringContaining("tracker-hook.mjs") })],
-      }),
+    const guards = config.hooks.PreToolUse.filter((entry: { hooks: { command: string }[] }) =>
+      entry.hooks.some((handler) => handler.command.includes("tracker-hook.mjs")),
     );
+    expect(guards).toHaveLength(1);
+    const matcher = new RegExp(guards[0].matcher);
+    for (const name of denied) expect(matcher.test(name)).toBe(true);
+    for (const name of retained) expect(matcher.test(name)).toBe(false);
   }
 });
 
@@ -84,10 +90,10 @@ it.skipIf(process.env.NATIVE_CLAUDE_CACHE_FIXTURES !== "1")(
       await exec("claude", ["plugin", "install", pluginId, "--scope", "user"], { env, timeout: 30_000 });
       const state = JSON.parse(await readFile(join(profile, "plugins/installed_plugins.json"), "utf8"));
       const installed = state.plugins[pluginId].find((entry: { scope: string }) => entry.scope === "user");
-      expect(installed.version).toBe("0.6.18");
+      expect(installed.version).toBe("0.6.19");
       const config = JSON.parse(await readFile(join(installed.installPath, "hooks/hooks.json"), "utf8"));
-      const guard = config.hooks.PreToolUse.find(
-        (entry: { matcher?: string }) => entry.matcher === "mcp__.*",
+      const guard = config.hooks.PreToolUse.find((entry: { hooks: { command: string }[] }) =>
+        entry.hooks.some((handler) => handler.command.includes("tracker-hook.mjs")),
       );
       expect(guard.hooks[0].command).toBe('node "${CLAUDE_PLUGIN_ROOT}/bin/tracker-hook.mjs"');
       const child = spawn(process.execPath, [join(installed.installPath, "bin/tracker-hook.mjs")], {

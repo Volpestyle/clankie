@@ -43,8 +43,9 @@ const FIRST_TOOLS_WAIT_MS = 20_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 // A linked service sends its catalog revision on every seat long poll and ends
 // a parked poll when that revision changes, so the bridge lists its catalog only
-// then (VUH-2062). Without a fresh revision (an older service, no channel, a
-// failing poll) it keeps checking every five seconds; with one, every five minutes.
+// then (VUH-2062). A bridge without the channel long-polls the revision alone
+// (VUH-2390). Without a fresh revision (an older service, a failing poll) it
+// keeps checking every five seconds; with one, every five minutes.
 const CATALOG_CHECK_MS = 5_000;
 const CATALOG_FALLBACK_MS = 300_000;
 const CATALOG_PUSH_FRESH_MS = WAIT_MS + 15_000;
@@ -612,7 +613,13 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       try {
         const result = await granted.list(signal);
         assertSource();
-        catalogHeld = result.refreshPending && verifiedTools !== undefined;
+        // A busy session holds only a changed catalog. The revision hashes every
+        // input of the one already published; holding an unchanged one would
+        // re-list every five seconds for the whole turn (VUH-2390).
+        catalogHeld =
+          result.refreshPending &&
+          verifiedTools !== undefined &&
+          (result.catalogRevision === undefined || result.catalogRevision !== listedCatalogRevision);
         if (catalogHeld) {
           // A newer busy observation fences older lookups still in flight.
           verifiedToolsSequence = Math.max(sequence, verifiedToolsSequence);
@@ -780,6 +787,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     return firstListPending;
   };
   const polling = link && paneId && approvesWorkerChannel(parentArgv);
+  const waitsForCatalog = !polling && link && paneId;
   /** True while the service's pushed revision vouches for the catalog last listed. */
   const catalogCurrent = () => {
     if (
@@ -810,14 +818,56 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     if (
       membershipStopped ||
       !initialized ||
-      !polling ||
+      !(polling || waitsForCatalog) ||
       started ||
       (requiresCatalog && !firstCatalogVerified)
     )
       return;
     started = true;
+    if (!polling) return void waitForCatalog();
     log(`serving the seat channel for pane ${paneId}`);
     void poll();
+  }
+
+  // The seat's catalog revision alone, for a bridge without the channel. The
+  // wait never reads the mailbox. A service before it answers 404: keep the
+  // five-second check, and look again later in case the service is updated.
+  async function waitForCatalog() {
+    let backoff = RETRY_MS;
+    while (!closed && !membershipStopped) {
+      firstPollAt ??= Date.now();
+      try {
+        const known = pushedCatalog?.revision ?? listedCatalogRevision;
+        const query = new URLSearchParams({ wait: String(WAIT_MS), ...(known ? { revision: known } : {}) });
+        const response = await fetch(`${seatRoute(link, paneId, "tool-catalog")}?${query}`, {
+          headers: linkHeaders(),
+          signal: AbortSignal.timeout(WAIT_MS + 10_000),
+        });
+        await checkFleetMembership(response);
+        await response.text();
+        if (response.status === 404) {
+          await delay(CATALOG_FALLBACK_MS);
+          continue;
+        }
+        const revision = response.headers.get(CATALOG_REVISION_HEADER);
+        if (!response.ok || !revision || revision.length > 256)
+          throw new Error(`catalog wait answered ${String(response.status)}`);
+        pushedCatalog = { revision, at: Date.now() };
+        backoff = RETRY_MS;
+        if (!catalogCurrent())
+          await catalog
+            .check()
+            .catch((error) => log(`catalog refresh failed (${String(error)}); keeping the previous catalog`));
+      } catch (error) {
+        if (closed) return;
+        if (error instanceof FleetMembershipRefused) return stopMembership(error);
+        if (refused(error) && refresh()) continue;
+        if (backoff === RETRY_MS)
+          log(`catalog wait failed (${error instanceof Error ? error.message : String(error)}); retrying`);
+        await delay(backoff);
+        backoff = Math.min(backoff * 2, 60_000);
+      }
+    }
   }
 
   async function poll() {
@@ -1098,7 +1148,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         void catalog
           .check()
           .catch((error) => log(`initial catalog failed (${String(error)}); waiting before polling`));
-      else if (!polling) log("channel not loaded for this session; not polling");
+      else if (!polling) log("channel not loaded for this session; not polling the mailbox");
       return;
     }
     if (method === "ping") return send({ id, result: {} });

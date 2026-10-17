@@ -79,10 +79,18 @@ The fleet bridge lists its catalog when it changes and emits MCP
 `notifications/tools/list_changed` for added, removed or changed definitions.
 A seat's mailbox long poll carries its catalog revision, and the service ends a
 parked poll when a refresh request, a deploy or the fleet tool and peer settings
-change it, so the bridge lists only then (VUH-2062). An unchanged catalog is
-still checked every five minutes. A bridge without a fresh revision (no channel,
-a failing poll, or an older service) checks every five seconds; older bridges
-ignore the revision and keep their five-second check.
+change it, so the bridge lists only then (VUH-2062). A bridge without the seat
+channel, such as every Codex seat, long-polls
+`GET /v1/fleet/seats/{paneId}/tool-catalog?wait=25000&revision=R` for the same
+revision instead; that wait never reads or binds the mailbox (VUH-2390). An
+unchanged catalog is still checked every five minutes. A bridge without a fresh
+revision (a failing poll, or a service without the wait, which answers 404)
+checks every five seconds and tries the wait again after five minutes; bridges
+before worker 0.6.19 keep their five-second check without a channel.
+While a seat is mid-turn (any Herdr status but idle or done) the service holds a
+changed catalog, and the bridge keeps its published one until the turn settles,
+checking every five seconds only while such a change waits. An unchanged
+catalog is never held.
 Temporary discovery failures, including admission refusals, keep the previously
 verified schemas. Explicit settings metadata removes disabled tools. Calls still
 pass through Clankie's current admission and account checks, and a refusal reports
@@ -92,7 +100,11 @@ Codex 0.160.0 logs this notification without updating its executable catalog.
 Plain `config/mcpServer/reload` also reuses an unchanged ready connection.
 For locally hired seats with a dedicated app-server and copied worker config,
 Clankie's controller atomically persists the proven bridge registration, tool
-approval and connection environment revision through `config/batchWrite`, then reloads. Codex reconnects Clankie's MCP connection
+approval and connection environment revision through `config/batchWrite`, then reloads.
+Hires since VUH-2390 register the bridge as `node` running this install's
+`integrations/claude-plugin/worker/bin/fleet-mcp.mjs`, with no `clankie mcp --fleet`
+wrapper process; the refresh also accepts the wrapper for seats launched before
+and preserves whichever registration the seat was proven with. Codex reconnects Clankie's MCP connection
 at the next model step on the same thread. The pane, conversation and message
 tool remain available. Refreshes are serialized and failed RPCs are retried at
 most three times per catalog change; no tool call or turn is retried.

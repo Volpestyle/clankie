@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { verifyLocalCodexCatalogOverrides } from "../src/captain/local-codex-catalog-coordinator.ts";
+import { CODEX_WORKER_BRIDGE } from "../src/captain/codex-catalog-refresh.ts";
 
 // Golden from the owned native launch that refused VUH-1739's live refresh.
 const { argv } = JSON.parse(
@@ -52,4 +53,25 @@ it("accepts worker launches and preserves legacy refresh provenance", () => {
       'mcp_servers.worker.env.CLANKIE_CATALOG_REVISION="masked"',
     ]),
   ).toThrow();
+});
+
+// Hires from VUH-2390 run the bridge entry directly; only this install's entry is managed.
+it("accepts the direct fleet bridge launch and refuses another Node script", () => {
+  const direct = argv.map((arg) =>
+    arg.startsWith("mcp_servers.clankie.command=")
+      ? `mcp_servers.clankie.command=${JSON.stringify(CODEX_WORKER_BRIDGE.command)}`
+      : arg.startsWith("mcp_servers.clankie.args=")
+        ? `mcp_servers.clankie.args=${JSON.stringify(CODEX_WORKER_BRIDGE.args)}`
+        : arg,
+  );
+  expect(() => verifyLocalCodexCatalogOverrides(direct)).not.toThrow();
+  expect(() =>
+    verifyLocalCodexCatalogOverrides(
+      direct.map((arg) =>
+        arg.startsWith("mcp_servers.clankie.args=")
+          ? `mcp_servers.clankie.args=${JSON.stringify(["/tmp/another/fleet-mcp.mjs"])}`
+          : arg,
+      ),
+    ),
+  ).toThrow("original_codex_tui_bridge_not_managed_fleet");
 });

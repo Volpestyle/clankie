@@ -131,13 +131,14 @@
         "hooks": [
           {
             "type": "command",
+            "if": "Bash(*clankie *)",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/worker/bin/resource-hook.mjs\"",
             "timeout": 10
           }
         ]
       },
       {
-        "matcher": "mcp__.*",
+        "matcher": "^mcp__.*[Ll][Ii][Nn][Ee][Aa][Rr].*__",
         "hooks": [
           {
             "type": "command",

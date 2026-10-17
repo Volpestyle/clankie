@@ -18,8 +18,6 @@ const EVENTS = new Set<FleetSeatHook["event"]>([
   "StopFailure",
   "PreToolUse",
   "PermissionRequest",
-  "Notification",
-  "PostToolUse",
   "SessionEnd",
 ]);
 
@@ -57,7 +55,6 @@ export async function runSeatHookCommand(
     tool_name?: unknown;
     tool_use_id?: unknown;
     tool_input?: unknown;
-    notification_type?: unknown;
   };
   const event = hook.hook_event_name as FleetSeatHook["event"];
   if (!EVENTS.has(event) || typeof hook.session_id !== "string") return 0;
@@ -87,7 +84,6 @@ export async function runSeatHookCommand(
         ? { toolUseId: hook.tool_use_id }
         : {}),
     ...(hook.tool_input && typeof hook.tool_input === "object" ? { toolInput: hook.tool_input } : {}),
-    ...(typeof hook.notification_type === "string" ? { notificationType: hook.notification_type } : {}),
     ...(lastMessage === undefined || lastMessage.trim() === ""
       ? {}
       : { lastMessage: lastMessage.slice(0, OPERATOR_CONVERSATION_TEXT_MAX) }),

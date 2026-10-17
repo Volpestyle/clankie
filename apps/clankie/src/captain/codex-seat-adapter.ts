@@ -23,6 +23,7 @@ import {
 } from "./codex-app-server.ts";
 import { codexTrackerOverrides } from "./tracker-isolation.ts";
 import { codexWorkerMcpOverrides } from "./worker-mcp-profile.ts";
+import { CODEX_WORKER_BRIDGE } from "./codex-catalog-refresh.ts";
 import { codexAsyncQuestion, codexQuestion } from "./codex-user-input.ts";
 import type { CodexToolCatalogReport } from "../../../../integrations/claude-plugin/worker/bin/codex-tool-catalog.mjs";
 import { MAXIMUM_TRUST_CODEX_CONFIG, type FleetGates } from "@clankie/protocol";
@@ -326,8 +327,8 @@ export function createCodexSeatAdapter(
             trackerOverrides.push(
               "mcp_servers.clankie.enabled=false",
               "mcp_servers.worker.enabled=true",
-              'mcp_servers.worker.command="clankie"',
-              'mcp_servers.worker.args=["mcp","--fleet"]',
+              `mcp_servers.worker.command=${JSON.stringify(CODEX_WORKER_BRIDGE.command)}`,
+              `mcp_servers.worker.args=${JSON.stringify(CODEX_WORKER_BRIDGE.args)}`,
               'mcp_servers.worker.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
             );
           // Each Codex thread, subagents included, starts its own set of every

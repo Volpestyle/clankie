@@ -250,6 +250,9 @@ Changing the device or exact model refuses while that holder has a different lea
 concurrent requests validate their own selection instead of sharing another grant. Native Claude Bash hooks supply a session/subagent holder;
 Codex uses its executing thread ID even when a parent holder is inherited. The
 Claude hook scopes its identity to a subshell and clears an ancestor Codex thread.
+It runs only for a Bash command that names `clankie` as a command word, so write
+`clankie heavy` or `clankie simulator` in the command itself; a script that calls
+them internally gets no Claude holder and is refused unless it passes `--holder`/`holderId`.
 `clankie doctor` detects an installed worker plugin without the resource Bash hook;
 refresh that linked profile with the approved harness setup route. Installing a
 new hook does not update an existing session that has cached hook definitions. Status names `holderId` beside the seat. A child cannot

@@ -5516,6 +5516,40 @@ paths:
           description: That pane holds no Claude seat with this session
 
   /v1/fleet/seats/{paneId}/tool-catalog:
+    get:
+      tags: [Captain, Operator]
+      operationId: waitFleetSeatCatalogRevision
+      summary: Long-poll a fleet seat's catalog revision
+      description: |
+        For a worker bridge without the seat channel, such as a Codex seat
+        (VUH-2390). With `revision` equal to the seat's current catalog revision
+        it parks for up to `wait` ms (capped at 30000) and returns early when a
+        refresh request, a deploy or the fleet tool and peer settings change it;
+        otherwise it answers at once. The bridge lists its tools only when the
+        revision differs from the one it listed. Never reads or binds the
+        seat's mailbox, and grants nothing. Same pane admission as the mailbox.
+        A service before this route answers 404; the bridge then keeps its
+        five-second check.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: wait
+          schema: { type: integer, minimum: 0, maximum: 30000, default: 0 }
+        - in: query
+          name: revision
+          schema: { type: string, maxLength: 256 }
+      responses:
+        "200":
+          description: The seat's current catalog revision, also in the x-clankie-catalog-revision header
+          content:
+            application/json:
+              example: { schemaVersion: 1, revision: 0f3c9a4b6d2e8f1a7c5b3d9e2a4f6c8b }
+        "403": { description: Fleet admission or native pane identity refused }
+        "503": { description: Worker catalog unavailable (worker_catalog_unavailable) }
     post:
       tags: [Captain, Operator]
       operationId: recordFleetNativeToolCatalog

@@ -503,6 +503,27 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
     return context.json(await ctx.dependencies.captain.toolCatalogHealth());
   });
+  // A bridge without the seat channel (Codex, or Claude started without
+  // --channels) long-polls its catalog revision here instead of listing its
+  // tools on a timer (VUH-2390). It never reads or binds the seat's mailbox.
+  ctx.app.get(FLEET_SEAT_TOOL_CATALOG_PATH, async (context) => {
+    context.header("cache-control", "no-store");
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
+    const worker = ctx.dependencies.workerMcp;
+    if (!worker) return context.json({ error: "worker_catalog_unavailable" }, 503);
+    const wait = Number(context.req.query("wait") ?? 0);
+    const qualified = splitFleetQualified(pane.paneId);
+    const revision = await worker.waitCatalogRevision(
+      qualified?.fleet ?? "default",
+      qualified?.id ?? pane.paneId,
+      context.req.query("revision"),
+      Number.isFinite(wait) ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX) : 0,
+      context.req.raw.signal,
+    );
+    context.header(FLEET_CATALOG_REVISION_HEADER, revision);
+    return context.json({ schemaVersion: 1, revision });
+  });
   ctx.app.post(FLEET_SEAT_TOOL_CATALOG_PATH, bodyLimit({ maxSize: 1024 * 1024 }), async (context) => {
     const pane = await fleetSeatPane(context);
     if ("denial" in pane) return pane.denial;

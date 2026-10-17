@@ -136,9 +136,7 @@ describe("clankie-worker claude plugin", () => {
       hooks: Record<string, { hooks: { command: string }[] }[]>;
     };
     expect(Object.keys(hooks.hooks).sort()).toEqual([
-      "Notification",
       "PermissionRequest",
-      "PostToolUse",
       "PreToolUse",
       "SessionEnd",
       "SessionStart",
@@ -158,7 +156,6 @@ describe("clankie-worker claude plugin", () => {
             },
           ],
           ...(event === "PreToolUse" ? { matcher: "AskUserQuestion" } : {}),
-          ...(event === "Notification" ? { matcher: "idle_prompt|permission_prompt" } : {}),
         },
         ...(event === "PreToolUse"
           ? [
@@ -167,6 +164,7 @@ describe("clankie-worker claude plugin", () => {
                 hooks: [
                   {
                     type: "command",
+                    if: "Bash(*clankie *)",
                     command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/resource-hook.mjs"',
                     timeout: 10,
                   },
@@ -177,7 +175,7 @@ describe("clankie-worker claude plugin", () => {
         ...(["SessionStart", "PreToolUse"].includes(event)
           ? [
               {
-                ...(event === "PreToolUse" ? { matcher: "mcp__.*" } : {}),
+                ...(event === "PreToolUse" ? { matcher: "^mcp__.*[Ll][Ii][Nn][Ee][Aa][Rr].*__" } : {}),
                 hooks: [
                   {
                     type: "command",

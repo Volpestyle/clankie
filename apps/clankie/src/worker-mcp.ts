@@ -304,6 +304,35 @@ export class WorkerMcp {
     );
   }
 
+  /**
+   * Parks while the seat's catalog revision is still `known`, for a bridge
+   * without the seat channel to long-poll instead of listing its tools on a
+   * timer (VUH-2390). Returns the current revision; a signal, never a grant.
+   */
+  async waitCatalogRevision(
+    fleet: string,
+    pane: string,
+    known: string | undefined,
+    waitMs: number,
+    signal: AbortSignal,
+  ): Promise<string> {
+    // Taken before the read, so a change during it still ends the wait.
+    const changed = this.catalogChanges();
+    if (waitMs > 0 && known !== undefined && known === (await this.catalogRevision(fleet, pane)))
+      await new Promise<void>((resolve) => {
+        const stop = AbortSignal.any([signal, changed]);
+        const finish = () => {
+          clearTimeout(timer);
+          stop.removeEventListener("abort", finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, waitMs);
+        if (stop.aborted) finish();
+        else stop.addEventListener("abort", finish, { once: true });
+      });
+    return this.catalogRevision(fleet, pane);
+  }
+
   private catalogRevisionOf(
     fleet: string | undefined,
     pane: string | undefined,

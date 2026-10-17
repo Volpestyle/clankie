@@ -11,6 +11,7 @@ import {
   type LocalCodexCatalogResult,
 } from "../src/captain/local-codex-catalog-coordinator.ts";
 import { readLocalCodexRecords } from "../src/local-codex-records.ts";
+import { CODEX_WORKER_BRIDGE } from "../src/captain/codex-catalog-refresh.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -29,7 +30,12 @@ async function until(predicate: () => boolean) {
 }
 
 /** Real Unix WebSocket RPC + private config/registry/journal files. Kernel observation is the sole fixture seam. */
-async function fixture(pid = 42, paneId = "w1:p1", serverName = "clankie") {
+async function fixture(
+  pid = 42,
+  paneId = "w1:p1",
+  serverName = "clankie",
+  bridge: { command: string; args: readonly string[] } = { command: "clankie", args: ["mcp", "--fleet"] },
+) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "codex-catalog-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "worker-codex", "seat-owned"),
@@ -125,8 +131,8 @@ async function fixture(pid = 42, paneId = "w1:p1", serverName = "clankie") {
               mcp_servers: {
                 [serverName]: {
                   enabled: true,
-                  command: "clankie",
-                  args: ["mcp", "--fleet"],
+                  command: bridge.command,
+                  args: bridge.args,
                   env: {
                     CLANKIE_CODEX_CATALOG_SIGNAL: signalPath,
                     ...(revision ? { CLANKIE_CATALOG_REVISION: revision } : {}),
@@ -155,8 +161,8 @@ async function fixture(pid = 42, paneId = "w1:p1", serverName = "clankie") {
           expect(params.filePath).toBe(configPath);
           const edits = params.edits as { keyPath: string; value: unknown }[];
           const values = Object.fromEntries(edits.map((edit) => [edit.keyPath, edit.value]));
-          expect(values[`mcp_servers.${serverName}.command`]).toBe("clankie");
-          expect(values[`mcp_servers.${serverName}.args`]).toEqual(["mcp", "--fleet"]);
+          expect(values[`mcp_servers.${serverName}.command`]).toBe(bridge.command);
+          expect(values[`mcp_servers.${serverName}.args`]).toEqual(bridge.args);
           expect(values[`mcp_servers.${serverName}.default_tools_approval_mode`]).toBe("approve");
           const revision = values[`mcp_servers.${serverName}.env.CLANKIE_CATALOG_REVISION`];
           await writeFile(
@@ -364,6 +370,16 @@ it.each(["clankie", "worker"])(
     ).toBe(true);
   },
 );
+
+// A direct bridge (VUH-2390) keeps its own transport; the refresh never rewrites it to the wrapper.
+it("refreshes a direct fleet bridge registration with its own transport", async () => {
+  const f = await fixture(42, "w1:p1", "worker", CODEX_WORKER_BRIDGE);
+  expect(await f.coordinator().refresh({ revision: "deploy-one" })).toMatchObject([
+    { outcome: "catalog-refreshed" },
+  ]);
+  expect(f.count("config/batchWrite")).toBe(1);
+  expect(f.count("config/mcpServer/reload")).toBe(1);
+});
 
 it("recovers a legacy registration only from the original native endpoint and loaded registered occupant digest", async () => {
   const f = await fixture();

@@ -7,7 +7,7 @@ import type { LocalCodexSeats } from "../local-codex-seats.ts";
 import { nativeRequest } from "../herdr-native-request.ts";
 import { nativeProcessReceipt, observeCodexServer, observeNativeProcesses } from "../local-fleet-process.ts";
 import { CodexAppServerClient, openCodexSocket } from "./codex-app-server.ts";
-import { isolatedCodexConfig } from "./codex-catalog-refresh.ts";
+import { isolatedCodexConfig, managedCodexWorkerBridge } from "./codex-catalog-refresh.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { codexToolCatalogReport } from "../../../../integrations/claude-plugin/worker/bin/codex-tool-catalog.mjs";
 
@@ -51,6 +51,7 @@ interface ThreadScope {
 }
 interface ConfigProvenance {
   server: "worker" | "clankie";
+  bridge: { command: string; args: readonly string[] };
   home: string;
   filePath: string;
   expectedVersion: string;
@@ -138,8 +139,10 @@ export function verifyLocalCodexCatalogOverrides(argv: readonly string[]): Reado
   );
   requireProof(
     overrides.get(`mcp_servers.${server}.enabled`) === true &&
-      overrides.get(`mcp_servers.${server}.command`) === "clankie" &&
-      same(overrides.get(`mcp_servers.${server}.args`), ["mcp", "--fleet"]) &&
+      managedCodexWorkerBridge(
+        overrides.get(`mcp_servers.${server}.command`),
+        overrides.get(`mcp_servers.${server}.args`),
+      ) !== undefined &&
       same(overrides.get(`mcp_servers.${server}.env_vars`), [
         "HERDR_PANE_ID",
         "HERDR_SOCKET_PATH",
@@ -360,12 +363,8 @@ async function configuration(
   requireProof(candidates.length === 1, "native_codex_bridge_ambiguous");
   const server = candidates[0]!;
   const effective = object(servers[server]);
-  requireProof(
-    effective.enabled !== false &&
-      effective.command === "clankie" &&
-      same(effective.args, ["mcp", "--fleet"]),
-    "native_codex_bridge_not_managed_fleet",
-  );
+  const bridge = managedCodexWorkerBridge(effective.command, effective.args);
+  requireProof(effective.enabled !== false && bridge !== undefined, "native_codex_bridge_not_managed_fleet");
   const env = object(effective.env),
     signalPath = env.CLANKIE_CODEX_CATALOG_SIGNAL;
   requireProof(
@@ -376,6 +375,7 @@ async function configuration(
   requireProof(revision === undefined || revisionValid(revision), "native_codex_revision_invalid");
   return {
     server,
+    bridge: bridge!,
     home,
     filePath,
     expectedVersion: String(users[0]!.version),
@@ -650,6 +650,7 @@ export function createLocalCodexCatalogCoordinator(input: {
         configs.every(
           (row) =>
             row.server === config.server &&
+            same(row.bridge, config.bridge) &&
             row.filePath === config.filePath &&
             row.expectedVersion === config.expectedVersion,
         ),
@@ -909,6 +910,7 @@ export function createLocalCodexCatalogCoordinator(input: {
           const current = await configuration(request, cwd, config.home);
           requireProof(
             current.server === config.server &&
+              same(current.bridge, config.bridge) &&
               current.filePath === config.filePath &&
               current.expectedVersion === version,
             "original_codex_config_version_changed",
@@ -948,8 +950,8 @@ export function createLocalCodexCatalogCoordinator(input: {
           // Legacy controllers retain their original server name.
           await request("config/batchWrite", {
             edits: [
-              ["command", "clankie"],
-              ["args", ["mcp", "--fleet"]],
+              ["command", config.bridge.command],
+              ["args", [...config.bridge.args]],
               ["default_tools_approval_mode", "approve"],
               ["env.CLANKIE_CATALOG_REVISION", attempt.envRevision],
             ].map(([key, value]) => ({

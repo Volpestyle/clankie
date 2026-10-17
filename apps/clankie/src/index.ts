@@ -1862,7 +1862,9 @@ const workerMcp = new WorkerMcp({
     const paneId = fleet === "default" ? pane : `${fleet}/${pane}`;
     // Every tools/list asks this; read only the requesting seat, not every machine's census.
     const seat = await captain.workerCatalogSeat!(paneId);
-    if (!seat || !["idle", "ready"].includes(seat.status ?? "")) return true;
+    // A settled turn (done) can take a new catalog like an idle one; holding it
+    // kept every finished seat's bridge listing every five seconds (VUH-2390).
+    if (!seat || !["idle", "ready", "done"].includes(seat.status ?? "")) return true;
     if (seat.harness === "opencode") {
       const observed = await captain.refreshNativeWorkerCatalog!(paneId, { revision: workerRuntimeRevision });
       return observed.outcome !== "refreshed";

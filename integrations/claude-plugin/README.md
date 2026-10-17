@@ -400,6 +400,13 @@ doctor/native setup also require its Bash resource hook, not just lifecycle hook
 Existing sessions must use their native hook reload before new definitions apply. They preserve tool fields
 and leave permission decisions to Claude. The resource CLIs use it for independent
 simulator ownership and named heavy holders; they do not write a shared env file.
+From worker 0.6.19 and operator 0.3.8 (VUH-2390) Claude starts that hook only for
+a Bash call with a command word `clankie` (`"if": "Bash(*clankie *)"`; compound
+commands it cannot split still run it), so name `clankie heavy` or
+`clankie simulator` in the command itself. A script that calls them internally
+has no native holder and is refused: pass `--holder`/`holderId` there. The
+Linear connector guard starts only for an MCP server whose name contains
+`linear`, matched case-insensitively, and still denies every one of them.
 
 Before a checkout worker install or fleet copy, the existing Codex materializer
 refreshes both snapshots. Release assembly does the same.

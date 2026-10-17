@@ -1308,6 +1308,12 @@ async function recoveryService(
         setTimeout(() => response.end(JSON.stringify({ schemaVersion: 1, events: [] })), 200);
         return;
       }
+      // A service without the catalog wait (VUH-2390): the bridge keeps its five-second check.
+      if (request.url?.includes("/tool-catalog?")) {
+        response.statusCode = 404;
+        response.end("{}");
+        return;
+      }
       if (request.url?.endsWith("/peers")) {
         peerRequests++;
         if (peerRefusal) {

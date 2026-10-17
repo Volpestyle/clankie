@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { LocalCodexSeats } from "../src/local-codex-seats.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
@@ -32,7 +33,10 @@ it("registers a private hire before startup discovery, injects the worker bridge
       options.onServerStarted?.(42);
       expect(localProcess).toHaveBeenCalledWith(42, "w1:p1");
       expect(options.config).toContain("mcp_servers.worker.enabled=true");
-      expect(options.config).toContain('mcp_servers.worker.args=["mcp","--fleet"]');
+      expect(options.config).toContain('mcp_servers.worker.command="node"');
+      expect(options.config).toContain(
+        `mcp_servers.worker.args=${JSON.stringify([fileURLToPath(new URL("../../../integrations/claude-plugin/worker/bin/fleet-mcp.mjs", import.meta.url))])}`,
+      );
       expect(options.env).toEqual({
         CODEX_HOME: "/another-account",
         HERDR_PANE_ID: "w1:p1",

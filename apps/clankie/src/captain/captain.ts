@@ -7185,7 +7185,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       if (["SessionEnd", "Stop", "StopFailure", "UserPromptSubmit"].includes(hook.event))
         hookQuestions.cancel(ref, "Native question is no longer pending");
-      if (["PreToolUse", "Notification", "PostToolUse", "SessionEnd"].includes(hook.event)) return true;
+      if (hook.event === "PreToolUse" || hook.event === "SessionEnd") return true;
       seatHooks.record(paneId, hook);
       if (hook.event !== "SessionStart")
         fleetMailboxes
