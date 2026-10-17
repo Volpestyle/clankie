@@ -912,6 +912,14 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/discord/official",
+      {
+        access: "Device bearer with terminal-observe access",
+        purpose:
+          "Read this computer’s free official-bot status, server, blocks and limits. Changes require the operator bridge.",
+      },
+    ],
+    [
       "GET /v1/discord/room-voice",
       {
         access: "Device bearer with terminal-observe access",
