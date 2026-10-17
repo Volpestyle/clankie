@@ -498,6 +498,15 @@ under `<state>/captain/auto-rounds/` with whether the wake was delivered;
 Auto tick (reused while younger than one); a [drift signal](../apps/clankie/src/captain/auto-drift.ts)
 adds a section to that lead's round and its name to the round fingerprint, and stays
 pending in the record until a round carrying it is delivered. The owner is not told.
+[Staffing measurements](../apps/clankie/src/captain/auto-staffing.ts) also retain ready
+work and explicit blocker edges from the project's saved tracker, census seats
+against worker/WIP caps, and per-plan headroom and pace. Ready work with spare
+capacity flags `under_staffed`; an empty ready queue with headroom flags
+`backlog_not_ready` and asks the lead to plan independent work. The next round
+checks staffing increased or records the cap, queue or reserve reason. These
+signals share the existing wake and fingerprint; they never hire or change issues.
+Old clients opt in with `includeStaffing=true`. A historical velocity replay cannot
+invent historical census or usage and leaves staffing unavailable without those inputs.
 New completed parents and tracker milestones add their stable identities to the
 fingerprint and, at the default milestone owner-loop cadence, request one combined
 project status update with media and evidence links. Silent cadence requests none;

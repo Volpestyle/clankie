@@ -191,7 +191,7 @@ export function autoRoundPrompt(
     "Auto round. The owner put these projects on Auto: work their backlogs without being asked.",
     "For each one, read its tracker with the linear_* tools, take the next ready work in priority order, plan it into issues where it needs planning, and staff it within the project's worker cap and the machine and account limits. Land finished work and close it with evidence, and file what you find along the way.",
     "A Linear project reference names that exact project in the connected Linear app. Read its backlog by UUID; it does not switch a repository’s saved tracker backend or grant access to another account.",
-    "Your autonomy settings decide which calls you make alone. Bring the owner only decisions that are truly his, one owner ask each. If a project is blocked or its backlog is empty, record that once and move on; do not message the owner just to say so.",
+    "Your autonomy settings decide which calls you make alone. Bring the owner only decisions that are truly his, one owner ask each. Owner-blocked issues hold only their linked dependents. With account headroom but no ready work, break backlog items into ready, independent results; if the backlog is exhausted, record that reason and move to another Auto project. Do not message the owner just to report idleness.",
     "",
     "Projects on Auto (owner settings):",
     ...states.map(

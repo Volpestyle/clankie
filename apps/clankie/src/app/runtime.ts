@@ -2766,7 +2766,18 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     const roundsView = (value: unknown) => {
-      const response = AutoRoundsResponseSchema.parse(value);
+      const parsed = AutoRoundsResponseSchema.parse(value);
+      // Additive capability: released clients use strict round schemas.
+      const response =
+        context.req.query("includeStaffing") === "true"
+          ? parsed
+          : {
+              ...parsed,
+              rounds: parsed.rounds.map(({ staffing: _staffing, ...round }) => ({
+                ...round,
+                projects: round.projects.map(({ staffing: _projectStaffing, ...project }) => project),
+              })),
+            };
       if (context.req.query("includeWorkPolicy") === "true") return response;
       return {
         ...response,
@@ -2815,6 +2826,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         project: ProjectIdSchema.optional(),
         limit: z.coerce.number().int().min(1).max(200).optional(),
         includeWorkPolicy: z.literal("true").optional(),
+        includeStaffing: z.literal("true").optional(),
       })
       .strict()
       .safeParse(context.req.query());

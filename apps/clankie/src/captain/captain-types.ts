@@ -88,6 +88,10 @@ export interface CaptainOptions {
   readonly remoteOrigin?: RemoteOriginReader;
   /** Reads a project's tracker outcomes for its Auto round's velocity (ADR 0270). */
   readonly projectOutcomes?: VelocityDeps["outcomes"];
+  /** Ready work and explicit blockers from the project's saved tracker (VUH-2335). */
+  readonly projectWorkQueue?: (
+    project: import("@clankie/protocol/projects").Project,
+  ) => Promise<import("@clankie/protocol/auto-rounds").AutoWorkQueue>;
   /** How long an operator head stays held after a completed poll; defaults to 30s (VUH-2045). */
   readonly headBoundGraceMs?: number;
   /**

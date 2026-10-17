@@ -1,3 +1,4 @@
+import type { AutoWorkQueue } from "@clankie/protocol/auto-rounds";
 import {
   TrackerSyncCommandSchema,
   type TrackerSyncCommand,
@@ -367,6 +368,8 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
    * a host operation, not a tool, so no caller can type a release's items.
    */
   syncReleases(history: ReleaseHistory, options?: TrackerToolCallOptions): Promise<ReleaseSyncResult>;
+  /** Read-only current ready work and explicit blocker edges for Auto staffing. */
+  readWorkQueue(projectId: string): Promise<AutoWorkQueue>;
   /** Host-only read of one project's outcome facts for Auto rounds (ADR 0270). */
   readOutcomes(input: {
     readonly projectId: string;
@@ -3939,6 +3942,39 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         publish(store.events?.slice(firstEvent - 1) ?? []);
         return report;
       });
+    },
+    async readWorkQueue(projectId) {
+      const { store, clock } = await load({ mutable: false });
+      findProject(store, projectId);
+      const members = store.issues.filter((issue) => issue.projectId === projectId && isOpen(store, issue));
+      const open = (id: string) => store.issues.some((issue) => issue.id === id && isOpen(store, issue));
+      const key = (id: string) => store.issues.find((issue) => issue.id === id)?.identifier ?? id;
+      const blocked = members.filter((issue) => issue.blocked || issue.asking || issue.blockedBy.some(open));
+      const ready = readyIssues(store, findProject(store, projectId), clock).filter(
+        (issue) =>
+          !issue.asking &&
+          store.issueStatuses.find((status) => status.id === issue.statusId)?.type === "unstarted",
+      );
+      return {
+        state: "known",
+        ready: ready.map((issue) => issue.identifier),
+        backlog: members
+          .filter(
+            (issue) =>
+              !blocked.includes(issue) &&
+              store.issueStatuses.find((status) => status.id === issue.statusId)?.type === "backlog",
+          )
+          .map((issue) => issue.identifier),
+        blocked: blocked.map((issue) => ({
+          issue: issue.identifier,
+          blocks: issue.blocks.filter(open).map(key),
+          reason: issue.asking
+            ? "owner ask pending"
+            : issue.blocked
+              ? "recorded blocker"
+              : `blocked by ${issue.blockedBy.filter(open).map(key).join(", ")}`,
+        })),
+      };
     },
     async readOutcomes(input) {
       const { store, clock } = await load({ mutable: false });

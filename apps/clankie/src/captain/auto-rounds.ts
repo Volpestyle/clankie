@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } fr
 import { join } from "node:path";
 import type {
   AutoRound,
+  AutoStaffingTotals,
   DriftDetection,
   DriftCorrection,
   MilestoneReport,
@@ -18,6 +19,7 @@ interface MeasurementLine {
   readonly conversationId: string;
   readonly at: string;
   readonly velocity: ProjectVelocity;
+  readonly staffing?: AutoStaffingTotals;
 }
 interface DeliveryLine {
   readonly type: "delivery";
@@ -230,11 +232,23 @@ export class AutoRoundRecord {
   }
 
   /** Records a round's measurements before its wake is sent; returns the round id. */
-  measured(conversationId: string, velocities: readonly ProjectVelocity[], at = new Date()): string {
+  measured(
+    conversationId: string,
+    velocities: readonly ProjectVelocity[],
+    at = new Date(),
+    staffing?: AutoStaffingTotals,
+  ): string {
     const roundId = randomUUID();
     const carried = new Map<string, DriftDetection[]>();
     for (const velocity of velocities) {
-      this.append({ type: "measurement", roundId, conversationId, at: at.toISOString(), velocity });
+      this.append({
+        type: "measurement",
+        roundId,
+        conversationId,
+        at: at.toISOString(),
+        velocity,
+        ...(staffing ? { staffing } : {}),
+      });
       const state = this.state(velocity.projectId);
       const drift = (velocity.drift ?? []).map(({ carried: _carried, ...detection }) => detection);
       const pending = [
@@ -321,6 +335,7 @@ export class AutoRoundRecord {
         at: line.at,
         delivery: null,
         projects: [],
+        ...(line.staffing ? { staffing: line.staffing } : {}),
       };
       round.projects.push(line.velocity);
       rounds.set(line.roundId, round);

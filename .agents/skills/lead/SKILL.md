@@ -413,6 +413,22 @@ Product churn is project-wide evidence, not proof that the chosen issue caused i
 Keep the correction in the ordinary Auto round; routine drift does not warrant
 an owner message or project status update.
 
+## Auto staffing checks
+
+An Auto round's `under_staffed` signal means ready unblocked work, spare capacity
+under the project caps, and fresh plan headroom coexist. Staff independent ready
+results in that round; reuse suitable idle owned seats or hire within ordinary
+admission. Owner-blocked items hold only their named dependent issues. Keep their
+blocker edges current and continue unrelated ready work.
+
+`backlog_not_ready` asks you to break backlog items into ready results rather than
+idle while plan capacity remains. The next recorded round checks active staffing
+increased, or records `cap_reached`, `no_ready_work` or `plan_reserve`. An unresolved
+check needs action again; unknown telemetry is not spare capacity. Re-read usage
+before a hire. Detection does not grant authority, change caps, pick an issue or
+start a worker; those remain your decisions. Read measurements with
+`clankie auto rounds`; routine utilization corrections need no owner post.
+
 ## Auto milestone reports
 
 Auto's check deadline and each lead's delivery fence survive service restarts.

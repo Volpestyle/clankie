@@ -2356,6 +2356,13 @@ paths:
       description: Each Auto round's measured velocity per project (ADR 0270) and whether its wake was delivered. Closures since the last milestone split owner-facing, tooling, unlinked and unclassified; started issues (cap null until a WIP cap exists); churn by bucket; per-day facts for the window and the last seven local days. Any part the service could not measure is `{state:"unknown", reason}`, never zero. A round whose wake never settled has a null delivery. Reads the service-local record only; no tracker or git calls.
       security: [{ operatorBearer: [] }]
       parameters:
+        - {
+            name: includeStaffing,
+            in: query,
+            required: false,
+            schema: { const: "true" },
+            description: "Include additive staffing facts and totals (VUH-2335); historical rounds may omit them.",
+          }
         - { name: project, in: query, required: false, schema: { type: string } }
         - {
             name: limit,
@@ -2391,6 +2398,11 @@ paths:
                                 delivered: { type: boolean }
                                 at: { type: string, format: date-time }
                                 reason: { type: string }
+                        staffing:
+                          {
+                            type: object,
+                            description: "AutoStaffingTotals from @clankie/protocol/auto-rounds; only with includeStaffing=true",
+                          }
                         projects:
                           type: array
                           items:

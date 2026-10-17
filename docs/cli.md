@@ -3963,6 +3963,21 @@ through `GET /v1/auto/rounds` with the operator credential, newest round first
 service measured before waking the lead, and whether that wake was delivered
 (`delivery` is null when it never settled, for example across a restart):
 
+- `staffing` on each project: explicit ready issue keys, backlog keys and blocker edges;
+  working, idle/done and occupied seats; worker and Started-issue WIP caps; and
+  fresh per-plan remaining usage, reset horizon and burn/spare capacity per day.
+  `under_staffed` means ready work, positive plan headroom and room under the caps
+  coexist. `backlog_not_ready` asks the lead to plan ready slices rather than idle.
+  The next recorded round checks increased active staffing or records `cap_reached`,
+  `no_ready_work`, `plan_reserve`, `unresolved` or `unknown`.
+- Round-level `staffing`: ready-work and seat totals plus the plan snapshots.
+  Unknown sources stay unknown/null; unset caps are null. Plan headroom requires
+  fresh usage within five minutes, sign-in, no owner hold, more than 10% remaining
+  in every general window, and positive spare capacity at the observed pace.
+  Staffing is advisory: ordinary project, machine, model and hire admission still apply.
+  The CLI requests `includeStaffing=true`; HTTP clients must opt in so older strict
+  clients retain their response shape. Historical rounds may omit staffing.
+
 - `window`: since the last milestone (a closed parent issue or a complete tracker
   milestone), or the 14-day lookback start when none is known.
 - `closures`: keys closed in the window, split `ownerFacing`, `tooling` (every

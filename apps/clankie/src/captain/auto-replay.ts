@@ -13,6 +13,7 @@ export const AutoReplayQuerySchema = z
     since: z.iso.datetime({ offset: true }),
     until: z.iso.datetime({ offset: true }),
     includeWorkPolicy: z.literal("true").optional(),
+    includeStaffing: z.literal("true").optional(),
   })
   .strict()
   .refine((value) => {
@@ -64,6 +65,7 @@ export async function replayAutoRounds(
           caveats: [
             ...velocity.caveats,
             "Read-only replay: no wake, tracker write, round-record write or pending drift consumption.",
+            "Historical staffing is unavailable without recorded census, queue and usage inputs; current capacity is never projected backwards.",
             ...(project.wipCap === undefined ? ["No WIP cap is set; over_wip cannot be evaluated."] : []),
           ],
         },

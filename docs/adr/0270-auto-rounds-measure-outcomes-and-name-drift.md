@@ -244,3 +244,34 @@ Lead decisions for VUH-2284:
 - Decision asks have a default and deadline. Expiry informs the lead and owner
   with service attribution; it never fabricates an owner answer or approves an
   owner gate. The lead can act only within existing authority.
+
+## Amendment: unused capacity is measured (VUH-2335, 2026-10-17)
+
+- Each delivered or refused round retains per-project ready/backlog keys, explicit
+  blockers and their dependent keys, working and idle/done census seats, occupied
+  seats against the worker cap, and Started issues against the WIP cap. The same
+  record includes totals and per-plan usage windows, observed time, remaining
+  fraction, reset horizon, burn per day and spare fraction per day.
+- Known, signed-in, usable, unheld accounts need usage at most five minutes old,
+  more than the existing 10% reserve in every general window, and positive spare
+  capacity at their observed pace to count as headroom. An expired reset never
+  becomes fresh capacity. Project plan/harness constraints filter the candidates;
+  ordinary model, role, machine and hire admission remain authoritative.
+- Ready work with headroom and room under worker/WIP caps flags `under_staffed` in
+  the existing Auto wake. No ready work with headroom flags `backlog_not_ready`:
+  plan backlog items into independent ready ones. Explicit blockers hold only
+  their dependent keys; no project-wide hiring pause follows an owner blocker.
+- The next recorded round compares active seats with the preceding signal and
+  records `staffed`, `cap_reached`, `no_ready_work`, `plan_reserve`, `unresolved` or
+  `unknown`. Signal names and unresolved checks join the existing fingerprint;
+  unchanged signals follow the existing idle rewake. Measurements do not hire,
+  change issue state, raise a cap, or add owner notifications.
+- Queue reads follow the saved tracker route. Built-in reads use the same native
+  ready/lease/run rules, restricted to Todo/unstarted items; Linear reads page
+  open issues and blocker relations and use explicit owner-blocked labels/states.
+  Free-text descriptions do not establish a blocker. Failed or partial reads
+  remain unknown. Unreadable census sources cannot establish free seats.
+- `clankie auto rounds` opts into additive staffing fields. HTTP clients request
+  `includeStaffing=true`; historical records remain readable. Velocity replay
+  cannot reconstruct census and account usage from git/tracker state alone; a
+  staffing replay needs retained historical inputs and labels reconstructed facts.

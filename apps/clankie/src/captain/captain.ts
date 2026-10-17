@@ -1,4 +1,11 @@
 import { projectTrackerTool } from "./project-tracker-access.ts";
+import {
+  autoPlanCapacity,
+  projectStaffing,
+  staffingSection,
+  staffingSignals,
+  staffingTotals,
+} from "./auto-staffing.ts";
 import { readFleetSeatCapabilities } from "./fleet-seat-capabilities.ts";
 import {
   fleetProjectionDiagnostics,
@@ -4945,7 +4952,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const autoFingerprint = (states: readonly AutoProjectState[]) =>
     autoRoundFingerprint(
       states,
-      (id) => driftSignals(autoMeasurements.get(id)),
+      (id) => [
+        ...driftSignals(autoMeasurements.get(id)),
+        ...staffingSignals(autoMeasurements.get(id)?.staffing),
+      ],
       (id) => milestoneSignals(autoMeasurements.get(id)),
     );
   const stopAutoRounds = autoCadence.start(async () => {
@@ -4958,6 +4968,63 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     autoCadence.retain(new Set(rounds.keys()));
     // Velocity and drift (ADR 0270): measured every tick, so new drift changes the fingerprint.
     await measureAutoProjects(new Set([...rounds.values()].flat().map((state) => state.id)));
+    if (shutdown.signal.aborted) return;
+    const autoProjects = (await settings()).projects.projects.filter((project) => project.auto);
+    const machines = [
+      ...new Set(
+        autoProjects.flatMap((project) =>
+          [...project.workspaces, ...project.worktreeRoots].map((root) => root.machineId),
+        ),
+      ),
+    ];
+    const reports = await Promise.all(
+      machines.map(async (machine) => {
+        try {
+          return await readWorkerAccounts(machine === "local" ? undefined : machine, ["claude", "codex"]);
+        } catch {
+          return undefined;
+        } // Missing observations stay unknown; never authorize a hire.
+      }),
+    );
+    const plans = autoPlanCapacity(reports.flatMap((report) => (report ? [report] : [])));
+    const seats = (await refreshFleet()).map((seat) => ({
+      machine: seat.machine ?? seat.fleet ?? "local",
+      directory: seat.workingDirectory,
+      status: seat.status,
+    }));
+    await Promise.all(
+      autoProjects.map(async (project) => {
+        const velocity = autoMeasurements.get(project.id);
+        if (!velocity) return;
+        let queue: import("@clankie/protocol/auto-rounds").AutoWorkQueue;
+        try {
+          queue = (await options.projectWorkQueue?.(project)) ?? {
+            state: "unknown",
+            reason: "No tracker queue reader in this service",
+          };
+        } catch (error) {
+          queue = { state: "unknown", reason: error instanceof Error ? error.message : String(error) };
+        }
+        if (shutdown.signal.aborted) return;
+        const previous = autoRoundRecord.read({ projectId: project.id, limit: 1 })[0];
+        autoMeasurements.set(project.id, {
+          ...velocity,
+          staffing: projectStaffing({
+            project,
+            queue,
+            seats,
+            plans,
+            started: velocity.started,
+            unavailableMachines: new Set(
+              [...unansweredFleetSources, ...pendingFleetSources]
+                .filter((source) => source.startsWith("herdr:"))
+                .map((source) => (source === "herdr:default" ? "local" : source.slice(6))),
+            ),
+            ...(previous ? { previous } : {}),
+          }),
+        });
+      }),
+    );
     if (shutdown.signal.aborted) return;
     for (const [conversationId, states] of rounds) {
       if (pendingAutoRounds.has(conversationId)) continue;
@@ -4973,8 +5040,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           const velocity = autoMeasurements.get(state.id);
           return velocity === undefined ? [] : [autoRoundRecord.withReporting(velocity)];
         });
+        const groupProjects = autoProjects.filter((project) =>
+          states.some((state) => state.id === project.id),
+        );
+        const groupMachines = new Set(
+          groupProjects.flatMap((project) =>
+            [...project.workspaces, ...project.worktreeRoots].map((root) => root.machineId),
+          ),
+        );
         try {
-          roundId = autoRoundRecord.measured(conversationId, velocities);
+          roundId = autoRoundRecord.measured(
+            conversationId,
+            velocities,
+            new Date(),
+            staffingTotals(
+              velocities,
+              plans.filter((plan) => groupMachines.has(plan.machine)),
+              { seats, projects: groupProjects },
+            ),
+          );
           autoCadence.claim(conversationId, roundId, fingerprint);
           roundSummary = velocities.map(velocityLine).join("\n");
         } catch (error) {
@@ -4982,17 +5066,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // A milestone request must be durably claimed before it can be dispatched.
           throw error;
         }
-        const report = await readWorkerAccounts(undefined, ["claude", "codex"]);
-        const capacity = accountCapacityLines(report);
+        const capacity = reports.flatMap((report) =>
+          report && groupMachines.has(report.machine) ? accountCapacityLines(report) : [],
+        );
         return wakeConversation(
           { conversationId },
-          autoRoundPrompt(
-            states,
-            velocities.map(velocityLine),
-            driftSection(velocities, roundId),
-            capacity,
-            reportingSection(velocities),
-          ),
+          autoRoundPrompt(states, velocities.map(velocityLine), driftSection(velocities, roundId), capacity, [
+            ...reportingSection(velocities),
+            ...staffingSection(velocities),
+          ]),
           async () => {
             if (shutdown.signal.aborted || !autonomy.enabled) throw new Error("Auto is paused");
             const current = (await readAutoRounds()).get(conversationId);

@@ -1,3 +1,4 @@
+import { readProjectWorkQueue } from "./project-work-queue.ts";
 import { createDeliverableProjectReader } from "./fleet-project-deliverable.ts";
 import { MachineJoins } from "./machine-joins.ts";
 import { connectedLinearSession, importConnectedLinear, importLinearMedia } from "./linear-import.ts";
@@ -1550,6 +1551,19 @@ const captain = createCaptain(
     remoteCodexProcess: (launch) =>
       remoteCodexSeats.register(launch, proofFleetLinks?.lifetime(launch.fleet) ?? (() => false)),
     remoteOrigin: createRemoteOriginReader(remoteProofOptions),
+    projectWorkQueue: (project) =>
+      readProjectWorkQueue(project, {
+        route: (projectId) => workItems.trackerRepoForProject(projectId),
+        linearQuery: async () =>
+          (
+            await connectedLinearSession({
+              credentials: operatorCredentialStore,
+              budget: linearRequestBudget,
+              assertCurrent: async () => {},
+            })
+          ).query,
+        builtIn: builtInTracker,
+      }),
     // Auto round velocity reads the backend the project's workers write to (ADR 0270).
     projectOutcomes: (project, input) =>
       readProjectOutcomes(project, input, {

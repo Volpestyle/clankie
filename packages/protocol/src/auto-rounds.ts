@@ -95,10 +95,84 @@ export const MilestoneReportSchema = z
   .strict();
 export type MilestoneReport = z.infer<typeof MilestoneReportSchema>;
 
+/** Staffing facts are optional on historical rounds (VUH-2335). */
+export const AutoWorkQueueSchema = z.union([
+  z
+    .object({
+      state: z.literal("known"),
+      ready: z.array(z.string()),
+      backlog: z.array(z.string()),
+      blocked: z.array(
+        z.object({ issue: z.string(), blocks: z.array(z.string()), reason: z.string() }).strict(),
+      ),
+    })
+    .strict(),
+  Unknown,
+]);
+export type AutoWorkQueue = z.infer<typeof AutoWorkQueueSchema>;
+export const AutoPlanCapacitySchema = z
+  .object({
+    machine: z.string(),
+    harness: z.string(),
+    label: z.string(),
+    plan: z.string().nullable(),
+    observedAt: z.string().nullable(),
+    state: z.enum(["headroom", "reserve", "unknown", "unavailable", "held"]),
+    windows: z.array(
+      z
+        .object({
+          id: z.string(),
+          left: z.number(),
+          resetsAt: z.string().nullable(),
+          daysToReset: z.number().nullable(),
+          burnPerDay: z.number().nullable(),
+          sparePerDay: z.number().nullable(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type AutoPlanCapacity = z.infer<typeof AutoPlanCapacitySchema>;
+export const AutoProjectStaffingSchema = z
+  .object({
+    queue: AutoWorkQueueSchema,
+    activeSeats: z.number().int().nonnegative().nullable(),
+    idleSeats: z.number().int().nonnegative().nullable(),
+    occupiedSeats: z.number().int().nonnegative().nullable(),
+    workerCap: z.number().int().nonnegative().nullable(),
+    wipCap: z.number().int().positive().nullable(),
+    started: z.number().int().nonnegative().nullable(),
+    spareSeats: z.number().int().nonnegative().nullable(),
+    plans: z.array(AutoPlanCapacitySchema),
+    signal: z.enum(["under_staffed", "backlog_not_ready"]).nullable(),
+    reason: z.enum(["capacity_available", "cap_reached", "no_ready_work", "plan_reserve", "unknown"]),
+    check: z
+      .object({
+        roundId: z.string(),
+        state: z.enum(["staffed", "cap_reached", "no_ready_work", "plan_reserve", "unresolved", "unknown"]),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type AutoProjectStaffing = z.infer<typeof AutoProjectStaffingSchema>;
+export const AutoStaffingTotalsSchema = z
+  .object({
+    readyIssues: z.number().int().nonnegative().nullable(),
+    activeSeats: z.number().int().nonnegative().nullable(),
+    idleSeats: z.number().int().nonnegative().nullable(),
+    occupiedSeats: z.number().int().nonnegative().nullable(),
+    spareSeats: z.number().int().nonnegative().nullable(),
+    plans: z.array(AutoPlanCapacitySchema),
+  })
+  .strict();
+export type AutoStaffingTotals = z.infer<typeof AutoStaffingTotalsSchema>;
+
 /** One project's outcomes for one Auto round. Unreadable parts are `unknown`, never zero. */
 export const ProjectVelocitySchema = z
   .object({
     projectId: z.string(),
+    staffing: AutoProjectStaffingSchema.optional(),
     ownerLoop: ProjectOwnerLoopSchema.optional(),
     landings: z
       .union([
@@ -182,6 +256,7 @@ export const AutoRoundSchema = z
       .strict()
       .nullable(),
     projects: z.array(ProjectVelocitySchema),
+    staffing: AutoStaffingTotalsSchema.optional(),
   })
   .strict();
 export const AutoRoundsResponseSchema = z
