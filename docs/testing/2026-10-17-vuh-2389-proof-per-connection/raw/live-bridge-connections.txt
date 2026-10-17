@@ -1,0 +1,11 @@
+Live bridge connections to the local fleet listener, 18:30-18:33Z, runtime ea428c2b5.
+lsof sampled ESTABLISHED client sockets about every 5 s for 152 s (30 samples); short-lived
+connections between samples are missed, so these are lower bounds. Pane status from herdr pane list.
+
+fleet-mcp.mjs   claude  done     bridges= 2  distinct connections median=18.5 range=18-19
+fleet-mcp.mjs   codex   done     bridges=32  distinct connections median=9.0 range=5-13
+fleet-mcp.mjs   codex   idle     bridges= 2  distinct connections median=9.5 range=9-10
+fleet-mcp.mjs   codex   working  bridges= 3  distinct connections median=11 range=9-11
+swarm-mcp.mjs   claude  done     bridges=16  distinct connections median=25.5 range=20-28
+swarm-mcp.mjs   claude  idle     bridges= 3  distinct connections median=10 range=7-15
+swarm-mcp.mjs   claude  working  bridges= 5  distinct connections median=25 range=7-26

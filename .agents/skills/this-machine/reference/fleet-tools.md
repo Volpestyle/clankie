@@ -159,7 +159,10 @@ fixed safe reason. Done/idle hires held for fifteen minutes without a stored
 report since their latest brief carry `finished, unreported`. Three failed seats
 within ten minutes produce one native alert to their owning lead. Inspect
 `clankie metrics --fleet` for five- and sixty-minute proof/refusal and report
-failure rates. Preserve and reconcile uncertain originals; health observations
+failure rates. Proof attempts count full proofs: a local connection is proven
+once, and its later requests reuse that proof while its owner lineage, pane and
+binding hold, so a high attempt rate means many new connections or failed
+rechecks, not busy requests. Preserve and reconcile uncertain originals; health observations
 never authorize deleting receipts or replaying reports.
 
 Native `process_census_changed` with `retry: false` can accompany a successful

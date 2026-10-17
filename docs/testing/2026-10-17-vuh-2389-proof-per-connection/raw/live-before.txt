@@ -1,0 +1,17 @@
+Live service before VUH-2389, runtime c3eb93356 (started 2026-10-17T19:03:39.309Z); clankie metrics --fleet at 2026-10-17T19:15:04.877Z
+Fleet, last 5 min: 4703 proof attempts (15.7/s), 34 refusals
+Since start (2026-10-17T19:03:39.309Z): 13035 proof attempts, 30 worker reports
+
+Per pane, last 5 min, grouped by the pane's Herdr agent and status at the same time:
+  ?       gone     panes= 1  proofs/5 min median=34 range=34-34
+  claude  done     panes=14  proofs/5 min median=82.0 range=36-182
+  claude  idle     panes= 2  proofs/5 min median=27.0 range=25-29
+  claude  working  panes= 7  proofs/5 min median=146 range=86-401
+  codex   done     panes=15  proofs/5 min median=121 range=49-204
+  codex   idle     panes= 1  proofs/5 min median=99 range=99-99
+  codex   working  panes= 1  proofs/5 min median=67 range=67-67
+  None    unknown  panes= 1  proofs/5 min median=82 range=82-82
+
+Earlier runtime ea428c2b5 at 2026-10-17T18:58:44.462Z: last 5 min 4811 (16.0/s), last 60 min 59797 (16.6/s); totals 211306 proofs vs 147 reports since 2026-10-17T15:06:12.012Z.
+
+native-process-proof --serve CPU (ps %cpu, 5 s apart, 18:59Z): 81.4%, 37.5%, 50.4%

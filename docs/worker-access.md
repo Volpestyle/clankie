@@ -126,16 +126,20 @@ birth and socket identity. Non-owner ancestor lifetimes come from kernel
 `sysctl` process records across users, so Terminal's root `login` ancestor does
 not block a legitimate pane. The owner still requires full same-user process
 observation. Two fresh observations
-bracket the live pane and linked-session checks. An admitted connection pins
-that identity only to refuse a changed lifetime; every request still checks
-ownership and membership afresh. Shared ownership, missing observations, exit,
-PID reuse and revoked bindings fail closed. Service-owned private app-server
+bracket the live pane and linked-session checks. That full proof runs once per
+connection: later requests on the same live socket reuse it while the owner and
+its lineage up to the pane shell keep their kernel births, Herdr reports the same
+shell for the pane, the binding is unchanged and any private seat is still
+registered. Any failed recheck runs the full proof again. Shared ownership seen
+by a full proof, missing observations, exit, PID reuse and revoked bindings fail
+closed. A descriptor handed to another process after its connection was proven is
+not seen until that connection is proven again
+([details](../integrations/fleet-proof/README.md#proof-once-per-connection)). Service-owned private app-server
 registrations retain their separate live checks. See the
 [native helper](../integrations/fleet-proof/README.md) for build and verification.
 
 The body owns one persistent native helper over private pipes. Every job still
-checks fresh kernel facts; an earlier admission never substitutes for the
-current check. Herdr foreground and session reads use its socket API directly.
+checks fresh kernel facts; the helper itself retains no admission. Herdr foreground and session reads use its socket API directly.
 No helper, Herdr CLI or `ps` process is launched for ordinary mailbox/catalog
 polls or restored-private-seat birth checks. The bounded queue starts each 1 s
 timeout when the job becomes active. Cancelling one caller removes its queued
@@ -164,8 +168,8 @@ When project identity is required, the same helper reads the foreground agent's
 executable, exact first launcher arguments, and the shell and agent's microsecond
 births. These observations bracket current native-session and foreground-pane
 checks. Socket ancestry must agree with the observed process lifetime, including
-microseconds. There is no foreground `ps`/`lsof` fallback or connection-wide
-admission cache. Generic hire receipts recorded with older display timestamps
+microseconds. There is no foreground `ps`/`lsof` fallback, and project identity
+is never bound to a connection. Generic hire receipts recorded with older display timestamps
 fail closed until a fresh hire records the complete kernel lifetime.
 
 Local admission can refuse when process or descriptor ownership changes during
@@ -257,7 +261,7 @@ process lifetimes, ancestry, native pane/session and private registration. Peer
 routes consume it directly and reobserve it at later authority checks, rather
 than repeat broad fleet admission around every native check. Discovery brackets
 its roster reads with fresh proofs; sending and reconciliation retain their
-separate native sender/recipient fences. No admission is cached between requests.
+separate native sender/recipient fences. Project proofs are never reused between requests.
 Delivery reuses `message_seat` and its native harness channel/session API,
 receipts and refusal states; it never types terminal keys or revives Swarm.
 

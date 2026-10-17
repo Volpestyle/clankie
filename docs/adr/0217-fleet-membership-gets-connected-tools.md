@@ -155,3 +155,34 @@ wrapper, non-child, ambiguous candidate or changed observation still refuses.
 Retryable process/FD census observations remain diagnostic counters, never
 terminal refusal counts on their own. Failures after retries remain loud; no
 load, caller or startup exemptions are introduced.
+
+## Amendment: local fleet proof once per connection (2026-10-17)
+
+The owner asked for fleet proof once per connection instead of once per request
+([VUH-2389](https://linear.app/vuhlp/issue/VUH-2389)). On 2026-10-17 the live
+service ran 126,589 proofs in under two and a half hours, about 14 a second,
+against 110 worker reports. Each proof is two whole-machine descriptor censuses,
+and the helper used about half a core. Most of them repeated an earlier proof on
+the same pane: idle bridges polled every five seconds, and Node's five-second
+server keep-alive gave each poll a new connection.
+
+A successful local fleet proof is now bound to its connection. It records the
+kernel owner, the lineage from the owner up to the pane shell (the whole chain
+for a private seat) with each process's kernel birth, the pane claim, the shell
+and the Herdr binding. A later request on the same live socket reuses it after
+fresh rechecks of all of these: PID-local birth observations, a Herdr pane read,
+the binding, the private-seat registry and any server-owned owner pin. A failed
+or unavailable recheck discards the connection's proof and runs the full fresh
+proof, with its refusals and metrics. The local listener keeps idle connections
+for ten minutes so that Node `fetch` clients reuse them. This supersedes "never
+supplies cached admission" and "no admission cache" above, for local fleet
+admission only. Project proofs, private-seat registrations and remote links are
+unchanged, and there is still no header PID or bearer fallback.
+
+The accepted cost: a descriptor the proven owner hands to another process after
+the proof is not observed until that connection is proven again, on a new
+connection or after a failed recheck. Before, each request's census refused it.
+The owner is already a member, so this equals that member proxying for another
+process, which the boundary above already accepts. A full proof that sees a
+second holder still refuses. The rechecks, the residual and the test evidence
+are in the [native helper README](../../integrations/fleet-proof/README.md#proof-once-per-connection).

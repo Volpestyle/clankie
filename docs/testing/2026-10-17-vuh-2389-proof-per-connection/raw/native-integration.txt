@@ -1,0 +1,8 @@
+FLEET_PROOF_NATIVE_TEST=1 vitest run apps/clankie/test/local-fleet-proof.integration.test.ts (1 passed), 2026-10-17.
+Real helper, isolated Herdr daemon, /bin/sh pane, real TCP client.
+cold full proof: 115.6 ms
+20 warm requests on the same connection: full proofs 0, p95 13.5 ms, max 16.2 ms
+handoff, reused request before it: status 200 on the proven connection
+handoff, heir's request after the proven owner exited (ESRCH): status 403 local_process_membership_required, same connection, no forwarding effect
+  diagnostics: native_initial_unavailable, owner_mismatch
+second holder: after a binding revocation discarded the connection's proof, the next full census refused with multiple_owners (asserted)

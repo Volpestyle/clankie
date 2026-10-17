@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
-import { LocalFleetLink } from "../src/local-fleet-link.ts";
+import { LOCAL_FLEET_KEEP_ALIVE_MS, LocalFleetLink } from "../src/local-fleet-link.ts";
 import * as proofCurrent from "../src/local-fleet-proof.ts";
 import * as observerCurrent from "../src/project-process-proof.ts";
 import * as registryCurrent from "../src/local-codex-seats.ts";
@@ -320,6 +320,8 @@ nativeIt(
       listener = serve({
         hostname: "127.0.0.1",
         port: 0,
+        // The production local fleet listener's keep-alive (VUH-2389).
+        serverOptions: { keepAliveTimeout: LOCAL_FLEET_KEEP_ALIVE_MS },
         fetch: async (request, env) => {
           sockets.add(env.incoming.socket);
           const entry: (typeof requests)[number] = {
@@ -403,6 +405,7 @@ nativeIt(
       ];
       const cpuBefore = await sample(samplePids);
       const beforeCounts = { ...counts };
+      const connectionsBefore = sockets.size;
       const bodyBefore = process.cpuUsage();
       const started = performance.now();
       const startedEpochMs = Date.now();
@@ -424,6 +427,15 @@ nativeIt(
       }
       console.log(`MEASUREMENT END ${variant} ${endedEpochMs} ${logDirectory}`);
       const afterCounts = { ...counts };
+      const connectionsOpened = sockets.size - connectionsBefore;
+      // Full fleet/project proofs (a success or a refusal); reused connection proofs record neither.
+      const fullProofs = trace.filter(
+        (entry) =>
+          (entry as { phase?: string }).phase === "measuring" &&
+          ["proof_success", "proof"].includes(
+            (entry as { diagnostic?: { source?: string } }).diagnostic?.source ?? "",
+          ),
+      ).length;
       const live = await ready();
       const spawns = tracker.records.filter((record) => record.at >= started && record.at < ended);
       const intervalRequests = requests.filter(
@@ -445,6 +457,8 @@ nativeIt(
         cpuAfter,
         beforeCounts,
         afterCounts,
+        connectionsOpened,
+        fullProofs,
         startup,
         live,
         spawnDispatches: spawns.length,

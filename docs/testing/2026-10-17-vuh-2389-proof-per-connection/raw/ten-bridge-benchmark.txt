@@ -1,0 +1,11 @@
+apps/clankie/test/project-proof-frequency.integration.test.ts, PROJECT_PROOF_FREQUENCY_SECONDS=60:
+ten shipped fleet-mcp.mjs bridges in an isolated Herdr, restored private-seat records, real helper,
+real LocalFleetLink and WorkerMcp. Before = origin/main ea428c2b5 proof code and Node's default
+listener keep-alive; after = this change. Same harness, run back to back on 2026-10-17.
+
+before: 60 s, HTTP requests 70 ({'events': 20, 'tools/list': 50}), fleet validate() calls 90,
+        full proofs 90, new connections 50, private-registry checks 180,
+        CPU ms: native helper 2257, body 766, Herdr 411, ten bridges 282
+after : 60 s, HTTP requests 70 ({'events': 20, 'tools/list': 50}), fleet validate() calls 90,
+        full proofs 0, new connections 0, private-registry checks 90,
+        CPU ms: native helper 67, body 879, Herdr 334, ten bridges 299

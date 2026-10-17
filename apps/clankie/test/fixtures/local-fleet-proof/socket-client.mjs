@@ -43,6 +43,22 @@ for await (const line of createInterface({ input: control })) {
       control.write(JSON.stringify({ id: command.id, status: 200, coOwnerPid: ready.pid }) + "\n");
       continue;
     }
+    if (command.action === "handoff") {
+      // The heir is not this client's holder: quitting this client leaves it,
+      // and its inherited connection, running under the fixture's control.
+      const socket = Object.values(agent.freeSockets)
+        .flat()
+        .find((value) => !value.destroyed);
+      const fd = socket?._handle?.fd;
+      if (!Number.isSafeInteger(fd) || fd < 0) throw new Error("No live idle HTTP socket to hand off");
+      const heir = spawn(
+        process.execPath,
+        [fileURLToPath(new URL("./socket-holder.mjs", import.meta.url)), controlPath, command.heir, endpoint],
+        { stdio: ["ignore", "ignore", "ignore", fd] },
+      );
+      control.write(JSON.stringify({ id: command.id, status: 200, coOwnerPid: heir.pid }) + "\n");
+      continue;
+    }
     if (command.action === "release") {
       if (!holder) throw new Error("Socket is not shared");
       const exited = once(holder, "exit");

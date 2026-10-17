@@ -88,6 +88,7 @@ nativeIt(
     try {
       const admitted = proof();
       expect(await request(admitted)).toBe(true);
+      // Reuses this connection's proof (VUH-2389): not a proof attempt.
       expect(await request(admitted)).toBe(true);
       expect(await request(admitted, "invalid/pane")).toBe(false);
       expect(await request(proof({ platform: "unsupported" }))).toBe(false);
@@ -213,7 +214,7 @@ nativeIt(
       expect(effects).toBe(2);
       const snapshot = metrics.snapshot();
       expect(snapshot.totals.proof).toEqual({
-        attempts: 18,
+        attempts: 17,
         refusals: 16,
         byReason: {
           not_member: 1,
@@ -233,7 +234,7 @@ nativeIt(
         },
       });
       expect(snapshot.totals.transportDiagnostics.helper_unavailable).toBe(1);
-      expect(snapshot.windows[0].proofRefusalRate).toBe(16 / 18);
+      expect(snapshot.windows[0].proofRefusalRate).toBe(16 / 17);
       expect(JSON.stringify(snapshot)).not.toContain(herdr.socketPath);
       expect(JSON.stringify(snapshot)).not.toMatch(/\bpid\b/u);
     } finally {

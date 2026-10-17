@@ -19,6 +19,13 @@ import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 
 const nativeIt = it.skipIf(process.platform !== "darwin" || process.env.FLEET_PROOF_NATIVE_TEST !== "1");
 const checkout = fileURLToPath(new URL("../../../", import.meta.url));
+/** Whole-machine socket censuses that found an owner, or a full proof's refusal; reuse records neither. */
+const fullProofs = (entries: readonly unknown[]) =>
+  entries.filter((entry) =>
+    ["socket_owner", "proof"].includes(
+      (entry as { diagnostic?: { source?: string } }).diagnostic?.source ?? "",
+    ),
+  ).length;
 const waitClosed = (socket: Socket) =>
   new Promise<void>((resolve, reject) => {
     if (socket.destroyed) return resolve();
@@ -30,7 +37,7 @@ const waitClosed = (socket: Socket) =>
   });
 
 nativeIt(
-  "proves live pane ancestry over real TCP, rejects stale process birth, and stays bounded",
+  "proves live pane ancestry over real TCP once per connection, rejects stale process birth, and stays bounded",
   async () => {
     const logDirectory = join(checkout, ".local/proof-cost", `lifetime-${Date.now()}`);
     const helper = fleetProcessHelper(checkout);
@@ -196,6 +203,7 @@ nativeIt(
       }
       const warm = [];
       const warmResults = [];
+      const warmStart = trace.length;
       for (let index = 0; index < 20; index++) {
         phase = `warm-${index + 1}`;
         const response = await herdr.request("member");
@@ -205,6 +213,8 @@ nativeIt(
         warmResults.push(response);
         warm.push(response.elapsedMs);
       }
+      // Later requests on the proven connection reuse its proof (VUH-2389).
+      const warmFullProofs = fullProofs(trace.slice(warmStart));
       const sorted = [...warm].sort((a, b) => a - b);
       const timing = {
         coldMs: cold.elapsedMs,
@@ -212,14 +222,23 @@ nativeIt(
         warmResults,
         p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1]!,
         maxMs: sorted.at(-1)!,
+        warmFullProofs,
         memberPid,
         shellPid: herdr.shellPid,
       };
       await writeFile(join(logDirectory, "timing.json"), JSON.stringify(timing, null, 2) + "\n");
+      // Revoke and restore the real binding. That refusal discards the
+      // connection's bound proof, so its next request runs a full census.
+      const reprove = async () => {
+        linked = false;
+        expect((await herdr.request("member")).status).toBe(403);
+        linked = true;
+      };
       console.log(JSON.stringify({ nativeFleetProof: timing, logDirectory }));
       phase = "fd-churn";
       const stableOwner = await observeSocketProcess(sockets.get(cold.port)!, helper);
       expect(stableOwner?.owner).toEqual(snapshots.get(cold.port));
+      await reprove();
       const churnEffectsBefore = effects;
       const diagnosticsStart = trace.length;
       const churn = await herdr.startFdChurn();
@@ -284,7 +303,18 @@ nativeIt(
       const shared = await herdr.request("member", herdr.pane, "share");
       expect(shared.coOwnerPid).toBeGreaterThan(1);
       expect(shared.coOwnerPid).not.toBe(memberPid);
+      // The connection was proven before the share; a full census sees both holders.
+      await reprove();
+      const sharedStart = trace.length;
       expect((await herdr.request("member")).status).toBe(403);
+      expect(trace.slice(sharedStart)).toContainEqual(
+        expect.objectContaining({
+          diagnostic: expect.objectContaining({
+            source: "native",
+            event: expect.objectContaining({ reason: "multiple_owners" }),
+          }),
+        }),
+      );
       const sharedEffectsBefore = effects;
       phase = "shared-owner-fd-churn";
       const sharedChurn = await herdr.startFdChurn();
@@ -389,9 +419,58 @@ nativeIt(
           2,
         ) + "\n",
       );
+      phase = "handoff-reuse";
+      const reuseStart = trace.length;
+      const reused = await herdr.request("replacement");
+      expect(reused).toMatchObject({ status: 200, port: replacement.port, effects: effectsBefore + 2 });
+      expect(fullProofs(trace.slice(reuseStart))).toBe(0);
+      // The proven owner hands its live connection to a child and exits. The
+      // heir now holds the same connection; its request must not reuse the proof.
+      phase = "handoff";
+      const handoff = await herdr.request("replacement", herdr.pane, "handoff", "heir");
+      expect(await herdr.waitForClient("heir")).toBe(handoff.coOwnerPid);
+      await herdr.quitClient("replacement");
+      const replacedExit = await herdr.waitForExit(replacementPid);
+      expect(sockets.get(replacement.port)!.destroyed).toBe(false);
+      phase = "handoff-replaced";
+      const replacedStart = trace.length;
+      const replaced = await herdr.request("heir");
+      expect(replaced).toMatchObject({
+        status: 403,
+        error: "local_process_membership_required",
+        port: replacement.port,
+        effects: effectsBefore + 2,
+      });
+      expect(effects).toBe(effectsBefore + 2);
+      expect(trace.slice(replacedStart)).toContainEqual(
+        expect.objectContaining({
+          diagnostic: expect.objectContaining({
+            source: "native",
+            event: expect.objectContaining({ stage: "owner_pin", reason: "owner_mismatch" }),
+          }),
+        }),
+      );
+      await writeFile(
+        join(logDirectory, "handoff.json"),
+        JSON.stringify(
+          {
+            provenOwner: replacementOwner,
+            heirPid: handoff.coOwnerPid,
+            reused,
+            replacedExit,
+            replaced,
+            diagnostics: trace.slice(replacedStart),
+          },
+          null,
+          2,
+        ) + "\n",
+      );
       phase = "pane-closed";
+      await herdr.startClient("survivor", endpoint, true);
+      const survivor = await herdr.request("survivor");
+      expect(survivor.status).toBe(200);
       await herdr.cli("pane", "close", herdr.pane);
-      const removedPaneSocket = sockets.get(replacement.port)!;
+      const removedPaneSocket = sockets.get(survivor.port)!;
       await waitClosed(removedPaneSocket);
       expect(await prove(removedPaneSocket, herdr.pane)).toBe(false);
       expect((await herdr.request("outsider", herdr.pane)).status).toBe(403);
@@ -400,6 +479,7 @@ nativeIt(
       // proof scans while requiring a materially smaller per-request budget.
       expect(warmResults.map(({ status }) => status)).toEqual(Array(20).fill(200));
       expect(warmResults.every(({ port }) => port === cold.port)).toBe(true);
+      expect(warmFullProofs).toBe(0);
       expect(legacyScans).toEqual([]);
       expect(timing.p95Ms).toBeLessThan(100);
       expect(timing.maxMs).toBeLessThan(250);

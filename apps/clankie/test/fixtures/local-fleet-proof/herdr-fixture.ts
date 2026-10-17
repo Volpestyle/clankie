@@ -167,7 +167,12 @@ export async function isolatedHerdr(logDirectory: string) {
       cli,
       startClient,
       close,
-      request(name: string, selectedPane = pane, action?: "share" | "release"): Promise<Reply> {
+      request(
+        name: string,
+        selectedPane = pane,
+        action?: "share" | "release" | "handoff",
+        heir?: string,
+      ): Promise<Reply> {
         const client = clients.get(name);
         if (!client) return Promise.reject(new Error(`Unknown client ${name}`));
         const requestId = ++id;
@@ -177,7 +182,7 @@ export async function isolatedHerdr(logDirectory: string) {
             reject(new Error(`Client ${name} request timed out`));
           }, 6_000);
           pending.set(requestId, { resolve, reject, timer });
-          client.socket.write(JSON.stringify({ id: requestId, pane: selectedPane, action }) + "\n");
+          client.socket.write(JSON.stringify({ id: requestId, pane: selectedPane, action, heir }) + "\n");
         });
       },
       async startFdChurn() {

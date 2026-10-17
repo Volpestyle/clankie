@@ -34,10 +34,23 @@ export interface LocalFleetProofRequestContext {
 
 const bridgeUuid = z.string().uuid();
 
+/**
+ * Idle keep-alive for the local fleet listener (VUH-2389). Node's fetch (undici)
+ * honors the server's Keep-Alive hint, less a margin, up to its default ten-minute
+ * ceiling, so a worker bridge keeps its proven connection between catalog checks.
+ * At Node's 5 s default even a 3.5 s gap opened a new connection, and each new
+ * connection pays a whole-machine proof.
+ */
+export const LOCAL_FLEET_KEEP_ALIVE_MS = 600_000;
+
 export interface LocalFleetIdentity {
   readonly fleet?: string;
   readonly pane: string;
-  /** Fresh socket/process admission; current() alone never grants authority. */
+  /**
+   * Socket/process admission for this request's connection: a full fresh proof
+   * the first time, then that connection's bound proof while its owner lineage,
+   * pane, binding and private seat hold. current() alone never grants authority.
+   */
   validate(signal?: AbortSignal): Promise<boolean>;
   /** Synchronous link revocation only; never substitutes for async process admission. */
   current?(): boolean;
@@ -49,9 +62,10 @@ export interface LocalFleetIdentity {
 /**
  * Bind each request to its local listener socket. Seat routes are admitted here;
  * the MCP route receives a candidate identity that only WorkerMcp may consume,
- * after its own fresh validate(). Native peer routes likewise consume a full
+ * after its own validate(). Native peer routes likewise consume a full
  * socket-bound project proof instead of repeating broad fleet proof around it.
- * No proof is cached; later authority checks observe the kernel again.
+ * Fleet admission is proven once per connection and rechecked cheaply on each
+ * later request (local-fleet-proof.ts); project proofs stay fresh per call.
  */
 export class LocalFleetLink {
   private readonly identities = new WeakMap<Request, LocalFleetIdentity>();

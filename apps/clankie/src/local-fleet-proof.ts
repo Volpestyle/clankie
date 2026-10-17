@@ -19,7 +19,9 @@ import {
   type NativeSocketOwner,
   type NativeSocketProcess,
   type NativeProcessDiagnostic,
+  type NativeBirth,
   nativeProcessStart,
+  observeNativeBirth,
 } from "./local-fleet-process.ts";
 
 const exec = promisify(execFile);
@@ -85,6 +87,12 @@ export interface LocalFleetProofOptions extends Pick<
     expected?: NativeSocketOwner,
     signal?: AbortSignal,
   ): Promise<NativeSocketProcess | undefined>;
+  /**
+   * Host lifetime seam for a proven connection's owner and ancestors; production
+   * reads fresh native births. A host that replaces observeSocket without this
+   * gets no connection reuse: every request runs its injected observation.
+   */
+  observeBirth?(pid: number, signal?: AbortSignal): Promise<NativeBirth | undefined>;
   /** Server-owned additional lifetime pin. It can refuse, never grant admission. */
   expectedOwner?(socket: Socket): NativeSocketOwner | undefined;
   /** Server-owned opt-in diagnostics; fixed stages only, never caller authority. */
@@ -129,10 +137,40 @@ export function localFleetAdmissionProof(options: LocalFleetProofOptions) {
   return createLocalFleetProof(options, true);
 }
 
+/**
+ * A connection's successful proof (VUH-2389): the kernel owner and the ancestry
+ * that linked it to the pane's shell or private seat, with the pane and Herdr
+ * binding it was proven against. It never outlives its socket.
+ */
+interface ConnectionProof {
+  readonly pane: string;
+  readonly owner: NativeSocketOwner;
+  readonly shell: number;
+  /** Owner first, up to and including the shell; the whole chain for a private seat. */
+  readonly lineage: NativeSocketProcess["ancestors"];
+  readonly privateSeat: boolean;
+  readonly binding: Pick<HerdrBinding, "socketPath" | "session">;
+}
+
+const sameOwner = (a: NativeSocketOwner, b: NativeSocketOwner) =>
+  a.pid === b.pid &&
+  a.uid === b.uid &&
+  a.birth[0] === b.birth[0] &&
+  a.birth[1] === b.birth[1] &&
+  a.socket === b.socket &&
+  a.kernelIdentity === b.kernelIdentity;
+
 function createLocalFleetProof(options: LocalFleetProofOptions, admission: boolean) {
   const execute = options.run ?? run;
   const observe = options.observeSocket;
   const owners = new WeakMap<Socket, NativeSocketOwner>();
+  const proven = new WeakMap<Socket, ConnectionProof>();
+  const observeBirth =
+    options.observeBirth ??
+    (observe === undefined
+      ? (pid: number, signal?: AbortSignal) =>
+          observeNativeBirth(pid, signal, options.processHelper ?? fleetProcessHelper())
+      : undefined);
   return async (
     socket: Socket,
     pane: string,
@@ -193,6 +231,93 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       socket.remotePort === clientPort &&
       socket.localPort === serverPort;
     if (!alive() || !clientPort || !serverPort) return refuse("closed_socket");
+    const paneInfo = async (binding: HerdrBinding) => {
+      signal?.throwIfAborted();
+      let result: unknown;
+      try {
+        result = options.run
+          ? JSON.parse(
+              await execute(
+                options.herdrBinary,
+                ["pane", "process-info", "--pane", pane],
+                pinHerdrEnvironment({ ...process.env }, binding.socketPath),
+              ),
+            )
+          : await nativeRequest(
+              binding,
+              "pane.process_info",
+              { pane_id: pane },
+              { timeoutMs: 5_000, ...(signal ? { signal } : {}) },
+            );
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (error instanceof NativePaneNotFoundError) return null;
+        throw error;
+      }
+      signal?.throwIfAborted();
+      return (result as { result?: { process_info?: { pane_id: string; shell_pid: number } } })?.result
+        ?.process_info;
+    };
+    // A later request on a proven connection skips the whole-machine census.
+    // It still needs this live socket, the same pane claim, Herdr binding and
+    // shell, and its lineage at their proven births: a parent link changes only
+    // when that parent exits. A private seat must still be registered within
+    // the unbroken part of its chain (ancestors above it, such as a root login,
+    // need not be observable). Any doubt discards the connection's proof and
+    // runs the full fresh proof.
+    const reuse = async (held: ConnectionProof) => {
+      const expected = options.expectedOwner?.(socket);
+      if (held.pane !== pane || observeBirth === undefined || (expected && !sameOwner(expected, held.owner)))
+        return false;
+      try {
+        const binding = await options.binding();
+        signal?.throwIfAborted();
+        if (binding?.socketPath !== held.binding.socketPath || binding?.session !== held.binding.session)
+          return false;
+        const [births, info] = await Promise.all([
+          Promise.all(held.lineage.map((process) => observeBirth(process.pid, signal))),
+          paneInfo(binding),
+        ]);
+        signal?.throwIfAborted();
+        const unbroken = births.findIndex(
+          (birth, index) =>
+            birth === undefined ||
+            birth[0] !== held.lineage[index]!.birth[0] ||
+            birth[1] !== held.lineage[index]!.birth[1] ||
+            birth.kernelIdentity !== held.lineage[index]!.kernelIdentity,
+        );
+        const intact = unbroken < 0 ? held.lineage.length : unbroken;
+        if (info?.pane_id !== pane || info?.shell_pid !== held.shell || intact === 0) return false;
+        if (!held.privateSeat && intact !== held.lineage.length) return false;
+        if (
+          held.privateSeat &&
+          (await options.privateSeat?.(
+            held.lineage.slice(0, intact).map((process) => process.pid),
+            pane,
+            binding,
+            signal,
+          )) !== true
+        )
+          return false;
+        const current = await options.binding();
+        signal?.throwIfAborted();
+        return (
+          alive() &&
+          proven.get(socket) === held &&
+          current?.socketPath === held.binding.socketPath &&
+          current?.session === held.binding.session
+        );
+      } catch {
+        signal?.throwIfAborted();
+        return false;
+      }
+    };
+    const held = proven.get(socket);
+    if (held !== undefined) {
+      if (await reuse(held)) return true;
+      proven.delete(socket);
+      if (!alive()) return refuse("closed_socket");
+    }
     try {
       const binding = await options.binding();
       signal?.throwIfAborted();
@@ -203,34 +328,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       emit({ source: "socket_owner", owner: initial.owner });
       if (!alive()) return refuse("closed_socket");
       const chain = initial.ancestors.map((ancestor) => ancestor.pid);
-      const paneInfo = async () => {
-        signal?.throwIfAborted();
-        let result: unknown;
-        try {
-          result = options.run
-            ? JSON.parse(
-                await execute(
-                  options.herdrBinary,
-                  ["pane", "process-info", "--pane", pane],
-                  pinHerdrEnvironment({ ...process.env }, binding.socketPath),
-                ),
-              )
-            : await nativeRequest(
-                binding,
-                "pane.process_info",
-                { pane_id: pane },
-                { timeoutMs: 5_000, ...(signal ? { signal } : {}) },
-              );
-        } catch (error) {
-          signal?.throwIfAborted();
-          if (error instanceof NativePaneNotFoundError) return null;
-          throw error;
-        }
-        signal?.throwIfAborted();
-        return (result as { result?: { process_info?: { pane_id: string; shell_pid: number } } })?.result
-          ?.process_info;
-      };
-      const info = await paneInfo();
+      const info = await paneInfo(binding);
       if (info === null) return refuse("pane_unavailable");
       // Herdr resolves a moved pane's old ID to the pane under its new ID.
       if (info?.pane_id !== pane)
@@ -244,7 +342,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       // Drain both owned observations before returning, even if cancellation closes control first.
       const [finalRead, latestRead] = await Promise.allSettled([
         snapshot("final", initial.owner),
-        paneInfo(),
+        paneInfo(binding),
       ]);
       signal?.throwIfAborted();
       if (finalRead.status !== "fulfilled" || latestRead.status !== "fulfilled")
@@ -262,9 +360,18 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       if (!alive()) return refuse("closed_socket");
       if (current?.socketPath !== binding.socketPath || current?.session !== binding.session)
         return refuse("binding_changed");
-      // Pin only an admitted connection's identity. Every later check still
-      // observes OS ownership, ancestry, the linked pane and registry afresh.
+      // Pin the admitted connection's identity, and bind this proof to it for
+      // later requests on the same socket (reuse above).
       owners.set(socket, initial.owner);
+      const direct = chain.indexOf(shell);
+      proven.set(socket, {
+        pane,
+        owner: initial.owner,
+        shell,
+        lineage: direct < 0 ? initial.ancestors : initial.ancestors.slice(0, direct + 1),
+        privateSeat: direct < 0,
+        binding: { socketPath: binding.socketPath, session: binding.session },
+      });
       emit({ source: "proof_success" });
       return true;
     } catch (error) {

@@ -154,7 +154,7 @@ import {
 import { createEmailPort } from "./email.ts";
 import { accountMailbox, bodyMailbox, DEFAULT_CLANKIE_GATEWAY_URL } from "./hosted-mailbox.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
-import { LocalFleetLink } from "./local-fleet-link.ts";
+import { LOCAL_FLEET_KEEP_ALIVE_MS, LocalFleetLink } from "./local-fleet-link.ts";
 import { NativeFixtureAdmissions } from "./native-fixture-admissions.ts";
 import { createFixtureOriginalVerifier } from "./fixture-original-verifier.ts";
 import { createFixtureBootstrap } from "./fixture-admission-bootstrap.ts";
@@ -2428,7 +2428,12 @@ if (publicGatewayConnector !== undefined) {
 }
 const localFleetServer =
   ["darwin", "linux"].includes(process.platform) && herdr.available()
-    ? serve({ fetch: localFleet.fetch(clankie.app.fetch), port: 0, hostname: "127.0.0.1" })
+    ? serve({
+        fetch: localFleet.fetch(clankie.app.fetch),
+        port: 0,
+        hostname: "127.0.0.1",
+        serverOptions: { keepAliveTimeout: LOCAL_FLEET_KEEP_ALIVE_MS },
+      })
     : undefined;
 localFleetServer?.once("listening", () => {
   const address = localFleetServer.address();

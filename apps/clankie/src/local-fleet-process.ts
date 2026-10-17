@@ -85,7 +85,7 @@ export function nativeProcessStart(birth: NativeBirth, kernelIdentity = birth.ke
   return `${birth[0]}.${birth[1].padStart(6, "0")}${kernelIdentity === undefined ? "" : `@${kernelIdentity}`}`;
 }
 
-type NativeBirth = readonly [string, string] & { readonly kernelIdentity?: string };
+export type NativeBirth = readonly [string, string] & { readonly kernelIdentity?: string };
 
 const ProcessBirthSchema = z
   .object({

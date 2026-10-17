@@ -1,0 +1,8 @@
+Node v26.7.0 (undici 8.9.0): four fetch() requests, a fixed gap apart, against node:http with the given keepAliveTimeout.
+Script: scratch, not committed (createServer + server.on('connection') count + global fetch).
+
+{"serverKeepAliveTimeout":5000,"gap":3500,"header":"timeout=5","requests":4,"connections":4}
+{"serverKeepAliveTimeout":5000,"gap":5000,"header":"timeout=5","requests":4,"connections":4}
+{"serverKeepAliveTimeout":300000,"gap":6000,"header":"timeout=300","requests":4,"connections":1}
+{"serverKeepAliveTimeout":300000,"gap":20000,"header":"timeout=300","requests":4,"connections":1}
+{"serverKeepAliveTimeout":600000,"gap":70000,"header":"timeout=600","requests":3,"connections":1}

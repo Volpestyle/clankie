@@ -284,6 +284,9 @@ check("proves membership from the live HTTP claimant and always refuses a real n
     const parent = JSON.parse(await readFile(marker, "utf8")) as { root: number; leaf: number };
     expect(parent.leaf).toBe(claimant);
     expect(await herdr.request("reparent")).toMatchObject({ status: 200, effects: 2 });
+    // A refused claim discards this connection's bound proof (VUH-2389), so the
+    // next request runs the census in which the scheduled exit fires.
+    expect(await herdr.request("reparent", herdr.foreignPane)).toMatchObject({ status: 403, effects: 2 });
     const parentBirth = await observeNativeBirth(parent.root);
     expect(parentBirth).toBeDefined();
     const ownerCount = diagnostics.filter((event) => event.source === "socket_owner").length;

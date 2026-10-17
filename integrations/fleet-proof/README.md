@@ -107,10 +107,57 @@ remain fail-closed. Persistent uncertainty or exceeded bounds refuses access.
 
 The body takes two fresh snapshots around live Herdr and private-seat checks and
 requires agreement. Its per-connection identity pin adds a refusal fence against
-PID or socket replacement. It never caches authority, skips the census, or
-accepts a caller-supplied PID. A missing helper or unsupported platform refuses
-admission; there is no legacy socket-scan fallback. Project identity separately
-checks the shell and foreground harness through the process mode below.
+PID or socket replacement. It never accepts a caller-supplied PID. A missing
+helper or unsupported platform refuses admission; there is no legacy socket-scan
+fallback. Project identity separately checks the shell and foreground harness
+through the process mode below.
+
+### Proof once per connection
+
+Fleet admission is proven once per connection, not once per request
+([VUH-2389](https://linear.app/vuhlp/issue/VUH-2389)). The first request on a
+loopback connection runs the full proof above. Success binds it to that socket,
+with the kernel owner and the lineage from the owner up to the pane's shell
+(the whole chain for a private seat), each at its kernel birth, plus the pane
+claim, the shell PID and the Herdr binding. A later request on the same live
+socket skips the whole-machine census and rechecks only these, all fresh:
+
+- the socket is still connected, with the same endpoints and pane claim;
+- the Herdr binding is unchanged, and Herdr still reports the same shell for
+  the pane;
+- every lineage process is alive at its proven birth (`--birth`, PID-local).
+  A parent link changes only when that parent exits, so this also holds the
+  owner's ancestry;
+- for a private seat, the registry still allows the unbroken part of the chain,
+  from the owner up to the first process that no longer matches. Ancestors
+  above the registered process, such as a root `login`, need not be observable;
+- a server-owned expected-owner pin, if any, is the proven owner.
+
+Any failed or unavailable recheck discards the connection's proof, and that
+request runs the full proof, with its usual refusal reasons and metrics. So a
+closed socket, an exited or replaced owner, a reparented owner, a moved or
+closed pane, a changed binding or an expired private seat refuses or re-proves
+exactly as before. A full proof that sees a second holder of the socket still
+refuses at once (`multiple_owners`). Fleet metrics count full proofs only;
+reused requests are not proof attempts.
+
+The cost is one unseen case. A descriptor the proven owner hands to another
+process after its connection was proven is not observed until that connection is
+proven again: on a new connection, or after any recheck above fails. Before this
+change every request's census refused it while it was shared. The owner is
+already a pane member; handing over its connection is the same as proxying for
+another process, which ADR 0217 accepts ("anything running in a linked session"),
+and a descriptor in flight over `SCM_RIGHTS` was already outside the boundary.
+Project proofs, which carry native-session authority, are never reused.
+
+Reuse only helps when connections persist. Node's `fetch`, which every worker
+bridge uses, keeps an idle connection only as long as the server's `Keep-Alive`
+hint allows, less a margin. At Node's server default of five seconds, even a
+3.5 s gap opened a new connection, so each 5 s catalog check arrived on a fresh
+one. The local fleet listener therefore keeps idle connections for ten minutes
+(`LOCAL_FLEET_KEEP_ALIVE_MS`), the most `fetch` honors by default, with no bridge
+change. Short-lived clients, such as hook and catalog-report processes, still
+prove each of their connections once.
 
 ## Clankie's Claude foreground launcher
 
@@ -361,7 +408,11 @@ This opt-in integration test uses actual HTTP sockets, the compiled helper and
 an isolated real Herdr daemon with owned shell panes. It exercises membership,
 foreign panes and processes, revocation, socket exit, changed birth pins and
 shared descriptors; the fixture records cold and repeated proof durations in
-`.local/proof-cost/`. Legacy socket-scan commands are denied by the test while
+`.local/proof-cost/`. Twenty repeated requests on one connection must run no
+census. A proven owner that hands its connection to a child and exits must be
+refused on that same connection (`owner_mismatch` against the pinned owner), and
+a connection shared before its next full proof must be refused with
+`multiple_owners`. Legacy socket-scan commands are denied by the test while
 real Herdr commands run. No provider credentials or live fleet are needed.
 
 The stale-birth case uses a birth read from a different real process with the

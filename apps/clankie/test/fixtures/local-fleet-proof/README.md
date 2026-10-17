@@ -17,7 +17,14 @@ listener and `LocalFleetLink` seat route guard an in-memory effect counter. Prod
 process-info remain real. Request path and pane header always match, including
 wrong-pane claims, so those refusals exercise native membership.
 A real inherited copy of the HTTP socket is held by a second owned process to
-prove duplicate-owner refusal and recovery after that process exits. A command
+prove duplicate-owner refusal and recovery after that process exits. Fleet proof
+is bound to its connection (VUH-2389), so a binding revocation first discards the
+member connection's proof and the next full census sees both holders.
+Twenty warm requests on one connection must run no census. For process
+replacement, a proven client hands its live connection to a child heir (the same
+`socket-holder.mjs`, given the control path and a name), then exits; the heir's
+request on that unchanged connection must be refused against the pinned owner,
+with no forwarding effect. A command
 guard rejects legacy lsof/ps scans while delegating real Herdr execution.
 Nothing connects to the user's Herdr socket, Clankie service or credentials.
 Cleanup stops only the owned daemon/children and removes their temporary root.
