@@ -52,7 +52,7 @@ import { z } from "zod";
 import { DISCORD_VOICE_TRANSCRIPTS_PATH } from "./discord-voice-evidence.ts";
 import { OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH } from "./operator-conversations.ts";
 import { BODY_LEASE_STATUS_PATH } from "./body-leases.ts";
-import { DISCORD_DIRECTORY_PATH } from "./discord-directory.ts";
+import { DISCORD_DIRECTORY_PATH, isDiscordDirectoryRoute } from "./discord-directory.ts";
 import { DISCORD_SETUP_TEST_POST_PATH } from "./discord-permissions.ts";
 import {
   DISCORD_ROOMS_PATH,
@@ -383,9 +383,10 @@ export function publicGatewayTargetFor(
   additionalRoutes: readonly PublicGatewayRoute[] = [],
 ): PublicGatewayTarget | undefined {
   if (method === "POST" && /^\/v1\/devices\/[A-Za-z0-9_-]{1,128}\/revoke$/u.test(path)) return "control";
-  // Only the explicit autonomy projection may ride a query-bearing route.
-  // Preserve that query for the relay's own validation; never normalize others.
+  // Normalize only the explicitly validated queries. The forwarded path keeps
+  // its query for the receiving route to validate again.
   if (method === "GET" && path === `${PROJECTS_PATH}?includeAutonomy=true`) path = PROJECTS_PATH;
+  if (method === "GET" && isDiscordDirectoryRoute(path)) path = DISCORD_DIRECTORY_PATH;
   if (method === "GET" && isWorkerAccountsRoute(path)) path = WORKER_ACCOUNTS_PATH;
   if (method === "GET" && path === `${USAGE_PATH}?refresh=1`) path = USAGE_PATH;
   if (method === "GET" && isViewRoute(path)) return "relay";

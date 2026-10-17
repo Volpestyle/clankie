@@ -16,6 +16,27 @@ export const DiscordDirectoryRequestSchema = z
     path: ["guildId"],
   });
 export type DiscordDirectoryRequest = z.infer<typeof DiscordDirectoryRequestSchema>;
+/** Only bounded directory queries may cross the encrypted gateway. Unknown,
+ * duplicate or encoded parameters are refused before route normalization. */
+export function isDiscordDirectoryRoute(route: string): boolean {
+  if (route === DISCORD_DIRECTORY_PATH) return true;
+  if (!route.startsWith(`${DISCORD_DIRECTORY_PATH}?`) || route.length > 2048) return false;
+  const query = route.slice(DISCORD_DIRECTORY_PATH.length + 1);
+  const values: Record<string, string> = {};
+  for (const parameter of query.split("&")) {
+    if (
+      !/^(?:kind=(?:servers|channels|roles|people)|guildId=\d{5,32}|limit=[1-9]\d{0,2}|after=\d{5,32})$/u.test(
+        parameter,
+      )
+    )
+      return false;
+    const [name, value] = parameter.split("=") as [string, string];
+    if (Object.hasOwn(values, name)) return false;
+    values[name] = value;
+  }
+  return DiscordDirectoryRequestSchema.safeParse(values).success;
+}
+
 export const DiscordDirectoryEntrySchema = z
   .object({
     id: Snowflake,

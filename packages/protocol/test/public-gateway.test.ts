@@ -109,6 +109,33 @@ describe("public gateway protocol", () => {
     ).toBeUndefined();
   });
 
+  it("admits only bounded Discord directory reads and preserves their routing", () => {
+    for (const query of [
+      "kind=servers&limit=200",
+      "kind=channels&guildId=12345&limit=200&after=67890",
+      "guildId=12345&kind=roles",
+      "kind=people&guildId=12345",
+    ]) {
+      expect(publicGatewayTargetFor("GET", `/v1/discord/directory?${query}`)).toBe("relay");
+      expect(publicGatewayTargetFor("POST", `/v1/discord/directory?${query}`)).toBeUndefined();
+    }
+    for (const query of [
+      "",
+      "kind=roles",
+      "kind=servers&limit=201",
+      "kind=servers&limit=0",
+      "kind=servers&kind=servers",
+      "kind=servers&unknown=true",
+      "kind=%73ervers",
+      "kind=servers#other",
+      "kind=channels&guildId=not-a-snowflake",
+      "kind=servers&after=123",
+      "kind=servers&",
+    ]) {
+      expect(publicGatewayTargetFor("GET", `/v1/discord/directory?${query}`)).toBeUndefined();
+    }
+  });
+
   it("carries a signed hook's own headers, within the frame's header budget", () => {
     // Dropping any of these on either side turns a real delivery into a
     // signature that never arrives, which reads as forgery rather than a bug.

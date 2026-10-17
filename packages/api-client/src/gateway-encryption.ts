@@ -12,6 +12,7 @@ import {
   type GatewayPlainRequest,
 } from "@clankie/protocol/gateway-encryption";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "@clankie/protocol/projects";
+import { isDiscordDirectoryRoute } from "@clankie/protocol";
 import { isWorkerAccountsRoute } from "@clankie/protocol/worker-accounts";
 
 /** Implemented with node:crypto, WebCrypto, Expo Crypto, or CryptoKit, never JavaScript ciphers. */
@@ -132,9 +133,11 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
         (request.method === "POST" && hostPath?.[2] === PROJECT_UPDATE_SETTINGS_PATH));
     const workerAccountsQuery =
       request.method === "GET" && hostPath !== null && isWorkerAccountsRoute(`${hostPath[2]}${url.search}`);
+    const discordDirectoryQuery =
+      request.method === "GET" && hostPath !== null && isDiscordDirectoryRoute(`${hostPath[2]}${url.search}`);
     if (
       hostId !== credential.hostId ||
-      (url.search && !projectQuery && !workerAccountsQuery) ||
+      (url.search && !projectQuery && !workerAccountsQuery && !discordDirectoryQuery) ||
       url.hash ||
       url.username ||
       url.password

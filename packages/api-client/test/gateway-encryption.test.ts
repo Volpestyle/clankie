@@ -46,3 +46,42 @@ describe("gateway transport refusals", () => {
     },
   );
 });
+
+describe("encrypted Discord directory queries", () => {
+  it.each([
+    "kind=servers&limit=200",
+    "kind=channels&guildId=12345&after=67890&limit=200",
+    "kind=roles&guildId=12345",
+  ])("admits a valid read (%s)", async (query) => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 503 }));
+    const send = createGatewayEncryptedFetch({ credential: () => credential, crypto, fetchImpl });
+    await expect(
+      send(`https://example.test/h/${credential.hostId}/v1/discord/directory?${query}`),
+    ).rejects.toBeInstanceOf(GatewayRequestError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    "kind=roles",
+    "kind=servers&limit=201",
+    "kind=servers&kind=servers",
+    "kind=%73ervers",
+    "kind=servers&unknown=true",
+  ])("refuses an invalid query before transport (%s)", async (query) => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const send = createGatewayEncryptedFetch({ credential: () => credential, crypto, fetchImpl });
+    await expect(
+      send(`https://example.test/h/${credential.hostId}/v1/discord/directory?${query}`),
+    ).rejects.toThrow("Gateway host identity mismatch");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it("does not allow a query on writes", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const send = createGatewayEncryptedFetch({ credential: () => credential, crypto, fetchImpl });
+    await expect(
+      send(`https://example.test/h/${credential.hostId}/v1/discord/directory?kind=servers`, {
+        method: "POST",
+      }),
+    ).rejects.toThrow("Gateway host identity mismatch");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
