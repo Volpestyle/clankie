@@ -61,3 +61,12 @@ the `_x.ai/mcp/list` shape match.
 The floors stand only for semantics no probe sees; each floor's comment says
 which (`OPENCODE_WORKER_FLOOR` in `apps/clankie/src/opencode-history.ts`,
 `GROK_NATIVE_FLOOR` in `apps/clankie/src/captain/grok-native-controller.ts`).
+
+## Live hires
+
+Real hires through the real hire path, in throwaway services and Herdr sessions ([live-hires.json](live-hires.json)), 2026-10-18:
+
+- **OpenCode 1.19.3**: `verify-opencode-seat` **passed**: hire, brief, worker report, completion, follow-up `message_seat`, reply and close.
+- **Grok Build 1.0.50**: the worker hire passed every step: spawn, brief delivered, the worker's `message_clankie` report received, completion `passed`, a follow-up `message_seat` delivered and answered.
+
+**Not proven:** the Grok operator seat (`clankie seat --harness grok`), the verifier's last step. In the scratch stack the operator CLI could not reach the Keychain (`Keychain unavailable; retrying in 30 seconds`), exited, and its pane closed (`pane_not_found`). That is a scratch-environment limit, not a Grok 1.0.50 refusal. Run it once on the owner's console to close the gap.
