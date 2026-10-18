@@ -21,6 +21,8 @@ export const OperatorSeatEfficiencySchema = z
     effort: z.string().min(1).max(64).optional(),
     /** Latest native context occupancy, never lifetime or summed turn usage. */
     contextPercent: z.number().finite().min(0).max(100).optional(),
+    /** Host-observed start of the current idle/done interval for this exact native occupant. */
+    inactiveSince: z.string().datetime().optional(),
     lastProgressAt: z.string().datetime().optional(),
     lastReportAt: z.string().datetime().optional(),
     reportFailures: z.number().int().nonnegative().optional(),

@@ -106,9 +106,28 @@ it("reuses the private roster for an owner device and refuses visitors, guests, 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: "owner_device_required" });
   }
+  // VUH-2448: the fleet count is owner-only, including its retire and undo routes.
+  const fleetRead = (bearer: string) =>
+    service.app.request("/v1/fleet/roster", { headers: { authorization: `Bearer ${bearer}` } });
+  expect((await fleetRead(token("owner"))).status).toBe(200);
+  expect((await fleetRead("operator")).status).toBe(200);
+  for (const bearer of [token("visitor"), token("guest"), token("support"), "discord", "unknown"]) {
+    expect((await fleetRead(bearer)).status).toBe(403);
+    for (const action of ["retire", "undo"])
+      expect(
+        (
+          await service.app.request(`/v1/fleet/roster/${action}`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+            body: "{}",
+          })
+        ).status,
+      ).toBe(403);
+  }
   await service.app.request("/v1/devices/owner/revoke", {
     method: "POST",
     headers: { authorization: "Bearer operator" },
   });
   expect((await read(token("owner"))).status).toBe(403);
+  expect((await fleetRead(token("owner"))).status).toBe(403);
 });

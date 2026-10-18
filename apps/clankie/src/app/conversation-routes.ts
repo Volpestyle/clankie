@@ -22,6 +22,13 @@ import type {
   WorkItemWriteReceiptRequest,
   WorkItemWriteRequest,
 } from "@clankie/protocol/work-item-write";
+import {
+  FLEET_ROSTER_PATH,
+  FLEET_ROSTER_RETIRE_PATH,
+  FLEET_ROSTER_UNDO_PATH,
+  RetireFleetAgentSchema,
+  UndoFleetAgentSchema,
+} from "@clankie/protocol/fleet-roster";
 import { Hono } from "hono";
 import { withLinearRequestInvocation } from "../linear-request-budget.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -61,6 +68,43 @@ export interface RegisterConversationRoutesContext {
 }
 
 export function registerConversationRoutes(ctx: RegisterConversationRoutesContext) {
+  for (const path of [FLEET_ROSTER_PATH, FLEET_ROSTER_RETIRE_PATH, FLEET_ROSTER_UNDO_PATH]) {
+    ctx.app.on(path === FLEET_ROSTER_PATH ? "GET" : "POST", path, async (context) => {
+      context.header("cache-control", "no-store");
+      // Owner operator or a paired Take Control device; ordinary fleet workers and support reads are excluded.
+      const authorize = async () => {
+        const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+        if (operator && operator !== "unavailable") return true;
+        const device = await ctx.authenticateDevice(context.req.raw);
+        if (device === "unavailable" || "denied" in device || !device.grants.terminalControl) return false;
+        const record = ctx.devices.get(device.deviceId);
+        return (
+          record !== undefined &&
+          record.supportGrantId === undefined &&
+          record.mintedBy !== "hosted-account" &&
+          !record.mintedBy.startsWith("support:")
+        );
+      };
+      if (!(await authorize())) return context.json({ error: "forbidden" }, 403);
+      if (!ctx.dependencies.captain.fleetRoster || !ctx.dependencies.captain.fleetRosterAction)
+        return context.json({ error: "fleet_roster_unavailable" }, 503);
+      if (path === FLEET_ROSTER_PATH) return context.json(await ctx.dependencies.captain.fleetRoster());
+      const parsed = (
+        path === FLEET_ROSTER_RETIRE_PATH ? RetireFleetAgentSchema : UndoFleetAgentSchema
+      ).safeParse(await readJson(context.req.raw));
+      if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+      let current = true;
+      const result = await ctx.dependencies.captain.fleetRosterAction(parsed.data, {
+        current: () => current && !context.req.raw.signal.aborted,
+        authorize: async () => {
+          current = await authorize();
+          return current;
+        },
+      });
+      return context.json(result);
+    });
+  }
+
   for (const retire of [false, true]) {
     ctx.app.on(retire ? "POST" : "GET", `/v1/fleet/processes${retire ? "/retire" : ""}`, async (context) => {
       const identity = await authenticateOperator(context.req.raw, ctx.dependencies);

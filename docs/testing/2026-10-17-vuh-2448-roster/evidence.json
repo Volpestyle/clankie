@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "focused-tests.json",
+      "size": 20471,
+      "sha256": "d6ff9cb4acc1338368a3d57fc25164148a4fcc278752da47d1fc06139b2f6c80",
+      "url": "clankie://evidence/sha256/d6ff9cb4acc1338368a3d57fc25164148a4fcc278752da47d1fc06139b2f6c80"
+    }
+  ]
+}

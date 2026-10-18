@@ -1,4 +1,16 @@
 import {
+  FLEET_ROSTER_PATH,
+  FLEET_ROSTER_RETIRE_PATH,
+  FLEET_ROSTER_UNDO_PATH,
+  RetireFleetAgentSchema,
+  UndoFleetAgentSchema,
+  FleetRosterSnapshotSchema,
+  FleetRosterActionResultSchema,
+  type FleetRosterSnapshot,
+  type RetireFleetAgent,
+  type FleetRosterActionResult,
+} from "@clankie/protocol/fleet-roster";
+import {
   FLEET_RESOURCES_PATH,
   FleetResourceSnapshotSchema,
   FleetMachineResourceSnapshotSchema,
@@ -279,6 +291,34 @@ export class ClankieApiClient {
     return (await response.json()) as T;
   }
 
+  public async fleetRoster(): Promise<FleetRosterSnapshot> {
+    return parseProtocolResponse(
+      FleetRosterSnapshotSchema,
+      await this.request(FLEET_ROSTER_PATH, { headers: this.operatorHeaders(), redirect: "error" }),
+    );
+  }
+  public async retireFleetAgent(command: RetireFleetAgent): Promise<FleetRosterActionResult> {
+    return parseProtocolResponse(
+      FleetRosterActionResultSchema,
+      await this.request(FLEET_ROSTER_RETIRE_PATH, {
+        method: "POST",
+        headers: { ...this.operatorHeaders(), "content-type": "application/json" },
+        body: JSON.stringify(RetireFleetAgentSchema.parse(command)),
+        redirect: "error",
+      }),
+    );
+  }
+  public async undoFleetAgent(id: string): Promise<FleetRosterActionResult> {
+    return parseProtocolResponse(
+      FleetRosterActionResultSchema,
+      await this.request(FLEET_ROSTER_UNDO_PATH, {
+        method: "POST",
+        headers: { ...this.operatorHeaders(), "content-type": "application/json" },
+        body: JSON.stringify(UndoFleetAgentSchema.parse({ id })),
+        redirect: "error",
+      }),
+    );
+  }
   public async fleetResources(): Promise<FleetResourceSnapshot>;
   public async fleetResources(machine: string): Promise<FleetMachineResourceSnapshot>;
   public async fleetResources(

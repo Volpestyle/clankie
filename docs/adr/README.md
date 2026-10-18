@@ -179,3 +179,5 @@ scope is archived; readers should follow the successor for its implementation.
 - [0271: The lead seat restarts fresh in its own pane](0271-the-lead-seat-restarts-fresh-in-its-own-pane.md) — VUH-2274.
 - [0272: A hosted body runs model-directed work as a separate uid](0272-a-hosted-body-runs-model-directed-work-as-a-separate-uid.md) — VUH-2320 (Proposed).
 - [0273: The fleet room is a durable, owner-only coordination record](0273-the-fleet-room-is-a-durable-owner-only-coordination-record.md) — VUH-2184.
+
+- [0279: Fleet counts come from the host roster](0279-fleet-counts-come-from-the-host-roster.md) — VUH-2448.
