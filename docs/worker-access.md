@@ -73,6 +73,29 @@ choice from `push: owner`. A per-action pi envelope remains a separate
 preferences to that project, without imposing a global work preset on Discord,
 voice, play or other projects.
 
+## Windows Claude channels after an update or deploy
+
+The linked Claude bridge follows a republished fleet link after a runtime restart.
+Its next admitted mailbox poll binds the new runtime's mailbox; readopting the
+seat does not establish a live channel. Connected tools and native message
+delivery have separate admission checks, so working Linear calls alone do not
+prove that the channel or reports work.
+
+A pending Claude Code update can rename the loaded image to
+`claude.exe.old.<timestamp>.<updater-pid>`. Several workers may share that image:
+the suffix is the updater's PID, not necessarily the worker's. The Windows probe
+accepts only the independently installed launcher's exact predecessor renamed
+during the worker's lifetime, with fresh native process, pane ancestry and socket
+ownership proof. It does not require a worker restart to recognize that image.
+
+For a released channel, inspect retained receipts and the native proof before
+reconnecting a busy session. A server-side recognition fix applies to a running
+bridge that is still retrying when the corrected runtime is deployed. Verify
+its recovery after the scheduled deploy. If polling has stopped permanently,
+wait for the worker's turn to end, then coordinate an MCP reconnect with the
+owner; preserve the session, cwd, account profile and channel launch flag if
+resume is needed. Never replay an uncertain original as a new message.
+
 ## Catalog changes in Codex
 
 The fleet bridge lists its catalog when it changes and emits MCP

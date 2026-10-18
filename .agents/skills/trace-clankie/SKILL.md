@@ -122,8 +122,15 @@ caller-lifetime defect, not authority granted by an idle pane or reason to mute 
 
 For remote Windows `remote_pane_required`, compare the kernel's loaded image
 with the independently installed launcher before blaming workspace grants.
-A replaced Claude image may still run as `claude.exe.old.<timestamp>.<pid>`;
-the observer admits only that launcher's exact, lifetime-bound predecessor.
+A replaced Claude image may still run as `claude.exe.old.<timestamp>.<updater-pid>`;
+several workers can share that image, so its suffix need not equal the worker's
+PID. The observer admits only that launcher's exact predecessor renamed during
+the worker's lifetime; native PID/birth, pane ancestry and socket ownership still
+have to match. A bridge can reconnect to the new fleet port yet fail this native
+proof: connected tools can work while both mailbox polling and reports are refused.
+Readoption does not repair a failed native proof. A host-side probe fix can help
+an existing bridge that keeps polling; deploy it through the scheduled runtime
+restart, then observe recovery without replaying uncertain mail or touching a busy pane.
 Remote process/pane admission and project workspace membership are separate
 checks. A read-only process observation without the original request socket
 does not prove successful native report binding.

@@ -1,0 +1,28 @@
+{
+  "issue": "VUH-2479",
+  "base": "a979e3dfbbca4af26877daef6ac9bb44d6701cc7",
+  "diagnosis": "Windows Claude updater PID suffix was incorrectly required to equal the worker PID",
+  "timelineUtc": {
+    "workerStarted": "2026-10-18T21:42:57.5206959Z",
+    "imageRenamed": "2026-10-18T22:34:26.039Z",
+    "reportRejected": "2026-10-18T23:25:58.189Z",
+    "serviceShutdownRequested": "2026-10-18T23:27:54.189Z",
+    "replacementFleetLinkReady": "2026-10-18T23:28:08.652Z"
+  },
+  "baseMatcherOnCapturedImage": false,
+  "fixedMatcherOnCapturedImage": true,
+  "fixedNativeObservation": {
+    "firstRecognizedWorkers": 1,
+    "lastRecognizedWorkers": 1,
+    "exactRunningBridgeSocketProved": true,
+    "nativePidBirthPaneAndWorkspaceProved": true,
+    "requestOrMessageSentToWorker": false
+  },
+  "bridgeVersion": "0.6.19",
+  "versionNote": "The 0.6.18 observation belongs to another PC pane",
+  "limitations": [
+    "No live runtime restart, deployment or worker delivery probe performed",
+    "Lead must deploy and observe whether the existing bridge's polling recovers",
+    "Native observation establishes process admission, not model consumption"
+  ]
+}

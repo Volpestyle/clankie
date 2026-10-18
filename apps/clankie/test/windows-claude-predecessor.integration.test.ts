@@ -7,7 +7,7 @@ import { windowsProcessCommand } from "../src/windows-process-probe.ts";
 // Manual, read-only: runs the production PowerShell admission function on an
 // explicitly supplied Windows SSH host. Creates no pane, file or configuration.
 test.skipIf(!process.env.WINDOWS_CLAUDE_PROOF_HOST)(
-  "real PowerShell admits only the installed launcher's lifetime-bound predecessor",
+  "real PowerShell admits a shared Claude update predecessor without trusting its updater PID as the worker PID",
   () => {
     const command = windowsProcessCommand({ session: "default", pane: "w9:p2" });
     let script = Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le");
@@ -27,16 +27,20 @@ $future = [DateTimeOffset]::UtcNow.AddMinutes(1).ToUnixTimeMilliseconds()
 $pidValue = 648452
 $cases = @(
   "$launcher.old.$stamp.$pidValue",
-  "$launcher.old.$stamp.123",
+  "$launcher.old.$stamp.35252",
   "C:\\other\\claude.exe.old.$stamp.$pidValue",
   "$launcher.lookalike.old.$stamp.$pidValue",
   "$launcher.old.$before.$pidValue",
   "$launcher.old.$future.$pidValue",
   "$launcher.old.$stamp.$pidValue.extra",
-  ("$launcher.old.$stamp.$pidValue" + '.old.' + $stamp + '.' + $pidValue)
+  ("$launcher.old.$stamp.$pidValue" + '.old.' + $stamp + '.' + $pidValue),
+  "$launcher.old.$stamp.0",
+  "$launcher.old.$stamp.-1",
+  "$launcher.old.$stamp.4294967296",
+  "$launcher.old.$stamp.not-a-pid"
 )
 @($cases | ForEach-Object {
-  Test-ClankieClaudePredecessor $_ @($launcher) $pidValue $birth.ToString('O')
+  Test-ClankieClaudePredecessor $_ @($launcher) $birth.ToString('O')
 }) | ConvertTo-Json -Compress
 `;
     const result = execFileSync(
@@ -54,7 +58,20 @@ $cases = @(
       ],
       { encoding: "utf8", timeout: 30_000 },
     );
-    expect(JSON.parse(result)).toEqual([true, false, false, false, false, false, false, false]);
+    expect(JSON.parse(result)).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
   },
   40_000,
 );

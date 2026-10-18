@@ -381,16 +381,17 @@ $session = ${powershellLiteral(input.session)}
 $pane = ${powershellLiteral(input.pane)}
 # A replaced native Claude image can remain loaded under its predecessor name.
 # Keep the independently installed launcher as the anchor. Admit only its exact
-# predecessor for this kernel PID,
-# renamed during its lifetime. This never admits an arbitrary executable path.
-function Test-ClankieClaudePredecessor($running, $installed, $processId, $birth) {
+# predecessor renamed during this process's lifetime. The suffix PID belongs
+# to the updater, which can replace the image shared by several live workers.
+# Native PID/birth, pane ancestry and socket ownership are verified separately.
+function Test-ClankieClaudePredecessor($running, $installed, $birth) {
   $born = [DateTimeOffset]::Parse($birth).ToUnixTimeMilliseconds()
   $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   foreach ($launcher in $installed) {
-    $pattern = '^' + [regex]::Escape($launcher) + '\\.old\\.([0-9]{13})\\.' + [regex]::Escape([string]$processId) + '$'
+    $pattern = '^' + [regex]::Escape($launcher) + '\\.old\\.([0-9]{13})\\.([1-9][0-9]{0,9})$'
     if ($running -match $pattern) {
       $renamed = [long]$Matches[1]
-      if ($renamed -ge $born -and $renamed -le $now) { return $true }
+      if ($renamed -ge $born -and $renamed -le $now -and [long]$Matches[2] -le [uint32]::MaxValue) { return $true }
     }
   }
   return $false
@@ -444,7 +445,7 @@ $nativeProcesses = @(foreach ($row in $all) {
     $executable = [ClankieProcess]::Canonical($detail.executable)
     $recognized = $launchers -contains $executable
     if (!$recognized -and $agent.agent -eq 'claude' -and
-        (Test-ClankieClaudePredecessor $executable $launchers $row.pid $detail.startTime)) {
+        (Test-ClankieClaudePredecessor $executable $launchers $detail.startTime)) {
       # Preserve the independently resolved PATH launcher and the current image.
       # The receiver still verifies fresh native ancestry and socket ownership.
       $installed += $executable

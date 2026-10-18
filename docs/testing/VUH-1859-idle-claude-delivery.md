@@ -82,8 +82,12 @@ exact installed-image match, so its native process list was empty. The corrected
 probe recognizes that same running process and reads its cwd in both observation
 phases without changing the pane.
 
-The repair admits only that installed launcher's exact predecessor name, with
-the matching kernel PID and a rename timestamp within the process lifetime.
+The original repair admitted only that installed launcher's exact predecessor
+name, with the matching kernel PID and a rename timestamp within the process lifetime.
+VUH-2479 corrected the PID assumption: the filename records the **updater's**
+PID, and multiple workers can share that image. The current probe accepts a
+positive Windows updater PID with the same lifetime-bounded timestamp; the
+worker's own PID/birth, pane ancestry and socket owner are still verified independently.
 The launcher anchor does not grow as predecessors are observed. Fresh process
 lifetime, pane ancestry and socket-owner checks still apply. Workspace grants
 are unchanged. The process image replacement actor has not been identified.
@@ -97,8 +101,9 @@ to report `binding_rejected` before claiming or posting the report receipt.
 
 The manual `windows-claude-predecessor.integration.test.ts` executes the production
 admission function through real Windows PowerShell over authenticated SSH. It
-covers the accepted predecessor and refusals for wrong PID, directory, launcher
-name, pre-birth/future timestamp, extra suffix and nested predecessor. No remote
+covers predecessors with matching and different updater PIDs, and refusals for
+an invalid updater PID, directory, launcher name, pre-birth/future timestamp,
+extra suffix and nested predecessor. No remote
 files or configuration are written. Run explicitly with
 `clankie heavy -- env WINDOWS_CLAUDE_PROOF_HOST=HOST pnpm exec vitest run --config vitest.config.ts apps/clankie/test/windows-claude-predecessor.integration.test.ts`.
 

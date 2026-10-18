@@ -118,21 +118,18 @@ async function fixture(
   let seatPolls = 0;
   let bindingSlow = slowBinding;
   let binding = "a".repeat(64);
+  const seatOutbox = new SeatOutbox({ explicitAcknowledgments: true });
   const receiptApp = await createClankieApp({
     captain: createStubCaptain({
       fleetSeatMessageBinding: async () => binding,
       receiveFleetSeatMessage: async (sender, text, delivery) =>
         receiver.accept(sender, delivery!, text, text),
       fleetSeatMessageStatus: async (sender, id) => receiver.status(sender, binding, id),
-      // An empty mailbox that parks like the real one until its wait or abort.
       pollFleetSeatEvents: async (_pane, waitMs, signal) => {
         seatPolls++;
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, waitMs);
-          signal?.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
-        });
-        return [];
+        return seatOutbox.poll(waitMs, signal, binding);
       },
+      acknowledgeFleetSeatEvent: async (_pane, id) => seatOutbox.acknowledge(id, binding),
     }),
     localFleet: { identity: () => identity() },
     ...(seatEvents ? { workerMcp: worker } : {}),
@@ -163,7 +160,8 @@ async function fixture(
       requests++;
       const path = new URL(request.url).pathname;
       requestAttributions.push({ path, bridgeId: request.headers.get("x-clankie-bridge-id") });
-      if (seatEvents && path.endsWith("/events")) return receiptApp.app.fetch(request);
+      if (seatEvents && (path.endsWith("/events") || path.includes("/events/")))
+        return receiptApp.app.fetch(request);
       if (seatEvents && path.endsWith("/tool-catalog") && request.method === "GET") {
         catalogWaits++;
         return receiptApp.app.fetch(request);
@@ -211,16 +209,23 @@ async function fixture(
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Missing bridge health fixture address");
   const url = `http://127.0.0.1:${address.port}/v1/fleet/mcp`;
-  cleanup.push(async () => {
-    settings.held?.released.release();
+  let stopped = false;
+  const stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    seatOutbox.close();
     receiptApp.close();
     await worker.close();
     await host.close();
-    await conversations.close();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
       if ("closeAllConnections" in server) server.closeAllConnections();
     });
+  };
+  cleanup.push(async () => {
+    settings.held?.released.release();
+    await stop();
+    await conversations.close();
     await rm(root, { recursive: true, force: true });
   });
   const headers = (bridgeId: string, session?: string) => ({
@@ -298,6 +303,8 @@ async function fixture(
     },
     mailboxAcks: () => mailboxAcks,
     requests: () => requests,
+    seatOutbox,
+    stop,
     requestAttributions: () => requestAttributions,
     bindingGets: () => bindingGets,
     messagePosts: () => messagePosts,
@@ -380,6 +387,54 @@ async function startBridge(
   await expect.poll(() => f.status().status).toBe("ready");
   return call;
 }
+
+it("reattaches the same Claude bridge and accepts its report after a runtime restart republishes the link", async () => {
+  const first = await fixture(false, "w1:p1", undefined, undefined, true);
+  const notifications: string[] = [];
+  const call = await startBridge(first, true, "claude", notifications);
+  await expect.poll(() => first.seatOutbox.bound()).toBe(true);
+  const deliver = (runtime: typeof first, content: string) =>
+    runtime.seatOutbox.deliver({
+      conversationId: "fixture",
+      kind: "message",
+      source: "captain",
+      content,
+      wantsReply: false,
+      recipientBinding: "a".repeat(64),
+    });
+  const pollsBefore = first.seatPolls();
+  expect(await deliver(first, "Before deployment")).toMatchObject({ outcome: "delivered" });
+  // The service records ACK before its HTTP response reaches the bridge. Wait
+  // for that exact receipt to finish; interrupting it is a different, uncertain
+  // delivery scenario which must not silently replay the original event.
+  await expect.poll(() => first.seatPolls()).toBeGreaterThan(pollsBefore);
+  // Dispose the real HTTP listener and its in-memory MCP sessions/mailbox.
+  // Only the native stdio bridge stays alive, just as on the linked PC.
+  await first.stop();
+  const second = await fixture(false, first.pane, undefined, undefined, true);
+  expect(second.seatOutbox.bound()).toBe(false);
+  await writeFile(
+    join(first.root, ".clankie", "links", "default.json"),
+    JSON.stringify({
+      schemaVersion: 2,
+      fleet: "default",
+      socket: join(first.root, "herdr.sock"),
+      url: new URL(second.url).origin,
+      authentication: "local-process",
+    }),
+  );
+  await expect.poll(() => second.seatOutbox.bound(), { timeout: 10_000 }).toBe(true);
+  expect(await deliver(second, "After deployment")).toMatchObject({ outcome: "delivered" });
+  expect(notifications.filter((method) => method === "notifications/claude/channel")).toHaveLength(2);
+  const report = decoded(
+    (await call("tools/call", { name: "message_clankie", arguments: { text: "Report after deployment" } }))
+      .result,
+  );
+  expect(report).toMatchObject({ received: true, deliveryStage: "stored" });
+  expect(second.messagePosts()).toBe(1);
+  expect(first.messagePosts()).toBe(0);
+  expect(second.conversations.inboundAcceptance(report.deliveryId)?.text).toBe("Report after deployment");
+}, 20_000);
 
 it("lists an idle channel bridge's catalog only when the seat long poll pushes a new revision", async () => {
   const f = await fixture(false, "w1:p1", undefined, undefined, true);
