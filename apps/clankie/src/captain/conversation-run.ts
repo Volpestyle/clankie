@@ -2,13 +2,14 @@
 export const CONVERSATION_RUN_STALL_MS = 5 * 60_000;
 
 export class ConversationRunStalledError extends Error {
-  public constructor(
-    public readonly phase: string,
-    public readonly compacting = false,
-  ) {
+  public readonly phase: string;
+  public readonly compacting: boolean;
+  public constructor(phase: string, compacting = false) {
     super(
       `No progress for ${CONVERSATION_RUN_STALL_MS} ms during ${phase}. The service execution was abandoned; its outcome may be unknown. Check before retrying.`,
     );
+    this.phase = phase;
+    this.compacting = compacting;
   }
 }
 
