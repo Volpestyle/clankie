@@ -32,6 +32,7 @@ function counts(agents: readonly FleetRosterAgent[]): FleetRosterCounts {
 /** Host observations only. Restart and native occupant changes cannot inherit another agent's idle age. */
 export class FleetRoster {
   private state: z.infer<typeof State> = {};
+  private closed = false;
   private readonly path: string;
   constructor(path: string) {
     this.path = path;
@@ -40,6 +41,9 @@ export class FleetRoster {
     } catch {
       /* Unknown age starts at first observation. */
     }
+  }
+  close(): void {
+    this.closed = true;
   }
   project(
     snapshot: OperatorFleetSnapshot,
@@ -74,7 +78,7 @@ export class FleetRoster {
         (seat.workerReports ?? []).some((report) => report.state !== "read") ||
         (seat.workerReportBridge !== undefined && seat.workerReportBridge.outcome !== "stored");
       const inactive = status === "idle" || status === "finished";
-      if (!snapshot.readWarnings?.length) {
+      if (!this.closed && !snapshot.readWarnings?.length) {
         if (inactive) {
           const known = seat.efficiency?.inactiveSince;
           const since = known && Date.parse(known) <= now ? known : new Date(now).toISOString();
@@ -126,9 +130,9 @@ export class FleetRoster {
       };
     });
     // Missing sources do not erase the age of their retained observations.
-    if (!snapshot.readWarnings?.length)
+    if (!this.closed && !snapshot.readWarnings?.length)
       for (const key of Object.keys(this.state)) if (!seen.has(key)) delete this.state[key];
-    if (JSON.stringify(this.state) !== before) {
+    if (!this.closed && JSON.stringify(this.state) !== before) {
       mkdirSync(dirname(this.path), { recursive: true });
       const temp = `${this.path}.tmp`;
       writeFileSync(temp, JSON.stringify(this.state), { mode: 0o600 });
