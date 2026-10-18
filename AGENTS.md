@@ -67,8 +67,11 @@ This repository is public. Both neighbors are private and consume
 - Match the surrounding code. Use focused checks while iterating, and run the
   repository-root `pnpm check:landing` before pushing. Its own `--changed`
   selection is the landing gate; hand-picked test subsets do not substitute for
-  it. Follow the current worker/lead gate assignment. New tests follow
-  [ADR 0221](docs/adr/0221-tests-prove-the-product-and-its-boundaries.md):
+  it. Follow the current worker/lead gate assignment.
+  The timing-sensitive release-only file list is in
+  [`scripts/testing/landing-test-policy.mjs`](scripts/testing/landing-test-policy.mjs);
+  those files still run in release/manual `pnpm test`.
+  New tests follow [ADR 0221](docs/adr/0221-tests-prove-the-product-and-its-boundaries.md):
   full E2E with real dependencies and nothing mocked, then integration across
   data/API/schema boundaries, then goldens grounded in real examples. Do not add
   unit tests by default; existing unit tests stay until separately reviewed pruning.

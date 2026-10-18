@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "discovery-proof.json",
+      "size": 25252,
+      "sha256": "beae15cf940427e035d41c26982f7d56d89067e01449663416148b9355d679d0",
+      "url": "clankie://evidence/sha256/beae15cf940427e035d41c26982f7d56d89067e01449663416148b9355d679d0"
+    }
+  ]
+}

@@ -46,6 +46,17 @@ The actual compiler inputs also contribute to Turbo's cache key through
 `CLANKIE_LANDING_TYPE_INPUTS`; relative imports cannot reuse a result that predates
 an imported source change merely because the package manifest omits that dependency.
 
+Amendment, 2026-10-18 ([VUH-2460](https://linear.app/vuhlp/issue/VUH-2460)):
+landing omits the explicitly listed timing-sensitive native/process proofs in
+[`landing-test-policy.mjs`](../../scripts/testing/landing-test-policy.mjs).
+The root gate selects this policy with `CLANKIE_LANDING_TESTS=1`; the shared
+Vitest configuration applies it to both parallel and serial projects. Plain
+`pnpm test` and release checks retain these files, with their original assertions
+and deadlines. The eval and opt-in computer exclusions are unchanged. Cheap
+runtime-canary policy checks and the roster shutdown/lifecycle regression remain
+in landing. ADR 0221 still governs how tests are written; this changes when
+these proofs run. There is no blanket cap on transitive integration selection.
+
 Core includes `pnpm deadcode` (knip) in this landing command. Full-gate
 measurements on 2026-10-07 put it at 1.8–3.1 seconds. That small cost catches
 unused exports and missing dependency/entry declarations before they reach the

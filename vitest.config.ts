@@ -1,6 +1,7 @@
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type ViteUserConfig } from "vitest/config";
+import { releaseOnlyTests } from "./scripts/testing/landing-test-policy.mjs";
 
 const repoRoot = fileURLToPath(new URL(".", import.meta.url));
 const packagePath = relative(repoRoot, resolve(process.cwd())).replaceAll("\\", "/");
@@ -22,6 +23,7 @@ const sharedTest = {
     ? [process.env.CLANKIE_RELEASE_RETRY_FILE]
     : packageTestPattern,
   exclude: [
+    ...(process.env.CLANKIE_LANDING_TESTS === "1" ? releaseOnlyTests : []),
     ...(process.env.CLANKIE_COMPUTER_INTEGRATION === "1"
       ? []
       : [

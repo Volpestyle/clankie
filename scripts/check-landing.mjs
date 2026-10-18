@@ -197,6 +197,7 @@ run(
   ],
   {
     CLANKIE_LANDING_GRAPH: graphPath,
+    CLANKIE_LANDING_TESTS: "1",
     ...(retryTests
       ? {
           CLANKIE_RELEASE_TEST_REPORT: firstReport,
