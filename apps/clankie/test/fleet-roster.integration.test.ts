@@ -142,3 +142,18 @@ it("reuses the host's existing observed inactivity instead of guessing from prog
     new FleetRoster(join(root, "roster.json")).project(snapshot, new Set(), time).agents[0],
   ).toMatchObject({ stale: true, inactiveSince: "2026-10-18T00:00:00Z" });
 });
+
+it("does not turn a failed local native census into a confirmed empty count", async () => {
+  let failed = false;
+  const f = await leadChatFixture(false, cleanups, { localUnavailable: () => failed });
+  failed = true;
+  expect(
+    await f.captain.fleetRosterAction!(
+      { seatId: f.head.terminalId, occupantId: "previous" },
+      { current: () => true, authorize: async () => true },
+    ),
+  ).toMatchObject({ outcome: "refused", reason: "roster_unavailable" });
+  const roster = await f.captain.fleetRoster!();
+  expect(roster.complete).toBe(false);
+  expect(roster.readWarnings?.some((warning) => warning.source === "herdr:default")).toBe(true);
+});

@@ -9,13 +9,15 @@ shell is a separate change after VUH-2443.
 
 ## Evidence
 
-`focused-tests.json`: 64 cases passed across the new
+`focused-outage-tests.json`: 65 cases passed across the new
 roster integration, owner-device authorization, native-socket close/Undo and
 existing seat-efficiency integration suites. The count test compares the real
 captain's projected roster with its native local and configured remote fixture
 at the same read boundary. Status groups, the strict >1h threshold, restart,
 occupant replacement, pending mail, retained host inactivity and remote-source
-failure are covered.
+failure are covered. A local native read failure is also explicitly incomplete
+and cannot authorize retirement. `focused-tests.json` retains the earlier
+64-case run before that local-outage correction.
 
 The retirement round trip uses production HTTP routing, the public CLI,
 production orchestration, a private native socket, real ownership/report

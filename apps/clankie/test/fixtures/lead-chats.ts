@@ -33,7 +33,7 @@ export async function leadChatFixture(
   remote: boolean,
   cleanup: Array<() => Promise<void>>,
   /** A configured machine whose Herdr answers only after this delay, then fails. */
-  options: { slowFleetMs?: number } = {},
+  options: { slowFleetMs?: number; localUnavailable?: () => boolean } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lead-messages-"));
   cleanup.push(async () => rmSync(root, { recursive: true, force: true }));
@@ -164,10 +164,10 @@ export async function leadChatFixture(
       stateDir: root,
       workingDirectory: root,
       nativeHerdrRunner: runner,
-      nativeCensusRunner: async (_command: string, args: readonly string[]) => ({
-        stdout: herdrResponse(args),
-        stderr: "",
-      }),
+      nativeCensusRunner: async (_command: string, args: readonly string[]) => {
+        if (options.localUnavailable?.()) throw new Error("Local Herdr socket unavailable");
+        return { stdout: herdrResponse(args), stderr: "" };
+      },
       settings,
       discordEnvironment: {},
       seatAdapters: [],
