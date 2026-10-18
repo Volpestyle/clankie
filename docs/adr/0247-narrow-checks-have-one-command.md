@@ -48,7 +48,7 @@ an imported source change merely because the package manifest omits that depende
 
 Amendment, 2026-10-18 ([VUH-2460](https://linear.app/vuhlp/issue/VUH-2460)):
 landing omits the explicitly listed timing-sensitive native/process proofs in
-[`landing-test-policy.mjs`](../../scripts/testing/landing-test-policy.mjs).
+[`landing-test-policy.ts`](../../scripts/testing/landing-test-policy.ts).
 The root gate selects this policy with `CLANKIE_LANDING_TESTS=1`; the shared
 Vitest configuration applies it to both parallel and serial projects. Plain
 `pnpm test` and release checks retain these files, with their original assertions

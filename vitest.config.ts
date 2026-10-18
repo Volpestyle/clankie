@@ -1,7 +1,7 @@
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type ViteUserConfig } from "vitest/config";
-import { releaseOnlyTests } from "./scripts/testing/landing-test-policy.mjs";
+import { releaseOnlyTests } from "./scripts/testing/landing-test-policy.ts";
 
 const repoRoot = fileURLToPath(new URL(".", import.meta.url));
 const packagePath = relative(repoRoot, resolve(process.cwd())).replaceAll("\\", "/");

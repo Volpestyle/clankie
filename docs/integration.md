@@ -115,7 +115,7 @@ for releases and manual runs. Core also runs `pnpm deadcode` before typecheck
 and tests: measured knip execution costs about 2–3 seconds and catches unused
 exports and missing declarations before landing. The root gate also excludes
 the timing-sensitive files listed in
-[`landing-test-policy.mjs`](../scripts/testing/landing-test-policy.mjs), through
+[`landing-test-policy.ts`](../scripts/testing/landing-test-policy.ts), through
 the shared parallel/serial Vitest configuration. Plain `pnpm test` and release
 checks still include them; their bodies and deadlines are unchanged. Evals remain
 outside both. Gate processes start with private

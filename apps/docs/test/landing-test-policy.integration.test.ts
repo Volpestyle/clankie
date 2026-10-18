@@ -5,7 +5,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
-import { releaseOnlyTests } from "../../../scripts/testing/landing-test-policy.mjs";
+import { releaseOnlyTests } from "../../../scripts/testing/landing-test-policy.ts";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const exec = promisify(execFile);

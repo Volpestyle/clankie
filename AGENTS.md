@@ -69,7 +69,7 @@ This repository is public. Both neighbors are private and consume
   selection is the landing gate; hand-picked test subsets do not substitute for
   it. Follow the current worker/lead gate assignment.
   The timing-sensitive release-only file list is in
-  [`scripts/testing/landing-test-policy.mjs`](scripts/testing/landing-test-policy.mjs);
+  [`scripts/testing/landing-test-policy.ts`](scripts/testing/landing-test-policy.ts);
   those files still run in release/manual `pnpm test`.
   New tests follow [ADR 0221](docs/adr/0221-tests-prove-the-product-and-its-boundaries.md):
   full E2E with real dependencies and nothing mocked, then integration across

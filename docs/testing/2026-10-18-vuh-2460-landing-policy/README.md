@@ -3,7 +3,7 @@
 Tracks: https://linear.app/vuhlp/issue/VUH-2460
 
 The six issue-named timing-sensitive files are listed once in
-scripts/testing/landing-test-policy.mjs. The landing command selects that policy
+scripts/testing/landing-test-policy.ts. The landing command selects that policy
 in the shared Vitest configuration, so it applies to parallel and serial tests.
 Plain pnpm test and release checks continue to include every moved file. No
 existing test body, deadline, product default or eval boundary changes.
