@@ -282,6 +282,33 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/fleet/roster",
+      {
+        access:
+          "Encrypted owner-paired device bearer with terminalControl (Take Control); no visitors or support",
+        purpose:
+          "Read host-observed agent counts by status, machine and lead, each exact native occupant, progress, inactivity and incomplete-source warnings.",
+      },
+    ],
+    [
+      "POST /v1/fleet/roster/retire",
+      {
+        access:
+          "Encrypted owner-paired device bearer with terminalControl (Take Control); no visitors or support",
+        purpose:
+          "Retire a finished or stale exact occupant through kept-report, draft, native-process and work guards; refusals keep the pane, and a confirmed close supplies a five-minute Undo ID. No force override.",
+      },
+    ],
+    [
+      "POST /v1/fleet/roster/undo",
+      {
+        access:
+          "Encrypted owner-paired device bearer with terminalControl (Take Control); no visitors or support",
+        purpose:
+          "Reopen and resume the same saved native agent within its retirement Undo window. An uncertain reply must not be replayed automatically.",
+      },
+    ],
+    [
       "GET /v1/captain/routines",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
