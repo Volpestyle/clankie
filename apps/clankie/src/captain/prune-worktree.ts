@@ -102,7 +102,11 @@ async function withStableWorktreeHead(
       output?.close();
     }
     await lock.close();
-    const current = await lstat(lockPath).catch(() => undefined);
+    const current = await lstat(lockPath).catch((error: unknown) => {
+      // Git removal deletes the worktree admin directory, including our HEAD lock.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    });
     if (current?.dev === identity.dev && current.ino === identity.ino)
       await unlink(lockPath).catch((error: unknown) => {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

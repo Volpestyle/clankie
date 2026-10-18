@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "regression-proof-v2.json",
+      "size": 93884,
+      "sha256": "ce29d0a19aee57b6a90f0f3df2d50736134850c911f527d4da0898ac13a14bdb",
+      "url": "clankie://evidence/sha256/ce29d0a19aee57b6a90f0f3df2d50736134850c911f527d4da0898ac13a14bdb"
+    },
+    {
       "path": "regression-proof.json",
       "size": 156169,
       "sha256": "f2892226ad6abcecc11f4c2d41ec34ea584141b36acfaa214a092db4a2e7b71b",

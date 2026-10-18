@@ -16,7 +16,7 @@ worktrees. No force removal is used.
 ## Verification
 
 The pre-fix regression runs fail on seven automatic-retirement cases and two
-pruning cases. The final focused run passes 78 cases in three integration files:
+pruning cases. The final focused run passes 79 cases in three integration files:
 automatic/main/handoff/context/keep regressions, native close guards, owner
 roster retire/Undo, and guarded worktree pruning. A detached original commit
 remains readable after its worktree is removed, all fixture reflogs expire and
@@ -25,7 +25,9 @@ lock and prepared branch transaction refuse a racing commit while allowing
 unforced worktree removal. Explicit-file formatting and lint pass.
 
 Raw red/green reports, test output, source patch and native Git experiment are
-retained in regression-proof.json through evidence.json. Earlier intermediate
+retained in regression-proof.json and regression-proof-v2.json through
+evidence.json. The second proof adds a direct detached/unpushed start directory
+and corrects cleanup error handling found by the first landing gate. Earlier intermediate
 implementation failures are local diagnostics, not accepted evidence.
 
 The required exact-tree landing gate is pending; its checked SHA and result

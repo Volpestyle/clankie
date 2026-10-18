@@ -1114,44 +1114,49 @@ function automaticFixture(
 }
 
 // VUH-2462: real native close guards and real Git, without touching a live worker.
-it.each(["nested-dirty", "nested-detached", "separate-dirty", "separate-detached", "missing"])(
-  "automatic tidy holds unknown research context and preserves its owned work (%s)",
-  async (kind) => {
-    const w = await workerWorktree();
-    await fixtureOrigin(w);
-    const start = join(w.base, kind === "missing" ? "missing" : "research");
-    if (kind !== "missing") await mkdir(start);
-    let source = w.tree;
-    if (kind.startsWith("nested")) {
-      source = join(start, "source");
-      await git(w.repo, "worktree", "move", w.tree, source);
-    }
-    const content = "Owned work must survive automatic retirement\n";
-    await writeFile(join(source, "feature.txt"), content);
-    if (!kind.endsWith("dirty")) {
-      await git(source, "checkout", "--quiet", "--detach");
-      await git(source, "add", "feature.txt");
-      await git(source, "commit", "--quiet", "-m", "unpushed detached work");
-      expect(await git(source, "for-each-ref", "--contains", "HEAD")).toBe("");
-    }
-    const head = await git(source, "rev-parse", "HEAD");
-    const f = await fixture({ cwd: start });
-    f.setStatus("done");
-    f.tidy.keepReport(
-      await f.ports.runner.get("w1:p1"),
-      "A retained report is not clearance to discard other work.",
-    );
-    const { auto, tick } = automaticFixture(f, w);
-    expect(await tick(0)).toEqual([]);
-    expect(await tick(61)).toEqual([]);
-    expect(f.closes()).toBe(0);
-    expect(await auto.worktrees()).toEqual([]);
-    expect((await stat(source)).isDirectory()).toBe(true);
-    expect(await git(source, "rev-parse", "HEAD")).toBe(head);
-    expect(await readFile(join(source, "feature.txt"), "utf8")).toBe(content);
-    f.watch.close();
-  },
-);
+it.each([
+  "direct-detached",
+  "nested-dirty",
+  "nested-detached",
+  "separate-dirty",
+  "separate-detached",
+  "missing",
+])("automatic tidy holds unknown research context and preserves its owned work (%s)", async (kind) => {
+  const w = await workerWorktree();
+  await fixtureOrigin(w);
+  const start =
+    kind === "direct-detached" ? w.tree : join(w.base, kind === "missing" ? "missing" : "research");
+  if (kind !== "missing" && kind !== "direct-detached") await mkdir(start);
+  let source = w.tree;
+  if (kind.startsWith("nested")) {
+    source = join(start, "source");
+    await git(w.repo, "worktree", "move", w.tree, source);
+  }
+  const content = "Owned work must survive automatic retirement\n";
+  await writeFile(join(source, "feature.txt"), content);
+  if (!kind.endsWith("dirty")) {
+    await git(source, "checkout", "--quiet", "--detach");
+    await git(source, "add", "feature.txt");
+    await git(source, "commit", "--quiet", "-m", "unpushed detached work");
+    expect(await git(source, "for-each-ref", "--contains", "HEAD")).toBe("");
+  }
+  const head = await git(source, "rev-parse", "HEAD");
+  const f = await fixture({ cwd: start });
+  f.setStatus("done");
+  f.tidy.keepReport(
+    await f.ports.runner.get("w1:p1"),
+    "A retained report is not clearance to discard other work.",
+  );
+  const { auto, tick } = automaticFixture(f, w);
+  expect(await tick(0)).toEqual([]);
+  expect(await tick(61)).toEqual([]);
+  expect(f.closes()).toBe(0);
+  expect(await auto.worktrees()).toEqual([]);
+  expect((await stat(source)).isDirectory()).toBe(true);
+  expect(await git(source, "rev-parse", "HEAD")).toBe(head);
+  expect(await readFile(join(source, "feature.txt"), "utf8")).toBe(content);
+  f.watch.close();
+});
 
 it("automatic tidy holds a pushed feature branch until main or a recorded handoff covers it", async () => {
   const w = await workerWorktree();
