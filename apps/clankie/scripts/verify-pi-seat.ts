@@ -36,7 +36,7 @@ import { createCaptainMemory } from "../src/captain-memory.ts";
 assert.equal(process.env.HERDR_ENV, "1", "Run from Herdr; only the owned throwaway session is changed");
 const [outArg, profileArg, model] = process.argv.slice(2);
 assert.ok(
-  outArg && profileArg && model?.includes("/"),
+  outArg && profileArg && model !== undefined && model.includes("/"),
   "Usage: verify-pi-seat OUT.json PI_AGENT_DIR PROVIDER/MODEL",
 );
 const output = resolve(outArg);
