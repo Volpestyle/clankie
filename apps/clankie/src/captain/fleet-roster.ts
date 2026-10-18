@@ -60,7 +60,7 @@ export class FleetRoster {
       const key = JSON.stringify([seat.fleet ?? "local", seat.seatId, seat.occupantId]);
       seen.add(key);
       const status =
-        waitingOnOwner.has(seat.seatId) || seat.status === "waiting"
+        waitingOnOwner.has(seat.seatId) || seat.status === "waiting" || seat.status === "blocked"
           ? "waiting"
           : seat.status === "working"
             ? "working"

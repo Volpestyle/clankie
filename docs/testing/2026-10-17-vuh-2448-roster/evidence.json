@@ -8,6 +8,12 @@
       "url": "clankie://evidence/sha256/bf3d6a4df435090b5c1eddb2d6026ed93fa3bf60b63acede29f17974504feceb"
     },
     {
+      "path": "focused-status-tests.json",
+      "size": 21460,
+      "sha256": "4c1cc09a7bfdf939828673332f2f7efc2078530ced5e9f615f880bf10edc262a",
+      "url": "clankie://evidence/sha256/4c1cc09a7bfdf939828673332f2f7efc2078530ced5e9f615f880bf10edc262a"
+    },
+    {
       "path": "focused-tests.json",
       "size": 20471,
       "sha256": "d6ff9cb4acc1338368a3d57fc25164148a4fcc278752da47d1fc06139b2f6c80",
