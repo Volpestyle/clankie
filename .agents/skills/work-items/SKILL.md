@@ -376,6 +376,15 @@ tracker backends refuse these additions.
 
 ## Built-in tracker sync
 
+The same enrolled-device `tracker_sync` route reads named filters with
+`list_issue_views` and applies one with `list_issue_view_issues`. Send exact
+`project` UUID and `storeId`, plus saved view `id` for apply. Optional `limit`,
+`cursor` and `orderBy` use normal tracker pagination. Read results are
+`issue_views` (`views`) or `issue_view_issues` (`issues`), with scope IDs,
+`hasNextPage` and optional `cursor`. These require current chat access and
+delegate to canonical current tools; saved definitions never grant authority.
+Use existing sync commits to refresh, including empty-delta definition commits.
+
 `clankie work sync --json COMMAND` reads project-scoped bootstrap/batch data,
 waits for deltas from `(storeId,lastSyncId)`, or sends one keyed atomic
 transaction of existing write tools. It uses the existing authenticated service

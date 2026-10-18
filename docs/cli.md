@@ -2839,9 +2839,20 @@ and file trackers refuse saved views rather than falling back to a local store.
 A view from another project or replaced tracker store is refused, including on
 read, apply, update and delete. Saving a filter grants no future access.
 
-The Work UI picker and iPhone, iPad and Mac presentation are not implemented or
-proved by this API/CLI slice. The parent Work UI milestone and James's visual
-review remain open.
+Enrolled devices use the existing `tracker_sync` operation on
+`POST /operator/v1/dispatch` with read-only commands
+`{action:"list_issue_views",project:PROJECT_UUID,storeId:STORE_ID}` and
+`{action:"list_issue_view_issues",project:PROJECT_UUID,storeId:STORE_ID,id:VIEW_UUID}`.
+Both accept `limit` (1–250, default 50), `cursor` and `orderBy` (`createdAt` or
+`updatedAt`). Current chat authority is required before dispatch and return.
+The outcomes are `issue_views` with `views`, or `issue_view_issues` with current
+canonical `issues`; both include `storeId`, `projectId`, `hasNextPage` and optional
+`cursor`, and apply includes `viewId`. Follow the returned cursor for that same
+read. Changed filters invalidate it. Existing tracker commits drive refresh,
+including definition writes whose sync deltas are empty; no new poller is needed.
+
+This API/CLI contract does not establish native iPhone, iPad or Mac presentation
+or James's visual acceptance. Those remain separate Work UI checks.
 
 ### `evidence push|fetch` / `evidence list|receipt`
 

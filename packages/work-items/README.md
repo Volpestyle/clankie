@@ -148,6 +148,17 @@ See the [ADR 0226 sync amendment](../../docs/adr/0226-one-tracker-tool-surface.m
 for model fields, groups, hydration ordering and cursor recovery. This changes
 neither connected Linear nor repository adapters.
 
+Enrolled devices read saved filters using `tracker_sync` commands
+`list_issue_views` and `list_issue_view_issues`. Both require the exact `project`
+UUID and current `storeId`; apply also requires the saved view `id`. The backend
+delegates to the normal saved-view tools under the store lock and checks live
+access before dispatch and return. Results carry `outcome: issue_views` or
+`issue_view_issues`, scope IDs, canonical `views` or `issues`, `hasNextPage` and
+optional `cursor`. `limit` (1–250, default 50), `cursor` and `orderBy` use canonical
+pagination. Definitions are never evaluated in the app or stored as snapshots.
+Existing sync commits, including saved-definition writes with empty deltas, let
+clients refresh their selected read without a separate poller.
+
 `clankie work project-details --repo REPO` reads the saved tracker project’s summary, description, status, priority, lead, dates, teams, resources and latest 200 authored status updates. Paired devices use the additive `work_project_details` operation. Linear and the built-in tracker share the canonical project/status-update tools. Unsupported or failed reads answer unavailable; an empty feed means a successful read with no updates. The read never infers health, author or delivery from issue state.
 
 ### Linear mirror import
