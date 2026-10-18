@@ -506,8 +506,13 @@ async function fixture(
       hireResult = next;
     },
     /** Another Herdr pane already running this native session. */
-    reopenElsewhere: () => {
-      others.push({ ...pane, pane_id: "w1:p9", terminal_id: "term_999" });
+    reopenElsewhere: (unlabelled = false) => {
+      others.push({
+        ...pane,
+        pane_id: "w1:p9",
+        terminal_id: "term_999",
+        ...(unlabelled ? { agent: "unknown" } : {}),
+      });
     },
     closes: () => closes,
     watchPath,
@@ -633,6 +638,7 @@ it.each([
   ["conflicting owner", "provenance_unknown"],
   ["missing receipt", "provenance_unknown"],
   ["duplicate session", "provenance_unknown"],
+  ["unlabelled duplicate session", "provenance_unknown"],
   ["host changed", "provenance_unknown"],
   ["process unavailable", "provenance_unknown"],
   ["working", "provenance_unknown"],
@@ -654,7 +660,8 @@ it.each([
     f.restoreSeat();
     if (scenario === "draft") f.setAnsi(await golden("claude", "draft"));
     if (scenario === "dirty") await writeFile(join(w.tree, "unsaved.txt"), "Keep this work");
-    if (scenario === "duplicate session") f.reopenElsewhere();
+    if (scenario === "duplicate session" || scenario === "unlabelled duplicate session")
+      f.reopenElsewhere(scenario === "unlabelled duplicate session");
     if (scenario === "host changed") f.replaceHost();
     if (scenario === "process unavailable") f.refuseProofAfter(2);
     if (scenario === "working") f.setStatus("working");

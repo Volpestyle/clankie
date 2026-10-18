@@ -44,16 +44,16 @@ the checked diff and source hashes.
 
 Proof:
 
-- `restored-tests.log`: 16 focused cases pass through production Herdr parsing,
+- `restored-tests.log`: 17 focused cases pass through production Herdr parsing,
   a real Unix socket, real ownership/allocation/receipt/report journals and real
   Git worktrees. They cover recovered retirement with stale or missing launch
   proof; draft, dirty-work, results, other-lead, adopted/unknown/conflicting-owner,
-  missing-receipt, duplicate-session, changed-host, unavailable-process and busy
+  missing-receipt, duplicate-session (including unknown agent labels), changed-host, unavailable-process and busy
   refusals; and final process-birth/host revalidation. The ordinary completed
   receipt golden comes from p1; its target host/nonce are replaced for isolation,
   and tests translate its native identity and directory into their fixture.
 - `pane-tidy-tests.log`: the complete pane-tidy integration suite passes before
-  the final three added recovery cases; the root landing gate reruns the final
+  the final recovery hardening; the root landing gate reruns the final
   tree's selected tests.
 - `native-test.log` and `native/proof.json`: a disposable real Herdr server,
   Codex TUI/app-server and kernel process observer verify the process/session,

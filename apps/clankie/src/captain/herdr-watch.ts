@@ -4773,7 +4773,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
         (item) =>
           item.paneId === agent.paneId ||
           item.terminalId === agent.terminalId ||
-          (item.agent === agent.agent && nativeSessionId(item) === sessionId),
+          ((item.agent === agent.agent || item.session?.source === agent.session!.source) &&
+            nativeSessionId(item) === sessionId),
       );
       const current = matching[0];
       if (
