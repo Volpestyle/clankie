@@ -167,6 +167,7 @@ it.each([
     const agent = {
       paneId: "fixture:p1",
       terminalId: "fixture-worker",
+      title: "Disposable worker",
       agent: "codex",
       status: "working",
       session: { source: "herdr:codex", kind: "id" as const, value: "disposable-worker" },
