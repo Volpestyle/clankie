@@ -1096,7 +1096,6 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             ...dependencies,
             ...(builtIn ? { builtIn } : {}),
             scopedWrites: true,
-            linearWriteScope: "team",
             actor: CLANKIE_FOR_OWNER,
             beforeWrite,
             ...(convention.backend !== "linear"
