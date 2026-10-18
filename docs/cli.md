@@ -5747,7 +5747,12 @@ times out after five minutes. Healthy work has no total duration cap, and queued
 runs do not consume the timeout while waiting. A stalled stored run fails
 with `conversation_turn_stalled`; the service log names its conversation, run ID
 and stalled phase. The host releases its admission so later inputs can proceed, but its
-original receipt remains and the request is never replayed. Earlier effects may
+original receipt remains and the request is never replayed. A stall during Pi
+compaction marks that session as abandoned. The next durable service turn (including
+Discord) uses a fresh session seeded from a bounded conversation-log projection;
+the old session and log remain evidence. Queued inputs drain into the fresh session
+rather than retrying compaction against the same oversized history (VUH-2463).
+Earlier effects may
 have an unknown outcome; inspect the original run before retrying. See
 [ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md#stalled-service-preparation-and-execution-vuh-1613).
 

@@ -2,7 +2,10 @@
 export const CONVERSATION_RUN_STALL_MS = 5 * 60_000;
 
 export class ConversationRunStalledError extends Error {
-  public constructor(phase: string) {
+  public constructor(
+    public readonly phase: string,
+    public readonly compacting = false,
+  ) {
     super(
       `No progress for ${CONVERSATION_RUN_STALL_MS} ms during ${phase}. The service execution was abandoned; its outcome may be unknown. Check before retrying.`,
     );
@@ -38,6 +41,7 @@ export class ConversationServiceRun {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private phase = "service preparation";
   private closed = false;
+  private compacting = false;
   private readonly cleanup = new Set<() => void>();
   private readonly executingTools = new Set<string>();
 
@@ -56,13 +60,15 @@ export class ConversationServiceRun {
     // Tools own their execution deadlines; silence while one runs is not an idle turn.
     if (this.executingTools.size > 0) return;
     this.timer = setTimeout(() => {
-      this.cancellation.abort(new ConversationRunStalledError(this.phase));
+      this.cancellation.abort(new ConversationRunStalledError(this.phase, this.compacting));
     }, CONVERSATION_RUN_STALL_MS);
     this.timer.unref?.();
   }
 
   public observe(event: { readonly type: string; readonly toolCallId?: string }): void {
     if (this.closed || this.signal.aborted) return;
+    if (event.type === "compaction_start") this.compacting = true;
+    else if (event.type === "compaction_end") this.compacting = false;
     if (event.toolCallId !== undefined) {
       if (event.type === "tool_execution_start") this.executingTools.add(event.toolCallId);
       else if (event.type === "tool_execution_end") this.executingTools.delete(event.toolCallId);

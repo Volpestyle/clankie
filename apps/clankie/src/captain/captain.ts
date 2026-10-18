@@ -1,3 +1,4 @@
+import { createDurableSessions } from "./durable-sessions.ts";
 import { projectTrackerTool } from "./project-tracker-access.ts";
 import {
   autoPlanCapacity,
@@ -207,7 +208,7 @@ import {
   type NativeSeatRecipient,
   type WorkerWriteAuthority,
 } from "./conversation-owner.ts";
-import { ConversationServiceRun, waitForConversationRun } from "./conversation-run.ts";
+import { ConversationServiceRun } from "./conversation-run.ts";
 import {
   ConversationStore,
   roomHandoffConversationId,
@@ -1894,75 +1895,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
-  function durableSession(
-    key: string,
-    lane: CaptainSessionLaneV2,
-    dir: string,
-    systemTools: boolean,
-    cwd: string,
-    sideConversation = false,
-    run?: ConversationServiceRun,
-    /** Start a new session file instead of resuming; older files stay on disk. */
-    fresh = false,
-  ): Promise<LaneSession> {
-    run?.signal.throwIfAborted();
-    if (fresh) {
-      const previous = sessions.get(key);
-      sessions.delete(key);
-      void previous?.then(
-        (lane) => lane.session.dispose(),
-        () => undefined,
-      );
-    }
-    let pending = sessions.get(key);
-    if (pending === undefined) {
-      const created = (async () => {
-        let manager: SessionManager;
-        if (fresh) manager = SessionManager.create(cwd, dir);
-        else
-          try {
-            manager = SessionManager.continueRecent(cwd, dir);
-          } catch {
-            manager = SessionManager.create(cwd, dir);
-          }
-        return buildSession(
-          lane,
-          manager,
-          systemTools,
-          cwd,
-          sideConversation,
-          key.startsWith("operator:") ? key.slice("operator:".length) : undefined,
-          run,
-        );
-      })();
-      sessions.set(key, created);
-      void created.catch(() => {
-        if (sessions.get(key) === created) sessions.delete(key);
-      });
-      pending = created;
-    }
-    if (run === undefined) return pending;
-    const selected = pending;
-    const onAbort = (): void => {
-      if (sessions.get(key) === selected) sessions.delete(key);
-      // The dependency may ignore its signal. If it finishes later, this lane
-      // belongs to the abandoned run and cannot return to the session cache.
-      void selected.then(
-        (lane) => {
-          void lane.session.abort().catch(() => undefined);
-          lane.session.dispose();
-        },
-        () => undefined,
-      );
-    };
-    run.signal.addEventListener("abort", onAbort, { once: true });
-    run.onClose(() => run.signal.removeEventListener("abort", onAbort));
-    if (run.signal.aborted) onAbort();
-    return waitForConversationRun(selected, run.signal).then((lane) => {
-      run.signal.throwIfAborted();
-      return lane;
-    });
-  }
+  const durableSession = createDurableSessions({
+    sessions,
+    buildSession,
+    recoveryContext: (id) => conversations.compactionRecoveryContext(id),
+  });
 
   function seatEventKind(
     conversationId: string,

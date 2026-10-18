@@ -65,6 +65,7 @@ import {
   seatStartProjection,
   roomForkContext,
   serviceContextSeed,
+  compactionRecoveryContext,
   settleServiceHandoff,
   type ServiceHandoffClaim,
 } from "./service-handoff.ts";
@@ -1190,7 +1191,11 @@ export class ConversationStore {
     );
   }
 
-  /** A native head remains native while its channel is offline. */
+  /** Bounded retained history for a fresh lane after an abandoned compaction. */
+  public compactionRecoveryContext(conversationId: string): string {
+    return compactionRecoveryContext(this, conversationId);
+  }
+
   /** The service runner every unrouted turn uses; host fallbacks reuse it (ADR 0218). */
   public get serviceRunner(): ConversationRunner {
     return this.runner;

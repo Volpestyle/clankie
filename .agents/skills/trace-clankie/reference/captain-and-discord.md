@@ -140,7 +140,12 @@ list` and `clankie doctor` show each with its age (legacy entries have none).
   last tool ends. Pre-start inactivity remains bounded, and queued runs do not
   consume that timeout while waiting.
   For `conversation_turn_stalled`, match the run ID to the service log's
-  conversation and stalled phase. Healthy runs have no total duration cap.
+  conversation and stalled phase. After a stall during Pi compaction,
+  the old Pi session retains a `clankie-compaction-stalled` custom entry. Its next
+  durable turn starts a fresh session with bounded conversation-log context;
+  the old execution is never replayed. This applies to operator and Discord
+  durable lanes. A queued report or watch can therefore drain after the stall
+  without an unrelated fleet round. Healthy runs have no total duration cap.
   Discord Pi stream stalls use `captain_turn_stalled`; native acknowledgments
   and escalation replies retain their own deadlines. A stall can leave earlier
   effects unknown. Inspect the original receipt before retrying; accepted or

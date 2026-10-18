@@ -75,6 +75,8 @@ export interface CreateDiscordTurnsContext {
     cwd: string,
     sideConversation?: boolean,
     run?: ConversationServiceRun,
+    fresh?: boolean,
+    conversationId?: string,
   ) => Promise<LaneSession>;
   readonly conversations: ConversationStore;
   readonly settings: () => Promise<ClankieSettings>;
@@ -158,6 +160,8 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       ctx.workingDirectory,
       false,
       run,
+      false,
+      ctx.conversations.roomConversation(normalized.lane, normalized.targetId),
     );
   }
 
