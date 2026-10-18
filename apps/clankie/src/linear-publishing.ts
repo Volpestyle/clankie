@@ -86,12 +86,47 @@ export async function publishLinearWorker(input: {
   const parsed = (kind === "comment" ? Comment : Issue).safeParse(input.args);
   if (!parsed.success) throw new Error("Invalid worker publishing arguments");
   const { personaId, ...fields } = parsed.data;
+  const postFields: Record<string, unknown> = { ...fields };
   signal.throwIfAborted();
   const author = await beforeDeadline(input.author(personaId), signal);
   if (!author || !author.name.trim()) throw new Error("Unknown worker persona");
   const avatar = new URL(author.avatarUrl);
   if (avatar.protocol !== "https:" || avatar.username || avatar.password)
     throw new Error("Worker avatar must be a public HTTPS URL");
+  if (kind === "comment" && typeof postFields.parentId === "string") {
+    await beforeDeadline(input.beforeWrite(), signal);
+    const request = input.fetch ?? fetch;
+    const init: RequestInit = {
+      method: "POST",
+      redirect: "error",
+      signal,
+      headers: { authorization: `Bearer ${credential.access}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        query: "query WorkerReplyParent($id: String!) { comment(id: $id) { id parent { id } } }",
+        variables: { id: postFields.parentId },
+      }),
+    };
+    const response = await beforeDeadline(
+      input.requestBudget
+        ? input.requestBudget.fetch(credential, request, "https://api.linear.app/graphql", init)
+        : request("https://api.linear.app/graphql", init),
+      signal,
+    );
+    const parent = z
+      .object({
+        data: z.object({
+          comment: z.object({
+            id: z.string().uuid(),
+            parent: z.object({ id: z.string().uuid() }).nullish(),
+          }),
+        }),
+        errors: z.array(z.unknown()).optional(),
+      })
+      .safeParse(await beforeDeadline(response.json(), signal));
+    if (!response.ok || !parent.success || parent.data.errors?.length)
+      throw new Error("Linear reply parent unavailable");
+    postFields.parentId = parent.data.data.comment.parent?.id ?? parent.data.data.comment.id;
+  }
   const variableType = kind === "comment" ? "CommentCreateInput" : "IssueCreateInput";
   const selection =
     kind === "comment" ? "id body updatedAt url" : "id identifier title description updatedAt url";
@@ -110,7 +145,7 @@ export async function publishLinearWorker(input: {
       headers: { authorization: `Bearer ${credential.access}`, "content-type": "application/json" },
       body: JSON.stringify({
         query: `mutation WorkerPost($input: ${variableType}!) { ${kind}Create(input: $input) { success ${kind} { ${selection} } } }`,
-        variables: { input: { ...fields, createAsUser: author.name, displayIconUrl: author.avatarUrl } },
+        variables: { input: { ...postFields, createAsUser: author.name, displayIconUrl: author.avatarUrl } },
       }),
       signal: completion,
     };

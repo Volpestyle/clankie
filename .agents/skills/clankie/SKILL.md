@@ -352,6 +352,12 @@ media and editorial rules. Read the record again immediately before updating it.
 Keep evidence on the assigned issue. After a timed-out mutation, inspect the
 record before retrying: missing acknowledgment does not prove the write failed.
 
+Answer an owner's Linear comment in its existing thread: pass the wake's
+`replyParentId` (or `commentId`) as `parentId`, together with `issueId`, `projectId`
+or `statusUpdateId` (the wake's `projectUpdateId`). A reply to a reply resolves to
+the thread root. When relaying a comment to another worker, include its comment
+ID and target so they can answer in the same thread.
+
 Ordinary updates speak as the connected Clankie account. Worker-name posts are
 separate: granted `linear_create_worker_comment` or `linear_create_worker_issue`
 uses an existing, bound fleet persona **via Clankie**. Its portrait is not a

@@ -587,7 +587,7 @@ export function createLinearApiTracker(options: {
         if (args.statusUpdateId) input.projectUpdateId = args.statusUpdateId;
         if (args.parentId) {
           const parent = await one("comment", String(args.parentId), COMMENT);
-          input.parentId = parent.id;
+          input.parentId = parent.parent ? (record(parent.parent).id ?? parent.id) : parent.id;
           for (const [key, field] of [
             ["issue", "issueId"],
             ["project", "projectId"],

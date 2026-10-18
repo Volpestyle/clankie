@@ -757,8 +757,24 @@ export function linearActivityWakeTypes(
 
 /** Compact, quoted context for the normal conversation journal and coalesced wake. */
 export function linearActivityPrompt(activity: LinearActivityEvent): string {
+  const comment = activity.type === "Comment" ? activity.data : record(activity.data.comment);
+  const commentId =
+    activity.type === "Comment"
+      ? consistentUuid([comment.id])
+      : activity.type === "Reaction"
+        ? consistentUuid([activity.data.commentId, comment.id])
+        : undefined;
+  // A sparse reaction may only carry the comment UUID; the write adapter resolves
+  // that UUID to its thread root before sending the reply.
+  const replyParentId = commentId
+    ? (consistentUuid([comment.parentId, record(comment.parent).id]) ?? commentId)
+    : undefined;
+  const projectUpdateId = consistentUuid([comment.projectUpdateId, record(comment.projectUpdate).id]);
+  const projectId = consistentUuid([comment.projectId, record(comment.project).id]);
   const issue =
-    activity.type === "Issue" ? activity.data : { ...activity.issueContext, ...record(activity.data.issue) };
+    activity.type === "Issue"
+      ? activity.data
+      : { ...record(comment.issue), ...activity.issueContext, ...record(activity.data.issue) };
   const compact = (value: unknown, limit = 240): unknown => {
     const encoded = typeof value === "string" ? value : JSON.stringify(value);
     if (encoded === undefined) return value;
@@ -779,6 +795,8 @@ export function linearActivityPrompt(activity: LinearActivityEvent): string {
       issue.title ?? (activity.issueId ? "Title unavailable" : linearSubject(activity.type, activity.data)),
     ),
     resource: activity.type,
+    ...(commentId ? { commentId, replyParentId } : {}),
+    ...(projectUpdateId ? { projectUpdateId } : projectId ? { projectId } : {}),
     ...(linearActivityProject(activity) ? { project: linearActivityProject(activity) } : {}),
     ...(activity.routing
       ? { destination: activity.routing.conversationId, route: activity.routing.reason }

@@ -8,6 +8,7 @@ import {
   classifyLinearDelivery,
   linearWriteIssue,
   linearActivityUpdateParent,
+  linearActivityPrompt,
   type LinearActivityEvent,
 } from "../src/linear-webhook.ts";
 import type { LinearRecipient } from "../src/captain/conversation-owner.ts";
@@ -34,6 +35,39 @@ function commentBody(overrides: Record<string, unknown> = {}, data: Record<strin
 function sign(body: string) {
   return createHmac("sha256", SECRET).update(body).digest("hex");
 }
+it.each(["issue", "project", "projectUpdate"] as const)(
+  "carries comment and reaction reply context for %s threads",
+  (target) => {
+    const commentId = "00000000-0000-4000-8000-000000000001";
+    const rootId = "00000000-0000-4000-8000-000000000002";
+    const targetId = "00000000-0000-4000-8000-000000000003";
+    const comment = {
+      id: commentId,
+      body: "Owner question",
+      parentId: rootId,
+      [`${target}Id`]: targetId,
+      ...(target === "issue" ? { issue: { id: targetId, identifier: "VUH-2456" } } : {}),
+    };
+    for (const type of ["Comment", "Reaction"]) {
+      const body = commentBody({
+        type,
+        data: type === "Comment" ? comment : { commentId, comment, emoji: "+1" },
+      });
+      const result = classifyLinearDelivery({
+        rawBody: Buffer.from(body),
+        headers: { signature: sign(body), delivery: "thread", event: type },
+        secret: SECRET,
+        now: NOW,
+      });
+      expect(result.kind).toBe("activity");
+      if (result.kind !== "activity") throw new Error("Missing signed activity");
+      const prompt = JSON.parse(linearActivityPrompt(result.activity).split("\n> ")[1]!);
+      expect(prompt).toMatchObject({ commentId, replyParentId: rootId });
+      if (target !== "issue") expect(prompt[`${target}Id`]).toBe(targetId);
+    else expect(prompt).toMatchObject({ issueId: targetId, identifier: "VUH-2456" });
+    }
+  },
+);
 describe("canonical Linear issue routing identity", () => {
   const organizationId = "8397840d-889c-49d5-b686-254640d488b3";
   const issueId = "a06a1c92-8a14-4240-8802-a0bb868d639c";

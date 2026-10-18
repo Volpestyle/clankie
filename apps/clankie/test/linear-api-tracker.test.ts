@@ -69,6 +69,24 @@ async function setup() {
 }
 
 describe("registered Linear OAuth through real broker and hosted tracker", () => {
+  it.each(["issue", "project", "projectUpdate"] as const)(
+    "replies to a reply at the %s thread root",
+    async (target) => {
+      const { tracker, provider } = await setup();
+      const rootId = "00000000-0000-4000-8000-000000000030";
+      const comment = provider.rows.comments![0]!;
+      comment.parent = { id: rootId };
+      comment.issue = comment.project = comment.projectUpdate = null;
+      const targetId = target === "issue" ? ISSUE_ID : target === "project" ? PROJECT_ID : UPDATE_ID;
+      comment[target] = { id: targetId };
+      await tracker.call("save_comment", { parentId: COMMENT_ID, body: "Threaded answer" });
+      const sent = provider.seen.find((entry) => entry.query?.includes("commentCreate"));
+      expect(sent).toBeDefined();
+      const input = JSON.parse(sent!.body).variables.input;
+      expect(input).toMatchObject({ parentId: rootId, [`${target}Id`]: targetId });
+      expect(provider.validationErrors).toEqual([]);
+    },
+  );
   it("verifies an exact project binding without a complexity-heavy collection scan", async () => {
     const { host, provider } = await setup();
     const before = provider.seen.length;

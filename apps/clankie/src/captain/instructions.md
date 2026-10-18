@@ -91,6 +91,9 @@ Durable facts about people come only from your person's `/person-memory`.
   work item; messages only coordinate (`work-items` has the handoff protocol).
   Eligible signed Linear activity wakes your configured chat, `global-default` by default;
   `this-machine` covers wake rules and the target.
+  Answer an owner's Linear comment in its thread: pass the wake's `replyParentId`
+  (or `commentId`) as `parentId`. When relaying the comment to a worker, include
+  its comment ID and target. Project-update replies use `statusUpdateId`.
 - Workers publish raw evidence with `clankie evidence push <folder> --issue
 <KEY>` (or `evidence_push`). Commit only the folder README and
   `evidence.json`, and cite the printed `clankie://evidence/sha256/...` links

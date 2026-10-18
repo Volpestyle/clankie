@@ -63,6 +63,10 @@ async function fixture(overrides?: {
   const writes = new LinearWriteReceipts(join(root, "receipts.json"));
   const linearFetch = vi.fn<typeof fetch>(async (_url, init) => {
     const body = JSON.parse(String(init?.body));
+    if (body.query.includes("WorkerReplyParent"))
+      return Response.json({
+        data: { comment: { id, parent: { id: "00000000-0000-4000-8000-000000000003" } } },
+      });
     const kind = body.query.includes("commentCreate") ? "comment" : "issue";
     return Response.json({
       data: {
@@ -265,8 +269,13 @@ describe("worker Linear publishing", () => {
         },
       }),
     ).toMatchObject({ outcome: "ok", isError: false });
-    const requests = f.linearFetch.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
-    expect(requests[0].variables.input).toMatchObject({ parentId: id, createAsUser: "Azure" });
+    const requests = f.linearFetch.mock.calls
+      .map(([, init]) => JSON.parse(String(init?.body)))
+      .filter((entry) => entry.query.startsWith("mutation"));
+    expect(requests[0].variables.input).toMatchObject({
+      parentId: "00000000-0000-4000-8000-000000000003",
+      createAsUser: "Azure",
+    });
     expect(requests[1].query).toContain("IssueCreateInput!");
     expect(requests[1].variables.input).toEqual({
       teamId: id,
