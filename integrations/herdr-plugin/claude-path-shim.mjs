@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Clankie's pane-local launcher. It conveys no authority: the worker bridge
 // still proves the native pane/session and the channel policy still applies.
-import { access, copyFile, mkdir, readFile, realpath, writeFile, chmod, stat } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, realpath, writeFile, chmod, stat, lstat } from "node:fs/promises";
 import { constants } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
@@ -20,6 +20,32 @@ async function launcherSource() {
   );
 }
 const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+
+/**
+ * `process.execPath` is Homebrew's versioned Cellar binary, which `brew upgrade
+ * node` deletes, breaking every pane's `claude`. Prefer a PATH link that
+ * resolves to the same binary (`/opt/homebrew/bin/node`); the upgrade repoints
+ * it. Mirrors `stableNodePath` in apps/tui autostart (VUH-2393).
+ */
+async function stableNode(env) {
+  let target;
+  try {
+    target = await realpath(process.execPath);
+  } catch {
+    return process.execPath;
+  }
+  for (const directory of (env.PATH ?? "").split(":")) {
+    if (!isAbsolute(directory)) continue;
+    const candidate = join(directory, "node");
+    try {
+      if ((await lstat(candidate)).isSymbolicLink() && (await realpath(candidate)) === target)
+        return candidate;
+    } catch {
+      // Not on this PATH entry.
+    }
+  }
+  return process.execPath;
+}
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 
 /** Skip every copy/symlink of our launcher, without removing PATH from Claude's children. */
@@ -121,7 +147,7 @@ export async function installPaneShell({ root, socketPath, owner = process.env, 
   const launcher = join(root, "bin", "claude");
   await writeFile(
     launcher,
-    `#!/bin/sh\n# clankie-claude-path-shim\nexec ${quote(process.execPath)} ${quote(runner)} "$@"\n`,
+    `#!/bin/sh\n# clankie-claude-path-shim\nexec ${quote(await stableNode(owner))} ${quote(runner)} "$@"\n`,
     { mode: 0o700 },
   );
   await chmod(launcher, 0o700);
