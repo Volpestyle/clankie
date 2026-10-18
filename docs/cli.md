@@ -2605,9 +2605,14 @@ plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
   `work_project` uses the same registered repo ids and device authority as
   `work_items`. Metadata reads share connected-account snapshots and pagination,
   preserving the poller's provider budget.
-- `clankie work repos` lists the repos registered on this machine. A repo is
-  registered the first time a local command names it; only registered repos are
-  readable from a paired device.
+- `clankie work repos` lists registered repositories, saved project trackers and
+  projects in Clankie's connected Linear account. Linear projects have read-only
+  `linear-<UUID>` references usable with `work list`, `show`, `activity`,
+  `project` and `project-details`, including when their checkout is remote or
+  absent. These reads register no repository and change no settings. A saved
+  exact Linear UUID associates a World project; names do not. Projects cut over
+  to the built-in tracker are listed through that tracker. A local command that
+  names a repository path still registers it; paired devices name returned IDs.
 - `clankie work list [--status todo,in_progress] [--owner NAME] [--label L]`,
   `work show ID`. `--label` keeps items carrying that label, matched
   case-insensitively; it is how a role station reads its backlog

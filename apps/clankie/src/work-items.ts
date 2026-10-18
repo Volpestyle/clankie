@@ -1,3 +1,4 @@
+import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import { projectWorkRepoId } from "./project-work-items.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -535,6 +536,19 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     }
     return "files";
   };
+  const linearProjects = linear
+    ? createLinearWorkProjects({
+        call: linear,
+        binding: async () => {
+          if ((await options.mcpHost?.trackerStatus?.())?.backend === "local")
+            throw new Error("Linear is not connected.");
+          return accountBinding("linear");
+        },
+        ...(options.projects ? { projects: options.projects } : {}),
+        builtInRepos: async () => (await projectReader?.repos()) ?? [],
+        root: options.stateDirectory,
+      })
+    : undefined;
   const writeScope = async (request: WorkItemWriteReceiptRequest, authority: WorkWriteAuthority) => {
     const target = await prepareWrite(request.repoId, authority);
     const account = await accountBinding(target.convention.backend);
@@ -1303,11 +1317,32 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (request.action === "repos") {
         const repos = [
           ...((await projectReader?.repos()) ?? []),
+          ...((await linearProjects?.repos().catch(() => [])) ?? []),
           ...(await Promise.all((await known()).map(describe))),
         ];
         if (repos.length > WORK_REPO_LIST_MAX)
           throw new WorkRequestError("result_too_large", "There are too many work trackers to list at once.");
         return { repos };
+      }
+      if (/^linear-[a-f0-9-]{36}$/u.test(request.repo)) {
+        if (
+          !linearProjects ||
+          !["list", "show", "activity", "project", "project-details"].includes(request.action)
+        )
+          throw new WorkRequestError("invalid", "Linear project references are read-only");
+        try {
+          return await linearProjects.read(
+            request as Extract<
+              WorkRequest,
+              { action: "list" | "show" | "activity" | "project" | "project-details" }
+            >,
+          );
+        } catch {
+          throw new WorkRequestError(
+            "backend_unavailable",
+            "This Linear project can’t be read from the connected account. Read the work again.",
+          );
+        }
       }
       if (/^project-[a-f0-9]{48}$/u.test(request.repo)) {
         if (
