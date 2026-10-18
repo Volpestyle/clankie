@@ -2694,13 +2694,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const revision = fleet === undefined ? undefined : fleetRevisions.get(fleet);
       await requireAccess(fleet, "workers");
       const original = await herdrWatches.retirementGuard(agent);
-      return async () => {
-        await refreshFleets();
-        if (fleet !== undefined && (fleetRevisions.get(fleet) !== revision || !fleetIdentities.has(fleet)))
-          throw new Error("Machine connection changed or disconnected");
-        await requireAccess(fleet, "workers");
-        await original();
-      };
+      return Object.assign(
+        async () => {
+          await refreshFleets();
+          if (fleet !== undefined && (fleetRevisions.get(fleet) !== revision || !fleetIdentities.has(fleet)))
+            throw new Error("Machine connection changed or disconnected");
+          await requireAccess(fleet, "workers");
+          await original();
+        },
+        original.restoredHire ? { restoredHire: original.restoredHire } : {},
+      );
     },
     worktreeHold: async (agent, options) => {
       const qualified = splitFleetQualified(agent.paneId);

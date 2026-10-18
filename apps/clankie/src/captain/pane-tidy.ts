@@ -38,6 +38,7 @@ import { paneInputLine } from "./pane-draft.ts";
 import { describeRetainedWorktrees, listTidyWorktrees, type TidyWorktreesResult } from "./tidy-worktrees.ts";
 import { WorktreeDecisions, workerWorktreeHold } from "./worktree-decisions.ts";
 import { PaneKeeps, type PaneKeep } from "./pane-keeps.ts";
+import { RestoredHireRetirementSchema, type RetirementGuard } from "./retirement-guard.ts";
 
 const UNDO_MS = 5 * 60_000;
 const HandoffSchema = z
@@ -51,6 +52,7 @@ const HandoffSchema = z
   .strict();
 type Handoff = z.infer<typeof HandoffSchema>;
 const EntrySchema = ClosedWorkerPaneSchema.extend({
+  restoredHire: RestoredHireRetirementSchema.optional(),
   handoffs: z.array(HandoffSchema).optional(),
   sessionId: z.string().min(1),
   workingDirectory: z.string().min(1),
@@ -148,18 +150,21 @@ function publicEntry(entry: Entry): ClosedWorkerPane {
     input: _input,
     undoFailure: _undo,
     handoffs: _handoffs,
+    restoredHire: _restored,
     ...visible
   } = entry;
   return ClosedWorkerPaneSchema.parse(visible);
 }
 /** The lead's view: the public record plus what was in the input line and why Undo failed. */
-export type ClosedWorkerPaneHistory = ClosedWorkerPane & Pick<Entry, "input" | "undoFailure" | "handoffs">;
+export type ClosedWorkerPaneHistory = ClosedWorkerPane &
+  Pick<Entry, "input" | "undoFailure" | "handoffs" | "restoredHire">;
 function leadEntry(entry: Entry): ClosedWorkerPaneHistory {
   return {
     ...publicEntry(entry),
     ...(entry.input ? { input: entry.input } : {}),
     ...(entry.undoFailure ? { undoFailure: entry.undoFailure } : {}),
     ...(entry.handoffs ? { handoffs: entry.handoffs } : {}),
+    ...(entry.restoredHire ? { restoredHire: entry.restoredHire } : {}),
   };
 }
 
@@ -190,7 +195,7 @@ export class PaneTidy {
       guard: () => Promise<void>,
     ): Promise<import("./prune-worktree.ts").PruneWorktreeResult>;
     provenance(agent: HerdrAgentSnapshot): ConversationOwner | "unknown" | "owner_interactive";
-    retirementGuard?(agent: HerdrAgentSnapshot): Promise<() => Promise<void>>;
+    retirementGuard?(agent: HerdrAgentSnapshot): Promise<RetirementGuard>;
     worktreeHold?(
       agent: HerdrAgentSnapshot,
       options?: import("./worktree-decisions.ts").WorktreeHoldOptions,
@@ -741,6 +746,7 @@ export class PaneTidy {
         harness: agent.agent,
         sessionId: agent.session!.value,
         workingDirectory: agent.workingDirectory,
+        ...(retirementGuard?.restoredHire ? { restoredHire: retirementGuard.restoredHire } : {}),
         owner,
         closedBy: authority.owner,
         reason,

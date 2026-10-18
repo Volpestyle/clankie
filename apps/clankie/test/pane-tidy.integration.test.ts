@@ -70,6 +70,10 @@ async function fixture(
     remote?: boolean;
     socket?: boolean;
     projectHire?: boolean;
+    missingLaunchProof?: boolean;
+    missingHireReceipt?: boolean;
+    ordinaryHire?: boolean;
+    conflictingOwner?: boolean;
     controller?: boolean;
     reload?: boolean;
     cwd?: string;
@@ -96,6 +100,11 @@ async function fixture(
   if (options.legacy) {
     const state = JSON.parse(await readFile(`${watchPath}.owners.json`, "utf8"));
     delete state.hires[0].hired;
+    await writeFile(`${watchPath}.owners.json`, JSON.stringify(state));
+  }
+  if (options.conflictingOwner) {
+    const state = JSON.parse(await readFile(`${watchPath}.owners.json`, "utf8"));
+    state.hires.push({ ...state.hires[0], id: "competing-hire", owner: { conversationId: "other-lead" } });
     await writeFile(`${watchPath}.owners.json`, JSON.stringify(state));
   }
   let present = true,
@@ -232,7 +241,7 @@ async function fixture(
       }
     : routedRunner;
   const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "fixture", name: "Fixture" }] });
-  const proof: ProjectHireProcessProof = {
+  let proof: ProjectHireProcessProof = {
     nativeOccupantId: occupant,
     fleet: "pc",
     pane: paneId,
@@ -269,8 +278,21 @@ async function fixture(
     ledger.pane(allocation.id, paneId);
     ledger.observe(allocation.id, seatId, occupant, proof);
     ledger.confirmed(allocation.id);
+    if (options.missingLaunchProof) {
+      const state = JSON.parse(await readFile(`${watchPath}.project-hires.json`, "utf8"));
+      delete state.allocations[0].proof;
+      await writeFile(`${watchPath}.project-hires.json`, JSON.stringify(state));
+    }
     const golden = JSON.parse(
-      await readFile(new URL("./fixtures/hire-receipts/completed-hire.json", import.meta.url), "utf8"),
+      await readFile(
+        new URL(
+          options.ordinaryHire
+            ? "./fixtures/hire-receipts/restored-hire.json"
+            : "./fixtures/hire-receipts/completed-hire.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
     );
     const claim = (await remoteHireReceipts.claim("pc", {
       receiptId: golden.messageId,
@@ -279,12 +301,21 @@ async function fixture(
     }))!;
     const receipt = ReceiptSchema.parse({
       ...golden,
+      ...(golden.freshHire
+        ? {
+            freshHire: {
+              ...golden.freshHire,
+              baseKey: JSON.stringify(["pc", harness, options.cwd ?? root, "new"]),
+            },
+          }
+        : { hireBaseKey: JSON.stringify(["pc", harness, options.cwd ?? root, "new"]) }),
       paneId,
       sessionId: native.value,
       occupantId: occupant,
       remoteAdmission: { target: claim.target, nonce: claim.nonce },
     });
-    await writeFile(`${watchPath}.hire-receipts.json`, JSON.stringify({ "completed-original": receipt }));
+    if (!options.missingHireReceipt)
+      await writeFile(`${watchPath}.hire-receipts.json`, JSON.stringify({ "completed-original": receipt }));
   }
   let controllerStopped = false;
   let nativeProtocol = options.controller
@@ -481,6 +512,24 @@ async function fixture(
     closes: () => closes,
     watchPath,
     ledger,
+    restoreSeat: () => {
+      pane.terminal_id = "term_restored";
+      pane.agent_status = "idle";
+      proof = {
+        ...proof,
+        processes: [{ pid: 456, startTime: "restored-harness" }],
+        shell: { pid: 400, startTime: "restored-shell" },
+      };
+    },
+    replaceHost: () => {
+      fixtureHost = "replacement-host";
+    },
+    replaceProcessBirth: () => {
+      proof = {
+        ...proof,
+        processes: proof.processes.map((p) => ({ ...p, startTime: p.startTime + "-reused" })),
+      };
+    },
     refuseProofAfter: (reads: number) => {
       refuseProofAt = proofReads + reads;
     },
@@ -522,6 +571,146 @@ it("records a completed remote project hire close without re-running live admiss
     f.watch.close();
   }
 });
+
+// VUH-2477: Herdr restores the same hired thread into a new terminal/process lifetime.
+it.each([false, true])(
+  "retires a restored completed hire without rewriting launch provenance (missing proof=%s)",
+  async (missingLaunchProof) => {
+    const w = await workerWorktree();
+    const f = await fixture({
+      remote: true,
+      socket: true,
+      projectHire: true,
+      harness: "claude",
+      cwd: w.tree,
+      missingLaunchProof,
+      ordinaryHire: true,
+    });
+    try {
+      f.restoreSeat();
+      const ownersBefore = await readFile(f.watchPath + ".owners.json", "utf8");
+      const allocationBefore = f.ledger.retirementCandidate("pc", "pc/w1:p1")!;
+      const result = await f.tidy.close(
+        { pane: "pc/w1:p1", reason: "Finished restored hire", reportPath: f.reportPath },
+        authority,
+      );
+      expect(result, JSON.stringify(result)).toMatchObject({
+        outcome: "closed",
+        entry: {
+          seatId: "pc/term_restored",
+          restoredHire: {
+            originalSeatId: "pc/term_111",
+            censusSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+            proof: { shell: { pid: 400 }, processes: [{ pid: 456 }] },
+          },
+        },
+      });
+      expect(f.closes()).toBe(1);
+      expect(await readFile(f.watchPath + ".owners.json", "utf8")).toBe(ownersBefore);
+      const retained = JSON.parse(await readFile(f.watchPath + ".project-hires.json", "utf8")).allocations[0];
+      expect(retained).toEqual({ ...allocationBefore, gone: true });
+      expect(f.receipts()[0]![1]).toMatchObject({
+        completed: expect.any(Object),
+        retired: expect.any(Object),
+      });
+      const history = new PaneTidy(f.path, f.ports);
+      expect(history.leadHistory()[0]?.restoredHire?.originalSeatId).toBe("pc/term_111");
+      expect(history.history()[0]).not.toHaveProperty("restoredHire");
+      expect(await stat(w.tree)).toBeDefined();
+    } finally {
+      f.watch.close();
+    }
+  },
+);
+
+it.each([
+  ["draft", "unsent_draft"],
+  ["dirty", "unlanded_work"],
+  ["results", "results_not_kept"],
+  ["other lead", "not_owner"],
+  ["adopted", "owner_interactive"],
+  ["legacy owner", "provenance_unknown"],
+  ["conflicting owner", "provenance_unknown"],
+  ["missing receipt", "provenance_unknown"],
+  ["duplicate session", "provenance_unknown"],
+  ["host changed", "provenance_unknown"],
+  ["process unavailable", "provenance_unknown"],
+  ["working", "provenance_unknown"],
+])("restored retirement keeps the %s safety boundary", async (scenario, reason) => {
+  const w = await workerWorktree();
+  const f = await fixture({
+    remote: true,
+    socket: true,
+    projectHire: true,
+    harness: "claude",
+    cwd: w.tree,
+    adopted: scenario === "adopted",
+    legacy: scenario === "legacy owner",
+    missingHireReceipt: scenario === "missing receipt",
+    ordinaryHire: true,
+    conflictingOwner: scenario === "conflicting owner",
+  });
+  try {
+    f.restoreSeat();
+    if (scenario === "draft") f.setAnsi(await golden("claude", "draft"));
+    if (scenario === "dirty") await writeFile(join(w.tree, "unsaved.txt"), "Keep this work");
+    if (scenario === "duplicate session") f.reopenElsewhere();
+    if (scenario === "host changed") f.replaceHost();
+    if (scenario === "process unavailable") f.refuseProofAfter(2);
+    if (scenario === "working") f.setStatus("working");
+    const journals = [".owners.json", ".project-hires.json", ".hire-receipts.json"];
+    const before = await Promise.all(
+      journals.map((suffix) => readFile(f.watchPath + suffix, "utf8").catch(() => "absent")),
+    );
+    const source =
+      scenario === "other lead" ? { ...authority, owner: { conversationId: "other-lead" } } : authority;
+    expect(
+      await f.tidy.close(
+        {
+          pane: "pc/w1:p1",
+          reason: "Finished restored hire",
+          ...(scenario === "results" ? {} : { reportPath: f.reportPath }),
+        },
+        source,
+      ),
+    ).toMatchObject({ reason });
+    expect(f.closes()).toBe(0);
+    expect(
+      await Promise.all(
+        journals.map((suffix) => readFile(f.watchPath + suffix, "utf8").catch(() => "absent")),
+      ),
+    ).toEqual(before);
+    expect(f.tidy.history()).toEqual([]);
+    expect(await stat(w.tree)).toBeDefined();
+  } finally {
+    f.watch.close();
+  }
+});
+
+it.each(["process", "host"])(
+  "restored retirement rechecks the captured %s before dispatch",
+  async (change) => {
+    const f = await fixture({
+      remote: true,
+      socket: true,
+      projectHire: true,
+      harness: "claude",
+      ordinaryHire: true,
+    });
+    try {
+      f.restoreSeat();
+      const guard = await f.watch.retirementGuard(await f.ports.runner.get("pc/w1:p1"));
+      if (change === "process") f.replaceProcessBirth();
+      else f.replaceHost();
+      await expect(guard()).rejects.toThrow(/changed/u);
+      expect(f.closes()).toBe(0);
+      expect(f.ledger.retirementCandidate("pc", "pc/w1:p1")).toBeDefined();
+      expect(f.receipts()[0]![1].retired).toBeUndefined();
+    } finally {
+      f.watch.close();
+    }
+  },
+);
 
 it("a remote provenance refusal preserves allocation, owner, receipt and native roster", async () => {
   const f = await fixture({ remote: true, socket: true, projectHire: true, controller: true });

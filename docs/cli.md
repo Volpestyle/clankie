@@ -6696,6 +6696,20 @@ service replacement and on remote fleets. A proven hire remains eligible for
 guards. Re-adoption or messaging alone cannot make a hand-started pane eligible;
 legacy records with unknown hire provenance remain refused.
 
+After a remote Herdr restore, the same completed hired session can have a new
+terminal and process lifetime. `close_worker_pane` (including `clankie agents
+retire`) recovers retirement authority only from an explicit persisted hiring
+owner and one matching completed receipt on its unchanged configured host.
+A complete census must find that exact idle session once, in its original pane
+and directory. Fresh native process, shell and connection proof is captured and
+rechecked through the final close guard. Missing original process proof can use
+this route; missing receipts, unknown hire provenance, adoption, ambiguous
+sessions and unconfirmed launches cannot. The lead history's `restoredHire`
+records the original seat, receipt, census digest and new process proof. This
+does not rewrite launch records, re-adopt the worker, grant project membership,
+replay its brief or remove its worktree. Saved-result, styled-draft and
+unlanded-work checks still apply.
+
 `clankie agents retire PANE --conversation ID --reason TEXT [--report PATH]
 [--unlanded-reason TEXT]` invokes `close_worker_pane` through the operator
 conversation MCP API (`/v1/mcp?conversationId=ID`). Use a bare local

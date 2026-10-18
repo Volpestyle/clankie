@@ -1,0 +1,23 @@
+{
+  "messageId": "09e29919-dd6a-4d6b-b875-cd2968707b5d",
+  "fingerprint": "7c883e58a4f507529f5f9ec4541e15d3ea6a0a0a65235ac069bdcc5f54f03f95",
+  "hireBaseKey": "[\"pc\",\"claude\",\"C:\\\\Users\\\\volpe\\\\repos\\\\kh2-multiplayer\\\\.local\\\\wt-vuh2254\",\"new\"]",
+  "remoteAdmission": {
+    "target": {
+      "fleet": "pc",
+      "host": "fixture-host",
+      "session": "default",
+      "shell": "powershell"
+    },
+    "nonce": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "remoteLaunchCommitted": true,
+  "sessionId": "8c40c703-b917-4d4b-8d34-a424a46f5898",
+  "occupantId": "session-b49c9703c0f1664925e6e27bb63a9b98ab650deb7d2a674f4663e19f981f0d03",
+  "paneId": "pc/w18:p1",
+  "agentName": "juno-6484",
+  "beforeIds": [],
+  "completed": {
+    "at": 1792026619576
+  }
+}

@@ -69,6 +69,16 @@ including remote fleets. Messaging or re-adopting a hand-started pane does not
 make it a hire. A legacy record with lost provenance still fails closed; do not
 infer a hire from its name, report route or re-adoption.
 
+A remote Herdr restore may preserve the hired session but replace its terminal
+and process. Use the same `close_worker_pane` route: it can recover a completed
+hire from its explicit persisted hiring owner, exact completed receipt and
+unchanged host, with a complete unique-session census and fresh native process
+proof rechecked until close. The session must be idle in its original pane and
+directory. The close history keeps `restoredHire` evidence; original launch
+records remain intact. Missing receipts, unknown hiring ownership and
+unconfirmed launches still refuse. This grants no messaging, adoption or
+project membership, and keeps every result, draft and work check.
+
 The service protects unsent drafts, owner-interactive or hand-started panes you
 did not hire, results not kept, and unlanded work: `unlanded_work` names the
 worker's dirty or unreadable worktree, or commits without a handoff. Clean

@@ -10,7 +10,13 @@ import { createHireLayout, HireLayoutNotStarted, HireLayoutUnconfirmed } from ".
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { ResourceAdmissionError, type FleetResourceRuntime } from "../fleet-resource-runtime.ts";
 import { realpath } from "node:fs/promises";
-import { ProjectHires, projectHireProfile, type ProjectHireProcessProof } from "./project-hires.ts";
+import {
+  ProjectHires,
+  ProjectHireProcessProofSchema,
+  projectHireProfile,
+  type ProjectHireProcessProof,
+} from "./project-hires.ts";
+import type { RetirementGuard } from "./retirement-guard.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
 import { HireOwners } from "./hire-owners.ts";
 import { NativeQuestionUnownedError } from "./claude-hook-questions.ts";
@@ -67,7 +73,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, win32 } from "node:path";
 import { isDeepStrictEqual, stripVTControlCharacters } from "node:util";
 import { redactSensitiveText } from "@clankie/observability";
 import {
@@ -4679,10 +4685,166 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return record.owner;
   }
 
+  /**
+   * Herdr restore preserves a native session but creates a new terminal and process.
+   * Recover retirement authority from the exact completed hire, never from a title,
+   * directory, adoption or today's project assignment. Original journals stay intact.
+   */
+  private async restoredRetirementGuard(agent: HerdrAgentSnapshot): Promise<RetirementGuard> {
+    const fleet = splitFleetQualified(agent.paneId)?.fleet;
+    const sessionId = nativeSessionId(agent);
+    if (!fleet || !agent.session || !sessionId || !this.runner.list || !this.remoteHireReceipts)
+      throw new Error("Restored retirement requires complete native and original host evidence");
+    const occupant = occupantIdForHerdrSession(agent.session);
+    const sessionKey = JSON.stringify([fleet, agent.agent, sessionId]);
+    const owner = this.hireOwners.restoredRetirementRecord(
+      agent.paneId,
+      agent.terminalId,
+      occupant,
+      sessionKey,
+    );
+    if (!owner || owner.hired !== true || owner.paneId !== agent.paneId || !owner.seatId)
+      throw new Error("Restored retirement requires the persisted exact hiring owner");
+    const candidate = this.projectHires.retirementCandidate(fleet, agent.paneId);
+    if (candidate && (!candidate.confirmed || candidate.occupantId !== occupant))
+      throw new Error("Restored retirement cannot replace an unconfirmed or different original hire");
+    const originals = this.hireReceipts
+      .all()
+      .filter(
+        ([, receipt]) =>
+          receipt.completed &&
+          !receipt.retired &&
+          receipt.paneId === agent.paneId &&
+          receipt.sessionId === sessionId &&
+          receipt.occupantId === occupant &&
+          receipt.remoteAdmission?.target.fleet === fleet,
+      );
+    if (originals.length !== 1) throw new Error("Completed original hire is missing or ambiguous");
+    const [key, receipt] = originals[0]!;
+    // Completed ordinary hires live under completed-hire:<id>, not their launch key.
+    const originalKey = receipt.freshHire?.baseKey ?? receipt.hireBaseKey ?? key;
+    const scope: unknown = JSON.parse(originalKey);
+    const target = receipt.remoteAdmission!.target;
+    if (
+      !Array.isArray(scope) ||
+      scope[0] !== fleet ||
+      scope[1] !== agent.agent ||
+      typeof scope[2] !== "string"
+    )
+      throw new Error("Original hire launch scope is incomplete");
+    const directory = (value: string) =>
+      target.shell === "powershell"
+        ? win32
+            .normalize(value)
+            .toLowerCase()
+            .replace(/[\\/]+$/u, "")
+        : value;
+    if (!agent.workingDirectory || directory(agent.workingDirectory) !== directory(scope[2]))
+      throw new Error("Restored hire directory changed");
+    const unchanged = () => {
+      if (
+        this.closed ||
+        this.activeHires.has(key) ||
+        (candidate && this.activeProjectHires.has(candidate.id))
+      )
+        throw new Error("Original hire is active or service closed");
+      if (
+        !isDeepStrictEqual(this.projectHires.retirementCandidate(fleet, agent.paneId), candidate) ||
+        !isDeepStrictEqual(
+          this.hireOwners.restoredRetirementRecord(agent.paneId, agent.terminalId, occupant, sessionKey),
+          owner,
+        ) ||
+        !isDeepStrictEqual(this.hireReceipts.all().find(([id]) => id === key)?.[1], receipt)
+      )
+        throw new Error("Original retirement provenance changed");
+    };
+    const host = async () => {
+      const claim = await this.remoteHireReceipts!.claim(fleet, {
+        receiptId: receipt.messageId,
+        receiptKey: originalKey,
+        fingerprint: receipt.fingerprint,
+      });
+      if (!claim || !isDeepStrictEqual(claim.target, target))
+        throw new Error("Original remote hire target changed or disconnected");
+    };
+    const census = async () => {
+      const inventory = await this.runner.list!(fleet);
+      const matching = inventory.filter(
+        (item) =>
+          item.paneId === agent.paneId ||
+          item.terminalId === agent.terminalId ||
+          (item.agent === agent.agent && nativeSessionId(item) === sessionId),
+      );
+      const current = matching[0];
+      if (
+        matching.length !== 1 ||
+        !current?.session ||
+        current.paneId !== agent.paneId ||
+        current.terminalId !== agent.terminalId ||
+        current.agent !== agent.agent ||
+        occupantIdForHerdrSession(current.session) !== occupant ||
+        !current.workingDirectory ||
+        directory(current.workingDirectory) !== directory(agent.workingDirectory!)
+      )
+        throw new Error("Restored hire census is absent, changed or ambiguous");
+      if (!["idle", "done"].includes(current.status)) throw new Error("Restored hire is not idle");
+      return inventory;
+    };
+    const observe = async () => {
+      unchanged();
+      await host();
+      const inventory = await census();
+      const observed = await this.projectPolicy?.proof?.(fleet, agent.paneId);
+      const proof =
+        observed &&
+        ProjectHireProcessProofSchema.parse({
+          nativeOccupantId: observed.nativeOccupantId,
+          fleet: observed.fleet,
+          pane: observed.pane,
+          binding: observed.binding,
+          processes: observed.processes,
+          shell: observed.shell,
+        });
+      if (
+        !proof ||
+        proof.nativeOccupantId !== occupant ||
+        proof.fleet !== fleet ||
+        proof.pane !== agent.paneId ||
+        proof.binding.session !== target.session ||
+        (candidate?.proof && !isDeepStrictEqual(proof.binding, candidate.proof.binding))
+      )
+        throw new Error("Restored hire native process or connection is unavailable or changed");
+      await census();
+      await host();
+      unchanged();
+      return { proof, inventory };
+    };
+    const original = await observe();
+    const verify: RetirementGuard = async () => {
+      const latest = await observe();
+      if (!isDeepStrictEqual(latest.proof, original.proof))
+        throw new Error("Restored native process changed during retirement");
+    };
+    verify.restoredHire = {
+      receiptId: receipt.messageId,
+      originalSeatId: candidate?.seat ?? owner.seatId,
+      target,
+      observedAt: new Date().toISOString(),
+      censusSha256: createHash("sha256").update(JSON.stringify(original.inventory)).digest("hex"),
+      proof: original.proof,
+    };
+    return verify;
+  }
+
   /** Captured once before retirement. Unconfirmed launches retain their original process proof. */
-  public async retirementGuard(agent: HerdrAgentSnapshot): Promise<() => Promise<void>> {
+  public async retirementGuard(agent: HerdrAgentSnapshot): Promise<RetirementGuard> {
     const fleet = splitFleetQualified(agent.paneId)?.fleet ?? "default";
     const candidate = this.projectHires.retirementCandidate(fleet, agent.paneId);
+    if (
+      splitFleetQualified(agent.paneId) &&
+      (!candidate || !candidate.proof || candidate.seat !== agent.terminalId)
+    )
+      return this.restoredRetirementGuard(agent);
     const check = async () => {
       if (this.closed) throw new Error("Native hire service is closed");
       if (!candidate) {

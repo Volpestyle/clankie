@@ -113,6 +113,21 @@ export class HireOwners {
     if (held) return { ...held, owner: ConversationOwnerSchema.parse(held.owner) };
     return this.hasClaim(paneId, seatId) ? ("unknown" as const) : undefined;
   }
+  /** Restored retirement needs one explicit original hire, with no competing pane/thread claim. */
+  public restoredRetirementRecord(paneId: string, seatId: string, occupantId: string, sessionKey: string) {
+    const records = this.state.hires.filter(
+      (entry) => entry.paneId === paneId || entry.seatId === seatId || entry.sessionKey === sessionKey,
+    );
+    const held = records[0];
+    return records.length === 1 &&
+      held?.hired === true &&
+      held.paneId === paneId &&
+      held.occupantId === occupantId &&
+      held.sessionKey === sessionKey &&
+      held.seatId
+      ? { ...held, owner: ConversationOwnerSchema.parse(held.owner) }
+      : undefined;
+  }
   /** A matching thread may retain its report, without adopting or granting native control. */
   public retainedReportOwner(
     paneId: string,

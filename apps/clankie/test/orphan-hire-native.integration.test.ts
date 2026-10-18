@@ -17,18 +17,23 @@ import { PaneTidy } from "../src/captain/pane-tidy.ts";
 import { paneInputLine } from "../src/captain/pane-draft.ts";
 import { createProjectProcessObserver } from "../src/project-process-proof.ts";
 import { retirementWorkProgram } from "../src/captain/remote-retirement-work.ts";
+import { createRemoteHireReceipts } from "../src/remote-hire-receipts.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 
 const exec = promisify(execFile);
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const nativeIt = it.skipIf(process.platform !== "darwin" || process.env.ORPHAN_HIRE_NATIVE_TEST !== "1");
-nativeIt.each([false, true])(
-  "retires only the original orphan with kept results and complete absence (qualified=%s)",
-  async (qualified) => {
+nativeIt.each([
+  { qualified: false, restored: false },
+  { qualified: true, restored: false },
+  { qualified: true, restored: true },
+])(
+  "guards original hire retirement with native process, lifecycle and retained-work evidence (%j)",
+  async ({ qualified, restored }) => {
     const logs = join(
       import.meta.dirname,
-      "../../../docs/testing/2026-10-12-orphan-hire",
-      qualified ? "qualified" : "local",
+      restored ? "../../../docs/testing/2026-10-18-vuh-2477" : "../../../docs/testing/2026-10-12-orphan-hire",
+      restored ? "native" : qualified ? "qualified" : "local",
     );
     const herdr = await isolatedHerdr(logs);
     const evidence: unknown[] = [];
@@ -168,15 +173,16 @@ nativeIt.each([false, true])(
       const claim = allocations.reserve(settings, "proof", request);
       allocations.pane(claim.id, address);
       allocations.observe(claim.id, agent.terminalId, originalProof.nativeOccupantId, originalProof);
+      const originalSeat = restored ? `${fleet}/term_before_restore` : agent.terminalId;
       new HireOwners(`${watchPath}.owners.json`).bind(
         address,
         authority.owner,
-        agent.terminalId,
+        originalSeat,
         undefined,
         originalProof.nativeOccupantId,
         JSON.stringify([qualified ? fleet : "local", "codex", thread]),
       );
-      if (qualified) {
+      if (qualified && !restored) {
         // Older ownership journals lack hired:true; the exact retained launch still proves provenance.
         const ownershipPath = `${watchPath}.owners.json`;
         const ownership = JSON.parse(await readFile(ownershipPath, "utf8"));
@@ -184,13 +190,14 @@ nativeIt.each([false, true])(
         await writeFile(ownershipPath, JSON.stringify(ownership));
       }
       const fence = new DeliveryFence(`${watchPath}.hire-receipts.json`);
+      const baseKey = JSON.stringify([qualified ? fleet : "local", "codex", cwd, "new"]);
       const key = JSON.stringify([qualified ? fleet : "local", "codex", cwd, "new", request.freshIntent.id]);
       const fingerprint = deliveryFingerprint("Never sent orphan proof brief");
       const receipt = fence.begin(key, {
         fingerprint,
         freshHire: {
           ...request.freshIntent,
-          baseKey: key,
+          baseKey: restored ? baseKey : key,
           owner: authority.owner,
           launch: {
             schemaVersion: 1,
@@ -204,36 +211,76 @@ nativeIt.each([false, true])(
         occupantId: originalProof.nativeOccupantId,
         sessionId: thread,
         briefNotSent: true,
+        ...(restored
+          ? {
+              remoteAdmission: {
+                target: { fleet, host: "this-mac-only", session: "default", shell: "posix" as const },
+                nonce: "a".repeat(64),
+              },
+              remoteLaunchCommitted: true as const,
+            }
+          : {}),
       });
       const census = await runner.list!(qualified ? fleet : undefined);
-      fence.settleRecovery(key, receipt.messageId, {
-        receiptId: receipt.messageId,
-        receiptKey: key,
-        fingerprint,
-        disposition: "abandoned",
-        journal: "authenticated-recovery",
-        target: { fleet, host: "this-mac-only", session: "default", shell: "posix" },
-        hostIdentity: root,
-        census: {
-          observedAt: Date.now(),
-          panes: census.length,
-          processes: originalProof.processes.length,
-          sessions: 1,
-          sha256: createHash("sha256").update(JSON.stringify(census)).digest("hex"),
-        },
-        allocation: {
-          paneId: address,
-          present: true,
-          terminalId: agent.terminalId,
-          sessionId: thread,
-          status: agent.status,
-        },
-      });
-      allocations.failed(claim.id);
-      expect(allocations.recoveryCandidate(claim.id)?.gone).toBe(false);
+      if (restored) {
+        // Restore the production failure shape into our disposable native host:
+        // a completed session whose allocation still names its pre-reboot seat/process.
+        fence.reconcile(key, receipt.messageId, true);
+        allocations.confirmed(claim.id);
+        const state = JSON.parse(await readFile(`${watchPath}.project-hires.json`, "utf8"));
+        state.allocations[0].seat = originalSeat;
+        state.allocations[0].proof.processes = [{ pid: 1, startTime: "before-restore" }];
+        state.allocations[0].proof.shell = { pid: 2, startTime: "before-restore" };
+        await writeFile(`${watchPath}.project-hires.json`, JSON.stringify(state));
+      } else
+        fence.settleRecovery(key, receipt.messageId, {
+          receiptId: receipt.messageId,
+          receiptKey: key,
+          fingerprint,
+          disposition: "abandoned",
+          journal: "authenticated-recovery",
+          target: { fleet, host: "this-mac-only", session: "default", shell: "posix" },
+          hostIdentity: root,
+          census: {
+            observedAt: Date.now(),
+            panes: census.length,
+            processes: originalProof.processes.length,
+            sessions: 1,
+            sha256: createHash("sha256").update(JSON.stringify(census)).digest("hex"),
+          },
+          allocation: {
+            paneId: address,
+            present: true,
+            terminalId: agent.terminalId,
+            sessionId: thread,
+            status: agent.status,
+          },
+        });
+      if (!restored) {
+        allocations.failed(claim.id);
+        expect(allocations.recoveryCandidate(claim.id)?.gone).toBe(false);
+      }
       const next = { ...request, freshIntent: { id: randomUUID(), afterReceiptId: receipt.messageId } };
       watch = new HerdrWatchStore(watchPath, {
         runner,
+        ...(restored
+          ? {
+              remoteHireReceipts: createRemoteHireReceipts({
+                fleet: async () => ({
+                  id: fleet,
+                  session: "default",
+                  ssh: { host: "this-mac-only", shell: "posix" },
+                }),
+                shell: () => async (command) =>
+                  (
+                    await exec("/bin/sh", ["-c", command], {
+                      env: { ...process.env, HOME: root },
+                      timeout: 15000,
+                    })
+                  ).stdout,
+              }),
+            }
+          : {}),
         remoteWorkspace: async (selected, directory) => selected === fleet && directory === cwd,
         projectHirePolicy: { settings: async () => settings, project: async () => "proof", proof: observe },
       });
@@ -252,10 +299,13 @@ nativeIt.each([false, true])(
         originalProof,
       });
       expect(refused).toMatchObject({ outcome: "failed", reason: "not_ready" });
-      expect("detail" in refused && refused.detail).toContain(claim.id);
-      expect("detail" in refused && refused.detail).toContain(address);
-      expect("detail" in refused && refused.detail).toContain(receipt.messageId);
-      expect("detail" in refused && refused.detail).toContain("close_worker_pane");
+      if (restored) expect("detail" in refused && refused.detail).toContain("pane-absent inventory");
+      else {
+        expect("detail" in refused && refused.detail).toContain(claim.id);
+        expect("detail" in refused && refused.detail).toContain(address);
+        expect("detail" in refused && refused.detail).toContain(receipt.messageId);
+        expect("detail" in refused && refused.detail).toContain("close_worker_pane");
+      }
       // No model turn is running; retain the live native backend until guarded retirement.
       // A disconnected view with an unreadable composer must still refuse.
       evidence.push({ phase: "native-screen", ansi: await runner.readPane!(address, "visible", "ansi") });
@@ -315,6 +365,21 @@ nativeIt.each([false, true])(
           { pane: address, reason: "Abandoned original with report retained", reportPath },
           authority,
         );
+      if (restored && (await runner.get(address)).status === "unknown") {
+        // Current Herdr cannot observe lifecycle for this bare remote Codex TUI.
+        // Record the real boundary refusal; never synthesize idle to make a close pass.
+        const held = await close();
+        evidence.push({ phase: "native-lifecycle-unknown-held", result: held, proof: await observe() });
+        expect(held).toMatchObject({
+          outcome: "failed",
+          reason: "provenance_unknown",
+          detail: "Restored hire is not idle",
+        });
+        expect((await runner.list!(fleet)).some((entry) => entry.paneId === address)).toBe(true);
+        expect(allocations.retirementCandidate(fleet, address)).toBeDefined();
+        expect(new DeliveryFence(`${watchPath}.hire-receipts.json`).all()).toEqual(fence.all());
+        return;
+      }
       const other = await tidy.close(
         { pane: address, reason: "Not my hire", reportPath },
         { ...authority, owner: { conversationId: "other" } },
@@ -340,21 +405,34 @@ nativeIt.each([false, true])(
         .toBe("empty");
       const saved = JSON.parse(await readFile(`${watchPath}.project-hires.json`, "utf8"));
       const changed = structuredClone(saved);
-      changed.allocations[0].proof.processes[0].startTime += "-changed";
+      if (restored) changed.allocations[0].proof.binding.socketPath += "-changed";
+      else changed.allocations[0].proof.processes[0].startTime += "-changed";
       await writeFile(`${watchPath}.project-hires.json`, JSON.stringify(changed));
       const mismatch = await close();
-      evidence.push({ phase: "wrong-original-birth", result: mismatch });
+      evidence.push({
+        phase: restored ? "wrong-original-binding" : "wrong-original-birth",
+        result: mismatch,
+      });
       expect(mismatch).toMatchObject({ outcome: "failed", reason: "provenance_unknown" });
       await writeFile(`${watchPath}.project-hires.json`, JSON.stringify(saved));
       const closed = await close();
       evidence.push({ phase: "guarded-retirement", result: closed });
       expect(closed).toMatchObject({ outcome: "closed" });
+      if (restored)
+        expect(closed).toMatchObject({
+          entry: { restoredHire: { originalSeatId: originalSeat, proof: { shell: originalProof.shell } } },
+        });
       expect(
         (await runner.list!(qualified ? fleet : undefined)).some((value) => value.paneId === address),
       ).toBe(false);
       expect(allocations.retirementCandidate(fleet, address)).toBeUndefined();
       expect(allocations.reserve(settings, "proof", next).id).not.toBe(claim.id);
-      expect(new DeliveryFence(`${watchPath}.hire-receipts.json`).all()).toEqual(fence.all());
+      if (restored)
+        expect(new DeliveryFence(`${watchPath}.hire-receipts.json`).all()[0]![1]).toMatchObject({
+          completed: expect.any(Object),
+          retired: expect.any(Object),
+        });
+      else expect(new DeliveryFence(`${watchPath}.hire-receipts.json`).all()).toEqual(fence.all());
       evidence.push({
         phase: "released-no-replay",
         nativeReceiptUnchanged: true,

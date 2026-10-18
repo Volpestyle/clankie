@@ -24,7 +24,7 @@ import {
 import { projectRolePolicy, type ProjectsSettings } from "@clankie/protocol/projects";
 
 const ProcessSchema = z.object({ pid: z.number().int().positive(), startTime: z.string().min(1) }).strict();
-const ProofSchema = z
+export const ProjectHireProcessProofSchema = z
   .object({
     nativeOccupantId: z.string().min(1),
     fleet: z.string(),
@@ -54,7 +54,7 @@ const AllocationSchema = z
     pane: z.string().optional(),
     seat: z.string().optional(),
     occupantId: z.string().optional(),
-    proof: ProofSchema.optional(),
+    proof: ProjectHireProcessProofSchema.optional(),
     selection: z
       .object({
         at: z.string().datetime(),
@@ -376,7 +376,14 @@ export class ProjectHires {
         // Native observers also report cwd/private-seat metadata. A hire's
         // intentional assignment retains only its original process identity.
         const { nativeOccupantId, fleet, pane, binding, processes, shell } = proof;
-        const observed = ProofSchema.parse({ nativeOccupantId, fleet, pane, binding, processes, shell });
+        const observed = ProjectHireProcessProofSchema.parse({
+          nativeOccupantId,
+          fleet,
+          pane,
+          binding,
+          processes,
+          shell,
+        });
         if (a.proof && !isDeepStrictEqual(a.proof, observed))
           throw new Error(
             "The original hire's native process has changed. Check the existing agent before retrying.",
