@@ -19,10 +19,24 @@ parsing. Issue titles remain null because this roster has no cached title source
 - Production app/device authentication, core API-client and CLI transports prove
   nullable fields, legacy strict parsing and visitor/support refusals. Existing
   fixture host transports remain deterministic; this is not deployed fleet proof.
-- Landing gate result and retained logs: pending.
+- Core landing gate initially caught two `TS2322` errors in the new test
+  transport adapters. Async adapters correct their promised return type;
+  the initial failed report is retained alongside the final result.
+- App device-session real-HTTP fixture: 4 cases passed against core `f8630e0ba`.
+- App `clankie heavy -- pnpm check:landing`: exit 0, 104.97 seconds, on
+  `17ddc0ef98a9478950f6311a2250a72e7c493355`, based on app
+  `2f63ef78d98b1c99e46981c5fbab9a9efc10d306`. It ran in an isolated real
+  sibling clone pair, with private installs and the exact core commit above.
+- Final core gate result and raw logs are retained in the evidence manifest.
+  The issue comment names the tested implementation revision separately from
+  any later evidence-only commit.
 
 ## Gaps
 
-The app's device-session client is in the private app repo, outside this supplied
-worktree. Its consumer must opt in using the documented query; the lead has the
-contract for VUH-2472. No app UI, live deployment or main push was performed.
+The app consumer is committed on `vuh-2476-roster-work-client` at
+`17ddc0ef98a9478950f6311a2250a72e7c493355` in the lead-assigned
+`~/dev/clankie-app-wt/vuh-2476` worktree. Protocol uses `workspace:*`, with no
+vendored schema/version pin. Core must land and deploy before this app patch.
+No app UI, live deployment, native build or main push was performed; integration
+and deployment remain the lead's work. Issue titles remain null because the
+roster has no cached title source; no new tracker poll/cache was added.

@@ -124,7 +124,7 @@ it("reuses the private roster for an owner device and refuses visitors, guests, 
     agents: z.array(FleetRosterAgentSchema.omit({ project: true, task: true, ownership: true })),
   });
   expect(legacySchema.safeParse(await (await fleetRead(token("owner"))).json()).success).toBe(true);
-  const fetchImpl: typeof fetch = (input, init) => service.app.request(String(input), init);
+  const fetchImpl: typeof fetch = async (input, init) => service.app.request(String(input), init);
   const client = new ClankieApiClient({ baseUrl: "http://fixture", operatorToken: "operator", fetchImpl });
   expect((await client.fleetRoster()).agents[0]).toMatchObject({
     project: null,
@@ -133,7 +133,7 @@ it("reuses the private roster for an owner device and refuses visitors, guests, 
   });
   const command = await runFleetRosterCommand([], {
     ownerFetcher: {
-      fetch: (path, init) =>
+      fetch: async (path, init) =>
         service.app.request(path, { ...init, headers: { authorization: `Bearer ${token("owner")}` } }),
     },
   });
