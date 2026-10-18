@@ -6209,7 +6209,9 @@ owner's fix. It does not launch a second worker or type the brief into the pane.
 Nothing accepts the development-channel warning on the owner's behalf.
 
 Local OpenCode workers use `hire_agent` with `harness: "opencode"` on macOS
-and a direct native **1.18.18** executable. Optional models use `provider/model`;
+and the installed direct native executable, 1.18.18 or newer. A release whose
+worker probe fails is refused with its version and the missing surface, before
+any brief. Optional models use `provider/model`;
 `effort` requires an explicit model and a variant it supports. Account, skill,
 Chrome and extra-argv overrides are unavailable. The same native TUI stays in
 Herdr; its original process/socket, cwd and displayed session are checked before
@@ -6233,8 +6235,8 @@ fresh remote process/socket/Herdr proofs, no local fallback and no automatic
 reconnection. `clankie agents list --host FLEET` and `clankie agents read FLEET:ses_…`
 read only registered dedicated worker SQLite history. Resume uses the original
 live controller on that exact SSH target. The remote Mac needs Node 24+, Python
-3, Herdr, native OpenCode 1.18.18 and its existing Clankie fleet link. Windows is
-unsupported. Remote live acceptance remains open; [fixture evidence and limits](testing/2026-10-05-remote-opencode/README.md).
+3, Herdr, native OpenCode 1.18.18 or newer that passes the same probe, and its
+existing Clankie fleet link. Windows is unsupported. Remote live acceptance remains open; [fixture evidence and limits](testing/2026-10-05-remote-opencode/README.md).
 
 Every hire logs its selected lane and reason. The result carries `control.mode`:
 `channel` for the Claude worker channel, `adapter` for Codex or OpenCode,
@@ -7964,9 +7966,10 @@ removal, native delivery semantics and current verification limits are in the
 
 `clankie grok --dry-run` or `clankie seat --harness grok --dry-run` reviews the
 native launch, profile, selected skills and conversation. Remove `--dry-run`
-to open the interactive Grok Build TUI. This adapter requires macOS and verified
-Grok Build 1.0.46 on PATH, an existing Grok sign-in, and Clankie's operator
-credential. It uses the current `GROK_HOME` (otherwise `~/.grok`); it never
+to open the interactive Grok Build TUI. This adapter requires macOS and Grok
+Build 1.0.46 or newer on PATH, an existing Grok sign-in, and Clankie's operator
+credential. Each connection probes the leader IPC and ACP; a release that lacks
+them is refused with its version and what is missing. It uses the current `GROK_HOME` (otherwise `~/.grok`); it never
 changes accounts or signs in. `/grok` reviews the same plan in the console.
 
 A fresh launch takes the global chat while no live seat holds it and otherwise

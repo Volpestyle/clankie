@@ -227,8 +227,10 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
                   latestAllocation.agent_session.source !== reportedSession.source ||
                   latestAllocation.agent_session.value !== reportedSession.value)))) ||
           JSON.stringify(await facts()) !== JSON.stringify(birth)
-        )
+        ) {
+          console.error("VUH2417_DEBUG allocation", JSON.stringify({ reportedSession, originalAllocation, latestAllocation, info: await info(), initial })); // VUH2417_DEBUG
           throw new Error("Original native allocation changed");
+        }
       };
       await current();
       return {

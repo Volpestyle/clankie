@@ -172,24 +172,45 @@ test.each(["linked-shm", "linked-db", "replaced-db", "directory"])(
   },
 );
 
+test("a later release's added migration, column and session version are admitted", async () => {
+  const f = await fixture();
+  f.message("one", "native");
+  f.db.exec("INSERT INTO migration VALUES('20261101000000_later_release',1)");
+  f.db.exec("ALTER TABLE message ADD COLUMN future TEXT");
+  f.db.prepare("UPDATE session SET version=? WHERE id=?").run("1.19.3", f.id);
+  const page = await readOpenCodeHistory({ ...f.source, version: "1.19.3" }, f.root);
+  expect(text(page)).toEqual(["native"]);
+});
+
 test.each([
-  "future-migration",
+  "missing-migration",
   "missing-index",
   "wrong-collation",
-  "unknown-column",
+  "missing-column",
+  "other-version",
+  "below-floor",
   "view",
   "v2-only",
   "bad-json",
   "unknown-part",
 ])("%s refuses instead of empty or guessed native history", async (change) => {
   const f = await fixture();
-  if (change === "future-migration") f.db.exec("INSERT INTO migration VALUES('future',1)");
+  if (change === "missing-migration")
+    f.db.exec("DELETE FROM migration WHERE id='20260622202450_simplify_session_input'");
+  if (change === "missing-column") f.db.exec("ALTER TABLE message DROP COLUMN time_updated");
+  if (change === "other-version") f.db.prepare("UPDATE session SET version=? WHERE id=?").run("1.19.3", f.id);
+  if (change === "below-floor") {
+    f.db.prepare("UPDATE session SET version=? WHERE id=?").run("1.18.17", f.id);
+    await expect(readOpenCodeHistory({ ...f.source, version: "1.18.17" }, f.root)).rejects.toThrow(
+      "session from OpenCode 1.18.17 predates the validated floor 1.18.18",
+    );
+    return;
+  }
   if (change === "missing-index") f.db.exec("DROP INDEX part_message_id_id_idx");
   if (change === "wrong-collation")
     f.db.exec(
       "DROP INDEX part_message_id_id_idx;CREATE INDEX part_message_id_id_idx ON part(message_id COLLATE NOCASE,id)",
     );
-  if (change === "unknown-column") f.db.exec("ALTER TABLE message ADD COLUMN future TEXT");
   if (change === "view") f.db.exec("DROP TABLE message;CREATE VIEW message AS SELECT 'fake' AS id");
   if (change === "v2-only")
     f.db.prepare("INSERT INTO session_message VALUES(?,?,?,?,?,?,?)").run("v2", f.id, "user", 1, 1, 1, "{}");

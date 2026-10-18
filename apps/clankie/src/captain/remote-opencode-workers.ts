@@ -8,12 +8,17 @@ import type { HerdrBinding } from "@clankie/protocol";
 import type { AgentHostConnection } from "@clankie/settings";
 import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
-import type { OpenCodeHistorySource, OpenCodeHistorySnapshot } from "../opencode-history.ts";
+import {
+  OPENCODE_WORKER_FLOOR,
+  type OpenCodeHistorySource,
+  type OpenCodeHistorySnapshot,
+} from "../opencode-history.ts";
 import type { OpenCodeWorkerProfile } from "../opencode-profiles.ts";
 import { clientPid } from "../local-fleet-proof.ts";
 import { splitFleetQualified, type HerdrFleet, type FleetShellRun } from "../herdr-fleet.ts";
 import { createOpenCodeNativeHost } from "./opencode-native-host.ts";
 import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
+import { releaseAtLeast } from "./native-release.ts";
 import type { OpenCodeCommandTab } from "./opencode-native-host.ts";
 import {
   remoteOpenCodeAssets,
@@ -22,6 +27,13 @@ import {
 } from "./remote-opencode-transport.ts";
 
 const execute = promisify(execFile);
+// The linked Mac's own OpenCode release, admitted by the same floor as local hires.
+const Release = z
+  .string()
+  .max(64)
+  .refine((value) => releaseAtLeast(value, OPENCODE_WORKER_FLOOR), {
+    message: `Remote OpenCode is older than the validated floor ${OPENCODE_WORKER_FLOOR}`,
+  });
 const Profile = z
   .object({
     profileId: z.string().regex(/^profile-[A-Za-z0-9]+$/u),
@@ -47,7 +59,7 @@ const Source = z
     database: z.string().startsWith("/"),
     databaseIdentity: z.string().regex(/^\d+:\d+$/u),
     sessionId: z.string().regex(/^ses_[A-Za-z0-9]{8,128}$/u),
-    version: z.literal("1.18.18"),
+    version: Release,
     workingDirectory: z.string().startsWith("/"),
   })
   .strict();
@@ -269,7 +281,8 @@ export class RemoteOpenCodeWorkers {
         const selected = z
           .object({
             executable: z.string().startsWith("/"),
-            version: z.literal("1.18.18"),
+            // The helper probes with the same floor; the seat adapter names a refusal.
+            version: z.string().max(64),
             cwd: z.string().startsWith("/"),
           })
           .parse(await call("discover", { cwd: launch.cwd }));
@@ -278,9 +291,9 @@ export class RemoteOpenCodeWorkers {
       },
       profiles: {
         allocate: async () => Profile.parse(await call("allocate")) as OpenCodeWorkerProfile,
-        register: async (profile, sessionId, cwd, verify) => {
+        register: async (profile, sessionId, cwd, version, verify) => {
           await verify();
-          Source.parse(await call("register", { profileId: profile.profileId, sessionId, cwd }));
+          Source.parse(await call("register", { profileId: profile.profileId, sessionId, cwd, version }));
           await verify();
         },
       },

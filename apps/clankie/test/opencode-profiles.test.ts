@@ -24,19 +24,21 @@ async function fixture() {
 test("only original prepared profile and fresh binding plus exact native DB row register history", async () => {
   const f = await fixture();
   const verify = vi.fn(async () => {});
-  await expect(f.profiles.register({ ...f.profile }, f.id, f.root, verify)).rejects.toThrow("Original");
+  await expect(f.profiles.register({ ...f.profile }, f.id, f.root, "1.18.18", verify)).rejects.toThrow(
+    "Original",
+  );
   expect(verify).not.toHaveBeenCalled();
-  await expect(f.profiles.register(f.profile, f.id, f.root, verify)).rejects.toThrow();
+  await expect(f.profiles.register(f.profile, f.id, f.root, "1.18.18", verify)).rejects.toThrow();
   expect(await readdir(f.profile.directory)).toEqual([]);
   await writeOpenCodeNativeSession(f.profile.database, f.root, f.id);
-  await f.profiles.register(f.profile, f.id, f.root, verify);
+  await f.profiles.register(f.profile, f.id, f.root, "1.18.18", verify);
   expect(verify.mock.calls.length).toBeGreaterThanOrEqual(4);
   expect(await f.profiles.resolve(f.id)).toMatchObject({
     sessionId: f.id,
     workingDirectory: f.root,
     kind: "opencode-sqlite",
   });
-  await expect(f.profiles.register(f.profile, f.id, f.root, verify)).rejects.toThrow("Original");
+  await expect(f.profiles.register(f.profile, f.id, f.root, "1.18.18", verify)).rejects.toThrow("Original");
   expect((await new OpenCodeProfiles(f.root).list()).map((v) => v.source.sessionId)).toEqual([f.id]);
 });
 
@@ -57,7 +59,13 @@ test.each(["proof-loss", "row-retarget", "wrong-session"])(
       }
     };
     await expect(
-      f.profiles.register(f.profile, mode === "wrong-session" ? "ses_wrongNative123" : f.id, f.root, verify),
+      f.profiles.register(
+        f.profile,
+        mode === "wrong-session" ? "ses_wrongNative123" : f.id,
+        f.root,
+        "1.18.18",
+        verify,
+      ),
     ).rejects.toThrow();
     expect(await readdir(f.profile.directory)).toEqual(["opencode.db"]);
   },
@@ -66,7 +74,7 @@ test.each(["proof-loss", "row-retarget", "wrong-session"])(
 test("API session service returns native source without fake file/size; stored metadata cannot launch", async () => {
   const f = await fixture();
   await writeOpenCodeNativeSession(f.profile.database, f.root, f.id);
-  await f.profiles.register(f.profile, f.id, f.root, async () => {});
+  await f.profiles.register(f.profile, f.id, f.root, "1.18.18", async () => {});
   const host = {
     id: "local",
     list: async () => [],

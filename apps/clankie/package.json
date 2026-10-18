@@ -12,6 +12,7 @@
     "minecraft:smoke": "tsx scripts/minecraft-smoke.ts",
     "verify-codex-seat": "tsx scripts/verify-codex-seat.ts",
     "verify-grok-seat": "tsx scripts/verify-grok-seat.ts",
+    "verify-opencode-seat": "tsx scripts/verify-opencode-seat.ts",
     "verify-pi-seat": "tsx scripts/verify-pi-seat.ts",
     "verify-prime-seat": "tsx scripts/verify-prime-seat.ts",
     "verify-model": "tsx scripts/verify-model-selection.ts",

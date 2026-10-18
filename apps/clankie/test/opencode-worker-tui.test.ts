@@ -13,7 +13,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-test("awaited first TUI plugin initialization binds before prompt mounting, then sends via its native SDK", async () => {
+async function workerTui() {
   const directory = await mkdtemp(join(tmpdir(), "opencode-tui-fixture-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const controller = await createOpenCodeController({
@@ -43,7 +43,11 @@ test("awaited first TUI plugin initialization binds before prompt mounting, then
     default: { id: string; tui(api: unknown, options: unknown): Promise<void> };
   };
   expect(module.default.id).toBe("clankie-native-worker");
-  const { tui } = module.default;
+  return { directory, controller, tui: module.default.tui };
+}
+
+test("awaited first TUI plugin initialization binds before prompt mounting, then sends via its native SDK", async () => {
+  const { directory, controller, tui } = await workerTui();
   const sessionId = "ses_nativeWorker123";
   let mounted = false;
   let route: { name: string; params?: { sessionID: string } } = { name: "home" };
@@ -88,10 +92,13 @@ test("awaited first TUI plugin initialization binds before prompt mounting, then
         }),
         get: vi.fn(async () => ({ data: { id: sessionId, directory } })),
         status: async () => ({ data: {} }),
+        messages: vi.fn(async () => ({ data: [] })),
         promptAsync: vi.fn(async () => ({ response: { status: 204 } })),
+        abort: vi.fn(async () => ({ data: true })),
       },
       permission: { list: async () => ({ data: [] }) },
       question: { list: async () => ({ data: [] }) },
+      provider: { list: vi.fn(async () => ({ data: { all: [], connected: [] } })) },
       mcp: {
         connect: vi.fn(async () => ({ data: true })),
         status: vi.fn(async () => ({ data: { clankie: { status: "connected" } } })),
@@ -167,4 +174,33 @@ test("awaited first TUI plugin initialization binds before prompt mounting, then
   expect(api.client.session.create).toHaveBeenCalledOnce();
   dispose();
   await expect(controller.request("status")).rejects.toThrow();
+});
+
+test("an OpenCode release lacking a worker surface is refused by name before any native effect", async () => {
+  const { directory, controller, tui } = await workerTui();
+  const create = vi.fn(async () => ({ data: { id: "ses_nativeWorker123" } }));
+  const api = {
+    app: { version: "1.20.0" },
+    lifecycle: { signal: new AbortController().signal, onDispose() {} },
+    route: { current: { name: "home" }, navigate: vi.fn() },
+    state: {
+      ready: false,
+      config: {},
+      session: { permission: () => [], question: () => [], status: () => undefined },
+    },
+    client: {
+      session: { create, get: vi.fn(), status: vi.fn(), messages: vi.fn(), abort: vi.fn() },
+      permission: { list: vi.fn() },
+      question: { list: vi.fn() },
+      provider: { list: vi.fn() },
+    },
+  };
+  const loaded = tui(api, { endpoint: controller.endpoint, token: controller.token });
+  void loaded.catch(() => {});
+  await expect(controller.request("initialize", { cwd: directory }, 1000)).rejects.toThrow(
+    "OpenCode 1.20.0 lacks the Clankie worker surface: client.session.promptAsync",
+  );
+  await expect(loaded).rejects.toThrow();
+  expect(create).not.toHaveBeenCalled();
+  expect(api.route.navigate).not.toHaveBeenCalled();
 });

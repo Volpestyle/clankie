@@ -293,14 +293,14 @@ export function createRemoteOpenCodeHelper(
       }
       case "register": {
         const value = z
-          .object({ profileId: z.string(), sessionId: Session, cwd: Path })
+          .object({ profileId: z.string(), sessionId: Session, cwd: Path, version: z.string().max(64) })
           .strict()
           .parse(input);
         const profile = allocated.get(value.profileId);
         if (!profile) throw unavailable();
         // Caller fences the SSH request on both sides; the shared reader also
         // rechecks profile/DB identity around each native SQLite transaction.
-        await profiles.register(profile, value.sessionId, value.cwd, async () => {});
+        await profiles.register(profile, value.sessionId, value.cwd, value.version, async () => {});
         allocated.delete(profile.profileId);
         return profiles.resolve(value.sessionId);
       }

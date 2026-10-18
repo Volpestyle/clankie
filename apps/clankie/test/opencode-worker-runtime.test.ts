@@ -359,7 +359,7 @@ test("native exit authorizes the original session and refuses a route change dur
   expect(changed.api.keymap.dispatchCommand).not.toHaveBeenCalled();
 });
 
-test("exact resume never creates or navigates; wrong route and unsupported exact version refuse before effects", async () => {
+test("exact resume never creates or navigates; a wrong route refuses before effects", async () => {
   const f = fixture(true);
   await f.initialize();
   expect(f.api.client.session.create).not.toHaveBeenCalled();
@@ -368,10 +368,6 @@ test("exact resume never creates or navigates; wrong route and unsupported exact
   wrong.switch();
   await expect(wrong.initialize()).rejects.toThrow("exact saved session");
   expect(wrong.api.client.session.create).not.toHaveBeenCalled();
-  const version = fixture();
-  version.api.app.version = "1.18.29";
-  await expect(version.initialize()).rejects.toThrow("exactly 1.18.18");
-  expect(version.api.client.session.create).not.toHaveBeenCalled();
 });
 
 test("route changes during create or session read cannot select, bind or submit a different session", async () => {

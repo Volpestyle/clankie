@@ -316,9 +316,13 @@ plugin's channel is selected, or it can consume mail Claude never receives.
 
 ## OpenCode worker control
 
-A local `hire_agent` may select `opencode` with a direct native **1.18.18** binary
-on macOS. `model` is `provider/model`; `effort` requires that model and a supported
-native variant. Account, skill, Chrome and extra-argv overrides are refused. One native
+A local `hire_agent` may select `opencode` with the installed direct native binary
+on macOS: any release at or above **1.18.18** whose worker probe passes. Before
+the brief, the TUI plugin checks every plugin API call a worker makes and the
+history reader checks its tables and migrations; a failure refuses the hire with
+the found version and the missing surface. Report that refusal to the owner
+rather than downgrading OpenCode or retrying. `model` is `provider/model`;
+`effort` requires that model and a supported native variant. Account, skill, Chrome and extra-argv overrides are refused. One native
 initial argv pane is bound to its original process/socket, cwd and displayed
 session before briefing. Its worker MCP uses the fleet projection, without
 operator authority. Permissions and questions remain owner decisions.
@@ -334,13 +338,9 @@ On a linked Mac POSIX fleet, pass its `fleet` ID to `hire_agent`. The same nativ
 TUI/controller uses a private loopback SSH forward; fresh probes check the exact
 SSH child, remote UID/process birth, executable, cwd, Herdr binding and displayed
 session. Disconnects and retargets refuse without local fallback or reconnect.
-The remote machine needs Node 24+, Python 3, Herdr, native OpenCode 1.18.18 and
-its existing Clankie fleet link. Windows remote OpenCode remains unsupported.
-Registered remote history uses `<fleet>:ses_…` with the existing agent APIs/CLI;
-resume requires the original live controller on that exact SSH target. The helper
-reads only dedicated native worker profiles; it is not a model/session writer.
-
-its existing Clankie fleet link. Windows remote OpenCode remains unsupported.
+The remote machine needs Node 24+, Python 3, Herdr, native OpenCode 1.18.18 or
+newer that passes the same probe, and its existing Clankie fleet link. Windows
+remote OpenCode remains unsupported.
 Registered remote history uses `<fleet>:ses_…` with the existing agent APIs/CLI;
 resume requires the original live controller on that exact SSH target. The helper
 reads only dedicated native worker profiles; it is not a model/session writer.
@@ -357,7 +357,11 @@ remaining live acceptance separate; read
 
 ## Grok Build worker control
 
-Grok Build native control requires macOS and verified 1.0.46. Review
+Grok Build native control requires macOS and the installed Grok at 1.0.46 or
+newer. Each connection probes the leader IPC (protocol 1 with `control_v1`) and
+ACP (protocol 1 with session loading) and requires one version across
+`grok --version`, the leader and its agent; a failure names the found version
+and what it lacks, and nothing is briefed. Review
 `clankie seat --harness grok --dry-run`; launch uses the current `GROK_HOME`
 and its existing sign-in. Each fresh operator launch creates its own workspace
 chat; resume retains the original profile/session/chat after a confirmed exit.

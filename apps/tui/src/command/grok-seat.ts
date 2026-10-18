@@ -14,7 +14,6 @@ import {
 } from "../../../clankie/src/captain/grok-seat-adapter.ts";
 import {
   connectGrokNative,
-  GROK_NATIVE_VERSION,
   GrokSessionId,
   type GrokNativeController,
 } from "../../../clankie/src/captain/grok-native-controller.ts";
@@ -48,7 +47,7 @@ export async function planGrokSeat(
 ): Promise<SeatPlan & { version: string; grokHome: string }> {
   if (flags.pluginDir) throw new Error("Grok seat does not accept Claude/OpenCode plugin directories");
   const env = options.env ?? process.env;
-  const command = await discoverGrok(env);
+  const { executable: command, version } = await discoverGrok(env);
   const grokHome = await realpath(env.GROK_HOME ?? join(env.HOME ?? process.env.HOME!, ".grok"));
   let previous: Record | undefined;
   if (flags.resume) {
@@ -79,7 +78,7 @@ export async function planGrokSeat(
   const trust = await readSeatMaximumTrust(options);
   return {
     command,
-    version: GROK_NATIVE_VERSION,
+    version,
     grokHome,
     cwd: context.cwd,
     args: [
@@ -209,6 +208,7 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
     native = await connectGrokNative({
       socketPath,
       executable: plan.command,
+      version: plan.version,
       cwd: await realpath(plan.cwd),
       sessionId: plan.sessionId,
       processHelper: join(options.repoRoot, "integrations/opencode-plugin/process-birth.py"),

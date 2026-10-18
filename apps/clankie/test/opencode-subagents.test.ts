@@ -43,7 +43,7 @@ async function fixture() {
   const profiles = new OpenCodeProfiles(root);
   const profile = await profiles.allocate();
   await writeOpenCodeNativeSession(profile.database, root, native.parent);
-  await profiles.register(profile, native.parent, root, async () => {});
+  await profiles.register(profile, native.parent, root, "1.18.18", async () => {});
   const db = new DatabaseSync(profile.database);
   db.exec("PRAGMA foreign_keys=OFF"); // Fixture contains history tables only.
   cleanup.push(async () => db.close());

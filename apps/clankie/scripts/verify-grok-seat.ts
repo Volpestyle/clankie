@@ -20,6 +20,7 @@ import { WorkerMcp } from "../src/worker-mcp.ts";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { localFleetProof } from "../src/local-fleet-proof.ts";
 import { connectLaneUpstream } from "../../tui/src/command/mcp.ts";
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { verifyNativeMcp } from "./verify-native-mcp.ts";
 import { readHerdrSeatTranscript, type HerdrAgentSession } from "../src/captain/herdr-transcript.ts";
 import { createFileMemory } from "../src/memory.ts";
@@ -35,7 +36,9 @@ const root = await realpath(await mkdtemp("/tmp/cl1583-"));
 const execute = promisify(execFile);
 const session = `vuh1583-${randomUUID().slice(0, 8)}`;
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const proofDiagnostics: unknown[] = [];
 const evidence: Record<string, unknown> = { startedAt: new Date().toISOString(), root, session };
+evidence.proofDiagnostics = proofDiagnostics;
 const liveDescriptor = join(process.env.HOME!, ".clankie/links/default-local.json");
 const before = await readFile(liveDescriptor).catch(() => undefined);
 const path = join(root, "bin");
@@ -156,6 +159,10 @@ try {
       rawTranscript: false,
     },
   });
+  // The scratch owner turns on maximum trust: the worker's own message_clankie
+  // call must not wait on a native permission prompt nobody is here to answer.
+  const settings = new SettingsStore(join(root, "settings.json"));
+  await settings.update((current) => ({ ...current, maximumTrustMode: true }));
   captain = createCaptain(
     {
       herdrAvailable: () => true,
@@ -168,7 +175,7 @@ try {
       repoRoot,
       stateDir: join(root, "captain"),
       workingDirectory: root,
-      settings: new SettingsStore(join(root, "settings.json")),
+      settings,
       grokNative: native,
       nativeHerdrRunner: createHerdrWatchRunner(
         () => true,
@@ -194,6 +201,10 @@ try {
       binding,
       herdrBinary: "herdr",
       privateSeat: (chain, pane, current) => native.allows(chain, pane, current),
+      // Proof stages only (pids, reasons), so a refused bridge is diagnosable.
+      diagnostics: (event, pane) => {
+        if (proofDiagnostics.length < 200) proofDiagnostics.push({ pane, event });
+      },
     }),
   });
   const workerMcp = new WorkerMcp({ directory: join(root, "grants"), credentials, host: mcp as never });
@@ -260,26 +271,28 @@ try {
     evidence.outcome = "passed";
   } else {
     upstream = await connectLaneUpstream({ host, bearer });
+    // Tool text is a readable summary; the result itself is structured content.
     const call = async (name: string, args: Record<string, unknown>) => {
       const result = await upstream!.callTool(name, args);
-      const part = result.content.find((part) => part.type === "text");
-      assert.ok(part?.type === "text");
-      try {
-        return JSON.parse(part.text);
-      } catch {
-        throw new Error(`${name}: ${part.text}`);
-      }
+      const value = decodeMcpResult(result);
+      if (typeof value !== "object" || value === null)
+        throw new Error(`${name}: ${JSON.stringify(result.content).slice(0, 2000)}`);
+      return value as any;
     };
     const hire = await call("hire_agent", {
       harness: "grok",
       title: "Nova",
       role: "developer",
       workingDirectory: root,
-      brief: "Reply with exactly VUH1583_HIRE_OK. Do not use tools or change files.",
+      effort: "low",
+      effortReason: "A fixed two-step verification reply needs no deeper reasoning.",
+      brief:
+        "Verification only; do not change files. First call the message_clankie tool once with the exact text " +
+        "VUH2417_GROK_REPORT. Then end your turn by replying with exactly VUH1583_HIRE_OK.",
     });
     evidence.hire = hire;
     assert.equal(hire.outcome, "spawned", JSON.stringify(hire));
-    const seatId = hire.seat.seatId;
+    const seatId = (hire.seat?.seatId ?? hire.seatId) as string;
     const worker = await createHerdrWatchRunner(
       () => true,
       async (args) => (await execute("herdr", [...args], { env })).stdout,
@@ -287,7 +300,7 @@ try {
     assert.ok(worker);
     evidence.worker = worker;
     const waitText = async (pane: string, session: HerdrAgentSession, expected: readonly string[]) => {
-      for (let i = 0; i < 300; i++) {
+      for (let i = 0; i < 900; i++) {
         const transcript = readHerdrSeatTranscript("grok", session);
         if (
           transcript?.entries.some(
@@ -317,28 +330,63 @@ try {
     };
     assert.ok(worker.session);
     evidence.workerReply = await waitText(worker.paneId, worker.session, ["VUH1583_HIRE_OK"]);
+    // VUH-2417: the worker's own report reaches the hiring conversation, and the
+    // roster records the settled run.
+    for (let i = 0; i < 120 && !evidence.workerReports; i++) {
+      const reports = await call("worker_reports", { limit: 20 });
+      if (JSON.stringify(reports).includes("VUH2417_GROK_REPORT")) evidence.workerReports = reports;
+      else await pause(500);
+    }
+    assert.ok(evidence.workerReports, "Worker report never reached the hiring conversation");
+    for (let i = 0; i < 120 && !evidence.completion; i++) {
+      const fleet = await captain.serveOperatorConversation({ op: "fleet", schemaVersion: 1 });
+      const seat =
+        fleet.op === "fleet"
+          ? fleet.snapshot.seats.find((candidate) => candidate.seatId === seatId)
+          : undefined;
+      if (seat?.lastOutcome) evidence.completion = { status: seat.status, lastOutcome: seat.lastOutcome };
+      else await pause(500);
+    }
+    assert.ok(evidence.completion, "Roster never recorded the settled run");
     const message = await call("message_seat", {
       seat: seatId,
       message: "Reply with exactly VUH1583_MESSAGE_OK. Do not use tools.",
     });
     evidence.message = message;
-    assert.equal(message.outcome, "delivered", JSON.stringify(message));
+    // The native reply below proves delivery; this only refuses an outright failure.
+    assert.ok(
+      ["delivered", "accepted", "queued"].includes(message.outcome) ||
+        ["delivered", "consumed"].includes(message.deliveryStage),
+      JSON.stringify(message),
+    );
     evidence.workerMessageReply = await waitText(worker.paneId, worker.session, ["VUH1583_MESSAGE_OK"]);
     // Real public operator command runs as initial argv in another owned native pane.
     const pane = await native.createCommandTab({
       cwd: root,
       label: "VUH1583 operator",
-      command: [join(path, "clankie"), "seat", "--harness", "grok"],
+      // stderr only, kept so an operator launch that exits early can be diagnosed.
+      command: [
+        "/bin/sh",
+        "-c",
+        `exec "$0" seat --harness grok 2>>'${join(root, "operator.stderr")}'`,
+        join(path, "clankie"),
+      ],
       env: Object.fromEntries(
         Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
       ),
     });
     for (let i = 0; i < 150; i++) {
-      const text = (
-        await execute("herdr", ["pane", "read", pane, "--source", "recent-unwrapped", "--lines", "50"], {
-          env,
-        })
-      ).stdout;
+      const text = await execute(
+        "herdr",
+        ["pane", "read", pane, "--source", "recent-unwrapped", "--lines", "50"],
+        { env },
+      ).then(
+        (result) => result.stdout,
+        async (error: unknown) => {
+          evidence.operatorStderr = await readFile(join(root, "operator.stderr"), "utf8").catch(() => "");
+          throw error;
+        },
+      );
       if (text.includes("Clankie Grok: native session")) {
         evidence.operatorReadyTui = text;
         break;
@@ -411,6 +459,17 @@ try {
 } catch (error) {
   evidence.error = String(error);
   process.exitCode = 1;
+  // A failed hire names its pane; keep what the native TUI showed.
+  const pane = /inspect pane (\S+?);/u.exec(String(error))?.[1];
+  if (pane)
+    evidence.failedPane = await execute(
+      "herdr",
+      ["pane", "read", pane, "--source", "recent-unwrapped", "--lines", "100"],
+      { env },
+    ).then(
+      (result) => result.stdout,
+      (failure: unknown) => String(failure),
+    );
   console.error(error);
 } finally {
   await upstream?.close();

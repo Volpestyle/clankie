@@ -14,11 +14,7 @@ import type {
 } from "@clankie/agent-hosts";
 import { bundledSkills } from "@clankie/settings";
 import { MAXIMUM_TRUST_HARNESS_ARGS } from "@clankie/protocol";
-import {
-  connectGrokNative,
-  GROK_NATIVE_VERSION,
-  type GrokNativeController,
-} from "./grok-native-controller.ts";
+import { admitGrokRelease, connectGrokNative, type GrokNativeController } from "./grok-native-controller.ts";
 import type { GrokNativeHost } from "./grok-native-host.ts";
 import type { PreparedNativeRoot } from "./prepared-native-host.ts";
 
@@ -60,7 +56,10 @@ export async function waitForGrokTuiSession(input: {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
-export async function discoverGrok(env: NodeJS.ProcessEnv = process.env) {
+/** The `grok` entry on PATH and the release it reports, admitted by the floor. */
+export async function discoverGrok(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ executable: string; version: string }> {
   if (process.platform !== "darwin")
     throw new Error("Native Grok control is currently verified on macOS only");
   for (const directory of (env.PATH ?? "").split(delimiter)) {
@@ -73,11 +72,11 @@ export async function discoverGrok(env: NodeJS.ProcessEnv = process.env) {
       continue;
     }
     const result = await exec(executable, ["--version"], { env, timeout: 5000, maxBuffer: 4096 });
-    if (!result.stdout.trim().startsWith(`grok ${GROK_NATIVE_VERSION} (`))
-      throw new Error(`Grok native control requires verified ${GROK_NATIVE_VERSION}; no fallback`);
+    const reported = /^grok (\S+) \(/u.exec(result.stdout.trim())?.[1] ?? result.stdout.trim();
+    const version = admitGrokRelease(reported);
     // Preserve the harness entry point so Herdr recognizes `grok`; the native
     // process proof still compares its canonical executable, including versioned symlinks.
-    return join(directory, "grok");
+    return { executable: join(directory, "grok"), version };
   }
   throw new Error("Grok Build is unavailable; install and sign in to Grok yourself before hiring");
 }
@@ -125,7 +124,7 @@ export function createGrokSeatAdapter(options: {
           "Grok saved-history resume or extra argv lacks original controller proof; use the existing live seat",
         );
       const env = { ...process.env, ...launch.env };
-      const executable = await discoverGrok(env);
+      const { executable, version } = await discoverGrok(env);
       const cwd = await realpath(launch.cwd);
       const directory = await realpath(await mkdtemp(join(tmpdir(), "clankie-grok-")));
       const sessionId = randomUUID();
@@ -205,6 +204,7 @@ export function createGrokSeatAdapter(options: {
             lifecycle.unref();
             native = await connectGrokNative({
               executable,
+              version,
               cwd,
               socketPath,
               sessionId,
@@ -227,14 +227,17 @@ export function createGrokSeatAdapter(options: {
                 await view.guard?.();
               },
             });
+            ref = { harness: "grok", paneId: view.paneId, sessionId };
+            await root.report(descriptor, "idle", view.name);
+            // session/load starts the worker bridge, which asks for fleet
+            // admission at once, and a refusal is final for that bridge. Admit
+            // this proven leader and session before Grok launches it.
+            unregister = options.native.register(ref, root, native);
             await native.load({
               mcpServers: [{ name: "clankie", command: "clankie", args: ["mcp", "--fleet"], env: [] }],
               ...(launch.model ? { model: launch.model } : {}),
               ...(launch.effort ? { effort: launch.effort } : {}),
             });
-            ref = { harness: "grok", paneId: view.paneId, sessionId };
-            await root.report(descriptor, "idle", view.name);
-            unregister = options.native.register(ref, root, native);
             await native.waitTools("clankie", ["clankie_tools", "clankie_call", "message_clankie"]);
             await view.bound?.(ref);
             await verify(ref);

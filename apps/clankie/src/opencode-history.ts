@@ -26,6 +26,17 @@ import {
 // expect-error would fail there as unused.
 // @ts-ignore
 import { projectMessages } from "../../../integrations/opencode-plugin/runtime.mjs";
+import { releaseAtLeast } from "./captain/native-release.ts";
+
+/**
+ * Oldest OpenCode release a worker is admitted on (VUH-2417). Newer releases are
+ * admitted when the capability probes pass: the TUI plugin surface, the SDK
+ * calls and this reader's schema check. The floor covers what a probe cannot
+ * see: the TUI awaiting plugin initialization before it mounts a prompt, idle
+ * sessions leaving the status map, and final replies excluding `tool-calls`.
+ * Verified on 1.18.18 and 1.19.3.
+ */
+export const OPENCODE_WORKER_FLOOR = "1.18.18";
 
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_PARTS = 2000;
@@ -54,7 +65,8 @@ export interface OpenCodeHistorySource {
   readonly database: string;
   readonly databaseIdentity: string;
   readonly sessionId: string;
-  readonly version: "1.18.18";
+  /** The release that created the session, as the original TUI reported it. */
+  readonly version: string;
   readonly workingDirectory: string;
 }
 export interface OpenCodeHistorySnapshot {
@@ -136,11 +148,18 @@ function schema(db: DatabaseSync) {
     )
       refuse("unsupported table schema");
     // Identifiers are from the fixed source-pinned map, never a request or DB row.
-    const columns = db
-      .prepare(`PRAGMA table_xinfo(${table})`)
-      .all()
-      .map((row) => [row.name, String(row.type).toUpperCase(), row.notnull, row.pk, row.hidden]);
-    if (JSON.stringify(columns) !== JSON.stringify(expected)) refuse(`unsupported ${table} schema`);
+    // A later release may add columns; every column this reader relies on must
+    // keep its validated type, nullability and key position.
+    const columns = new Set(
+      db
+        .prepare(`PRAGMA table_xinfo(${table})`)
+        .all()
+        .map((row) =>
+          JSON.stringify([row.name, String(row.type).toUpperCase(), row.notnull, row.pk, row.hidden]),
+        ),
+    );
+    if (expected.some((column) => !columns.has(JSON.stringify(column))))
+      refuse(`unsupported ${table} schema`);
   }
   for (const [index, expected] of Object.entries(OPEN_CODE_HISTORY_INDEXES)) {
     const columns = db
@@ -158,11 +177,16 @@ function schema(db: DatabaseSync) {
   }
   const migrations = db
     .prepare(
-      "SELECT CASE WHEN length(id)<=128 THEN id ELSE NULL END AS id FROM migration ORDER BY id LIMIT 65",
+      "SELECT CASE WHEN length(id)<=128 THEN id ELSE NULL END AS id FROM migration ORDER BY id LIMIT 513",
     )
     .all()
     .map((row) => row.id);
-  if (JSON.stringify(migrations) !== JSON.stringify(OPEN_CODE_HISTORY_MIGRATIONS))
+  // The validated migrations are a floor: later releases add their own after them.
+  if (
+    migrations.length > 512 ||
+    migrations.some((id) => typeof id !== "string") ||
+    OPEN_CODE_HISTORY_MIGRATIONS.some((id) => !migrations.includes(id))
+  )
     refuse("unsupported native migration revision");
   return digest([OPEN_CODE_HISTORY_SCHEMA, OPEN_CODE_HISTORY_INDEXES, migrations]);
 }
@@ -206,11 +230,14 @@ export async function readOpenCodeHistory(
   if (
     source.kind !== "opencode-sqlite" ||
     source.machineId !== "local" ||
-    source.version !== "1.18.18" ||
     !/^profile-[A-Za-z0-9]+$/u.test(source.profileId) ||
     !profileRoot.endsWith(`/${source.profileId}`)
   )
     refuse("unsupported native source");
+  if (!releaseAtLeast(source.version, OPENCODE_WORKER_FLOOR))
+    refuse(
+      `session from OpenCode ${source.version.slice(0, 64)} predates the validated floor ${OPENCODE_WORKER_FLOOR}`,
+    );
   const before = await files(source.database, profileRoot);
   if (before.database !== source.databaseIdentity) refuse("registered database replaced");
   const db = new DatabaseSync(source.database, {
@@ -235,7 +262,7 @@ export async function readOpenCodeHistory(
         id: SessionId,
         directory: z.string().max(4096),
         title: z.string().max(16_384),
-        version: z.literal("1.18.18"),
+        version: z.string().max(64),
         time_updated: Time,
         revert: z.string().nullable(),
       })
@@ -244,6 +271,8 @@ export async function readOpenCodeHistory(
           .prepare("SELECT id,directory,title,version,time_updated,revert FROM session WHERE id=?")
           .get(source.sessionId),
       );
+    if (session.version !== source.version)
+      refuse(`native session version ${session.version} differs from the registered ${source.version}`);
     if (
       session.id !== source.sessionId ||
       session.directory !== source.workingDirectory ||

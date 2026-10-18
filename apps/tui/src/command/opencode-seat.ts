@@ -16,9 +16,13 @@ import { fetchLaneText } from "./prompt.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import type { SeatCommandOptions, SeatPlan } from "./seat.ts";
 import { resolveSeatContext } from "./seat-context.ts";
+import { releaseAtLeast } from "../../../clankie/src/captain/native-release.ts";
 
 const exec = promisify(execCallback);
 const SESSION = /^ses_[A-Za-z0-9]{8,128}$/u;
+// First release the operator plugin/server contract was verified on. Newer
+// releases are admitted while the flag probe below passes (VUH-2417).
+const OPENCODE_SEAT_FLOOR = "1.18.0";
 type Flags = {
   resume: boolean;
   dryRun: boolean;
@@ -46,13 +50,13 @@ export async function planOpenCodeSeat(
   } catch {
     throw new Error("OpenCode is unavailable; install OpenCode CLI or set CLANKIE_OPENCODE_BIN.");
   }
-  if (
-    !version.startsWith("1.18.") ||
-    !["--session", "--hostname", "--port"].every((flag) => help.includes(flag))
-  )
+  if (!releaseAtLeast(version, OPENCODE_SEAT_FLOOR))
     throw new Error(
-      `Unsupported OpenCode ${version}; clankie opencode requires the verified 1.18.x plugin/server contract.`,
+      `Unsupported OpenCode ${version}; clankie opencode requires ${OPENCODE_SEAT_FLOOR} or newer.`,
     );
+  const missing = ["--session", "--hostname", "--port"].filter((flag) => !help.includes(flag));
+  if (missing.length)
+    throw new Error(`OpenCode ${version} lacks ${missing.join(", ")}; clankie opencode cannot attach to it.`);
   const source = resolve(flags.pluginDir ?? join(options.repoRoot, "integrations/opencode-plugin"));
   if (!existsSync(join(source, "plugin.mjs")))
     throw new Error(`Clankie's OpenCode plugin is missing at ${source}`);

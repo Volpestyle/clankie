@@ -6,8 +6,22 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { SeatDelivery, SeatEvent, SeatStatus } from "@clankie/agent-hosts";
 import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
+import { admitNativeRelease } from "./native-release.ts";
 
-export const GROK_NATIVE_VERSION = "1.0.46";
+/**
+ * Oldest Grok Build release a hire or seat is admitted on (VUH-2417). The leader
+ * IPC is internal and undocumented, so connecting also probes what it reports:
+ * leader protocol 1 with control_v1, ACP protocol 1 with session loading, and
+ * one binary version across `--version`, the leader and its agent. The floor
+ * covers what that probe cannot see: queue acknowledgments, prompt-ID echoes,
+ * the system-prompt override and leader mode ignoring permission flags.
+ * Verified on 1.0.46 and 1.0.50.
+ */
+export const GROK_NATIVE_FLOOR = "1.0.46";
+/** The installed release, admitted at or above the floor, or a named refusal. */
+export function admitGrokRelease(found: string): string {
+  return admitNativeRelease("Grok Build", found, GROK_NATIVE_FLOOR);
+}
 export const GrokSessionId = z.string().uuid();
 const exec = promisify(execFile);
 const Birth = z.object({
@@ -31,6 +45,8 @@ type Pending = {
 export interface GrokNativeOptions {
   socketPath: string;
   executable: string;
+  /** What `executable --version` reported, already admitted by the floor. */
+  version: string;
   cwd: string;
   processHelper: string;
   sessionId: string;
@@ -248,25 +264,34 @@ export async function connectGrokNative(options: GrokNativeOptions) {
       type: "register",
       client_type: "clankie",
       mode: "stdio",
-      capabilities: { client_version: GROK_NATIVE_VERSION },
+      capabilities: { client_version: options.version },
     });
     while ((!registration || !ready) && !closed && Date.now() < deadline)
       await new Promise((resolve) => setTimeout(resolve, 25));
     const registered = z
       .object({
         ready: z.boolean(),
-        leader_protocol_version: z.literal(1),
-        leader_binary_version: z.literal(GROK_NATIVE_VERSION),
+        leader_protocol_version: z.unknown(),
+        leader_binary_version: z.unknown(),
+        leader_capabilities: z.object({ control_v1: z.unknown() }).partial().optional(),
       })
       .parse(registration);
-    void registered;
+    const lacks = [
+      ...(registered.leader_protocol_version === 1 ? [] : ["leader protocol 1"]),
+      ...(registered.leader_capabilities?.control_v1 === true ? [] : ["leader control_v1"]),
+      ...(registered.leader_binary_version === options.version
+        ? []
+        : [`the probed binary (leader reports ${String(registered.leader_binary_version).slice(0, 40)})`]),
+    ];
+    if (lacks.length)
+      throw new Error(`Grok Build ${options.version} lacks ${lacks.join(", ")}; nothing was briefed`);
     if (!ready) throw new Error("Original Grok leader is not ready");
     const info = z
       .object({
         pid: z.number().int().min(2),
         socket_path: z.literal(options.socketPath),
         leader_protocol_version: z.literal(1),
-        leader_binary_version: z.literal(GROK_NATIVE_VERSION),
+        leader_binary_version: z.literal(options.version),
       })
       .parse(await call("leader-info", {}));
     leader = await observe(info.pid);
@@ -278,8 +303,9 @@ export async function connectGrokNative(options: GrokNativeOptions) {
     await verify();
     const initialized = z
       .object({
-        protocolVersion: z.literal(1),
-        _meta: z.object({ agentVersion: z.literal(GROK_NATIVE_VERSION) }),
+        protocolVersion: z.unknown(),
+        agentCapabilities: z.object({ loadSession: z.unknown() }).partial().optional(),
+        _meta: z.object({ agentVersion: z.unknown() }).partial().optional(),
       })
       .parse(
         await call("initialize", {
@@ -288,7 +314,13 @@ export async function connectGrokNative(options: GrokNativeOptions) {
           clientCapabilities: {},
         }),
       );
-    void initialized;
+    const agentLacks = [
+      ...(initialized.protocolVersion === 1 ? [] : ["ACP protocol 1"]),
+      ...(initialized.agentCapabilities?.loadSession === true ? [] : ["ACP session/load"]),
+      ...(initialized._meta?.agentVersion === options.version ? [] : ["an agent of the probed version"]),
+    ];
+    if (agentLacks.length)
+      throw new Error(`Grok Build ${options.version} lacks ${agentLacks.join(", ")}; nothing was briefed`);
     return {
       sessionId: options.sessionId,
       leaderPid: leader.pid,

@@ -568,7 +568,7 @@ const HEADLESS_COMMAND_HELP = [
       "  claude[N]               Open Clankie in claude or a numbered shell account command (e.g. claude2)",
       "  codex[N]                Open Codex; a numbered command selects its exact registered account label",
       "  opencode                Open Clankie in OpenCode (TTY)",
-      "  grok                    Open Clankie in Grok Build (TTY; macOS, 1.0.46)",
+      "  grok                    Open Clankie in Grok Build (TTY; macOS, 1.0.46 or newer)",
       "  prime-agent | prime     Open Clankie in a resident Prime Agent session (TTY; 0.10.x)",
       "    [--resume] [--conversation ID | --new] [--plugin-dir PATH] [--dry-run]",
       "                           Without a selection: the global chat while no live seat holds it, else a new chat; --new forces one",

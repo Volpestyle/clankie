@@ -1,0 +1,176 @@
+{
+  "1.0.46": {
+    "version": "grok 1.0.46 (2765805b9442)",
+    "registered": {
+      "ready": false,
+      "leader_protocol_version": 1,
+      "leader_binary_version": "1.0.46",
+      "leader_capabilities": {
+        "control_v1": true,
+        "runtime_cpu_profile": true,
+        "profile_formats": [],
+        "workspace_exposure": true,
+        "relaunch_v1": true,
+        "cursor_worker": true
+      }
+    },
+    "leaderInfo": {
+      "keys": [
+        "cpu_profile_active",
+        "cpu_profile_stopping",
+        "cursor_worker",
+        "leader_binary_version",
+        "leader_protocol_version",
+        "lock_path",
+        "pid",
+        "profile_formats",
+        "profile_started_at",
+        "profiling_compiled_in",
+        "profiling_supported",
+        "socket_path",
+        "type",
+        "ws_url_suffix"
+      ],
+      "leader_protocol_version": 1,
+      "leader_binary_version": "1.0.46"
+    },
+    "initialize": {
+      "protocolVersion": 1,
+      "agentCapabilities": [
+        "_meta",
+        "auth",
+        "loadSession",
+        "mcpCapabilities",
+        "promptCapabilities",
+        "sessionCapabilities"
+      ],
+      "loadSession": true,
+      "agentVersion": "1.0.46",
+      "metaKeys": [
+        "agentId",
+        "agentInstanceId",
+        "agentVersion",
+        "availableCommands",
+        "cancelRewind",
+        "currentWorkingDirectory",
+        "defaultAuthMethodId",
+        "feedbackTraceOffer",
+        "grokShell",
+        "hostname",
+        "mcpApps",
+        "mcpServers",
+        "metadata",
+        "modelState",
+        "sessionRecap",
+        "voiceMode",
+        "x.ai/mcp/sdk",
+        "x.ai/pluginDirs"
+      ]
+    },
+    "mcpListShape": {
+      "servers": true,
+      "sessionFields": [
+        "enabled",
+        "status",
+        "tools"
+      ]
+    },
+    "notifications": [
+      "_x.ai/announcements/update",
+      "_x.ai/mcp/servers_updated",
+      "_x.ai/mcp_initialized",
+      "_x.ai/models/update",
+      "_x.ai/session/setup",
+      "leader_ready",
+      "registered",
+      "session/update"
+    ]
+  },
+  "1.0.50": {
+    "version": "grok 1.0.50 (c58f321264ba)",
+    "registered": {
+      "ready": true,
+      "leader_protocol_version": 1,
+      "leader_binary_version": "1.0.50",
+      "leader_capabilities": {
+        "control_v1": true,
+        "runtime_cpu_profile": true,
+        "profile_formats": [],
+        "workspace_exposure": true,
+        "relaunch_v1": true,
+        "cursor_worker": true
+      }
+    },
+    "leaderInfo": {
+      "keys": [
+        "cpu_profile_active",
+        "cpu_profile_stopping",
+        "cursor_worker",
+        "leader_binary_version",
+        "leader_protocol_version",
+        "lock_path",
+        "other_client_count",
+        "pid",
+        "profile_formats",
+        "profile_started_at",
+        "profiling_compiled_in",
+        "profiling_supported",
+        "socket_path",
+        "type",
+        "ws_url_suffix"
+      ],
+      "leader_protocol_version": 1,
+      "leader_binary_version": "1.0.50"
+    },
+    "initialize": {
+      "protocolVersion": 1,
+      "agentCapabilities": [
+        "_meta",
+        "auth",
+        "loadSession",
+        "mcpCapabilities",
+        "promptCapabilities",
+        "sessionCapabilities"
+      ],
+      "loadSession": true,
+      "agentVersion": "1.0.50",
+      "metaKeys": [
+        "agentId",
+        "agentInstanceId",
+        "agentVersion",
+        "availableCommands",
+        "cancelRewind",
+        "currentWorkingDirectory",
+        "defaultAuthMethodId",
+        "feedbackTraceOffer",
+        "grokShell",
+        "hostname",
+        "mcpApps",
+        "mcpServers",
+        "metadata",
+        "modelState",
+        "sessionRecap",
+        "voiceMode",
+        "x.ai/mcp/sdk",
+        "x.ai/pluginDirs"
+      ]
+    },
+    "mcpListShape": {
+      "servers": true,
+      "sessionFields": [
+        "enabled",
+        "status",
+        "tools"
+      ]
+    },
+    "notifications": [
+      "_x.ai/announcements/update",
+      "_x.ai/mcp/servers_updated",
+      "_x.ai/mcp_initialized",
+      "_x.ai/models/update",
+      "_x.ai/session/setup",
+      "registered",
+      "session/update"
+    ]
+  }
+}

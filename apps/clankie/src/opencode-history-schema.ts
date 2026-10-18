@@ -1,4 +1,6 @@
-// Pinned OpenCode 4643e65, schema.gen.ts and migration.gen.ts; read-only validation, no migrations.
+// Required native history surface from OpenCode 4643e65 schema.gen.ts and migration.gen.ts,
+// unchanged through 1.19.3. Later releases may add columns and migrations; read-only
+// validation, no migrations.
 export const OPEN_CODE_HISTORY_SCHEMA = {
   session: [
     ["id", "TEXT", 0, 1, 0],

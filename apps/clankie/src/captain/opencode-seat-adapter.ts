@@ -18,15 +18,20 @@ import type {
   SeatView,
 } from "@clankie/agent-hosts";
 import { z } from "zod";
-import { createOpenCodeController, type OpenCodeController } from "./opencode-worker-controller.ts";
+import {
+  createOpenCodeController,
+  OpenCodeCapabilityError,
+  type OpenCodeController,
+} from "./opencode-worker-controller.ts";
 import type { createOpenCodeNativeHost, OpenCodeNativeRoot } from "./opencode-native-host.ts";
 import { DeliveryFence } from "./delivery-fence.ts";
+import { OPENCODE_WORKER_FLOOR } from "../opencode-history.ts";
+import { admitNativeRelease } from "./native-release.ts";
 
-const OPENCODE_WORKER_VERSION = "1.18.18";
 const exec = promisify(execFile);
 const Session = z.object({
   sessionId: z.string().regex(/^ses_[A-Za-z0-9]{8,128}$/u),
-  version: z.literal(OPENCODE_WORKER_VERSION),
+  version: z.string().max(64),
 });
 const Status = z.enum(["idle", "working", "blocked"]);
 const CatalogRefresh = z.object({
@@ -71,6 +76,7 @@ export async function probeOpenCodeVersion(
   ) => Promise<{ stdout: string }> = (file, args, options) => exec(file, [...args], options),
 ): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "clankie-opencode-version-"));
+  let version: string;
   try {
     const result = await run(executable, ["--version"], {
       cwd: directory,
@@ -90,16 +96,13 @@ export async function probeOpenCodeVersion(
         OPENCODE_PURE: "1",
       },
     });
-    const version = result.stdout.trim();
-    if (version !== OPENCODE_WORKER_VERSION) throw new Error("Unsupported native OpenCode version");
-    return version;
+    version = result.stdout.trim();
   } catch {
-    throw new Error(
-      `Native OpenCode worker requires exactly ${OPENCODE_WORKER_VERSION}; isolated version check unavailable`,
-    );
+    throw new Error("Native OpenCode isolated version check unavailable; no worker launched");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+  return admitNativeRelease("Native OpenCode", version, OPENCODE_WORKER_FLOOR);
 }
 
 async function discover(launch: SeatLaunch): Promise<{ executable: string; version: string }> {
@@ -209,8 +212,8 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
           "OpenCode resume unavailable: original native exit is unproven; use the existing live controller",
         );
       const selected = await (deps.discover ?? discover)(launch);
-      if (selected.version !== OPENCODE_WORKER_VERSION || !isAbsolute(selected.executable))
-        throw new Error("Native OpenCode capability unavailable");
+      admitNativeRelease("Native OpenCode", selected.version, OPENCODE_WORKER_FLOOR);
+      if (!isAbsolute(selected.executable)) throw new Error("Native OpenCode capability unavailable");
       signal?.throwIfAborted();
       const launchRoot = join(deps.stateDir, "opencode-workers");
       await mkdir(launchRoot, { recursive: true, mode: 0o700 });
@@ -337,6 +340,10 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
                   deps.timeoutMs ?? 20_000,
                 ),
               );
+              if (initialized.version !== selected.version)
+                throw new OpenCodeCapabilityError(
+                  `OpenCode TUI reports ${initialized.version}, not the probed ${selected.executable} ${selected.version}`,
+                );
               if (launch.resumeSessionId !== undefined && initialized.sessionId !== launch.resumeSessionId)
                 throw new Error("Exact resume mismatch");
               ref = { harness: "opencode", paneId: view.paneId, sessionId: initialized.sessionId };
@@ -356,7 +363,9 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
               }
               await view.bound?.(ref);
               await verify(ref);
-              await profiles.register(profile, ref.sessionId, launch.cwd, () => verify(ref!));
+              await profiles.register(profile, ref.sessionId, launch.cwd, initialized.version, () =>
+                verify(ref!),
+              );
               await verify(ref);
               const selectedRef = ref;
               let lastMessageId: string | undefined;
@@ -503,13 +512,16 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
                   );
               }
               return { outcome: "started", control };
-            } catch {
+            } catch (error) {
+              console.error("VUH2417_DEBUG start failure", error); // VUH2417_DEBUG
               await dispose();
               return {
                 outcome: "failed",
                 reason: "not_ready",
                 detail:
-                  "Native OpenCode binding or brief unconfirmed; inspect the original pane before retrying. No fallback or duplicate native process was launched.",
+                  error instanceof OpenCodeCapabilityError
+                    ? `${error.message}. Nothing was briefed; no fallback or duplicate native process was launched.`
+                    : "Native OpenCode binding or brief unconfirmed; inspect the original pane before retrying. No fallback or duplicate native process was launched.",
               };
             }
           },

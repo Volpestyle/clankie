@@ -151,12 +151,12 @@ test("prepared initial argv owns one controller, preserves native config, and tr
   ).toMatchObject({ sessionId });
 });
 
-test.each(["wrong-version", "model", "variant", "resume", "extra-args", "bad-config"])(
+test.each(["below-floor", "model", "variant", "resume", "extra-args", "bad-config"])(
   "unsupported %s fails before any native allocation",
   async (mode) => {
     const f = await fixture();
-    if (mode === "wrong-version")
-      f.discovery.mockResolvedValue({ executable: "/native/opencode", version: "1.19.0" });
+    if (mode === "below-floor")
+      f.discovery.mockResolvedValue({ executable: "/native/opencode", version: "1.18.17" });
     const launch = {
       ...f.launch,
       ...(mode === "model" ? { model: "no-provider" } : {}),
@@ -165,7 +165,11 @@ test.each(["wrong-version", "model", "variant", "resume", "extra-args", "bad-con
       ...(mode === "extra-args" ? { harnessArgs: ["--continue"] } : {}),
       ...(mode === "bad-config" ? { env: { OPENCODE_CONFIG_CONTENT: "[invalid" } } : {}),
     };
-    await expect(f.adapter.prepare!(launch)).rejects.toThrow();
+    if (mode === "below-floor")
+      await expect(f.adapter.prepare!(launch)).rejects.toThrow(
+        "Native OpenCode 1.18.17 is older than the validated floor 1.18.18",
+      );
+    else await expect(f.adapter.prepare!(launch)).rejects.toThrow();
     expect(f.native.capture).not.toHaveBeenCalled();
     if (mode === "bad-config") expect(f.controller.close).toHaveBeenCalledOnce();
   },
@@ -337,14 +341,14 @@ test.each([false, true])(
           ].sort(),
         );
         if (fails) throw new Error("native import failed");
-        return { stdout: "1.18.18\n" };
+        return { stdout: "1.19.3\n" };
       },
     );
     if (fails)
       await expect(probeOpenCodeVersion("/selected/opencode", run)).rejects.toThrow(
         "isolated version check unavailable",
       );
-    else expect(await probeOpenCodeVersion("/selected/opencode", run)).toBe("1.18.18");
+    else expect(await probeOpenCodeVersion("/selected/opencode", run)).toBe("1.19.3");
     expect(run).toHaveBeenCalledOnce();
     await expect(readdir(scratch)).rejects.toMatchObject({ code: "ENOENT" });
   },

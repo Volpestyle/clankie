@@ -6,9 +6,11 @@ import { z } from "zod";
 import { AgentSessionRequestError } from "@clankie/agent-transcript";
 import {
   openCodeDatabaseIdentity,
+  OPENCODE_WORKER_FLOOR,
   readOpenCodeHistory,
   type OpenCodeHistorySource,
 } from "./opencode-history.ts";
+import { releaseAtLeast } from "./captain/native-release.ts";
 
 const Descriptor = z
   .object({
@@ -18,7 +20,10 @@ const Descriptor = z
     database: z.string().max(4096),
     databaseIdentity: z.string().regex(/^\d+:\d+$/u),
     sessionId: z.string().regex(/^ses_[A-Za-z0-9]{8,128}$/u),
-    version: z.literal("1.18.18"),
+    version: z
+      .string()
+      .max(64)
+      .refine((value) => releaseAtLeast(value, OPENCODE_WORKER_FLOOR)),
     workingDirectory: z.string().max(4096),
   })
   .strict();
@@ -52,10 +57,12 @@ export class OpenCodeProfiles {
     this.created.add(profile);
     return profile;
   }
+  /** `version` is the release the original TUI reported; the reader confirms the session row matches it. */
   public async register(
     profile: OpenCodeWorkerProfile,
     sessionId: string,
     cwd: string,
+    version: string,
     verify: () => Promise<unknown>,
   ): Promise<void> {
     if (!this.created.has(profile) || profile.directory !== join(await this.root(), profile.profileId))
@@ -68,7 +75,7 @@ export class OpenCodeProfiles {
       database: profile.database,
       databaseIdentity: await openCodeDatabaseIdentity(profile.database, profile.directory),
       sessionId,
-      version: "1.18.18",
+      version,
       workingDirectory: await realpath(cwd),
     });
     await readOpenCodeHistory(source, profile.directory, { metadataOnly: true });

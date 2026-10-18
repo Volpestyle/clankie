@@ -53,8 +53,8 @@ idle ending is estimated at last file write plus five minutes. Missing source
 timestamps remain unknown rather than using the fleet read's wall clock.
 
 OpenCode task projection consumes only the registered local profile's bounded
-v1 records supplied by the service's existing SQLite history reader (1.18.18
-pin). It uses native call IDs, agent type/description labels and task start/end
+v1 records supplied by the service's existing SQLite history reader (OpenCode
+1.18.18 or newer that passes its schema probe). It uses native call IDs, agent type/description labels and task start/end
 times. A background tool result with a running task envelope stays running
 until its synthetic parent completion/error notification. Child references
 must match the parent's direct child in that profile; continuations retain

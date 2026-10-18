@@ -87,3 +87,15 @@ Selected skills are readable paths, not an asserted native plugin installation.
 Native owner permission acceptance and restart/controller recovery are not
 implied by catalog readiness, queue receipts or transcript discovery. The
 evidence directory records the instrument failures and live results separately.
+
+## Amendment: the installed release, probed (James, 2026-10-17, VUH-2417)
+
+Harnesses stay on their latest release. The exact 1.0.46 pin becomes a floor:
+an installed Grok Build at 1.0.46 or newer is admitted when the leader reports
+protocol 1 with `control_v1`, ACP initializes at protocol 1 with session
+loading, and `grok --version`, the leader and its agent report one version.
+Otherwise the hire refuses with the found version and what it lacks. The floor
+stands for what no probe observes: queue acknowledgments, prompt-ID echoes, the
+system-prompt override and leader mode ignoring permission flags. The leader
+IPC is still the observed internal protocol. Grok 1.0.50 passed the probe and a
+live hire ([evidence](../testing/2026-10-17-opencode-grok-latest/README.md)).

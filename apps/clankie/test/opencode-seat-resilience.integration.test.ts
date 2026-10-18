@@ -12,9 +12,10 @@ import { expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
+import { releaseAtLeast } from "../src/captain/native-release.ts";
 import { runOpenCodeSeat } from "../../tui/src/command/opencode-seat.ts";
 
-// VUH-2348: a real OpenCode 1.18 server runs the shipped seat plugin against the
+// VUH-2348: a real OpenCode (1.18 or newer) server runs the shipped seat plugin against the
 // real seat bridge, service and captain. Only the model provider is a fixture,
 // so a turn can end in a provider error on demand. OpenCode and Clankie state
 // live in a temporary home; the plugin's `clankie mcp` entry resolves to a shim.
@@ -36,7 +37,7 @@ async function until(check: () => boolean, label: string, timeoutMs = 60_000) {
   }
 }
 
-it.skipIf(!opencode?.startsWith("1.18."))(
+it.skipIf(!opencode || !releaseAtLeast(opencode, "1.18.0"))(
   "a slow context read and a provider error each fail one turn, later turns deliver, and the first stop cause survives",
   async () => {
     const root = await mkdtemp(join(tmpdir(), "opencode-resilience-"));

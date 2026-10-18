@@ -33,7 +33,7 @@ test("OpenCode plan discovers capabilities and exact resume refuses conversation
     );
     await expect(
       planSeat(flags, { repoRoot, env, execFileImpl: async () => ({ stdout: "2.0.0", stderr: "" }) }),
-    ).rejects.toThrow("Unsupported");
+    ).rejects.toThrow("OpenCode 2.0.0 lacks --session, --hostname, --port");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

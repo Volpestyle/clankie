@@ -939,7 +939,7 @@ function hireAgentTool(
       "through the harness with a receipt, never by terminal typing; control.reason and control.fix explain the " +
       "delivery result, and missing channel consent is an owner decision. An uncertain start or delivery keeps " +
       "its pane: reconcile before retrying. Follow up with message_seat and watch the returned seatId with " +
-      "herdr_watch. Grok Build hires require macOS and the verified 1.0.46 native TUI leader channel; fresh sessions only unless the original live controller is still bound. Native permission prompts remain the owner's decision.",
+      "herdr_watch. Grok Build hires require macOS and Grok 1.0.46 or newer whose native TUI leader channel passes its capability probe; fresh sessions only unless the original live controller is still bound. Native permission prompts remain the owner's decision.",
     parameters: Type.Object({
       harness: Type.Optional(
         StringEnum(OPERATOR_SEAT_HARNESSES, {

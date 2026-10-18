@@ -9,8 +9,9 @@ creates nothing. Older resume records without a conversation retain the global
 chat. The service resolves the workspace before launch; a changed resume
 workspace fails closed. `/opencode` in Clankie's
 console reviews the same plan. Requires the running Clankie service, a brokered
-operator credential, OpenCode 1.18.x, and `clankie` on PATH. Capability discovery
-checks the installed version and native session/server flags before launching.
+operator credential, OpenCode 1.18.0 or newer, and `clankie` on PATH. Capability
+discovery checks the installed version and native session/server flags before
+launching, and names a missing flag.
 `CLANKIE_OPENCODE_BIN` can select an absolute native binary.
 
 The exported `planOpenCodeSeat` and `runOpenCodeSeat` functions provide the local
@@ -116,8 +117,8 @@ Deterministic tests cover native busy/idle behavior, identity mismatch,
 claim-before-dispatch and uncertain delivery, role boundaries, bridge auth,
 config preservation, exact resume, preflight-before-ready ordering, context
 failure and identity mismatch without extra turns.
-`opencode-seat-resilience.integration.test.ts` runs a real OpenCode 1.18
-server with this plugin, the real seat bridge and an in-process Clankie service;
+`opencode-seat-resilience.integration.test.ts` runs the installed OpenCode (1.18
+or newer; last run on 1.19.3) server with this plugin, the real seat bridge and an in-process Clankie service;
 only the model provider is a fixture. It covers a stalled context read, a turn
 ending in a provider error followed by a delivered app turn, and a preserved
 first stop cause ([evidence](../../docs/testing/2026-10-17-opencode-seat-resilience/README.md)). Scoped native evidence and remaining
@@ -134,8 +135,10 @@ Native references: [plugins](https://opencode.ai/docs/plugins/),
 ## Hired native workers
 
 `worker-tui.mjs` is a separately loaded native TUI plugin. Local macOS workers
-require a direct OpenCode **1.18.18** executable and a controller-created initial
-argv pane in Herdr. The controller verifies the original process, socket, cwd
+require a direct OpenCode executable at **1.18.18** or newer and a
+controller-created initial argv pane in Herdr. On load the plugin probes every TUI
+and SDK call a worker makes; a missing one answers initialization with
+`OpenCode VERSION lacks the Clankie worker surface: …` and creates no session. The controller verifies the original process, socket, cwd
 and session; the plugin observes that TUI's displayed route and uses its SDKv2
 client. It leaves prompt drafts, permissions and questions with the owner.
 `worker-server.mjs` selects `clankie mcp --fleet`, without an operator token.
@@ -180,7 +183,8 @@ private remote directory, proves both socket ends and checks the native process
 and Herdr allocation afresh. The helper reuses Clankie's registered SQLite reader;
 provider secrets and owner-wide profiles do not cross the link. Remote history
 uses `<fleet>:ses_…`; live reuse never creates another writer. Node 24+, Python 3,
-Herdr, native 1.18.18 and the existing Clankie fleet link are required there.
+Herdr, native 1.18.18 or newer and the existing Clankie fleet link are required
+there.
 Windows is unsupported. Remote fixture coverage is not a live acceptance claim.
 
 An owned live worker can exit through its original TUI's `app.exit` command;

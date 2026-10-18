@@ -2,7 +2,42 @@ import { projectMessages } from "./runtime.mjs";
 
 // This module consumes the native TUI's SDKv2 client, never a discovered HTTP
 // endpoint or the operator plugin's credentials. The controller owns admission.
-export const WORKER_OPENCODE_VERSION = "1.18.18";
+
+// The TUI plugin API members a worker calls. OpenCode publishes no capability
+// list, so admission probes these exactly; the service separately requires a
+// validated release floor for semantics no probe can see. Events, MCP status and
+// keymap exit stay optional: without them catalog refresh or self-exit refuse.
+const REQUIRED_CALLS = [
+  "route.navigate",
+  "lifecycle.onDispose",
+  "state.session.permission",
+  "state.session.question",
+  "state.session.status",
+  "client.session.get",
+  "client.session.create",
+  "client.session.status",
+  "client.session.messages",
+  "client.session.promptAsync",
+  "client.session.abort",
+  "client.permission.list",
+  "client.question.list",
+  "client.provider.list",
+];
+/** A named refusal when this OpenCode lacks a worker surface, else undefined. */
+export function workerSurfaceRefusal(api) {
+  const at = (path) =>
+    path
+      .split(".")
+      .reduce((value, key) => (value === null || value === undefined ? undefined : value[key]), api);
+  const missing = REQUIRED_CALLS.filter((path) => typeof at(path) !== "function");
+  if (!(at("lifecycle.signal") instanceof AbortSignal)) missing.push("lifecycle.signal");
+  if (typeof at("route") !== "object" || !("current" in api.route)) missing.push("route.current");
+  if (typeof at("state") !== "object" || !("ready" in api.state)) missing.push("state.ready");
+  const version = typeof api?.app?.version === "string" ? api.app.version.slice(0, 40) : "unknown";
+  return missing.length
+    ? `OpenCode ${version} lacks the Clankie worker surface: ${missing.join(", ")}`
+    : undefined;
+}
 const sessionPattern = /^ses_[A-Za-z0-9]{8,128}$/u;
 const messagePattern = /^msg_[A-Za-z0-9]{8,128}$/u;
 const MAX_TEXT = 128 * 1024;
@@ -96,8 +131,6 @@ export function createOpenCodeWorkerRuntime(api, controller) {
     observeRoute();
     if (retired || api.lifecycle.signal.aborted || !controller.connected())
       throw new Error("OpenCode worker endpoint is unavailable");
-    if (api.app.version !== WORKER_OPENCODE_VERSION)
-      throw new Error(`OpenCode worker requires exactly ${WORKER_OPENCODE_VERSION}`);
     if (switched) throw new Error("The owner changed the displayed session; this control is retired");
   };
   const bound = (expectedGeneration) => {

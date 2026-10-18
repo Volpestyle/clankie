@@ -88,9 +88,29 @@ flowchart TD
 | Claude Code | Native worker-plugin channel and turn hooks           | Implemented; requires the owner's channel consent                          |
 | Codex       | App-server shared with the native TUI's bound thread  | Implemented; starts or steers a turn                                       |
 | Pi          | Process-bound native extension follow-up messages     | Opt-in on macOS/Linux; installed Pi ≥ 0.87.1 that passes the hire probe    |
-| OpenCode    | Injected SDK in the process-bound native worker TUI   | Implemented locally and on linked Mac POSIX fleets; pinned to 1.18.18      |
-| Grok Build  | Leader IPC/ACP on the exact interactive TUI session   | Implemented locally on macOS; pinned to Grok 1.0.46                        |
+| OpenCode    | Injected SDK in the process-bound native worker TUI   | Local and linked Mac POSIX fleets; installed 1.18.18+ passing its probe    |
+| Grok Build  | Leader IPC/ACP on the exact interactive TUI session   | Local on macOS; installed 1.0.46+ passing its probe                        |
 | Prime Agent | Daemon session created by Clankie, TUI attached to it | Implemented locally on macOS/Linux (0.10.x); operator seat `clankie prime` |
+
+OpenCode and Grok use whatever release is installed (VUH-2417). A hire probes
+the exact surfaces Clankie calls and refuses, naming the found version and what
+it lacks, only when that probe fails. A version floor remains only for semantics
+no probe can observe, and each floor's code comment says which. Hosted images
+may still pin a version in their image build; that is a build choice, not an
+adapter refusal. Several of these surfaces are harness internals:
+
+| Harness  | Surface Clankie relies on                                         | Status                                                                                                                             |
+| -------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| OpenCode | SDKv2 client injected into TUI plugins (`api.client`)             | Published `@opencode-ai/sdk` v2 types; usage docs cover v1                                                                         |
+| OpenCode | TUI plugin entry: default `{ id, tui }`, loaded by `readV1Plugin` | `TuiPluginModule` type is published; TUI plugins undocumented, loader internal                                                     |
+| OpenCode | Stored history: `opencode.db` tables, indexes and migrations      | Internal; the reader probes the columns and migrations it uses                                                                     |
+| Grok     | Leader IPC socket (`--leader`, `--leader-socket`, control)        | Internal, undocumented; [ADR 0224](../../docs/adr/0224-grok-build-shares-the-visible-native-session.md) pins the observed protocol |
+| Grok     | ACP over that socket                                              | ACP is public; the `_x.ai/*` methods and `_meta` keys are internal                                                                 |
+
+No documented public extension point drives either harness's visible TUI
+session, so these stay. Floors: OpenCode 1.18.18, Grok 1.0.46; verified on
+OpenCode 1.19.3 and Grok 1.0.50 in the
+[latest-release evidence](../../docs/testing/2026-10-17-opencode-grok-latest/README.md).
 
 Transcript discovery and an available native CLI
 do not imply a local hire adapter exists. Unsupported automated briefs fail
@@ -205,9 +225,9 @@ The OpenCode **operator** seat is available separately through
 `clankie opencode`. Its plugin uses the native injected SDK client
 for the exact interactive session; the shared dispatch implementation lives in
 `integrations/opencode-plugin/runtime.mjs`. The local worker hire adapter uses
-the separate `worker-tui.mjs` and `worker-server.mjs` entries. OpenCode 1.18.18
-loads the TUI entry's default `{ id, tui }` object; named exports alone do not
-initialize its session. The prepared host observes the fresh pane with
+the separate `worker-tui.mjs` and `worker-server.mjs` entries. OpenCode (1.18.18
+through 1.19.3) loads the TUI entry's default `{ id, tui }` object; named exports
+alone do not initialize its session. The prepared host observes the fresh pane with
 `pane.get` before native TUI detection, then requires the exact bound harness
 and session while retaining the process, socket and allocation fences. After
 binding, it registers the hire's stable Herdr name so census preserves its
@@ -274,12 +294,15 @@ retarget and replaced native roots refuse; no local fallback or automatic adopti
 exists. Remote history is registered per service/fleet in dedicated profiles and
 is addressed as `<fleet>:ses_…`. Live-controller reuse requires that same source,
 process and owning conversation. Node 24+, Python 3, the existing Clankie fleet
-link and native OpenCode 1.18.18 must be available on the Mac. Windows control is
-not advertised. Remote acceptance currently has integration-fixture evidence;
+link and native OpenCode 1.18.18 or newer that passes the worker probe must be
+available on the Mac. Windows control is not advertised. Remote acceptance currently has integration-fixture evidence;
 the full owner draft/approval/interrupt/recovery live matrix remains open.
 
-Local worker control requires macOS and a direct native OpenCode **1.18.18**
-executable. One new Herdr tab starts its initial argv process. The controller
+Local worker control requires macOS and a direct native OpenCode executable at
+**1.18.18** or newer. Its isolated `--version` must clear the floor; the TUI
+plugin then probes each SDK and TUI call a worker makes and answers
+initialization with a named refusal if one is missing, and the TUI must report the
+same version. One new Herdr tab starts its initial argv process. The controller
 proves the original foreground process lifetime, held socket, canonical cwd and
 displayed native session before briefing. Its separate TUI plugin uses the
 in-process SDKv2 client; the server plugin selects `clankie mcp --fleet` without

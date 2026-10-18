@@ -148,7 +148,7 @@ async function openCodeFiles() {
   const profiles = new OpenCodeProfiles(directory);
   const profile = await profiles.allocate();
   await writeOpenCodeNativeSession(profile.database, directory, opencode.parent);
-  await profiles.register(profile, opencode.parent, directory, async () => {});
+  await profiles.register(profile, opencode.parent, directory, "1.18.18", async () => {});
   const db = new DatabaseSync(profile.database);
   cleanup.push(async () => db.close());
   db.exec("PRAGMA foreign_keys=OFF");

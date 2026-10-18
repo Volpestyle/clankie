@@ -163,6 +163,7 @@ async function fixture(
           data: sessionStatus === "idle" ? {} : { [sessionId]: { type: sessionStatus } },
         }),
         messages: async () => ({ data: [] }),
+        abort: async () => ({ data: true }),
         promptAsync: async (input: { parts: { type: string; text: string }[] }) => {
           receivedBriefs.push(input.parts[0]!.text);
           messages++;

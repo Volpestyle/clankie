@@ -1,13 +1,12 @@
 // Loaded by OpenCode's TUI plugin host, separately from server plugins.
-// Pinned OpenTUI 0.4.5 aliases these imports to the host's shared Solid runtime.
+// OpenTUI 0.4.5 (OpenCode 1.18.18 through 1.19.3) aliases these imports to the
+// host's shared Solid runtime.
 import { createComputed, createRoot } from "solid-js";
-import { createOpenCodeWorkerRuntime, WORKER_OPENCODE_VERSION } from "./worker-runtime.mjs";
+import { createOpenCodeWorkerRuntime, workerSurfaceRefusal } from "./worker-runtime.mjs";
 
 export const id = "clankie-native-worker";
 
 export async function tui(api, options) {
-  if (api.app.version !== WORKER_OPENCODE_VERSION)
-    throw new Error(`Clankie workers require OpenCode ${WORKER_OPENCODE_VERSION}`);
   const address = new URL(options?.endpoint ?? "");
   if (
     address.protocol !== "ws:" ||
@@ -20,6 +19,9 @@ export async function tui(api, options) {
     !/^[a-f0-9]{64}$/u.test(options?.token ?? "")
   )
     throw new Error("Invalid native worker controller");
+  // Probe before any native effect. A host that fails still connects, so its
+  // controller hears this named reason instead of waiting out initialization.
+  const refusal = workerSurfaceRefusal(api);
   const socket = new WebSocket(address, ["clankie-native-worker", options.token]);
   let connected = false;
   let sequence = 0;
@@ -36,17 +38,19 @@ export async function tui(api, options) {
       pending.set(requestId, { resolve, reject, timeout });
       socket.send(JSON.stringify({ id: requestId, method, input }));
     });
-  const runtime = createOpenCodeWorkerRuntime(api, {
-    connected: () => connected,
-    watchRoute: (observe) =>
-      createRoot((dispose) => {
-        createComputed(observe);
-        return dispose;
-      }),
-    authorize: (action) => request("authorize", { action }),
-    claim: (claim) => request("claim", claim),
-    receipt: (receipt) => request("receipt", receipt),
-  });
+  const runtime = refusal
+    ? undefined
+    : createOpenCodeWorkerRuntime(api, {
+        connected: () => connected,
+        watchRoute: (observe) =>
+          createRoot((dispose) => {
+            createComputed(observe);
+            return dispose;
+          }),
+        authorize: (action) => request("authorize", { action }),
+        claim: (claim) => request("claim", claim),
+        receipt: (receipt) => request("receipt", receipt),
+      });
   let finishInitialization;
   let failInitialization;
   const initialization = new Promise((resolve, reject) => {
@@ -59,7 +63,7 @@ export async function tui(api, options) {
   );
   const close = () => {
     connected = false;
-    runtime.close();
+    runtime?.close();
     clearTimeout(startup);
     for (const waiter of pending.values()) {
       clearTimeout(waiter.timeout);
@@ -68,7 +72,7 @@ export async function tui(api, options) {
     pending.clear();
     failInitialization(new Error("Original controller disconnected"));
   };
-  api.lifecycle.onDispose(() => {
+  api.lifecycle?.onDispose?.(() => {
     close();
     socket.close();
   });
@@ -101,9 +105,10 @@ export async function tui(api, options) {
       if (message.method === "initialize") {
         if (initialized) throw new Error("No reload or reinitialization");
         initialized = true;
+        if (refusal) throw new Error(refusal);
         result = await runtime.initialize(message.input);
       } else {
-        if (!initialized) throw new Error("Native worker is not initialized");
+        if (!initialized || !runtime) throw new Error("Native worker is not initialized");
         if (message.method === "status") result = await runtime.status();
         else if (message.method === "refreshToolCatalog") result = await runtime.refreshToolCatalog();
         else if (message.method === "send") result = await runtime.send(message.input);
@@ -121,7 +126,12 @@ export async function tui(api, options) {
       }
     } catch {
       if (connected)
-        socket.send(JSON.stringify({ id: message.id, error: "Native worker action unavailable" }));
+        socket.send(
+          JSON.stringify({
+            id: message.id,
+            error: message.method === "initialize" && refusal ? refusal : "Native worker action unavailable",
+          }),
+        );
       if (message.method === "initialize")
         failInitialization(new Error("Native worker initialization failed"));
     }
@@ -137,5 +147,7 @@ export async function tui(api, options) {
   }
 }
 
-// OpenCode 1.18.18's readV1Plugin loads the TUI entry from a default object.
+// OpenCode's internal loader (readV1Plugin) reads the TUI entry from a default
+// `{ id, tui }` object, the shape `@opencode-ai/plugin/tui` types as
+// TuiPluginModule; named exports alone are not loaded. Same in 1.18.18 and 1.19.3.
 export default { id, tui };

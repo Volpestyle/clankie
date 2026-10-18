@@ -14,6 +14,12 @@ const Frame = z.object({
   result: z.unknown().optional(),
   error: z.string().max(500).optional(),
 });
+// The worker plugin's capability probe names what an installed OpenCode lacks.
+// Only that bounded form is relayed; every other native error stays generic.
+const SurfaceRefusal =
+  /^OpenCode [0-9A-Za-z.+-]{1,40} lacks the Clankie worker surface: [A-Za-z., ]{1,400}$/u;
+/** A named reason this OpenCode cannot host a worker; nothing was briefed. */
+export class OpenCodeCapabilityError extends Error {}
 const Claim = z.object({
   sessionId: SessionId,
   messageId: MessageId,
@@ -146,7 +152,12 @@ export async function createOpenCodeController(input: {
       if (!waiter) return;
       pending.delete(frame.id);
       clearTimeout(waiter.timer);
-      if (frame.error) waiter.reject(new Error("Native OpenCode action unavailable"));
+      if (frame.error)
+        waiter.reject(
+          SurfaceRefusal.test(frame.error)
+            ? new OpenCodeCapabilityError(frame.error)
+            : new Error("Native OpenCode action unavailable"),
+        );
       else waiter.resolve(frame.result);
       return;
     }

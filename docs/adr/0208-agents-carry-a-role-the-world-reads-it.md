@@ -74,7 +74,8 @@ tool return whose native envelope says `state="running"` remains running until
 the parent's synthetic completion/error notification; its message creation
 time supplies the ending. There is no SQLite-file idleness heuristic.
 
-OpenCode retains the history adapter's 1.18.18 schema/version pin. Each read
+OpenCode retains the history adapter's schema check, with 1.18.18 as a release
+floor since VUH-2417 (later columns and migrations are admitted). Each read
 selects at most 500 recent parent messages, 2,000 parts and 4 MiB of payload,
 then retains 64 task calls and emits eight recent entries. Older tasks outside
 that window and v2-only history remain unsupported. The inspected installed
