@@ -64,7 +64,7 @@ it.each(["issue", "project", "projectUpdate"] as const)(
       const prompt = JSON.parse(linearActivityPrompt(result.activity).split("\n> ")[1]!);
       expect(prompt).toMatchObject({ commentId, replyParentId: rootId });
       if (target !== "issue") expect(prompt[`${target}Id`]).toBe(targetId);
-    else expect(prompt).toMatchObject({ issueId: targetId, identifier: "VUH-2456" });
+      else expect(prompt).toMatchObject({ issueId: targetId, identifier: "VUH-2456" });
     }
   },
 );
