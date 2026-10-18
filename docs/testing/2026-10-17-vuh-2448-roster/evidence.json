@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "focused-outage-tests.json",
+      "size": 20758,
+      "sha256": "bf3d6a4df435090b5c1eddb2d6026ed93fa3bf60b63acede29f17974504feceb",
+      "url": "clankie://evidence/sha256/bf3d6a4df435090b5c1eddb2d6026ed93fa3bf60b63acede29f17974504feceb"
+    },
+    {
       "path": "focused-tests.json",
       "size": 20471,
       "sha256": "d6ff9cb4acc1338368a3d57fc25164148a4fcc278752da47d1fc06139b2f6c80",

@@ -791,6 +791,8 @@ export interface ObservedHeadSeat {
 }
 
 export interface ObservedFleet {
+  /** Private local observation failure; the outer read retains fail-soft display behavior. */
+  readonly unavailable?: true;
   readonly seats: readonly ObservedFleetSeat[];
   readonly head?: ObservedHeadSeat;
 }
@@ -831,13 +833,20 @@ export async function readFleet(
   const [local, remote] = await Promise.all([
     options.localAvailable === false
       ? Promise.resolve<ObservedFleet>({ seats: [] })
-      : observe("herdr:default", () => readLocalFleet(options)),
+      : observe("herdr:default", async () => {
+          const local = await readLocalFleet(options);
+          if (local.unavailable) throw new Error("Local Herdr census unavailable");
+          return local;
+        }).catch((): ObservedFleet => ({ seats: [] })),
     Promise.all(
       (options.fleets ?? []).map(async (fleet) => {
         try {
-          const stdout = await observe(`herdr:${fleet.id}`, () => fleet.run(["api", "snapshot"]));
-          const snapshot = JSON.parse(stdout).result?.snapshot;
-          if (!Array.isArray(snapshot?.agents)) throw new Error("Complete Herdr snapshot unavailable");
+          const { stdout, snapshot } = await observe(`herdr:${fleet.id}`, async () => {
+            const stdout = await fleet.run(["api", "snapshot"]);
+            const snapshot = JSON.parse(stdout)?.result?.snapshot;
+            if (!Array.isArray(snapshot?.agents)) throw new Error("Complete Herdr snapshot unavailable");
+            return { stdout, snapshot };
+          });
           return {
             fleet,
             agents: parseHerdrAgentList(JSON.stringify({ result: { agents: snapshot.agents } })).map(
@@ -944,6 +953,8 @@ async function readLocalFleet(
           new Map(sessions.map(({ terminalId, workspace, tab }) => [terminalId, { workspace, tab }])),
       ),
     ]);
+    if (!Array.isArray(JSON.parse(stdout)?.result?.agents))
+      throw new Error("Complete local Herdr list unavailable");
     let bridgeReport: Awaited<ReturnType<typeof inspectLiveHarnessBridges>> | undefined;
     if (options.bridgeSocket) {
       const panes = parseHerdrAgentList(stdout).map((entry) => ({
@@ -1047,7 +1058,7 @@ async function readLocalFleet(
       });
     return head === undefined ? { seats } : { seats, head };
   } catch {
-    return { seats: [] };
+    return { seats: [], unavailable: true };
   }
 }
 
