@@ -7983,7 +7983,7 @@ removal, native delivery semantics and current verification limits are in the
 
 ### Grok Build worker and operator seats
 
-`clankie grok --dry-run` or `clankie seat --harness grok --dry-run` reviews the
+`clankie grok --dry-run` reviews the
 native launch, profile, selected skills and conversation. Remove `--dry-run`
 to open the interactive Grok Build TUI. This adapter requires macOS and Grok
 Build 1.0.46 or newer on PATH, an existing Grok sign-in, and Clankie's operator
@@ -8019,8 +8019,7 @@ fallback runs. See [ADR 0224](adr/0224-grok-build-shares-the-visible-native-sess
 
 ### Prime Agent operator seat
 
-`clankie prime-agent --dry-run` (alias `clankie prime`) or
-`clankie seat --harness prime --dry-run` reviews the launch: the `prime-agent` install and daemon socket, folder, conversation
+`clankie prime-agent --dry-run` (alias `clankie prime`) reviews the launch: the `prime-agent` install and daemon socket, folder, conversation
 and skills. Remove `--dry-run` to open it. It needs Prime Agent 0.10.x on PATH
 (daemon protocol 7), a model sign-in in Prime Agent, and Clankie's operator
 credential. `--model PROVIDER/MODEL` picks the new session's model; otherwise

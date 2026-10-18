@@ -18,7 +18,6 @@ it.each([
   "herdr",
   "discord",
   "gateway",
-  "seat",
   "claude",
   "claude2",
   "codex",

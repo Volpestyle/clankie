@@ -362,7 +362,7 @@ newer. Each connection probes the leader IPC (protocol 1 with `control_v1`) and
 ACP (protocol 1 with session loading) and requires one version across
 `grok --version`, the leader and its agent; a failure names the found version
 and what it lacks, and nothing is briefed. Review
-`clankie seat --harness grok --dry-run`; launch uses the current `GROK_HOME`
+`clankie grok --dry-run`; launch uses the current `GROK_HOME`
 and its existing sign-in. Each fresh operator launch creates its own workspace
 chat; resume retains the original profile/session/chat after a confirmed exit.
 Skills are readable `SKILL.md` paths, not a claimed plugin installation.

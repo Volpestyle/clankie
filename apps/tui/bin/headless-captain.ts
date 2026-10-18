@@ -66,12 +66,12 @@ export async function runHeadlessCaptainCommand(
     }
     // Joined installs launch locally even when their home is hosted. The
     // hosted portal dispatcher must not turn their native seat into a home action.
-    if (command === "seat" || /^claude\d*$/u.test(command ?? "")) {
+    if (/^claude\d*$/u.test(command ?? "")) {
       const joined = await (
         await import("../src/command/joined-seat.ts")
       ).runJoinedClaudeSeat(rest, {
         repoRoot: options.repoRoot,
-        ...(command === "seat" ? {} : { harnessCommand: command! }),
+        harnessCommand: command!,
         ...(options.env === undefined ? {} : { env: options.env }),
         ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
         ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
@@ -693,14 +693,11 @@ export async function runHeadlessCaptainCommand(
       return await (await import("../src/command/seat-sync.ts")).runSeatSyncCommand(rest, options);
     if (command === "seat-hook")
       return await (await import("../src/command/seat-hook.ts")).runSeatHookCommand(rest, options);
-    if (
-      command === "seat" ||
-      (await import("../src/command/harness-command.ts")).operatorHarness(command) !== undefined
-    ) {
+    if ((await import("../src/command/harness-command.ts")).operatorHarness(command) !== undefined) {
       return await (
         await import("../src/command/seat.ts")
       ).runSeatCommand(rest, {
-        ...(command === "seat" ? {} : { harnessCommand: command }),
+        harnessCommand: command!,
         repoRoot: options.repoRoot,
         ...(options.env === undefined ? {} : { env: options.env }),
         ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),

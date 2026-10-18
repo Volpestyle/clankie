@@ -1311,7 +1311,7 @@ export async function runMcpCommand(
     }
   };
   const parentArgv = await (options.readParentArgv ?? defaultReadParentArgv)().catch(() => undefined);
-  // `clankie seat` loads the projected plugin as the session-only
+  // `clankie claude` loads the projected plugin as the session-only
   // `clankie@inline`; an installed marketplace copy is `clankie@clankie`.
   const channel = OPERATOR_CHANNEL_ENTRIES.some((entry) => parentArgvLoadsChannel(parentArgv, entry));
   const journal =

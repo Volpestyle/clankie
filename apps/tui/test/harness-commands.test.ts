@@ -163,14 +163,8 @@ it.each(["claude", "claude2", "codex", "opencode"])(
   },
 );
 
-it.each(["claude", "codex", "opencode"])("hidden seat alias still selects %s", async (harness) => {
-  const f = await fixture();
-  expect(isHeadlessCaptainCommand("seat")).toBe(true);
-  expect(
-    await runHeadlessCaptainCommand(["seat", "--harness", harness, "--dry-run"], f.options),
-    f.error(),
-  ).toBe(0);
-  expect(JSON.parse(f.output()).command).toBe(harness);
+it("retires the seat alias; each harness is launched by its own name", () => {
+  expect(isHeadlessCaptainCommand("seat")).toBe(false);
 });
 
 it("help and TUI expose harness names, with only supported numbered account mappings", () => {

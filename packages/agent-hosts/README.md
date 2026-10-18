@@ -203,8 +203,7 @@ proof. See [question protocol evidence](../../docs/testing/2026-10-05-codex-work
 See [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md)
 for the boundary between task records, native terminals and harness delivery.
 
-The Grok Build operator seat uses `clankie seat --harness grok` (or
-`clankie grok`). It starts the visible TUI with a private leader socket, loads
+The Grok Build operator seat uses `clankie grok`. It starts the visible TUI with a private leader socket, loads
 the selected service conversation's persona/memory and operator MCP tools, and
 provides selected skills as readable paths. Briefs, messages and service wakes
 use the same native session; no ACP headless process or terminal typing is used.
@@ -214,8 +213,7 @@ a controller after restart are unsupported; unsupported versions/platforms refus
 See [the CLI guide](../../docs/cli.md#grok-build-worker-and-operator-seats) and
 [ADR 0224](../../docs/adr/0224-grok-build-shares-the-visible-native-session.md).
 
-The Prime Agent operator seat uses `clankie seat --harness prime` (or
-`clankie prime`). It creates a resident daemon session with the persona, memory
+The Prime Agent operator seat uses `clankie prime`. It creates a resident daemon session with the persona, memory
 card and skills, adds the operator MCP server through `replace_acp_mcp_servers`,
 and runs `prime-agent attach` on that session in the terminal. Wakes use the
 daemon's `prompt`; closing the TUI detaches without stopping the session. See

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * The seat arm (VUH-1473): the real Claude Code seat plugin, launched from
- * `clankie seat --dry-run`'s own plan, against a throwaway Clankie service
+ * `clankie claude --dry-run`'s own plan, against a throwaway Clankie service
  * (seat-service.mjs), compared with `bare` and `current` on the same machine.
  *
  * Headless `claude -p` cannot receive channel pushes (the bridge only pumps
@@ -294,7 +294,7 @@ function pinCheckout(campaign) {
 }
 
 /**
- * Pin what `clankie seat` would launch at campaign start: its plan, and a
+ * Pin what `clankie claude` would launch at campaign start: its plan, and a
  * dereferenced copy of the plugin projection (output style, hooks, skills), so
  * a concurrent instruction or skill edit cannot change the seat mid-run.
  */
@@ -304,7 +304,7 @@ function pinSeat(campaign, claude, checkout) {
   symlinkSync(join(checkout, "apps/tui/bin/clankie.ts"), join(pin, "bin", "clankie"));
   symlinkSync(claude, join(pin, "bin", "claude"));
   writeFileSync(join(pin, "settings.json"), JSON.stringify({ schemaVersion: 1 }));
-  const dry = spawnSync(join(pin, "bin", "clankie"), ["seat", "--dry-run"], {
+  const dry = spawnSync(join(pin, "bin", "clankie"), ["claude", "--dry-run"], {
     cwd: pin,
     env: {
       PATH: `${join(pin, "bin")}:${SYSTEM_PATH}`,
@@ -314,7 +314,7 @@ function pinSeat(campaign, claude, checkout) {
     },
     encoding: "utf8",
   });
-  if (dry.status !== 0) throw Error(`clankie seat --dry-run failed: ${dry.stderr}`);
+  if (dry.status !== 0) throw Error(`clankie claude --dry-run failed: ${dry.stderr}`);
   const plan = JSON.parse(dry.stdout);
   const plugin = join(pin, "plugin");
   cpSync(plan.plugin.path, plugin, { recursive: true, dereference: true });
@@ -639,7 +639,7 @@ async function run(options) {
       Object.entries(context.instructions).map(([k, v]) => [k, hash(v)]),
     ),
     isolation:
-      "Seat: real plugin from `clankie seat --dry-run` in the macOS sandbox with loopback only to a throwaway service, which runs sandboxed with temp state and credentials and reaches only fake Discord and herdr bodies. Every arm: the same fake herdr fleet on PATH.",
+      "Seat: real plugin from `clankie claude --dry-run` in the macOS sandbox with loopback only to a throwaway service, which runs sandboxed with temp state and credentials and reaches only fake Discord and herdr bodies. Every arm: the same fake herdr fleet on PATH.",
     results: [],
     stopped: null,
   };

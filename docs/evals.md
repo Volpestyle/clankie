@@ -170,11 +170,11 @@ The two suites above give the model Clankie's words (instructions and skills) an
 nothing else. The seat suite measures the seat itself: presence and integrations
 that bare Claude Code does not have. Its three arms share one machine:
 
-| Arm       | What runs                                                                          |
-| --------- | ---------------------------------------------------------------------------------- |
-| `bare`    | The harness alone                                                                  |
-| `current` | The harness with the current instructions and bundled skills, as in `run.mjs`      |
-| `seat`    | The real plugin from `clankie seat --dry-run`, against a throwaway Clankie service |
+| Arm       | What runs                                                                            |
+| --------- | ------------------------------------------------------------------------------------ |
+| `bare`    | The harness alone                                                                    |
+| `current` | The harness with the current instructions and bundled skills, as in `run.mjs`        |
+| `seat`    | The real plugin from `clankie claude --dry-run`, against a throwaway Clankie service |
 
 Every arm has the same fake herdr fleet on `PATH`, because a machine has herdr with
 or without Clankie; the owner's real herdr is unreadable to all of them. Only the

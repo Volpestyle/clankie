@@ -74,7 +74,7 @@ function fakeExec(input: {
   };
 }
 
-describe("clankie seat", () => {
+describe("clankie claude (the operator seat)", () => {
   it("parses its flags and refuses anything else", () => {
     expect(parseSeatArgs([])).toEqual({ resume: false, dryRun: false });
     expect(parseSeatArgs(["--new"])).toEqual({ resume: false, dryRun: false, newConversation: true });
@@ -146,7 +146,7 @@ describe("clankie seat", () => {
   it("prints the plan on --dry-run through the dispatcher without launching anything", async () => {
     const env = await stateEnv();
     const stdout = outputBuffer();
-    const exit = await runHeadlessCaptainCommand(["seat", "--new", "--dry-run"], {
+    const exit = await runHeadlessCaptainCommand(["claude", "--new", "--dry-run"], {
       repoRoot,
       env,
       execFileImpl: fakeExec({}),

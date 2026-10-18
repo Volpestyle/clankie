@@ -42,7 +42,7 @@ This repository is public. Both neighbors are private and consume
   `pnpm doctor` (checkout) or `clankie doctor` (any install).
 - `integrations/claude-plugin` — Clankie's Claude Code plugin: the operator
   seat as an output style, hooks, the `clankie mcp` stdio bridge, and linked
-  product skills (ADR 0152). `clankie seat` launches it; it carries only what
+  product skills (ADR 0152). `clankie claude` launches it; it carries only what
   a plugin can uniquely declare, like the herdr plugin.
 - `.agents/skills` — product skills shipped with every install (`this-machine`,
   `trace-clankie`). They teach Clankie, his seat and his workers his own

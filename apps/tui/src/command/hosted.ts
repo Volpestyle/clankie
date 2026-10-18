@@ -233,7 +233,6 @@ export const HOSTED_LOCAL_ONLY = new Set([
   "discord",
   "gateway",
   "operator-credential",
-  "seat",
   "claude",
   "codex",
   "opencode",

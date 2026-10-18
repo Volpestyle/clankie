@@ -579,7 +579,6 @@ const HEADLESS_COMMAND_HELP = [
       "                           --dry-run prints a plan without creating a chat",
     ],
   },
-  { nouns: ["seat"], lines: [] }, // Hidden compatibility alias; internal hooks keep their separate names.
   {
     nouns: ["mcp"],
     lines: [
