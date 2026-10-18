@@ -20,6 +20,7 @@ const WORK_USAGE = [
   "  | write ID --owner O|--no-owner|--add-label L|--remove-label L|--add-blocker ID [--request-id UUID] | receipt ID --request-id UUID",
   "  | close ID [--canceled] | attach ID --url URL --caption TEXT [--kind image|video|log|link]",
   "  | releases [--lane L] [--item KEY] [--limit N] | releases sync | release ID|VERSION",
+  "  | view save|get|list|apply|delete [ID] --project UUID --store-id ID [--json DEFINITION] [--limit N] [--cursor C]",
   "  | cycle [--project P] [--type current|previous|next|all] | cycle show ID [--project P]",
   "  | cycle add ITEM [--to current|next|NUMBER] | cycle remove ITEM | cycle length PROJECT DAYS",
   "  | ready [--project P] [--limit N] | drift [--project P] [--idle-days N] | runs [ITEM] [--status S]",
@@ -272,6 +273,52 @@ function trackerRequest(
     body: { name, arguments: toolArgs },
   });
   switch (verb) {
+    case "view": {
+      const viewCall = (name: string, toolArgs: Record<string, unknown>) => ({
+        path: "/v1/tracker/call",
+        body: { name, arguments: toolArgs, repo },
+      });
+      const [action, id, ...extra] = rest;
+      if (extra.length || !one(parsed, "--project") || !one(parsed, "--store-id"))
+        throw new Error(WORK_USAGE);
+      const scope = { project: one(parsed, "--project"), storeId: one(parsed, "--store-id") };
+      const controls = Object.fromEntries(
+        [
+          ["ifUpdatedAt", "--if-updated-at"],
+          ["idempotencyKey", "--idempotency-key"],
+        ]
+          .filter(([, flag]) => one(parsed, flag!) !== undefined)
+          .map(([key, flag]) => [key, one(parsed, flag!)]),
+      );
+      if (action === "save") {
+        const definition = JSON.parse(one(parsed, "--json") ?? "{}");
+        if (!definition || typeof definition !== "object" || Array.isArray(definition))
+          throw new Error("--json requires a view definition object");
+        return viewCall("save_issue_view", {
+          schemaVersion: 1,
+          ...definition,
+          ...scope,
+          ...(id === undefined ? {} : { id }),
+          ...controls,
+        });
+      }
+      if (action === "list" || action === "apply") {
+        if (action === "list" ? id !== undefined : id === undefined) throw new Error(WORK_USAGE);
+        return viewCall(action === "list" ? "list_issue_views" : "list_issue_view_issues", {
+          ...scope,
+          ...(id === undefined ? {} : { id }),
+          ...(one(parsed, "--limit") === undefined ? {} : { limit: Number(one(parsed, "--limit")) }),
+          ...(one(parsed, "--cursor") === undefined ? {} : { cursor: one(parsed, "--cursor") }),
+        });
+      }
+      if ((action === "get" || action === "delete") && id !== undefined)
+        return viewCall(action === "get" ? "get_issue_view" : "post_delete_issue_view", {
+          ...scope,
+          id,
+          ...(action === "delete" ? controls : {}),
+        });
+      throw new Error(WORK_USAGE);
+    }
     case "sync": {
       if (rest.length || one(parsed, "--json") === undefined) throw new Error(WORK_USAGE);
       const command = TrackerSyncCommandSchema.parse(JSON.parse(one(parsed, "--json")!));

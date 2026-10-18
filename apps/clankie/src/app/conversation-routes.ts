@@ -964,6 +964,25 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return context.json({ error: "owner_required" }, 401);
       const actor = authority.principal.kind === "device" ? appActor(authority.principal.id) : operatorActor;
       try {
+        if (parsed.data.repo !== undefined) {
+          if (ctx.dependencies.workItems === undefined) throw new Error("Work tracking is unavailable");
+          const result = await ctx.dependencies.workItems.callTracker(
+            parsed.data.name,
+            parsed.data.arguments,
+            {
+              repo: parsed.data.repo,
+              local: authority.principal.kind !== "device",
+              actor,
+              beforeWrite: async () => {
+                if (!(await authority.authorize()) || !authority.current())
+                  throw new Error("Owner authority expired");
+              },
+            },
+          );
+          if (!(await authority.authorize()) || !authority.current())
+            throw new Error("Owner authority expired");
+          return context.json({ result });
+        }
         const result = await tracker.call(parsed.data.name, parsed.data.arguments, {
           actor,
           beforeWrite: async () => {
@@ -1108,6 +1127,7 @@ const appActor = (deviceId: string): TrackerActor => ({
 const TrackerOwnerCallSchema = z
   .object({
     name: z.string().min(1).max(128),
+    repo: z.string().min(1).max(4096).optional(),
     arguments: z.record(z.string(), z.unknown()).default({}),
   })
   .strict();

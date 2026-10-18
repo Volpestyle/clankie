@@ -230,6 +230,31 @@ scope, native recipient or original thread refuses before the owner write. The
 assignment and original note retain separate receipts; uncertainty is checked,
 never replayed or reversed.
 
+## Saved issue views (built-in API/CLI)
+
+Use `clankie work view save|get|list|apply|delete` for named project filters.
+Name the exact `--project UUID` and `--store-id ID` on every operation.
+The CLI follows `--repo` (default current git repo) and requires its current
+host project binding to that built-in project; unknown or unsupported repos
+refuse without a global/local fallback. Read a view
+before updating/deleting, preserve its `updatedAt` with `--if-updated-at`, and use
+one `--idempotency-key` per intended write. Create with
+`view save --json '{"name":"Urgent","filter":{"priority":1}}'`; update by adding
+the view UUID and only changed fields. Apply runs the normal current issue list;
+follow `--cursor` with the same filter and use `--limit` for paging.
+
+Canonical tools: `save_issue_view`, `get_issue_view`, `list_issue_views`,
+`list_issue_view_issues` (apply), `post_delete_issue_view`. Records are version 1,
+exact-store/project bound, limited to 1000 per store; names are 1–120 characters,
+filters at most 8192 characters. Filters reuse `list_issues` fields, excluding
+project and pagination. Store IDs come from sync bootstrap metadata; project
+UUIDs come from project reads. Never infer either from a display name or reuse a
+view after a store replacement. Current access is checked on every operation;
+filters carry no authority or cached issues. Unsupported backends, including
+disconnected Linear, refuse this capability; never substitute a local tracker.
+The Work UI picker and iPhone/iPad/Mac presentation remain unimplemented/unproved
+by this slice; parent milestone and owner visual review remain open.
+
 ## Built-in tracker sync discovery
 
 `clankie work sync --json COMMAND` uses the authenticated tracker sync API.

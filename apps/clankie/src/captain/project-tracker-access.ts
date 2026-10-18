@@ -3,6 +3,11 @@ import { validateTrackerToolArgs } from "@clankie/work-items";
  * Unknown operations stay unavailable until their target can be proved.
  */
 const TOOLS = new Set([
+  "save_issue_view",
+  "get_issue_view",
+  "list_issue_views",
+  "list_issue_view_issues",
+  "post_delete_issue_view",
   "get_issue",
   "list_issues",
   "search_issues",
@@ -61,6 +66,25 @@ export async function authorizeProjectTrackerCall(
   if (args.project !== undefined) await projectRef(args.project);
   if (args.projectId !== undefined) await projectRef(args.projectId);
   switch (name) {
+    case "save_issue_view":
+    case "get_issue_view":
+    case "list_issue_views":
+    case "list_issue_view_issues":
+    case "post_delete_issue_view": {
+      // No inference: the caller and persisted view must name this exact project.
+      // The current backend checks store identity on every read/write/apply.
+      if (args.project !== project) refuse();
+      if (args.id !== undefined)
+        assertTrackerProject(
+          await read("get_issue_view", { id: args.id, project, storeId: args.storeId }),
+          project,
+        );
+      if (args.filter !== undefined) {
+        const filter = record(args.filter);
+        if (filter.parentId !== undefined) await issueRef(filter.parentId);
+      }
+      break;
+    }
     case "get_user":
       if (args.query !== "me") refuse();
       break;

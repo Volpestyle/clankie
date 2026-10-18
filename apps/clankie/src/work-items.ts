@@ -43,6 +43,8 @@ import {
   type TrackerToolBackend,
   createLocalTracker,
   TRACKER_LEAD,
+  SAVED_ISSUE_VIEW_TOOLS,
+  refuseBuiltInTrackerFeatures,
   TRACKER_OWNER,
   type TrackerActor,
 } from "@clankie/work-items";
@@ -1130,6 +1132,73 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     ): Promise<unknown> {
       const { repo, local, ...callbacks } = callOptions;
       const { repo: _repo, ...toolArgs } = args;
+      if (SAVED_ISSUE_VIEW_TOOLS.has(name)) {
+        // Saved views use a fresh canonical project fence, never discovery's
+        // frozen options.projects snapshot as authority. Other tools retain
+        // their existing routing below.
+        if (!options.projectsFence) throw new Error("Current project authority is unavailable");
+        const snapshot = await options.projectsFence();
+        snapshot.assertCurrent();
+        const target = await prepareWorkWriteTarget({
+          repoId: repo,
+          localMachineId: options.localMachineId ?? "local",
+          projectsFence: async () => snapshot,
+          locate: async () => {
+            const entry = await locate(repo, local);
+            snapshot.assertCurrent();
+            return { path: entry.path, assertCurrent: snapshot.assertCurrent };
+          },
+        });
+        if (target.convention.backend !== "builtin") refuseBuiltInTrackerFeatures(name, toolArgs);
+        const projects = snapshot.projects.projects.filter(
+          (project) =>
+            project.trackerRef !== undefined &&
+            project.workspaces.some(
+              (workspace) =>
+                workspace.id === project.trackerRef?.workspaceId &&
+                workspace.machineId === (options.localMachineId ?? "local") &&
+                workspace.platform === (process.platform === "win32" ? "windows" : "posix") &&
+                resolve(workspace.path) === target.path,
+            ),
+        );
+        const project = projects.length === 1 ? projects[0] : undefined;
+        if (
+          !project?.trackerProjectId ||
+          project.trackerProjectId !== toolArgs.project ||
+          snapshot.projects.projects.filter((entry) => entry.trackerProjectId === project.trackerProjectId)
+            .length !== 1
+        )
+          throw new Error("Saved view project does not match this repo's current built-in tracker binding");
+        const tracker = openBuiltIn();
+        const view = (await tracker.call("get_project", { query: project.trackerProjectId })) as {
+          id?: unknown;
+          leadTeam?: { id?: unknown };
+        };
+        target.assertCurrent();
+        if (view.id !== project.trackerProjectId || typeof view.leadTeam?.id !== "string")
+          throw new Error("Saved view tracker project is unavailable");
+        const validate = () => {
+          snapshot.assertCurrent();
+          target.assertCurrent();
+        };
+        const result = await trackerToolsFor(target.path, target.convention, {
+          ...callbacks,
+          builtIn: { projectId: project.trackerProjectId, teamId: view.leadTeam.id, open: () => tracker },
+        }).call(name, toolArgs, {
+          ...callbacks,
+          beforeWrite: async () => {
+            await callbacks.beforeWrite?.();
+            validate();
+          },
+          onDispatch: () => {
+            validate();
+            callbacks.onDispatch?.();
+            validate();
+          },
+        });
+        validate();
+        return result;
+      }
       let path: string;
       let convention: WorkConvention;
       let validate: (() => Promise<void>) | undefined;

@@ -50,8 +50,18 @@ export interface TrackerActor extends TrackerActorRef {
 export const TRACKER_OWNER: TrackerActorRef = { type: "human", id: "owner", name: "Owner" };
 export const TRACKER_LEAD: TrackerActorRef = { type: "agent-worker", id: "clankie", name: "Clankie" };
 
+/** Canonical saved-filter tools; unsupported backends refuse all of them before fallback. */
+export const SAVED_ISSUE_VIEW_TOOLS: ReadonlySet<string> = new Set([
+  "save_issue_view",
+  "get_issue_view",
+  "list_issue_views",
+  "list_issue_view_issues",
+  "post_delete_issue_view",
+]);
+
 /** Built-in tracker only: write receipts, the audit log, preconditions and the item event stream. */
 export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
+  ...SAVED_ISSUE_VIEW_TOOLS,
   "get_write_receipt",
   "list_audit_events",
   "post_issue_event",
@@ -241,6 +251,36 @@ const issueFilters = {
   updatedAt: string,
   includeArchived: boolean,
 };
+// Saved definitions contain only bounded normal issue filters; pagination is chosen at apply time.
+const savedIssueFilters = Object.setPrototypeOf(
+  Object.fromEntries(
+    Object.entries(issueFilters)
+      .filter(([key]) => !["project", "limit", "cursor"].includes(key))
+      .map(([key, schema]) => [
+        key,
+        {
+          ...schema,
+          ...((
+            Array.isArray(schema.type)
+              ? schema.type.includes("string")
+              : ["string", "array"].includes(String(schema.type))
+          )
+            ? schema.type === "array"
+              ? { maxItems: 32, items: { ...string, maxLength: 2048 } }
+              : { maxLength: 2048 }
+            : {}),
+        },
+      ]),
+  ),
+  null,
+);
+const viewScope = {
+  project: {
+    ...string,
+    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+  },
+  storeId: { ...string, minLength: 1, maxLength: 128 },
+};
 const commentTargets = {
   issueId: string,
   projectId: string,
@@ -259,6 +299,43 @@ function tool(
 
 /** Schemas deliberately cover the supported subset; unavailable features fail explicitly. */
 export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
+  tool(
+    "save_issue_view",
+    "Built-in only. Create or update a named version-1 issue filter in an exact store/project. No saved authority or issue snapshot. Read before updating; use ifUpdatedAt and idempotencyKey.",
+    {
+      ...viewScope,
+      id: string,
+      name: { ...string, minLength: 1, maxLength: 120 },
+      schemaVersion: { const: 1, type: "integer" },
+      filter: object(savedIssueFilters),
+      ...writeControls,
+    },
+    ["project", "storeId", "schemaVersion"],
+  ),
+  tool(
+    "get_issue_view",
+    "Built-in only. Read a saved filter by UUID in its exact store/project.",
+    { ...viewScope, id: string },
+    ["project", "storeId", "id"],
+  ),
+  tool(
+    "list_issue_views",
+    "Built-in only. List named filters in an exact store/project; follow cursor.",
+    { ...viewScope, ...pagination },
+    ["project", "storeId"],
+  ),
+  tool(
+    "list_issue_view_issues",
+    "Built-in only. Apply a saved filter through the current normal issue list and current access checks. Pagination belongs to this read.",
+    { ...viewScope, id: string, ...pagination },
+    ["project", "storeId", "id"],
+  ),
+  tool(
+    "post_delete_issue_view",
+    "Built-in only. Delete a saved filter in its exact store/project with normal write guards and receipts.",
+    { ...viewScope, id: string, ...writeControls },
+    ["project", "storeId", "id"],
+  ),
   tool(
     "get_issue",
     "Read an issue by UUID or identifier. Read immediately before an update; includeRelations reveals parents, children and blocking/related issues; includeReleases lists the releases that shipped it, oldest (the one that delivered it) first.",

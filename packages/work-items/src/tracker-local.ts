@@ -34,6 +34,7 @@ import {
   TRACKER_LEAD,
   TRACKER_OWNER,
   TRACKER_TOOLS,
+  SAVED_ISSUE_VIEW_TOOLS,
   validateTrackerToolArgs,
   type DeliveryStage,
   type IssueEventType,
@@ -256,8 +257,17 @@ interface Release {
   firstSyncedAt: string;
   syncedAt: string;
 }
+interface SavedIssueView extends Entity {
+  schemaVersion: 1;
+  storeId: string;
+  projectId: string;
+  name: string;
+  filter: Record<string, unknown>;
+}
+
 interface Store {
   version: 1;
+  issueViews?: SavedIssueView[];
   /** Import keeps the native store identity separate from the provider's team id. */
   storeId?: string;
   syncId?: number;
@@ -544,6 +554,32 @@ function parseStore(content: string): Store {
     if (new Set(store[key].map((entry) => entry.id)).size !== store[key].length)
       throw new Error(`Duplicate IDs in local tracker collection ${key}`);
   }
+  if (store.issueViews !== undefined) {
+    if (
+      !Array.isArray(store.issueViews) ||
+      store.issueViews.length > 1000 ||
+      new Set(store.issueViews.map((view) => view.id)).size !== store.issueViews.length
+    )
+      throw new Error("Invalid local saved issue views");
+    for (const view of store.issueViews) {
+      validateTrackerToolArgs("save_issue_view", {
+        schemaVersion: view.schemaVersion,
+        storeId: view.storeId,
+        project: view.projectId,
+        name: view.name,
+        filter: view.filter,
+      });
+      if (
+        view.storeId !== (store.storeId ?? store.team.id) ||
+        !store.projects.some((project) => project.id === view.projectId) ||
+        typeof view.id !== "string" ||
+        typeof view.createdAt !== "string" ||
+        typeof view.updatedAt !== "string" ||
+        JSON.stringify(view.filter).length > 8192
+      )
+        throw new Error("Invalid local saved issue view binding");
+    }
+  }
   if (store.issueStatuses.length === 0 || store.projectStatuses.length === 0)
     throw new Error("Local tracker statuses are missing");
   if (store.events !== undefined) {
@@ -662,13 +698,14 @@ const ENTITY_TYPES = [
   ["comments", "comment"],
   ["statusUpdates", "status_update"],
   ["labels", "label"],
+  ["issueViews", "issue_view"],
 ] as const;
 
 /** The write time (or its transaction operation times) identifies touched records. */
 function stampActor(store: Store, actor: TrackerActor, now: string): AuditEvent["entities"] {
   const touched: AuditEvent["entities"] = [];
   for (const [collection, type] of ENTITY_TYPES)
-    for (const entry of store[collection] as (Entity & { identifier?: string })[]) {
+    for (const entry of (store[collection] ?? []) as (Entity & { identifier?: string })[]) {
       if (entry.updatedAt < now) continue;
       if (entry.createdAt >= now) entry.createdByActor = actor;
       entry.updatedByActor = actor;
@@ -2308,6 +2345,40 @@ async function commentTarget(
   return target;
 }
 
+function issueViewProject(store: Store, args: Record<string, unknown>): Project {
+  if (args.storeId !== (store.storeId ?? store.team.id)) throw new Error("Saved view tracker store mismatch");
+  const project = store.projects.find((entry) => entry.id === args.project);
+  if (!project) throw new Error("Saved views require an exact existing project UUID");
+  return project;
+}
+function savedIssueView(store: Store, args: Record<string, unknown>): SavedIssueView {
+  const project = issueViewProject(store, args);
+  const view = store.issueViews?.find(
+    (entry) => entry.id === args.id && entry.projectId === project.id && entry.storeId === args.storeId,
+  );
+  if (!view) throw new Error("Saved issue view not found in this store/project");
+  return view;
+}
+
+function validateSavedFilter(
+  store: Store,
+  project: Project,
+  filter: Record<string, unknown>,
+  now: string,
+): void {
+  // Normal issue reads parse these lazily per issue; saved definitions must
+  // refuse invalid dates even while the project's current issue list is empty.
+  for (const key of ["createdAt", "updatedAt"])
+    if (filter[key] !== undefined) dateBoundary(filter[key] as string, now);
+  if (filter.parentId !== undefined && findIssue(store, filter.parentId as string).projectId !== project.id)
+    throw new Error("Saved view parent belongs to another project");
+  if (
+    filter.cycle !== undefined &&
+    findCycle(store, filter.cycle as string, project, now, false).projectId !== project.id
+  )
+    throw new Error("Saved view cycle belongs to another project");
+}
+
 async function dispatch(
   store: Store,
   name: string,
@@ -2317,6 +2388,86 @@ async function dispatch(
   context: WriteContext,
 ): Promise<unknown> {
   switch (name) {
+    case "save_issue_view": {
+      const project = issueViewProject(store, args);
+      const existing = args.id === undefined ? undefined : savedIssueView(store, args);
+      if (existing) assertUnchangedSince(existing, args);
+      else refuseCreatePrecondition(args);
+      const title = args.name === undefined ? existing?.name : (args.name as string).trim();
+      const filter = (args.filter ?? existing?.filter) as Record<string, unknown> | undefined;
+      if (!title || filter === undefined) throw new Error("A new saved view requires name and filter");
+      if (JSON.stringify(filter).length > 8192) throw new Error("Saved filter exceeds 8192 characters");
+      validateSavedFilter(store, project, filter, now);
+      // Resolve and validate references through the normal list implementation.
+      await dispatch(
+        store,
+        "list_issues",
+        { ...filter, project: project.id, limit: 1 },
+        options,
+        now,
+        context,
+      );
+      if (!existing && (store.issueViews?.length ?? 0) >= 1000) throw new Error("Saved view limit reached");
+      if (
+        (store.issueViews ?? []).some(
+          (entry) => entry.projectId === project.id && entry.id !== existing?.id && entry.name === title,
+        )
+      )
+        throw new Error("Saved view name already exists in this project");
+      const view: SavedIssueView = {
+        ...(existing ?? { id: randomUUID(), createdAt: now }),
+        schemaVersion: 1,
+        storeId: args.storeId as string,
+        projectId: project.id,
+        name: title,
+        filter: structuredClone(filter),
+        updatedAt: now,
+      };
+      store.issueViews ??= [];
+      if (existing) store.issueViews[store.issueViews.indexOf(existing)] = view;
+      else store.issueViews.push(view);
+      return structuredClone(view);
+    }
+    case "post_delete_issue_view": {
+      const view = savedIssueView(store, args);
+      assertUnchangedSince(view, args);
+      store.issueViews = store.issueViews!.filter((entry) => entry.id !== view.id);
+      return { id: view.id, projectId: view.projectId, storeId: view.storeId, deleted: true };
+    }
+    case "get_issue_view":
+      return structuredClone(savedIssueView(store, args));
+    case "list_issue_views": {
+      const project = issueViewProject(store, args);
+      return page(
+        order(
+          (store.issueViews ?? []).filter((entry) => entry.projectId === project.id),
+          args,
+        ).map((entry) => ({ ...entry })),
+        args,
+        "views",
+        name,
+      );
+    }
+    case "list_issue_view_issues": {
+      const view = savedIssueView(store, args);
+      validateSavedFilter(store, issueViewProject(store, args), view.filter, now);
+      return dispatch(
+        store,
+        "list_issues",
+        {
+          ...view.filter,
+          project: view.projectId,
+          ...Object.fromEntries(
+            ["limit", "cursor", "orderBy"]
+              .filter((key) => args[key] !== undefined)
+              .map((key) => [key, args[key]]),
+          ),
+        },
+        options,
+        now,
+        context,
+      );
+    }
     case "post_issue_event":
       return postIssueEvent(store, args, context, now, options);
     case "save_issue_status":
@@ -3404,6 +3555,8 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         return withTrackerStoreLock(path, async (assertHeld) => {
           const { store, clock } = await load();
           await roll(store, clock, assertHeld);
+          for (const operation of command.operations)
+            if (SAVED_ISSUE_VIEW_TOOLS.has(operation.name)) issueViewProject(store, operation.arguments);
           const actor = callOptions?.actor ?? localActor(store);
           const key = command.idempotencyKey;
           const fingerprint = createHash("sha256")
@@ -4156,6 +4309,8 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             (target, now, context) => rolloverCycles(target, clock, context, now),
           );
         }
+        // Also fence receipt replays: a saved result never survives a store replacement.
+        if (SAVED_ISSUE_VIEW_TOOLS.has(name)) issueViewProject(store, args);
         const actor = callOptions?.actor ?? localActor(store);
         if (!writing) {
           const result = await read(store, name, args, options, actor, clock);
@@ -4237,6 +4392,7 @@ const LINEAR_SOURCED_TOOLS = new Set(["import_linear", "mirror_linear", "cutover
 function summarizeStore(store: Store | undefined): TrackerStoreSummary {
   if (store === undefined) return { exists: false, counts: {}, empty: true, localWrites: 0 };
   const counts: Record<string, number> = {
+    issueViews: store.issueViews?.length ?? 0,
     issues: store.issues.length,
     projects: store.projects.length,
     comments: store.comments.length,

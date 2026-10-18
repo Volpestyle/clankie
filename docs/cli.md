@@ -2698,6 +2698,60 @@ Local records persist across restart and do not automatically migrate on
 connection. Other unavailable repo providers answer `backend_unavailable`. The HTTP
 form is `POST /v1/work` with the operator bearer and `{ "action": ... }`.
 
+### `work view save|get|list|apply|delete` (built-in tracker)
+
+Saved views persist named issue filters, never issue snapshots or access rights.
+Every operation names the exact tracker `storeId` and project UUID. Obtain the
+store ID from the metadata line of `work sync --json
+'{"action":"bootstrap","type":"full","projects":["*"],"lazy":true}'` and the project
+UUID from `work call list_projects`. Names are not project identifiers here.
+
+```bash
+clankie work view save --project PROJECT_UUID --store-id STORE_ID \
+  --json '{"name":"Urgent open","filter":{"priority":1,"state":"open"}}' \
+  --idempotency-key saved-view-create-001
+clankie work view list --project PROJECT_UUID --store-id STORE_ID --limit 50
+clankie work view get VIEW_UUID --project PROJECT_UUID --store-id STORE_ID
+clankie work view apply VIEW_UUID --project PROJECT_UUID --store-id STORE_ID --limit 50
+clankie work view save VIEW_UUID --project PROJECT_UUID --store-id STORE_ID \
+  --json '{"name":"Urgent"}' --if-updated-at LAST_READ_UPDATED_AT
+clankie work view delete VIEW_UUID --project PROJECT_UUID --store-id STORE_ID \
+  --if-updated-at LAST_READ_UPDATED_AT --idempotency-key saved-view-delete-001
+```
+
+`save` creates without an ID and updates with an ID; omitted update fields stay
+unchanged. Read first and pass `--if-updated-at` for concurrent update protection.
+A name is nonblank, at most 120 characters and unique within its project. The
+version-1 `filter` accepts the normal `list_issues` fields except `project`,
+`limit` and `cursor`; the project is fixed and paging is chosen when applying.
+Filter text is bounded to 8192 characters, individual string fields to 2048
+characters and field arrays to 32 entries. A store holds at most 1000 views.
+`--limit` and `--cursor` reuse normal pagination; changed filters invalidate an
+old cursor. Newly matching issues appear and issues that stop matching disappear.
+The saved record includes `schemaVersion:1`, store/project IDs, timestamps and
+host-attributed actors. It stores no credentials, query code or authorization.
+
+The view CLI selects the saved backend of `--repo PATH_OR_REGISTERED_ID` (default:
+current git repository). It requires a current host project binding to that exact
+built-in tracker project. An unknown repo or unsupported backend refuses; it never
+replays the call against the global tracker. In the HTTP body, optional `repo`
+selects that same existing registered resolution and its current fences. Omitting
+`repo` preserves the existing direct built-in API behavior. Scope remains explicit
+in `arguments.project` and `arguments.storeId` in either case.
+
+The public tools are `save_issue_view`, `get_issue_view`, `list_issue_views`,
+`list_issue_view_issues` (apply) and `post_delete_issue_view`. HTTP uses the
+existing authenticated `POST /v1/tracker/call` with `{name,arguments}`; write tools
+support `idempotencyKey` and `ifUpdatedAt`. The `linear_` tool prefix is only the
+existing transport vocabulary. Connected Linear, disconnected Linear, GitHub
+and file trackers refuse saved views rather than falling back to a local store.
+A view from another project or replaced tracker store is refused, including on
+read, apply, update and delete. Saving a filter grants no future access.
+
+The Work UI picker and iPhone, iPad and Mac presentation are not implemented or
+proved by this API/CLI slice. The parent Work UI milestone and James's visual
+review remain open.
+
 ### `evidence push|fetch` / `evidence list|receipt`
 
 Phase A preserves the private destination captured at upload CLAIM, including a
