@@ -295,7 +295,9 @@ try {
   for (let i = 0; i < 120; i++) {
     const fleet = await captain.serveOperatorConversation({ op: "fleet", schemaVersion: 1 });
     const seat =
-      fleet.op === "fleet" ? fleet.snapshot.seats.find((candidate) => candidate.seatId === seatId) : undefined;
+      fleet.op === "fleet"
+        ? fleet.snapshot.seats.find((candidate) => candidate.seatId === seatId)
+        : undefined;
     // The stored final reply above is OpenCode's own completion; the roster must
     // also show the seat settled (a run outcome when it observed the working state).
     if (seat?.lastOutcome || seat?.status === "done" || seat?.status === "idle") {
@@ -311,11 +313,11 @@ try {
   });
   evidence.message = message;
   // The native reply below proves delivery; this only refuses an outright failure.
-    assert.ok(
-      ["delivered", "accepted", "queued"].includes(message.outcome) ||
-        ["delivered", "consumed"].includes(message.deliveryStage),
-      JSON.stringify(message),
-    );
+  assert.ok(
+    ["delivered", "accepted", "queued"].includes(message.outcome) ||
+      ["delivered", "consumed"].includes(message.deliveryStage),
+    JSON.stringify(message),
+  );
   evidence.messageReply = await waitReply("VUH2417_OPENCODE_MESSAGE_OK");
   // Recorded, not asserted: retirement also involves tracker policy outside this check.
   evidence.close = await call("close_worker_pane", {

@@ -69,11 +69,7 @@
     },
     "mcpListShape": {
       "servers": true,
-      "sessionFields": [
-        "enabled",
-        "status",
-        "tools"
-      ]
+      "sessionFields": ["enabled", "status", "tools"]
     },
     "notifications": [
       "_x.ai/announcements/update",
@@ -157,11 +153,7 @@
     },
     "mcpListShape": {
       "servers": true,
-      "sessionFields": [
-        "enabled",
-        "status",
-        "tools"
-      ]
+      "sessionFields": ["enabled", "status", "tools"]
     },
     "notifications": [
       "_x.ai/announcements/update",
