@@ -23,13 +23,23 @@ parsing. Issue titles remain null because this roster has no cached title source
   transport adapters. Async adapters correct their promised return type;
   the initial failed report is retained alongside the final result.
 - App device-session real-HTTP fixture: 4 cases passed against core `f8630e0ba`.
-- App `clankie heavy -- pnpm check:landing`: exit 0, 104.97 seconds, on
+- App `clankie heavy -- pnpm check:landing`: final exit 0, 107.28 seconds, on
   `17ddc0ef98a9478950f6311a2250a72e7c493355`, based on app
   `2f63ef78d98b1c99e46981c5fbab9a9efc10d306`. It ran in an isolated real
-  sibling clone pair, with private installs and the exact core commit above.
-- Final core gate result and raw logs are retained in the evidence manifest.
-  The issue comment names the tested implementation revision separately from
-  any later evidence-only commit.
+  sibling clone pair, with private installs, repeated against final core
+  `d141631bd9a92831666ff77441a38aa5f735097f`. The focused fixture's four
+  cases also passed in this final gate.
+- Final core `clankie heavy -- pnpm check:landing`: exit 0, 695.83 seconds,
+  on `d141631bd9a92831666ff77441a38aa5f735097f`, against fetched base
+  `b931e69d6ef0bd983d67f254b290b78cdcf99d3a`. All 17 affected typechecks
+  passed; 520 runtime files passed, 23 skipped; 4,522 cases passed, 55 skipped.
+  No retries or failure exceptions. Final focused proof: 3 files, 63 cases passed.
+- Reports and raw logs are retained in the evidence manifest, including the
+  initial TypeScript failure and the intentionally interrupted superseded run.
+  The archive commit changes evidence only; implementation checks apply to the
+  exact revision above.
+
+[Raw verification reports and logs](clankie://evidence/sha256/ba6ba43fdf0199aa35865f85f3f9a27269019630c3fa976f1ee018b605354a80).
 
 ## Gaps
 
