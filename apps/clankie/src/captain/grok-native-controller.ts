@@ -17,7 +17,7 @@ import { admitNativeRelease } from "./native-release.ts";
  * the system-prompt override and leader mode ignoring permission flags.
  * Verified on 1.0.46 and 1.0.50.
  */
-export const GROK_NATIVE_FLOOR = "1.0.46";
+const GROK_NATIVE_FLOOR = "1.0.46";
 /** The installed release, admitted at or above the floor, or a named refusal. */
 export function admitGrokRelease(found: string): string {
   return admitNativeRelease("Grok Build", found, GROK_NATIVE_FLOOR);

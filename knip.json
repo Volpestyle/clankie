@@ -70,6 +70,8 @@
         "scripts/manual/windows-computer/check.ts",
         "scripts/manual/computer-use/fixture-server.d.mts",
         "integrations/pi-plugin/worker.mjs",
+        "integrations/pi-plugin/probe.mjs",
+        "integrations/pi-plugin/probe-extension.mjs",
         "scripts/release/pi-worker-fleet.d.mts",
         "integrations/pi-plugin/worker-runtime.d.mts",
         "integrations/pi-plugin/worker-connection.d.mts",

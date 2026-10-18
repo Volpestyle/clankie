@@ -5,7 +5,7 @@
  */
 const RELEASE = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})$/u;
 
-export function isNativeRelease(version: string): boolean {
+function isNativeRelease(version: string): boolean {
   return RELEASE.test(version);
 }
 
