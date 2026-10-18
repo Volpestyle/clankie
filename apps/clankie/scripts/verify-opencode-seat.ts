@@ -45,6 +45,7 @@ const proofDiagnostics: unknown[] = [];
 const evidence: Record<string, unknown> = { startedAt: new Date().toISOString(), root, session, model };
 evidence.proofDiagnostics = proofDiagnostics;
 const liveDescriptor = join(process.env.HOME!, ".clankie/links/default-local.json");
+// allow-swallowed-rejection -- no live descriptor is a valid before-state
 const before = await readFile(liveDescriptor).catch(() => undefined);
 const path = join(root, "bin");
 await mkdir(path);
@@ -273,6 +274,7 @@ try {
   // carrying the marker is this turn's completion.
   const waitReply = async (marker: string) => {
     for (let i = 0; i < 600; i++) {
+      // allow-swallowed-rejection -- a missing page is retried on the next poll
       const page = await profiles.read(sessionId, { tail: 50 }).catch(() => undefined);
       const reply = page?.entries.find(
         (entry) => entry.type === "message" && entry.role === "agent" && entry.text.includes(marker),

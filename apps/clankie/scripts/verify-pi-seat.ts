@@ -50,6 +50,8 @@ const session = `vuh-2417-pi-${randomUUID().slice(0, 8)}`;
 const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const evidence: Record<string, unknown> = { startedAt: new Date().toISOString(), root, session, model };
 const liveDescriptor = join(process.env.HOME!, ".clankie/links/default-local.json");
+// allow-swallowed-rejection -- no live descriptor is a valid before-state
+// allow-swallowed-rejection -- an unreadable transcript is retried on the next poll
 const before = await readFile(liveDescriptor).catch(() => undefined);
 
 const ownerAuth = JSON.parse(await readFile(join(profileArg, "auth.json"), "utf8")) as Record<
@@ -82,6 +84,7 @@ await writeFile(
 );
 await writeFile(join(agentDir, "trust.json"), JSON.stringify({ [work]: true }));
 // An established profile already holds Pi's ripgrep; a fresh one would download it during startup.
+// allow-swallowed-rejection -- the bundled rg is optional; Pi falls back to PATH
 await copyFile(join(profileArg, "bin/rg"), join(agentDir, "bin/rg")).catch(() => {});
 await writeFile(
   join(root, "herdr.toml"),
@@ -257,6 +260,7 @@ try {
           ? await request
               .clone()
               .json()
+              // allow-swallowed-rejection -- an unreadable transcript is retried on the next poll
               .catch(() => undefined)
           : undefined;
       const response = await app!.app.fetch(request);

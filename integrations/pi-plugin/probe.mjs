@@ -274,6 +274,7 @@ try {
 } catch (error) {
   outcome = { ok: false, reason: `${step}: ${String(error?.message ?? error).slice(0, 200)}` };
 }
+// allow-swallowed-rejection -- best-effort cleanup of a throwaway temp root
 await rm(root, { recursive: true, force: true }).catch(() => {});
 process.stdout.write(`${JSON.stringify(outcome)}\n`);
 process.exit(0);
