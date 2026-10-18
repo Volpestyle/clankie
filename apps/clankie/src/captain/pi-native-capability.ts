@@ -115,7 +115,9 @@ function atLeastFloor(version: string): boolean {
 async function piBundleFiles(packageRoot: string, version: string): Promise<string[]> {
   const bundle = join(packageRoot, "dist/bundle");
   const read = (file: string) => readFile(join(bundle, file), "utf8").catch(() => "");
-  const chunks = [...(await read("cli-runtime.js")).matchAll(/(?:from|import)\s*"\.\/(chunks\/[\w.-]+\.js)"/gu)];
+  const chunks = [
+    ...(await read("cli-runtime.js")).matchAll(/(?:from|import)\s*"\.\/(chunks\/[\w.-]+\.js)"/gu),
+  ];
   if (!(await read("cli.js")).includes('"./cli-runtime.js"') || !chunks.length)
     throw new PiNativeRefusal(`Native Pi ${version} has an unrecognized CLI bundle layout`);
   return [

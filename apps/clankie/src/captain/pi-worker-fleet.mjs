@@ -17,10 +17,14 @@ function modelFacing(description, schema) {
   for (const key of compositions) delete parameters[key];
   for (const branch of branches) Object.assign(parameters.properties, branch?.properties);
   const allOf = Array.isArray(schema.allOf) ? schema.allOf : [];
-  const required = new Set([...(schema.required ?? []), ...allOf.flatMap((branch) => branch?.required ?? [])]);
+  const required = new Set([
+    ...(schema.required ?? []),
+    ...allOf.flatMap((branch) => branch?.required ?? []),
+  ]);
   if (required.size) parameters.required = [...required];
   else delete parameters.required;
-  if (branches.every((branch) => branch?.additionalProperties === false)) parameters.additionalProperties = false;
+  if (branches.every((branch) => branch?.additionalProperties === false))
+    parameters.additionalProperties = false;
   const choices = branches
     .filter((branch) => !allOf.includes(branch))
     .map((branch) => `(${(branch?.required ?? Object.keys(branch?.properties ?? {})).join(", ")})`);

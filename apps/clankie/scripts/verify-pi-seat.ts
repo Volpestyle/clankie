@@ -35,7 +35,10 @@ import { createCaptainMemory } from "../src/captain-memory.ts";
 
 assert.equal(process.env.HERDR_ENV, "1", "Run from Herdr; only the owned throwaway session is changed");
 const [outArg, profileArg, model] = process.argv.slice(2);
-assert.ok(outArg && profileArg && model?.includes("/"), "Usage: verify-pi-seat OUT.json PI_AGENT_DIR PROVIDER/MODEL");
+assert.ok(
+  outArg && profileArg && model?.includes("/"),
+  "Usage: verify-pi-seat OUT.json PI_AGENT_DIR PROVIDER/MODEL",
+);
 const output = resolve(outArg);
 const provider = model.slice(0, model.indexOf("/"));
 const repoRoot = resolve(import.meta.dirname, "../../..");
@@ -332,7 +335,9 @@ try {
       await pause(200);
     }
     evidence.unavailableTui = (
-      await execute("herdr", ["pane", "read", pane, "--source", "recent-unwrapped", "--lines", "120"], { env })
+      await execute("herdr", ["pane", "read", pane, "--source", "recent-unwrapped", "--lines", "120"], {
+        env,
+      })
     ).stdout;
     evidence.unavailableTranscript = readHerdrSeatTranscript("pi", agent)?.entries.slice(-12);
     throw new Error(`Native Pi transcript output unavailable: ${marker}`);
@@ -356,7 +361,8 @@ try {
       for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
         const path = join(directory, entry.name);
         if (entry.isDirectory()) await walk(path);
-        else if (/\.(json|jsonl)$/u.test(entry.name)) texts.push(await readFile(path, "utf8").catch(() => ""));
+        else if (/\.(json|jsonl)$/u.test(entry.name))
+          texts.push(await readFile(path, "utf8").catch(() => ""));
       }
     };
     await walk(stateDir);
@@ -369,11 +375,14 @@ try {
     if (evidence.completionHarvested && evidence.reportStored) break;
     await pause(200);
   }
-  evidence.watches = JSON.parse(await readFile(join(stateDir, "herdr-watches.json"), "utf8").catch(() => "null"));
+  evidence.watches = JSON.parse(
+    await readFile(join(stateDir, "herdr-watches.json"), "utf8").catch(() => "null"),
+  );
   assert.equal(evidence.reportStored, true, "The worker report was not stored by the service");
   assert.equal(evidence.completionHarvested, true, "The service did not harvest the native completion");
   evidence.liveDescriptorUnchanged =
-    Buffer.compare(before ?? Buffer.alloc(0), await readFile(liveDescriptor).catch(() => Buffer.alloc(0))) === 0;
+    Buffer.compare(before ?? Buffer.alloc(0), await readFile(liveDescriptor).catch(() => Buffer.alloc(0))) ===
+    0;
   assert.equal(evidence.liveDescriptorUnchanged, true);
   evidence.outcome = "passed";
 } catch (error) {

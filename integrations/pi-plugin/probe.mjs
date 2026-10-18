@@ -201,8 +201,7 @@ async function probe(packageRoot, root) {
       const ui = new Proxy(
         { confirm: () => new Promise((resolve) => (answer = resolve)) },
         {
-          get: (target, key) =>
-            key in target ? target[key] : key === "then" ? undefined : () => undefined,
+          get: (target, key) => (key in target ? target[key] : key === "then" ? undefined : () => undefined),
         },
       );
       await session.bindExtensions({ mode: "tui", uiContext: ui });
