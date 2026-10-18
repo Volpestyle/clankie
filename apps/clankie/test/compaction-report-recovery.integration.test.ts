@@ -21,9 +21,13 @@ import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import type { LaneSession } from "../src/captain/captain-types.ts";
 
-it.each(["operator", "discord_presence"] as const)(
+it.each([
+  ["operator", "operator"],
+  ["ask-social", "discord_presence"],
+  ["discord", "discord_presence"],
+] as const)(
   "%s drains a queued report, watch and owner input after abandoning stalled compaction",
-  async (laneKind) => {
+  async (namespace, laneKind) => {
     const root = await mkdtemp(join(tmpdir(), "compaction-report-"));
     const requests: string[] = [];
     const server = createServer(async (request, response) => {
@@ -132,7 +136,7 @@ it.each(["operator", "discord_presence"] as const)(
         () => undefined,
         async (run) => {
           const lane = await durable(
-            laneKind === "operator" ? `operator:${id}` : "discord:fixture",
+            namespace === "discord" ? "discord:fixture" : `${namespace}:${id}`,
             laneKind,
             dir,
             false,
@@ -140,7 +144,7 @@ it.each(["operator", "discord_presence"] as const)(
             false,
             run,
             false,
-            id,
+            namespace === "discord" ? id : undefined,
           );
           const unsubscribe = lane.session.subscribe((event) => run.observe(event));
           try {

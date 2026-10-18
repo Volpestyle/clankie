@@ -23,13 +23,13 @@ HTTP provider, the conversation store, inbound receipts and an armed Herdr watch
 The native worker observation is a disposable runner fixture. No paid model or
 installed runtime is used. A virtual clock advances the unchanged five-minute
 watchdog; the report, watch and explicitly queued owner follow-up then drain in
-under the five-second observation deadline. Operator and Discord durable lane
-namespaces both recover; the recovered model requests include the retained owner
+under the five-second observation deadline. Operator, social continuation and Discord durable lane
+namespaces recover; the recovered model requests include the retained owner
 context, exclude the oversized session and never send the abandoned owner prompt.
 The report advances to `responded` and stays unread for explicit acknowledgment.
 
-- Recovery disabled: both cases fail; no queued inputs drain.
-- Recovery restored: both cases pass.
+- Recovery disabled: both original cases fail; no queued inputs drain.
+- Recovery restored: all three cases pass.
 - Compatibility: 62 tests pass across the regression, conversation driver,
   worker-lead integration and seat outbox.
 
@@ -51,7 +51,7 @@ Recovery disabled:
 
 Recovery restored:
   Test Files 1 passed (1)
-  Tests 2 passed (2)
+  Tests 3 passed (3)
 
 Compatibility:
   Test Files 4 passed (4)

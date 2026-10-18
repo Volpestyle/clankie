@@ -33,7 +33,9 @@ export function createDurableSessions(ctx: {
     run?: ConversationServiceRun,
     /** Start a new session file instead of resuming; older files stay on disk. */
     fresh = false,
-    conversationId = key.startsWith("operator:") ? key.slice("operator:".length) : undefined,
+    conversationId = key.startsWith("operator:") || key.startsWith("ask-social:")
+      ? key.slice(key.indexOf(":") + 1)
+      : undefined,
   ): Promise<LaneSession> {
     run?.signal.throwIfAborted();
     if (fresh) {
