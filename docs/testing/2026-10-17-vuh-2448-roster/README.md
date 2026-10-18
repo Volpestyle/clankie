@@ -9,6 +9,15 @@ shell is a separate change after VUH-2443.
 
 ## Evidence
 
+`focused-rebased-tests.json`: 72 cases passed in five suites after rebasing onto
+`12af00a42`, including VUH-2391's Herdr event observation and VUH-2456. A catalog
+read followed by a native status change cannot authorize retirement from the
+earlier idle count: both local and remote cases refresh to working and refuse.
+The event feed's shared catalog census and slower bridge display inspection do
+not replace the native status source or retirement's forced refresh. The action
+uses upstream's `tidySessionKey`; the upstream automatic tidy/keep/report/draft
+coverage and this feature's owner close/Undo round trip pass together.
+
 `focused-status-tests.json`: 67 cases passed across the new
 roster integration, owner-device authorization, native-socket close/Undo and
 existing seat-efficiency integration suites. The count test compares the real
