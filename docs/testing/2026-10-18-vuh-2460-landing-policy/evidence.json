@@ -6,6 +6,18 @@
       "size": 25252,
       "sha256": "beae15cf940427e035d41c26982f7d56d89067e01449663416148b9355d679d0",
       "url": "clankie://evidence/sha256/beae15cf940427e035d41c26982f7d56d89067e01449663416148b9355d679d0"
+    },
+    {
+      "path": "history-review.json",
+      "size": 1372431,
+      "sha256": "c4e11afc6766370bc33f5e3950e2d844e67e0e428d7c64732bdfd4b24d1b80fc",
+      "url": "clankie://evidence/sha256/c4e11afc6766370bc33f5e3950e2d844e67e0e428d7c64732bdfd4b24d1b80fc"
+    },
+    {
+      "path": "same-change-comparison.json",
+      "size": 7354080,
+      "sha256": "381534e2bd2d81a51b80975daac22c0167fc67f3c784c5305c1d414b0df5ae7a",
+      "url": "clankie://evidence/sha256/381534e2bd2d81a51b80975daac22c0167fc67f3c784c5305c1d414b0df5ae7a"
     }
   ]
 }

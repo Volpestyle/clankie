@@ -56,6 +56,14 @@ and deadlines. The eval and opt-in computer exclusions are unchanged. Cheap
 runtime-canary policy checks and the roster shutdown/lifecycle regression remain
 in landing. ADR 0221 still governs how tests are written; this changes when
 these proofs run. There is no blanket cap on transitive integration selection.
+The available-history review distinguishes assertion/import failures, unknown
+causes and native-observation refusals from confirmed unchanged-input recovery.
+It cannot attribute most historical outcomes to individual files; a matching
+HEAD with different source fingerprints is not unchanged-input proof. No
+additional exclusions or subject-only integration cap follow from that gap.
+The real roster shutdown persistence regression required a product lifecycle
+fix, so its broader fleet/lifecycle coverage stays. Measurements and limitations
+are retained in [the policy evidence](../testing/2026-10-18-vuh-2460-landing-policy/README.md).
 
 Core includes `pnpm deadcode` (knip) in this landing command. Full-gate
 measurements on 2026-10-07 put it at 1.8–3.1 seconds. That small cost catches
