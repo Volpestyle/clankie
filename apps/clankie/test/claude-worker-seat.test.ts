@@ -706,6 +706,24 @@ describe("Claude completion evidence", () => {
     });
   });
 
+  it("a wait armed after a retained Stop ignores it while Claude works, then reports the new Stop", async () => {
+    const f = await ready();
+    await f.control.send("automated followup");
+    f.hooks.record("w1:p1", { schemaVersion: 1, event: "Stop", sessionId: SESSION, lastMessage: "pre-arm" });
+    f.agent.status = "working";
+    const waiting = f.control.settled();
+    const pending = Symbol("pending");
+    expect(await Promise.race([waiting, new Promise((resolve) => setTimeout(resolve, 150, pending))])).toBe(
+      pending,
+    );
+    f.hooks.record("w1:p1", { schemaVersion: 1, event: "Stop", sessionId: SESSION, lastMessage: "new" });
+    expect(await waiting).toMatchObject({
+      type: "settlement_unconfirmed",
+      reason: "message_correlation_unavailable",
+      observedStop: { text: "new" },
+    });
+  });
+
   it("keeps a fast Stop during initial dispatch without calling the brief completed", async () => {
     const f = await fixture();
     f.deliver.mockImplementationOnce(async (_seat, text) => {

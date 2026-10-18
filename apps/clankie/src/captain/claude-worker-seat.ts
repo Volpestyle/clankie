@@ -785,10 +785,8 @@ class ClaudeWorkerSeatControl implements SeatControl {
           stop !== undefined && (held?.dispatch === undefined || stop.sequence > held.dispatch.sequence)
             ? stop
             : undefined;
-        if (
-          status === "idle" ||
-          (eligible !== undefined && (eligible.sequence > initialSequence || held?.dispatch !== undefined))
-        ) {
+        // A retained Stop from before this wait never settles it while Claude works, dispatch or not.
+        if (status === "idle" || (eligible !== undefined && eligible.sequence > initialSequence)) {
           return {
             type: "settlement_unconfirmed",
             at: at(),
