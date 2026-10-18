@@ -105,7 +105,9 @@ export function createDurableSessions(ctx: {
               reason: run.signal.reason.message,
             });
           }
-          void lane.session.abort().catch(() => undefined);
+          void lane.session.abort().catch(() => {
+            console.warn("Abandoned durable session could not be aborted", key);
+          });
           lane.session.dispose();
         },
         () => undefined,
