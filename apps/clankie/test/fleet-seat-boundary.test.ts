@@ -8,25 +8,31 @@ test("retained controller loses authority after removal and same-id replacement 
   const send = vi.fn(async () => ({ outcome: "released" as const }));
   const close = vi.fn(async () => {});
   const interrupt = vi.fn(async () => true);
+  const settled = vi.fn(async () => ({ type: "released" as const, at: "now" }));
   const control: SeatControl = {
     ref: { harness: "codex", sessionId: "old", paneId: "pc/p1" },
     send,
     close,
     interrupt,
     status: async () => "idle",
-    settled: async () => ({ type: "released", at: "now" }),
+    settled,
   };
   const attach = vi.fn(async () => control);
   const start = vi.fn(async () => ({ outcome: "started" as const, control }));
   const adapter = fenceFleetSeatAdapter({ harness: "codex", start, attach }, async () => revision === 1);
   const retained = (await adapter.attach(control.ref))!;
   await retained.send("first");
+  const abort = new AbortController();
+  await retained.settled(abort.signal, "message-1", "2026-10-18T00:00:00.000Z");
+  expect(settled).toHaveBeenCalledWith(abort.signal, "message-1", "2026-10-18T00:00:00.000Z");
+  settled.mockClear();
   revision = 3;
   expect(await retained.send("must not reach replacement")).toMatchObject({ outcome: "offline" });
   expect(await retained.status()).toBe("offline");
   expect(await retained.interrupt()).toBe(false);
   await retained.close();
   expect(await retained.settled()).toMatchObject({ type: "released" });
+  expect(settled).not.toHaveBeenCalled();
   expect(await adapter.attach(control.ref)).toBeUndefined();
   expect(
     await adapter.start(

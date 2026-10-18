@@ -68,9 +68,9 @@ export function fenceFleetSeatAdapter(
             });
           },
         }),
-    settled: async (signal, _messageId, armedAt) => {
+    settled: async (signal, messageId, armedAt) => {
       if (!(await current())) return { type: "released", at: new Date().toISOString() };
-      const event = await control.settled(signal, undefined, armedAt);
+      const event = await control.settled(signal, messageId, armedAt);
       return (await current()) ? event : { type: "released", at: new Date().toISOString() };
     },
   });
