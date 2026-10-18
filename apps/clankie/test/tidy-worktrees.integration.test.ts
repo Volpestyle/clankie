@@ -327,6 +327,76 @@ it("prune saves ignored evidence, removes a merged clean worktree and only delet
   expect(await git(f.repo, ["branch", "--list", "landed"])).toBe("");
 });
 
+it("keeps a nested worktree while its worker is in the non-Git research parent", async () => {
+  const f = await fixture();
+  const parent = join(f.root, "research");
+  await mkdir(parent);
+  const tree = await f.worktree("research/source");
+  const result = await tidy(f.root, inventory(() => [pane(parent)]).runner).worktrees(f.repo);
+  expect(result.candidates).toEqual([]);
+  expect(result.excluded).toContainEqual({ path: tree, reason: "live_pane" });
+  expect(existsSync(tree)).toBe(true);
+});
+
+it("prune keeps the only ref to detached commits landed by content", async () => {
+  const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+  const f = await fixture();
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  const tree = await f.worktree("detached-content", true);
+  await writeFile(join(tree, "feature.txt"), "Preserve the exact original commit\n");
+  await git(tree, ["add", "feature.txt"]);
+  await git(tree, ["commit", "-m", "original unpushed work"]);
+  const head = await git(tree, ["rev-parse", "HEAD"]);
+  await writeFile(join(f.repo, "other.txt"), "main advanced\n");
+  await git(f.repo, ["add", "other.txt"]);
+  await git(f.repo, ["commit", "-m", "main advanced"]);
+  await git(f.repo, ["cherry-pick", head]);
+  await git(f.repo, ["push", "--quiet", "origin", "main"]);
+  expect(await git(f.repo, ["for-each-ref", "--contains", head])).toBe("");
+  const result = await pruneTidyWorktree(
+    f.repo,
+    tree,
+    join(f.root, "archive"),
+    inventory(() => []).runner,
+    async () => {},
+  );
+  expect(result).toMatchObject({ outcome: "removed", keptRef: `refs/clankie/pruned-worktrees/${head}` });
+  expect(await git(f.repo, ["rev-parse", result.keptRef!])).toBe(head);
+  // A loose object or worktree reflog alone is not preservation.
+  await git(f.repo, ["reflog", "expire", "--expire=now", "--all"]);
+  await git(f.repo, ["gc", "--prune=now"]);
+  expect(await git(f.repo, ["show", `${head}:feature.txt`])).toBe("Preserve the exact original commit");
+});
+
+it("prune retains a worktree whose detached HEAD changes at the final permission check", async () => {
+  const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+  const f = await fixture();
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  const tree = await f.worktree("changed-head", true);
+  await writeFile(join(tree, "feature.txt"), "New unpushed HEAD\n");
+  await git(tree, ["add", "feature.txt"]);
+  await git(tree, ["commit", "-m", "detached unpushed work"]);
+  const head = await git(tree, ["rev-parse", "HEAD"]);
+  await git(tree, ["checkout", "--detach", f.sha]);
+  let checks = 0;
+  const result = await pruneTidyWorktree(
+    f.repo,
+    tree,
+    join(f.root, "archive"),
+    inventory(() => []).runner,
+    async () => {
+      if (++checks === 2) await git(tree, ["checkout", "--detach", head]);
+    },
+  );
+  expect(result).toMatchObject({ outcome: "kept", reason: "inventory_changed" });
+  expect(await git(tree, ["rev-parse", "HEAD"])).toBe(head);
+  expect(await readFile(join(tree, "feature.txt"), "utf8")).toBe("New unpushed HEAD\n");
+});
+
 it("prune retains dirty, live, unmerged and main trees and refuses an unavailable census", async () => {
   const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
   const f = await fixture();

@@ -81,7 +81,7 @@ export const PaneTidyStateSchema = z
   .strict();
 type Entry = z.infer<typeof EntrySchema>;
 export type TidyFailure =
-  | { outcome: "refused"; reason: "owner_interactive" | "results_not_kept" }
+  | { outcome: "refused"; reason: "owner_interactive" | "results_not_kept" | "pane_kept" }
   /** The native input line holds typed text; it is returned verbatim so nothing is lost. */
   | { outcome: "refused"; reason: "unsent_draft"; draft?: string }
   /** Another lead conversation hired this pane; only it may close it (VUH-1763). */
@@ -167,6 +167,7 @@ function leadEntry(entry: Entry): ClosedWorkerPaneHistory {
 export class PaneTidy {
   private state: z.infer<typeof PaneTidyStateSchema>;
   private readonly pending = new Set<string>();
+  private readonly keepVersions = new Map<string, number>();
   private readonly path: string;
   /** Recorded lead decisions about unlanded worktree work, beside this history. */
   readonly decisions: WorktreeDecisions;
@@ -190,7 +191,10 @@ export class PaneTidy {
     ): Promise<import("./prune-worktree.ts").PruneWorktreeResult>;
     provenance(agent: HerdrAgentSnapshot): ConversationOwner | "unknown" | "owner_interactive";
     retirementGuard?(agent: HerdrAgentSnapshot): Promise<() => Promise<void>>;
-    worktreeHold?(agent: HerdrAgentSnapshot): Promise<WorktreeReconciliation[]>;
+    worktreeHold?(
+      agent: HerdrAgentSnapshot,
+      options?: import("./worktree-decisions.ts").WorktreeHoldOptions,
+    ): Promise<WorktreeReconciliation[]>;
     ownerValid(owner: ConversationOwner): Promise<boolean>;
     close(seatId: string, guard: () => Promise<void>, nativeOnly?: boolean): Promise<boolean>;
     untrack(seatId: string): void;
@@ -233,6 +237,10 @@ export class PaneTidy {
   keptPane(agent: HerdrAgentSnapshot): PaneKeep | undefined {
     return this.keeps.kept(tidySessionKey(agent));
   }
+  /** Volatile like the automatic idle clock; keep/release between sweeps starts a new period. */
+  keepVersion(agent: HerdrAgentSnapshot): number {
+    return this.keepVersions.get(tidySessionKey(agent)) ?? 0;
+  }
   /**
    * Keep a worker pane open, or release it, so automatic tidy skips or considers it again.
    * Any authenticated conversation may ask: keeping closes nothing, and releasing only
@@ -252,12 +260,19 @@ export class PaneTidy {
       const reason = input.reason?.trim() || (input.keep ? "Kept open" : "Released");
       if (!validReason(reason)) return fail("invalid_reason");
       const agent = await this.fresh(input.pane);
-      if (!input.keep)
+      const key = tidySessionKey(agent);
+      if (!input.keep) {
+        const released = this.keeps.release(key);
+        if (released) {
+          this.keepVersions.set(key, this.keepVersion(agent) + 1);
+          this.ports.changed();
+        }
         return {
-          outcome: this.keeps.release(tidySessionKey(agent)) ? "released" : "not_kept",
+          outcome: released ? "released" : "not_kept",
           paneId: agent.paneId,
           keeps: this.keeps.list(),
         };
+      }
       const keep = this.keeps.keep({
         sessionKey: tidySessionKey(agent),
         paneId: agent.paneId,
@@ -265,6 +280,7 @@ export class PaneTidy {
         reason,
         by: authority.owner.conversationId,
       });
+      this.keepVersions.set(key, this.keepVersion(agent) + 1);
       this.ports.changed();
       return { outcome: "kept", keep, keeps: this.keeps.list() };
     } catch (error) {
@@ -430,11 +446,24 @@ export class PaneTidy {
     }
   }
   /** Check every held commit, including merge resolutions, against an actual handoff. */
-  private async worktreeHandoffs(agent: HerdrAgentSnapshot) {
+  private async worktreeHandoffs(agent: HerdrAgentSnapshot, automatic = false) {
     const held: WorktreeReconciliation[] = [];
     const handoffs: Handoff[] = [];
-    const worktrees = await (this.ports.worktreeHold?.(agent) ?? workerWorktreeHold(agent));
-    if (splitFleetQualified(agent.paneId)) return { held: worktrees, handoffs };
+    const options = { requireProof: automatic };
+    const worktrees = await (this.ports.worktreeHold?.(agent, options) ?? workerWorktreeHold(agent, options));
+    if (automatic && worktrees.length === 0)
+      return {
+        held: [
+          {
+            path: agent.workingDirectory ?? "(worker directory unavailable)",
+            state: "unknown" as const,
+            reason: "No positive worker work proof",
+          },
+        ],
+        handoffs,
+      };
+    if (splitFleetQualified(agent.paneId))
+      return { held: worktrees.filter((work) => work.state !== "reconciled"), handoffs };
     for (const work of worktrees) {
       if (work.state === "unknown" || work.dirtyFiles !== 0 || !work.head) {
         held.push(work);
@@ -442,23 +471,51 @@ export class PaneTidy {
       }
       try {
         const decision = this.decisions.latest(work.path, work.head);
-        const base = (
-          await checkoutGit(work.path, ["rev-parse", "--verify", "origin/main^{commit}"]).catch(() =>
-            checkoutGit(work.path, ["rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}"]),
+        let base: string;
+        if (automatic) {
+          const advertised = (
+            await checkoutGit(work.path, [
+              "ls-remote",
+              "--exit-code",
+              "--heads",
+              "--",
+              "origin",
+              "refs/heads/main",
+            ])
           )
-        ).trim();
-        const commits = [
-          ...new Set([
-            ...(await checkoutGit(work.path, ["cherry", base, work.head]))
-              .split("\n")
-              .filter((line) => line.startsWith("+ "))
-              .map((line) => line.slice(2).trim()),
-            ...(await checkoutGit(work.path, ["rev-list", "--merges", `${base}..${work.head}`]))
+            .trim()
+            .split(/\s+/u);
+          if (
+            advertised.length !== 2 ||
+            advertised[1] !== "refs/heads/main" ||
+            !/^[a-f0-9]{40,64}$/u.test(advertised[0]!)
+          )
+            throw Error("Main landing proof unavailable");
+          base = advertised[0]!;
+        } else {
+          base = (
+            await checkoutGit(work.path, ["rev-parse", "--verify", "origin/main^{commit}"]).catch(() =>
+              checkoutGit(work.path, ["rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}"]),
+            )
+          ).trim();
+        }
+        const commits = automatic
+          ? (await checkoutGit(work.path, ["rev-list", `${base}..${work.head}`]))
               .trim()
               .split("\n")
-              .filter(Boolean),
-          ]),
-        ];
+              .filter(Boolean)
+          : [
+              ...new Set([
+                ...(await checkoutGit(work.path, ["cherry", base, work.head]))
+                  .split("\n")
+                  .filter((line) => line.startsWith("+ "))
+                  .map((line) => line.slice(2).trim()),
+                ...(await checkoutGit(work.path, ["rev-list", "--merges", `${base}..${work.head}`]))
+                  .trim()
+                  .split("\n")
+                  .filter(Boolean),
+              ]),
+            ];
         const receipt = (kind: Handoff["kind"], reference: string, covered: string[]): Handoff => ({
           path: work.path,
           head: work.head!,
@@ -473,7 +530,7 @@ export class PaneTidy {
           covered.add(item.commit);
           proof.push(receipt("merge_queue", item.requestId, [item.commit]));
         }
-        if (covered.size < commits.length) {
+        if (!automatic && covered.size < commits.length) {
           // Remote-tracking refs alone can be stale or locally manufactured. Verify the
           // advertised pushed heads/tags without fetching or mutating the worker's refs.
           for (const remote of (await checkoutGit(work.path, ["remote"]))
@@ -539,6 +596,8 @@ export class PaneTidy {
       idleOnly?: boolean;
       /** App retirement cannot close a worker that has started waiting on its owner. */
       inactiveOnly?: boolean;
+      /** Service-only automatic cleanup requires positive work proof, never inferred handoff. */
+      automatic?: boolean;
       expected?: { terminalId: string; sessionKey: string };
       nativeOnly?: boolean;
     },
@@ -556,6 +615,8 @@ export class PaneTidy {
         return fail("invalid_reason");
       const agent = await this.fresh(input.pane);
       const key = tidySessionKey(agent);
+      const keepVersion = this.keepVersion(agent);
+      if (input.automatic && this.keptPane(agent)) return refuse("pane_kept");
       if (
         input.expected &&
         (agent.terminalId !== input.expected.terminalId || key !== input.expected.sessionKey)
@@ -605,12 +666,16 @@ export class PaneTidy {
       this.keepReport(agent, reportText);
       reportPath = this.state.reports.find((report) => report.sessionKey === key)!.reportPath;
       // Restart resumes the same thread in the same directory, so nothing is left behind.
-      const checkWorktrees = !input.nativeOnly;
-      let checked = checkWorktrees ? await this.worktreeHandoffs(agent) : { held: [], handoffs: [] };
+      const checkWorktrees = input.automatic || !input.nativeOnly;
+      let checked = checkWorktrees
+        ? await this.worktreeHandoffs(agent, input.automatic)
+        : { held: [], handoffs: [] };
       const held = checked.held;
       if (
         held.length &&
-        (!unlandedReason || held.some((work) => work.state === "unknown" || work.dirtyFiles !== 0))
+        (input.automatic ||
+          !unlandedReason ||
+          held.some((work) => work.state === "unknown" || work.dirtyFiles !== 0))
       )
         throw new Failure({ outcome: "refused", reason: "unlanded_work", worktrees: held });
       const raw = await this.ports.runner
@@ -621,6 +686,7 @@ export class PaneTidy {
         await this.authority(authority);
         await retirementGuard?.().catch((error: unknown) => fail("provenance_unknown", errorText(error)));
         const latest = await this.fresh(agent.paneId);
+        if (input.automatic && this.keptPane(latest)) return refuse("pane_kept");
         if (input.idleOnly && !["idle", "waiting", "done"].includes(latest.status)) return fail("busy");
         if (input.inactiveOnly && !["idle", "done"].includes(latest.status)) return fail("busy");
         if (
@@ -646,10 +712,11 @@ export class PaneTidy {
         if (entry && line) entry.input = line;
         // Work committed or written after the first look still holds the close.
         if (checkWorktrees) {
-          checked = await this.worktreeHandoffs(latest);
+          checked = await this.worktreeHandoffs(latest, input.automatic);
           if (
             checked.held.length &&
-            (!unlandedReason ||
+            (input.automatic ||
+              !unlandedReason ||
               checked.held.some((work) => work.state === "unknown" || work.dirtyFiles !== 0))
           )
             throw new Failure({ outcome: "refused", reason: "unlanded_work", worktrees: checked.held });
@@ -661,6 +728,8 @@ export class PaneTidy {
           }
         }
         await this.authority(authority);
+        if (input.automatic && (this.keptPane(latest) || this.keepVersion(latest) !== keepVersion))
+          return refuse("pane_kept");
       };
       await guard();
       const closedAt = this.now();

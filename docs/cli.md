@@ -4026,8 +4026,14 @@ finished hires on its own (VUH-2392). Every five minutes it closes a local hire'
 pane once the pane has sat idle or done for that long, its authenticated report
 is kept, every report it sent has been acknowledged, and no one kept it with
 `keep_worker_pane` (`clankie agents keep`). The close runs `close_worker_pane`'s
-checks unchanged: landed worktrees, no unsent draft, still idle; hand-started
-and owner-interactive panes are never closed. A refused close waits another
+guards: no unsent draft, still idle, and positive work proof. Automatic landing
+requires ancestry in actual advertised `origin/main` or a retained merge-queue
+handoff/current-HEAD work decision covering every unlanded commit; a pushed
+feature branch, local ref or patch equivalence is insufficient. Missing or
+non-Git working directories and incomplete observations hold the pane.
+Hand-started and owner-interactive panes are never closed. A keep excludes held
+time; releasing it starts a full new idle period, even between sweeps, and a keep
+arriving before native dispatch stops the automatic close. A refused close waits another
 period before it is tried again. Each close is in `worker_pane_history` with the
 usual five-minute Undo, settles its seat issue as a close does, and the hiring
 lead's conversation gets one notice per sweep. Hourly, linked worktrees in
@@ -4036,6 +4042,14 @@ or process inside and no checkout activity for a day are removed through the
 `clankie checkouts prune` path (`.local` evidence kept, merged branch deleted),
 at most 16 per repository per sweep. `off` stops both; the setting applies
 without a restart.
+
+Pruning preserves the exact HEAD of content-equivalent work under
+`refs/clankie/pruned-worktrees/`, alongside decided-drop refs under
+`refs/clankie/dropped-worktrees/`. Native HEAD/branch locks prevent a new commit
+from losing its only ref during removal; changing or busy refs keep the tree.
+A live non-Git parent directory also protects worktrees nested below it.
+After VUH-2462, automatic tidy stays off in the affected fleet until James
+decides to enable it again; installing the fix does not change that setting.
 
 `--remote-gates on` lets an integrate batch gate on a linked machine while this
 one is saturated; it defaults to off. Remote placement/staging times out after two minutes and falls back to the local gate with the reason recorded; cleanup is bounded to ten seconds. See [gates on a linked machine](integration.md#gates-on-a-linked-machine).

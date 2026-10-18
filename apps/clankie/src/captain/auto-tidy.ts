@@ -22,7 +22,7 @@ const platform = process.platform === "win32" ? "windows" : "posix";
 export interface AutoTidyPorts {
   readonly setting: () => Promise<FleetAutoTidy>;
   readonly runner: Pick<HerdrWatchRunner, "list">;
-  readonly tidy: Pick<PaneTidy, "close" | "keptPane" | "hasKeptReport">;
+  readonly tidy: Pick<PaneTidy, "close" | "keptPane" | "keepVersion" | "hasKeptReport">;
   readonly provenance: (agent: HerdrAgentSnapshot) => ConversationOwner | "unknown" | "owner_interactive";
   /** Reports from this exact seat that no lead has acknowledged yet. */
   readonly unreadReports: (agent: HerdrAgentSnapshot) => number;
@@ -83,21 +83,26 @@ export function createAutoTidy(ports: AutoTidyPorts) {
       if (!SETTLED.has(agent.status) || !["claude", "codex"].includes(agent.agent)) continue;
       if (agent.session?.kind !== "id") continue;
       const sessionKey = tidySessionKey(agent);
-      const key = JSON.stringify([agent.terminalId, sessionKey]);
+      const key = JSON.stringify([agent.terminalId, sessionKey, ports.tidy.keepVersion(agent)]);
       seen.add(key);
+      if (ports.tidy.keptPane(agent)) {
+        settledSince.delete(key);
+        retryAt.delete(key);
+        continue;
+      }
       const since = settledSince.get(key) ?? at;
       settledSince.set(key, since);
       if (at - since < delay || (retryAt.get(key) ?? 0) > at) continue;
       const owner = ports.provenance(agent);
       // Hand-started, owner-interactive and unproven panes are never closed automatically.
       if (typeof owner !== "object") continue;
-      if (ports.tidy.keptPane(agent) || !ports.tidy.hasKeptReport(agent) || ports.unreadReports(agent) > 0)
-        continue;
+      if (!ports.tidy.hasKeptReport(agent) || ports.unreadReports(agent) > 0) continue;
       const result = await ports.tidy.close(
         {
           pane: agent.paneId,
-          reason: `Auto-tidy: idle ${setting} with its reports read and its work landed`,
+          reason: `Auto-tidy: idle ${setting} with its reports read and its work landed or explicitly handed off`,
           idleOnly: true,
+          automatic: true,
           expected: { terminalId: agent.terminalId, sessionKey },
         },
         { owner, current: () => !ports.stopped(), authorize: () => ports.ownerValid(owner) },

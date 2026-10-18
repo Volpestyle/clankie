@@ -2764,20 +2764,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         await original();
       };
     },
-    worktreeHold: async (agent) => {
+    worktreeHold: async (agent, options) => {
       const qualified = splitFleetQualified(agent.paneId);
-      if (!qualified) return workerWorktreeHold(agent);
+      if (!qualified) return workerWorktreeHold(agent, options);
       await refreshFleets();
       const fleet = remoteFleets.find((entry) => entry.id === qualified.fleet);
-      if (!fleet || !deps.fleets?.shell) return workerWorktreeHold(agent);
+      if (!fleet || !deps.fleets?.shell) return workerWorktreeHold(agent, options);
       const revision = fleetRevisions.get(fleet.id);
-      const result = await remoteRetirementWork(fleet, deps.fleets.shell(fleet), [
-        ...new Set(
-          [agent.workingDirectory, agent.foregroundWorkingDirectory].filter(
-            (path): path is string => path !== undefined,
+      const result = await remoteRetirementWork(
+        fleet,
+        deps.fleets.shell(fleet),
+        [
+          ...new Set(
+            [agent.workingDirectory, agent.foregroundWorkingDirectory].filter(
+              (path): path is string => path !== undefined,
+            ),
           ),
-        ),
-      ]);
+        ],
+        options,
+      );
       await refreshFleets();
       if (fleetRevisions.get(fleet.id) !== revision)
         throw new Error("Machine connection changed or disconnected");
@@ -5528,7 +5533,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         (entries.length > 20 ? ` and ${entries.length - 20} more in worker_pane_history` : "");
       conversations.recordServiceNotice(
         owner.conversationId,
-        `Auto-tidy closed ${entries.length === 1 ? "a finished hire" : `${entries.length} finished hires`} whose reports you read and whose work landed: ${panes}. undo_worker_pane reopens one within five minutes; later, resume its saved session. keep_worker_pane keeps a pane open; \`clankie fleet set --auto-tidy off\` stops this.`,
+        `Auto-tidy closed ${entries.length === 1 ? "a finished hire" : `${entries.length} finished hires`} whose reports you read and whose work landed or was explicitly handed off: ${panes}. undo_worker_pane reopens one within five minutes; later, resume its saved session. keep_worker_pane keeps a pane open; \`clankie fleet set --auto-tidy off\` stops this.`,
       );
     },
     checkouts: async () => {

@@ -218,7 +218,14 @@ export async function listTidyWorktrees(
             throw new Error("Unverified worktree backlink");
           const head = (await git(entry.path, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
           if (head !== entry.sha) throw new Error("Worktree changed");
-          if (panePaths.some((path) => projectPathContains(entry.path, path, platform))) reason = "live_pane";
+          if (
+            panePaths.some(
+              (path) =>
+                projectPathContains(entry.path, path, platform) ||
+                projectPathContains(path, entry.path, platform),
+            )
+          )
+            reason = "live_pane";
           else if (await git(entry.path, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]))
             reason = "dirty";
           else {

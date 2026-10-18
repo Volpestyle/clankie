@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "regression-proof.json",
+      "size": 156169,
+      "sha256": "f2892226ad6abcecc11f4c2d41ec34ea584141b36acfaa214a092db4a2e7b71b",
+      "url": "clankie://evidence/sha256/f2892226ad6abcecc11f4c2d41ec34ea584141b36acfaa214a092db4a2e7b71b"
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { runFleetRosterCommand } from "../../tui/src/command/fleet-roster.ts";
 import type { SeatControl } from "@clankie/agent-hosts";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -1074,8 +1074,193 @@ async function workerWorktree() {
   await git(repo, "update-ref", "refs/remotes/origin/main", "HEAD");
   const tree = join(base, "worker");
   await git(repo, "worktree", "add", "--quiet", "-b", "pip/vuh-1", tree, "main");
-  return { repo, tree };
+  return { repo, tree, base };
 }
+
+async function fixtureOrigin(w: Awaited<ReturnType<typeof workerWorktree>>) {
+  const origin = join(w.base, "origin.git");
+  await git(w.repo, "clone", "--bare", "--quiet", w.repo, origin);
+  await git(w.repo, "remote", "add", "origin", origin);
+}
+
+function automaticFixture(
+  f: Awaited<ReturnType<typeof fixture>>,
+  work?: Awaited<ReturnType<typeof workerWorktree>>,
+) {
+  let clock = Date.now() + 2 * 24 * 60 * 60_000;
+  const auto = createAutoTidy({
+    setting: async () => "1h",
+    runner: f.ports.runner,
+    tidy: f.tidy,
+    provenance: (agent) => f.watch.tidyProvenance(agent),
+    unreadReports: () => 0,
+    ownerValid: async () => true,
+    closed: async () => {},
+    checkouts: async () => (work ? [{ repository: work.repo, roots: [work.base] }] : []),
+    prune: async (repository, path) => {
+      const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+      return pruneTidyWorktree(repository, path, join(work!.base, "archive"), f.ports.runner, async () => {});
+    },
+    stopped: () => false,
+    now: () => clock,
+  });
+  return {
+    auto,
+    tick: async (minutes: number) => {
+      clock += minutes * 60_000;
+      return auto.panes();
+    },
+  };
+}
+
+// VUH-2462: real native close guards and real Git, without touching a live worker.
+it.each(["nested-dirty", "nested-detached", "separate-dirty", "separate-detached", "missing"])(
+  "automatic tidy holds unknown research context and preserves its owned work (%s)",
+  async (kind) => {
+    const w = await workerWorktree();
+    await fixtureOrigin(w);
+    const start = join(w.base, kind === "missing" ? "missing" : "research");
+    if (kind !== "missing") await mkdir(start);
+    let source = w.tree;
+    if (kind.startsWith("nested")) {
+      source = join(start, "source");
+      await git(w.repo, "worktree", "move", w.tree, source);
+    }
+    const content = "Owned work must survive automatic retirement\n";
+    await writeFile(join(source, "feature.txt"), content);
+    if (!kind.endsWith("dirty")) {
+      await git(source, "checkout", "--quiet", "--detach");
+      await git(source, "add", "feature.txt");
+      await git(source, "commit", "--quiet", "-m", "unpushed detached work");
+      expect(await git(source, "for-each-ref", "--contains", "HEAD")).toBe("");
+    }
+    const head = await git(source, "rev-parse", "HEAD");
+    const f = await fixture({ cwd: start });
+    f.setStatus("done");
+    f.tidy.keepReport(
+      await f.ports.runner.get("w1:p1"),
+      "A retained report is not clearance to discard other work.",
+    );
+    const { auto, tick } = automaticFixture(f, w);
+    expect(await tick(0)).toEqual([]);
+    expect(await tick(61)).toEqual([]);
+    expect(f.closes()).toBe(0);
+    expect(await auto.worktrees()).toEqual([]);
+    expect((await stat(source)).isDirectory()).toBe(true);
+    expect(await git(source, "rev-parse", "HEAD")).toBe(head);
+    expect(await readFile(join(source, "feature.txt"), "utf8")).toBe(content);
+    f.watch.close();
+  },
+);
+
+it("automatic tidy holds a pushed feature branch until main or a recorded handoff covers it", async () => {
+  const w = await workerWorktree();
+  await fixtureOrigin(w);
+  await writeFile(join(w.tree, "feature.txt"), "Not landed on main\n");
+  await git(w.tree, "add", "feature.txt");
+  await git(w.tree, "commit", "--quiet", "-m", "feature only");
+  await git(w.tree, "push", "--quiet", "origin", "HEAD:refs/heads/feature-only");
+  const head = await git(w.tree, "rev-parse", "HEAD");
+  // A local tracking ref alone cannot manufacture a landing.
+  await git(w.repo, "update-ref", "refs/remotes/origin/main", head);
+  const f = await fixture({ cwd: w.tree });
+  f.setStatus("done");
+  f.tidy.keepReport(await f.ports.runner.get("w1:p1"), "Feature branch pushed; waiting for integration.");
+  const { tick } = automaticFixture(f, w);
+  await tick(0);
+  expect(await tick(61)).toEqual([]);
+  expect(f.closes()).toBe(0);
+  await git(w.repo, "fetch", "--quiet", "origin");
+  await f.tidy.decideWorktree(
+    {
+      repository: w.repo,
+      path: w.tree,
+      decision: "worth_landing",
+      reason: "Lead retained this exact stack for integration",
+    },
+    "lead",
+  );
+  expect(await tick(61)).toHaveLength(1);
+  expect(f.tidy.history()[0]).toMatchObject({ state: "closed" });
+  expect(f.tidy.leadHistory()[0]?.handoffs).toContainEqual(
+    expect.objectContaining({ kind: "worth_landing", head }),
+  );
+  f.watch.close();
+});
+
+it.each([false, true])(
+  "automatic tidy rechecks a keep arriving at native close (released: %s)",
+  async (release) => {
+    const w = await workerWorktree();
+    await fixtureOrigin(w);
+    const f = await fixture({ cwd: w.tree, socket: true });
+    f.setStatus("done");
+    f.tidy.keepReport(
+      await f.ports.runner.get("w1:p1"),
+      "Landed, but the lead may still preserve its context.",
+    );
+    const close = f.ports.close;
+    f.ports.close = async (...args) => {
+      await f.tidy.keep(
+        { pane: "w1:p1", keep: true, reason: "Hold arrived before native dispatch" },
+        authority,
+      );
+      if (release) await f.tidy.keep({ pane: "w1:p1", keep: false }, authority);
+      return close(...args);
+    };
+    const { tick } = automaticFixture(f);
+    await tick(0);
+    expect(await tick(61)).toEqual([]);
+    expect(f.closes()).toBe(0);
+    f.watch.close();
+  },
+);
+
+it("remote automatic work proof checks actual main and keeps non-Git or missing context unknown", async () => {
+  const w = await workerWorktree();
+  await fixtureOrigin(w);
+  const inspect = (paths: string[]) =>
+    remoteRetirementWork(
+      { id: "pc", session: "fixture", ssh: { host: "fixture-host", shell: "posix" } },
+      async (command) => (await promisify(execFile)("/bin/sh", ["-c", command], { timeout: 15000 })).stdout,
+      paths,
+      { requireProof: true },
+    );
+  expect(await inspect([w.tree])).toMatchObject([{ state: "reconciled", dirtyFiles: 0, unlandedCommits: 0 }]);
+  await writeFile(join(w.tree, "feature.txt"), "Not on actual main\n");
+  await git(w.tree, "add", "feature.txt");
+  await git(w.tree, "commit", "--quiet", "-m", "remote unlanded work");
+  await git(w.tree, "push", "--quiet", "origin", "HEAD:refs/heads/feature-only");
+  await git(w.repo, "update-ref", "refs/remotes/origin/main", await git(w.tree, "rev-parse", "HEAD"));
+  expect(await inspect([w.tree])).toMatchObject([
+    { state: "unreconciled", dirtyFiles: 0, unlandedCommits: 1 },
+  ]);
+  expect(await inspect([w.base, join(w.base, "missing")])).toMatchObject([
+    { state: "unknown" },
+    { state: "unknown" },
+  ]);
+  expect(await inspect([])).toMatchObject([{ state: "unknown" }]);
+  await git(w.tree, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+  expect(await inspect([w.tree])).toMatchObject([{ state: "reconciled", dirtyFiles: 0, unlandedCommits: 0 }]);
+});
+
+it("automatic tidy restarts its idle period when a lead releases a keep between sweeps", async () => {
+  const w = await workerWorktree();
+  await fixtureOrigin(w);
+  const f = await fixture({ cwd: w.tree });
+  f.setStatus("done");
+  f.tidy.keepReport(await f.ports.runner.get("w1:p1"), "Landed work, live context held for the owner.");
+  const { tick } = automaticFixture(f);
+  await tick(0);
+  await tick(59);
+  await f.tidy.keep({ pane: "w1:p1", keep: true, reason: "Waiting for owner proof" }, authority);
+  await f.tidy.keep({ pane: "w1:p1", keep: false }, authority);
+  expect(await tick(2)).toEqual([]);
+  expect(await tick(59)).toEqual([]);
+  expect(await tick(1)).toHaveLength(1);
+  expect(f.closes()).toBe(1);
+  f.watch.close();
+});
 
 it("refuses dirty files even with a reason, and allows an explicit reason for clean local commits", async () => {
   const w = await workerWorktree();
@@ -1242,6 +1427,7 @@ it("holds a merge's unique resolution even when git cherry says every patch land
 // or an unsent draft keeps it open, each through the production close checks.
 it("automatic tidy closes a harvested, landed hire only after its idle period", async () => {
   const w = await workerWorktree();
+  await fixtureOrigin(w);
   await writeFile(join(w.tree, "feature.txt"), "unlanded\n");
   await git(w.tree, "add", "feature.txt");
   await git(w.tree, "commit", "--quiet", "-m", "unlanded feature");
@@ -1284,9 +1470,10 @@ it("automatic tidy closes a harvested, landed hire only after its idle period", 
   });
   expect(await sweep(1)).toBe(0);
   expect(await f.tidy.keep({ pane: "w1:p1", keep: false }, authority)).toMatchObject({ outcome: "released" });
-  // Its commit is not on origin/main yet; the close refuses and waits another period.
+  // Releasing a hold starts a new idle period; its work still has not landed.
   expect(await sweep(1)).toBe(0);
-  await git(w.repo, "update-ref", "refs/remotes/origin/main", await git(w.tree, "rev-parse", "HEAD"));
+  await git(w.tree, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+  await git(w.repo, "fetch", "--quiet", "origin");
   f.setAnsi(await golden("codex", "draft"));
   expect(await sweep(61)).toBe(0);
   f.setAnsi(await golden("codex", "empty"));
@@ -1294,7 +1481,9 @@ it("automatic tidy closes a harvested, landed hire only after its idle period", 
   expect(f.closes()).toBe(0);
   expect(await sweep(31)).toBe(1);
   expect(f.closes()).toBe(1);
-  expect(notices).toEqual([["lead", "Auto-tidy: idle 1h with its reports read and its work landed"]]);
+  expect(notices).toEqual([
+    ["lead", "Auto-tidy: idle 1h with its reports read and its work landed or explicitly handed off"],
+  ]);
   expect(f.tidy.history()[0]).toMatchObject({ state: "closed", reason: notices[0]![1] });
   f.watch.close();
 });

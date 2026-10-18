@@ -17,13 +17,22 @@ without waiting for the owner to list panes or approve each close.
 
 The service also tidies on its own under the owner's `autoTidy` fleet setting
 (default `1h`): a hire whose pane has sat idle that long, with a kept report,
-every report acknowledged and its work landed, is closed through the same checks
-below, and landed, clean worktrees idle for a day in enrolled roots are pruned.
+every report acknowledged and positive work proof, is closed through the same
+guards below. Automatic landing counts only actual advertised `origin/main`
+ancestry or an explicit retained merge-queue/current-HEAD work decision covering
+every unlanded commit. A feature branch, local ref or patch equivalence alone
+does not count. Missing/non-Git working directories and incomplete observations
+hold the pane; never infer no work from an empty result. Landed, clean worktrees
+idle for a day in enrolled roots are pruned.
 Acknowledge a report only once you have its result; that is what lets the pane
 go. When a worker's live context is worth keeping, or the owner asks, call
 `keep_worker_pane({ pane, reason })` (CLI `clankie agents keep PANE --conversation ID`);
 `keep: false` (or `clankie agents unkeep`) releases it. A keep never closes
-anything and never stops your own `close_worker_pane`.
+anything and never stops your own `close_worker_pane`. Kept time does not count
+toward automatic retirement: release starts a new full idle period, including
+when keep and release happen between sweeps. Automatic close rechecks a new keep
+before native dispatch. After the VUH-2462 incident, leave the affected fleet's
+automatic tidy off until James explicitly decides to enable it again.
 
 For the owner's at-a-glance inventory, `clankie fleet roster` reads the same
 host counts as the app, including machine/lead groups, stale flags and source
@@ -87,8 +96,10 @@ Classify each retained unmerged or dirty tree: landed by content, worth
 landing, or safe to drop, and record the last two with
 `decide_tidy_worktree` and a one-line reason. Unlanded work is never removed
 without one, and a decided drop keeps its commits under
-`refs/clankie/dropped-worktrees/`; uncommitted files are never pruned. Even idle/shell panes protect their
-working directories. An unavailable or changing census returns no candidates.
+`refs/clankie/dropped-worktrees/`; content-equivalent pruning preserves the exact
+original HEAD under `refs/clankie/pruned-worktrees/`. Uncommitted files are never
+pruned. Even idle/shell panes protect their working directories and worktrees
+nested below those directories. An unavailable or changing census returns no candidates.
 The tool does not establish ownership or refresh the destination ref: confirm
 your ownership and current landing proof before removing a candidate. This tool
 lists; it never removes.
@@ -113,6 +124,9 @@ fetches `origin/main`, verifies a registered linked-worktree root, copies ignore
 (default `~/.clankie/captain/worktree-evidence/`), then freshly checks
 landing, cleanliness and every live local pane's cwd and foreground cwd. It uses
 `git worktree remove` without force and deletes only a merged local branch.
+Native HEAD/branch locks hold the verified commit stable through removal; a
+changed or busy ref keeps the checkout. Retained refs preserve detached commits
+even after reflog expiry and garbage collection.
 Managed runtime pins, runtime/update namespaces, the running service checkout and
 owner main checkouts are protected independently of developer-root enrollment. Never treat a
 removal refusal as permission to force it. Keep live workers' owned trees even

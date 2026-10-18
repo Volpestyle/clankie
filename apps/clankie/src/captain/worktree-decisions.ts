@@ -69,22 +69,46 @@ export class WorktreeDecisions {
  * files: its start directory and its foreground directory. A remote fleet's directories
  * cannot be read from here, so they are unknown, never assumed reconciled.
  */
-export async function workerWorktreeHold(agent: {
-  paneId: string;
-  workingDirectory?: string;
-  foregroundWorkingDirectory?: string;
-}): Promise<WorktreeReconciliation[]> {
+export interface WorktreeHoldOptions {
+  /** Automatic retirement needs positive Git evidence, including a clean main checkout. */
+  requireProof?: boolean;
+}
+export async function workerWorktreeHold(
+  agent: {
+    paneId: string;
+    workingDirectory?: string;
+    foregroundWorkingDirectory?: string;
+  },
+  options: WorktreeHoldOptions = {},
+): Promise<WorktreeReconciliation[]> {
   const directories = [
     ...new Set(
       [agent.workingDirectory, agent.foregroundWorkingDirectory].filter((path) => path !== undefined),
     ),
   ];
+  if (!directories.length && options.requireProof)
+    return [
+      {
+        path: "(worker directory unavailable)",
+        state: "unknown",
+        reason: "No verified worker work directory",
+      },
+    ];
   if (splitFleetQualified(agent.paneId))
     return directories.map((path) => ({ path, state: "unknown", reason: "Remote fleet worktree" }));
   const held = new Map<string, WorktreeReconciliation>();
   for (const directory of directories) {
-    const result = await reconcileWorktree(directory);
-    if (result && result.state !== "reconciled") held.set(result.path, result);
+    const result = await reconcileWorktree(
+      directory,
+      options.requireProof ? "refs/remotes/origin/main" : "origin/main",
+    );
+    if (result && (options.requireProof || result.state !== "reconciled")) held.set(result.path, result);
+    else if (!result && options.requireProof)
+      held.set(directory, {
+        path: directory,
+        state: "unknown",
+        reason: "Worker work is not verified by a Git checkout",
+      });
   }
   return [...held.values()];
 }

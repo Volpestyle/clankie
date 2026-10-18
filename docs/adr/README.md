@@ -181,3 +181,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0273: The fleet room is a durable, owner-only coordination record](0273-the-fleet-room-is-a-durable-owner-only-coordination-record.md) — VUH-2184.
 
 - [0279: Fleet counts come from the host roster](0279-fleet-counts-come-from-the-host-roster.md) — VUH-2448.
+- [0280: Automatic tidy requires positive work proof](0280-automatic-tidy-requires-positive-work-proof.md) — VUH-2462.
