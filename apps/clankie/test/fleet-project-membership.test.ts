@@ -1,3 +1,5 @@
+import { fleetRosterWork } from "../src/captain/fleet-roster-work.ts";
+import { OperatorFleetSnapshotSchema } from "@clankie/protocol";
 import { mkdtemp, mkdir, rm, readFile, realpath } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -148,6 +150,72 @@ it("joins an owner-started process's real cwd to enrolled settings and its saved
       source: "workspace",
       projectId: "repo",
     });
+    // VUH-2476: carry the real native-cwd membership proof into the roster.
+    // A matching display cwd/title is never sufficient for a replacement occupant.
+    const snapshot = OperatorFleetSnapshotSchema.parse({
+      schemaVersion: 1,
+      cursor: "fleet:1",
+      personas: [],
+      channels: [],
+      seats: [
+        {
+          seatId: "seat0",
+          occupantId: f.proofs[0]!.nativeOccupantId,
+          personaId: "owner-started",
+          harness: "codex",
+          status: "working",
+          title: "Wrong project VUH-9999",
+          workingDirectory: "/wrong",
+          owner: { conversationId: "lead", hired: false },
+          efficiency: {
+            checkedAt: new Date().toISOString(),
+            ownerConversationId: "lead",
+            flags: [],
+            assignedDeliverable: "VUH-2476",
+          },
+        },
+        {
+          seatId: "unowned",
+          occupantId: "unknown",
+          personaId: "unowned",
+          harness: "codex",
+          status: "idle",
+          title: "VUH-9999 Repository",
+          workingDirectory: path,
+        },
+        {
+          seatId: "hired",
+          occupantId: "another",
+          personaId: "hired",
+          harness: "codex",
+          status: "working",
+          title: "Repository",
+          owner: { conversationId: "lead", hired: true },
+          assignment: {
+            objective: "This is not an issue title",
+            issue: { repoId: "repo", itemId: "VUH-2472" },
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      ],
+    });
+    const work = await fleetRosterWork(snapshot, f.settings(), service, new AbortController().signal);
+    expect(work.get("seat0")).toEqual({
+      project: { id: "repo", name: "Repository" },
+      task: { issue: "VUH-2476", title: null },
+      ownership: "owner",
+    });
+    expect(work.get("unowned")).toEqual({ project: null, task: null, ownership: "unowned" });
+    expect(work.get("hired")).toEqual({
+      project: null,
+      task: { issue: "VUH-2472", title: null },
+      ownership: "hired",
+    });
+    snapshot.seats[0]!.occupantId = "replacement";
+    expect(
+      (await fleetRosterWork(snapshot, f.settings(), service, new AbortController().signal)).get("seat0")
+        ?.project,
+    ).toBeNull();
     expect(await readFile(f.path, "utf8")).toBe(before);
     await expect(
       service.read(f.input, new AbortController().signal, async () => {

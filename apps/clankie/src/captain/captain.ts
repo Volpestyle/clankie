@@ -280,6 +280,7 @@ import {
 import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
 import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
+import { fleetRosterWork } from "./fleet-roster-work.ts";
 import { FleetRoster } from "./fleet-roster.ts";
 import { fleetRosterAction } from "./fleet-roster-actions.ts";
 import { PaneTidy } from "./pane-tidy.ts";
@@ -4568,7 +4569,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   /** Prefer a stable cursor, but a busy or slow fleet must not starve display reads. */
-  async function readFleetRoster() {
+  async function readFleetRoster({ includeWork = false }: { includeWork?: boolean } = {}) {
+    const started = Date.now();
     const { snapshot } = await fleetSnapshot();
     const readWarnings = [...(snapshot.readWarnings ?? [])];
     for (const source of [...unansweredFleetSources, ...pendingFleetSources]) {
@@ -4579,6 +4581,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         message: `${source} has not answered; its agents are not confirmed absent.`,
       });
     }
+    const work = includeWork
+      ? await (async () => {
+          const settings = await settingsStore.loadFenced();
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), Math.max(1, 4_000 - (Date.now() - started)));
+          try {
+            const work = await fleetRosterWork(
+              snapshot,
+              settings.settings.projects,
+              options.fleetProjectMembership?.(),
+              controller.signal,
+            );
+            try {
+              settings.assertCurrent();
+            } catch {
+              for (const row of work.values()) row.project = null;
+            }
+            return work;
+          } finally {
+            clearTimeout(timer);
+          }
+        })()
+      : undefined;
     const result = fleetRoster.project(
       { ...snapshot, ...(readWarnings.length ? { readWarnings } : {}) },
       waitingRosterSeats(),
@@ -4587,7 +4612,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ...result,
       agents: result.agents.map((agent) => {
         const lead = agent.leadId && conversations.conversation(agent.leadId)?.title;
-        return lead ? { ...agent, lead } : agent;
+        return { ...agent, ...(lead ? { lead } : {}), ...work?.get(agent.seatId) };
       }),
       leads: result.leads.map((lead) => ({
         ...lead,

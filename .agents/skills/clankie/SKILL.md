@@ -179,6 +179,14 @@ On a host with the owner-authorized CLI, these bounded reads explain a gap:
   the shared daemon to fix this: inherited pane identity can break worker bridges. Roster `toolCatalog` carries the same verdict.
 - `clankie connections`: identify the intended machine/session and connected
   account. A healthy SSH link is transport health, not a native tool-call result.
+- `clankie fleet roster`: read live counts plus `project`, `task` and `ownership`.
+  Project uses exact-occupant confirmed membership; unknown is `null`. Task uses
+  an explicit assigned issue/deliverable, with `title: null` when no cached title
+  is available. Never fill either from pane captions. `ownership` distinguishes
+  `hired`, adopted hand-started `owner` panes, and `unowned` panes; unadopted
+  personal panes remain unowned. Counts still include every row. New device
+  clients request `GET /v1/fleet/roster?includeWork=true`; the unnegotiated strict
+  v1 response stays unchanged for shipped apps.
 - `clankie fleet status`: inspect `fleet.tools` (`connected` or `off`) and
   `fleet.peerMessages` (`on` or `off`).
 - `clankie access linear` and `access list`: inspect the connected actor and

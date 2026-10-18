@@ -8681,6 +8681,28 @@ issue, last known progress and host-observed stale flag. `complete: false` and
 `readWarnings` mean a source did not answer; those agents are unknown, not zero.
 Unsupported native statuses have an explicit unknown count.
 
+The CLI requests `?includeWork=true`. These reads add `project: {id, name} | null`,
+`task: {issue, title} | null`, and `ownership: hired | owner | unowned` to each
+agent. Project comes from the existing host-confirmed membership proof for that
+exact occupant, never the pane title or its advertised working directory. Task
+comes from the seat's explicit current assignment or assigned deliverable; a
+free-text deliverable is unknown. No tracker request is made to fill these
+fields. The roster has no cached issue-title source, so `task.title` is currently
+`null`; an assignment objective is not an issue title. Missing, revoked, timed-out
+or unsupported membership is `null`.
+
+`hired` identifies a host-recorded hire, `owner` a hand-started pane subsequently
+adopted by a conversation, and `unowned` a pane without an ownership claim. These
+are display markers, not control grants. Existing counts still include all rows;
+clients can use the markers to select their team count. Unadopted personal panes
+remain `unowned`; the host cannot infer their purpose.
+
+Unnegotiated `GET /v1/fleet/roster` retains the original strict v1 response shape
+so existing app builds continue parsing it. The shared API client opts in; new
+app/device-session consumers must request `?includeWork=true`. The new schema
+also accepts older hosts that omit the three fields: omission means the host
+does not supply this metadata, while explicit `null` means unknown.
+
 Retire takes the exact seat and occupant IDs from that read. Only finished or
 stale hires with nothing pending qualify. The existing `close_worker_pane`
 implementation checks kept reports, unsent drafts, provenance, work and native

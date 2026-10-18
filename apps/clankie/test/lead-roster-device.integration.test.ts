@@ -1,3 +1,11 @@
+import { z } from "zod";
+import {
+  FleetRosterSnapshotSchema,
+  FleetRosterAgentSchema,
+  FLEET_ROSTER_WORK_PATH,
+} from "@clankie/protocol/fleet-roster";
+import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
+import { runFleetRosterCommand } from "../../tui/src/command/fleet-roster.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -111,6 +119,31 @@ it("reuses the private roster for an owner device and refuses visitors, guests, 
     service.app.request("/v1/fleet/roster", { headers: { authorization: `Bearer ${bearer}` } });
   expect((await fleetRead(token("owner"))).status).toBe(200);
   expect((await fleetRead("operator")).status).toBe(200);
+  // Shipped app schemas are strict. Unnegotiated reads retain their exact shape.
+  const legacySchema = FleetRosterSnapshotSchema.extend({
+    agents: z.array(FleetRosterAgentSchema.omit({ project: true, task: true, ownership: true })),
+  });
+  expect(legacySchema.safeParse(await (await fleetRead(token("owner"))).json()).success).toBe(true);
+  const fetchImpl: typeof fetch = (input, init) => service.app.request(String(input), init);
+  const client = new ClankieApiClient({ baseUrl: "http://fixture", operatorToken: "operator", fetchImpl });
+  expect((await client.fleetRoster()).agents[0]).toMatchObject({
+    project: null,
+    task: null,
+    ownership: "unowned",
+  });
+  const command = await runFleetRosterCommand([], {
+    ownerFetcher: {
+      fetch: (path, init) =>
+        service.app.request(path, { ...init, headers: { authorization: `Bearer ${token("owner")}` } }),
+    },
+  });
+  expect(command).toMatchObject({ agents: [{ project: null, task: null, ownership: "unowned" }] });
+  for (const bearer of [token("visitor"), token("guest"), token("support"), "discord", "unknown"])
+    expect(
+      (await service.app.request(FLEET_ROSTER_WORK_PATH, { headers: { authorization: `Bearer ${bearer}` } }))
+        .status,
+    ).toBe(403);
+
   for (const bearer of [token("visitor"), token("guest"), token("support"), "discord", "unknown"]) {
     expect((await fleetRead(bearer)).status).toBe(403);
     for (const action of ["retire", "undo"])

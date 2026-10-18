@@ -6,6 +6,8 @@ import {
 } from "./operator-conversations.ts";
 
 export const FLEET_ROSTER_PATH = "/v1/fleet/roster";
+/** Opt-in because shipped v1 clients reject unknown row fields. */
+export const FLEET_ROSTER_WORK_PATH = `${FLEET_ROSTER_PATH}?includeWork=true`;
 export const FLEET_ROSTER_RETIRE_PATH = "/v1/fleet/roster/retire";
 export const FLEET_ROSTER_UNDO_PATH = "/v1/fleet/roster/undo";
 const Ref = z.string().min(1).max(512);
@@ -34,6 +36,19 @@ export const FleetRosterAgentSchema = z
     leadId: Ref.optional(),
     lead: z.string().max(256).optional(),
     issue: z.string().max(256).optional(),
+    /** Absent on older hosts/legacy reads; null means not confirmed. */
+    project: z
+      .object({ id: Ref, name: z.string().max(256) })
+      .strict()
+      .nullable()
+      .optional(),
+    task: z
+      .object({ issue: z.string().min(1).max(512), title: z.string().max(4000).nullable() })
+      .strict()
+      .nullable()
+      .optional(),
+    /** owner = hand-started, subsequently adopted; no claim means unowned. */
+    ownership: z.enum(["hired", "owner", "unowned"]).optional(),
     summary: z.string().max(4000).optional(),
     lastProgressAt: z.string().datetime().optional(),
     inactiveSince: z.string().datetime().optional(),

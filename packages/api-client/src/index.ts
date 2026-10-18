@@ -1,5 +1,5 @@
 import {
-  FLEET_ROSTER_PATH,
+  FLEET_ROSTER_WORK_PATH,
   FLEET_ROSTER_RETIRE_PATH,
   FLEET_ROSTER_UNDO_PATH,
   RetireFleetAgentSchema,
@@ -294,7 +294,7 @@ export class ClankieApiClient {
   public async fleetRoster(): Promise<FleetRosterSnapshot> {
     return parseProtocolResponse(
       FleetRosterSnapshotSchema,
-      await this.request(FLEET_ROSTER_PATH, { headers: this.operatorHeaders(), redirect: "error" }),
+      await this.request(FLEET_ROSTER_WORK_PATH, { headers: this.operatorHeaders(), redirect: "error" }),
     );
   }
   public async retireFleetAgent(command: RetireFleetAgent): Promise<FleetRosterActionResult> {

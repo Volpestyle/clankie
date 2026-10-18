@@ -176,7 +176,9 @@ export type FleetHealthAlertDelivery =
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
-  fleetRoster?(): Promise<import("@clankie/protocol/fleet-roster").FleetRosterSnapshot>;
+  fleetRoster?(options?: {
+    includeWork?: boolean;
+  }): Promise<import("@clankie/protocol/fleet-roster").FleetRosterSnapshot>;
   fleetRosterAction?(
     command: import("@clankie/protocol/fleet-roster").RetireFleetAgent | { id: string },
     authority: { current(): boolean; authorize(): Promise<boolean> },

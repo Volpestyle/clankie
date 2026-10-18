@@ -88,7 +88,12 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       if (!(await authorize())) return context.json({ error: "forbidden" }, 403);
       if (!ctx.dependencies.captain.fleetRoster || !ctx.dependencies.captain.fleetRosterAction)
         return context.json({ error: "fleet_roster_unavailable" }, 503);
-      if (path === FLEET_ROSTER_PATH) return context.json(await ctx.dependencies.captain.fleetRoster());
+      if (path === FLEET_ROSTER_PATH)
+        return context.json(
+          await ctx.dependencies.captain.fleetRoster({
+            includeWork: context.req.query("includeWork") === "true",
+          }),
+        );
       const parsed = (
         path === FLEET_ROSTER_RETIRE_PATH ? RetireFleetAgentSchema : UndoFleetAgentSchema
       ).safeParse(await readJson(context.req.raw));
