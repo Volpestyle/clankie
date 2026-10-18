@@ -288,17 +288,20 @@ check can still refuse an expired OAuth credential in the separate native Pi
 profile. The owner refreshes that profile in Pi; service credentials do not
 replace it. No account observation refreshes a token.
 Without opt-in, unbriefed Pi launches retain hosted model/provider preparation,
-while automated briefs remain unavailable. Opt-in requires the selected 0.87.1
-native capability and original visible process/session; validate compatibility
-after a Pi upgrade before enabling it. Its
-`{repoRoot}/docs/testing/2026-10-04-pi-workers/README.md`
-keeps native hosted/billing and live fleet-tool acceptance open. Prepared Pi
+while automated briefs remain unavailable. Opt-in uses whatever Pi is installed:
+a release of at least 0.87.1 that passes the hire-time capability probe, plus the
+original visible process/session. No pin or manual validation follows a Pi
+upgrade. A refused release shows `Native Pi VERSION ...` with the failed surface
+in `worker_accounts` and the hire result; report that reason rather than
+downgrading Pi. `{repoRoot}/docs/testing/2026-10-04-pi-workers/README.md`
+keeps native hosted/billing and the remaining owner acceptance open. Prepared Pi
 workers consume `clankie mcp --fleet` through their original native extension;
 server-advertised schemas and original receipts pass through without an operator
 fallback. Controller/session loss or MCP process loss ends this consumer; it
 never reconnects, retries an uncertain tool call or hires a replacement. The
-consumer has Pi 0.87.1 SDK / MCP subprocess coverage without provider turns,
-not live Mac or hosted hire proof. Missing
+consumer has installed Pi SDK / MCP subprocess coverage without provider turns;
+`{repoRoot}/docs/testing/2026-10-17-vuh-2417-pi-latest/README.md` records the
+live Mac hire, not hosted proof. Missing
 structured control reports `unavailable` with `control.reason` (and `control.fix` when owner action
 is needed). `terminal` is only an unbriefed native launch. Each hire logs its
 lane. Folder trust and channel consent remain owner decisions; a visible prompt

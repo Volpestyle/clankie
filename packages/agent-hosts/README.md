@@ -87,7 +87,7 @@ flowchart TD
 | ----------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
 | Claude Code | Native worker-plugin channel and turn hooks           | Implemented; requires the owner's channel consent                          |
 | Codex       | App-server shared with the native TUI's bound thread  | Implemented; starts or steers a turn                                       |
-| Pi          | Process-bound native extension follow-up messages     | Opt-in on macOS/Linux; Pi 0.87.1; live acceptance held                     |
+| Pi          | Process-bound native extension follow-up messages     | Opt-in on macOS/Linux; installed Pi ≥ 0.87.1 that passes the hire probe    |
 | OpenCode    | Injected SDK in the process-bound native worker TUI   | Implemented locally and on linked Mac POSIX fleets; pinned to 1.18.18      |
 | Grok Build  | Leader IPC/ACP on the exact interactive TUI session   | Implemented locally on macOS; pinned to Grok 1.0.46                        |
 | Prime Agent | Daemon session created by Clankie, TUI attached to it | Implemented locally on macOS/Linux (0.10.x); operator seat `clankie prime` |
@@ -110,12 +110,17 @@ Local fleet-MCP admission supports Linux only in the initial host PID namespace.
 Containers explicitly refuse; the future hosted containment receipt is VUH-2120.
 See [the kernel proof boundary](../../integrations/fleet-proof/README.md#linux-host-boundary).
 Without opt-in, ordinary unbriefed Pi launches preserve their hosted model/provider
-preparation and automated briefs remain unavailable. Opt-in requires the pinned
-Pi 0.87.1 files; upgrades need compatibility validation before opting in.
+preparation and automated briefs remain unavailable. Opt-in uses whatever Pi is
+installed, with no pin: a release of at least 0.87.1 with the expected CLI bundle
+that passes the [release probe](../../integrations/pi-plugin/README.md#release-probe)
+of every native surface a hire relies on. Anything else is refused with a reason
+naming the release and the failed surface, in the hire and in `worker_accounts`,
+so an upgrade stays visible ([ADR 0250](../../docs/adr/0250-pi-workers-use-the-same-usability-view.md)).
+A live Mac hire on Pi 1.3.0 delivered its brief, reported through
+`message_clankie` and completed
+([evidence](../../docs/testing/2026-10-17-vuh-2417-pi-latest/README.md)).
 Hosted model preparation has fixture coverage; native hosted/billing
-remain unverified. The native fleet-MCP consumer has pinned Pi SDK / real MCP
-subprocess integration coverage without provider turns; live worker reporting
-is still unverified. See the
+remain unverified. See the
 [Pi acceptance boundary](../../docs/testing/2026-10-04-pi-workers/README.md).
 
 Work records stay in the repo's [tracker or files](../work-items/README.md).

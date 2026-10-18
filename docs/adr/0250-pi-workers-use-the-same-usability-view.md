@@ -43,3 +43,27 @@ Hosted users have no setup step. A release needs matching public runtime and
 private body image references. Source checks and local Linux boundary tests do
 not prove a deployed tenant hire, billing or Discord-origin completion. Those
 remain rollout verification; no AWS deployment is part of this change.
+
+## Amendment: the installed release, probed at hire (James, 2026-10-17, VUH-2417)
+
+James: harnesses stay on their latest release, and a newer one must never
+silently make Pi unhireable. Native capability no longer equals one published
+release. A hire admits whatever Pi is installed when it has the CLI bundle
+layout, is at least 0.87.1 (the oldest release a live hire proved; the offline
+probe cannot open the TUI a hire runs) and passes the capability probe,
+`integrations/pi-plugin/probe.mjs`. The probe drives the shipped worker runtime
+through the installed package's own extension loader and SDK, offline in a
+throwaway profile against a local endpoint: session identity and file layout,
+dialog blocking, custom-message receipt, follow-up turn, settlement and the
+tool-error override. A failing release is refused with a reason naming its
+version and the first surface that failed, in the hire result and in
+`worker_accounts`. A pass is reused until the installed files or Node change.
+
+The process proof keeps its file identity, computed from the installed package
+instead of published hashes. Before the probe, discovery hashes `package.json`,
+the CLI wrapper, its runtime and every chunk the runtime loads at startup, and a
+hire holds those digests and file identities across allocation and every control
+admission. A file that changes after the probe refuses control, as before.
+
+The public Linux image still installs one Pi release at build time, now 1.3.0,
+for reproducibility. That pin is a build choice, not an adapter refusal.

@@ -1,9 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { createPiSessionVerifier, holdPiCapabilityFiles } from "../src/captain/pi-native-capability.ts";
+import {
+  createPiSessionVerifier,
+  holdPiCapabilityFiles,
+  PiNativeRefusal,
+  supportedPiOnPath,
+} from "../src/captain/pi-native-capability.ts";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -70,4 +75,42 @@ test("saved native path cannot change inode or escape the effective root", async
   await rename(replacement, file);
   await expect(verify(id, file, f.dir)).rejects.toThrow("replaced");
   await expect(createPiSessionVerifier([join(f.dir, "missing")], false)(id, file, f.dir)).rejects.toThrow();
+});
+
+// VUH-2417: no exact pin. An installed release is admitted only at or above the
+// validated floor with a recognized bundle and a passing probe, and otherwise
+// refused with a reason that names the version found.
+test("refuses an older, unrecognized or probe-failing Pi release by version", async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "pi-release-")));
+  directories.push(dir);
+  const install = async (version: string, chunk = true) => {
+    const root = join(dir, version, "pi-coding-agent");
+    const bundle = join(root, "dist/bundle");
+    await mkdir(join(bundle, "chunks"), { recursive: true });
+    await mkdir(join(dir, version, "bin"));
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({ name: "@earendil-works/pi-coding-agent", version }),
+    );
+    await writeFile(join(bundle, "cli.js"), 'createRequire(import.meta.url)("./cli-runtime.js");\n');
+    await chmod(join(bundle, "cli.js"), 0o755);
+    await writeFile(join(bundle, "cli-runtime.js"), chunk ? 'import{main}from"./chunks/core.js";\n' : "");
+    await writeFile(join(bundle, "chunks/core.js"), "export const main = () => {};\n");
+    // An SDK without the surfaces the worker runtime drives.
+    await writeFile(join(root, "dist/index.js"), "export {};\n");
+    await symlink(join(bundle, "cli.js"), join(dir, version, "bin/pi"));
+    return { PATH: [join(dir, version, "bin"), dirname(process.execPath)].join(delimiter) };
+  };
+  const refusal = async (version: string, chunk?: boolean) => {
+    const error = await supportedPiOnPath(await install(version, chunk)).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PiNativeRefusal);
+    return (error as Error).message;
+  };
+  expect(await refusal("0.86.2")).toBe(
+    "Native Pi 0.86.2 is older than 0.87.1, the oldest release proven with a live hire; update Pi",
+  );
+  expect(await refusal("9.0.0", false)).toBe("Native Pi 9.0.0 has an unrecognized CLI bundle layout");
+  expect(await refusal("9.1.0")).toMatch(
+    /^Native Pi 9\.1\.0 failed Clankie's capability probe: load the worker extension: /u,
+  );
 });

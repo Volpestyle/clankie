@@ -2,29 +2,35 @@
 
 VUH-1582 adds a native extension control channel to the existing prepared-hire
 path. Local fixtures exercise production extension and controller code without
-starting Pi, a model turn, an owner session, or a second agent process. A live Mac
-hire remains an explicit acceptance requirement; this document is not live proof.
+starting Pi, a model turn, an owner session, or a second agent process. The first
+live Mac hire, on Pi 1.3.0, is recorded in the
+[VUH-2417 evidence](../2026-10-17-vuh-2417-pi-latest/README.md); the owner
+acceptance list below is otherwise still open.
 
 The local native adapter is **off by default** until that acceptance. Set
 `CLANKIE_PI_NATIVE_ENABLED=1` in the Clankie service environment and restart the
 service to opt in; other values leave it off. Without opt-in the native host is
-not constructed, so normal unbriefed Pi launches do not run the pinned file/hash
+not constructed, so normal unbriefed Pi launches do not run the capability
 checks. Their hosted included-model/provider preparation remains in place, and
 automated briefs remain unavailable without a structured adapter.
 
 ## Native capability
 
-The selected executable is the installed `@earendil-works/pi-coding-agent` 0.87.1
-Node bundle. The launcher resolves the executable without running it, verifies
-the package, CLI wrapper, CLI runtime and relevant bundled core hashes, and holds
-their file identity across allocation and subsequent admission. The captain's
-patched 1.0.0 dependency is not imported or treated as native compatibility proof.
+The selected executable is the installed `@earendil-works/pi-coding-agent` Node
+bundle, whatever release is installed (VUH-2417). The launcher resolves the
+executable without running it and refuses an unrecognized layout or a release
+older than 0.87.1. It hashes the package, CLI wrapper, CLI runtime and every
+chunk the runtime loads at startup, then runs the
+[release probe](../../../integrations/pi-plugin/README.md#release-probe) once
+for those files and that Node. A hire holds the probed digests and file identity
+across allocation and subsequent admission. The captain's patched 1.0.0
+dependency is not imported or treated as native compatibility proof.
 
 Herdr launches the canonical Node binary and selected CLI directly as the pane's
 initial argv. The shared prepared-native host checks the original direct child,
 foreground PID, process birth, canonical executable/cwd, held controller socket,
 Herdr binding and terminal. Pi rewrites its process title, so the selected script
-comes from the service-owned initial argv and pinned files. The extension's
+comes from the service-owned initial argv and held files. The extension's
 reported `process.argv` is corroborating runtime metadata, not independent OS
 evidence or a tool-authority credential. This is not a guarantee against malicious
 same-user process-memory modification.

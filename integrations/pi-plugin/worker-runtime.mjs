@@ -1,6 +1,6 @@
-// Native Pi 0.87.1 extension API only. This module never imports the captain's
-// patched Pi dependency, creates a session, submits editor text, or runs a model.
-const PI_WORKER_VERSION = "0.87.1";
+// Native Pi extension API only, for any installed release that passes
+// probe.mjs. This module never imports the captain's patched Pi dependency,
+// creates a session, submits editor text, or runs a model.
 export const PI_WORKER_MESSAGE = "clankie-worker-message";
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_TEXT = 128 * 1024;
@@ -161,7 +161,6 @@ export function createPiWorkerRuntime(pi, controller) {
       return {
         ...identity,
         mode: ctx.mode,
-        version: PI_WORKER_VERSION,
         runtime: {
           executable: process.execPath,
           argv: process.argv.slice(0, 2),
@@ -200,8 +199,9 @@ export function createPiWorkerRuntime(pi, controller) {
         claimed = true;
         const ctx = bound(epoch);
         if (snapshot() === "blocked") throw new Error("Owner decision arrived before native dispatch");
-        // isIdle=false also covers compaction/retry boundaries. Queue only
-        // while the native agent exposes an active, non-aborted run signal.
+        // isIdle=false also covers compaction/retry boundaries and, since Pi
+        // 1.2, a run that is still starting. Queue only while the native agent
+        // exposes an active, non-aborted run signal.
         if (!ctx.isIdle() && (!ctx.signal || ctx.signal.aborted))
           throw new Error("Native Pi is between agent runs or compacting");
         attempted = true;

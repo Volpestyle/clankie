@@ -206,7 +206,7 @@ try {
       result: "passed",
       kernel: "linux",
       checks: [
-        "published-pi-0.87.1-bundle-hashes-linux-elf",
+        "probed-installed-pi-held-bundle-linux-elf",
         "native-session-file-header",
         "shared-pi-usability-producer-models-auto-choice",
         "durable-owner-hold-refuses-auto-then-release-restores",

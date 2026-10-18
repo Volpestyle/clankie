@@ -1,17 +1,29 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access, open, readFile, realpath, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { createLocalAgentHost, piSessionRoots, type SeatLaunch } from "@clankie/agent-hosts";
 import { findAgentSession } from "@clankie/agent-transcript";
 import { z } from "zod";
 
-const PINNED = {
-  "package.json": "627631b613ba4ca29eba8df793f5280fd20b19f01d73826e9ffda14c15def5dc",
-  "dist/bundle/cli.js": "e79626f2dd6f94aa45d30f3fa63cd84319a6eefcd150b353cfaf274366926774",
-  "dist/bundle/cli-runtime.js": "9ca136a7caa977d936aa789d7448a3dfb17851677ff5ac8c0dbcf23c31a02142",
-  "dist/bundle/chunks/chunk-OJP47DM6.js": "81c81a21ec81e84200205f561687408ff5e3738fbbbb3c2a6c186b348d376020",
-};
+/**
+ * Oldest Pi release a live native hire has proved. The probe drives the
+ * package's SDK build offline and cannot open the CLI bundle's interactive TUI
+ * that a hire runs, so older releases are refused rather than inferred.
+ */
+const VALIDATED_FLOOR = "0.87.1";
+const PROBE_RETRY_MS = 60_000;
+// The checkout keeps this module in src/captain and the release bundles it into
+// src; both keep integrations at the repository root.
+const probeScript = [1, 2, 3, 4]
+  .map((up) => join(import.meta.dirname, ...Array<string>(up).fill(".."), "integrations/pi-plugin/probe.mjs"))
+  .find((path) => existsSync(path));
+const probes = new Map<string, { readonly at: number; readonly result: Promise<void> }>();
+
+/** A refusal the owner can act on: it names the installed release and why, never a credential. */
+export class PiNativeRefusal extends Error {}
 export interface PiNativeCapability {
   readonly executable: string;
   readonly cli: string;
@@ -48,7 +60,7 @@ const fingerprint = async (path: string, hash: boolean) => {
   }
 };
 
-/** Service-selected files, held across allocation and every control admission. */
+/** Service-selected files and the digests they had when probed, held across allocation and every control admission. */
 export async function holdPiCapabilityFiles(
   executable: string,
   files: Readonly<Record<string, string>>,
@@ -58,7 +70,7 @@ export async function holdPiCapabilityFiles(
     Object.entries(files).map(async ([path, expected]) => {
       const observed = await fingerprint(path, true);
       if (observed.digest !== expected)
-        throw new Error("Selected Pi bundle does not match the supported native capability");
+        throw new Error("Selected Pi bundle changed after its supported capability probe");
       return { path, observed };
     }),
   );
@@ -88,31 +100,92 @@ async function executableOnPath(
   throw new Error(`Native ${name} executable unavailable`);
 }
 
+const releaseParts = (version: string) =>
+  /^(\d+)\.(\d+)\.(\d+)(?:[-+][\w.-]+)?$/u.exec(version)?.slice(1, 4).map(Number);
+function atLeastFloor(version: string): boolean {
+  const found = releaseParts(version);
+  const floor = releaseParts(VALIDATED_FLOOR)!;
+  if (!found) return false;
+  for (let index = 0; index < 3; index += 1)
+    if (found[index] !== floor[index]) return found[index]! > floor[index]!;
+  return true;
+}
+
+/** The CLI wrapper, its runtime and every chunk the runtime loads at startup. */
+async function piBundleFiles(packageRoot: string, version: string): Promise<string[]> {
+  const bundle = join(packageRoot, "dist/bundle");
+  const read = (file: string) => readFile(join(bundle, file), "utf8").catch(() => "");
+  const chunks = [...(await read("cli-runtime.js")).matchAll(/(?:from|import)\s*"\.\/(chunks\/[\w.-]+\.js)"/gu)];
+  if (!(await read("cli.js")).includes('"./cli-runtime.js"') || !chunks.length)
+    throw new PiNativeRefusal(`Native Pi ${version} has an unrecognized CLI bundle layout`);
+  return [
+    join(packageRoot, "package.json"),
+    join(bundle, "cli.js"),
+    join(bundle, "cli-runtime.js"),
+    ...new Set(chunks.map((match) => join(bundle, match[1]!))),
+  ];
+}
+
+/** Runs integrations/pi-plugin/probe.mjs once per installed release and Node, reusing a pass. */
+function probeInstalledPi(executable: string, packageRoot: string, version: string, key: string) {
+  const cached = probes.get(key);
+  if (cached && Date.now() - cached.at < PROBE_RETRY_MS) return cached.result;
+  const result = new Promise<void>((resolve, reject) => {
+    const refuse = (reason: string) =>
+      reject(new PiNativeRefusal(`Native Pi ${version} failed Clankie's capability probe: ${reason}`));
+    if (!probeScript) return refuse("integrations/pi-plugin/probe.mjs is missing");
+    // A clean environment: the probe needs no owner profile, key or proxy.
+    execFile(
+      executable,
+      [probeScript, packageRoot],
+      { cwd: tmpdir(), env: { PATH: "/usr/bin:/bin" }, timeout: 30_000, maxBuffer: 64 * 1024 },
+      (error, stdout) => {
+        let outcome: { ok: boolean; reason?: string | undefined } | undefined;
+        try {
+          outcome = z
+            .object({ ok: z.boolean(), reason: z.string().max(500).optional() })
+            .parse(JSON.parse(stdout.trim().split("\n").at(-1)!));
+        } catch {
+          return refuse(error?.killed ? "timed out" : "no result");
+        }
+        if (outcome.ok) {
+          // A pass holds until the installed files or Node change, which changes the key.
+          probes.set(key, { at: Number.POSITIVE_INFINITY, result });
+          return resolve();
+        }
+        refuse(outcome.reason ?? "unnamed failure");
+      },
+    );
+  });
+  probes.set(key, { at: Date.now(), result });
+  return result;
+}
+
 /**
- * The Pi CLI this PATH selects, refused unless native control supports that
- * release. Discovery applies exactly this check; tests that need the installed
- * Pi skip on its refusal (VUH-2414). PINNED below hashes the supported files.
+ * The Pi CLI this PATH selects and the native Node that runs it, refused with a
+ * named reason unless native control supports that release: the expected layout,
+ * at least the validated floor, and a passing capability probe of the surfaces a
+ * hire uses. Discovery applies exactly this check; tests that need the installed
+ * Pi skip on its refusal (VUH-2414). The returned digests were computed before the
+ * probe ran, so a hire holds the same files the probe admitted.
  */
-export async function supportedPiOnPath(
-  env: Readonly<Record<string, string | undefined>>,
-): Promise<{ cli: string; packageRoot: string }> {
+export async function supportedPiOnPath(env: Readonly<Record<string, string | undefined>>): Promise<{
+  cli: string;
+  packageRoot: string;
+  executable: string;
+  version: string;
+  files: Readonly<Record<string, string>>;
+}> {
   const cli = await executableOnPath("pi", env);
   const packageRoot = dirname(dirname(dirname(cli)));
   if (cli !== join(packageRoot, "dist/bundle/cli.js")) throw new Error("Unsupported Pi executable layout");
-  z.object({ name: z.literal("@earendil-works/pi-coding-agent"), version: z.literal("0.87.1") }).parse(
-    JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")),
-  );
-  return { cli, packageRoot };
-}
-
-export async function discoverPiNativeCapability(launch: SeatLaunch): Promise<PiNativeCapability> {
-  if (!["darwin", "linux"].includes(process.platform))
-    throw new Error("Native Pi control requires macOS or Linux");
-  const env = { ...process.env, ...launch.env };
-  const roots = piSessionRoots();
-  if (JSON.stringify(piSessionRoots(env)) !== JSON.stringify(roots))
-    throw new Error("Per-hire Pi profile differs from the active native transcript source");
-  const { cli, packageRoot } = await supportedPiOnPath(env);
+  const { version } = z
+    .object({ name: z.literal("@earendil-works/pi-coding-agent"), version: z.string().max(100) })
+    .parse(JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")));
+  if (!atLeastFloor(version))
+    throw new PiNativeRefusal(
+      `Native Pi ${version} is older than ${VALIDATED_FLOOR}, the oldest release proven with a live hire; update Pi`,
+    );
   const executable = await executableOnPath("node", env);
   const nodeFile = await open(executable, "r");
   try {
@@ -125,10 +198,27 @@ export async function discoverPiNativeCapability(launch: SeatLaunch): Promise<Pi
   } finally {
     await nodeFile.close();
   }
-  const verify = await holdPiCapabilityFiles(
-    executable,
-    Object.fromEntries(Object.entries(PINNED).map(([part, hash]) => [join(packageRoot, part), hash])),
+  const files = Object.fromEntries(
+    await Promise.all(
+      (await piBundleFiles(packageRoot, version)).map(
+        async (path) => [path, (await fingerprint(path, true)).digest!] as const,
+      ),
+    ),
   );
+  const node = await fingerprint(executable, false);
+  await probeInstalledPi(executable, packageRoot, version, JSON.stringify([executable, node, files]));
+  return { cli, packageRoot, executable, version, files };
+}
+
+export async function discoverPiNativeCapability(launch: SeatLaunch): Promise<PiNativeCapability> {
+  if (!["darwin", "linux"].includes(process.platform))
+    throw new Error("Native Pi control requires macOS or Linux");
+  const env = { ...process.env, ...launch.env };
+  const roots = piSessionRoots();
+  if (JSON.stringify(piSessionRoots(env)) !== JSON.stringify(roots))
+    throw new Error("Per-hire Pi profile differs from the active native transcript source");
+  const { cli, executable, files } = await supportedPiOnPath(env);
+  const verify = await holdPiCapabilityFiles(executable, files);
   const verifySession = createPiSessionVerifier(roots, launch.resumeSessionId !== undefined);
   let saved: PiNativeCapability["saved"];
   if (launch.resumeSessionId !== undefined) {

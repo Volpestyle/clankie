@@ -27,7 +27,6 @@ const Session = z.object({
   sessionDirectory: z.string().startsWith("/"),
   cwd: z.string(),
   mode: z.literal("tui"),
-  version: z.literal("0.87.1"),
   header: z.object({
     type: z.literal("session"),
     version: z.literal(3),
@@ -42,8 +41,9 @@ const Delivery = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("unavailable"), detail: z.string() }),
 ]);
 
-/** Native Pi compatibility is pinned and awaits live acceptance. Keep its host
- * construction and adapter registration absent unless explicitly opted in. */
+/** Native Pi admits the installed release that passes its capability probe and
+ * awaits full owner acceptance. Keep its host construction and adapter
+ * registration absent unless explicitly opted in. */
 export function piNativeOptions(
   enabled: string | undefined,
   createNative: () => ReturnType<typeof createPreparedNativeHost>,
@@ -346,7 +346,13 @@ export function createPiSeatAdapter(deps: {
             };
             owned = control;
             controls.set(selected.sessionId, control);
-            if (launch.brief && (await control.send(launch.brief)).outcome !== "accepted")
+            // Since Pi 1.2 a brief's run first passes before_agent_start, where
+            // the fleet consumer gives its tools up to 20 seconds to connect.
+            if (
+              launch.brief &&
+              (await control.send(launch.brief, { timeoutMs: deps.timeoutMs ?? 30_000 })).outcome !==
+                "accepted"
+            )
               throw new Error("brief_delivery_unverified: native Pi did not confirm its brief");
             return { outcome: "started", control };
           } catch {

@@ -4,8 +4,9 @@ import { supportedPiOnPath } from "../../src/captain/pi-native-capability.ts";
 
 /**
  * Why the native Pi acceptance slices cannot run against this PATH, or undefined
- * when native control's own check accepts its Pi (VUH-2414). The reason names
- * the Pi it found, so a skip says which release is installed.
+ * when native control's own check (layout, floor and capability probe) accepts
+ * its Pi (VUH-2414, VUH-2417). The reason names the Pi it found and why it was
+ * refused, so a skip says which release is installed and what failed.
  */
 export async function supportedPiUnavailable(path = process.env.PATH): Promise<string | undefined> {
   if (!["darwin", "linux"].includes(process.platform))
@@ -15,7 +16,7 @@ export async function supportedPiUnavailable(path = process.env.PATH): Promise<s
     return undefined;
   } catch (error) {
     const refusal = error instanceof Error ? (error.message.split("\n")[0] ?? "") : String(error);
-    return `the Pi on PATH fails native Pi control's own check: ${found(path) ?? refusal}`;
+    return `the Pi on PATH fails native Pi control's own check: ${found(path) ?? "no readable Pi"}: ${refusal}`;
   }
 }
 

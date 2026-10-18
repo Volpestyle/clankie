@@ -2,6 +2,36 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 
+const compositions = ["anyOf", "oneOf", "allOf"];
+/**
+ * Model providers refuse a tool schema whose top level is anyOf, oneOf or
+ * allOf (Anthropic says so; OpenAI needs a plain object), and Pi forwards the
+ * schema as given. Offer one object holding every branch's properties, with the
+ * alternatives in words, as Claude Code does. The MCP server still validates
+ * each call against the advertised schema.
+ */
+function modelFacing(description, schema) {
+  const branches = compositions.flatMap((key) => (Array.isArray(schema?.[key]) ? schema[key] : []));
+  if (!branches.length) return { description, parameters: schema };
+  const parameters = { ...schema, type: "object", properties: { ...schema.properties } };
+  for (const key of compositions) delete parameters[key];
+  for (const branch of branches) Object.assign(parameters.properties, branch?.properties);
+  const allOf = Array.isArray(schema.allOf) ? schema.allOf : [];
+  const required = new Set([...(schema.required ?? []), ...allOf.flatMap((branch) => branch?.required ?? [])]);
+  if (required.size) parameters.required = [...required];
+  else delete parameters.required;
+  if (branches.every((branch) => branch?.additionalProperties === false)) parameters.additionalProperties = false;
+  const choices = branches
+    .filter((branch) => !allOf.includes(branch))
+    .map((branch) => `(${(branch?.required ?? Object.keys(branch?.properties ?? {})).join(", ")})`);
+  return {
+    description: choices.length
+      ? `${description}\n\nInput constraint: provide one of ${choices.join(" or ")}.`
+      : description,
+    parameters,
+  };
+}
+
 /** A native Pi consumer, never a tool authority or an operator bridge. */
 export function createPiWorkerFleet(pi, options = {}) {
   const client = new Client({ name: "clankie-pi-worker", version: "1" });
@@ -72,8 +102,7 @@ export function createPiWorkerFleet(pi, options = {}) {
       pi.registerTool({
         name: tool.name,
         label: tool.title ?? tool.name,
-        description: tool.description ?? "",
-        parameters: tool.inputSchema,
+        ...modelFacing(tool.description ?? "", tool.inputSchema),
         ...(client.getInstructions() ? { promptGuidelines: [client.getInstructions()] } : {}),
         async execute(_id, args, signal, _update, ctx) {
           if (!current(ctx) || ctx.isProjectTrusted() !== true || catalog.get(tool.name) !== tool)
@@ -159,11 +188,17 @@ export function createPiWorkerFleet(pi, options = {}) {
       await close();
       return;
     }
-    await ready;
+    // Since Pi 1.2 this also runs before a brief's custom-message run, and the
+    // brief's native receipt waits behind it. Give the startup catalog a bounded
+    // window; tools that register later still join the session's active tools.
+    let timer;
+    await Promise.race([ready, new Promise((resolve) => (timer = setTimeout(resolve, 20_000)))]);
+    clearTimeout(timer);
   });
   pi.on("tool_result", (event) => {
-    // Pi 0.87.1 marks a returned tool value successful by default. Its native
-    // result hook carries MCP's error flag without throwing away the receipt.
+    // Pi 0.87.1 marks a returned tool value successful; later releases also
+    // read a returned isError. The native result hook carries MCP's error flag
+    // on every supported release without throwing away the receipt.
     if (registered.has(event.toolName) && event.details?.mcp)
       return { isError: event.details.mcp.isError === true };
   });

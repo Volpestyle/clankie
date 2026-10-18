@@ -8,7 +8,7 @@ import {
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import type { WorkerAccountStatus } from "./harness-accounts.ts";
 import type { PiSeatModel } from "./herdr-watch.ts";
-import { discoverPiNativeCapability } from "./pi-native-capability.ts";
+import { discoverPiNativeCapability, PiNativeRefusal } from "./pi-native-capability.ts";
 
 /** Inspect the same default profile native Pi opens; no login, refresh or credential mutation. */
 export async function localPiWorkerModelStatus(cwd: string): Promise<{ model: string } | { reason: string }> {
@@ -103,13 +103,17 @@ export function createPiWorkerStatusReader(options: {
           reason: "No authenticated model is available from the configured Pi worker provider",
         };
       return { ...base, signedIn: true, usable: true, models };
-    } catch {
+    } catch (error) {
       // Native capability/auth failures can contain paths or secrets; only a safe reason leaves the service.
+      // A release refusal names the installed version and the failed surface, so an upgrade stays visible.
       return {
         ...base,
         signedIn: null,
         usable: false,
-        reason: "Native Pi capability or model authentication could not be verified",
+        reason:
+          error instanceof PiNativeRefusal
+            ? error.message
+            : "Native Pi capability or model authentication could not be verified",
       };
     }
   };
