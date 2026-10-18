@@ -55,9 +55,15 @@ describe("doctor host power", () => {
       health({ doorway: { state: "connected" } }),
     );
 
-    expect(report.power).toMatchObject({ state: "sleep_allowed", source: "battery", sleepAfterMinutes: 1 });
+    expect(report.power).toMatchObject({
+      state: "sleep_allowed",
+      source: "battery",
+      sleepAfterMinutes: 1,
+      keepAwakeRequested: true,
+    });
     const advice = report.remediations.find((line) => line.startsWith("On battery"));
-    expect(advice).toContain("clankie awake on");
+    expect(advice).toContain("keep-awake only holds while plugged in");
+    expect(advice).toContain("Plug in");
     expect(advice).toContain("hosted Clankie");
   });
 
