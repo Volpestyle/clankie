@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { powershellLiteral, powershellScriptCommand } from "./herdr-fleet.ts";
+import { RESOURCE_HOLDER_RESET_ENV } from "@clankie/fleet-resources";
 
 const launcher = String.raw`
 using System;
@@ -181,6 +182,9 @@ $installed=@($installed | Select-Object -Unique)
 if($installed.Count -ne 1){throw 'Unique installed native Codex unavailable'}
 $cwd=[ClankieCodexLaunch]::DirectoryCanonical(${powershellLiteral(input.cwd)})
 $environment=[Environment]::GetEnvironmentVariables()
+${Object.entries(RESOURCE_HOLDER_RESET_ENV)
+  .map(([key, value]) => `$environment[${powershellLiteral(key)}]=${powershellLiteral(value)}`)
+  .join("\n")}
 $environment['HERDR_PANE_ID']=$pane
 $environment['HERDR_SOCKET_PATH']=$bindings[0].socket_path
 ${input.catalogObserved ? "$environment['CLANKIE_CODEX_CATALOG_OBSERVED']='1'" : ""}

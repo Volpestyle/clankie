@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { RESOURCE_HOLDER_RESET_ENV } from "@clankie/fleet-resources";
 import { windowsCodexBridge, windowsCodexLaunchCommand } from "../src/windows-codex-launch.ts";
 import * as externalCodex from "../src/captain/external-codex-control.ts";
 
@@ -83,7 +84,11 @@ describe("a remote Codex app-server (VUH-1527)", () => {
     })({
       cwd: "C:\\src\\app",
       configArgs: ["-c", "mcp_servers.linear.enabled=false"],
-      env: { HERDR_PANE_ID: "w8:p3", HERDR_SOCKET_PATH: "C:\\herdr\\herdr.sock" },
+      env: {
+        HERDR_PANE_ID: "w8:p3",
+        HERDR_SOCKET_PATH: "C:\\herdr\\herdr.sock",
+        ...RESOURCE_HOLDER_RESET_ENV,
+      },
       onExit,
     });
 
@@ -94,8 +99,9 @@ describe("a remote Codex app-server (VUH-1527)", () => {
     expect(script).toContain("CurrentDirectory = 'C:\\src\\app'");
     // Only the pane's Herdr identity crosses, so its MCP children find this session's link.
     expect(script).toContain(
-      'cmd.exe /d /s /c "set "HERDR_PANE_ID=w8:p3"&& set "HERDR_SOCKET_PATH=C:\\herdr\\herdr.sock"&& "',
+      'cmd.exe /d /s /c "set "HERDR_PANE_ID=w8:p3"&& set "HERDR_SOCKET_PATH=C:\\herdr\\herdr.sock"&& ',
     );
+    for (const key of Object.keys(RESOURCE_HOLDER_RESET_ENV)) expect(script).toContain(`set "${key}="&& `);
     expect(forward.spawn).toHaveBeenCalledWith(
       "ssh",
       forwardSshArgs(windows, localPort, 47_123),
@@ -128,12 +134,13 @@ describe("a remote Codex app-server (VUH-1527)", () => {
       spawn: forward.spawn,
       freeLocalPort: async () => 1,
       remotePort: () => 50_000,
-    })({ cwd: "/home/me/it's here", configArgs: [], onExit: vi.fn() });
+    })({ cwd: "/home/me/it's here", configArgs: [], env: RESOURCE_HOLDER_RESET_ENV, onExit: vi.fn() });
     expect(commands[0]).toMatch(/^exec sh -c '/u);
     // Undo the outer `sh -c '…'` quoting to read the script the remote shell runs.
     const script = commands[0]!.slice("exec sh -c '".length, -1).replaceAll("'\\''", "'");
     expect(script).toContain("nohup codex 'app-server' '--listen' 'ws://127.0.0.1:50000'");
     expect(script).toContain("cd '/home/me/it'\\''s here'");
+    for (const key of Object.keys(RESOURCE_HOLDER_RESET_ENV)) expect(script).toContain(`${key}='' `);
     await server.close();
     expect(commands.at(-1)).toContain("kill -TERM 77");
   });
@@ -167,6 +174,10 @@ describe("a remote Codex app-server (VUH-1527)", () => {
 
   it.each([
     { env: { OPENAI_API_KEY: "x" }, configArgs: [] },
+    ...Object.keys(RESOURCE_HOLDER_RESET_ENV).map((key) => ({
+      env: { [key]: "foreign-holder" },
+      configArgs: [],
+    })),
     { env: { CODEX_HOME: "relative/home" }, configArgs: [] },
     { env: { CLANKIE_EXPECTED_TOOL_NAMES: "[]" }, configArgs: [] },
     {
@@ -574,6 +585,7 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
       `mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(["linear_get_issue"]))}`,
     ],
     env: {
+      ...RESOURCE_HOLDER_RESET_ENV,
       HERDR_PANE_ID: "w1:p1",
       HERDR_SOCKET_PATH: "C:\\herdr.sock",
       CLANKIE_EXPECTED_TOOL_NAMES: JSON.stringify(["linear_get_issue"]),
@@ -596,6 +608,8 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
     script.indexOf("ResumeThread(created.thread)"),
   );
   expect(script).toContain("[Environment]::GetEnvironmentVariables()");
+  for (const key of Object.keys(RESOURCE_HOLDER_RESET_ENV))
+    expect(script).toContain(`$environment['${key}']=''`);
   expect(script).toContain("Worker bridge is stale or redirected");
   expect(script).toContain("Get-Command node.exe -All");
   expect(script).toContain("mcp_servers.worker.env.HERDR_PANE_ID");

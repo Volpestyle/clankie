@@ -1,4 +1,5 @@
 import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
+import { RESOURCE_HOLDER_RESET_ENV } from "@clankie/fleet-resources";
 import {
   windowsCodexLaunchCommand,
   windowsCodexStopCommand,
@@ -181,6 +182,10 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
       )
     )
       delete launchEnv.CLANKIE_EXPECTED_TOOL_NAMES;
+    // Empty holder resets deny inherited identity; they are not host/account
+    // overrides. Never accept a nonempty holder supplied by the controller.
+    for (const [key, value] of Object.entries(RESOURCE_HOLDER_RESET_ENV))
+      if (launchEnv[key] === value) delete launchEnv[key];
     // Only the pane's Herdr identity and the selected Codex home on that
     // machine cross, so the server's MCP children find their session's link
     // and it signs in as the chosen account; everything else comes from there.
@@ -192,6 +197,7 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
     );
     if (Object.keys(env).length + (codexHome === undefined ? 0 : 1) !== Object.keys(launchEnv).length)
       throw new Error("unsupported: a remote Codex server takes its environment from its own machine");
+    Object.assign(env, RESOURCE_HOLDER_RESET_ENV);
     if (codexHome !== undefined && !options.privateSeat) env.CODEX_HOME = codexHome;
     const id = randomUUID();
     const remotePort = options.remotePort?.() ?? randomInt(REMOTE_PORTS.min, REMOTE_PORTS.max + 1);

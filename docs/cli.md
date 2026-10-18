@@ -8594,6 +8594,11 @@ Advancement also refuses managed runtimes or unavailable/live ownership checks. 
 branches based on current main are valid. Non-Git workspaces remain usable for
 other tasks; saved-session resumes keep the exact saved cwd.
 
+SSH freshness refusals include the underlying Git, filesystem or census error.
+A live-pane refusal names its checkout directory; an unresolvable pane directory
+also blocks advancement. Preserve the checkout and inspect that pane before
+retrying. Diagnostics are bounded and redact credential-shaped values and URLs.
+
 A dirty-start refusal names up to 20 paths, including untracked directories.
 Preserve those files and use a clean deliverable worktree from fetched
 `origin/main`. Untracked scratch files still count as dirty.

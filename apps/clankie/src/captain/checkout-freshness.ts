@@ -1,5 +1,14 @@
 import { remoteProgramCommand, type HerdrFleet, type FleetShellRun } from "../herdr-fleet.ts";
 import type { HireCheckoutFreshness } from "@clankie/settings";
+import { redactSensitiveText } from "@clankie/observability";
+
+function diagnostic(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  return redactSensitiveText(text.replace(/\b(?:https?|ssh):\/\/[^\s"'`]+/giu, "[redacted-url]")).slice(
+    0,
+    2_000,
+  );
+}
 
 /** Runs on the enrolled machine; local filesystem facts cannot verify a PC checkout. */
 export function remoteCheckoutProgram(path: string, paneDirectories: string[] | null = []): string {
@@ -39,7 +48,9 @@ try {
           if(targets.some(target=>contains(target,canonical)||contains(canonical,target))) throw Error('Managed runtime checkout');
         }
         for(const directory of panes) {
-          if(contains(canonical,realpathSync(directory))) throw Error('Start checkout belongs to a live pane');
+          let resolved;
+          try {resolved=realpathSync(directory);} catch(error) {throw Error('Live pane checkout unavailable: '+JSON.stringify(directory)+': '+error.message);}
+          if(contains(canonical,resolved)) throw Error('Start checkout belongs to a live pane: '+JSON.stringify(directory));
         }
         if(git(['rev-parse','HEAD']).trim()!==head || git(['status','--porcelain=v1','-z','--untracked-files=normal'])) throw Error('Checkout changed');
         git(['-c','core.hooksPath=/dev/null','-c','merge.autoStash=false','merge','--ff-only','--no-autostash','--no-overwrite-ignore',remoteMain]);
@@ -50,7 +61,7 @@ try {
       }
     }
   }
-} catch { result={outcome:'refused',path,reason:'Cannot verify fresh origin/main on the remote machine'}; }
+} catch(error) { result={outcome:'refused',path,reason:'Cannot verify fresh origin/main on the remote machine: '+String(error.stderr||error.message||error).trim().slice(0,2000)}; }
 process.stdout.write(JSON.stringify(result));`;
 }
 export async function verifyRemoteHireCheckout(
@@ -73,8 +84,14 @@ export async function verifyRemoteHireCheckout(
           !/^[a-f0-9]{40,64}$/u.test(result.remoteMain ?? "")))
     )
       throw Error("Malformed freshness observation");
-    return result;
-  } catch {
-    return { outcome: "refused", path, reason: "Remote checkout freshness unavailable; no hire was started" };
+    return result.outcome === "refused" && result.reason
+      ? { ...result, reason: diagnostic(result.reason) }
+      : result;
+  } catch (error) {
+    return {
+      outcome: "refused",
+      path,
+      reason: `Remote checkout freshness unavailable; no hire was started: ${diagnostic(error)}`,
+    };
   }
 }

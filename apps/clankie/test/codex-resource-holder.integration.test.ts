@@ -2,10 +2,73 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { RESOURCE_HOLDER_RESET_ENV } from "@clankie/fleet-resources";
 import { expect, it, vi } from "vitest";
 import { startCodexAppServerSeat } from "../src/captain/codex-app-server.ts";
+import { remoteCodexServer } from "../src/captain/remote-codex-app-server.ts";
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+it("shared Codex startup reaches the remote executable with host holder identities cleared", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cl2447-"));
+  const bin = join(root, "bin");
+  const receipt = join(root, "remote-environment.json");
+  const exec = promisify(execFile);
+  try {
+    await mkdir(bin);
+    const program = join(root, "capture.cjs");
+    await writeFile(
+      program,
+      `require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify(process.env));`,
+    );
+    await writeFile(
+      join(bin, "codex"),
+      `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(program)} "$@"\n`,
+      { mode: 0o700 },
+    );
+    const inherited = Object.fromEntries(
+      Object.keys(RESOURCE_HOLDER_RESET_ENV).map((key) => [key, "host-operator"]),
+    );
+    const server = remoteCodexServer({
+      fleet: { id: "fixture", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } },
+      // Execute the generated remote launch script against a real owned executable.
+      // Stop after capture, before forwarding/RPC: the real PC hire is a deploy check.
+      shell: async (command) => {
+        await exec("/bin/sh", ["-c", command], {
+          env: { ...process.env, ...inherited, HOME: root, PATH: `${bin}:${process.env.PATH}` },
+        });
+        for (let attempt = 0; attempt < 200; attempt++) {
+          try {
+            await readFile(receipt, "utf8");
+            throw new Error("Remote environment captured before forwarding");
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        throw new Error("Remote executable did not write its environment");
+      },
+    });
+    await expect(
+      startCodexAppServerSeat({
+        cwd: root,
+        server,
+        startView: async () => {
+          throw new Error("No native view in this process-boundary proof");
+        },
+      }),
+    ).rejects.toThrow("Remote environment captured before forwarding");
+    const environment = JSON.parse(await readFile(receipt, "utf8"));
+    for (const [key, value] of Object.entries(RESOURCE_HOLDER_RESET_ENV))
+      expect(environment[key]).toBe(value);
+    // The host's ordinary environment still supplies the executable and home.
+    expect(environment.HOME).toBe(root);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 it("a hired Codex server clears the service and requested operator holders before its worker acquires", async () => {
   const root = await mkdtemp(join(tmpdir(), "cl2336-"));

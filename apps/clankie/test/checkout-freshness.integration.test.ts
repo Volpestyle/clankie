@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { checkoutGit, syncOwnerCheckout } from "@clankie/settings";
-import { remoteCheckoutProgram } from "../src/captain/checkout-freshness.ts";
+import { remoteCheckoutProgram, verifyRemoteHireCheckout } from "../src/captain/checkout-freshness.ts";
+import type { HerdrFleet } from "../src/herdr-fleet.ts";
 const exec = promisify(execFile);
 
 it("default fleet reads skip Git checkout work and opted-in reads reuse the complete bounded observation", async () => {
@@ -208,11 +209,22 @@ it("remote observer enforces fetched main and cleanliness in a real child proces
     const before = (await checkoutGit(owner, ["rev-parse", "HEAD"])).trim();
     const alias = join(root, "owner-alias");
     await symlink(owner, alias, "dir");
-    for (const census of [null, [alias]]) {
+    const missing = join(root, "missing-live-pane");
+    for (const [census, reason] of [
+      [null, "Live checkout census unavailable"],
+      [[alias], `Start checkout belongs to a live pane: ${JSON.stringify(alias)}`],
+      [[missing], `Live pane checkout unavailable: ${JSON.stringify(missing)}`],
+    ] as const) {
       const protectedStart = JSON.parse(
-        (await exec(process.execPath, ["-e", remoteCheckoutProgram(owner, census)])).stdout,
+        (
+          await exec(process.execPath, [
+            "-e",
+            remoteCheckoutProgram(owner, census === null ? null : [...census]),
+          ])
+        ).stdout,
       );
       expect(protectedStart.outcome).toBe("refused");
+      expect(protectedStart.reason).toContain(reason);
       expect((await checkoutGit(owner, ["rev-parse", "HEAD"])).trim()).toBe(before);
     }
     await mkdir(join(root, ".clankie"));
@@ -225,6 +237,7 @@ it("remote observer enforces fetched main and cleanliness in a real child proces
       ).stdout,
     );
     expect(runtimeStart.outcome).toBe("refused");
+    expect(runtimeStart.reason).toContain("Managed runtime checkout");
     expect((await checkoutGit(owner, ["rev-parse", "HEAD"])).trim()).toBe(before);
     expect(await observe()).toMatchObject({
       outcome: "fresh",
@@ -237,6 +250,40 @@ it("remote observer enforces fetched main and cleanliness in a real child proces
       reason: expect.stringContaining('"draft.txt"'),
     });
     expect(await readFile(join(owner, "draft.txt"), "utf8")).toBe("dirty\n");
+    await rm(join(owner, "draft.txt"));
+    await checkoutGit(owner, ["remote", "set-url", "origin", join(root, "missing-origin.git")]);
+    const fleet: HerdrFleet = {
+      id: "fixture",
+      session: "default",
+      ssh: { host: "fixture.invalid", shell: "posix" },
+    };
+    const failedFetch = await verifyRemoteHireCheckout(
+      fleet,
+      async (command) => (await exec("/bin/sh", ["-c", command])).stdout,
+      owner,
+    );
+    expect(failedFetch).toMatchObject({
+      outcome: "refused",
+      reason: expect.stringContaining("missing-origin.git"),
+    });
+    expect(failedFetch.reason).toContain("does not appear to be a git repository");
+    await checkoutGit(owner, [
+      "remote",
+      "set-url",
+      "origin",
+      "https://fixture:private-password@127.0.0.1:1/unreachable.git",
+    ]);
+    const unreachable = await verifyRemoteHireCheckout(
+      fleet,
+      async (command) => (await exec("/bin/sh", ["-c", command])).stdout,
+      owner,
+    );
+    expect(unreachable).toMatchObject({
+      outcome: "refused",
+      reason: expect.stringContaining("Failed to connect"),
+    });
+    expect(unreachable.reason).toContain("[redacted-url]");
+    expect(unreachable.reason).not.toContain("private-password");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -474,6 +474,10 @@ checkout, including detached HEAD. Dirty and divergent starts refuse; live and
 managed-runtime checkouts never auto-advance. Fresh topic branches are accepted. Roster and doctor
 checkout counts use cached refs.
 Dirty-start refusals name the blocking paths, including untracked files.
+Remote freshness refusals retain the underlying Git, filesystem or census cause;
+live-pane refusals name the checkout directory. An unresolved pane directory
+still blocks advancement. Inspect the named pane instead of retrying the hire
+or removing its checkout.
 Preserve owner scratch files and create a clean deliverable worktree from
 fetched `origin/main`; a refusal does not authorize deleting or ignoring them.
 
