@@ -7904,6 +7904,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     async close(): Promise<void> {
       shutdown.abort(new SeatLinkInterruptedError());
       seatEfficiency.close();
+      fleetRoster.close();
       stopFleetRounds();
       stopAutoRounds();
       stopLeadRestarts();
