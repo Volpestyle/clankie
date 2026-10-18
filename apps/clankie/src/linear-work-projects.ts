@@ -45,7 +45,7 @@ export function createLinearWorkProjects(options: {
         const projects: z.infer<typeof ProjectSchema>[] = [];
         const cursors = new Set<string>();
         let cursor: string | undefined;
-        do {
+        for (;;) {
           await check(binding);
           const page = PageSchema.parse(
             await options.call("list_projects", {
@@ -61,7 +61,7 @@ export function createLinearWorkProjects(options: {
           if (!page.cursor || cursors.has(page.cursor)) throw new Error("Incomplete Linear project list");
           cursors.add(page.cursor);
           cursor = page.cursor;
-        } while (true);
+        }
         return projects;
       })();
       cached = { binding, until: now() + 60_000, value };
