@@ -43,6 +43,22 @@ five-minute deadline, and Undo reopens its saved session. Existing guard cases
 retain coverage for dirty/unlanded work, unknown evidence and native processes.
 No live owner panes were closed.
 
+## Live parity follow-up
+
+Core `f011bf889` was deployed with a healthy canary. Live Mac/PC reads match all
+19 worker seats and occupants, but two stable PC `done` agents appear idle in
+the host projection. A separate PC snapshot confirms `done`: native harness
+idle enrichment was erasing completion. The projection now preserves Herdr
+`done` when the harness is idle, while a working or blocked harness still wins.
+Local and remote real-protocol regression cases fail before the fix and pass
+after it. All 69 protocol, roster and close-guard cases pass together.
+`live-parity-status-fix.json` retains the bracketed live reads, failing tests,
+passing report and exact source patch. No live panes were closed.
+
+The live host correctly reports unavailable `kh2` and a changing fleet cursor;
+these partial reads do not establish complete fleet parity or enable retirement.
+A deployed repeat remains pending.
+
 ## Gaps
 
 This is fixture-backed host/API evidence. Live local-plus-PC count comparison,

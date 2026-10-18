@@ -24,6 +24,12 @@
       "size": 20471,
       "sha256": "d6ff9cb4acc1338368a3d57fc25164148a4fcc278752da47d1fc06139b2f6c80",
       "url": "clankie://evidence/sha256/d6ff9cb4acc1338368a3d57fc25164148a4fcc278752da47d1fc06139b2f6c80"
+    },
+    {
+      "path": "live-parity-status-fix.json",
+      "size": 393441,
+      "sha256": "ce1942a2c99222841ca1acaa9d8de348b3b1e00eca25028bbcb7d47605dff91d",
+      "url": "clankie://evidence/sha256/ce1942a2c99222841ca1acaa9d8de348b3b1e00eca25028bbcb7d47605dff91d"
     }
   ]
 }

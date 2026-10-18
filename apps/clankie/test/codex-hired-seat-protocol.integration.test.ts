@@ -13,7 +13,9 @@ import {
   OperatorConversationServiceRequestSchema,
   OperatorConversationServiceResultSchema,
   OperatorFleetSeatSchema,
+  OperatorFleetSnapshotSchema,
 } from "@clankie/protocol";
+import { FleetRoster } from "../src/captain/fleet-roster.ts";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import type { ConversationAuthority } from "../src/captain/conversation-owner.ts";
 import { HerdrWatchStore, parseHerdrAgentResult } from "../src/captain/herdr-watch.ts";
@@ -227,6 +229,50 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
     throw error;
   }
 }
+
+it.each([false, true])(
+  "keeps a finished Herdr worker finished when its native harness is idle (remote=%s)",
+  async (remote) => {
+    const f = await hiredFixture({}, remote);
+    try {
+      const project = async () => {
+        const observed = await f.census();
+        const roster = observed.seats.map((seat) =>
+          OperatorFleetSeatSchema.parse({
+            seatId: seat.seatId,
+            occupantId: seat.occupantId,
+            personaId: seat.subject,
+            harness: seat.harness,
+            status: seat.status,
+            title: seat.title,
+          }),
+        );
+        return f.store.withNativeStatus(roster, observed.seats);
+      };
+      // A running native turn still outranks an earlier Herdr completion.
+      expect(await f.control.status()).toBe("working");
+      f.pane.agent_status = "done";
+      expect(await project()).toMatchObject([{ status: "working" }]);
+      f.native.finish("completed", "Work complete");
+      await vi.waitFor(async () => expect(await f.control.status()).toBe("idle"));
+      f.pane.agent_status = "done";
+      const seats = await project();
+      expect(seats).toMatchObject([{ status: "done" }]);
+      const snapshot = OperatorFleetSnapshotSchema.parse({
+        schemaVersion: 1,
+        cursor: "fleet:1",
+        seats,
+        personas: [],
+        channels: [],
+      });
+      expect(
+        new FleetRoster(join(f.directory, "fleet-roster.json")).project(snapshot, new Set()).counts,
+      ).toMatchObject({ total: 1, working: 0, idle: 0, finished: 1 });
+    } finally {
+      await f.close();
+    }
+  },
+);
 
 it("routes path-bound Codex 0.160 async questions to the hiring lead and waits for proven native idle after owner abort", async () => {
   const { native, pane, control, store, owner, wakes, fallback, census, close } = await hiredFixture();

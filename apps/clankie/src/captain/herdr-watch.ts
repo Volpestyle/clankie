@@ -1711,7 +1711,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ]);
         return {
           ...seat,
-          ...(status === "idle" || status === "working" || status === "blocked" ? { status } : {}),
+          // Native idle proves quiescence, not that a completed worker became unfinished.
+          ...(status === "idle" || status === "working" || status === "blocked"
+            ? { status: status === "idle" && source.status === "done" ? "done" : status }
+            : {}),
           ...(reason === undefined ? {} : { summary: bounded(redactSensitiveText(reason), 1_000) }),
         };
       }),

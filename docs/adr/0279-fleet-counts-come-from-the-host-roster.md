@@ -11,7 +11,9 @@ The host projects its existing native fleet roster through owner-only
 source evidence, every observed agent, and counts by status, machine and lead.
 Native working/waiting/idle/done maps to working/waiting/idle/finished; unsupported
 statuses stay unknown. A pending host owner question takes precedence as waiting.
-The client renders these facts without reconstructing them.
+A native harness idle response proves quiescence and preserves Herdr `done`;
+a resumed working or blocked harness still takes precedence. The client renders
+these facts without reconstructing them.
 
 An idle or finished exact occupant becomes stale after more than one continuous
 hour, with no queued messages, unacknowledged reports, running native children or
