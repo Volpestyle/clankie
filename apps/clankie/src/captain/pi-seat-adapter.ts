@@ -20,6 +20,11 @@ import { discoverPiNativeCapability } from "./pi-native-capability.ts";
 import { createPiWorkerController } from "./pi-worker-controller.ts";
 import { DeliveryFence } from "./delivery-fence.ts";
 
+// Pi 1.2+ runs before_agent_start for an idle triggered send, and the fleet
+// consumer waits there (bounded at 20 s) for its MCP catalog before the custom
+// message's receipt. Briefs and follow-ups share one window (VUH-2417).
+const SEND_RECEIPT_MS = 30_000;
+
 const Status = z.enum(["idle", "working", "blocked"]);
 const Session = z.object({
   sessionId: z.string().uuid(),
@@ -261,9 +266,9 @@ export function createPiSeatAdapter(deps: {
                         messageId,
                         text,
                         deliverAs: "followUp",
-                        timeoutMs: options?.timeoutMs ?? deps.timeoutMs ?? 10_000,
+                        timeoutMs: options?.timeoutMs ?? deps.timeoutMs ?? SEND_RECEIPT_MS,
                       },
-                      (options?.timeoutMs ?? deps.timeoutMs ?? 10_000) + 1000,
+                      (options?.timeoutMs ?? deps.timeoutMs ?? SEND_RECEIPT_MS) + 1000,
                     ),
                   );
                   if (result.outcome === "unavailable")
@@ -350,7 +355,7 @@ export function createPiSeatAdapter(deps: {
             // the fleet consumer gives its tools up to 20 seconds to connect.
             if (
               launch.brief &&
-              (await control.send(launch.brief, { timeoutMs: deps.timeoutMs ?? 30_000 })).outcome !==
+              (await control.send(launch.brief, { timeoutMs: deps.timeoutMs ?? SEND_RECEIPT_MS })).outcome !==
                 "accepted"
             )
               throw new Error("brief_delivery_unverified: native Pi did not confirm its brief");

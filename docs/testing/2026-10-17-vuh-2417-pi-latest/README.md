@@ -61,7 +61,9 @@ run and pass, and they also pass with 0.87.1 first on `PATH`.
 
 ## Live hire
 
-LIVE_HIRE_RESULT
+A real hire on the installed Pi 1.3.0 (`openrouter/~anthropic/claude-haiku-latest`) passed end to end, by `apps/clankie/scripts/verify-pi-seat.ts` in a throwaway service and Herdr session ([live-hire.json](live-hire.json)): spawn, brief consumed, the worker's `message_clankie` report stored, a follow-up `message_seat` **delivered** and answered, and the completion harvested.
+
+The first run failed at the follow-up: `message_seat` came back `unconfirmed`. Briefs had the 30-second receipt window, but follow-ups kept 10 seconds, and on 1.2+ an idle triggered send first waits (up to 20 seconds) in `before_agent_start` for the MCP catalog. Every send now shares the 30-second window (`SEND_RECEIPT_MS` in `pi-seat-adapter.ts`).
 
 ## What this does not prove
 
