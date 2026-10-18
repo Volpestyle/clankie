@@ -265,6 +265,7 @@ export interface CaptainPort {
     pane: string,
     seat: string,
     occupant: string,
+    allowTrackerReads?: boolean,
   ): Promise<string | null | undefined>;
   projectHireMembershipCandidate(fleet: string, pane: string): ProjectHireMembershipCandidate;
   confirmedProjectHireAssignment(

@@ -54,6 +54,7 @@ export async function fleetRosterWork(
             },
             signal,
             async () => (!signal.aborted ? true : "forbidden"),
+            { allowTrackerReads: false },
           );
           if (signal.aborted || proof.projectsRevision !== revision) return;
           for (const seat of seats) {

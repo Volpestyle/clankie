@@ -199,6 +199,16 @@ it("joins an owner-started process's real cwd to enrolled settings and its saved
         },
       ],
     });
+    f.options.hires.leadHireMembershipProject = async (
+      _fleet,
+      _pane,
+      _seat,
+      _occupant,
+      allowTrackerReads,
+    ) => {
+      expect(allowTrackerReads).toBe(false);
+      return undefined;
+    };
     const work = await fleetRosterWork(snapshot, f.settings(), service, new AbortController().signal);
     expect(work.get("seat0")).toEqual({
       project: { id: "repo", name: "Repository" },
@@ -216,6 +226,7 @@ it("joins an owner-started process's real cwd to enrolled settings and its saved
       (await fleetRosterWork(snapshot, f.settings(), service, new AbortController().signal)).get("seat0")
         ?.project,
     ).toBeNull();
+    delete f.options.hires.leadHireMembershipProject;
     expect(await readFile(f.path, "utf8")).toBe(before);
     await expect(
       service.read(f.input, new AbortController().signal, async () => {

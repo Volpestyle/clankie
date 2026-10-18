@@ -6887,7 +6887,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         needsYou: questions.length,
       };
     },
-    leadHireMembershipProject: async (_fleet, pane, seat, occupant) => {
+    leadHireMembershipProject: async (_fleet, pane, seat, occupant, allowTrackerReads = true) => {
       const owner = herdrWatches.leadHireMembershipOwner(pane, seat, occupant);
       if (owner === null) return null;
       if (!owner) return undefined;
@@ -6907,6 +6907,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return null;
       }
       if (configured !== undefined) return configured;
+      // Roster enrichment must never turn a missing project into a provider poll.
+      if (!allowTrackerReads) return null;
       const deliverable = seatEfficiency.readAssignedDeliverable(occupant, owner.conversationId);
       if (deliverable === undefined) return null;
       const trackerProject = await options.projectHireDeliverableTrackerProject?.(deliverable);

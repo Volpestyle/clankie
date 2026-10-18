@@ -127,6 +127,7 @@ export class FleetProjectMembership {
     settings: ProjectsSettings,
     binding: HerdrBinding | undefined,
     controller: AbortController,
+    allowTrackerReads: boolean,
   ): Promise<Receipt> {
     const signal = controller.signal;
     const fleet = this.options.fleet ?? "default";
@@ -173,6 +174,7 @@ export class FleetProjectMembership {
                     agent.paneId,
                     row.seatId,
                     row.occupantId,
+                    allowTrackerReads,
                   )
                 : undefined;
             const ownerStarted =
@@ -316,6 +318,7 @@ export class FleetProjectMembership {
     value: ReadFleetProjectMembership,
     signal: AbortSignal,
     authorize: () => Promise<MembershipAuthorization>,
+    readOptions: { allowTrackerReads?: boolean } = {},
   ): Promise<FleetProjectMembershipSnapshot> {
     const auth = async () => {
       signal.throwIfAborted();
@@ -341,7 +344,7 @@ export class FleetProjectMembership {
           const options = fleet === "default" ? localOptions : await this.options.remoteOptions!(fleet);
           if (!options) return seats.map((seat) => ({ ...seat, membership: unknown("unsupported_host") }));
           const child = new FleetProjectMembership(options, this.pool);
-          const snapshot = await child.read({ schemaVersion: 1, seats }, signal, authorize);
+          const snapshot = await child.read({ schemaVersion: 1, seats }, signal, authorize, readOptions);
           if (snapshot.projectsRevision !== projectsRevision(before))
             throw new FleetMembershipReadError("changed");
           return snapshot.seats;
@@ -368,7 +371,9 @@ export class FleetProjectMembership {
     }
     if (
       this.pool.batches >= 4 &&
-      ![...this.batches.values()].some((batch) => batch.input === JSON.stringify(input))
+      ![...this.batches.values()].some(
+        (batch) => batch.input === JSON.stringify([input, readOptions.allowTrackerReads ?? true]),
+      )
     )
       throw new FleetMembershipReadError("busy");
     const releaseBinding =
@@ -381,14 +386,19 @@ export class FleetProjectMembership {
     }
     const settings = await this.options.settings();
     signal.throwIfAborted();
-    const key = JSON.stringify([input, projectsRevision(settings), binding]);
+    const key = JSON.stringify([
+      input,
+      projectsRevision(settings),
+      binding,
+      readOptions.allowTrackerReads ?? true,
+    ]);
     let batch = this.batches.get(key);
     if (batch?.controller.signal.aborted) throw new FleetMembershipReadError("busy");
     if (!batch) {
       if (this.pool.batches >= 4) throw new FleetMembershipReadError("busy");
       const controller = new AbortController();
       batch = {
-        input: JSON.stringify(input),
+        input: JSON.stringify([input, readOptions.allowTrackerReads ?? true]),
         controller,
         waiters: 0,
         readers: 0,
@@ -397,7 +407,7 @@ export class FleetProjectMembership {
           () => controller.abort(new Error("Membership deadline")),
           this.options.deadlineMs ?? 5000,
         ),
-        result: this.collect(input, settings, binding, controller),
+        result: this.collect(input, settings, binding, controller, readOptions.allowTrackerReads ?? true),
       };
       this.batches.set(key, batch);
       this.pool.batches++;
@@ -469,6 +479,7 @@ export class FleetProjectMembership {
                     candidate.pane,
                     row.seatId,
                     row.occupantId,
+                    readOptions.allowTrackerReads ?? true,
                   )) !== (row.membership.source === "hire" ? row.membership.projectId : undefined)
                 )
                   throw new FleetMembershipReadError("changed");
