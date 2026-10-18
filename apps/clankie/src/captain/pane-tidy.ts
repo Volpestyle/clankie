@@ -212,6 +212,11 @@ export class PaneTidy {
       ? PaneTidyStateSchema.parse(JSON.parse(readFileSync(path, "utf8")))
       : { version: 1, entries: [], reports: [] };
   }
+  /** Service-only attribution for an authenticated owner Undo; never supplied by a client. */
+  undoOwner(id: string): ConversationOwner | undefined {
+    const owner = this.state.entries.find((entry) => entry.id === id)?.closedBy;
+    return owner ? structuredClone(owner) : undefined;
+  }
   history(): readonly ClosedWorkerPane[] {
     return this.state.entries.slice(-128).map(publicEntry).reverse();
   }
@@ -532,6 +537,8 @@ export class PaneTidy {
       /** Why the worker's unlanded commits or uncommitted files may be left behind. */
       unlandedReason?: string;
       idleOnly?: boolean;
+      /** App retirement cannot close a worker that has started waiting on its owner. */
+      inactiveOnly?: boolean;
       expected?: { terminalId: string; sessionKey: string };
       nativeOnly?: boolean;
     },
@@ -615,6 +622,7 @@ export class PaneTidy {
         await retirementGuard?.().catch((error: unknown) => fail("provenance_unknown", errorText(error)));
         const latest = await this.fresh(agent.paneId);
         if (input.idleOnly && !["idle", "waiting", "done"].includes(latest.status)) return fail("busy");
+        if (input.inactiveOnly && !["idle", "done"].includes(latest.status)) return fail("busy");
         if (
           latest.terminalId !== agent.terminalId ||
           tidySessionKey(latest) !== key ||

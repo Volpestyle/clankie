@@ -325,6 +325,7 @@ export class SeatEfficiencyStore {
         ? {}
         : { contextPercent }),
       ...(record.lastProgressAt === undefined ? {} : { lastProgressAt: record.lastProgressAt }),
+      ...(record.inactiveSince === undefined ? {} : { inactiveSince: record.inactiveSince }),
       ...(record.lastReportAt === undefined ? {} : { lastReportAt: record.lastReportAt }),
       ...(record.reportFailures === undefined ? {} : { reportFailures: record.reportFailures }),
       ...(record.reviewedAt === undefined ? {} : { reviewedAt: record.reviewedAt }),

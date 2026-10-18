@@ -1,3 +1,8 @@
+import { fleetRosterAction } from "../src/captain/fleet-roster-actions.ts";
+import { FleetRoster } from "../src/captain/fleet-roster.ts";
+import { createClankieApp } from "../src/app.ts";
+import { createStubCaptain } from "../src/captain/port.ts";
+import { runFleetRosterCommand } from "../../tui/src/command/fleet-roster.ts";
 import type { SeatControl } from "@clankie/agent-hosts";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1292,4 +1297,82 @@ it("automatic tidy closes a harvested, landed hire only after its idle period", 
   expect(notices).toEqual([["lead", "Auto-tidy: idle 1h with its reports read and its work landed"]]);
   expect(f.tidy.history()[0]).toMatchObject({ state: "closed", reason: notices[0]![1] });
   f.watch.close();
+});
+
+// VUH-2448: the app API/CLI uses the production orchestrator and the same
+// native socket, ownership/report journals, draft parser and close/undo guards.
+it("retires an exact finished occupant through the owner API and reopens it through Undo", async () => {
+  const f = await fixture({ socket: true });
+  f.setStatus("done");
+  const native = (await f.ports.runner.get("w1:p1"))!;
+  const model = new FleetRoster(join(f.root, "roster.json"));
+  const read = async () =>
+    model.project(
+      {
+        schemaVersion: 1,
+        cursor: "fleet:1",
+        seats: [
+          {
+            seatId: native.terminalId,
+            occupantId: occupantIdForHerdrSession(native.session!),
+            personaId: "pip",
+            harness: "codex",
+            status: "done",
+            title: "Pip",
+            owner: { conversationId: "lead", hired: true },
+          },
+        ],
+        personas: [],
+        channels: [],
+      },
+      new Set(),
+    );
+  const service = await createClankieApp({
+    eventLogPath: join(f.root, "events.jsonl"),
+    authenticateOperator: async (req) =>
+      req.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+    captain: createStubCaptain({
+      fleetRoster: read,
+      fleetRosterAction: (command, authority) =>
+        fleetRosterAction(command, authority, {
+          read,
+          resolve: async () => ({ native, owner: { conversationId: "lead" } }),
+          tidy: f.tidy,
+          current: () => true,
+          ownerValid: async () => true,
+          changed: () => {},
+        }),
+    }),
+  });
+  const options = {
+    ownerFetcher: {
+      fetch: async (path: string, init?: RequestInit) =>
+        service.app.request(path, { ...init, headers: { ...init?.headers, authorization: "Bearer owner" } }),
+    },
+  };
+  try {
+    const roster = await runFleetRosterCommand([], options);
+    if (!("agents" in roster)) throw new Error("Expected roster");
+    const row = roster.agents[0]!;
+    const retire = () => runFleetRosterCommand(["retire", row.seatId, row.occupantId], options);
+    expect(await retire()).toMatchObject({ outcome: "refused", reason: "results_not_kept" });
+    expect(f.closes()).toBe(0);
+    f.tidy.keepReport(native, "All work landed; proof retained.");
+    f.setAnsi(await golden("codex", "draft"));
+    expect(await retire()).toMatchObject({ outcome: "refused", reason: "unsent_draft" });
+    expect(f.closes()).toBe(0);
+    f.setAnsi(await golden("codex", "empty"));
+    const closed = await retire();
+    expect(closed).toMatchObject({ outcome: "closed", entry: { state: "closed" } });
+    if (!("entry" in closed)) throw new Error("Expected history");
+    expect(f.closes()).toBe(1);
+    expect(Date.parse(closed.entry.undoUntil) - Date.parse(closed.entry.closedAt)).toBe(300_000);
+    expect(await runFleetRosterCommand(["undo", closed.entry.id], options)).toMatchObject({
+      outcome: "reopened",
+      entry: { state: "reopened" },
+    });
+  } finally {
+    service.close();
+    f.watch.close();
+  }
 });

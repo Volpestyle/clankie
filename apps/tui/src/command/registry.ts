@@ -447,6 +447,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["fleet"],
     lines: [
+      "  fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards",
+
       "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear",
       "          [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]",
       "                           Read or set fleet routing, budget, autonomy and connected tools",

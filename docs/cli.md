@@ -8647,6 +8647,28 @@ command is sent, and a call that cannot be recorded is refused. The audit stores
 only the digest, but the full command text stays in that conversation's session
 transcript. The digest is a convention, not secrecy.
 
+### `fleet roster [retire SEAT OCCUPANT | undo HISTORY_ID]`
+
+Read the owner's live fleet counts, grouped by working, waiting, idle and
+finished, machine and lead. Each row includes its native occupant identity,
+issue, last known progress and host-observed stale flag. `complete: false` and
+`readWarnings` mean a source did not answer; those agents are unknown, not zero.
+Unsupported native statuses have an explicit unknown count.
+
+Retire takes the exact seat and occupant IDs from that read. Only finished or
+stale hires with nothing pending qualify. The existing `close_worker_pane`
+implementation checks kept reports, unsent drafts, provenance, work and native
+process identity. A refusal keeps the pane and returns its reason. There is no
+force or unlanded-work override on this owner route. Undo takes the returned
+history ID within its five-minute window and resumes the same native session.
+Never retry a retire or Undo automatically after a lost response; inspect the
+roster and close history first.
+
+The CLI, API client and app use `GET /v1/fleet/roster`,
+`POST /v1/fleet/roster/retire` and `POST /v1/fleet/roster/undo`. Reads and writes
+require the operator or an owner-paired Take Control device. Worker, support and
+visitor credentials do not grant access. See [ADR 0279](adr/0279-fleet-counts-come-from-the-host-roster.md).
+
 ### `fleet processes` / `fleet processes retire`
 
 `clankie fleet processes` reads the local host's Codex, Claude and Codex helper

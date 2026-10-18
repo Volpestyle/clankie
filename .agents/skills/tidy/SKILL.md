@@ -25,6 +25,15 @@ go. When a worker's live context is worth keeping, or the owner asks, call
 `keep: false` (or `clankie agents unkeep`) releases it. A keep never closes
 anything and never stops your own `close_worker_pane`.
 
+For the owner's at-a-glance inventory, `clankie fleet roster` reads the same
+host counts as the app, including machine/lead groups, stale flags and source
+warnings. An incomplete read never proves agents absent. The explicit owner
+route `clankie fleet roster retire SEAT OCCUPANT` accepts only a finished or
+stale exact occupant and retains every close guard; `clankie fleet roster undo
+HISTORY_ID` uses the returned five-minute undo window. These routes require
+owner authority; they are not another lead's permission to steer a hire. Never
+retry a mutation automatically after an uncertain response.
+
 Use `close_worker_pane` for each pane you judge finished, with a short one-line
 reason and its saved report path when available. The service preserves its last
 output and report in `worker_pane_history`, and returns an undo ID with a short

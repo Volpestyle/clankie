@@ -1,4 +1,13 @@
 import {
+  FLEET_ROSTER_PATH,
+  FLEET_ROSTER_RETIRE_PATH,
+  FLEET_ROSTER_UNDO_PATH,
+  RetireFleetAgentSchema,
+  UndoFleetAgentSchema,
+  FleetRosterSnapshotSchema,
+  FleetRosterActionResultSchema,
+} from "../../../packages/protocol/src/fleet-roster.ts";
+import {
   HTTP_SETTINGS_PATH,
   HttpSettingsSnapshotSchema,
   UpdateHttpSettingsSchema,
@@ -190,6 +199,9 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "POST", path: HUDDLE_CLOSE_PATH },
   { method: "GET", path: VIEWS_PATH },
   { method: "POST", path: VIEWS_PATH },
+  { method: "GET", path: FLEET_ROSTER_PATH },
+  { method: "POST", path: FLEET_ROSTER_RETIRE_PATH },
+  { method: "POST", path: FLEET_ROSTER_UNDO_PATH },
   { method: "GET", path: ROUTINES_PATH },
   { method: "POST", path: ROUTINES_PATH },
   { method: "GET", path: LINEAR_FOLLOW_PATH },
@@ -282,6 +294,17 @@ const OWNER_SETTINGS_ROUTES: Readonly<
   [HUDDLES_PATH]: { methods: ["GET", "POST"], update: StartHuddleSchema, snapshot: HuddlesResponseSchema },
   [HUDDLE_CLOSE_PATH]: { methods: ["POST"], update: CloseHuddleSchema, snapshot: HuddleSchema },
   [VIEWS_PATH]: { methods: ["GET", "POST"], update: ViewRequestSchema, snapshot: ViewsResponseSchema },
+  [FLEET_ROSTER_PATH]: { methods: ["GET"], snapshot: FleetRosterSnapshotSchema },
+  [FLEET_ROSTER_RETIRE_PATH]: {
+    methods: ["POST"],
+    update: RetireFleetAgentSchema,
+    snapshot: FleetRosterActionResultSchema,
+  },
+  [FLEET_ROSTER_UNDO_PATH]: {
+    methods: ["POST"],
+    update: UndoFleetAgentSchema,
+    snapshot: FleetRosterActionResultSchema,
+  },
   [ROUTINES_PATH]: { methods: ["GET", "POST"], update: RoutineCommandSchema, snapshot: RoutinesStatusSchema },
   [PROJECTS_PATH]: { methods: ["GET"], snapshot: ProjectsSnapshotSchema },
   [PROJECT_UPDATE_SETTINGS_PATH]: {

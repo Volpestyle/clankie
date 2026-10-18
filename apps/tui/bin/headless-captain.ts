@@ -486,6 +486,15 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "fleet") {
+      if (rest[0] === "roster") {
+        outputJson(
+          stdout,
+          await (
+            await import("../src/command/fleet-roster.ts")
+          ).runFleetRosterCommand(rest.slice(1), options),
+        );
+        return 0;
+      }
       if (rest[0] === "room")
         return await (
           await import("../src/command/fleet-room.ts")

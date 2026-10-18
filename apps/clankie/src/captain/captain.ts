@@ -279,6 +279,8 @@ import {
 import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
 import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
+import { FleetRoster } from "./fleet-roster.ts";
+import { fleetRosterAction } from "./fleet-roster-actions.ts";
 import { PaneTidy } from "./pane-tidy.ts";
 import { AUTO_TIDY_PANE_CHECK_MS, AUTO_TIDY_WORKTREE_CHECK_MS, createAutoTidy } from "./auto-tidy.ts";
 import {
@@ -2798,6 +2800,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     changed: () => fleetChanges.touch(),
   });
+  const fleetRoster = new FleetRoster(join(options.stateDir, "fleet-roster.json"));
+  const waitingRosterSeats = () =>
+    new Set(
+      conversations
+        .pendingLeadQuestions()
+        .flatMap((result) =>
+          result.question?.workerQuestion ? [result.question.workerQuestion.seatId] : [],
+        ),
+    );
   herdrWatches.tidy = paneTidy;
   const issueStatus = new SeatIssueKeeper(deps.mcp, join(options.stateDir, "seat-issue-status.json"), {
     requireAttribution: true,
@@ -4306,6 +4317,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         for (const result of results) if (result.outcome === "failed") warnSeatIssueUnavailable(result);
       });
     stopIssues();
+    fleetRoster.project(
+      {
+        schemaVersion: 1,
+        cursor: fleetChanges.current(),
+        seats: [...projected],
+        personas: [],
+        channels: [],
+        ...(pendingFleetSources.size || unansweredFleetSources.size
+          ? {
+              readWarnings: [
+                {
+                  source: "native_fleet_projection",
+                  reason: "unavailable" as const,
+                  message: "A fleet source did not answer.",
+                },
+              ],
+            }
+          : {}),
+      },
+      waitingRosterSeats(),
+    );
     return projected;
   }
 
@@ -4594,6 +4626,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   /** Prefer a stable cursor, but a busy or slow fleet must not starve display reads. */
+  async function readFleetRoster() {
+    const { snapshot } = await fleetSnapshot();
+    const readWarnings = [...(snapshot.readWarnings ?? [])];
+    for (const source of [...unansweredFleetSources, ...pendingFleetSources]) {
+      if (readWarnings.length >= 16 || readWarnings.some((warning) => warning.source === source)) continue;
+      readWarnings.push({
+        source,
+        reason: "unavailable",
+        message: `${source} has not answered; its agents are not confirmed absent.`,
+      });
+    }
+    const result = fleetRoster.project(
+      { ...snapshot, ...(readWarnings.length ? { readWarnings } : {}) },
+      waitingRosterSeats(),
+    );
+    return {
+      ...result,
+      agents: result.agents.map((agent) => {
+        const lead = agent.leadId && conversations.conversation(agent.leadId)?.title;
+        return lead ? { ...agent, lead } : agent;
+      }),
+      leads: result.leads.map((lead) => ({
+        ...lead,
+        name: conversations.conversation(lead.id)?.title ?? lead.name,
+      })),
+    };
+  }
+
   async function fleetSnapshot({ includeCheckouts = false }: { includeCheckouts?: boolean } = {}): Promise<
     Extract<OperatorConversationServiceResult, { op: "fleet" }>
   > {
@@ -6970,6 +7030,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     syncCheckouts,
     pruneWorktree,
     reclaimWorktreeCaches: reclaimCaches,
+    fleetRoster: readFleetRoster,
+    fleetRosterAction: (command, authority) =>
+      fleetRosterAction(command, authority, {
+        read: async () => {
+          await refreshFleet({ force: true });
+          return readFleetRoster();
+        },
+        resolve: async (row) => {
+          const edge = liveEdgeSeats.find(
+            (seat) => seat.seatId === row.seatId && seat.occupantId === row.occupantId,
+          );
+          if (!edge) return undefined;
+          const native = await herdrRunner.get(edge.paneId);
+          if (!native?.session || occupantIdForHerdrSession(native.session) !== row.occupantId)
+            return undefined;
+          const claim = herdrWatches.seatClaim(native);
+          return claim?.hired ? { native, owner: claim.owner } : undefined;
+        },
+        tidy: paneTidy,
+        ownerValid: validateConversationOwner,
+        current: () => !shutdown.signal.aborted,
+        changed: () => fleetChanges.touch(),
+      }),
     tidyWorktrees: (repository, mergedInto) => paneTidy.worktreeReport(repository, mergedInto),
     ...(deps.harnessProcesses
       ? {
