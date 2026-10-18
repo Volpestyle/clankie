@@ -5,6 +5,7 @@ import { createFilesBackend } from "./backends/files.ts";
 import { createGithubBackend, type GhRunner, type GithubApi } from "./backends/github.ts";
 import {
   assertLinearIssueScope,
+  assertLinearProjectTeam,
   createLinearBackend,
   linearResourceId,
   type LinearToolCall,
@@ -36,6 +37,8 @@ export interface TrackerDeps extends WorkWriteCallbacks {
   readonly linear?: LinearToolCall;
   readonly clock?: () => Date;
   readonly scopedWrites?: boolean;
+  /** Delegated connected-Linear tools may write across projects within the saved team. */
+  readonly linearWriteScope?: "team";
   /** Ancillary repo state belongs in service state, or ignored `.local/` for standalone use. */
   readonly trackerDirectory?: string;
   /** Host-authenticated writer, recorded by the built-in tracker; never from tool arguments. */
@@ -237,7 +240,7 @@ export function trackerToolsFor(
         if (deps.scopedWrites) {
           for (const [field, helper, expected] of [
             ["team", "get_team", scope.team],
-            ["project", "get_project", scope.project],
+            ["project", "get_project", deps.linearWriteScope === "team" ? undefined : scope.project],
           ] as const) {
             if (args[field] === undefined || expected === undefined) continue;
             if (args[field] === null) throw new WorkItemScopeError();
@@ -251,10 +254,23 @@ export function trackerToolsFor(
             )
               throw new WorkItemScopeError();
           }
+          if (deps.linearWriteScope === "team") {
+            const project =
+              args.project === undefined && name === "save_issue" && args.id === undefined
+                ? scope.project
+                : args.project;
+            if (project !== undefined && project !== null)
+              await assertLinearProjectTeam(await call("get_project", { query: project }), {
+                team: scope.team,
+                call,
+              });
+          }
+          const issueScope =
+            deps.linearWriteScope === "team" ? { team: scope.team, call } : { ...scope, call };
           if (name === "save_issue" && typeof args.id === "string")
-            await assertLinearIssueScope(await call("get_issue", { id: args.id }), { ...scope, call });
+            await assertLinearIssueScope(await call("get_issue", { id: args.id }), issueScope);
           if ((name === "save_comment" || name === "create_comment") && typeof args.issueId === "string")
-            await assertLinearIssueScope(await call("get_issue", { id: args.issueId }), { ...scope, call });
+            await assertLinearIssueScope(await call("get_issue", { id: args.issueId }), issueScope);
         }
         const parameters = {
           ...(scoped

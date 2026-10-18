@@ -1096,6 +1096,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             ...dependencies,
             ...(builtIn ? { builtIn } : {}),
             scopedWrites: true,
+            linearWriteScope: "team",
             actor: CLANKIE_FOR_OWNER,
             beforeWrite,
             ...(convention.backend !== "linear"
@@ -1257,6 +1258,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         ...callbacks,
         beforeWrite,
         scopedWrites: !local,
+        ...(!local ? { linearWriteScope: "team" as const } : {}),
         ...(convention.backend !== "linear" ||
         options.mcpHost === undefined ||
         dependencies.linear === undefined

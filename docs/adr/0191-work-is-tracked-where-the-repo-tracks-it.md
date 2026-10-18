@@ -109,11 +109,20 @@ owner identity and rechecks expiry, revocation, abort, saved repository or
 project binding, workspace identity and tracker convention immediately before
 publication. A device names an opaque registered or project repository ID,
 never a path. Project writes require the local enrolled tracker workspace.
-Linear additionally proves the source issue belongs to the configured canonical
-team and project. GitHub owner writes use the connected account, rather than
-an ambient `gh` login. Connected-provider dispatch retains its account and
-configuration fences. Dependencies remain prerequisite metadata; adding one
+Linear owner-device writes additionally prove the source issue belongs to the
+configured canonical team and project. GitHub owner writes use the connected
+account, rather than an ambient `gh` login. Connected-provider dispatch retains
+its account and configuration fences. Dependencies remain prerequisite metadata; adding one
 never writes the referenced item.
+
+**Delegated Linear writes (2026-10-18, VUH-2454).** James authorized workers to
+write across projects in the repo's saved Linear team. Both hired-project and
+explicit-repo tool routes compare the fresh issue's canonical team UUID, without
+requiring its project to match the repo's default. Named projects must resolve
+through the connected account and include that same team UUID; missing membership
+or another team is refused. Creation still defaults to the saved project.
+Owner-device writes retain the narrower team-and-project scope. This does not
+change built-in tracker, GitHub or file scopes, account fences or write receipts.
 
 The narrow work-write journal shares the flat, atomic, private receipt store
 used by native seat calls. It uses the delivery fingerprint and unresolved

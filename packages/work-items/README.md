@@ -93,6 +93,12 @@ Its returned item retains the backend's parent metadata.
 `scopedWrites: true` opts into the owner-device write boundary. Linear resolves
 the recorded team/project through connected reads and compares canonical UUIDs
 with the fresh item's `teamId`/`projectId`; display names alone never prove scope.
+Delegated connected-Linear tools additionally set `linearWriteScope: "team"`:
+the saved team's canonical UUID remains the write boundary, while an issue may
+belong to any project (or none) in that team. An explicitly named project must
+resolve to a real project associated with that team by UUID. New issues still
+default to the repo's saved project. Owner-device writes keep the default
+team-and-project boundary; built-in tracker scopes are unchanged.
 GitHub issues stay in the recorded repository, and scoped label deltas cannot
 manipulate labels recognized by its status parser, including `doing`/`wip` aliases.
 Files reject symlinked work paths, including

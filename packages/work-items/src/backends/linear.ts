@@ -65,6 +65,25 @@ export async function assertLinearIssueScope(
     throw new WorkItemScopeError();
 }
 
+/** A delegated writer may name any real project associated with its saved team. */
+export async function assertLinearProjectTeam(
+  project: unknown,
+  options: { team: string; call: LinearToolCall },
+): Promise<void> {
+  const teamId = linearResourceId(await options.call("get_team", { query: options.team }));
+  const value = project as { teams?: unknown } | null;
+  const teams = Array.isArray(value?.teams)
+    ? value.teams
+    : (value?.teams as { nodes?: unknown } | undefined)?.nodes;
+  if (
+    teamId === undefined ||
+    linearResourceId(project) === undefined ||
+    !Array.isArray(teams) ||
+    !teams.some((team: unknown) => linearResourceId(team) === teamId)
+  )
+    throw new WorkItemScopeError();
+}
+
 interface LinearComment {
   readonly id?: string;
   readonly body?: string | null;
