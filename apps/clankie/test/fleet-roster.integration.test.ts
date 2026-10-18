@@ -37,6 +37,26 @@ it.each([false, true])(
   },
 );
 
+it.each([false, true])(
+  "refreshes native counts after a catalog read before authorizing retirement (remote=%s)",
+  async (remote) => {
+    let status = "idle";
+    const f = await leadChatFixture(remote, cleanups, { nativeStatus: () => status });
+    const before = await f.captain.fleetRoster!();
+    expect(before.counts).toMatchObject({ total: 1, idle: 1, working: 0 });
+    await f.captain.workerCatalogSeats!();
+    status = "working";
+    const row = before.agents[0]!;
+    expect(
+      await f.captain.fleetRosterAction!(
+        { seatId: row.seatId, occupantId: row.occupantId },
+        { current: () => true, authorize: async () => true },
+      ),
+    ).toMatchObject({ outcome: "refused", reason: "agent_not_retirable" });
+    expect((await f.captain.fleetRoster!()).counts).toMatchObject({ total: 1, idle: 0, working: 1 });
+  },
+);
+
 it.each(["waiting", "blocked"])(
   "serves grouped statuses (%s) and persisted one-hour inactivity without inheriting another occupant's age or hiding pending mail",
   (waitingStatus) => {

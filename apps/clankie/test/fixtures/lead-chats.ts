@@ -33,7 +33,7 @@ export async function leadChatFixture(
   remote: boolean,
   cleanup: Array<() => Promise<void>>,
   /** A configured machine whose Herdr answers only after this delay, then fails. */
-  options: { slowFleetMs?: number; localUnavailable?: () => boolean } = {},
+  options: { slowFleetMs?: number; localUnavailable?: () => boolean; nativeStatus?: () => string } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lead-messages-"));
   cleanup.push(async () => rmSync(root, { recursive: true, force: true }));
@@ -75,6 +75,7 @@ export async function leadChatFixture(
     cwd: root,
   };
   const herdrResponse = (args: readonly string[]) => {
+    wire.agent_status = options.nativeStatus?.() ?? "idle";
     let result: unknown;
     if (args[0] === "agent" && args[1] === "list") result = { agents: [wire] };
     else if (args[0] === "agent" && args[1] === "get") result = { agent: wire };
