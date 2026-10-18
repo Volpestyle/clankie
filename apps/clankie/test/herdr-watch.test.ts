@@ -7,6 +7,7 @@ import { HireOwners } from "../src/captain/hire-owners.ts";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OPERATOR_CONVERSATION_TEXT_MAX, OPERATOR_CONVERSATION_TOOL_DETAIL_MAX } from "@clankie/protocol";
 import { parseHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
@@ -153,6 +154,84 @@ describe("HerdrWatchStore", () => {
       expect(deps.mailbox.deliver).toHaveBeenCalledOnce();
     } finally {
       store.close();
+    }
+  });
+
+  it("a restored Claude watch ignores a pre-arm Stop but wakes on a Stop between its original arm and the restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-claude-rearm-watch-"));
+    roots.push(root);
+    const path = join(root, "hooks.json");
+    const agent = {
+      ...working,
+      session: { source: "herdr:claude", kind: "id" as const, value: "10000000-0000-4000-8000-000000000002" },
+    };
+    const entries: { type: "message"; id: string; role: "operator"; text: string }[] = [];
+    const deps = {
+      consent: async () => ({ approved: true as const }),
+      hooks: new SeatHookLog(path),
+      agent: async (): Promise<WorkerSeatAgent> => agent,
+      transcript: async () => ({ sessionKey: "claude", entries }),
+      mailbox: {
+        bound: () => true,
+        deliver: vi.fn(async (_seat: string, text: string) => {
+          entries.push({ type: "message", id: "native-receipt", role: "operator", text });
+          return true;
+        }),
+      },
+      timing: { readyMs: 20, receiptMs: 20, pollMs: 1, firstTurnMs: 10 },
+      trackerDeny: () => [],
+    };
+    const started = await createClaudeWorkerSeatAdapter(deps).start(
+      { harness: "claude", cwd: root, brief: "followup" },
+      { paneId: agent.paneId, run: async () => undefined, start: async () => undefined },
+    );
+    expect(started.outcome).toBe("started");
+    const stop = (hooks: SeatHookLog, lastMessage: string) =>
+      hooks.record(agent.paneId, {
+        schemaVersion: 1,
+        event: "Stop",
+        sessionId: agent.session.value,
+        lastMessage,
+      });
+    const runner: HerdrWatchRunner = {
+      get: async () => agent,
+      resolveTerminal: async () => agent,
+      wait: vi.fn(async () => agent),
+    };
+    const open = () => {
+      const hooks = new SeatHookLog(path);
+      const next = vi.spyOn(hooks, "next");
+      const store = new HerdrWatchStore(join(root, "watches.json"), {
+        runner,
+        seatAdapters: [createClaudeWorkerSeatAdapter({ ...deps, hooks })],
+      });
+      const wake = vi.fn(async (_conversation: string, _prompt: string) => undefined);
+      store.start(wake);
+      return { hooks, next, store, wake };
+    };
+    stop(deps.hooks, "pre-arm stop");
+    await delay(5);
+    const first = open();
+    try {
+      await first.store.watch("global-default", agent.paneId, "Followup completion");
+      await vi.waitFor(() => expect(first.next).toHaveBeenCalled());
+      await delay(150);
+      expect(first.wake).not.toHaveBeenCalled();
+    } finally {
+      first.store.close();
+    }
+    // Stop lands after the original arm while no watcher is running; the restart re-baselines its wait.
+    await delay(5);
+    stop(first.hooks, "post-arm stop");
+    const restored = open();
+    try {
+      await vi.waitFor(() => expect(restored.wake).toHaveBeenCalledOnce());
+      const prompt = restored.wake.mock.calls[0]![1];
+      expect(prompt).toContain("post-arm stop");
+      expect(prompt).not.toContain("pre-arm stop");
+      expect(prompt).toContain("not correlated");
+    } finally {
+      restored.store.close();
     }
   });
 

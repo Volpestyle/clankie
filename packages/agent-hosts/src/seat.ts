@@ -271,8 +271,11 @@ export interface SeatControl {
    * settlement is not per-message completion. Rejects only when `signal` aborts.
    * Codex user-input questions use SeatView.question and keep this wait armed;
    * owner-only approval prompts still settle as blocked.
+   * `armedAt` is the ISO time the caller's persisted watch was originally armed,
+   * so a Stop retained from before it is never new after a reattach or restart.
+   * It is metadata only: absent or invalid, the wait re-baselines when it starts.
    */
-  settled(signal?: AbortSignal, messageId?: string): Promise<SeatEvent>;
+  settled(signal?: AbortSignal, messageId?: string, armedAt?: string): Promise<SeatEvent>;
   /** Interrupt the running turn. False when there is nothing to interrupt or no control. */
   interrupt(): Promise<boolean>;
   /** Stop one exact observed native turn; never a terminal key or a later task. */

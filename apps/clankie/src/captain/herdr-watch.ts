@@ -5319,7 +5319,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const held = control === undefined ? undefined : await control.status();
         if (control !== undefined && held !== "released" && held !== "offline") {
           // The harness's own completion, not a status read off the terminal.
-          const event = await control.settled(signal, record.messageId);
+          const event = await control.settled(signal, record.messageId, record.createdAt);
           if (event.type === "turn_completed") harvestMessageId ??= event.messageId;
           const after = await this.runner.resolveTerminal(record.terminalId).catch(() => undefined);
           if (this.endsOnNativeChange(record, after)) return;

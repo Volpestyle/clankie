@@ -753,9 +753,10 @@ class ClaudeWorkerSeatControl implements SeatControl {
     };
   }
 
-  public async settled(signal?: AbortSignal): Promise<SeatEvent> {
+  public async settled(signal?: AbortSignal, _messageId?: string, armedAt?: string): Promise<SeatEvent> {
     signal?.throwIfAborted();
     const at = () => new Date().toISOString();
+    const armedMs = armedAt === undefined ? Number.NaN : Date.parse(armedAt);
     const initialSequence = this.deps.hooks.snapshot(this.ref.sessionId)?.revision ?? 0;
     for (;;) {
       signal?.throwIfAborted();
@@ -786,7 +787,11 @@ class ClaudeWorkerSeatControl implements SeatControl {
             ? stop
             : undefined;
         // A retained Stop from before this wait never settles it while Claude works, dispatch or not.
-        if (status === "idle" || (eligible !== undefined && eligible.sequence > initialSequence)) {
+        // The watch's original arm time also keeps a Stop between arm and a restart; an invalid one adds nothing.
+        const fresh =
+          eligible !== undefined &&
+          (eligible.sequence > initialSequence || Date.parse(eligible.event.at) > armedMs);
+        if (status === "idle" || fresh) {
           return {
             type: "settlement_unconfirmed",
             at: at(),
