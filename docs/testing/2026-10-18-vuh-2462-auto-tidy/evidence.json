@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "landing-gate.json",
+      "size": 3753715,
+      "sha256": "fcdd75080a959389e45f2ad50b1507e5d69f3127769ab0205338a4617741e7a6",
+      "url": "clankie://evidence/sha256/fcdd75080a959389e45f2ad50b1507e5d69f3127769ab0205338a4617741e7a6"
+    },
+    {
       "path": "regression-proof-v2.json",
       "size": 93884,
       "sha256": "ce29d0a19aee57b6a90f0f3df2d50736134850c911f527d4da0898ac13a14bdb",

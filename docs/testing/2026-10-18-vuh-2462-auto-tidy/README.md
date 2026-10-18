@@ -30,8 +30,15 @@ evidence.json. The second proof adds a direct detached/unpushed start directory
 and corrects cleanup error handling found by the first landing gate. Earlier intermediate
 implementation failures are local diagnostics, not accepted evidence.
 
-The required exact-tree landing gate is pending; its checked SHA and result
-will be reported before any core push.
+The exact-tree root `check:landing --retry-failed-tests` passed on
+`39102f25b8b575d2b14915254758f2b12490b758` over `81414ad53`, with stable source
+and all five affected package typechecks passing. The selected suite first
+reported 651 pass, one failure and eight skips. The unchanged runtime-terminals
+case passed its one supported isolated rerun: 652 cases passed in all. No timing
+or assertion was weakened and no manual exception was used. The 79 focused
+retirement/roster/pruning cases also pass within the selected gate. Full gate,
+compiler and retry artifacts are retained in landing-gate.json. This checked
+source was pushed to main; deployment remains the lead's responsibility.
 
 ## Boundaries
 
