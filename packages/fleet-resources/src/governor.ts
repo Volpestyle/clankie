@@ -30,6 +30,7 @@ import {
   type ResourceState,
   type ResourceWaitOptions,
   type SimulatorReservation,
+  type SimulatorSettledReceipt,
   type SimulatorUpdate,
   type ResourceQueueEntry,
 } from "./model.ts";
@@ -396,8 +397,12 @@ export function createResourceGovernor(
     };
   }
   /** Append-only beside the journal, so older readers of the strict journal are unaffected. */
-  async function recordReaped(receipts: ReapReceipt[], leaseDirectory = directory): Promise<void> {
-    const path = join(leaseDirectory, "reaped.jsonl");
+  async function recordReaped(
+    receipts: readonly (ReapReceipt | SimulatorSettledReceipt)[],
+    leaseDirectory = directory,
+    name = "reaped.jsonl",
+  ): Promise<void> {
+    const path = join(leaseDirectory, name);
     try {
       if ((await stat(path)).size > 262_144) await rename(path, `${path}.1`);
     } catch (error) {
@@ -1391,6 +1396,9 @@ export function createResourceGovernor(
           (lease) => !(lease.kind === "simulator" && lease.id === id && lease.token === token),
         );
       });
+    },
+    async recordSimulatorSettled(receipt: SimulatorSettledReceipt) {
+      await recordReaped([receipt], directory, "simulator-settled.jsonl");
     },
     async close() {
       shutdown.abort();

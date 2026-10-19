@@ -2,7 +2,14 @@ import { observeSimulatorUsage, simulatorUsageFor, type SimulatorUsage } from ".
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { SimulatorsDisabledError } from "./governor.ts";
-import type { FleetResourceGovernor, ResourceSnapshot, SimulatorReservation } from "./model.ts";
+import type {
+  FleetResourceGovernor,
+  ResourcePressure,
+  ResourceSnapshot,
+  SimulatorReservation,
+  SimulatorSettleReason,
+} from "./model.ts";
+import { simulatorBootSettleMs } from "./pressure.ts";
 import { probeProcess } from "./process.ts";
 import {
   createSimctlAdapter,
@@ -230,6 +237,21 @@ type Plan =
     };
 /** A reservation with no native effect after this long is stalled, not booting. */
 const RESERVED_LIMIT_MS = 300_000;
+/**
+ * A cold iOS 27 boot burns about fifteen cores, re-renders its wallpaper posters
+ * at ten or more about 150 seconds in, and then idles under one percent
+ * (VUH-2353). Once its boot has settled, a device nobody has
+ * touched that holds four cores for two minutes while the host is under load or
+ * memory pressure is a runaway, and it is shut down before its idle deadline.
+ */
+const RUNAWAY_CPU_PERCENT = 400;
+const RUNAWAY_SUSTAIN_MS = 120_000;
+const SETTLED_DETAIL: Partial<Record<SimulatorSettleReason, string>> = {
+  idle: "The lease expired after its idle timeout and its device was shut down; acquire again.",
+  runaway:
+    "Clankie shut this device down: after its boot settled it held over four cores for two minutes, untouched, while the machine was under pressure. Acquire again, and touch the lease while you use it.",
+  owner_exited: "The lease ended when its seat's process exited.",
+};
 const BOOTING_PHASES = new Set([
   "reserved",
   "create-submitted",
@@ -258,11 +280,16 @@ export function createSimulatorManager(input: {
   processProbe?: typeof probeProcess;
   /** How long acquire waits on its boot before answering `booting`; the boot continues. */
   respondWithinMs?: number;
+  /** A booted device's runaway check starts this long after its lease. */
+  bootSettleMs?: number;
+  observeUsage?: () => Promise<ReadonlyMap<string, SimulatorUsage>>;
 }) {
   const adapter = input.adapter ?? createSimctlAdapter();
   const now = input.clock ?? Date.now;
   const probe = input.processProbe ?? probeProcess;
   const respondWithinMs = input.respondWithinMs ?? 20_000;
+  const bootSettleMs = input.bootSettleMs ?? simulatorBootSettleMs;
+  const observeUsage = input.observeUsage ?? observeSimulatorUsage;
   const authorized = async (authority?: SimulatorRequestOptions): Promise<boolean> => {
     if (authority?.signal?.aborted) return false;
     try {
@@ -333,10 +360,43 @@ export function createSimulatorManager(input: {
     changed();
     return next;
   };
-  const forget = async (lease: SimulatorReservation): Promise<SimulatorResult> => {
+  /** Lease id to the first consecutive runaway-level CPU sample, by this manager's clock. */
+  const hot = new Map<string, number>();
+  /** Why a shutdown was submitted, so a later settlement records its cause. */
+  const shuttingDown = new Map<string, SimulatorSettleReason>();
+  /** Recent settlements, so the holder's next call learns why its lease is gone. */
+  const settled = new Map<string, SimulatorSettleReason>();
+  const forget = async (
+    lease: SimulatorReservation,
+    reason?: SimulatorSettleReason,
+  ): Promise<SimulatorResult> => {
     await input.governor.releaseSimulator(lease.id, lease.token);
+    reason = shuttingDown.get(lease.id) ?? reason;
+    hot.delete(lease.id);
+    shuttingDown.delete(lease.id);
+    if (reason) {
+      settled.set(lease.id, reason);
+      if (settled.size > 64) settled.delete(settled.keys().next().value!);
+      await input.governor
+        .recordSimulatorSettled({
+          settledAtMs: now(),
+          leaseId: lease.id,
+          reason,
+          seatId: lease.seatId,
+          ...(lease.holderId ? { holderId: lease.holderId } : {}),
+          ...(lease.deviceId ? { deviceId: lease.deviceId } : {}),
+          createdAtMs: lease.createdAtMs,
+          lastUsedAtMs: lease.lastUsedAtMs,
+        })
+        // allow-swallowed-rejection -- the lease is already released; a lost receipt loses only its reason.
+        .catch(() => undefined);
+    }
     changed();
     return { outcome: "released" };
+  };
+  const unavailable = (id: string) => {
+    const reason = settled.get(id);
+    return rejected("lease_unavailable", reason && SETTLED_DETAIL[reason]);
   };
   const inventory = async () => {
     const devices = await adapter.inventory();
@@ -417,44 +477,49 @@ export function createSimulatorManager(input: {
   const removeStopped = async (
     lease: SimulatorReservation,
     authority?: SimulatorRequestOptions,
+    reason?: SimulatorSettleReason,
   ): Promise<SimulatorResult> => {
     if (!lease.deviceId) return held(lease);
     if (!(await authorized(authority))) return held(lease);
     // Retain every stopped device, including ones created by this manager.
     // Deletion belongs to an explicit owner tidy, never lease settlement.
-    return forget(lease);
+    return forget(lease, reason);
   };
+  /** `cleanup` names why the lease should end; false only advances its phase. */
   const reconcile = async (
     lease: SimulatorReservation,
-    cleanup = false,
+    cleanup: SimulatorSettleReason | false = false,
     authority?: SimulatorRequestOptions,
   ): Promise<SimulatorResult> => {
+    const reason = cleanup || undefined;
     if (!lease.deviceId) {
       // A reservation that never submitted a native effect and whose
       // preparation is gone (for example across a restart) frees its slot.
-      if (cleanup && lease.phase === "reserved" && !jobs.has(lease.id)) return forget(lease);
+      if (cleanup && lease.phase === "reserved" && !jobs.has(lease.id)) return forget(lease, reason);
       return held(lease);
     }
     const devices = await inventory();
     const device = deviceFor(lease, devices);
     if (!(await authorized(authority))) return held(lease);
-    if (!device) return forget(lease);
+    if (!device) return forget(lease, cleanup || "device_missing");
     if (["delete-submitted", "delete-uncertain"].includes(lease.phase)) return held(lease);
     if (["shutdown-submitted", "shutdown-uncertain"].includes(lease.phase)) {
-      return device.state === "Shutdown" ? removeStopped(lease, authority) : held(lease);
+      return device.state === "Shutdown" ? removeStopped(lease, authority, reason) : held(lease);
     }
     if (["boot-submitted", "boot-uncertain"].includes(lease.phase)) {
       if (device.state === "Booted") lease = await update(lease, { phase: "booted" });
       // An idle or abandoned lease whose device never left Shutdown is not
       // booting; it is cleaned up like an unbooted device.
       else if (cleanup && device.state === "Shutdown" && !jobs.has(lease.id))
-        return removeStopped(lease, authority);
+        return removeStopped(lease, authority, reason);
       else return held(lease); // A shutdown observation alone cannot settle a lost boot request.
     }
     if (!cleanup) return held(lease);
-    if (device.state === "Shutdown" && lease.phase === "created") return removeStopped(lease, authority);
+    if (device.state === "Shutdown" && lease.phase === "created")
+      return removeStopped(lease, authority, reason);
     if (device.state !== "Booted" || lease.phase !== "booted") return held(lease);
     lease = await update(lease, { phase: "shutdown-submitted" });
+    shuttingDown.set(lease.id, cleanup);
     if (!(await authorized(authority))) return held(await update(lease, { phase: "booted" }));
     try {
       await adapter.shutdown(lease.deviceId!);
@@ -464,6 +529,34 @@ export function createSimulatorManager(input: {
     return reconcile(lease, false, authority);
   };
   const find = async (id: string) => (await reservations()).find((lease) => lease.id === id);
+  /**
+   * How long this booted device has held runaway CPU on an exhausted host since
+   * its boot settled and its holder last touched it. A touch, a calm or unknown
+   * sample, or a healthy host restarts it; an unavailable probe never counts.
+   */
+  const runawayFor = (
+    lease: SimulatorReservation,
+    usage: ReadonlyMap<string, SimulatorUsage>,
+    pressure: ResourcePressure,
+  ) => {
+    const at = now();
+    const from = Math.max(lease.createdAtMs + bootSettleMs, lease.lastUsedAtMs);
+    const cpu = lease.deviceId ? usage.get(lease.deviceId.toUpperCase())?.cpuPercent : undefined;
+    const exhausted = !pressure.healthy && (pressure.reason === "load" || pressure.reason === "memory");
+    if (
+      !exhausted ||
+      lease.phase !== "booted" ||
+      cpu === undefined ||
+      cpu < RUNAWAY_CPU_PERCENT ||
+      at < from
+    ) {
+      hot.delete(lease.id);
+      return 0;
+    }
+    const since = Math.max(hot.get(lease.id) ?? at, from);
+    hot.set(lease.id, since);
+    return at - since;
+  };
 
   /** Prefer booted-before idle family matches, then cold matches, then create. */
   const choose = async (
@@ -715,7 +808,7 @@ export function createSimulatorManager(input: {
         const occupancy = externals(devices, leases).length + leases.length;
         if (!(await authorized(authority))) return revoked();
         if (!("owner" in proof) || !matchesOwner(lease, proof.owner) || occupancy > policy.simulatorSlots)
-          return reconcile(lease, true);
+          return reconcile(lease, "acquire_aborted");
         lease = await update(lease, { phase: "boot-submitted", lastUsedAtMs: now() });
         if (!(await authorized(authority))) {
           await update(lease, { phase: "created" });
@@ -1184,7 +1277,7 @@ export function createSimulatorManager(input: {
       const lease = await find(id);
       const current = await prove(owner);
       if (!(await authorized(authority))) return revoked();
-      if (!lease) return rejected("lease_unavailable");
+      if (!lease) return unavailable(id);
       if (!current || !matchesOwner(lease, owner) || !matchesOwner(lease, current))
         return rejected("stale_owner");
       if (lease.deviceId?.toUpperCase() !== deviceId.toUpperCase())
@@ -1202,7 +1295,7 @@ export function createSimulatorManager(input: {
     ): Promise<SimulatorResult> {
       return serial(async () => {
         const lease = await find(id);
-        if (!lease) return rejected("lease_unavailable");
+        if (!lease) return unavailable(id);
         const current = await prove(owner);
         if (!(await authorized(authority))) return revoked();
         if (!current || !matchesOwner(lease, owner) || !matchesOwner(lease, current))
@@ -1224,11 +1317,11 @@ export function createSimulatorManager(input: {
       };
       const settled = serial(async () => {
         const lease = await find(id);
-        if (!lease) return rejected("lease_unavailable");
+        if (!lease) return unavailable(id);
         const refused = await owned(lease);
         if (refused) return refused;
         try {
-          return await reconcile(lease, true, authority);
+          return await reconcile(lease, "released", authority);
         } catch {
           return held(lease);
         }
@@ -1251,7 +1344,7 @@ export function createSimulatorManager(input: {
       if (!lease) return { outcome: "released" };
       const refused = await owned(lease);
       if (refused) return refused;
-      if (lease.phase === "reserved") return forget(lease);
+      if (lease.phase === "reserved") return forget(lease, "released");
       // A native effect is in flight; the queued release settles it.
       return { outcome: "held", lease: view(lease), retryAfterMs: RETRY_MS };
     },
@@ -1266,7 +1359,7 @@ export function createSimulatorManager(input: {
           if ((await Promise.all(identity.processes.map(probe))).some((state) => state !== "exited"))
             continue;
           try {
-            await reconcile(lease, true);
+            await reconcile(lease, "owner_exited");
           } catch {
             /* Unknown native state retains capacity. */
           }
@@ -1289,7 +1382,7 @@ export function createSimulatorManager(input: {
         };
       }
       const usage = devices.some((device) => device.state === "Booted" || device.state === "Booting")
-        ? await observeSimulatorUsage()
+        ? await observeUsage()
         : new Map();
       const external = (await describeExternal(externals(devices, leases), devices)).map((device) => ({
         ...device,
@@ -1320,17 +1413,34 @@ export function createSimulatorManager(input: {
       // cannot hold the only slot until idle expiry (VUH-2053).
       for (const lease of await reservations().catch(() => [] as SimulatorReservation[]))
         if (lease.phase === "reserved" && now() - lease.createdAtMs >= RESERVED_LIMIT_MS)
-          await forget(lease).catch(() => undefined);
+          // allow-swallowed-rejection -- a failed release keeps the reservation for the next tick.
+          await forget(lease, "reservation_stale").catch(() => undefined);
       await serial(async () => {
-        const { policy } = await input.governor.snapshot();
-        for (const lease of await reservations()) {
+        const { policy, pressure } = await input.governor.snapshot();
+        const leases = await reservations();
+        const usage = leases.some((lease) => lease.phase === "booted")
+          ? await observeUsage().catch(() => new Map<string, SimulatorUsage>())
+          : new Map<string, SimulatorUsage>();
+        for (const lease of leases) {
           try {
             const processes = lease.ownerProcesses ?? [];
             const exited =
               processes.length > 0 &&
               (await Promise.all(processes.map(probe))).every((state) => state === "exited");
             const stale = lease.phase === "reserved" && now() - lease.createdAtMs >= RESERVED_LIMIT_MS;
-            await reconcile(lease, exited || stale || now() - lease.lastUsedAtMs >= policy.simulatorIdleMs);
+            const hotFor = runawayFor(lease, usage, pressure);
+            await reconcile(
+              lease,
+              exited
+                ? "owner_exited"
+                : stale
+                  ? "reservation_stale"
+                  : now() - lease.lastUsedAtMs >= policy.simulatorIdleMs
+                    ? "idle"
+                    : hotFor >= RUNAWAY_SUSTAIN_MS
+                      ? "runaway"
+                      : false,
+            );
           } catch {
             /* Unknown inventory or command outcome never frees a slot. */
           }

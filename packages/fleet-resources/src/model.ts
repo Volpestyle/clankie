@@ -61,6 +61,25 @@ export interface SimulatorReservation {
   deviceType?: string;
   runtime?: string;
 }
+/** Why a simulator lease ended; recorded beside the journal (VUH-2353). */
+export type SimulatorSettleReason =
+  | "released"
+  | "idle"
+  | "owner_exited"
+  | "reservation_stale"
+  | "acquire_aborted"
+  | "device_missing"
+  | "runaway";
+export interface SimulatorSettledReceipt {
+  settledAtMs: number;
+  leaseId: string;
+  reason: SimulatorSettleReason;
+  seatId: string;
+  holderId?: string;
+  deviceId?: string;
+  createdAtMs: number;
+  lastUsedAtMs: number;
+}
 export type SimulatorUpdate = Partial<
   Pick<SimulatorReservation, "phase" | "deviceId" | "deviceName" | "deviceType" | "runtime" | "lastUsedAtMs">
 >;
@@ -379,5 +398,7 @@ export interface FleetResourceGovernor {
   simulatorReservations(): Promise<SimulatorReservation[]>;
   updateSimulator(id: string, token: string, update: SimulatorUpdate): Promise<SimulatorReservation>;
   releaseSimulator(id: string, token: string): Promise<void>;
+  /** Append-only `simulator-settled.jsonl`; a lease's record is gone once released. */
+  recordSimulatorSettled(receipt: SimulatorSettledReceipt): Promise<void>;
   close(): Promise<void>;
 }

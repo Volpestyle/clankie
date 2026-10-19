@@ -3844,7 +3844,12 @@ resource hook; new hooks need the session's native reload to affect existing sea
 seats that name them; `clankie doctor` shows the same. The operator credential
 is required; native occupant, process proof and binding fields are rejected as
 caller input. Release, idle expiry or proven seat exit shuts down the leased
-device and retains it for reuse, including one Clankie created. Deletion is a
+device and retains it for reuse, including one Clankie created. So does a
+settled `runaway`: past its three-minute boot window, an untouched device holding
+four cores for two minutes while the host is refused for load or memory. Each
+settlement's reason is appended to `simulator-settled.jsonl` in the resource
+registry. A later touch, verify or release of an `idle`, `runaway` or
+`owner_exited` lease answers `lease_unavailable` with that reason. Deletion is a
 separate explicit owner tidy of exact stopped UDIDs. External booted devices count
 toward the ceiling and are never shut down; the lead of a seat using one is
 told once. Unknown receipts remain held for review; observer shutdown does not

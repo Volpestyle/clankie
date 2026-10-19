@@ -93,6 +93,8 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
     },
   });
   let clock = Date.now();
+  // Interval CPU per device, as the native census would report it (100% is one core).
+  const cpu = new Map<string, number>();
   // What the host's seat observation reports per task holder: by default proven.
   const seats = new Map<string, "proven" | "unproven" | "replaced">();
   const observations: { holderId?: string; state: string }[] = [];
@@ -101,6 +103,13 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
     adapter,
     ...settings,
     clock: () => clock,
+    observeUsage: async () =>
+      new Map(
+        [...cpu].map(([deviceId, cpuPercent]) => [
+          deviceId,
+          { sampledAtMs: clock, status: "available" as const, cpuPercent, intervalMs: 5_000 },
+        ]),
+      ),
     observeSeat: async (identity: Pick<SimulatorOwner, "seatId" | "occupantId" | "fleet" | "holderId">) => {
       const state = seats.get(identity.holderId ?? "") ?? "proven";
       observations.push({ ...(identity.holderId ? { holderId: identity.holderId } : {}), state });
@@ -190,6 +199,9 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
     directory,
     setLoad: (value: number) => {
       loadRatio = value;
+    },
+    setCpu: (deviceId: string, percent: number) => {
+      cpu.set(deviceId.toUpperCase(), percent);
     },
     port: address.port,
     disconnectHttp: () => server.closeAllConnections(),
@@ -368,6 +380,72 @@ it("only simulator heartbeats renew idle use; unrelated working turns do not", a
   await f.manager.observeSeatState(f.owner, "working");
   expect(await f.governor.simulatorReservations()).toHaveLength(0);
   expect((await f.commands()).filter((args) => args[0] === "shutdown")).toHaveLength(1);
+});
+
+it("shuts down only an untouched, settled device that keeps exhausting the host, and records why each lease ended", async () => {
+  const f = await fixture({ bootSettleMs: 180_000 });
+  const settled = async () =>
+    (await readFile(join(f.directory, "governor", "simulator-settled.jsonl"), "utf8").catch(() => ""))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((row) => JSON.parse(row) as { leaseId: string; reason: string; deviceId?: string });
+  // Fifteen-second ticks keep the case quick under a loaded gate; every
+  // boundary below is a multiple of one.
+  const run = async (ms: number) => {
+    for (let at = 0; at < ms; at += 15_000) {
+      f.advance(15_000);
+      await f.manager.tick();
+    }
+  };
+  const shutdowns = async () => (await f.commands()).filter((args) => args[0] === "shutdown").length;
+  const first = lease(await f.manager.acquire(f.request));
+  // The measured cold-boot bursts: fifteen cores on a loaded host stay protected.
+  f.setCpu(first.deviceId!, 1500);
+  f.setLoad(2 * defaultResourcePolicy().maxLoadRatio);
+  await run(180_000);
+  // Settled and hot for 90s, then touched: its holder's next 105s is spared.
+  await run(90_000);
+  await f.manager.touch(first.id, f.owner);
+  await run(105_000);
+  expect(await f.governor.simulatorReservations()).toHaveLength(1);
+  // Untouched and hot on a healthy host: the machine is not exhausted.
+  f.setLoad(0);
+  await run(150_000);
+  expect(await f.governor.simulatorReservations()).toHaveLength(1);
+  // A calm sample restarts the window, as an unknown one would.
+  f.setLoad(2 * defaultResourcePolicy().maxLoadRatio);
+  await run(60_000);
+  f.setCpu(first.deviceId!, 50);
+  await run(15_000);
+  f.setCpu(first.deviceId!, 1500);
+  // Hot from the first sample at +15s: 105s by the end, one tick short.
+  await run(120_000);
+  expect(await f.governor.simulatorReservations()).toHaveLength(1);
+  expect(await shutdowns()).toBe(0);
+  await run(15_000);
+  expect(await f.governor.simulatorReservations()).toHaveLength(0);
+  expect(await shutdowns()).toBe(1);
+  expect((await f.read()).devices[runtime]!.find((row) => row.udid === first.deviceId)!.state).toBe(
+    "Shutdown",
+  );
+  expect(await f.manager.touch(first.id, f.owner)).toEqual({
+    outcome: "rejected",
+    reason: "lease_unavailable",
+    detail: expect.stringContaining("four cores for two minutes"),
+  });
+
+  f.setLoad(0);
+  const second = lease(await f.manager.acquire(f.request));
+  expect(await f.manager.release(second.id, f.owner)).toEqual({ outcome: "released" });
+  const third = lease(await f.manager.acquire(f.request));
+  await run(defaultResourcePolicy().simulatorIdleMs + 15_000);
+  expect(await f.governor.simulatorReservations()).toHaveLength(0);
+  expect(await settled()).toEqual([
+    expect.objectContaining({ leaseId: first.id, reason: "runaway", deviceId: first.deviceId }),
+    expect.objectContaining({ leaseId: second.id, reason: "released", deviceId: second.deviceId }),
+    expect.objectContaining({ leaseId: third.id, reason: "idle", deviceId: third.deviceId }),
+  ]);
 });
 
 it("observer close and missing-seat hints preserve leases; independently proven native exit stops and retains its exact created device", async () => {

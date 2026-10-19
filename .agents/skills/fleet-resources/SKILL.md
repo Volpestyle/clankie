@@ -330,7 +330,16 @@ settles it, so read status after the retry rather than releasing again. A
 reservation that starts no device within five minutes frees its slot by itself.
 Release, idle expiry or a verified seat exit
 shuts the leased device down and keeps it for later reuse, including devices
-Clankie created. Deletion requires a separate, explicit owner tidy naming the
+Clankie created. Each iOS 27 boot burns about 15 cores in its first minute, then
+re-renders its wallpaper posters at 10–12 cores about two and a half minutes in.
+That is expected and never reclaimed. After the three-minute boot window, a
+device you have not touched that holds four cores for two minutes while the Mac
+is refused for load or memory is shut down early as a `runaway`. Touch the lease
+while you work, including while your capture waits for a heavy slot. Each lease
+end is recorded with its reason (`released`, `idle`, `runaway`, `owner_exited`,
+...) in `simulator-settled.jsonl` beside the lease journal, and your next touch,
+verify or release names an `idle`, `runaway` or `owner_exited` end
+([measurements](../../../docs/testing/2026-10-19-simulator-runaway/README.md)). Deletion requires a separate, explicit owner tidy naming the
 exact stopped UDIDs; release and expiry never delete devices. Clankie
 never shuts down a device it did not lease; it names such devices
 in status and doctor and tells the lead of the seat using one. Never run

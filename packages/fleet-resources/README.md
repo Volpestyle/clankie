@@ -287,7 +287,16 @@ retain the root’s process proof and idle timeout, so a parent exit cleans them
 
 Simulator reservations remain durable when request processes die. Only the
 simulator manager can settle native receipts and release them after confirmed
-shutdown of the exact device. Every device is kept for later reuse, including
+shutdown of the exact device. It appends each settlement's reason to
+`simulator-settled.jsonl` beside the journal (VUH-2353). The reasons are
+`released`, `idle`, `owner_exited`, `reservation_stale`, `acquire_aborted`,
+`device_missing` and `runaway`. `runaway` ends a booted lease early only after
+its boot window (`simulatorBootSettleMs`) has passed and all of these have held
+for two minutes: its census showed at least four cores, nobody touched it, and
+the host was refused for load or memory. Any break restarts the window. Both
+measured iOS 27 boot bursts, including the second poster render about 150
+seconds in, stay inside the boot window
+([measurements](../../docs/testing/2026-10-19-simulator-runaway/README.md)). Every device is kept for later reuse, including
 ones created by Clankie; deletion requires an explicit owner tidy by exact
 stopped UDID. A historical `Clankie-<uuid>` name grants no ownership. Active
 journal claims (including a name with an uncertain create receipt) exclude
