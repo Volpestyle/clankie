@@ -1703,6 +1703,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
       seats.map(async (seat) => {
         const source = byId.get(seat.seatId);
         if (this.closed || source === undefined) return seat;
+        const failure = this.hireOwners.startupFailure(
+          source.paneId,
+          source.seatId,
+          source.session === undefined ? undefined : occupantIdForHerdrSession(source.session),
+        );
+        if (failure) seat = { ...seat, summary: bounded(failure, 1000) };
         const control = await this.seatControl.attach({
           terminalId: source.seatId,
           paneId: source.paneId,
@@ -1722,7 +1728,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ...(status === "idle" || status === "working" || status === "blocked"
             ? { status: status === "idle" && source.status === "done" ? "done" : status }
             : {}),
-          ...(reason === undefined ? {} : { summary: bounded(redactSensitiveText(reason), 1_000) }),
+          ...(reason === undefined || failure
+            ? {}
+            : { summary: bounded(redactSensitiveText(reason), 1_000) }),
         };
       }),
     );
@@ -2852,6 +2860,34 @@ export class HerdrWatchStore implements HerdrWatchPort {
       this.activeHires.delete(receiptKey);
       this.remoteLaunches.delete(receiptKey);
     }
+    if (result.outcome === "failed" && authority?.intentId) {
+      const detail = bounded(
+        redactSensitiveText(
+          `Hire did not confirm its first turn: ${result.reason}. ${result.detail ?? ""} Do not replay an uncertain brief.`,
+        ),
+        4000,
+      );
+      const pane = this.hireOwners.failStartup(authority.intentId, detail);
+      // The durable flag remains if the native wake is unavailable.
+      if (pane && this.wake) {
+        const owner = authority.owner;
+        const guard = async () => {
+          if (this.closed || (await this.validateOwner?.(owner)) !== true)
+            throw new Error("Hiring conversation is unavailable");
+        };
+        await guard()
+          .then(() =>
+            this.wake!(
+              owner.conversationId,
+              `Worker startup failed in ${pane}. ${detail}`,
+              owner.discord,
+              guard,
+            ),
+          )
+          .catch(() => {});
+      }
+    }
+
     console.info(
       "hire_agent:",
       JSON.stringify({
@@ -3786,6 +3822,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (agent.session === undefined) throw new Error("Native hire identity has not been observed");
     const occupantId = occupantIdForHerdrSession(agent.session);
     const sessionId = nativeSessionId(agent);
+    // Historical identity must survive channel/catalog readiness or process-proof failure.
+    if (authority !== undefined) await this.bindHireOwner(agent, input, authority);
+    if (receiptKey !== undefined) {
+      const original = this.hireReceipts.pending(receiptKey)!;
+      this.hireReceipts.update(receiptKey, original.messageId, {
+        occupantId,
+        ...(sessionId === undefined ? {} : { sessionId }),
+      });
+    }
     const allocation = this.projectAllocations.get(input);
     if (allocation) {
       this.projectHires.pane(allocation, agent.paneId);
@@ -3799,18 +3844,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
           proof.pane !== agent.paneId ||
           proof.fleet !== (input.fleet ?? "default"))
       )
-        throw new Error("Native hire binding has no matching current process proof; no brief was sent");
+        throw new Error(
+          "Native hire binding has no matching current process proof; delivery remains unconfirmed",
+        );
       this.projectHires.observe(allocation, agent.terminalId, occupantId, proof);
-    }
-    // Recording the exact result is historical proof, not a new effect. Preserve
-    // it even when the originating turn lost authority during native startup.
-    if (authority !== undefined) await this.bindHireOwner(agent, input, authority);
-    if (receiptKey !== undefined) {
-      const original = this.hireReceipts.pending(receiptKey)!;
-      this.hireReceipts.update(receiptKey, original.messageId, {
-        occupantId,
-        ...(sessionId === undefined ? {} : { sessionId }),
-      });
     }
   }
 
@@ -4418,8 +4455,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
           bound: async (ref) => {
             if (ref.paneId !== paneId || ref.harness !== input.harness || !ref.sessionId)
               throw new Error("Native hire binding does not match the allocated pane and harness");
-            if (authority !== undefined) await assertConversationAuthority(authority);
-            await this.admitProjectLaunch(input);
             const agent = await this.agentWithSession(paneId, SPAWN_SESSION_WAIT_MS);
             const matches = (current: HerdrAgentSnapshot) =>
               current.paneId === paneId &&
@@ -4436,6 +4471,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
               this.save();
             }
             await this.observeHireIdentity(receiptKey, agent, input, authority, true, nativeProof);
+            if (authority !== undefined) await assertConversationAuthority(authority);
+            await this.admitProjectLaunch(input);
             const currentToolNames = await this.expectedHireTools(input);
             await checkExpectedTools();
             const final = await this.runner.get(paneId);

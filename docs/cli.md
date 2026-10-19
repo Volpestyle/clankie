@@ -5411,8 +5411,9 @@ What crosses the link, and what cannot:
   retained for inspection. Retrying that hire does not send its brief or create
   another worker. Failures after the native turn RPC retain uncertainty.
 - A remote Claude hire uses the `clankie-worker` plugin there, as a local one
-  does: its brief and messages arrive on the plugin's channel and its hooks
-  report each settled turn. Both travel over the fleet's **link**, which the
+  does: its fresh brief is the native CLI startup prompt, follow-ups use the
+  plugin's channel, and its hooks report each settled turn. Messages and hooks
+  travel over the fleet's **link**, which the
   service keeps up for every ssh fleet: an `ssh -R` forward from that machine's
   loopback to a listener here that answers only the fleet seat routes, and a
   token in `~/.clankie/link.json` there (owner-only) that reaches only that
@@ -6308,6 +6309,21 @@ Every hire logs its selected lane and reason. The result carries `control.mode`:
 explaining missing structured control. Registered remote fleets do not change the control lane of a
 local hire. Native questions remain visible in the pane; approvals and
 folder-trust prompts remain owner decisions.
+
+Fresh Claude hires pass the brief once as the native CLI startup prompt, so
+Claude schedules it after its own startup. They do not also send the brief over
+the channel. Resumed hires and follow-ups use the channel; its stdout ACK alone
+does not establish native prompt acceptance. A confirmed Claude brief requires
+the complete prompt in that exact session's transcript. Slow or unavailable
+transcripts leave delivery uncertain, retaining the original receipt: inspection
+can reconcile a late prompt without sending it again.
+
+The hire records its observed session and hiring conversation before waiting
+for channel readiness or the first-prompt receipt. A failed startup retains that
+ownership and a durable failure summary in the roster, and alerts the hiring
+conversation through the existing worker-watch wake path. An allocation without
+a native session retains its pending hiring claim and failure flag; it grants
+no native control. Startup flags clear when the original hire reconciles.
 
 Failed startups log `hire_agent.startup_failed`, with its
 session ID, resolved transcript path (null when no file is found), and rejecting

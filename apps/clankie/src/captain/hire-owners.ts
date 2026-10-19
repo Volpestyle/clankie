@@ -21,6 +21,7 @@ const RecordSchema = z
     occupantId: z.string().min(1).optional(),
     sessionKey: z.string().min(1).optional(),
     hired: z.boolean().optional(),
+    startupFailure: z.string().min(1).max(4000).optional(),
     hireConversationId: z.string().min(1).optional(),
     hireProjectId: z.string().min(1).optional(),
     owner: ConversationOwnerSchema,
@@ -41,6 +42,24 @@ export class HireOwners {
     this.state = existsSync(path)
       ? HireOwnersStateSchema.parse(JSON.parse(readFileSync(path, "utf8")))
       : { schemaVersion: 1, hires: [] };
+  }
+  /** Retain a failed first turn on the original allocation, including before native binding. */
+  public failStartup(intentId: string, detail: string): string | undefined {
+    const held = this.state.hires.find((entry) => entry.id === intentId);
+    if (!held?.paneId) return;
+    this.save({
+      ...this.state,
+      hires: this.state.hires.map((entry) => (entry === held ? { ...entry, startupFailure: detail } : entry)),
+    });
+    return held.paneId;
+  }
+  /** A display flag, never native authority; it remains visible across service replacement. */
+  public startupFailure(paneId: string, seatId: string, occupantId?: string): string | undefined {
+    return this.state.hires.find(
+      (entry) =>
+        entry.paneId === paneId &&
+        (entry.seatId === undefined || (entry.seatId === seatId && entry.occupantId === occupantId)),
+    )?.startupFailure;
   }
   public hasClaim(paneId: string, seatId: string): boolean {
     return this.state.hires.some((entry) => entry.paneId === paneId || entry.seatId === seatId);

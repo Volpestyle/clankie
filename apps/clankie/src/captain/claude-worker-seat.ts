@@ -6,7 +6,8 @@ import type { ClaudeHookQuestions } from "./claude-hook-questions.ts";
  * owner can type into it and everything Claude ships keeps working. Control
  * rides the harness's own extension points:
  *
- * - The brief and every message are channel notifications from the plugin's
+ * - A fresh hire takes its brief as Claude's native CLI startup prompt.
+ * - Follow-up messages are channel notifications from the plugin's
  *   MCP server, which serves the seat's mailbox (`clankie mcp --seat`).
  * - Acknowledgment is the message in the session's native transcript, the
  *   receipt VUH-1450 already trusts.
@@ -163,6 +164,10 @@ export function claudeWorkerLaunchArgs(
     ...(launch.harnessArgs ?? []),
     // Overrides the settings' auto default mode; Claude still enforces deny rules in every mode.
     ...(launch.maximumTrust === true ? MAXIMUM_TRUST_HARNESS_ARGS.claude : []),
+    // A fresh session takes its first prompt through Claude's native startup,
+    // after its hooks and channel handlers are installed. An MCP stdout write
+    // during discovery is not proof the native channel receiver exists yet.
+    ...(launch.resumeSessionId === undefined && launch.brief.length > 0 ? ["--", launch.brief] : []),
   ];
 }
 
@@ -716,10 +721,10 @@ class ClaudeWorkerSeatControl implements SeatControl {
       : options?.source === undefined
         ? this.deps.mailbox.deliver(agent.terminalId, message)
         : this.deps.mailbox.deliver(agent.terminalId, message, options.source));
-    // An exact authenticated bridge ACK proves transport delivery without waiting
-    // for a remote transcript read. It never proves model awareness or completion.
-    if (typeof delivery !== "boolean")
-      return delivery.outcome === "unconfirmed" ? { ...delivery, deliveryStage: "uncertain" } : delivery;
+    // A bridge ACK only proves a stdout write. In particular Claude can lose
+    // that notification during startup. Require the exact native prompt too.
+    if (typeof delivery !== "boolean" && delivery.outcome === "unconfirmed")
+      return { ...delivery, deliveryStage: "uncertain" };
     if (!delivery) return { outcome: "released", deliveryStage: "unavailable" };
     const id = await receipt(
       this.deps,
@@ -741,7 +746,7 @@ class ClaudeWorkerSeatControl implements SeatControl {
       return {
         outcome: "unconfirmed",
         deliveryStage: "uncertain",
-        messageId: "",
+        messageId: typeof delivery === "boolean" ? "" : delivery.messageId,
         detail: "The worker channel took the message, but it has not appeared in the session transcript",
       };
     return {
@@ -850,6 +855,9 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
       const consent = await deps.consent(launch.env);
       if (!consent.approved)
         return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
+      const nativePrompt = launch.resumeSessionId === undefined && launch.brief.length > 0;
+      await view.guard?.();
+      let startError: unknown;
       try {
         const trackerDeny = await (deps.trackerDeny ?? defaultTrackerDeny)(launch.cwd, launch.env);
         const settings = claudeWorkerSettings(
@@ -858,20 +866,17 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
             ? undefined
             : claudeWorkerMcpAllowlist(launch.cwd, launch.env ?? {}, launch.mcpServers),
         );
-        await view.start(
-          "claude",
-          claudeWorkerLaunchArgs(
-            launch,
-            trackerDeny,
-            deps.settingsArg ? await deps.settingsArg(settings) : settings,
-          ),
+        const args = claudeWorkerLaunchArgs(
+          launch,
+          trackerDeny,
+          deps.settingsArg ? await deps.settingsArg(settings) : settings,
         );
+        await view.guard?.();
+        await view.start("claude", args);
       } catch (error) {
-        return {
-          outcome: "failed",
-          reason: "not_ready",
-          detail: `Claude did not come up with the worker channel (a consent or trust prompt waits in the pane?): ${error instanceof Error ? error.message : String(error)}`,
-        };
+        // Herdr can time out after launching the TUI. Still retain its native
+        // identity before reporting uncertainty; never launch a replacement.
+        startError = error;
       }
       const agent = await until(
         async () => {
@@ -886,7 +891,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         return {
           outcome: "failed",
           reason: "not_ready",
-          detail: "Claude started without reporting its session to herdr",
+          detail: `Claude started without reporting its session to herdr${startError === undefined ? "" : `: ${String(startError)}`}`,
         };
       if (launch.resumeSessionId !== undefined && sessionId !== launch.resumeSessionId)
         return {
@@ -894,25 +899,35 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           reason: "not_ready",
           detail: "Claude resumed a different session; no brief was sent",
         };
+      const ref: SeatRef = { harness: "claude", sessionId, paneId: view.paneId };
+      await view.bound?.(ref);
+      if (startError !== undefined)
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail: `Claude startup is unconfirmed: ${String(startError)}`,
+        };
       // Readiness is the channel's own poll, never a connected MCP server alone (ADR 0194).
       if (
+        !nativePrompt &&
         (await until(() => (deps.mailbox.bound(agent.terminalId) ? true : undefined), readyMs, pollMs)) ===
-        undefined
+          undefined
       )
         return {
           outcome: "failed",
           reason: "not_ready",
           detail: `channel_unready: the ${CLAUDE_WORKER_PLUGIN_ID} channel never started polling the seat's mailbox`,
         };
-      const ref: SeatRef = { harness: "claude", sessionId, paneId: view.paneId };
       try {
         deps.hooks.rebind(ref, agent.terminalId);
+        if (nativePrompt) deps.hooks.beginDispatch(ref, agent.terminalId);
       } catch {
         return {
           outcome: "failed",
           reason: "not_ready",
-          detail:
-            "brief_delivery_unverified: the resumed session's hook boundary could not be saved; no brief was sent",
+          detail: nativePrompt
+            ? "brief_delivery_unverified: the native hook boundary could not be saved; the startup prompt may have been submitted; never replay it"
+            : "brief_delivery_unverified: the resumed session's hook boundary could not be saved; no brief was sent",
         };
       }
       const control = new ClaudeWorkerSeatControl(ref, deps, agent.terminalId);
@@ -923,7 +938,14 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         const firstStop = deps.hooks.next(sessionId, watch.signal);
         firstStop.catch(() => undefined);
         try {
-          const delivery = await control.send(launch.brief, { timeoutMs: receiptMs });
+          const delivery = nativePrompt
+            ? (await receipt(deps, agent, launch.brief, new Set(), receiptMs, pollMs)) === undefined
+              ? {
+                  outcome: "unconfirmed",
+                  detail: "Native startup prompt has not appeared in the session transcript; never replay it",
+                }
+              : { outcome: "accepted" }
+            : await control.send(launch.brief, { timeoutMs: receiptMs });
           if (delivery.outcome !== "accepted")
             return {
               outcome: "failed",
@@ -932,10 +954,9 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
             };
           // A signed-out or expired credential lets Claude start and take the
           // brief, then refuses its first turn. That is a failed hire, not a worker.
-          const stop = await Promise.race([
-            firstStop,
-            sleep(firstTurnMs, watch.signal).catch(() => undefined),
-          ]);
+          const stop =
+            (nativePrompt ? deps.hooks.snapshot(sessionId)?.lastStop?.event : undefined) ??
+            (await Promise.race([firstStop, sleep(firstTurnMs, watch.signal).catch(() => undefined)]));
           if (stop?.type === "turn_completed" && !stop.ok && stop.stopReason === "authentication_failed")
             return {
               outcome: "failed",

@@ -81,7 +81,11 @@ export interface SeatView {
   readonly guard?: () => Promise<void>;
   /** Deny-only startup expectation captured by the controller before native launch. */
   readonly expectedToolNames?: readonly string[];
-  /** Trusted controller callback after native identity is reported, before the first brief. */
+  /**
+   * Trusted callback as soon as native identity is reported, including startup
+   * failures. CLI startup prompts may already be submitted; prepared controllers
+   * bind before dispatch. Retaining ownership does not prove brief acceptance.
+   */
   readonly bound?: (ref: SeatRef) => Promise<void | { readonly expectedToolNames: readonly string[] }>;
   /** Native worker questions, projected only after the controller binds this exact hire. */
   readonly question?: (ref: SeatRef, question: SeatQuestion) => Promise<void>;

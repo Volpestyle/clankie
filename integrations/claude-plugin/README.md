@@ -231,6 +231,13 @@ Until both steps are done, a Claude hire reports `consent_required` with the
 missing step and unavailable control. It does not type the brief into the
 terminal or launch a replacement worker.
 
+Fresh hires take their brief once through Claude's native CLI startup prompt;
+the channel carries resumed briefs and follow-ups. A stdout ACK alone cannot
+confirm prompt acceptance: the exact native transcript must contain the whole
+brief. Missing evidence stays uncertain and must not trigger a replacement send.
+The observed session retains its hiring conversation when startup fails, with a
+persisted roster failure summary and a wake to that conversation.
+
 With consent approved, a briefed local Claude hire reports `control.mode: "channel"`,
 including when other execution fleets are registered. Every hire logs its lane;
 unavailable control includes `control.reason`. A folder-trust prompt reports

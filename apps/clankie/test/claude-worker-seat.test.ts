@@ -108,6 +108,8 @@ it("a worker launch enables its plugin for this session only and asks for the ap
     "high",
     "--plugin-dir",
     "/skills",
+    "--",
+    "b",
   ]);
   expect(
     claudeWorkerLaunchArgs({ harness: "claude", cwd: "/w", brief: "b" }, [
@@ -255,9 +257,12 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
   };
 }
 
-it("a hire starts the interactive TUI, briefs it over the channel, and waits for the transcript receipt", async () => {
+it("a resumed hire starts the interactive TUI, briefs it over the channel, and waits for the transcript receipt", async () => {
   const { adapter, view, start, deliver } = await fixture();
-  const started = await adapter.start({ harness: "claude", cwd: "/w", brief: "BRIEF-1 do the thing" }, view);
+  const started = await adapter.start(
+    { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "BRIEF-1 do the thing" },
+    view,
+  );
   expect(started.outcome).toBe("started");
   expect(start).toHaveBeenCalledWith(
     "claude",
@@ -300,7 +305,10 @@ it("a resume hire briefs the session it last messaged in another terminal (VUH-2
 
 it("preserves a taken but unacknowledged channel event as uncertain without replaying it", async () => {
   const f = await fixture();
-  const started = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "" }, f.view);
+  const started = await f.adapter.start(
+    { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "" },
+    f.view,
+  );
   if (started.outcome !== "started") throw new Error(JSON.stringify(started));
   const receipt = {
     outcome: "unconfirmed" as const,
@@ -316,7 +324,10 @@ it("preserves a taken but unacknowledged channel event as uncertain without repl
 
 it("rechecks peer authority after awaited transcript preparation before channel dispatch", async () => {
   const f = await fixture();
-  const started = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "" }, f.view);
+  const started = await f.adapter.start(
+    { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "" },
+    f.view,
+  );
   if (started.outcome !== "started") throw new Error(JSON.stringify(started));
   let prepared!: () => void;
   let resume!: () => void;
@@ -368,7 +379,9 @@ it("keeps an uncertain brief distinct from a released channel", async () => {
     messageId: "seat-brief",
     detail: "The bridge took the brief but did not acknowledge it",
   });
-  expect(await f.adapter.start({ harness: "claude", cwd: "/w", brief: "brief" }, f.view)).toMatchObject({
+  expect(
+    await f.adapter.start({ resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "brief" }, f.view),
+  ).toMatchObject({
     outcome: "failed",
     reason: "not_ready",
     detail: expect.stringMatching(/brief_delivery_unverified: .*unconfirmed.*seat-brief/u),
@@ -451,7 +464,13 @@ it.each(["string", "blocks"])(
     const start = vi.fn(async (_command: string, _args: readonly string[]) => undefined);
     const view: SeatView = { paneId: agent.paneId, run: vi.fn(async () => undefined), start };
     const started = await adapter.start(
-      { harness: "claude", cwd: root, model: "haiku", brief: "Reply exactly PROBE OK." },
+      {
+        resumeSessionId: SESSION,
+        harness: "claude",
+        cwd: root,
+        model: "haiku",
+        brief: "Reply exactly PROBE OK.",
+      },
       view,
     );
     expect(started.outcome).toBe("started");
@@ -510,7 +529,12 @@ it("verifies the recorded 2.1.286 probe and rejects a preexisting receipt or cha
         timing: { readyMs: 10, receiptMs: 10, pollMs: 1, firstTurnMs: 10 },
       });
       const result = await adapter.start(
-        { harness: "claude", cwd: root, brief: kind === "mismatch" ? brief + " altered" : brief },
+        {
+          resumeSessionId: SESSION,
+          harness: "claude",
+          cwd: root,
+          brief: kind === "mismatch" ? brief + " altered" : brief,
+        },
         { paneId: agent.paneId, run: async () => undefined, start: async () => undefined },
       );
       expect(result.outcome).toBe(kind === "new" ? "started" : "failed");
@@ -539,7 +563,9 @@ it("verifies the recorded 2.1.286 probe and rejects a preexisting receipt or cha
 
 it("without the owner's approval nothing launches and the hire is blocked on the named fix", async () => {
   const { adapter, view, start } = await fixture({ approved: false });
-  expect(await adapter.start({ harness: "claude", cwd: "/w", brief: "b" }, view)).toEqual({
+  expect(
+    await adapter.start({ resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "b" }, view),
+  ).toEqual({
     outcome: "blocked",
     reason: "consent_required",
     detail: "not approved",
@@ -550,21 +576,34 @@ it("without the owner's approval nothing launches and the hire is blocked on the
 
 it("a channel that never polls, or a brief that never lands, fails typed", async () => {
   const quiet = await fixture({ binds: false });
-  expect(await quiet.adapter.start({ harness: "claude", cwd: "/w", brief: "b" }, quiet.view)).toMatchObject({
+  expect(
+    await quiet.adapter.start(
+      { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "b" },
+      quiet.view,
+    ),
+  ).toMatchObject({
     outcome: "failed",
     reason: "not_ready",
     detail: expect.stringContaining("channel_unready"),
   });
   expect(quiet.deliver).not.toHaveBeenCalled();
   const lost = await fixture({ echoes: false });
-  expect(await lost.adapter.start({ harness: "claude", cwd: "/w", brief: "b" }, lost.view)).toMatchObject({
+  expect(
+    await lost.adapter.start(
+      { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "b" },
+      lost.view,
+    ),
+  ).toMatchObject({
     outcome: "failed",
     detail: expect.stringContaining("brief_delivery_unverified"),
   });
   const refused = await fixture();
   refused.start.mockRejectedValueOnce(new Error("agent_not_ready: blocked"));
   expect(
-    await refused.adapter.start({ harness: "claude", cwd: "/w", brief: "b" }, refused.view),
+    await refused.adapter.start(
+      { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "b" },
+      refused.view,
+    ),
   ).toMatchObject({
     outcome: "failed",
     reason: "not_ready",
@@ -573,7 +612,10 @@ it("a channel that never polls, or a brief that never lands, fails typed", async
 
 it("messages have transcript receipts, while Stop text remains separate from message completion", async () => {
   const { adapter, view, hooks, agent, entries, unbind } = await fixture();
-  const started = await adapter.start({ harness: "claude", cwd: "/w", brief: "brief" }, view);
+  const started = await adapter.start(
+    { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "brief" },
+    view,
+  );
   if (started.outcome !== "started") throw new Error(JSON.stringify(started));
   const control = started.control;
   expect(await control.send("follow-up")).toMatchObject({ outcome: "accepted", state: "queued" });
@@ -629,7 +671,10 @@ it("a brief whose turn Claude refuses for its sign-in fails the hire typed, not 
     );
     return true;
   });
-  const failed = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "brief" }, f.view);
+  const failed = await f.adapter.start(
+    { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "brief" },
+    f.view,
+  );
   expect(failed).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
   expect((failed as { detail: string }).detail).toMatch(/^sign_in_failed: .*Login expired/u);
   // Any other first-turn ending, or none within the window, is a started worker.
@@ -645,7 +690,12 @@ it("a brief whose turn Claude refuses for its sign-in fails the hire typed, not 
     return true;
   });
   expect(
-    (await other.adapter.start({ harness: "claude", cwd: "/w", brief: "brief" }, other.view)).outcome,
+    (
+      await other.adapter.start(
+        { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "brief" },
+        other.view,
+      )
+    ).outcome,
   ).toBe("started");
 });
 
@@ -655,9 +705,12 @@ it("rechecks the hiring source after readiness before delivering its initial bri
     throw new Error("hiring actor revoked");
   });
   await expect(
-    adapter.start({ harness: "claude", cwd: tmpdir(), brief: "must remain unsent" }, { ...view, guard }),
+    adapter.start(
+      { resumeSessionId: SESSION, harness: "claude", cwd: tmpdir(), brief: "must remain unsent" },
+      { ...view, guard },
+    ),
   ).rejects.toThrow("hiring actor revoked");
-  expect(start).toHaveBeenCalledOnce();
+  expect(start).not.toHaveBeenCalled();
   expect(guard).toHaveBeenCalledOnce();
   expect(deliver).not.toHaveBeenCalled();
 });
@@ -665,7 +718,10 @@ it("rechecks the hiring source after readiness before delivering its initial bri
 describe("Claude completion evidence", () => {
   async function ready() {
     const f = await fixture();
-    const result = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "" }, f.view);
+    const result = await f.adapter.start(
+      { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "" },
+      f.view,
+    );
     if (result.outcome !== "started") throw new Error(JSON.stringify(result));
     return { ...f, control: result.control };
   }
@@ -736,7 +792,10 @@ describe("Claude completion evidence", () => {
       });
       return true;
     });
-    const result = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "brief" }, f.view);
+    const result = await f.adapter.start(
+      { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "brief" },
+      f.view,
+    );
     if (result.outcome !== "started") throw new Error(JSON.stringify(result));
     expect(await result.control.settled()).toMatchObject({
       type: "settlement_unconfirmed",
@@ -984,7 +1043,10 @@ describe("Claude completion evidence", () => {
   it("initial brief also refuses dispatch if its durable boundary cannot be saved", async () => {
     const f = await fixture();
     await mkdir(join(f.root, "hooks.json"));
-    const result = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "must not send" }, f.view);
+    const result = await f.adapter.start(
+      { resumeSessionId: SESSION, harness: "claude", cwd: "/w", brief: "must not send" },
+      f.view,
+    );
     expect(result).toMatchObject({
       outcome: "failed",
       reason: "not_ready",

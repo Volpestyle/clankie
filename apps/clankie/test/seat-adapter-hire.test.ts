@@ -73,7 +73,7 @@ async function fixture(
   const terminalInput = { promptAgent: vi.fn(async () => undefined) };
   const runner = {
     createTab: vi.fn(async () => agent.paneId),
-    startAgent: vi.fn(async () => undefined),
+    startAgent: vi.fn<NonNullable<HerdrWatchRunner["startAgent"]>>(async () => undefined),
     get: vi.fn(async () => agent),
     resolveTerminal: vi.fn(async () => agent),
     wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
@@ -273,7 +273,7 @@ it.each([
 ] as const)(
   "a local Claude hire uses the real channel adapter with a registered remote fleet (trust prompt: %s)",
   async (blocked) => {
-    const { root, runner, agent } = await fixture(async () => ({
+    const { root, runner } = await fixture(async () => ({
       outcome: "started",
       control: {} as SeatControl,
     }));
@@ -303,6 +303,13 @@ it.each([
     });
     const read = vi.fn(async () => (blocked === false ? "ready" : blocked));
     if (blocked) runner.startAgent.mockRejectedValue(new Error("agent_not_ready: blocked during startup"));
+    else
+      runner.startAgent.mockImplementation(async ({ args }) => {
+        runner.transcript.mockResolvedValue({
+          sessionKey: "k",
+          entries: [{ type: "message", id: "native-first-prompt", role: "operator", text: args!.at(-1)! }],
+        });
+      });
     const adapter = createClaudeWorkerSeatAdapter({
       consent,
       hooks: new SeatHookLog(join(root, "hooks.json")),
@@ -366,7 +373,8 @@ it.each([
         expect(OperatorSeatSpawnResultSchema.parse(result).control).toEqual({ mode: "channel" });
       } else {
         expect(result.outcome).toBe("spawned");
-        expect(deliver).toHaveBeenCalledWith(agent.terminalId, "the brief");
+        expect(deliver).not.toHaveBeenCalled();
+        expect(runner.startAgent.mock.calls.at(-1)?.[0].args?.slice(-2)).toEqual(["--", "the brief"]);
         expect(runner.closePane).not.toHaveBeenCalled();
       }
       expect(JSON.parse(log.mock.calls.at(-1)![1] as string)).toMatchObject({

@@ -69,7 +69,7 @@ files, or in his built-in tracker, and keeps the plan true as it moves
 
 **Delegates it.** When a job needs more hands he hires Claude Code, Codex, Pi,
 OpenCode, or Grok Build agents into real terminals in Herdr, panes you can
-watch and type into, and briefs them through each harness's own channel. Each
+watch and type into, and briefs them through each harness's native input. Each
 project can get its own lead, on your Mac or a linked PC, and leads message
 each other directly. New hires go to the account with capacity to spare, and
 builds and simulators take turns so a busy fleet doesn't grind your Mac to a
