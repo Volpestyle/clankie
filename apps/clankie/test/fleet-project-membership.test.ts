@@ -8,6 +8,7 @@ import { once } from "node:events";
 import { createProjectWorkspaceResolver } from "../src/project-membership.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProjectsSettingsSchema, type ReadFleetProjectMembership } from "@clankie/protocol/projects";
 import type { HerdrBinding, SpawnOperatorSeat } from "@clankie/protocol";
@@ -118,6 +119,23 @@ async function fixture(count = 1) {
 }
 const read = (service: FleetProjectMembership, input: ReadFleetProjectMembership) =>
   service.read(input, new AbortController().signal, async () => true);
+/**
+ * The native helper answers within a fixed bound; a loaded host can miss it and
+ * the product then reports the observation unavailable. Wait for an answered
+ * observation; any answered value, right or wrong, returns at once.
+ */
+async function answered<T>(observe: () => Promise<T>, unanswered: (value: T) => boolean): Promise<T> {
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    const value = await observe();
+    if (!unanswered(value) || Date.now() > deadline) return value;
+    await delay(100);
+  }
+}
+const unavailable = (snapshot: Awaited<ReturnType<typeof read>>) =>
+  snapshot.seats.some(
+    (seat) => seat.membership.outcome === "unknown" && seat.membership.reason === "observation_unavailable",
+  );
 
 it("joins an owner-started process's real cwd to enrolled settings and its saved project role without a hire", async () => {
   await prepareCwd();
@@ -138,14 +156,14 @@ it("joins an owner-started process's real cwd to enrolled settings and its saved
     f.options.workspace = (proof, signal) => resolve(proof, signal);
     const before = await readFile(f.path, "utf8");
     const service = new FleetProjectMembership(f.options);
-    expect((await read(service, f.input)).seats[0]!.membership).toEqual({
+    expect((await answered(() => read(service, f.input), unavailable)).seats[0]!.membership).toEqual({
       outcome: "member",
       source: "workspace",
       projectId: "repo",
       role: "builder",
     });
     f.settings().assignments = [];
-    expect((await read(service, f.input)).seats[0]!.membership).toEqual({
+    expect((await answered(() => read(service, f.input), unavailable)).seats[0]!.membership).toEqual({
       outcome: "member",
       source: "workspace",
       projectId: "repo",
@@ -261,11 +279,12 @@ it("reads a live process's cwd afresh after chdir and refuses canceled or exited
   );
   await once(child, "message");
   try {
-    expect(await observeNativeCwd(child.pid!)).toBe(first);
+    const cwd = () => observeNativeCwd(child.pid!);
+    expect(await answered(cwd, (value) => value === undefined)).toBe(first);
     const moved = once(child, "message");
     child.send(changed);
     await moved;
-    expect(await observeNativeCwd(child.pid!)).toBe(await realpath(changed));
+    expect(await answered(cwd, (value) => value === undefined)).toBe(await realpath(changed));
     const canceled = new AbortController();
     canceled.abort();
     expect(await observeNativeCwd(child.pid!, canceled.signal)).toBeUndefined();

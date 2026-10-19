@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { fork, spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 
 if (process.argv[2] === "burn") {
   let value = 1;
@@ -35,14 +35,16 @@ if (process.argv[2] === "burn") {
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ cpuMs: cpu / 1000, workers: usage.size }));
   });
-  server.listen(0, "127.0.0.1", () =>
+  server.listen(0, "127.0.0.1", () => {
+    // The test polls this receipt; a rename never exposes a partial write.
     writeFileSync(
-      receipt,
+      `${receipt}.tmp`,
       JSON.stringify({
         port: server.address().port,
         vitest: process.env.VITEST_MAX_WORKERS,
         turbo: process.env.TURBO_CONCURRENCY,
       }),
-    ),
-  );
+    );
+    renameSync(`${receipt}.tmp`, receipt);
+  });
 }

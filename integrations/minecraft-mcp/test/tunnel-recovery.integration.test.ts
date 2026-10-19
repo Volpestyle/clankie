@@ -9,6 +9,10 @@ const agentId = "00000000-0000-4000-8000-000000000001";
 const tunnelId = "00000000-0000-4000-8000-000000000002";
 const secret = "abcdef0123456789".repeat(4);
 const originPort = 25684;
+// The product's "spawn" event precedes the child's script running, so the child's own records are the only
+// proof it booted. Under host load Node boot can exceed expect.poll's 1 s default; wait as long as the
+// product's own create-request deadline (AbortSignal.timeout(15_000) in src/tunnel.ts).
+const childBootDeadline = 15_000;
 type ReadyTunnel = {
   id: string;
   internal_id: number;
@@ -109,8 +113,9 @@ async function harness(
       expect(await readFile(join(dataDir, "playit-tunnel-id"), "utf8")).toBe("allocation-pending\n");
       // Native startup is required to register the agent's version/schema before allocation.
       await expect
-        .poll(async () =>
-          JSON.parse(await readFile(join(dataDir, "playit-runtime/fixture-start.json"), "utf8")),
+        .poll(
+          async () => JSON.parse(await readFile(join(dataDir, "playit-runtime/fixture-start.json"), "utf8")),
+          { timeout: childBootDeadline },
         )
         .toMatchObject({ pid: expect.any(Number) });
       expect(input).toEqual({
@@ -166,12 +171,15 @@ const path = require("node:path");
 const args = process.argv.slice(2);
 const secretPath = args[args.indexOf("--secret_path") + 1];
 if (!/^[a-f0-9]{64}$/.test(fs.readFileSync(secretPath, "utf8"))) process.exit(2);
-fs.writeFileSync(path.join(process.cwd(), "fixture-start.json"), JSON.stringify({pid: process.pid, args}));
-fs.appendFileSync(path.join(process.cwd(), "fixture-starts"), process.pid + "\\n");
+// Handle SIGTERM before publishing the start record, so a visible record proves the stop record will follow.
 process.on("SIGTERM", () => {
   fs.writeFileSync(path.join(process.cwd(), "fixture-stopped"), "SIGTERM\\n");
   process.exit(0);
 });
+const startRecord = path.join(process.cwd(), "fixture-start.json");
+fs.writeFileSync(startRecord + "." + process.pid, JSON.stringify({pid: process.pid, args}));
+fs.renameSync(startRecord + "." + process.pid, startRecord);
+fs.appendFileSync(path.join(process.cwd(), "fixture-starts"), process.pid + "\\n");
 setInterval(() => {}, 1000);
 `,
     { mode: 0o700 },
@@ -221,14 +229,14 @@ async function closeProvider(provider: Server): Promise<void> {
 async function assertRealProcess(tunnel: MinecraftTunnel, dataDir: string, starts = 1) {
   const runtime = join(dataDir, "playit-runtime");
   await expect
-    .poll(async () => (await readFile(join(runtime, "fixture-starts"), "utf8")).trim().split("\n"))
+    .poll(async () => (await readFile(join(runtime, "fixture-starts"), "utf8")).trim().split("\n"), {
+      timeout: childBootDeadline,
+    })
     .toHaveLength(starts);
-  await expect
-    .poll(async () => JSON.parse(await readFile(join(runtime, "fixture-start.json"), "utf8")))
-    .toEqual({
-      pid: expect.any(Number),
-      args: ["--secret_path", join(runtime, "agent.secret"), "--stdout", "start"],
-    });
+  expect(JSON.parse(await readFile(join(runtime, "fixture-start.json"), "utf8"))).toEqual({
+    pid: expect.any(Number),
+    args: ["--secret_path", join(runtime, "agent.secret"), "--stdout", "start"],
+  });
   expect((await stat(runtime)).mode & 0o777).toBe(0o700);
   expect((await readFile(join(runtime, "fixture-starts"), "utf8")).trim().split("\n")).toHaveLength(starts);
   expect((await stat(join(runtime, "agent.secret"))).mode & 0o777).toBe(0o600);
@@ -300,7 +308,7 @@ test("another instance cannot allocate while the original HTTP create is still o
   try {
     const first = f.restart();
     const firstStart = first.start();
-    await expect.poll(() => f.attempts()).toBe(1);
+    await expect.poll(() => f.attempts(), { timeout: childBootDeadline }).toBe(1);
     expect(await readFile(join(f.dataDir, "playit-tunnel-id"), "utf8")).toBe("allocation-pending\n");
     const second = f.restart();
     expect(await second.start()).toEqual({

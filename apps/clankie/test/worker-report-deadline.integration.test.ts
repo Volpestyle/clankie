@@ -25,8 +25,15 @@ afterEach(async () => {
 it("answers a stalled worker report not_sent by its deadline, fences the late original and stores a resend", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-report-deadline-"));
   const conversations = new ConversationStore(join(root, "conversations"), async () => {});
+  // The admission deadline runs on the receiver's clock. The stalled route
+  // below moves that clock past its deadline itself, so a loaded machine can
+  // neither expire the resend nor let the deadline timer fire before the
+  // receiver sees the original as abandoned.
+  const deadlineMs = 1_000;
+  let clock = Date.now();
   const receiver = new InboundSeatReceipts(join(root, "inbound.json"), conversations, {
-    deadlineMs: 1_000,
+    deadlineMs,
+    now: () => clock,
   });
   const pane = "w15:p7";
   const binding = "c".repeat(64);
@@ -47,6 +54,7 @@ it("answers a stalled worker report not_sent by its deadline, fences the late or
             if (stalled) return receiver.accept(paneId, delivery!, text, text);
             // The first route outlives the admission deadline, like three remote censuses.
             stalled = true;
+            clock += deadlineMs;
             await stall;
             const accepted = receiver.accept(paneId, delivery!, text, text);
             lateAccept(accepted);
@@ -80,7 +88,7 @@ it("answers a stalled worker report not_sent by its deadline, fences the late or
   await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
   cleanup.push(async () => {
     release();
-    service.close();
+    await service.close();
     await conversations.close();
     await new Promise<void>((resolve) => {
       server.close(() => resolve());

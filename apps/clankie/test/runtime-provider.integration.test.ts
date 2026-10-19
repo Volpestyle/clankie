@@ -197,7 +197,7 @@ async function fixture(
   const server = serve({ fetch: service.app.fetch, hostname: "127.0.0.1", port: 0 });
   await new Promise<void>((resolve) => server.once("listening", resolve));
   cleanups.push(async () => {
-    service.close();
+    await service.close();
     if ("closeAllConnections" in server) server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });

@@ -1,8 +1,13 @@
-import { access, writeFile } from "node:fs/promises";
+import { access, rename, writeFile } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
 import { createResourceGovernor } from "../../src/governor.ts";
 
 const [directory, holderId, barrier, receipt, command] = process.argv.slice(2);
+/** The test polls these receipts; a rename never exposes a partial write. */
+const publish = async (path, text) => {
+  await writeFile(`${path}.tmp`, text);
+  await rename(`${path}.tmp`, path);
+};
 const governor = createResourceGovernor({
   directory,
   probe: async () => ({ loadRatio: 0, availableMemoryMb: 64_000 }),
@@ -26,11 +31,11 @@ try {
       process.stdout.write(
         `Nested server admission wait: ${JSON.stringify({ capacity: snapshot.capacity, queue: snapshot.serverQueue })}\n`,
       );
-      await writeFile(`${receipt}.waiting`, JSON.stringify(snapshot));
+      await publish(`${receipt}.waiting`, JSON.stringify(snapshot));
       stop.abort();
     },
   });
-  await writeFile(`${receipt}.done`, JSON.stringify({ code, snapshot: await governor.snapshot() }));
+  await publish(`${receipt}.done`, JSON.stringify({ code, snapshot: await governor.snapshot() }));
   process.exitCode = code;
 } finally {
   await governor.close();

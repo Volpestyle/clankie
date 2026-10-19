@@ -77,13 +77,13 @@ class HeldSettings extends SettingsStore {
 
 const wrappers = ["clankie_tools", "clankie_call"];
 const requestTimeoutMs = 250;
-// The service holds a slow binding lookup this long; the bridge's request budget
-// below must stay under it so that lookup times out deterministically.
-const bindingStallMs = 750;
-// The bridge's budget also bounds its first catalog: a fresh process's first
-// fetch plus the MCP initialize, initialized and tools/list round trips
-// (about 100ms warm here, over 250ms on a cold CI runner; VUH-2059).
-const bridgeRequestTimeoutMs = 500;
+// The bridge's request budget. A slow binding lookup is held until the case
+// recovers it, so that lookup exceeds any budget without racing a timed stall.
+// The same budget bounds the bridge's first catalog: a fresh process's first
+// fetch plus the MCP initialize, initialized and tools/list round trips (about
+// 100ms warm, over 500ms on a loaded machine; VUH-2059), so it leaves room for
+// that discovery while keeping each induced binding timeout short.
+const bridgeRequestTimeoutMs = 3_000;
 
 async function fixture(
   slowBinding = false,
@@ -117,6 +117,7 @@ async function fixture(
   });
   let seatPolls = 0;
   let bindingSlow = slowBinding;
+  const bindingStall = gate();
   let binding = "a".repeat(64);
   const seatOutbox = new SeatOutbox({ explicitAcknowledgments: true });
   const receiptApp = await createClankieApp({
@@ -197,7 +198,7 @@ async function fixture(
           return receiptApp.app.fetch(request);
         } else {
           bindingGets++;
-          if (bindingSlow) await new Promise((resolve) => setTimeout(resolve, bindingStallMs));
+          if (bindingSlow) await bindingStall.promise;
         }
         return receiptApp.app.fetch(request);
       }
@@ -213,8 +214,9 @@ async function fixture(
   const stop = async () => {
     if (stopped) return;
     stopped = true;
+    bindingStall.release();
     seatOutbox.close();
-    receiptApp.close();
+    await receiptApp.close();
     await worker.close();
     await host.close();
     await new Promise<void>((resolve, reject) => {
@@ -311,6 +313,7 @@ async function fixture(
     validations: () => validations,
     recoverBinding() {
       bindingSlow = false;
+      bindingStall.release();
     },
     revoke() {
       valid = false;

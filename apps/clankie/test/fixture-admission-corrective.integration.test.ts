@@ -49,6 +49,31 @@ const close = (server: ReturnType<typeof serve>) =>
   new Promise<void>((resolveClose) => server.close(() => resolveClose()));
 const absent = async (path: string) => expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
 const issue = () => ({ requestId: randomUUID(), receiptId: randomUUID(), assurance: "host-seat/v1" });
+/**
+ * Sends a fixture read until it reaches the claim. Under load the worker's or
+ * host's native caller observation can miss its bound; both refuse before any
+ * claim, leaving no receipt and the ticket still issued. Only that untouched
+ * refusal is sent again; any other outcome returns as it is.
+ */
+const readPastObservation = async (
+  send: () => Promise<Response>,
+  receipt: string,
+  ticketState: () => Promise<string>,
+) => {
+  for (let attempt = 1; ; attempt++) {
+    const response = await send();
+    if (
+      attempt === 10 ||
+      response.status !== 403 ||
+      (await lstat(receipt).then(
+        () => true,
+        () => false,
+      )) ||
+      (await ticketState()) !== "issued"
+    )
+      return response;
+  }
+};
 // Hardlinks a test-owned file into the next owned fixture root as soon as it appears, so that
 // root's real cleanup must refuse its contents and preserve it.
 const plantForeignLink = (scratch: string, foreign: string) => {
@@ -350,9 +375,11 @@ it("an authenticated claim with failed consume retains exactly one uncertain rec
     };
     const send = (body: unknown) =>
       fetch(`${fixture.descriptor.origin}/v1/fixture/reads`, { method: "POST", body: JSON.stringify(body) });
-    expect((await send(read)).status).toBe(403);
-    const path = join(fixture.descriptor.root, "fixture-receipts.json"),
-      receipt = await readFile(path);
+    const path = join(fixture.descriptor.root, "fixture-receipts.json");
+    const state = async () =>
+      (await (await h.request(`/requests/${input.requestId}`)).json()).state as string;
+    expect((await readPastObservation(() => send(read), path, state)).status).toBe(403);
+    const receipt = await readFile(path);
     expect(JSON.parse(receipt.toString())).toMatchObject({ state: "uncertain", input: read });
     expect((await send(read)).status).toBe(409);
     expect((await send({ ...read, receiptId: randomUUID() })).status).toBe(403);
@@ -554,8 +581,10 @@ for (const lost of ["claim", "consume"] as const)
           method: "POST",
           body: JSON.stringify(read),
         });
-      expect((await send()).status).toBe(403);
       const receipt = join(fixture.descriptor.root, "fixture-receipts.json");
+      const state = async () =>
+        (await (await h.request(`/requests/${input.requestId}`)).json()).state as string;
+      expect((await readPastObservation(send, receipt, state)).status).toBe(403);
       if (lost === "claim") await absent(receipt);
       else
         expect(JSON.parse(await readFile(receipt, "utf8"))).toMatchObject({

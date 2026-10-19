@@ -1,7 +1,6 @@
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   createFleetShellRun,
@@ -24,6 +23,7 @@ const roots: string[] = [];
 const linksToClose: FleetLinks[] = [];
 afterEach(async () => {
   for (const links of linksToClose.splice(0)) links.close();
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
@@ -138,12 +138,16 @@ it("keeps the decoded remote failure in link status and logs after exactly one r
 it("refreshes an old command master even when commands continue succeeding", async () => {
   const f = await fixture();
   await f.install(f.newBin, "fixtureprobe");
+  // The master's age is read from the wall clock; hold it so a loaded machine
+  // cannot age the master between the first two runs. Timers stay real.
+  vi.useFakeTimers({ toFake: ["Date"] });
   const run = createFleetShellRun(fleet, { controlDirectory: f.controlDirectory, maxControlAgeMs: 1_000 });
   const command = remoteProgramCommand("powershell", "fixtureprobe", ["environment"]);
   await expect(run(command)).resolves.toContain('"environment":"old-bin"');
   await f.login(`${f.newBin}${delimiter}${f.oldBin}`);
+  vi.setSystemTime(Date.now() + 999);
   await expect(run(command)).resolves.toContain('"environment":"old-bin"');
-  await delay(1_100);
+  vi.setSystemTime(Date.now() + 1);
   await expect(run(command)).resolves.toContain('"environment":"new-bin"');
   const commands = (await f.ssh()).filter((call) => call.kind === "command");
   expect(commands).toHaveLength(3);
