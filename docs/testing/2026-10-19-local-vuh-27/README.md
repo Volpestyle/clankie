@@ -14,7 +14,8 @@ Excluded: repositories, .git, node_modules, settings, credentials, other issues'
 
 ## Published by the integrator (Clankie, 2026-10-19)
 
-- Full packet (everything listed above, as a tar): `clankie://evidence/sha256/39e9265f784e8eba11221a8a7879985db3314ba1f102572553903b20a278c599`
+- Full packet v2, exactly the original 25 files with no macOS metadata or directory entries: `clankie://evidence/sha256/6a940c9839d90b4674a3ed001fdc043da78f9238ded188f8f34869b70919a931`
+- Superseded first tar, kept for provenance: `clankie://evidence/sha256/39e9265f784e8eba11221a8a7879985db3314ba1f102572553903b20a278c599`. It's defective: it contains AppleDouble `._*` files and directory entries, and it lacks README.md and candidate-v3.patch. The work lead caught this.
 - v3 patch: `clankie://evidence/sha256/baed6d081214615f0f832ec34e6d218ac1dceb9539669dc324eb3b4145fbff05`
 - Original packet SHA256SUMS (as verified by the work lead): `0706c2230fe807c80e453c3fe654160c48295ea8f1a49f93e0fef77c6de7105c`
 - Labels: the first Gitlink run's parent-directory ("..") diagnosis is **worker-attributed**. The v1 NOTE is **retrospective**, not an original transcript.

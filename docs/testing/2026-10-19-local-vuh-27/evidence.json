@@ -8,6 +8,12 @@
       "url": "clankie://evidence/sha256/baed6d081214615f0f832ec34e6d218ac1dceb9539669dc324eb3b4145fbff05"
     },
     {
+      "path": "packet-local27-v2.tar",
+      "size": 92160,
+      "sha256": "6a940c9839d90b4674a3ed001fdc043da78f9238ded188f8f34869b70919a931",
+      "url": "clankie://evidence/sha256/6a940c9839d90b4674a3ed001fdc043da78f9238ded188f8f34869b70919a931"
+    },
+    {
       "path": "packet-local27.tar",
       "size": 102912,
       "sha256": "39e9265f784e8eba11221a8a7879985db3314ba1f102572553903b20a278c599",
