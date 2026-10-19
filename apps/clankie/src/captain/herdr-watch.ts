@@ -2560,7 +2560,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           fingerprint: deliveryFingerprint(brief),
         });
         if (!target || !isDeepStrictEqual(target.target, fresh.target))
-          throw new Error("The settled original's remote host target changed or disconnected");
+          throw new Error(
+            `The settled original's remote host target changed or disconnected; expected ${input.freshIntent.afterReceiptId}`,
+          );
         await assertConversationAuthority(authority);
         // The sibling check and begin below have no await between them.
         fresh = this.hireReceipts.freshHireAdmission(

@@ -58,6 +58,9 @@ it("binds an explicit fresh admission to a retained native settlement, rejecting
   expect(accepted.target).toEqual(proof.target);
   expect(accepted.key).not.toBe(proof.receiptKey);
   expect(accepted.metadata.owner).toEqual(f.owner);
+  // Every refusal names the receipt the service expects (VUH-2180).
+  const naming = (reason: string, receipt = proof.receiptId) =>
+    new RegExp(`${reason}.*expected ${receipt}`, "u");
   expect(() =>
     f.fence.freshHireAdmission(
       proof.receiptKey,
@@ -65,9 +68,9 @@ it("binds an explicit fresh admission to a retained native settlement, rejecting
       f.owner,
       f.fingerprint,
     ),
-  ).toThrow(/UUID/u);
+  ).toThrow(naming("UUID"));
   expect(() => f.fence.freshHireAdmission(proof.receiptKey, f.input, f.owner, proof.fingerprint)).toThrow(
-    /replay/u,
+    naming("replay"),
   );
   expect(() =>
     f.fence.freshHireAdmission(
@@ -76,7 +79,7 @@ it("binds an explicit fresh admission to a retained native settlement, rejecting
       f.owner,
       f.fingerprint,
     ),
-  ).toThrow(/settled native/u);
+  ).toThrow(naming("settled native"));
   expect(() =>
     f.fence.freshHireAdmission(
       JSON.stringify(["pc", "codex", "elsewhere", "new"]),
@@ -84,10 +87,10 @@ it("binds an explicit fresh admission to a retained native settlement, rejecting
       f.owner,
       f.fingerprint,
     ),
-  ).toThrow(/location/u);
+  ).toThrow(naming("location", "no retained receipt"));
   expect(() =>
     f.fence.freshHireAdmission(proof.receiptKey, { ...f.input, resume: "pc:saved" }, f.owner, f.fingerprint),
-  ).toThrow(/resume/u);
+  ).toThrow(naming("resume"));
   for (const freshIntent of [
     { ...f.input.freshIntent, id: f.input.freshIntent!.id.toUpperCase() },
     { ...f.input.freshIntent, afterReceiptId: proof.receiptId.toUpperCase() },

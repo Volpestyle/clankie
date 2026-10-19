@@ -146,28 +146,32 @@ export class DeliveryFence {
     fingerprint: string,
   ) {
     const { freshIntent, ...launch } = input;
-    if (!freshIntent || !input.fleet || input.resume)
-      throw new Error("freshIntent requires a new remote hire, never a saved-session resume");
-    // Canonical persisted shape: optional undefined properties cannot become aliases on restart.
-    const metadata = FreshHireReceiptSchema.parse(
-      JSON.parse(JSON.stringify({ ...freshIntent, baseKey, owner, launch })),
-    );
     const entries = this.all();
-    if (entries.some(([, record]) => record.messageId === metadata.id))
-      throw new Error("Fresh intent UUID already names a native receipt");
-    const originals = entries.filter(
-      ([, record]) =>
-        record.messageId === metadata.afterReceiptId || record.freshHire?.id === metadata.afterReceiptId,
-    );
-    const key = JSON.stringify([...(JSON.parse(baseKey) as string[]), "fresh", metadata.id]);
+    const key =
+      freshIntent && JSON.stringify([...(JSON.parse(baseKey) as string[]), "fresh", freshIntent.id]);
     const siblings = entries.filter(
       ([id, record]) => id !== key && (record.freshHire?.baseKey ?? record.hireBaseKey ?? id) === baseKey,
     );
     const expected = siblings.at(-1)?.[1];
-    if (siblings.some(([, record]) => !record.settlement && !record.completed))
-      throw new Error(
-        `Another original hire at this location is unresolved; expected ${expected?.messageId}; no fresh dispatch may begin`,
+    // Every refusal names the latest retained receipt at this location (VUH-2180).
+    const refuse = (reason: string) =>
+      new Error(
+        `${reason}; expected ${expected?.messageId ?? "no retained receipt"}${expected?.freshHire ? ` (fresh intent ${expected.freshHire.id})` : ""}`,
       );
+    if (!freshIntent || !key || !input.fleet || input.resume)
+      throw refuse("freshIntent requires a new remote hire, never a saved-session resume");
+    // Canonical persisted shape: optional undefined properties cannot become aliases on restart.
+    const metadata = FreshHireReceiptSchema.parse(
+      JSON.parse(JSON.stringify({ ...freshIntent, baseKey, owner, launch })),
+    );
+    if (entries.some(([, record]) => record.messageId === metadata.id))
+      throw refuse("Fresh intent UUID already names a native receipt");
+    const originals = entries.filter(
+      ([, record]) =>
+        record.messageId === metadata.afterReceiptId || record.freshHire?.id === metadata.afterReceiptId,
+    );
+    if (siblings.some(([, record]) => !record.settlement && !record.completed))
+      throw refuse("Another original hire at this location is unresolved; no fresh dispatch may begin");
     const original = originals[0];
     const settled = original?.[1].settlement;
     const target =
@@ -180,8 +184,8 @@ export class DeliveryFence {
       !target ||
       (original[1].freshHire?.baseKey ?? original[1].hireBaseKey ?? original[0]) !== baseKey
     )
-      throw new Error(
-        `freshIntent requires the exact settled native hire receipt at this location; expected ${expected?.messageId ?? "no retained receipt"}${expected?.freshHire ? ` (fresh intent ${expected.freshHire.id})` : ""}. Completed hires require complete pane-absent inventory.`,
+      throw refuse(
+        "freshIntent requires the exact settled native hire receipt at this location. Completed hires require complete pane-absent inventory",
       );
     const known = entries.filter(([, record]) => record.freshHire?.id === metadata.id);
     const identity = (value: z.infer<typeof FreshHireReceiptSchema>) => {
@@ -197,9 +201,9 @@ export class DeliveryFence {
           known[0][1].fingerprint !== fingerprint ||
           !isDeepStrictEqual(identity(known[0][1].freshHire!), identity(metadata))))
     )
-      throw new Error("Fresh intent UUID already names a different owner, launch or brief");
+      throw refuse("Fresh intent UUID already names a different owner, launch or brief");
     if (siblings.some(([, record]) => record.fingerprint === fingerprint))
-      throw new Error("A fresh intent cannot replay any retained original brief at this location");
+      throw refuse("A fresh intent cannot replay any retained original brief at this location");
     return { key, metadata, target };
   }
 
