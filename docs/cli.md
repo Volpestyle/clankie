@@ -2691,6 +2691,9 @@ plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
   id/name; Markdown uses both `milestone_id` and `milestone_name` front matter.
   Device `work_items` requests opt into these facts with `statusVersion: 2`;
   older requests receive backlog as todo and omit the new milestone field.
+  A device `work_items` request with `itemId` reads that one item directly, as
+  `work show` does, so the app can open an issue its repo's 250-item list does
+  not reach; it returns that item, or none when the tracker has no such item.
   `work_project` uses the same registered repo ids and device authority as
   `work_items`. Metadata reads share connected-account snapshots and pagination,
   preserving the poller's provider budget.

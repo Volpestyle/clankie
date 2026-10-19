@@ -806,12 +806,29 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
       try {
         const label = parsed.data.label?.trim();
-        const result = await withLinearRequestInvocation("background", () =>
-          ctx.dependencies.workItems!.handle(
-            { action: "list", repo: repoId, ...(label ? { label } : {}) },
-            false,
-          ),
-        );
+        const itemId = parsed.data.itemId;
+        // A direct read reaches an item the repo's list would not (VUH-1954).
+        const result = await withLinearRequestInvocation("background", async () => {
+          if (itemId === undefined)
+            return ctx.dependencies.workItems!.handle(
+              { action: "list", repo: repoId, ...(label ? { label } : {}) },
+              false,
+            );
+          try {
+            const shown = await ctx.dependencies.workItems!.handle(
+              { action: "show", repo: repoId, id: itemId },
+              false,
+            );
+            if (!("item" in shown)) throw new Error("unexpected work result");
+            return { repo: shown.repo, items: [shown.item] };
+          } catch (error) {
+            if (!(error instanceof WorkRequestError && error.code === "not_found")) throw error;
+            const repos = await ctx.dependencies.workItems!.handle({ action: "repos" }, false);
+            const repo = "repos" in repos ? repos.repos.find((entry) => entry.id === repoId) : undefined;
+            if (repo === undefined) throw error;
+            return { repo, items: [] };
+          }
+        });
         if (!("items" in result)) throw new Error("unexpected work result");
         return context.json({
           op: "work_items",

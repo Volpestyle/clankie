@@ -484,6 +484,11 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       repoId: WorkRepoSchema.shape.id,
       /** Only items carrying this label, case-insensitively (a role station's backlog). */
       label: WorkItemLabelSchema.optional(),
+      /**
+       * Read this one item directly, even when the repo's list would not reach it
+       * (VUH-1954). Its result holds that item, or none when the tracker has no such item.
+       */
+      itemId: z.string().trim().min(1).max(64).optional(),
     })
     .strict(),
   z
@@ -1483,7 +1488,7 @@ export interface OperatorConversationServiceClient {
   evidencePreview?(sha256: string): Promise<OperatorEvidencePreviewOutcome>;
   workItems?(
     repoId: string,
-    options?: { readonly label?: string; readonly statusVersion?: 2 },
+    options?: { readonly label?: string; readonly statusVersion?: 2; readonly itemId?: string },
   ): Promise<OperatorWorkItemsOutcome>;
   /** One owner-authorized intent; transport loss returns its original ID without replay. */
   workItemWrite?(input: WorkItemWriteRequest): Promise<WorkItemWriteReceipt>;
@@ -1916,6 +1921,7 @@ export function createOperatorConversationServiceClient(
         repoId,
         ...(options?.label === undefined ? {} : { label: options.label }),
         ...(options?.statusVersion === undefined ? {} : { statusVersion: options.statusVersion }),
+        ...(options?.itemId === undefined ? {} : { itemId: options.itemId }),
       });
       if (result.op !== "work_items") throw new Error(`Unexpected ${result.op} result for work_items`);
       return result.result;

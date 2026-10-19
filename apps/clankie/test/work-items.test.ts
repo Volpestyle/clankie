@@ -241,6 +241,27 @@ describe("the work routes", () => {
       await post("/v1/work", { action: "list", repo: workspace, label: "DESIGNER" })
     ).json()) as { items: unknown[] };
     expect(cli.items).toHaveLength(1);
+
+    // A direct read reaches one item without the list, and finds none for an unknown ID (VUH-1954).
+    const { id } = (cli.items as { id: string }[])[0]!;
+    const direct = async (itemId: string) =>
+      (
+        (await (
+          await post(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+            op: "work_items",
+            schemaVersion: 1,
+            repoId: "workspace",
+            itemId,
+            label: "builder",
+          })
+        ).json()) as { result: { outcome: string; repo: { id: string }; items: { id: string }[] } }
+      ).result;
+    expect(await direct(id)).toMatchObject({ outcome: "ready", repo: { id: "workspace" }, items: [{ id }] });
+    expect(await direct("W-none00")).toMatchObject({
+      outcome: "ready",
+      repo: { id: "workspace" },
+      items: [],
+    });
   });
 });
 
