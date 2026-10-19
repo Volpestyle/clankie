@@ -101,3 +101,71 @@ the index, the worktree or configuration.
 
 Naming a repository is the authorization: this API exposes no new machine tool,
 HTTP or MCP route, and it does not widen what a remote caller may read.
+
+## Reading a supplied patch
+
+When there is no repository to read, or the change arrived as a file, a guided
+review can start from a local Git patch instead (the plain-patch fallback):
+
+```bash
+git diff BASE HEAD > change.patch
+clankie work review-patch change.patch
+```
+
+```ts
+import { readReviewPatch } from "@clankie/work-items";
+
+const review = await readReviewPatch({ path: "/abs/change.patch" });
+```
+
+The CLI resolves a relative path against the current directory; the API takes
+an absolute path. It reads that one regular file and nothing else: no Git
+process, no repository, no service or credential, and no path named inside the
+patch is opened. Nothing is applied. `--repo` is refused because a patch names
+no repository. The CLI prints the JSON below and exits 0 only for a complete
+result; every refusal exits 1.
+
+The result has `source: "patch"`, `patch` (`path` as given, `bytes`, and the
+`sha256` of exactly the bytes parsed), `complete: true`, `fileCount`, `limits`
+and `files`. There is no repository, base or head: **everything in a patch is
+the patch's own assertion.** Each file carries `change` (`added`, `deleted`,
+`modified`, `renamed` or `copied`), `oldPath`/`newPath`, the modes the patch
+states (null when it states none, as for a pure rename), rename/copy
+`similarity`, `binary`, `submodule` and `hunks` in the same shape as
+`review-diff`, with `oldLine`/`newLine` anchors and `noNewlineAtEnd`.
+`claimedObjects` holds the IDs from the patch's `index` line exactly as printed,
+usually abbreviated. Unlike `review-diff`'s `oldObject`/`newObject`, which Git
+resolved from commits it read, these were never checked against any object
+store and name no commit; treat them as labels, not identity or authorization.
+
+Supported input is ordinary `git diff` (or `git diff --cached`, `git show
+--format=`) output with Git's default `a/` and `b/` prefixes: added, deleted
+and modified text, renames and copies with or without edits, mode changes,
+symlinks, gitlinks (their `Subproject commit` text, never resolved), empty
+files, quoted names, `-U0` and any context width, and `\ No newline at end of
+file` on either side. A type change stays Git's two sections, a deletion then an
+addition of the same path. `Binary files … differ` reports `binary: true` with
+no hunks, because the patch carries no content for it.
+
+Refused, as `ReviewPatchError` with a code (the CLI prints
+`{ "outcome": "refused", "code", "message" }`):
+
+| Code             | When                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_path`   | not absolute (API), missing, a symbolic link, a directory or other non-regular file                                                                                                                                                                                                                                                                   |
+| `empty`          | a zero-byte file: it asserts no change, and looks like a failed export                                                                                                                                                                                                                                                                                |
+| `too_large`      | over `maxPatchBytes` (1 MiB); the rest is never read                                                                                                                                                                                                                                                                                                  |
+| `too_many_files` | over `maxFiles` (200) file sections                                                                                                                                                                                                                                                                                                                   |
+| `too_many_hunks` | over `maxHunks` (2000) hunks in the whole patch                                                                                                                                                                                                                                                                                                       |
+| `invalid_utf8`   | the file or a quoted name is not valid UTF-8 (never shown with replacement characters)                                                                                                                                                                                                                                                                |
+| `malformed`      | truncation, missing final newline, hunk counts that disagree with their lines, overlapping or misplaced hunks, names or headers (including a `Binary files` line) that contradict each other, a gitlink hunk that is not a `Subproject commit` pointer, a no-newline marker with other text, a path changed twice on one side, a NUL byte, stray text |
+| `unsupported`    | mail headers (`git format-patch`), plain non-Git diffs, a byte-order mark, other prefixes (`--no-prefix`, mnemonic), `GIT binary patch` payloads (`--binary`), combined merge diffs, break rewrites, unusual modes                                                                                                                                    |
+
+A patch is parsed whole or refused whole. A patch cut exactly between two file
+sections is indistinguishable from a shorter valid patch, and a function
+heading Git cut through a multibyte character is refused as `invalid_utf8`; the `sha256` and
+`bytes` bind exactly what was reviewed. Names and line text are untrusted
+content, as with `review-diff`: hunk lines are counted from their headers, so a
+filename or line shaped like `diff --git`, `+++` or `@@` stays data, and a name
+like `../../outside.txt` is reported, never followed. The API accepts lower or
+higher `limits`; the CLI always uses the defaults.

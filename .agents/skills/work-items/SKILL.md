@@ -31,6 +31,7 @@ from inside the repo (or pass `--repo PATH`); output is JSON.
 | Finished                       | `clankie work close ID` (`--canceled` if dropped)             |
 | Evidence                       | `clankie work attach ID --url URL --caption "what it proves"` |
 | Review a local Git change      | `clankie work review-diff BASE HEAD` (read-only, two commits) |
+| Review a supplied patch file   | `clankie work review-patch FILE` (patch claims only, no Git)  |
 
 Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `canceled`. Items carry
 the backend's `labels` (Linear, GitHub, or Markdown `labels:` front matter);

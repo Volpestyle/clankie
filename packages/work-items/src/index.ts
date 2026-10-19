@@ -26,3 +26,12 @@ export { readProjectDetails } from "./project-details.ts";
 export { readProjectWork } from "./project-read.ts";
 export * from "./releases.ts";
 export * from "./review-git.ts";
+export {
+  readReviewPatch,
+  REVIEW_PATCH_LIMITS,
+  ReviewPatchError,
+  type ReviewPatch,
+  type ReviewPatchErrorCode,
+  type ReviewPatchFile,
+  type ReviewPatchLimits,
+} from "./review-patch.ts";

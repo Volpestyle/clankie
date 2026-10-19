@@ -9,7 +9,7 @@ import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
-import { readReviewDiff, ReviewDiffError } from "@clankie/work-items";
+import { readReviewDiff, readReviewPatch, ReviewDiffError, ReviewPatchError } from "@clankie/work-items";
 import { WorkItemPrioritySchema } from "@clankie/protocol/work-items";
 import { commandHost } from "./io.ts";
 
@@ -30,6 +30,7 @@ const WORK_USAGE = [
   "  | run steer|pause|resume|stop ID [--body TEXT] | ask ITEM --body TEXT",
   "  | lease ITEM [--minutes N] [--release]",
   "  | review-diff BASE HEAD   (read-only local Git change between two commits of --repo; no service)",
+  "  | review-patch FILE   (read-only local Git patch file; no Git, repository or service)",
   "  | sync --json COMMAND   (built-in bootstrap, batch, subscribe or keyed transaction)",
   "  | call TOOL [--json ARGS]   (Clankie's call to the built-in tracker, for the owner)",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker; agents never use it)",
@@ -522,6 +523,20 @@ export async function runWorkCommand(
 ): Promise<{ readonly ok: boolean; readonly body: unknown }> {
   const env = options.env ?? process.env;
   const parsed = parseWorkArgs(args);
+  // Before repoRoot: a patch names no repository, and no Git process may run for it.
+  if (parsed.positional[0] === "review-patch") {
+    if (parsed.positional.length !== 2 || parsed.flags.size > 0) throw new Error(WORK_USAGE);
+    try {
+      const patch = await readReviewPatch({
+        path: resolve(options.cwd ?? process.cwd(), parsed.positional[1]!),
+      });
+      return { ok: patch.complete, body: patch };
+    } catch (error) {
+      if (error instanceof ReviewPatchError)
+        return { ok: false, body: { outcome: "refused", code: error.code, message: error.message } };
+      throw error;
+    }
+  }
   const repo = await repoRoot(one(parsed, "--repo"), options.cwd ?? process.cwd());
   const withoutRepo = args.filter((arg, index) => arg !== "--repo" && args[index - 1] !== "--repo");
   const local = parseWorkArgs(withoutRepo);

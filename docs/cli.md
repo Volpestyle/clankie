@@ -2801,6 +2801,18 @@ unknown or ambiguous refs answer `{ "outcome": "refused", "code" }`. Changes ove
 `info/attributes`, answer `complete: false` with the reason; exit 0 means a
 complete result. Contract and limits: [guided reviews](guided-reviews.md).
 
+### `work review-patch FILE`
+
+Reads one local Git patch file (`git diff` output) for a guided review, as JSON:
+`source: "patch"`, the file's `sha256` and size, then each file's change kind,
+paths, stated modes, unverified `index` IDs (`claimedObjects`) and hunks with
+old/new line anchors. It opens only that regular file, runs no Git or other
+process, opens no path the patch names, applies nothing and needs no service or
+credential; `--repo` is refused. Empty, oversized (over 1 MiB, 200 files or 2000
+hunks), non-UTF-8, truncated, contradictory or unsupported patches answer
+`{ "outcome": "refused", "code" }` and exit 1. Contract: [guided
+reviews](guided-reviews.md#reading-a-supplied-patch).
+
 ### `work view save|get|list|apply|delete` (built-in tracker)
 
 Saved views persist named issue filters, never issue snapshots or access rights.
