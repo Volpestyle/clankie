@@ -1,5 +1,6 @@
 import {
   APPEARANCE_SETTINGS_PATH,
+  EVIDENCE_STORAGE_SETTINGS_PATH,
   HOST_SETTINGS_PATH,
   HTTP_SETTINGS_PATH,
   MAXIMUM_TRUST_MODE_PATH,
@@ -121,6 +122,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
   const routes: Record<string, readonly string[]> = {
     GET: [
       HTTP_SETTINGS_PATH,
+      EVIDENCE_STORAGE_SETTINGS_PATH,
       HOST_SETTINGS_PATH,
       APPEARANCE_SETTINGS_PATH,
       MAXIMUM_TRUST_MODE_PATH,
@@ -157,6 +159,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
     ],
     POST: [
       HTTP_SETTINGS_PATH,
+      EVIDENCE_STORAGE_SETTINGS_PATH,
       HOST_SETTINGS_PATH,
       APPEARANCE_SETTINGS_PATH,
       MAXIMUM_TRUST_MODE_PATH,

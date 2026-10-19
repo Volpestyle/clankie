@@ -2930,6 +2930,12 @@ full startup-selection and hosted proof remain open. Invalid existing settings
 fail closed with `evidence_settings_invalid` (503), preserving the file bytes;
 these controls do not accept unknown fields or infer legacy locations.
 
+Paired devices use the same GET/POST `/v1/settings/evidence-storage` route through
+the relay with current `terminalControl` authority and their original device
+bearer. The relay validates the canonical update and snapshot schemas. Saving
+changes only `configured`; `active` and `restartRequired` report the captured
+backend until a separately authorized restart.
+
 The S3 foundation uses the standard AWS SDK credential provider chain; never
 put credentials in settings. Broker-backed renewable tenant credentials and
 owner-approved bucket/IAM/lifecycle/backup configuration still belong to hosted
