@@ -4,11 +4,12 @@
 // Discovery is published only under the private root, never the installed links.
 //
 //   clankie heavy --server -- node --import ./scripts/dependency-types.mjs \
-//     apps/clankie/scripts/read-receipt-proof-host.ts ROOT [--runner]
+//     apps/clankie/scripts/read-receipt-proof-host.ts ROOT [--runner] [--journal-records N]
 import { serve } from "@hono/node-server";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker } from "@clankie/work-items";
+import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
@@ -19,6 +20,8 @@ import { WorkerMcp } from "../src/worker-mcp.ts";
 const root = process.argv[2];
 // Production's built-in tracker carries a host runner; --runner reproduces that shape.
 const runner = process.argv.includes("--runner");
+// Seeds a receipt journal shaped like a long-lived service's, to measure the READ lock hold.
+const journalRecords = Number(process.argv[process.argv.indexOf("--journal-records") + 1] ?? 0);
 if (!root || !isAbsolute(root)) throw new Error("Expected an absolute private proof root");
 await mkdir(root, { recursive: true, mode: 0o700 });
 if ((await readdir(root)).length > 0) throw new Error("The proof root must be new and empty");
@@ -49,10 +52,54 @@ await settings.update((current) => ({
 // Empty broker: the built-in tracker needs no provider account.
 const credentials = new FileCredentialStore(join(root, "credentials.json"));
 const trackerDirectory = join(root, "tracker");
-const tracker = createLocalTracker({
+const backend = createLocalTracker({
   directory: trackerDirectory,
   ...(runner ? { runner: () => ({ source: "proof host runner" }) } : {}),
 });
+// Times each backend call: with no contention this is the whole store-lock hold.
+const tracker: typeof backend = {
+  ...backend,
+  async call(name, args, options) {
+    const started = performance.now();
+    try {
+      return await backend.call(name, args, options);
+    } finally {
+      void log({
+        event: "tracker.call",
+        tool: name,
+        ms: performance.now() - started,
+        proofHooks: !!options?.onReadPrepared,
+      });
+    }
+  },
+};
+if (process.argv.includes("--journal-records")) {
+  if (!Number.isInteger(journalRecords) || journalRecords <= 0)
+    throw new Error("Expected --journal-records N");
+  const owner = JSON.stringify(["fleet", "default", "w0:seeded"]);
+  const records = Array.from({ length: journalRecords }, (_, index) => ({
+    id: randomUUID(),
+    owner,
+    server: "linear",
+    tool: "get_issue",
+    binding: "0".repeat(64),
+    fingerprint: "1".repeat(64),
+    createdAt: Date.now() - journalRecords + index,
+    state: "settled",
+    // The service keeps bodies for its newest 1,000 settled calls.
+    ...(index >= journalRecords - 1_000
+      ? { result: { outcome: "ok", content: "x".repeat(800), isError: false } }
+      : {}),
+  }));
+  await mkdir(join(root, "worker-grants", "receipts"), { recursive: true, mode: 0o700 });
+  await writeFile(
+    join(root, "worker-grants", "receipts", "connected-calls.json"),
+    `${JSON.stringify(records)}\n`,
+    {
+      mode: 0o600,
+    },
+  );
+}
 // Initialize before any proved original: initialization itself is never READ.
 const seeded = (await tracker.call("save_issue", {
   team: "LOCAL",

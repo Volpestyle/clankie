@@ -58,7 +58,14 @@ async function listen(fetch: (request: Request) => Promise<Response>) {
 
 /** Real worker/host/SDK HTTP path; the isolated tracker owns one controlled issue. */
 async function fixture(
-  options: { local?: boolean; api?: boolean; manual?: boolean; requestTimeoutMs?: number } = {},
+  options: {
+    local?: boolean;
+    api?: boolean;
+    manual?: boolean;
+    requestTimeoutMs?: number;
+    /** Supplies an admitted native session; its occupant can change like a relaunched harness. */
+    native?: boolean;
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-call-receipts-"));
   const admitted = gate();
@@ -180,11 +187,18 @@ async function fixture(
   const localTracker = options.local
     ? createLocalTracker({ directory: join(root, "local-tracker") })
     : undefined;
+  let routedRepo: string | undefined;
   const host = createMcpHost({
     credentials,
     settings,
     curated: [],
-    ...(localTracker ? { localTracker, trackerIdentity: join(root, "local-tracker") } : {}),
+    ...(localTracker
+      ? {
+          localTracker,
+          trackerIdentity: join(root, "local-tracker"),
+          trackerRepoForWorker: async () => routedRepo,
+        }
+      : {}),
     ...(apiProvider
       ? {
           linearApiTracker: createLinearApiTracker({ credentials, fetch: apiProvider.fetch }),
@@ -201,6 +215,9 @@ async function fixture(
     | { entered: ReturnType<typeof gate>; release: ReturnType<typeof gate>; settled: ReturnType<typeof gate> }
     | undefined;
   const hostResults: Awaited<ReturnType<typeof host.call>>[] = [];
+  // Lost reply: the real host settles later, as after a caller timeout.
+  let holdNextSettlement = false;
+  let heldSettlement: (() => void) | undefined;
   const workerOptions = {
     directory: join(root, "grants"),
     credentials,
@@ -228,7 +245,32 @@ async function fixture(
             return result;
           },
         }
-      : host,
+      : options.local
+        ? {
+            ...host,
+            call: async (input: Parameters<typeof host.call>[0]) => {
+              if (!holdNextSettlement) return host.call(input);
+              holdNextSettlement = false;
+              let intercepted!: () => void;
+              const stashed = new Promise<void>((resolve) => (intercepted = resolve));
+              const real = host.call({
+                ...input,
+                onSettled: (result, observation) => {
+                  heldSettlement = () => input.onSettled?.(result, observation);
+                  intercepted();
+                },
+              });
+              // The real host settled after admission; this caller never receives that reply.
+              await Promise.race([stashed, real]);
+              return {
+                outcome: "refused" as const,
+                reason: "server_unavailable" as const,
+                possiblyDispatched: true,
+                detail: "Fixture reply lost after admission",
+              };
+            },
+          }
+        : host,
     // Receipt/authority tests use the production deadline, not a latency assertion.
     // Only tests whose contract is expiry opt into a short budget.
     ...(options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: options.requestTimeoutMs }),
@@ -254,9 +296,23 @@ async function fixture(
         ttlSeconds: 900,
       })
     : undefined;
+  let occupant = "fixture-native-session-1";
   const identity = (pane = "w1:p1"): LocalFleetIdentity => ({
     fleet: "default",
     pane,
+    // A synthetic admitted session: WorkerMcp-level only, never native admission proof.
+    ...(options.native
+      ? {
+          admittedProjectProof: async () => ({
+            fleet: "default",
+            pane,
+            nativeOccupantId: occupant,
+            binding: { socketPath: "/tmp/clankie-receipt-fixture.sock", session: "default" },
+            shell: { pid: 4242, startTime: "1792400000.000001" },
+            processes: [{ pid: 4343, startTime: "1792400001.000001" }],
+          }),
+        }
+      : {}),
     current: () => valid,
     validate: async () => {
       if (authenticationFailure) throw authenticationFailure;
@@ -352,6 +408,7 @@ async function fixture(
     await rm(root, { recursive: true, force: true });
   });
   return {
+    root,
     call,
     post,
     initialize,
@@ -389,6 +446,21 @@ async function fixture(
     },
     revoke() {
       valid = false;
+    },
+    loseNextReply() {
+      holdNextSettlement = true;
+    },
+    deliverLateSettlement() {
+      const deliver = heldSettlement;
+      heldSettlement = undefined;
+      if (!deliver) throw new Error("No held settlement");
+      deliver();
+    },
+    route(repo: string | undefined) {
+      routedRepo = repo;
+    },
+    relaunchNative(id: string) {
+      occupant = id;
     },
   };
 }
@@ -658,7 +730,7 @@ it("an ordinary cycle rollover stays UNKNOWN and retains its effects on a custom
   });
 });
 
-it("receipt recovery keeps missing and unproven originals uncertain and rejects caller READ assertions", async () => {
+it("receipt recovery keeps missing originals uncertain, reports unproven ones truthfully and rejects caller READ assertions", async () => {
   const f = await fixture({ local: true });
   const session = await f.initialize();
   const missing = randomUUID();
@@ -693,9 +765,13 @@ it("receipt recovery keeps missing and unproven originals uncertain and rejects 
     receiptId,
   );
   expect(original).toMatchObject({ outcome: "ok", receiptId });
+  // Initialization is never READ proof; inspection still reports what was retained.
   expect(await f.call({ receiptId, action: "inspect" }, session)).toMatchObject({
-    outcome: "uncertain",
+    outcome: "inspected",
     classification: "UNKNOWN",
+    recovery: { abandonable: false },
+    execution: { response: "confirmed-success" },
+    abandonment: { state: "not-observed" },
     toolError: false,
   });
   for (const assertion of [
@@ -735,6 +811,155 @@ it("receipt recovery keeps missing and unproven originals uncertain and rejects 
     outcome: "refused",
     toolError: true,
   });
+});
+
+async function readFixture() {
+  const f = await fixture({ local: true, native: true });
+  const session = await f.initialize();
+  // Initialize first: an initializing call is never READ.
+  const issue = (await f.localTracker!.call("save_issue", { team: "LOCAL", title: "READ receipt" })) as {
+    identifier: string;
+  };
+  const read = async (receiptId: string, id = issue.identifier) =>
+    f.call({ name: "linear_get_issue", arguments: { id } }, session, undefined, receiptId);
+  const inspect = (receiptId: string, abandonmentId?: string) =>
+    f.call({ receiptId, action: "inspect", ...(abandonmentId ? { abandonmentId } : {}) }, session);
+  const abandon = (receiptId: string, decision: string, reason = "Stop waiting") =>
+    f.call({ receiptId, action: "abandon-read", reason }, session, undefined, undefined, decision);
+  return { f, session, issue, read, inspect, abandon };
+}
+
+it("a READ-classified receipt inspects, abandons once and refuses a conflicting decision", async () => {
+  const { read, inspect, abandon, f } = await readFixture();
+  const receiptId = randomUUID();
+  const original = await read(receiptId);
+  expect(original).toMatchObject({ outcome: "ok", receiptId, toolError: false });
+  expect(await inspect(receiptId)).toMatchObject({
+    outcome: "inspected",
+    classification: "READ",
+    recovery: { abandonable: true },
+    original: { readSnapshot: { contract: "builtin-strict-no-effect/v1", operation: "get_issue" } },
+    execution: { dispatchAdmission: "recorded", response: "confirmed-success" },
+    abandonment: { state: "not-observed" },
+    toolError: false,
+  });
+  const decision = randomUUID();
+  const first = await abandon(receiptId, decision);
+  expect(first).toMatchObject({
+    outcome: "abandoned-read",
+    abandonmentId: decision,
+    abandonment: { state: "recorded", decision: { id: decision, reason: "Stop waiting" } },
+    toolError: false,
+  });
+  // The same decision again answers its original audit.
+  expect(await abandon(receiptId, decision)).toEqual(first);
+  const other = randomUUID();
+  expect(await abandon(receiptId, other, "A different decision")).toMatchObject({
+    outcome: "refused",
+    reason: "abandonment_conflict",
+    abandonmentId: other,
+    recordedAbandonmentId: decision,
+    toolError: true,
+  });
+  expect(await inspect(receiptId, other)).toMatchObject({
+    outcome: "inspected",
+    abandonment: { state: "recorded", decision: { id: decision }, requested: { id: other, recorded: false } },
+  });
+  // Recovery never touches the original result or replays the call.
+  expect(await f.call({ receiptId }, (await f.initialize()) as string)).toEqual(original);
+});
+
+it("a mistyped key on a READ-classified call settles as a definite error", async () => {
+  const { read, inspect } = await readFixture();
+  const receiptId = randomUUID();
+  expect(await read(receiptId, "LOCAL-404")).toMatchObject({
+    outcome: "ok",
+    isError: true,
+    receiptId,
+    toolError: true,
+    content: expect.stringContaining("Issue not found"),
+  });
+  expect(await inspect(receiptId)).toMatchObject({
+    outcome: "inspected",
+    classification: "READ",
+    execution: { response: "confirmed-error" },
+  });
+});
+
+it("a lost READ reply stays uncertain, can be abandoned, and its late result keeps the audit", async () => {
+  const { read, inspect, abandon, f } = await readFixture();
+  const receiptId = randomUUID();
+  f.loseNextReply();
+  expect(await read(receiptId)).toMatchObject({ outcome: "uncertain", receiptId, toolError: false });
+  expect(await inspect(receiptId)).toMatchObject({
+    outcome: "inspected",
+    classification: "READ",
+    execution: { dispatchAdmission: "recorded", response: "UNKNOWN" },
+  });
+  const decision = randomUUID();
+  expect(await abandon(receiptId, decision)).toMatchObject({
+    outcome: "abandoned-read",
+    execution: { response: "UNKNOWN" },
+    abandonment: { state: "recorded" },
+  });
+  f.deliverLateSettlement();
+  expect(await inspect(receiptId, decision)).toMatchObject({
+    outcome: "inspected",
+    execution: { response: "confirmed-success" },
+    abandonment: { state: "recorded", decision: { id: decision } },
+  });
+});
+
+it("another native session on the same pane cannot inspect or abandon a READ receipt", async () => {
+  const { read, inspect, abandon, f } = await readFixture();
+  const receiptId = randomUUID();
+  await read(receiptId);
+  f.relaunchNative("fixture-native-session-2");
+  expect(await inspect(receiptId)).toMatchObject({
+    outcome: "refused",
+    reason: "receipt_recovery_unavailable",
+    toolError: true,
+  });
+  expect(await abandon(receiptId, randomUUID())).toMatchObject({
+    outcome: "refused",
+    reason: "receipt_recovery_unavailable",
+  });
+  f.relaunchNative("fixture-native-session-1");
+  expect(await inspect(receiptId)).toMatchObject({
+    outcome: "inspected",
+    abandonment: { state: "not-observed" },
+  });
+});
+
+it("a route or grant change during recovery refuses without recording an abandonment", async () => {
+  const { read, inspect, abandon, f } = await readFixture();
+  const receiptId = randomUUID();
+  await read(receiptId);
+  let held = f.holdFence();
+  const routed = abandon(receiptId, randomUUID());
+  await held.entered.promise;
+  f.route("/fixture/repository");
+  held.release.release();
+  expect(await routed).toMatchObject({
+    outcome: "refused",
+    reason: "receipt_recovery_unavailable",
+    detail: "The worker's tracker route changed",
+  });
+  f.route(undefined);
+  expect(await inspect(receiptId)).toMatchObject({
+    outcome: "inspected",
+    abandonment: { state: "not-observed" },
+  });
+  held = f.holdFence();
+  const revoked = abandon(receiptId, randomUUID());
+  await held.entered.promise;
+  f.revoke();
+  held.release.release();
+  expect(await revoked).toMatchObject({ outcome: "refused", detail: "Fleet admission unavailable" });
+  const retained = JSON.parse(
+    await readFile(join(f.root, "grants", "receipts", "connected-calls.json"), "utf8"),
+  ) as { id: string; abandonment?: unknown }[];
+  expect(retained.find((record) => record.id === receiptId)?.abandonment).toBeUndefined();
 });
 
 it("API-owned reads and writes retain scoped worker receipts without repeating provider calls", async () => {

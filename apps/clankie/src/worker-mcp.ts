@@ -153,7 +153,8 @@ const ReceiptNativeSubjectSchema = z.strictObject({
   shell: z.strictObject({ pid: z.number().int().positive(), startTime: z.string().min(1) }),
   processes: z
     .array(z.strictObject({ pid: z.number().int().positive(), startTime: z.string().min(1) }))
-    .min(1),
+    .min(1)
+    .max(16),
 });
 /** Only a backend-owned, pre-effect locked snapshot may author this proof. */
 const WorkerReadSnapshotSchema = z.strictObject({
@@ -195,7 +196,8 @@ export type WorkerReadReceiptHost = {
       principalId: string;
       signal: AbortSignal;
     },
-    prepare: (assertTargetCurrent: () => void) => Promise<() => T>,
+    /** Awaited before the store lock; its commit runs under the lock without yielding. */
+    prepare: () => Promise<(assertTargetCurrent: () => void) => T>,
   ): Promise<T>;
 };
 const WorkerCallResultSchema = z.strictObject({
@@ -220,6 +222,8 @@ const WorkerCallReceiptSchema = z.object({
   result: WorkerCallResultSchema.optional(),
   nativeSubject: ReceiptNativeSubjectSchema.optional(),
   readSnapshot: WorkerReadSnapshotSchema.optional(),
+  /** Recovery proof removed by retention; the receipt remains a tombstone. */
+  proofTrimmed: z.literal(true).optional(),
   dispatchAdmissionAt: z.number().optional(),
   abandonment: z
     .strictObject({
@@ -269,6 +273,8 @@ const KEY_ID = "clankie_worker_mcp_signing";
 const WORKER_REQUEST_TIMEOUT_MS = 30_000;
 /** Optional recovery provenance must not consume an ordinary call's entire budget. */
 const READ_RECEIPT_PROOF_TIMEOUT_MS = 1_000;
+/** Retained READ selectors are bounded; get_issue/get_user/list_runs selectors are far smaller. */
+const READ_ROUTING_ARGUMENTS_MAX_BYTES = 1_024;
 /** Fleet seat long polls carry their catalog revision here; bridges list only when it moves. */
 export const FLEET_CATALOG_REVISION_HEADER = "x-clankie-catalog-revision";
 // Settings are owner-authored files; one service-side read covers every parked seat.
@@ -469,6 +475,14 @@ export class WorkerMcp {
       path: join(options.directory, "receipts", "connected-calls.json"),
       schema: WorkerCallReceiptSchema,
       unreadableMessage: "Worker call receipts are unreadable; no connected call was dispatched",
+      // Old settled reads keep their tombstone but not their recovery proof; an
+      // abandonment audit keeps the proof it was checked against.
+      trimSettled: (record) => {
+        if (record.abandonment || (!record.readSnapshot && !record.nativeSubject)) return;
+        delete record.readSnapshot;
+        delete record.nativeSubject;
+        record.proofTrimmed = true;
+      },
     });
   }
 
@@ -1041,10 +1055,18 @@ export class WorkerMcp {
     });
   }
 
-  private receiptInspection(receipt: WorkerCallReceipt, abandonmentId?: string) {
+  /** Retained facts only; classification never depends on whether recovery is possible now. */
+  private receiptInspection(
+    receipt: WorkerCallReceipt,
+    recovery: { abandonable: boolean; reason?: string },
+    abandonmentId?: string,
+  ) {
+    const decision = receipt.abandonment;
     return {
       receiptId: receipt.id,
       classification: receipt.readSnapshot ? ("READ" as const) : ("UNKNOWN" as const),
+      recovery,
+      ...(receipt.proofTrimmed ? { proofRetention: "trimmed" as const } : {}),
       original: {
         server: receipt.server,
         tool: receipt.tool,
@@ -1065,12 +1087,36 @@ export class WorkerMcp {
             : "UNKNOWN",
         ...(receipt.result === undefined ? {} : { result: receipt.result }),
       },
-      abandonment:
-        receipt.abandonment && (!abandonmentId || receipt.abandonment.id === abandonmentId)
-          ? { state: "recorded" as const, decision: receipt.abandonment }
-          : { state: "not-observed" as const, ...(abandonmentId === undefined ? {} : { id: abandonmentId }) },
+      abandonment: decision
+        ? {
+            state: "recorded" as const,
+            decision,
+            // One decision per original: a different requested ID was certainly not recorded.
+            ...(abandonmentId && abandonmentId !== decision.id
+              ? { requested: { id: abandonmentId, recorded: false } }
+              : {}),
+          }
+        : { state: "not-observed" as const, ...(abandonmentId === undefined ? {} : { id: abandonmentId }) },
       detail:
         "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+    };
+  }
+
+  private inspectedReceipt(
+    receipt: WorkerCallReceipt,
+    recovery: { abandonable: boolean; reason?: string },
+    abandonmentId?: string,
+  ) {
+    const inspection = this.receiptInspection(receipt, recovery, abandonmentId);
+    // A requested abandonment that is not yet visible may still be in flight.
+    return {
+      outcome:
+        abandonmentId && recovery.abandonable && inspection.abandonment.state === "not-observed"
+          ? ("uncertain" as const)
+          : ("inspected" as const),
+      operation: "inspect" as const,
+      ...(abandonmentId === undefined ? {} : { abandonmentId }),
+      ...inspection,
     };
   }
 
@@ -1119,41 +1165,56 @@ export class WorkerMcp {
       action.action === "abandon-read"
         ? uuid.parse(suppliedAbandonmentId).toLowerCase()
         : action.abandonmentId?.toLowerCase();
-    // Inspection keeps an unprovable original UNKNOWN. Abandonment of one is a
-    // definite refusal: no audit exists, so its reply must not read as uncertain.
-    const unproven = (reason?: string) =>
-      action.action === "inspect"
+    const refused = (reason: string, detail: string, extra: Record<string, unknown> = {}) => ({
+      outcome: "refused" as const,
+      receiptId,
+      ...(abandonmentId ? { abandonmentId } : {}),
+      reason,
+      detail,
+      ...extra,
+    });
+    const receipt = await this.authorizedCallReceipt(receiptId, authority, signal);
+    if (!receipt)
+      return action.action === "inspect"
         ? {
-            ...uncertainWorkerCall(receiptId, reason),
+            ...uncertainWorkerCall(receiptId),
             classification: "UNKNOWN" as const,
             ...(abandonmentId ? { abandonmentId } : {}),
           }
-        : {
-            outcome: "refused" as const,
-            receiptId,
-            abandonmentId,
-            classification: "UNKNOWN" as const,
-            reason: "original_read_unproven",
-            detail: `No abandonment was recorded${reason ? `: ${reason}` : ""}. The original stays UNKNOWN; reconcile with {receiptId} only and never repeat it.`,
-          };
-    const receipt = await this.authorizedCallReceipt(receiptId, authority, signal);
-    if (!receipt) return unproven();
-    if (!receipt.readSnapshot || !receipt.fingerprint)
-      return unproven("Original strict no-effect READ and target proof were not retained");
-    if (!receipt.nativeSubject)
-      return unproven("Original native ownership was not retained; recovery is unavailable");
-    const subject = await this.receiptNativeSubject(authority, signal);
-    if (!subject || !isDeepStrictEqual(subject, receipt.nativeSubject))
-      throw new Error("Worker receipt unavailable to this native session");
-    if (!this.options.host.withReadReceiptTarget)
-      return unproven("Current original backend target proof is unavailable");
-    this.assertReadReceiptIdentity(receipt);
+        : refused(
+            "original_read_unproven",
+            "No abandonment was recorded: no receipt is retained for this ID. The original stays UNKNOWN; reconcile with {receiptId} only and never repeat it.",
+            { classification: "UNKNOWN" },
+          );
+    const unrecoverable =
+      !receipt.readSnapshot || !receipt.fingerprint
+        ? receipt.proofTrimmed
+          ? "Recovery proof is retained only for recent settled calls"
+          : "Original strict no-effect READ and target proof were not retained"
+        : !receipt.nativeSubject
+          ? "Original native session was not retained"
+          : !this.options.host.withReadReceiptTarget
+            ? "Current original backend target proof is unavailable"
+            : undefined;
+    if (unrecoverable)
+      // Inspection reports what was retained, under the same access checks as lookup.
+      return action.action === "inspect"
+        ? this.inspectedReceipt(receipt, { abandonable: false, reason: unrecoverable }, abandonmentId)
+        : refused(
+            receipt.readSnapshot ? "original_session_unproven" : "original_read_unproven",
+            `No abandonment was recorded: ${unrecoverable}. Reconcile with {receiptId} only and never repeat the original.`,
+            { classification: receipt.readSnapshot ? "READ" : "UNKNOWN" },
+          );
     let auditAttempted = false;
     try {
-      return await this.options.host.withReadReceiptTarget(
-        { snapshot: receipt.readSnapshot, principalId: authority.principalId, signal },
-        async (assertTargetCurrent) => {
-          // Reprove access and the exact native occupant after acquiring the original target's lock.
+      const subject = await this.receiptNativeSubject(authority, signal);
+      if (!subject || !isDeepStrictEqual(subject, receipt.nativeSubject))
+        throw new Error("Worker receipt unavailable to this native session");
+      this.assertReadReceiptIdentity(receipt);
+      return await this.options.host.withReadReceiptTarget!(
+        { snapshot: receipt.readSnapshot!, principalId: authority.principalId, signal },
+        async () => {
+          // Reprove access and the exact native occupant; all of it awaits before the store lock.
           const authorized = await this.authorizedCallReceipt(receiptId, authority, signal);
           const currentSubject = await this.receiptNativeSubject(authority, signal);
           if (
@@ -1167,8 +1228,13 @@ export class WorkerMcp {
           const settingsFence = await this.options.fleetToolsSnapshot?.();
           if (settingsFence?.tools !== "connected")
             throw new Error("Current recovery tools fence is unavailable");
-          // The host revalidates its account/target after this preparation and invokes this commit without yielding.
-          return () => {
+          // Runs under the original store lock without yielding.
+          return (assertTargetCurrent: () => void) => {
+            signal.throwIfAborted();
+            settingsFence.assertCurrent();
+            assertTargetCurrent();
+            if (authority.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
+            // Reload synchronously: a late original result is kept, never overwritten.
             const latest = this.callReceipts.load().get(receiptId);
             if (
               !latest ||
@@ -1179,24 +1245,8 @@ export class WorkerMcp {
             )
               throw new Error("Original READ receipt changed during recovery preparation");
             this.assertReadReceiptIdentity(latest);
-            const assertFinal = () => {
-              signal.throwIfAborted();
-              settingsFence.assertCurrent();
-              assertTargetCurrent();
-              if (authority.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
-            };
-            assertFinal();
-            if (action.action === "inspect") {
-              const inspection = this.receiptInspection(latest, abandonmentId);
-              return abandonmentId && inspection.abandonment.state === "not-observed"
-                ? {
-                    outcome: "uncertain" as const,
-                    operation: "inspect" as const,
-                    abandonmentId,
-                    ...inspection,
-                  }
-                : { outcome: "inspected" as const, operation: "inspect" as const, ...inspection };
-            }
+            if (action.action === "inspect")
+              return this.inspectedReceipt(latest, { abandonable: true }, abandonmentId);
             const requestFingerprint = createHash("sha256")
               .update(canonicalJson(["abandon-read", receiptId, abandonmentId, action.reason]))
               .digest("hex");
@@ -1205,53 +1255,39 @@ export class WorkerMcp {
                 latest.abandonment.id !== abandonmentId ||
                 latest.abandonment.requestFingerprint !== requestFingerprint
               )
-                throw new Error("The original READ already retains a different abandonment decision");
+                return refused(
+                  "abandonment_conflict",
+                  "The original READ already retains a different abandonment decision; nothing was recorded.",
+                  { recordedAbandonmentId: latest.abandonment.id },
+                );
             } else {
-              // Reload synchronously: a late original response must not be overwritten by an awaited authority check.
-              const retained = this.callReceipts.load().get(receiptId);
-              if (
-                !retained ||
-                retained.owner !== authority.key ||
-                retained.owner !== receipt.owner ||
-                retained.abandonment ||
-                !isDeepStrictEqual(retained.readSnapshot, latest.readSnapshot) ||
-                !isDeepStrictEqual(retained.nativeSubject, currentSubject)
-              )
-                throw new Error("Worker receipt changed before abandonment audit");
-              retained.abandonment = {
+              // Every check above passed before this mutation; save() is its only failure point.
+              latest.abandonment = {
                 id: abandonmentId!,
                 receiptId,
                 at: Date.now(),
                 reason: action.reason,
                 owner: authority.key,
                 nativeSubject: currentSubject,
-                binding: retained.binding,
-                originalFingerprint: retained.fingerprint!,
+                binding: latest.binding,
+                originalFingerprint: latest.fingerprint!,
                 requestFingerprint,
                 readSnapshotFingerprint: createHash("sha256")
-                  .update(canonicalJson(retained.readSnapshot))
+                  .update(canonicalJson(latest.readSnapshot))
                   .digest("hex"),
               };
               auditAttempted = true;
-              try {
-                assertFinal();
-                this.callReceipts.save();
-              } catch {
-                return {
-                  ...uncertainWorkerCall(
-                    receiptId,
-                    "Abandonment audit persistence is unconfirmed; inspect both original IDs",
-                  ),
-                  abandonmentId,
-                };
-              }
+              this.callReceipts.save();
             }
-            const recorded = this.callReceipts.load().get(receiptId)!;
             return {
               outcome: "abandoned-read" as const,
               operation: "abandon-read" as const,
               abandonmentId,
-              ...this.receiptInspection(recorded, abandonmentId),
+              ...this.receiptInspection(
+                this.callReceipts.load().get(receiptId)!,
+                { abandonable: true },
+                abandonmentId,
+              ),
             };
           };
         },
@@ -1259,14 +1295,17 @@ export class WorkerMcp {
     } catch (error) {
       const detail = (error instanceof Error ? error.message : String(error)).slice(0, 500);
       return auditAttempted
-        ? { ...uncertainWorkerCall(receiptId, detail), abandonmentId }
-        : {
-            outcome: "refused" as const,
-            receiptId,
-            ...(abandonmentId ? { abandonmentId } : {}),
-            reason: "receipt_recovery_unavailable",
-            detail,
-          };
+        ? {
+            ...uncertainWorkerCall(
+              receiptId,
+              `Abandonment audit persistence is unconfirmed; inspect both original IDs: ${detail}`.slice(
+                0,
+                500,
+              ),
+            ),
+            abandonmentId,
+          }
+        : refused("receipt_recovery_unavailable", detail);
     }
   }
 
@@ -1892,6 +1931,12 @@ export class WorkerMcp {
                 // Manual grants have no native recovery subject; their ordinary read path is unchanged.
                 if (authorityNow.fleet === undefined) return;
                 const snapshot = WorkerReadSnapshotSchema.parse(observation);
+                // Large selectors stay ordinary unclassified reads rather than growing every tombstone.
+                if (
+                  Buffer.byteLength(canonicalJson(snapshot.routingArguments)) >
+                  READ_ROUTING_ARGUMENTS_MAX_BYTES
+                )
+                  return;
                 if (
                   snapshot.server !== current.server ||
                   snapshot.tool !== rule.name ||

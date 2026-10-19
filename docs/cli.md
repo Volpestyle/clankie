@@ -6655,33 +6655,48 @@ characters. The connected-tool equivalents are
 `clankie_call({receiptId, action: "inspect", abandonmentId?})` and
 `clankie_call({receiptId, action: "abandon-read", reason})`.
 
-Only an original backend-owned `builtin-strict-no-effect/v1` READ snapshot can
-qualify. The backend writes it under the store lock, before the read runs and
-before any effect, binding the store directory incarnation, store ID, account
-binding and argument fingerprint; the receipt also retains the original native
-session (occupant, shell and harness process lifetimes). The audited built-in
-branches are `get_user`, `get_issue`, and `list_runs` without a host runner,
-using the default clock. The service's own tracker has a runner, so its
-`list_runs` stays UNKNOWN. Initialization, cycle rollover, custom clocks,
-callbacks without a purity contract, missing proof, changed routes or store
-incarnations, writes, repository-routed calls and remote providers cannot supply
-that proof. A read-looking name or caller-supplied classification never makes
-an original eligible; an unproven original remains UNKNOWN. Abandoning one is
-refused with `original_read_unproven` and records nothing.
+Only an original with a retained `builtin-strict-no-effect/v1` READ snapshot can
+be abandoned. The built-in tracker emits the snapshot under its store lock, before
+the read runs and before any effect, binding the store directory incarnation and
+store ID. The host adds the account binding, argument fingerprint and original
+selectors to it, and the receipt also retains the original native session
+(occupant, shell and harness process lifetimes). The audited built-in branches are
+`get_user`, `get_issue`, and `list_runs` without a host runner, using the default
+clock. The service's own tracker has a runner, so its `list_runs` stays UNKNOWN.
+Initialization, cycle rollover, custom clocks, callbacks without a purity
+contract, selectors over 1 KiB, changed routes or store incarnations, writes,
+repository-routed calls and remote providers cannot supply that proof. A
+read-looking name or caller-supplied classification never makes an original
+eligible. If a backend read throws after its snapshot (a mistyped key, say), the
+receipt settles as a definite `confirmed-error`.
 
-Inspection revalidates the original target under its real lock without replaying
-the call. `inspected` and `abandoned-read` describe recovery operations separately
-from the original execution result. Abandonment records a decision to stop
-waiting; it does not cancel execution or authorize repeating the original.
-The bridge mints one reserved `abandonmentId` before sending abandonment. If its
-reply is uncertain, preserve both `receiptId` and `abandonmentId` and use
-`inspect` with those IDs. Never resend abandonment or the original call.
+Inspection never replays the call. For any retained receipt it reports
+`classification` (`READ` or `UNKNOWN`), `recovery` (`abandonable` and, when false,
+its `reason`), `original` (server, tool, fingerprint, account binding, native
+session, READ snapshot), `execution` (`dispatchAdmission`, and `response`:
+`confirmed-success`, `confirmed-error`, `settled-body-unavailable` once an old
+body was trimmed, or `UNKNOWN`) and `abandonment` (`recorded` with the audit, or
+`not-observed`) as separate facts. An abandonable original is reinspected under
+its store lock with the same native session; another session, a changed route,
+account or store, revoked admission or fleet tools off are refused. A READ whose
+native session was not retained is still `READ` but not abandonable.
 
-Inspection reports `classification`, `original` (server, tool, fingerprint,
-account binding, native session, READ snapshot), `execution` (`dispatchAdmission`
-and `response`: `confirmed-success`, `confirmed-error` or `UNKNOWN`) and
-`abandonment` (`recorded` with the audit, or `not-observed`) as separate facts.
-A later original result settles into the same receipt without erasing its audit.
+Abandonment records a decision to stop waiting; it does not cancel execution or
+authorize repeating the original. One decision is kept per original: the same
+`abandonmentId` answers the recorded audit, and a different one is refused with
+`abandonment_conflict`. Inspecting with a different ID reports the recorded
+decision and `requested.recorded: false`. Abandoning a settled READ is allowed and
+only records the decision. A late original result settles into the same receipt
+without erasing its audit. Unproven originals are refused with
+`original_read_unproven` (or `original_session_unproven` for a READ without its
+session) and record nothing. The bridge mints one reserved `abandonmentId` before
+sending abandonment. If its reply is uncertain, preserve both `receiptId` and
+`abandonmentId` and use `inspect` with those IDs. Never resend abandonment or the
+original call.
+
+The receipt journal keeps result bodies for the newest 1,000 settled calls;
+older settled READs also drop their recovery proof (`proofRetention: "trimmed"`)
+unless they hold an abandonment audit. Uncertain receipts keep theirs.
 
 Receipts written before this contract retained no classification, so they can
 never qualify. The historical LOCAL-VUH-13 originals

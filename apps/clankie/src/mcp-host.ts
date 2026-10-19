@@ -323,7 +323,8 @@ export interface McpHostOptions {
   readonly googleFetch?: typeof fetch;
   readonly googleEndpoints?: GoogleOAuthEndpoints;
   /** The durable fallback. Connected transport failures never select this backend. */
-  readonly localTracker?: TrackerToolBackend & Partial<Pick<LocalTrackerBackend, "withReadSnapshot">>;
+  readonly localTracker?: TrackerToolBackend &
+    Partial<Pick<LocalTrackerBackend, "withReadSnapshot" | "readSnapshotCandidate">>;
   /** Registered GraphQL OAuth, with a separate broker audience from MCP. */
   readonly linearApiTracker?: TrackerToolBackend;
   readonly linearRequestBudget?: LinearRequestBudget;
@@ -978,21 +979,18 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       if (!server || !isLocalTracker(server) || !laneAllows(server, "operator"))
         throw new Error("The original default tracker route changed");
       const state = await stateFor(server);
+      const originalCall = { tool: snapshot.tool, args: snapshot.routingArguments };
+      // Core native/account authorization and host routing may await: prepare both
+      // before the store lock, so under it only synchronous checks precede the commit.
+      const commit = await prepare();
+      const hostFence = await defaultReadFence(server, state, principalId, signal, originalCall);
       return tracker.withReadSnapshot(snapshot, async (assertStoreCurrent) => {
-        const originalCall = { tool: snapshot.tool, args: snapshot.routingArguments };
-        let hostFence = await defaultReadFence(server, state, principalId, signal, originalCall);
         const assertTargetCurrent = () => {
           assertStoreCurrent();
           hostFence();
         };
         assertTargetCurrent();
-        const commit = await prepare(assertTargetCurrent);
-        // Core native/account authorization may await. Refuse any stale held load
-        // before preparing fresh host authority, then commit without another yield.
-        assertTargetCurrent();
-        hostFence = await defaultReadFence(server, state, principalId, signal, originalCall);
-        assertTargetCurrent();
-        return commit();
+        return commit(assertTargetCurrent);
       });
     },
     async account(id, lane) {
@@ -1470,38 +1468,41 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               if (linearWrite) trackerReads.invalidate();
             }
           };
-          let defaultReadCurrent: (() => void) | undefined;
-          const publication = {
-            actor: trackerActor,
-            ...(!repositoryCall &&
+          // A strict READ's authority is prepared here, before the backend takes its
+          // store lock; under the lock only these synchronous checks run.
+          let readCurrent: (() => void) | undefined;
+          let readPrepared = false;
+          if (
+            !repositoryCall &&
             isLocalTracker(server) &&
             input.delegation &&
             input.fence &&
             input.onReadPrepared &&
-            options.localTracker?.withReadSnapshot
+            options.localTracker?.withReadSnapshot &&
+            options.localTracker.readSnapshotCandidate?.(input.tool)
+          ) {
+            const hostFence = await defaultReadFence(server, state!, input.delegation.principalId, signal, {
+              tool: input.tool,
+              args: input.arguments,
+            });
+            const receiptFence = await input.readReceiptFence?.();
+            readCurrent = () => {
+              receiptFence?.();
+              hostFence();
+              assertDispatch();
+            };
+            readCurrent();
+          }
+          const publication = {
+            actor: trackerActor,
+            ...(readCurrent
               ? {
                   beforeRead: async () => {
-                    commitCurrent = await input.fence!();
-                    assertDispatch();
-                    const hostFence = await defaultReadFence(
-                      server,
-                      state!,
-                      input.delegation!.principalId,
-                      signal,
-                      { tool: input.tool, args: input.arguments },
-                    );
-                    const receiptFence = await input.readReceiptFence?.();
-                    defaultReadCurrent = () => {
-                      receiptFence?.();
-                      hostFence();
-                      assertDispatch();
-                    };
-                    return defaultReadCurrent;
+                    readCurrent!();
+                    return readCurrent;
                   },
                   onReadPrepared: (snapshot: import("@clankie/work-items").TrackerReadSnapshot) => {
-                    if (!defaultReadCurrent)
-                      throw new DispatchRefused("Default READ authority is unavailable");
-                    defaultReadCurrent();
+                    readCurrent!();
                     input.onReadPrepared!({
                       ...snapshot,
                       server: "linear",
@@ -1515,6 +1516,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                         .parse(structuredClone(input.arguments)),
                       target: { ...snapshot.target, resourceBinding: localBinding },
                     });
+                    readPrepared = true;
                   },
                 }
               : {}),
@@ -1656,12 +1658,18 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                         isError: false,
                       }
                   : isLocalTracker(server)
-                    ? {
-                        content: JSON.stringify(
-                          await options.localTracker!.call(input.tool, input.arguments, publication),
-                        ),
-                        isError: false,
-                      }
+                    ? await options.localTracker!.call(input.tool, input.arguments, publication).then(
+                        (value) => ({ content: JSON.stringify(value), isError: false }),
+                        (error: unknown) => {
+                          // After READ proof, the backend's own pure read threw: that is
+                          // its definite answer, not a possibly dispatched call.
+                          if (!readPrepared || error instanceof DispatchRefused) throw error;
+                          return {
+                            content: error instanceof Error ? error.message : String(error),
+                            isError: true,
+                          };
+                        },
+                      )
                     : workerPost
                       ? await publishLinearWorker({
                           tool: input.tool,

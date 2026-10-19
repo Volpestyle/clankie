@@ -3,7 +3,7 @@
 // this pane's real process ancestry. Nothing here can grant admission.
 //
 //   node --import ./scripts/dependency-types.mjs \
-//     apps/clankie/scripts/read-receipt-proof-driver.ts ROOT read|runner
+//     apps/clankie/scripts/read-receipt-proof-driver.ts ROOT read|runner|measure
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
@@ -15,7 +15,8 @@ import { createLocalTracker } from "@clankie/work-items";
 const repo = join(import.meta.dirname, "../../..");
 const root = process.argv[2]!;
 const mode = process.argv[3];
-if (mode !== "read" && mode !== "runner") throw new Error("Expected ROOT read|runner");
+if (mode !== "read" && mode !== "runner" && mode !== "measure")
+  throw new Error("Expected ROOT read|runner|measure");
 const { issue } = JSON.parse(await readFile(join(root, "host.json"), "utf8")) as {
   issue: { identifier: string };
 };
@@ -106,7 +107,19 @@ const listed = await seat.start();
 const tools = ((listed.result as { tools?: { name: string }[] })?.tools ?? []).map((tool) => tool.name);
 record("bridge.tools", { tools });
 
-if (mode === "runner") {
+if (mode === "measure") {
+  // Alternate eligible READs (proof hooks, journal admission) with an ineligible read.
+  for (let round = 0; round < 20; round++) {
+    for (const [name, args] of [
+      ["linear_get_issue", { id: issue.identifier }],
+      ["linear_list_issues", { limit: 5 }],
+    ] as const) {
+      const started = performance.now();
+      const result = await seat.call({ name, arguments: args });
+      record(`measure.${name}`, { ms: performance.now() - started, outcome: result.body.outcome });
+    }
+  }
+} else if (mode === "runner") {
   const runs = await seat.call({ name: "linear_list_runs", arguments: {} });
   record("original.list_runs.runner", runs);
   const receiptId = runs.body.receiptId as string;
@@ -128,6 +141,12 @@ if (mode === "runner") {
     arguments: { id: issue.identifier, title: "LOCAL-VUH-13 proof mutation" },
   });
   record("original.save_issue", save);
+  const mistyped = await seat.call({ name: "linear_get_issue", arguments: { id: "LOCAL-404" } });
+  record("original.get_issue.mistyped", mistyped);
+  record(
+    "cli.inspect.get_issue.mistyped",
+    parsed(await cli(["inspect", mistyped.body.receiptId as string])) ?? {},
+  );
   const readId = getIssue.body.receiptId as string;
   const userId = getUser.body.receiptId as string;
   const writeId = save.body.receiptId as string;

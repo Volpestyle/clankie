@@ -350,6 +350,8 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
     storeId: string;
     storeDigest: string;
   }>;
+  /** Whether this backend can ever emit READ proof for the operation; never proof itself. */
+  readSnapshotCandidate(name: string): boolean;
   /** Revalidate an original READ target without replaying, seeding or rolling the store. */
   withReadSnapshot<T>(
     snapshot: TrackerReadSnapshot,
@@ -3633,6 +3635,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         { existingOnly: true },
       );
     },
+    readSnapshotCandidate: (name) => strictReadOperation(name, options) !== undefined,
     async withReadSnapshot(snapshot, apply) {
       if (
         snapshot.version !== 1 ||

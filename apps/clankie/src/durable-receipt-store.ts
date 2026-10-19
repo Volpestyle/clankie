@@ -18,11 +18,19 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
   private readonly path: string | undefined;
   private readonly schema: z.ZodType<Record[]>;
   private readonly unreadableMessage: string;
+  private readonly trimSettled: ((record: Record) => void) | undefined;
 
-  public constructor(options: { path?: string; schema: z.ZodType<Record>; unreadableMessage: string }) {
+  public constructor(options: {
+    path?: string;
+    schema: z.ZodType<Record>;
+    unreadableMessage: string;
+    /** Drops further optional detail from a settled record whose body is trimmed. */
+    trimSettled?: (record: Record) => void;
+  }) {
     this.path = options.path;
     this.schema = z.array(options.schema);
     this.unreadableMessage = options.unreadableMessage;
+    this.trimSettled = options.trimSettled;
   }
 
   /** Reload at each synchronous journal operation, including after a service restart. */
@@ -44,7 +52,10 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
     const settled = [...this.records.values()]
       .filter((record) => record.state === "settled" && record.result !== undefined)
       .sort((a, b) => b.createdAt - a.createdAt);
-    for (const record of settled.slice(SETTLED_BODY_LIMIT)) delete record.result;
+    for (const record of settled.slice(SETTLED_BODY_LIMIT)) {
+      delete record.result;
+      this.trimSettled?.(record);
+    }
     if (this.path === undefined) return;
     mkdirSync(dirname(this.path), { recursive: true });
     const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;

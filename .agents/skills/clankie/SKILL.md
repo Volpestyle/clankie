@@ -278,20 +278,23 @@ An uncertain receipt can also be inspected, and a proven READ abandoned:
 `{receiptId, action: "abandon-read", reason}`, or natively
 `clankie agents call-receipt inspect ORIGINAL_UUID [--abandonment-id UUID]` and
 `clankie agents call-receipt abandon-read ORIGINAL_UUID --reason TEXT` (nonblank,
-at most 500 characters). Both use the calling seat's own fleet link and require
-the original native session, current access and the original route; there is no
-operator credential fallback. Only an original whose receipt retained a
-backend-owned `builtin-strict-no-effect/v1` READ snapshot qualifies: built-in
-`get_issue` or `get_user` on an initialized store (and `list_runs` only on a
-tracker without a host runner, so never on the service's own). Initialization,
-cycle rollover, writes, remote providers and repository-routed calls stay
-UNKNOWN; names and caller assertions supply no READ proof. Inspection rechecks
-the original store under its lock and never replays the call. Abandonment
-records a decision to stop waiting; it neither cancels nor proves nonexecution,
-and an unproven original refuses with `original_read_unproven` and records
-nothing. After an uncertain abandonment reply, inspect with both IDs; never
-resend abandonment or the original. Receipts made before this contract
-(including `70136c4f-43ad-45f3-8434-5de9fd04545a` and
+at most 500 characters). Both use the calling seat's own fleet link; there is no
+operator credential fallback. Inspection reports what the receipt retained
+(classification, whether it is abandonable and why not, execution, abandonment)
+and never replays the call. Only an original whose receipt kept a backend-owned
+`builtin-strict-no-effect/v1` READ snapshot and its native session can be
+abandoned, from that same session with current access and the original route:
+built-in `get_issue` or `get_user` on an initialized store (and `list_runs` only
+on a tracker without a host runner, so never on the service's own).
+Initialization, cycle rollover, writes, remote providers and repository-routed
+calls stay UNKNOWN; names and caller assertions supply no READ proof. A READ that
+throws after its snapshot, such as a mistyped key, settles as `confirmed-error`.
+Abandonment records one decision to stop waiting; it neither cancels nor proves
+nonexecution. A different decision is refused with `abandonment_conflict`, and an
+unproven original with `original_read_unproven`; neither records anything. After
+an uncertain abandonment reply, inspect with both IDs; never resend abandonment
+or the original. Receipts made before this contract (including
+`70136c4f-43ad-45f3-8434-5de9fd04545a` and
 `7065c6aa-fffb-4e55-9c0f-550d139af96c`) retained no classification and stay
 UNKNOWN for good.
 

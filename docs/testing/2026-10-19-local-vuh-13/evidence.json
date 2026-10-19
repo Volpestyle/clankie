@@ -25,29 +25,67 @@
         {
           "step": "original.get_issue",
           "outcome": "ok",
-          "receiptId": "6abcb47f-3f53-4df2-957b-bf55e5419053"
+          "receiptId": "47a6367e-86fb-4490-9731-230a3670a891",
+          "isError": false
         },
         {
           "step": "original.get_user",
           "outcome": "ok",
-          "receiptId": "464ede83-8f69-42e8-bcfa-c47e3e65bfbe"
+          "receiptId": "b4da7188-09ec-45ef-ab73-05016be55720",
+          "isError": false
         },
         {
           "step": "original.list_runs",
           "outcome": "ok",
-          "receiptId": "1c47fa03-75de-4c01-b236-9ff0c35a9ff6"
+          "receiptId": "4b1db5b4-b27e-4ae3-81ff-34314238a010",
+          "isError": false
         },
         {
           "step": "original.save_issue",
           "outcome": "ok",
-          "receiptId": "8048953a-9cbf-4192-b8f2-6ed27f75422a"
+          "receiptId": "16db3959-6346-4ec6-87df-4a18813801a9",
+          "isError": false
+        },
+        {
+          "step": "original.get_issue.mistyped",
+          "outcome": "ok",
+          "receiptId": "fbe8e889-8534-4b52-bcfd-9adf12ae7305",
+          "isError": true
+        },
+        {
+          "step": "cli.inspect.get_issue.mistyped",
+          "outcome": "inspected",
+          "classification": "READ",
+          "receiptId": "fbe8e889-8534-4b52-bcfd-9adf12ae7305",
+          "detail": "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+          "recovery": {
+            "abandonable": true
+          },
+          "execution": {
+            "dispatchAdmission": "recorded",
+            "response": "confirmed-error"
+          },
+          "abandonment": "not-observed",
+          "readSnapshot": {
+            "contract": "builtin-strict-no-effect/v1",
+            "operation": "get_issue",
+            "fingerprint": "0c6396e44c6bc300e73622f8efd8be2b0e1402132ec740cc0305f2a7e93f09f0"
+          },
+          "nativeSession": {
+            "pane": "w5J:p5",
+            "session": "default",
+            "occupant": "session-939128620f23701b\u2026"
+          }
         },
         {
           "step": "cli.inspect.get_issue",
           "outcome": "inspected",
           "classification": "READ",
-          "receiptId": "6abcb47f-3f53-4df2-957b-bf55e5419053",
+          "receiptId": "47a6367e-86fb-4490-9731-230a3670a891",
           "detail": "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+          "recovery": {
+            "abandonable": true
+          },
           "execution": {
             "dispatchAdmission": "recorded",
             "response": "confirmed-success"
@@ -68,9 +106,12 @@
           "step": "cli.abandon.get_issue",
           "outcome": "abandoned-read",
           "classification": "READ",
-          "receiptId": "6abcb47f-3f53-4df2-957b-bf55e5419053",
-          "abandonmentId": "3b23bc3a-49fa-4b60-ad72-29afc8db2b2f",
+          "receiptId": "47a6367e-86fb-4490-9731-230a3670a891",
+          "abandonmentId": "379ae112-bb08-4faf-923a-a72626889c90",
           "detail": "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+          "recovery": {
+            "abandonable": true
+          },
           "execution": {
             "dispatchAdmission": "recorded",
             "response": "confirmed-success"
@@ -91,8 +132,12 @@
           "step": "cli.inspect.get_issue.with_abandonment",
           "outcome": "inspected",
           "classification": "READ",
-          "receiptId": "6abcb47f-3f53-4df2-957b-bf55e5419053",
+          "receiptId": "47a6367e-86fb-4490-9731-230a3670a891",
+          "abandonmentId": "379ae112-bb08-4faf-923a-a72626889c90",
           "detail": "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+          "recovery": {
+            "abandonable": true
+          },
           "execution": {
             "dispatchAdmission": "recorded",
             "response": "confirmed-success"
@@ -112,23 +157,28 @@
         {
           "step": "cli.abandon.get_issue.second_decision",
           "outcome": "refused",
-          "receiptId": "6abcb47f-3f53-4df2-957b-bf55e5419053",
-          "abandonmentId": "312f414c-7b90-4295-98ea-23b26db50676",
-          "reason": "receipt_recovery_unavailable",
-          "detail": "The original READ already retains a different abandonment decision"
+          "receiptId": "47a6367e-86fb-4490-9731-230a3670a891",
+          "abandonmentId": "cd7e1515-2368-4e47-8313-d257a89a06c7",
+          "reason": "abandonment_conflict",
+          "recordedAbandonmentId": "379ae112-bb08-4faf-923a-a72626889c90",
+          "detail": "The original READ already retains a different abandonment decision; nothing was recorded."
         },
         {
           "step": "bridge.lookup.get_issue.after_abandon",
           "outcome": "ok",
-          "receiptId": "6abcb47f-3f53-4df2-957b-bf55e5419053"
+          "receiptId": "47a6367e-86fb-4490-9731-230a3670a891",
+          "isError": false
         },
         {
           "step": "bridge.abandon.get_user",
           "outcome": "abandoned-read",
           "classification": "READ",
-          "receiptId": "464ede83-8f69-42e8-bcfa-c47e3e65bfbe",
-          "abandonmentId": "8159d2cb-a081-4078-9664-635a0f79bc05",
+          "receiptId": "b4da7188-09ec-45ef-ab73-05016be55720",
+          "abandonmentId": "ae665fb2-94e7-4afb-8b77-c4846ef35005",
           "detail": "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+          "recovery": {
+            "abandonable": true
+          },
           "execution": {
             "dispatchAdmission": "recorded",
             "response": "confirmed-success"
@@ -149,8 +199,11 @@
           "step": "cli.inspect.list_runs",
           "outcome": "inspected",
           "classification": "READ",
-          "receiptId": "1c47fa03-75de-4c01-b236-9ff0c35a9ff6",
+          "receiptId": "4b1db5b4-b27e-4ae3-81ff-34314238a010",
           "detail": "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+          "recovery": {
+            "abandonable": true
+          },
           "execution": {
             "dispatchAdmission": "recorded",
             "response": "confirmed-success"
@@ -169,26 +222,34 @@
         },
         {
           "step": "cli.inspect.save_issue",
-          "outcome": "uncertain",
+          "outcome": "inspected",
           "classification": "UNKNOWN",
-          "receiptId": "8048953a-9cbf-4192-b8f2-6ed27f75422a",
-          "reason": "Original strict no-effect READ and target proof were not retained",
-          "detail": "may have applied; reconcile, don\u2019t retry"
+          "receiptId": "16db3959-6346-4ec6-87df-4a18813801a9",
+          "detail": "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+          "recovery": {
+            "abandonable": false,
+            "reason": "Original strict no-effect READ and target proof were not retained"
+          },
+          "execution": {
+            "dispatchAdmission": "recorded",
+            "response": "confirmed-success"
+          },
+          "abandonment": "not-observed"
         },
         {
           "step": "cli.abandon.save_issue",
           "outcome": "refused",
           "classification": "UNKNOWN",
-          "receiptId": "8048953a-9cbf-4192-b8f2-6ed27f75422a",
-          "abandonmentId": "b06634f4-84ae-41aa-b77e-ebf73ac1c8d5",
+          "receiptId": "16db3959-6346-4ec6-87df-4a18813801a9",
+          "abandonmentId": "bba21802-b16b-4152-9a72-bdc46f80abab",
           "reason": "original_read_unproven",
-          "detail": "No abandonment was recorded: Original strict no-effect READ and target proof were not retained. The original stays UNKNOWN; reconcile with {receiptId} only and never repeat it."
+          "detail": "No abandonment was recorded: Original strict no-effect READ and target proof were not retained. Reconcile with {receiptId} only and never repeat the original."
         },
         {
           "step": "cli.inspect.missing",
           "outcome": "uncertain",
           "classification": "UNKNOWN",
-          "receiptId": "1bdade84-cbe5-4402-8205-ca6cb38f96a6",
+          "receiptId": "38806a43-dbd9-45b1-980e-3ed3cf0a450e",
           "detail": "may have applied; reconcile, don\u2019t retry"
         },
         {
@@ -200,7 +261,7 @@
         {
           "step": "cli.inspect.spoofed_pane",
           "outcome": "uncertain",
-          "receiptId": "6abcb47f-3f53-4df2-957b-bf55e5419053",
+          "receiptId": "47a6367e-86fb-4490-9731-230a3670a891",
           "reason": "This native seat is no longer admitted to the fleet. Automatic mailbox polling stopped. Ask Clankie to confirm or restore this seat's admission; repeated retries cannot grant access.",
           "detail": "may have applied; reconcile, don\u2019t retry"
         },
@@ -214,8 +275,11 @@
           "step": "cli.inspect.tools_restored",
           "outcome": "inspected",
           "classification": "READ",
-          "receiptId": "6abcb47f-3f53-4df2-957b-bf55e5419053",
+          "receiptId": "47a6367e-86fb-4490-9731-230a3670a891",
           "detail": "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+          "recovery": {
+            "abandonable": true
+          },
           "execution": {
             "dispatchAdmission": "recorded",
             "response": "confirmed-success"
@@ -235,15 +299,15 @@
         {
           "step": "cli.inspect.store_replaced",
           "outcome": "refused",
-          "receiptId": "6abcb47f-3f53-4df2-957b-bf55e5419053",
+          "receiptId": "47a6367e-86fb-4490-9731-230a3670a891",
           "reason": "receipt_recovery_unavailable",
           "detail": "The original tracker READ store is missing or replaced"
         },
         {
           "step": "cli.abandon.store_replaced",
           "outcome": "refused",
-          "receiptId": "464ede83-8f69-42e8-bcfa-c47e3e65bfbe",
-          "abandonmentId": "7e17b95c-fb3e-44fa-a1d1-85a7278711f6",
+          "receiptId": "b4da7188-09ec-45ef-ab73-05016be55720",
+          "abandonmentId": "6352f607-9731-477e-83e1-22acbe127561",
           "reason": "receipt_recovery_unavailable",
           "detail": "The original tracker READ store is missing or replaced"
         }
@@ -266,42 +330,93 @@
         {
           "step": "original.list_runs.runner",
           "outcome": "ok",
-          "receiptId": "3eab12fb-9217-49b0-a504-3fc756b9b216"
+          "receiptId": "a11efc9e-f71d-4d39-8211-914059616fb7",
+          "isError": false
         },
         {
           "step": "cli.inspect.list_runs.runner",
-          "outcome": "uncertain",
+          "outcome": "inspected",
           "classification": "UNKNOWN",
-          "receiptId": "3eab12fb-9217-49b0-a504-3fc756b9b216",
-          "reason": "Original strict no-effect READ and target proof were not retained",
-          "detail": "may have applied; reconcile, don\u2019t retry"
+          "receiptId": "a11efc9e-f71d-4d39-8211-914059616fb7",
+          "detail": "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+          "recovery": {
+            "abandonable": false,
+            "reason": "Original strict no-effect READ and target proof were not retained"
+          },
+          "execution": {
+            "dispatchAdmission": "UNKNOWN",
+            "response": "confirmed-success"
+          },
+          "abandonment": "not-observed"
         },
         {
           "step": "cli.abandon.list_runs.runner",
           "outcome": "refused",
           "classification": "UNKNOWN",
-          "receiptId": "3eab12fb-9217-49b0-a504-3fc756b9b216",
-          "abandonmentId": "ff43aefe-d759-4d0e-8acd-838458a55bae",
+          "receiptId": "a11efc9e-f71d-4d39-8211-914059616fb7",
+          "abandonmentId": "e6d16d25-0994-4111-b8f7-c40a7d074b6e",
           "reason": "original_read_unproven",
-          "detail": "No abandonment was recorded: Original strict no-effect READ and target proof were not retained. The original stays UNKNOWN; reconcile with {receiptId} only and never repeat it."
+          "detail": "No abandonment was recorded: Original strict no-effect READ and target proof were not retained. Reconcile with {receiptId} only and never repeat the original."
         },
         {
           "step": "bridge.lookup.list_runs.runner",
           "outcome": "ok",
-          "receiptId": "3eab12fb-9217-49b0-a504-3fc756b9b216"
+          "receiptId": "a11efc9e-f71d-4d39-8211-914059616fb7",
+          "isError": false
         }
       ]
     }
   ],
   "admission": {
-    "nativeSuccesses": 55,
-    "refusalOrRetryReasons": ["pane_unavailable"],
-    "note": "pane_unavailable is the spoofed header w0:p999; others, if any, are first-attempt native observation retries"
+    "nativeSuccesses": 62,
+    "refusalOrRetryReasons": ["pane_unavailable", "process_census_changed", "socket_unavailable"],
+    "note": "pane_unavailable is the spoofed header w0:p999; socket_unavailable and process_census_changed were first-attempt native observation retries that then succeeded"
   },
   "rawCaptures": {
-    ".local/proof-v4-read-050414/driver-read.json": "8b67e3c9cebcec1c22ca4d595fbe616b474178dc486a5af5f60c8713f9a9b0ef",
-    ".local/proof-v4-read-050414/host-events.jsonl": "3e2ba8b7028480985374056d2e49a4682616d69b0b12ce0e78f1a9b92181c8c9",
-    ".local/proof-v4-runner-050417/driver-runner.json": "2934be31d1e2afda8f96df10e0ebbbca4593fa436b1473a72b7478223eff2710",
-    ".local/proof-v4-runner-050417/host-events.jsonl": "8031d7e86b9e795190abac6a811e1c9f93ea9b6703baf377978687384cd5ff40"
+    ".local/proof-v6-read-055126/driver-read.json": "9bcc8161f8aa9698b446f3efce28c99966730b835f1249513459110c65db6143",
+    ".local/proof-v6-read-055126/host-events.jsonl": "1c8a42b1fd768f43cd264a02cce7659b72ebb60f8a6c703762f82fde084ce183",
+    ".local/proof-v6-runner-055129/driver-runner.json": "ed77e8a4c804729507b3d3974476a25eb70f66e024c98c3f80b5a36f93732a59",
+    ".local/proof-v6-runner-055129/host-events.jsonl": "bc135f1272e221f3ed358e1afbd8e858c6f902c2b4c4d681c981cb20b54d8226",
+    ".local/proof-v5-measure-054959/driver-measure.json": "2b992ce87bfef2891cca9505ea768e38db7e13dfc7dbe72fa892d065461a4814",
+    ".local/proof-v5-measure-054959/host-events.jsonl": "fb558811f4c770f90ca5e00df8f14b030b6a8cd3630bbad44041d7c213736c1a"
+  },
+  "lockHold": {
+    "journal": {
+      "records": 12261,
+      "bytes": 4996055,
+      "retainedBodies": 1000,
+      "liveJournalForScale": {
+        "records": 12261,
+        "bytes": 7212457
+      }
+    },
+    "storeLockHold": {
+      "get_issue (READ proof + admission)": {
+        "n": 20,
+        "medianMs": 26.0,
+        "p90Ms": 27.8,
+        "maxMs": 33.3
+      },
+      "list_issues (ineligible)": {
+        "n": 20,
+        "medianMs": 0.5,
+        "p90Ms": 0.9,
+        "maxMs": 1.7
+      }
+    },
+    "endToEnd": {
+      "get_issue": {
+        "n": 20,
+        "medianMs": 839.8,
+        "p90Ms": 1050.7,
+        "maxMs": 1197.0
+      },
+      "list_issues": {
+        "n": 20,
+        "medianMs": 509.4,
+        "p90Ms": 518.6,
+        "maxMs": 522.8
+      }
+    }
   }
 }
