@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import { projectPathContains, resolveProjectMembership, type ClankieSettings } from "@clankie/settings";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
+import { autoProjectRounds } from "./auto-projects.ts";
 
 /** The service's local machine ID is `local` (machines.ts); a fleet label is not a machine identity. */
 export async function localWorkspaceProject(
@@ -133,6 +134,31 @@ export function configuredLeadHireProject(
   }
   if (owned.length === 1) return owned[0]!.id;
   throw new Error("Name a projectId owned by this configured project lead before hiring.");
+}
+
+/**
+ * The project this conversation leads: the owner's explicit binding, else the Auto
+ * project the service's own round routing currently assigns it, as when the bound
+ * chat is gone and its round falls back to the default chat (LOCAL-VUH-7). A requested
+ * projectId alone proves nothing; routing must assign it to this conversation.
+ */
+export async function leadHireProject(
+  settings: ProjectsSettings,
+  routes: ClankieSettings["linearWebhook"]["projectChats"],
+  conversationId: string | undefined,
+  autoLeads: () => Promise<{
+    readonly leads: Parameters<typeof autoProjectRounds>[2];
+    readonly defaultConversationId: string;
+  }>,
+  requested?: string,
+): Promise<string | undefined> {
+  const configured = configuredLeadHireProject(settings, routes, conversationId, requested);
+  if (configured !== undefined || conversationId === undefined || requested === undefined) return configured;
+  const { leads, defaultConversationId } = await autoLeads();
+  const round = autoProjectRounds(settings.projects, new Map(), leads, defaultConversationId).get(
+    conversationId,
+  );
+  return round?.some((project) => project.id === requested) ? requested : undefined;
 }
 
 /** Native source attribution shares the service's current-process workspace resolver. */

@@ -299,6 +299,7 @@ import {
   localWorkspaceProject,
   nativeHireProject,
   configuredLeadHireProject,
+  leadHireProject,
   remoteHireMachine,
   remoteWorkspaceProject,
   selectHireProject,
@@ -726,10 +727,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ).projectId;
     let source: string | undefined;
     const origin = authority?.owner.conversationId;
-    const configuredProject = configuredLeadHireProject(
+    const configuredProject = await leadHireProject(
       projects,
       (await settings()).linearWebhook.projectChats,
       origin,
+      async () => ({
+        leads: await leadChats(),
+        defaultConversationId: conversations.defaultGlobalConversationId(),
+      }),
       input.projectId,
     );
     const native = origin === undefined ? undefined : conversations.nativeSource(origin);

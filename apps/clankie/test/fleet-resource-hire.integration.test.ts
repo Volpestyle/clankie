@@ -35,7 +35,7 @@ import { autonomyLevelFleet } from "@clankie/protocol/autonomy";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { SettingsStore } from "@clankie/settings";
 import {
-  configuredLeadHireProject,
+  leadHireProject,
   localWorkspaceProject,
   nativeHireProject,
   selectHireProject,
@@ -258,23 +258,42 @@ async function fixture(projectHirePolicy?: ProjectHirePolicy) {
   };
 }
 
+const BOUND_LEAD = "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0";
+
 // LOCAL-VUH-6: live 2026-10-12 refusal at conv-4c11af56 cursor 3628.
 // Policy fields match the attempted Iris/LOCAL-VUH-4 hire. Paths are disposable;
 // the existing executable helper proves native admission, not Codex/model behavior.
-async function autoFixture(configuredOwner = false) {
+// `lead` is the hiring conversation; `chats` are the lead chats that still exist.
+async function autoFixture(
+  configuredOwner = false,
+  lead = BOUND_LEAD,
+  chats: readonly string[] = ["global-default", BOUND_LEAD],
+) {
   let settings: SettingsStore;
   let sourceDirectory: string;
   const resolve: ProjectHirePolicy["project"] = async (input, projects, authority) => {
     const destination = await localWorkspaceProject(projects, input.workingDirectory);
     if (!configuredOwner) return destination;
     const current = await settings.load();
+    const routes = current.linearWebhook.projectChats;
     const source =
-      configuredLeadHireProject(
+      (await leadHireProject(
         projects,
-        current.linearWebhook.projectChats,
+        routes,
         authority?.owner.conversationId,
+        async () => ({
+          leads: chats.map((conversationId) => ({
+            conversationId,
+            workspace: sourceDirectory,
+            machine: "local",
+            projects: routes
+              .filter((route) => route.conversationId === conversationId)
+              .map((route) => ({ id: route.projectId })),
+          })),
+          defaultConversationId: "global-default",
+        }),
         input.projectId,
-      ) ?? (await localWorkspaceProject(projects, sourceDirectory));
+      )) ?? (await localWorkspaceProject(projects, sourceDirectory));
     return selectHireProject(source, destination, input.projectId);
   };
   const f = await fixture({
@@ -303,7 +322,7 @@ async function autoFixture(configuredOwner = false) {
               {
                 projectId: "cbd205ab-cad4-48b8-9724-7109410fc921",
                 name: "Clankie Work",
-                conversationId: "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0",
+                conversationId: BOUND_LEAD,
               },
             ],
           },
@@ -364,10 +383,10 @@ async function autoFixture(configuredOwner = false) {
   const tool = captainTools(
     { embodiment: {} } as CaptainDeps,
     {
-      targetId: "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0",
+      targetId: lead,
       autonomous: true,
       conversationAuthority: {
-        owner: { conversationId: "conv-4c11af56-0e37-4870-9294-bf307fc3c0d0" },
+        owner: { conversationId: lead },
         current: () => routeCurrent,
         authorize: async () => routeCurrent,
       },
@@ -574,6 +593,49 @@ it("LOCAL-VUH-7: rechecks saved lead ownership after preparation before launchin
     await f.settings.update((current) => ({
       ...current,
       linearWebhook: { ...current.linearWebhook, projectChats: [] },
+    }));
+  });
+  expect((await f.hire()).details).toMatchObject({
+    outcome: "failed",
+    detail: expect.stringContaining("different projects"),
+  });
+  expect(f.launches()).toBe(0);
+  expect(await f.journal()).toEqual([]);
+});
+
+// Live 2026-10-19 round 1a21f97b: the bound chat was gone, so global-default received
+// Clankie Work's Auto round but could not hire for it.
+it("LOCAL-VUH-7: the chat the service routes a project's Auto round to hires into its primary folder", async () => {
+  const f = await autoFixture(true, "global-default", ["global-default"]);
+  expect((await f.hire()).details).toMatchObject({ outcome: "spawned" });
+  expect(f.launches()).toBe(1);
+});
+
+it("LOCAL-VUH-7: Auto routing never admits a hire outside the project's folders or for an unrouted chat", async () => {
+  const routed = await autoFixture(true, "global-default", ["global-default"]);
+  await expect(routed.hire(routed.sourceDirectory)).rejects.toThrow("different projects");
+  expect(routed.launches()).toBe(0);
+  const unrouted = await autoFixture(true, "conv-unrouted", ["global-default", "conv-unrouted"]);
+  await expect(unrouted.hire()).rejects.toThrow("different projects");
+  expect(unrouted.launches()).toBe(0);
+  expect(await unrouted.journal()).toEqual([]);
+});
+
+it("LOCAL-VUH-7: rechecks Auto routing after preparation when the owner rebinds the project", async () => {
+  const f = await autoFixture(true, "global-default", ["global-default", "conv-new-lead"]);
+  f.onPrepare(async () => {
+    await f.settings.update((current) => ({
+      ...current,
+      linearWebhook: {
+        ...current.linearWebhook,
+        projectChats: [
+          {
+            projectId: "cbd205ab-cad4-48b8-9724-7109410fc921",
+            name: "Clankie Work",
+            conversationId: "conv-new-lead",
+          },
+        ],
+      },
     }));
   });
   expect((await f.hire()).details).toMatchObject({
