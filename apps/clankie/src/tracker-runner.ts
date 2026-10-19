@@ -1,4 +1,5 @@
 import type { CaptainPort } from "./captain/port.ts";
+import type { TrackerRouteFence } from "./mcp-host.ts";
 
 /**
  * The live link behind a run's actor (VUH-1918): a fleet worker's principal names its
@@ -33,12 +34,21 @@ export function trackerRunner(
 export async function trackerRepoForPrincipal(
   principalId: string,
   candidate: (fleet: string, pane: string) => ReturnType<CaptainPort["projectHireMembershipCandidate"]>,
-  repoForProject: (projectId: string) => Promise<string | undefined>,
+  repoForProject: (projectId: string, fence?: TrackerRouteFence) => Promise<string | undefined>,
+  fence?: TrackerRouteFence,
 ): Promise<string | undefined> {
   const project = /^project:(.+)$/u.exec(principalId)?.[1];
-  if (project !== undefined) return repoForProject(project);
+  if (project !== undefined) return repoForProject(project, fence);
   const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
   if (!match || match[2] === "unverified") return undefined;
-  const hire = candidate(match[1]!, match[2]!);
-  return hire.state === "confirmed" ? repoForProject(hire.projectId) : undefined;
+  // Only the hire's project decides the route; a relaunch into the same project keeps it.
+  const hired = () => {
+    const hire = candidate(match[1]!, match[2]!);
+    return hire.state === "confirmed" ? hire.projectId : undefined;
+  };
+  const projectId = hired();
+  fence?.(() => {
+    if (hired() !== projectId) throw new Error("The worker's project hire changed");
+  });
+  return projectId === undefined ? undefined : repoForProject(projectId, fence);
 }

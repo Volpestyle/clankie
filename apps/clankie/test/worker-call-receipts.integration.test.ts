@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, realpath, rename, rm, stat, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
@@ -188,15 +188,41 @@ async function fixture(
     ? createLocalTracker({ directory: join(root, "local-tracker") })
     : undefined;
   let routedRepo: string | undefined;
+  let routeLookups = 0;
+  let failRouteLookup: number | undefined;
+  // Runs once after the host's pre-lock READ fence, just before the backend takes its lock.
+  let beforeLock: (() => void) | undefined;
+  const takeBeforeLock = () => {
+    const hook = beforeLock;
+    beforeLock = undefined;
+    hook?.();
+  };
   const host = createMcpHost({
     credentials,
     settings,
     curated: [],
     ...(localTracker
       ? {
-          localTracker,
+          localTracker: {
+            ...localTracker,
+            call: (name, args, publication) => {
+              if (publication?.beforeRead) takeBeforeLock();
+              return localTracker.call(name, args, publication);
+            },
+            withReadSnapshot: (snapshot, apply) => {
+              takeBeforeLock();
+              return localTracker.withReadSnapshot(snapshot, apply);
+            },
+          },
           trackerIdentity: join(root, "local-tracker"),
-          trackerRepoForWorker: async () => routedRepo,
+          trackerRepoForWorker: async (_principalId, fence) => {
+            if (++routeLookups === failRouteLookup) throw new Error("Fixture route lookup failed");
+            const repo = routedRepo;
+            fence?.(() => {
+              if (routedRepo !== repo) throw new Error("The worker's tracker route changed");
+            });
+            return repo;
+          },
         }
       : {}),
     ...(apiProvider
@@ -297,20 +323,24 @@ async function fixture(
       })
     : undefined;
   let occupant = "fixture-native-session-1";
+  let nativeProofs = 0;
   const identity = (pane = "w1:p1"): LocalFleetIdentity => ({
     fleet: "default",
     pane,
     // A synthetic admitted session: WorkerMcp-level only, never native admission proof.
     ...(options.native
       ? {
-          admittedProjectProof: async () => ({
-            fleet: "default",
-            pane,
-            nativeOccupantId: occupant,
-            binding: { socketPath: "/tmp/clankie-receipt-fixture.sock", session: "default" },
-            shell: { pid: 4242, startTime: "1792400000.000001" },
-            processes: [{ pid: 4343, startTime: "1792400001.000001" }],
-          }),
+          admittedProjectProof: async () => {
+            nativeProofs++;
+            return {
+              fleet: "default",
+              pane,
+              nativeOccupantId: occupant,
+              binding: { socketPath: "/tmp/clankie-receipt-fixture.sock", session: "default" },
+              shell: { pid: 4242, startTime: "1792400000.000001" },
+              processes: [{ pid: 4343, startTime: "1792400001.000001" }],
+            };
+          },
         }
       : {}),
     current: () => valid,
@@ -459,6 +489,14 @@ async function fixture(
     route(repo: string | undefined) {
       routedRepo = repo;
     },
+    /** Fails the next route lookup after this many more succeed. */
+    failRouteLookupAfter(lookups: number) {
+      failRouteLookup = routeLookups + lookups + 1;
+    },
+    beforeLock(hook: () => void) {
+      beforeLock = hook;
+    },
+    nativeProofs: () => nativeProofs,
     relaunchNative(id: string) {
       occupant = id;
     },
@@ -960,6 +998,96 @@ it("a route or grant change during recovery refuses without recording an abandon
     await readFile(join(f.root, "grants", "receipts", "connected-calls.json"), "utf8"),
   ) as { id: string; abandonment?: unknown }[];
   expect(retained.find((record) => record.id === receiptId)?.abandonment).toBeUndefined();
+});
+
+it("a route change after the pre-lock READ fence is caught at commit, for reads and for recovery", async () => {
+  const { read, inspect, abandon, f } = await readFixture();
+  const raced = randomUUID();
+  f.beforeLock(() => f.route("/fixture/repository"));
+  expect(await read(raced)).toMatchObject({
+    outcome: "refused",
+    possiblyDispatched: false,
+    detail: "The worker's tracker route changed",
+  });
+  f.route(undefined);
+  const receiptId = randomUUID();
+  await read(receiptId);
+  f.beforeLock(() => f.route("/fixture/repository"));
+  expect(await abandon(receiptId, randomUUID())).toMatchObject({
+    outcome: "refused",
+    reason: "receipt_recovery_unavailable",
+    detail: "The worker's tracker route changed",
+  });
+  f.route(undefined);
+  expect(await inspect(receiptId)).toMatchObject({
+    outcome: "inspected",
+    classification: "READ",
+    abandonment: { state: "not-observed" },
+  });
+});
+
+it("an eligible read that can't retain a READ proof skips the native census and stays an ordinary read", async () => {
+  const { read, inspect, f } = await readFixture();
+  const proofs = f.nativeProofs();
+  // Selectors over 1 KiB can't be retained, so no proof is gathered for them. No issue key is
+  // that long, so the backend's not-found answer comes back as an ordinary definite refusal.
+  expect(await read(randomUUID(), `LOCAL-404-${"x".repeat(1_100)}`)).toMatchObject({
+    outcome: "refused",
+    possiblyDispatched: false,
+    detail: expect.stringContaining("Issue not found"),
+  });
+  expect(f.nativeProofs()).toBe(proofs);
+  // A failed pre-lock READ fence falls back to the ordinary read instead of refusing it.
+  f.failRouteLookupAfter(1);
+  const fallback = randomUUID();
+  expect(await read(fallback)).toMatchObject({ outcome: "ok", isError: false, receiptId: fallback });
+  expect(await inspect(fallback)).toMatchObject({
+    outcome: "inspected",
+    classification: "UNKNOWN",
+    execution: { response: "confirmed-success" },
+  });
+  expect(f.nativeProofs()).toBe(proofs);
+  // A read that can retain its proof still gathers it.
+  await read(randomUUID());
+  expect(f.nativeProofs()).toBeGreaterThan(proofs);
+});
+
+it("a settled READ keeps its classification after retention trims its recovery proof", async () => {
+  const { read, inspect, abandon, f } = await readFixture();
+  const receiptId = randomUUID();
+  await read(receiptId);
+  // A thousand newer settled bodies push this one out at the next journal write.
+  const journal = join(f.root, "grants", "receipts", "connected-calls.json");
+  const records = JSON.parse(await readFile(journal, "utf8")) as Record<string, unknown>[];
+  const [original] = records.filter((record) => record.id === receiptId);
+  await writeFile(
+    journal,
+    JSON.stringify([
+      ...records,
+      ...Array.from({ length: 1_000 }, (_, index) => ({
+        ...original,
+        id: randomUUID(),
+        createdAt: Date.now() + index + 1,
+        readSnapshot: undefined,
+        nativeSubject: undefined,
+      })),
+    ]),
+  );
+  await read(randomUUID());
+  const trimmed = await inspect(receiptId);
+  expect(trimmed).toMatchObject({
+    outcome: "inspected",
+    classification: "READ",
+    proofRetention: "trimmed",
+    recovery: { abandonable: false },
+    execution: { response: "settled-body-unavailable" },
+  });
+  expect(trimmed.original.readSnapshot).toBeUndefined();
+  expect(await abandon(receiptId, randomUUID())).toMatchObject({
+    outcome: "refused",
+    reason: "original_read_unproven",
+    classification: "READ",
+  });
 });
 
 it("API-owned reads and writes retain scoped worker receipts without repeating provider calls", async () => {

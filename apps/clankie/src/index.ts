@@ -754,7 +754,7 @@ const mcpHost = createMcpHost({
 
   localTracker: builtInTracker,
   trackerIdentity: join(stateRoot, "tracker"),
-  trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
+  trackerRepoForCall: (name, args, fence) => workItems.resolveTrackerRepo(name, args, fence),
   prepareTrackerLeadClosure: (source, projectId) => captain.prepareTrackerLeadClosure!(source, projectId),
   trackerForRepo: ({
     name,
@@ -777,11 +777,12 @@ const mcpHost = createMcpHost({
       ...(authorizeLeadClosure === undefined ? {} : { authorizeLeadClosure }),
     }),
   // A hired worker's tracker calls follow its project's saved convention (VUH-2014).
-  trackerRepoForWorker: (principalId) =>
+  trackerRepoForWorker: (principalId, fence) =>
     trackerRepoForPrincipal(
       principalId,
       (fleet, pane) => captain.projectHireMembershipCandidate(fleet, pane),
-      (projectId) => workItems.trackerRepoForProject(projectId),
+      (projectId, projectFence) => workItems.trackerRepoForProject(projectId, projectFence),
+      fence,
     ),
   // A fleet worker is named by the seat it was hired into, as the host recorded it.
   trackerWorkerName: (principalId) => {

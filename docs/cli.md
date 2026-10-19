@@ -6671,7 +6671,12 @@ Initialization, cycle rollover, custom clocks, callbacks without a purity
 contract, selectors over 1 KiB, changed routes or store incarnations, writes,
 repository-routed calls and remote providers cannot supply that proof. A
 read-looking name or caller-supplied classification never makes an original
-eligible. If a backend read throws after its snapshot (a mistyped key, say), the
+eligible. Reads that can't retain a proof (manual grants, selectors over 1 KiB)
+skip the native census and READ fences and stay ordinary unclassified reads. So
+does a read whose READ fence can't be established: it isn't refused. The route a
+READ was proved on is fenced again at commit. That covers the hire's project, the
+repo registry, conventions and other repos' stores, so a route change after the
+pre-lock check refuses the read or recovery before it runs. If a backend read throws after its snapshot (a mistyped key, say), the
 receipt settles as a definite `confirmed-error`.
 
 Inspection never replays the call. For any retained receipt it reports
@@ -6700,7 +6705,9 @@ original call.
 
 The receipt journal keeps result bodies for the newest 1,000 settled calls;
 older settled READs also drop their recovery proof (`proofRetention: "trimmed"`)
-unless they hold an abandonment audit. Uncertain receipts keep theirs.
+unless they hold an abandonment audit. They are still reported as `READ`, but they
+can't be abandoned (`original_read_unproven`). Uncertain receipts keep their proof.
+Receipts trimmed before LOCAL-VUH-35 lost their classification and read `UNKNOWN`.
 
 Receipts written before this contract retained no classification, so they can
 never qualify. The historical LOCAL-VUH-13 originals

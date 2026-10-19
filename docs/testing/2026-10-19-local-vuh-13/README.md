@@ -55,7 +55,9 @@ alternating rounds through the stock bridge, an eligible `get_issue` held the
 store lock for a median of 26.0 ms (p90 27.8, max 33.3). An ineligible
 `list_issues` held it for 0.5 ms (max 1.7). End to end, `get_issue` took a median
 of 840 ms against 509 ms for `list_issues`; the difference is the out-of-lock
-census and fences. Live-size lock hold was not measured.
+census and fences. Live-size lock hold was not measured. LOCAL-VUH-35 later
+removed that cost from reads that can't retain a proof and fenced the route at
+commit ([follow-up](../2026-10-19-local-vuh-35/README.md)).
 
 A READ proof adds about 1.1 KB to a receipt. When a settled body leaves the
 newest 1,000, its READ proof is dropped too (`proofRetention: "trimmed"`), unless

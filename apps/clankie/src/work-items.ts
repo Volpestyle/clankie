@@ -3,7 +3,7 @@ import { projectWorkRepoId } from "./project-work-items.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -21,6 +21,7 @@ import {
   type WorkSignal,
 } from "@clankie/protocol/work-items";
 import {
+  CONVENTION_FILE,
   ConventionNeededError,
   discoverConvention,
   readConvention,
@@ -50,7 +51,7 @@ import {
   TrackerReadRejected,
   type TrackerActor,
 } from "@clankie/work-items";
-import type { McpHost } from "./mcp-host.ts";
+import type { McpHost, TrackerRouteFence } from "./mcp-host.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
 import { WORK_REPO_LIST_MAX } from "@clankie/protocol/work-items";
 import { createProjectWorkReader } from "./project-work-items.ts";
@@ -255,6 +256,26 @@ function repoId(path: string): string {
     .replace(/^-+|-+$/gu, "")
     .slice(0, 40);
   return `${name || "repo"}-${createHash("sha256").update(path).digest("hex").slice(0, 8)}`;
+}
+
+/** A file's identity and timestamps, or `absent`; any write replaces or touches it. */
+function fileVersion(path: string): string {
+  try {
+    const stats = statSync(path, { bigint: true });
+    return `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent";
+    throw error;
+  }
+}
+
+/** Fences one route input. Its version is taken before the read, so a racing write fails the fence. */
+function fenceRouteFile(fence: TrackerRouteFence | undefined, path: string) {
+  if (!fence) return;
+  const version = fileVersion(path);
+  fence(() => {
+    if (fileVersion(path) !== version) throw new Error("The tracker route changed");
+  });
 }
 
 export function createWorkItemsService(options: WorkItemsServiceOptions) {
@@ -794,8 +815,18 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   };
   return {
     handleOwnerWrite,
-    /** Resolve existing local identities without enrolling a repo or opening a tracker backend. */
-    async resolveTrackerRepo(_name: string, args: Record<string, unknown>): Promise<string | undefined> {
+    /**
+     * Resolve existing local identities without enrolling a repo or opening a tracker backend.
+     * With `fence`, every file the answer depends on is fenced: the registry, conventions and
+     * other repos' stores. The default store itself is not: a reference it gains or loses
+     * cannot move the answer unless another store changes too, and its own writers hold the
+     * lock a fenced read commits under. Project settings belong to the caller's settings fence.
+     */
+    async resolveTrackerRepo(
+      _name: string,
+      args: Record<string, unknown>,
+      fence?: TrackerRouteFence,
+    ): Promise<string | undefined> {
       const isReference = (value: unknown): value is string =>
         typeof value === "string" &&
         (/^(?:P-)?LOCAL(?:-[A-Z0-9]+)*-\d+$/iu.test(value) ||
@@ -834,6 +865,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       ])
         if (Array.isArray(args[key]))
           for (const value of args[key]) if (isReference(value)) references.add(value.toLowerCase());
+      fenceRouteFile(fence, registryPath);
+      const fencedWorkspace = options.workspace?.();
+      fence?.(() => {
+        if (options.workspace?.() !== fencedWorkspace) throw new Error("The tracker route changed");
+      });
       const registered = await known();
       if (references.size === 0) {
         const workspace = options.workspace?.();
@@ -841,6 +877,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           workspace === undefined
             ? undefined
             : registered.find((candidate) => candidate.path === resolve(workspace));
+        if (entry) fenceRouteFile(fence, join(entry.path, CONVENTION_FILE));
         const backend = entry === undefined ? undefined : (await readConvention(entry.path))?.backend;
         if (entry && (backend === "linear" || backend === "builtin")) return entry.id;
         return undefined;
@@ -851,6 +888,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           undefined,
         ],
       ]);
+      if (fence)
+        // A project workspace's convention decides whether its repo is a candidate at all.
+        for (const project of (await options.projects?.())?.projects ?? [])
+          for (const workspace of project.workspaces)
+            if (workspace.id === project.trackerRef?.workspaceId)
+              fenceRouteFile(fence, join(workspace.path, CONVENTION_FILE));
       const projectRepos = (await projectReader?.repos()) ?? [];
       const existing = [
         ...registered,
@@ -859,6 +902,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           .map((entry) => ({ id: entry.id, path: entry.root!, name: entry.name })),
       ];
       for (const entry of existing) {
+        fenceRouteFile(fence, join(entry.path, CONVENTION_FILE));
         const convention = await readConvention(entry.path);
         if (!convention) continue;
         const directory = join(options.stateDirectory, "repo-trackers", repoId(entry.path));
@@ -867,6 +911,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       }
       const matches = new Set<string | undefined>();
       for (const [path, repo] of candidates) {
+        if (repo !== undefined) fenceRouteFile(fence, path);
         let store: Record<string, unknown>;
         try {
           store = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
@@ -916,8 +961,10 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
      * names none (VUH-2014). A `linear` convention returns undefined, so the call reaches
      * Linear as before; any other convention returns the project's repo. A project that is
      * gone, has no saved convention, or cannot be read here refuses instead of guessing.
+     * With `fence`, the conventions it read are fenced; the project settings belong to the
+     * caller's settings fence.
      */
-    async trackerRepoForProject(projectId: string): Promise<string | undefined> {
+    async trackerRepoForProject(projectId: string, fence?: TrackerRouteFence): Promise<string | undefined> {
       const project = (await options.projects?.())?.projects.find((entry) => entry.id === projectId);
       if (project === undefined)
         throw new WorkRequestError(
@@ -933,7 +980,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         const backends = await Promise.all(
           project.workspaces
             .filter((workspace) => workspace.machineId === machine)
-            .map(async (workspace) => (await readConvention(workspace.path).catch(() => undefined))?.backend),
+            .map(async (workspace) => {
+              fenceRouteFile(fence, join(workspace.path, CONVENTION_FILE));
+              // An unreadable convention counts as none: without a trackerRef the project then refuses.
+              // allow-swallowed-rejection -- treated as no saved convention, never as a route
+              return (await readConvention(workspace.path).catch(() => undefined))?.backend;
+            }),
         );
         const saved = backends.filter((backend) => backend !== undefined);
         if (
@@ -948,6 +1000,10 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           `${project.name} has no saved work tracker, so this worker's tracker call has nowhere safe to go. Choose one with clankie project update, or pass repo explicitly.`,
         );
       const repo = projectWorkRepoId(project.id);
+      const tracking = project.workspaces.find(
+        (workspace) => workspace.id === project.trackerRef?.workspaceId,
+      );
+      if (tracking) fenceRouteFile(fence, join(tracking.path, CONVENTION_FILE));
       const read = await projectReader.prepare(repo).catch(() => {
         throw new WorkRequestError(
           "backend_unavailable",

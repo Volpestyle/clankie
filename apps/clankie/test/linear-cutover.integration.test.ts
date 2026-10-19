@@ -167,10 +167,20 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
   });
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   let workItems!: ReturnType<typeof createWorkItemsService>;
+  // Runs once after the host's pre-lock READ fence, just before the backend takes its lock.
+  let beforeLock: (() => Promise<void>) | undefined;
   const host = createMcpHost({
     credentials,
     settings,
-    localTracker: live,
+    localTracker: {
+      ...live,
+      async call(name, args, publication) {
+        const hook = publication?.beforeRead ? beforeLock : undefined;
+        beforeLock = undefined;
+        await hook?.();
+        return live.call(name, args, publication);
+      },
+    },
     curated: [
       {
         id: "linear",
@@ -185,12 +195,14 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     ],
     trackerForRepo: ({ name, args, repo, local, ...publication }) =>
       workItems.callTracker(name, args, { repo, local, ...publication }),
-    trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
-    trackerRepoForWorker: (principalId) =>
+    // Wired as the service wires them, route fences included.
+    trackerRepoForCall: (name, args, fence) => workItems.resolveTrackerRepo(name, args, fence),
+    trackerRepoForWorker: (principalId, fence) =>
       trackerRepoForPrincipal(
         principalId,
         (fleet, pane) => hires.membershipCandidate(fleet, pane),
-        (projectId) => workItems.trackerRepoForProject(projectId),
+        (projectId, projectFence) => workItems.trackerRepoForProject(projectId, projectFence),
+        fence,
       ),
     logger: { info() {}, warn() {} },
   });
@@ -359,6 +371,9 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     looseWorkspace,
     unboundWorkspace,
     repo: projectWorkRepoId("clankie-work"),
+    beforeLock(hook: () => Promise<void>) {
+      beforeLock = hook;
+    },
   };
 }
 
@@ -804,6 +819,43 @@ it("routes a hired worker's tracker calls without repo by its project's saved co
   expect((await store()).issues.some((entry: { title: string }) => entry.title === "Explicit repo")).toBe(
     false,
   );
+});
+
+it("a hired worker's READ commits only on the route its pre-lock fence saw (LOCAL-VUH-35)", async () => {
+  const f = await cutoverFixture();
+  const cut = await f.post("/v1/tracker/cutover/linear", {
+    worldProject: "clankie-work",
+    scratch: "work",
+    linearProjectId: f.projectId,
+  });
+  expect(cut.status, JSON.stringify(cut.body)).toBe(200);
+  await f.hire("linear-work", "w1:p2", f.linearWorkspace);
+  const created = await f.post("/v1/tracker/owner/call", {
+    name: "save_issue",
+    arguments: { team: "VUH", title: "Read through a Linear project's route" },
+  });
+  const identifier = created.body.result.identifier as string;
+  // A Linear project's worker reads the default store, as a classified READ.
+  expect(await f.workerCall("linear_get_issue", { id: identifier }, "w1:p2")).toMatchObject({
+    outcome: "ok",
+  });
+  // Its project switches to the built-in tracker after the pre-lock fence resolved the route.
+  f.beforeLock(() =>
+    writeConvention(f.linearWorkspace, {
+      schemaVersion: 1,
+      backend: "builtin",
+      linear: { team: "VUH", project: "Still On Linear" },
+      decidedBy: "owner",
+      decidedAt: "2026-10-19T12:00:00.000Z",
+    }),
+  );
+  // The commit fence refuses it before the read runs, so nothing was dispatched.
+  expect(await f.workerCall("linear_get_issue", { id: identifier }, "w1:p2")).toEqual({
+    outcome: "refused",
+    reason: "server_unavailable",
+    possiblyDispatched: false,
+    detail: "The tracker route changed",
+  });
 });
 
 it("records the lead's tracker writes as Clankie for the owner, and the owner's verify answer closes them (LOCAL-VUH-1)", async () => {

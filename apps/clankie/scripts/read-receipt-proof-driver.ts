@@ -108,16 +108,31 @@ const tools = ((listed.result as { tools?: { name: string }[] })?.tools ?? []).m
 record("bridge.tools", { tools });
 
 if (mode === "measure") {
-  // Alternate eligible READs (proof hooks, journal admission) with an ineligible read.
+  // Alternate eligible READs (proof hooks, journal admission) with an ineligible read, and
+  // an eligible read whose selector exceeds the 1 KiB proof cap so it can't retain a proof.
+  const cases = [
+    ["get_issue", "linear_get_issue", { id: issue.identifier }],
+    ["get_issue.oversized", "linear_get_issue", { id: `${issue.identifier}-${"x".repeat(1_100)}` }],
+    ["list_issues", "linear_list_issues", { limit: 5 }],
+  ] as const;
+  const timings = new Map<string, number[]>();
   for (let round = 0; round < 20; round++) {
-    for (const [name, args] of [
-      ["linear_get_issue", { id: issue.identifier }],
-      ["linear_list_issues", { limit: 5 }],
-    ] as const) {
+    for (const [label, name, args] of cases) {
       const started = performance.now();
       const result = await seat.call({ name, arguments: args });
-      record(`measure.${name}`, { ms: performance.now() - started, outcome: result.body.outcome });
+      const ms = performance.now() - started;
+      timings.set(label, [...(timings.get(label) ?? []), ms]);
+      record(`measure.${label}`, { ms, outcome: result.body.outcome, isError: result.body.isError });
     }
+  }
+  for (const [label, values] of timings) {
+    const sorted = values.toSorted((left, right) => left - right);
+    record(`measure.${label}.summary`, {
+      runs: sorted.length,
+      medianMs: (sorted[(sorted.length - 1) >> 1]! + sorted[sorted.length >> 1]!) / 2,
+      p90Ms: sorted[Math.ceil(sorted.length * 0.9) - 1],
+      maxMs: sorted.at(-1),
+    });
   }
 } else if (mode === "runner") {
   const runs = await seat.call({ name: "linear_list_runs", arguments: {} });

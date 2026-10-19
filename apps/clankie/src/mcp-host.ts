@@ -259,7 +259,10 @@ export interface McpHost extends WorkerReadReceiptHost {
     readonly nativeWriteProof?: (signal?: AbortSignal) => Promise<ProjectProcessProof | undefined>;
     /** Internal receipt hooks; never caller/model arguments. */
     readonly onDispatch?: () => void;
-    /** Backend-owned pre-effect READ proof; never caller/model arguments. */
+    /**
+     * Backend-owned pre-effect READ proof; never caller/model arguments. Supplied only by a caller
+     * that can retain the proof, and it classifies the receipt READ or throws to refuse.
+     */
     readonly onReadPrepared?: (snapshot: WorkerReadSnapshot) => void;
     /** Optional native receipt provenance, prepared only at the locked default READ boundary. */
     readonly readReceiptFence?: () => Promise<void | (() => void)>;
@@ -318,6 +321,12 @@ const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
   ),
 ];
 
+/**
+ * Collects a route lookup's synchronous freshness checks. Each check throws when an input the
+ * lookup read has changed since, so a commit under the store lock sees the route it was given.
+ */
+export type TrackerRouteFence = (assertCurrent: () => void) => void;
+
 export interface McpHostOptions {
   /** The same body-owned developer app as /v1/accounts; no secret leaves the broker. */
   readonly googleApps?: () => Promise<GoogleOAuthApp>;
@@ -332,14 +341,25 @@ export interface McpHostOptions {
   readonly trackerIdentity?: string;
   /** Internal clock for list freshness; never a caller/model argument. */
   readonly trackerReadClock?: () => number;
-  /** Read-only lookup in already registered stores; never enrolls a repository. */
-  readonly trackerRepoForCall?: (name: string, args: Record<string, unknown>) => Promise<string | undefined>;
+  /**
+   * Read-only lookup in already registered stores; never enrolls a repository. With `fence`, it
+   * registers synchronous checks that the inputs it read still hold.
+   */
+  readonly trackerRepoForCall?: (
+    name: string,
+    args: Record<string, unknown>,
+    fence?: TrackerRouteFence,
+  ) => Promise<string | undefined>;
   /**
    * The tracker repo a delegated principal's hire routes to when it names none (VUH-2014):
    * its registered project's repo when that project's convention is not `linear`,
-   * undefined when it has no project or tracks in Linear. Throws to refuse.
+   * undefined when it has no project or tracks in Linear. Throws to refuse. With `fence`, it
+   * registers synchronous checks that the hire and inputs it read still hold.
    */
-  readonly trackerRepoForWorker?: (principalId: string) => Promise<string | undefined>;
+  readonly trackerRepoForWorker?: (
+    principalId: string,
+    fence?: TrackerRouteFence,
+  ) => Promise<string | undefined>;
   /** Host-only authority: caller roles and inherited worker attribution grant no closure. */
   readonly prepareTrackerLeadClosure?: (
     source: ConversationAuthority,
@@ -949,9 +969,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     if (currentAccount.binding !== localBinding || currentAccount.backend !== "local")
       throw new Error("The original default tracker account changed");
     const settingsFence = await options.settings.loadFenced();
-    if ((await options.trackerRepoForWorker?.(principalId)) !== undefined)
+    // Routing awaits; its inputs are fenced again synchronously at commit, with the settings
+    // (projects and their bindings) under the settings fence above.
+    const routeChecks: (() => void)[] = [];
+    const routeFence: TrackerRouteFence = (check) => void routeChecks.push(check);
+    if ((await options.trackerRepoForWorker?.(principalId, routeFence)) !== undefined)
       throw new Error("The worker's tracker route changed");
-    if (call && (await options.trackerRepoForCall?.(call.tool, call.args)) !== undefined)
+    if (call && (await options.trackerRepoForCall?.(call.tool, call.args, routeFence)) !== undefined)
       throw new Error("The original call now routes to a repository tracker");
     // Routing can await. Keep the ordinary current-account/configuration guard last.
     await assertCurrent(server, state);
@@ -960,6 +984,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       settingsFence.assertCurrent();
       if (closed || states.get(server.id) !== state)
         throw new Error("The original default tracker configuration changed");
+      for (const check of routeChecks) check();
     };
     assertFinal();
     return assertFinal;
@@ -1486,17 +1511,33 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             options.localTracker?.withReadSnapshot &&
             options.localTracker.readSnapshotCandidate?.(input.tool)
           ) {
+            // The READ proof is optional: when its route or account can't be fenced, the call
+            // stays an ordinary unclassified read under the ordinary dispatch fences.
             const hostFence = await defaultReadFence(server, state!, input.delegation.principalId, signal, {
               tool: input.tool,
               args: input.arguments,
+            }).catch((error: unknown) => {
+              signal.throwIfAborted();
+              options.logger.info(
+                {
+                  event: "mcp.read_proof.unavailable",
+                  server: server.id,
+                  tool: input.tool,
+                  detail: error instanceof Error ? error.message.slice(0, 200) : "Read fence failed",
+                },
+                "Tracker read proceeds unclassified",
+              );
+              return undefined;
             });
-            const receiptFence = await input.readReceiptFence?.();
-            readCurrent = () => {
-              receiptFence?.();
-              hostFence();
-              assertDispatch();
-            };
-            readCurrent();
+            if (hostFence) {
+              const receiptFence = await input.readReceiptFence?.();
+              readCurrent = () => {
+                receiptFence?.();
+                hostFence();
+                assertDispatch();
+              };
+              readCurrent();
+            }
           }
           const publication = {
             actor: trackerActor,
@@ -1667,8 +1708,8 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                     ? await options.localTracker!.call(input.tool, input.arguments, publication).then(
                         (value) => ({ content: JSON.stringify(value), isError: false }),
                         (error: unknown) => {
-                          // After READ proof, the backend's own pure read threw: that is
-                          // its definite answer, not a possibly dispatched call.
+                          // After the worker classified it READ, the backend's own pure read
+                          // threw: that is its definite answer, not a possibly dispatched call.
                           if (!readPrepared || error instanceof DispatchRefused) throw error;
                           return {
                             content: error instanceof Error ? error.message : String(error),

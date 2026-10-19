@@ -1,0 +1,757 @@
+{
+  "issue": "LOCAL-VUH-35",
+  "host": "apps/clankie/scripts/read-receipt-proof-host.ts ROOT --journal-records 12261 (clankie heavy --server, native Claude seat w5J:p8)",
+  "driver": "apps/clankie/scripts/read-receipt-proof-driver.ts ROOT measure (stock fleet-mcp.mjs bridge)",
+  "before": {
+    "tree": "2014e727d + this driver",
+    "steps": [
+      {
+        "step": "measure.get_issue",
+        "ms": 1192.79175,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 1079.3331660000003,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 526.3042920000003,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 1072.128208,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 1187.5983339999993,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 522.6744580000004,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 867.181208,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 977.0140840000004,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 525.9314580000009,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 1190.3230000000003,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 872.0915420000001,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 520.1452090000002,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 866.928249999999,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 754.1822499999998,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 513.9445829999986,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 759.4226670000007,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 729.8744170000009,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 501.98570800000016,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 760.1803749999999,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 856.8637080000008,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 510.9157090000008,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 842.094208999999,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 745.0942500000019,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 516.437417000001,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 748.945208000001,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 877.1491659999992,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 526.4439579999998,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 748.0921250000029,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 857.3747919999987,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 540.5117090000022,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 1063.9220410000016,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 748.1472079999985,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 500.0829999999987,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 739.9464999999982,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 1000.5882920000004,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 504.26737499999945,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 743.6402080000007,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 842.3759169999976,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 518.4815409999974,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 946.1743750000023,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 444.41854199999943,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 507.6377079999984,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 753.9729589999988,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 757.4910830000008,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 514.5409160000054,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 759.6496670000051,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 730.331124999997,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 516.3375410000008,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 863.6992920000048,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 986.648540999995,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 532.2398749999993,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 753.1498340000035,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 732.7021669999958,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 509.0747909999991,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 980.4109590000007,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 760.5924169999998,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 407.56958300000406,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 1176.069875000001,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 770.5761249999996,
+        "outcome": "ok",
+        "isError": true
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 517.4479590000046,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.summary",
+        "runs": 20,
+        "medianMs": 852.8967505000019,
+        "p90Ms": 1176.069875000001,
+        "maxMs": 1192.79175
+      },
+      {
+        "step": "measure.get_issue.oversized.summary",
+        "runs": 20,
+        "medianMs": 806.4760209999986,
+        "p90Ms": 1000.5882920000004,
+        "maxMs": 1187.5983339999993
+      },
+      {
+        "step": "measure.list_issues.summary",
+        "runs": 20,
+        "medianMs": 516.3874790000009,
+        "p90Ms": 526.4439579999998,
+        "maxMs": 540.5117090000022
+      }
+    ]
+  },
+  "after": {
+    "tree": "this change",
+    "steps": [
+      {
+        "step": "measure.get_issue",
+        "ms": 861.421334,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 439.5361250000001,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 524.8634999999999,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 957.159917,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 465.3702499999995,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 513.3973749999996,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 1078.6805839999997,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 447.41525,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 510.4315409999999,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 952.6698749999996,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 337.5172499999999,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 511.5451669999993,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 744.8557500000006,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 436.28862499999923,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 523.5058329999993,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 742.9512500000001,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 442.9836670000004,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 517.888332999999,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 762.0840840000001,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 434.73062500000015,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 524.015958,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 759.1657080000004,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 442.6270420000001,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 513.4279580000002,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 745.5595830000002,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 450.6029589999998,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 507.6012090000004,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 757.6966249999969,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 444.83066699999836,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 423.4519160000018,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 757.2763750000013,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 223.7208329999994,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 413.7775409999995,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 860.3845829999991,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 456.36720799999966,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 513.0413750000007,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 738.5476670000025,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 340.5267500000009,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 526.0610830000005,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 646.7980410000018,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 481.7792079999999,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 511.9642090000016,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 860.3752920000006,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 454.6964999999982,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 416.3755000000019,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 728.5592079999988,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 444.58758300000045,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 508.5810410000013,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 772.5515420000011,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 451.70629199999894,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 521.9165839999987,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 745.8610829999998,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 475.31725000000006,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 503.04229199999827,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 744.6311670000032,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 445.3758750000052,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 516.3697079999984,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue",
+        "ms": 747.8372079999972,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.oversized",
+        "ms": 457.9882920000018,
+        "outcome": "refused"
+      },
+      {
+        "step": "measure.list_issues",
+        "ms": 418.6602920000005,
+        "outcome": "ok",
+        "isError": false
+      },
+      {
+        "step": "measure.get_issue.summary",
+        "runs": 20,
+        "medianMs": 757.4864999999991,
+        "p90Ms": 952.6698749999996,
+        "maxMs": 1078.6805839999997
+      },
+      {
+        "step": "measure.get_issue.oversized.summary",
+        "runs": 20,
+        "medianMs": 445.10327100000177,
+        "p90Ms": 465.3702499999995,
+        "maxMs": 481.7792079999999
+      },
+      {
+        "step": "measure.list_issues.summary",
+        "runs": 20,
+        "medianMs": 512.5027920000011,
+        "p90Ms": 524.015958,
+        "maxMs": 526.0610830000005
+      }
+    ]
+  }
+}

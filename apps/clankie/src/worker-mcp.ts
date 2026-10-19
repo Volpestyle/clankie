@@ -224,6 +224,8 @@ const WorkerCallReceiptSchema = z.object({
   readSnapshot: WorkerReadSnapshotSchema.optional(),
   /** Recovery proof removed by retention; the receipt remains a tombstone. */
   proofTrimmed: z.literal(true).optional(),
+  /** The trimmed proof was a READ snapshot: the classification outlives the proof. */
+  trimmedRead: z.literal(true).optional(),
   dispatchAdmissionAt: z.number().optional(),
   abandonment: z
     .strictObject({
@@ -275,6 +277,9 @@ const WORKER_REQUEST_TIMEOUT_MS = 30_000;
 const READ_RECEIPT_PROOF_TIMEOUT_MS = 1_000;
 /** Retained READ selectors are bounded; get_issue/get_user/list_runs selectors are far smaller. */
 const READ_ROUTING_ARGUMENTS_MAX_BYTES = 1_024;
+/** Retained classification only. A trimmed READ stays READ; its recovery proof is gone. */
+const receiptClassification = (receipt: Pick<WorkerCallReceipt, "readSnapshot" | "trimmedRead">) =>
+  receipt.readSnapshot || receipt.trimmedRead ? ("READ" as const) : ("UNKNOWN" as const);
 /** Fleet seat long polls carry their catalog revision here; bridges list only when it moves. */
 export const FLEET_CATALOG_REVISION_HEADER = "x-clankie-catalog-revision";
 // Settings are owner-authored files; one service-side read covers every parked seat.
@@ -475,10 +480,11 @@ export class WorkerMcp {
       path: join(options.directory, "receipts", "connected-calls.json"),
       schema: WorkerCallReceiptSchema,
       unreadableMessage: "Worker call receipts are unreadable; no connected call was dispatched",
-      // Old settled reads keep their tombstone but not their recovery proof; an
-      // abandonment audit keeps the proof it was checked against.
+      // Old settled reads keep their tombstone and READ classification but not their
+      // recovery proof; an abandonment audit keeps the proof it was checked against.
       trimSettled: (record) => {
         if (record.abandonment || (!record.readSnapshot && !record.nativeSubject)) return;
+        if (record.readSnapshot) record.trimmedRead = true;
         delete record.readSnapshot;
         delete record.nativeSubject;
         record.proofTrimmed = true;
@@ -1064,7 +1070,7 @@ export class WorkerMcp {
     const decision = receipt.abandonment;
     return {
       receiptId: receipt.id,
-      classification: receipt.readSnapshot ? ("READ" as const) : ("UNKNOWN" as const),
+      classification: receiptClassification(receipt),
       recovery,
       ...(receipt.proofTrimmed ? { proofRetention: "trimmed" as const } : {}),
       original: {
@@ -1203,7 +1209,7 @@ export class WorkerMcp {
         : refused(
             receipt.readSnapshot ? "original_session_unproven" : "original_read_unproven",
             `No abandonment was recorded: ${unrecoverable}. Reconcile with {receiptId} only and never repeat the original.`,
-            { classification: receipt.readSnapshot ? "READ" : "UNKNOWN" },
+            { classification: receiptClassification(receipt) },
           );
     let auditAttempted = false;
     try {
@@ -1871,35 +1877,74 @@ export class WorkerMcp {
               return workerCallResponse(await this.reconcileCallReceipt(id, authorityNow, signal));
             }
             let nativeSubject: z.infer<typeof ReceiptNativeSubjectSchema> | undefined;
-            const hostInput: Parameters<McpHost["call"]>[0] & {
-              onReadPrepared(snapshot: WorkerReadSnapshot): void;
-            } = {
+            // Only a fleet call whose selectors fit the receipt can retain a READ proof. Manual
+            // grants (no native recovery subject) and larger selectors skip the native census
+            // and READ fences entirely and stay ordinary unclassified reads.
+            const readProof: Pick<Parameters<McpHost["call"]>[0], "readReceiptFence" | "onReadPrepared"> =
+              authorityNow.fleet === undefined ||
+              Buffer.byteLength(canonicalJson(args)) > READ_ROUTING_ARGUMENTS_MAX_BYTES
+                ? {}
+                : {
+                    readReceiptFence: async () => {
+                      // Only the exact locked, eligible backend READ requests this optional provenance.
+                      // Provider reads, writes and ordinary publication never observe it.
+                      const proofSignal = AbortSignal.any([
+                        signal,
+                        AbortSignal.timeout(
+                          Math.max(1, Math.min(READ_RECEIPT_PROOF_TIMEOUT_MS, Math.floor(remaining() / 2))),
+                        ),
+                      ]);
+                      try {
+                        nativeSubject = await beforeWorkerDeadline(
+                          proofSignal,
+                          "Optional original READ provenance",
+                          () => this.receiptNativeSubject(authorityNow, proofSignal),
+                        );
+                      } catch {
+                        signal.throwIfAborted();
+                        nativeSubject = undefined;
+                      }
+                      return () => {
+                        signal.throwIfAborted();
+                        if (authorityNow.currentFleet?.() !== true)
+                          throw new Error("Fleet admission unavailable");
+                      };
+                    },
+                    onReadPrepared: (observation) => {
+                      signal.throwIfAborted();
+                      const snapshot = WorkerReadSnapshotSchema.parse(observation);
+                      if (
+                        snapshot.server !== current.server ||
+                        snapshot.tool !== rule.name ||
+                        snapshot.operation !== rule.name ||
+                        snapshot.fingerprint !== fingerprint ||
+                        snapshot.accountBinding !== current.grant.profileHash
+                      )
+                        throw new Error("Backend READ snapshot does not match the original call and account");
+                      if (admitted)
+                        throw new Error("READ classification must precede original dispatch admission");
+                      if (authorityNow.currentFleet?.() !== true)
+                        throw new Error("Fleet admission unavailable");
+                      const previous = this.beginCallReceipt(
+                        id,
+                        authorityNow,
+                        current,
+                        rule.name,
+                        fingerprint,
+                        nativeSubject,
+                        snapshot,
+                      );
+                      if (previous) {
+                        repeatedReceipt = previous;
+                        throw new Error("Worker call already admitted; reconcile its original receipt");
+                      }
+                      admitted = true;
+                    },
+                  };
+            const hostInput: Parameters<McpHost["call"]>[0] = {
               ...(background ? { requestPriority: "background" as const } : {}),
               timeoutMs: remaining(),
-              readReceiptFence: async () => {
-                // Only the exact locked, eligible backend READ requests this optional provenance.
-                // Provider reads, writes and ordinary publication never observe it.
-                const proofSignal = AbortSignal.any([
-                  signal,
-                  AbortSignal.timeout(
-                    Math.max(1, Math.min(READ_RECEIPT_PROOF_TIMEOUT_MS, Math.floor(remaining() / 2))),
-                  ),
-                ]);
-                try {
-                  nativeSubject = await beforeWorkerDeadline(
-                    proofSignal,
-                    "Optional original READ provenance",
-                    () => this.receiptNativeSubject(authorityNow, proofSignal),
-                  );
-                } catch {
-                  signal.throwIfAborted();
-                  nativeSubject = undefined;
-                }
-                return () => {
-                  signal.throwIfAborted();
-                  if (authorityNow.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
-                };
-              },
+              ...readProof,
               onDispatch: () => {
                 signal.throwIfAborted();
                 if (!admitted) {
@@ -1925,42 +1970,6 @@ export class WorkerMcp {
                   record.dispatchAdmissionAt = Date.now();
                   this.callReceipts.save();
                 }
-              },
-              onReadPrepared: (observation) => {
-                signal.throwIfAborted();
-                // Manual grants have no native recovery subject; their ordinary read path is unchanged.
-                if (authorityNow.fleet === undefined) return;
-                const snapshot = WorkerReadSnapshotSchema.parse(observation);
-                // Large selectors stay ordinary unclassified reads rather than growing every tombstone.
-                if (
-                  Buffer.byteLength(canonicalJson(snapshot.routingArguments)) >
-                  READ_ROUTING_ARGUMENTS_MAX_BYTES
-                )
-                  return;
-                if (
-                  snapshot.server !== current.server ||
-                  snapshot.tool !== rule.name ||
-                  snapshot.operation !== rule.name ||
-                  snapshot.fingerprint !== fingerprint ||
-                  snapshot.accountBinding !== current.grant.profileHash
-                )
-                  throw new Error("Backend READ snapshot does not match the original call and account");
-                if (admitted) throw new Error("READ classification must precede original dispatch admission");
-                if (authorityNow.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
-                const previous = this.beginCallReceipt(
-                  id,
-                  authorityNow,
-                  current,
-                  rule.name,
-                  fingerprint,
-                  nativeSubject,
-                  snapshot,
-                );
-                if (previous) {
-                  repeatedReceipt = previous;
-                  throw new Error("Worker call already admitted; reconcile its original receipt");
-                }
-                admitted = true;
               },
               onSettled: (settled, observation) => {
                 if (!admitted) {
