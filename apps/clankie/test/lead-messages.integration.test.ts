@@ -149,6 +149,65 @@ it("a lead cannot message itself", async () => {
   });
 });
 
+it("LOCAL-VUH-20: a service lead's reply its sender's channel acknowledges answers that lead's report; one that never reached it does not", async () => {
+  const f = await fixture(false);
+  const [global, work] = f.leads as [string, string];
+  const tool = async (from: string, name: string, input: Record<string, unknown>) => {
+    const bank = await f.captain.laneToolBank("operator", from);
+    const result = await bank.tools.find((candidate) => candidate.name === name)!.call(input);
+    return JSON.parse(result.content.find((item) => item.type === "text")!.text);
+  };
+  // The work lead reports to the global lead, which has no seat channel: its service inbox admits it.
+  const report = async (message: string) => {
+    const sent = await f.messageSeat(work, global, message);
+    expect(sent).toMatchObject({ status: "lead_service_queued", deliveryStage: "stored" });
+    const page = await tool(global, "worker_reports", { deliveryIds: [sent.messageId] });
+    expect(page.items).toMatchObject([{ deliveryId: sent.messageId, paneId: work, text: message }]);
+    return sent.messageId as string;
+  };
+
+  // No work channel yet: the reply cannot be channel-acknowledged, so it answers nothing.
+  const first = await report("Blocked: which deploy window?");
+  expect(await f.messageSeat(global, work, "Use 18:00")).not.toMatchObject({
+    status: "lead_channel_acknowledged",
+  });
+  expect(await tool(global, "acknowledge_worker_reports", { deliveryIds: [first] })).toMatchObject({
+    appliedDeliveryIds: [first],
+    unanswered: [first],
+    unansweredInstruction: expect.any(String),
+  });
+
+  const workChannel = await f.bridge(work);
+  const second = await report("Blocked: which region?");
+  expect(await f.messageSeat(global, work, "Use eu-west")).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "delivered",
+    status: "lead_channel_acknowledged",
+    leadConversationId: work,
+  });
+  expect(workChannel).toHaveBeenCalledOnce();
+  const acknowledged = await tool(global, "acknowledge_worker_reports", {
+    deliveryIds: [second],
+    receipt: { summary: "Answered: eu-west" },
+  });
+  expect(acknowledged).toMatchObject({ acknowledged: true, appliedDeliveryIds: [second], unanswered: [] });
+  expect(acknowledged).not.toHaveProperty("unansweredInstruction");
+  // A reply marks only reports that existed when it was delivered.
+  const third = await report("Blocked: which branch?");
+  expect(await tool(global, "acknowledge_worker_reports", { deliveryIds: [third] })).toMatchObject({
+    unanswered: [third],
+  });
+  expect(f.adoption).not.toHaveBeenCalled();
+  expect(f.workerDelivery).not.toHaveBeenCalled();
+  // The service lane is told how to answer without an event_id it never sees.
+  await f.captain.close();
+  const stored = new ConversationStore(join(f.root, "conversations"), async () => {});
+  cleanup.push(() => stored.close());
+  const admitted = stored.inboundAcceptance(first)!.message;
+  expect(admitted).toContain(`message_seat({seat: ${JSON.stringify(work)}}) and no inReplyTo`);
+  expect(admitted).not.toContain("event_id");
+});
+
 it("only the sender reconciles an unconfirmed lead message after a restart, once the recipient's bridge acknowledges it", async () => {
   const f = await fixture(false);
   const [global, work] = f.leads as [string, string];

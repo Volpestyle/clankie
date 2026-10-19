@@ -316,6 +316,10 @@ restart. Remote-only leads need their bridge. An uncertain native send stays
 with its original receipt: never resend through the service as a fallback.
 When you answer another lead's message, pass its `event_id` as `inReplyTo`; the
 result's `inReplyTo.acknowledged` says the sender's receipt resolved.
+A lead message in your service inbox has no `event_id`: answer it with plain
+`message_seat` to its sender. A reply that sender's lead channel acknowledges
+marks it answered for `acknowledge_worker_reports`; a stored, queued or
+unconfirmed reply does not.
 
 ## Unresolved Claude channel deliveries
 
