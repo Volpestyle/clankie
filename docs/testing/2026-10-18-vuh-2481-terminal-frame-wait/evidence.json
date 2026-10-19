@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "parallel-proof.log",
+      "size": 29760,
+      "sha256": "5e611cf0442c7bb5549af211b4dfabe9c0df38dec70c404f1ecc66a2edc45abd",
+      "url": "clankie://evidence/sha256/5e611cf0442c7bb5549af211b4dfabe9c0df38dec70c404f1ecc66a2edc45abd"
+    }
+  ]
+}

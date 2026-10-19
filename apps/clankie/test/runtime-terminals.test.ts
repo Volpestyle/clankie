@@ -36,7 +36,13 @@ else if (args[0] === 'pane' && args[1] === 'layout') {
   } else finish();
 }
 else if (args[0] === 'terminal') {
-  if (args[2] === 'observe') emit({type:'terminal.frame',seq:1,encoding:'ansi',width:80,height:24,full:true,bytes:Buffer.from(socket).toString('base64')});
+  if (args[2] === 'observe') {
+    const frame = () => emit({type:'terminal.frame',seq:1,encoding:'ansi',width:80,height:24,full:true,bytes:Buffer.from(socket).toString('base64')});
+    if (fs.existsSync(${JSON.stringify(join(root, "release-frame"))})) frame();
+    else {
+      const timer = setInterval(()=>{ if (fs.existsSync(${JSON.stringify(join(root, "release-frame"))})) { clearInterval(timer); frame(); } }, 5);
+    }
+  }
   else require('node:readline').createInterface({input:process.stdin}).on('line',line=>record({input:JSON.parse(line)}));
   process.on('SIGTERM',()=>{record({closed:true});process.exit(0)});
   setInterval(()=>{},1000);
@@ -127,9 +133,23 @@ else if (args[0] === 'terminal') {
       expect((await calls()).filter((row) => row.input).map((row) => row.socket)).toEqual(["/tmp/beta.sock"]),
     );
     const observation = { schemaVersion: 1 as const, terminalId: beta!, surfaceClientId };
-    const page = await service.tail(observation);
+    let page = await service.tail(observation);
     expect(page.status).toBe("page");
     if (page.status !== "page") throw new Error("page missing");
+    // The initial long poll can return an empty page before the observer emits.
+    // Resume its cursor: polling without one would restart the observer each time.
+    expect(page.frames).toEqual([]);
+    await writeFile(join(root, "release-frame"), "");
+    let cursor = page.cursor;
+    page = await vi.waitUntil(
+      async () => {
+        const next = await service.tail({ ...observation, cursor });
+        if (next.status !== "page") throw new Error(`Expected page, received ${next.status}`);
+        cursor = next.cursor;
+        return next.frames.length > 0 ? next : false;
+      },
+      { timeout: 5_000 },
+    );
     expect(page.terminalId).toBe(beta);
     expect(page.frames[0]?.terminalId).toBe(beta);
     expect(Buffer.from(page.frames[0]!.data, "base64").toString()).toContain("/tmp/beta.sock");
