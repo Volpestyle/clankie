@@ -31,6 +31,9 @@ function createQueue(options: ConstructorParameters<typeof IntegrationQueue>[0])
 const git = async (directory: string, ...args: string[]) =>
   (await execute("git", ["-c", "core.hooksPath=/dev/null", "-C", directory, ...args])).stdout.trim();
 const guard = async () => {};
+/** Whether a runner command invokes this clankie-gate phase. */
+const remotePhase = (command: string, phase: string) =>
+  new RegExp(`clankie-gate['"]?\\s+['"]?${phase}['"]?\\s`, "u").test(command.replaceAll("'\\''", "'"));
 
 it("remote stdout and stderr reset the silence deadline without losing the exact gate report", async () => {
   const f = await fixture();
@@ -54,7 +57,8 @@ it("remote stdout and stderr reset the silence deadline without losing the exact
         shell: "posix",
         batch: batch.id,
         origin: batch.origin,
-        stream: f.stream,
+        // Only the gate's own pulses may keep the gate alive.
+        stream: (command) => (remotePhase(command, "gate") ? f.stream(command) : f.audible(command)),
         bundle: gitBundle,
       }),
   });
@@ -82,12 +86,15 @@ it.each(["silent", "chatty", "report"] as const)(
     const started = new Promise<void>((resolve) => {
       ready = resolve;
     });
+    // Only the injected phase may fall silent or overrun: every other phase
+    // stays audible, and the silent case also gives them wall-clock room.
+    // Neither changes which timer the injected phase trips.
     const queue = createQueue({
       directory: join(f.root, "integration"),
       core: f.source,
       governor: () => f.governor,
-      remoteExecutionTimeoutMs: 5_000,
-      remotePreparationTimeoutMs: 5_000,
+      remoteExecutionTimeoutMs: mode === "silent" ? 60_000 : 5_000,
+      remotePreparationTimeoutMs: mode === "silent" ? 60_000 : 5_000,
       remoteNoOutputTimeoutMs: mode === "silent" ? 1_000 : 2_000,
       remoteNoOutputAlertMs: 500,
       placeGate: async (batch) =>
@@ -98,10 +105,7 @@ it.each(["silent", "chatty", "report"] as const)(
           origin: batch.origin,
           bundle: gitBundle,
           stream: (command) => {
-            const script = command.replaceAll("'\\''", "'");
-            const phase = mode === "report" ? "report" : "gate";
-            if (!new RegExp(`clankie-gate['"]?\\s+['"]?${phase}['"]?\\s`, "u").test(script))
-              return f.stream(command);
+            if (!remotePhase(command, mode === "report" ? "report" : "gate")) return f.audible(command);
             child = spawn(
               process.execPath,
               [
@@ -225,13 +229,19 @@ console.log('gated-in', process.env.HOME);
       env: { PATH: process.env.PATH, HOME: machine },
       stdio: ["pipe", "pipe", "pipe"],
     });
+  // The real remote install can pause past a short silence bound on a loaded
+  // machine; a case that tests another phase's silence keeps it audible.
+  const audible = (remoteCommand: string) =>
+    stream(
+      `(while :; do echo fixture-heartbeat >&2; sleep 0.2; done) & beat=$!; sh -c '${remoteCommand.replaceAll("'", "'\\''")}'; code=$?; kill $beat; exit $code`,
+    );
   const commit = async (file: string, value: string) => {
     await writeFile(join(source, file), value);
     await git(source, "add", file);
     await git(source, "commit", "-m", file);
     return git(source, "rev-parse", "HEAD");
   };
-  return { root, source, origin, machine, stream, commit, governor };
+  return { root, source, origin, machine, stream, audible, commit, governor };
 }
 
 it("a core batch gates on the linked machine at its exact HEAD, recorded as a local gate is, and lands from here", async () => {
