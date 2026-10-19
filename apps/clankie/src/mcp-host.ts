@@ -62,6 +62,7 @@ import {
   type ProviderAccount,
 } from "@clankie/credential-broker";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
+import { canonicalJson } from "@clankie/play";
 import { GoogleAccountProviderSchema, type GoogleAccountProvider } from "@clankie/protocol/accounts";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./linear-publishing.ts";
@@ -85,7 +86,9 @@ import {
   type TrackerActor,
   type TrackerToolBackend,
   type TrackerToolCallOptions,
+  type LocalTrackerBackend,
 } from "@clankie/work-items";
+import type { WorkerReadReceiptHost, WorkerReadSnapshot } from "./worker-mcp.ts";
 import { createPrioritySortedLinearIssueReader, callCachedLinearCollection } from "./tracker-tool-router.ts";
 import {
   currentLinearRequestPriority,
@@ -197,7 +200,7 @@ type McpCallResult =
       readonly retryAt?: number;
     };
 
-export interface McpHost {
+export interface McpHost extends WorkerReadReceiptHost {
   account(server: string, lane: CaptainSessionLaneV2): Promise<{ account: ProviderAccount; binding: string }>;
   /** A local tracker has a resource binding, never a fabricated provider account. */
   binding?(
@@ -255,6 +258,10 @@ export interface McpHost {
     readonly nativeWriteProof?: (signal?: AbortSignal) => Promise<ProjectProcessProof | undefined>;
     /** Internal receipt hooks; never caller/model arguments. */
     readonly onDispatch?: () => void;
+    /** Backend-owned pre-effect READ proof; never caller/model arguments. */
+    readonly onReadPrepared?: (snapshot: WorkerReadSnapshot) => void;
+    /** Optional native receipt provenance, prepared only at the locked default READ boundary. */
+    readonly readReceiptFence?: () => Promise<void | (() => void)>;
     /** Confirmed response in the caller's result mode; may follow a caller timeout. */
     readonly onSettled?: (
       result: { content: string; isError: boolean },
@@ -316,7 +323,7 @@ export interface McpHostOptions {
   readonly googleFetch?: typeof fetch;
   readonly googleEndpoints?: GoogleOAuthEndpoints;
   /** The durable fallback. Connected transport failures never select this backend. */
-  readonly localTracker?: TrackerToolBackend;
+  readonly localTracker?: TrackerToolBackend & Partial<Pick<LocalTrackerBackend, "withReadSnapshot">>;
   /** Registered GraphQL OAuth, with a separate broker audience from MCP. */
   readonly linearApiTracker?: TrackerToolBackend;
   readonly linearRequestBudget?: LinearRequestBudget;
@@ -921,8 +928,73 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     };
   }
 
+  /** Fence settings and the selected host generation for the synchronous backend/core commit. */
+  async function defaultReadFence(
+    server: McpServerSettings,
+    state: ServerState,
+    principalId: string,
+    signal: AbortSignal,
+    call?: { tool: string; args: Record<string, unknown> },
+  ): Promise<() => void> {
+    signal.throwIfAborted();
+    if (!isLocalTracker(server)) throw new Error("The original default tracker is unavailable");
+    await assertCurrent(server, state);
+    const currentAccount = await account(server, state.credential);
+    if (currentAccount.binding !== localBinding || currentAccount.backend !== "local")
+      throw new Error("The original default tracker account changed");
+    const settingsFence = await options.settings.loadFenced();
+    if ((await options.trackerRepoForWorker?.(principalId)) !== undefined)
+      throw new Error("The worker's tracker route changed");
+    if (call && (await options.trackerRepoForCall?.(call.tool, call.args)) !== undefined)
+      throw new Error("The original call now routes to a repository tracker");
+    // Routing can await. Keep the ordinary current-account/configuration guard last.
+    await assertCurrent(server, state);
+    const assertFinal = () => {
+      signal.throwIfAborted();
+      settingsFence.assertCurrent();
+      if (closed || states.get(server.id) !== state)
+        throw new Error("The original default tracker configuration changed");
+    };
+    assertFinal();
+    return assertFinal;
+  }
+
   return {
     invalidateTrackerReads: () => trackerReads.invalidate(),
+    async withReadReceiptTarget(input, prepare) {
+      const { snapshot, principalId, signal } = input;
+      const tracker = options.localTracker;
+      if (
+        !tracker?.withReadSnapshot ||
+        snapshot.server !== "linear" ||
+        snapshot.tool !== snapshot.operation ||
+        snapshot.target.repo !== undefined ||
+        snapshot.accountBinding !== localBinding ||
+        snapshot.target.resourceBinding !== localBinding
+      )
+        throw new Error("The original default tracker READ target is unproven");
+      signal.throwIfAborted();
+      const server = (await activeServers()).find((entry) => entry.id === snapshot.server);
+      if (!server || !isLocalTracker(server) || !laneAllows(server, "operator"))
+        throw new Error("The original default tracker route changed");
+      const state = await stateFor(server);
+      return tracker.withReadSnapshot(snapshot, async (assertStoreCurrent) => {
+        const originalCall = { tool: snapshot.tool, args: snapshot.routingArguments };
+        let hostFence = await defaultReadFence(server, state, principalId, signal, originalCall);
+        const assertTargetCurrent = () => {
+          assertStoreCurrent();
+          hostFence();
+        };
+        assertTargetCurrent();
+        const commit = await prepare(assertTargetCurrent);
+        // Core native/account authorization may await. Refuse any stale held load
+        // before preparing fresh host authority, then commit without another yield.
+        assertTargetCurrent();
+        hostFence = await defaultReadFence(server, state, principalId, signal, originalCall);
+        assertTargetCurrent();
+        return commit();
+      });
+    },
     async account(id, lane) {
       const server = (await activeServers()).find((entry) => entry.id === id);
       if (server === undefined || !laneAllows(server, lane))
@@ -1398,8 +1470,54 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               if (linearWrite) trackerReads.invalidate();
             }
           };
+          let defaultReadCurrent: (() => void) | undefined;
           const publication = {
             actor: trackerActor,
+            ...(!repositoryCall &&
+            isLocalTracker(server) &&
+            input.delegation &&
+            input.fence &&
+            input.onReadPrepared &&
+            options.localTracker?.withReadSnapshot
+              ? {
+                  beforeRead: async () => {
+                    commitCurrent = await input.fence!();
+                    assertDispatch();
+                    const hostFence = await defaultReadFence(
+                      server,
+                      state!,
+                      input.delegation!.principalId,
+                      signal,
+                      { tool: input.tool, args: input.arguments },
+                    );
+                    const receiptFence = await input.readReceiptFence?.();
+                    defaultReadCurrent = () => {
+                      receiptFence?.();
+                      hostFence();
+                      assertDispatch();
+                    };
+                    return defaultReadCurrent;
+                  },
+                  onReadPrepared: (snapshot: import("@clankie/work-items").TrackerReadSnapshot) => {
+                    if (!defaultReadCurrent)
+                      throw new DispatchRefused("Default READ authority is unavailable");
+                    defaultReadCurrent();
+                    input.onReadPrepared!({
+                      ...snapshot,
+                      server: "linear",
+                      tool: input.tool,
+                      fingerprint: createHash("sha256")
+                        .update(canonicalJson([`linear_${input.tool}`, input.arguments]))
+                        .digest("hex"),
+                      accountBinding: connectedAccount!.binding,
+                      routingArguments: z
+                        .record(z.string(), z.json())
+                        .parse(structuredClone(input.arguments)),
+                      target: { ...snapshot.target, resourceBinding: localBinding },
+                    });
+                  },
+                }
+              : {}),
             ...(input.lane === "operator" &&
             input.delegation === undefined &&
             providedSource &&

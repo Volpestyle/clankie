@@ -272,6 +272,29 @@ Connected calls return a `receiptId`. If a dispatched call times out, its typed
 `{receiptId}` to read the original result; never repeat its name and arguments.
 The bridge keeps that ID even when the HTTP reply is lost. Receipt lookup proves
 current admission, tool grant and account binding and never dispatches a write.
+
+An uncertain receipt can also be inspected, and a proven READ abandoned:
+`clankie_call({receiptId, action: "inspect", abandonmentId?})` and
+`{receiptId, action: "abandon-read", reason}`, or natively
+`clankie agents call-receipt inspect ORIGINAL_UUID [--abandonment-id UUID]` and
+`clankie agents call-receipt abandon-read ORIGINAL_UUID --reason TEXT` (nonblank,
+at most 500 characters). Both use the calling seat's own fleet link and require
+the original native session, current access and the original route; there is no
+operator credential fallback. Only an original whose receipt retained a
+backend-owned `builtin-strict-no-effect/v1` READ snapshot qualifies: built-in
+`get_issue` or `get_user` on an initialized store (and `list_runs` only on a
+tracker without a host runner, so never on the service's own). Initialization,
+cycle rollover, writes, remote providers and repository-routed calls stay
+UNKNOWN; names and caller assertions supply no READ proof. Inspection rechecks
+the original store under its lock and never replays the call. Abandonment
+records a decision to stop waiting; it neither cancels nor proves nonexecution,
+and an unproven original refuses with `original_read_unproven` and records
+nothing. After an uncertain abandonment reply, inspect with both IDs; never
+resend abandonment or the original. Receipts made before this contract
+(including `70136c4f-43ad-45f3-8434-5de9fd04545a` and
+`7065c6aa-fffb-4e55-9c0f-550d139af96c`) retained no classification and stay
+UNKNOWN for good.
+
 A `No durable native binding` receipt
 means no new message was sent; report the pane and inspect its native binding.
 Managed PC Codex hires set their assigned worker name on the fresh native thread

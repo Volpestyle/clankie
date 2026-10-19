@@ -45,6 +45,7 @@
         "integrations/claude-plugin/worker/bin/fleet-mcp.mjs",
         "integrations/claude-plugin/worker/bin/inbound-receipt.d.mts",
         "integrations/claude-plugin/worker/bin/message-status.d.mts",
+        "integrations/claude-plugin/worker/bin/seat-channel.d.mts",
         "integrations/claude-plugin/worker/bin/peer-receipt.d.mts",
         "integrations/claude-plugin/worker/bin/catalog-watch.d.mts",
         "integrations/claude-plugin/worker/bin/admission.d.mts",
@@ -86,6 +87,8 @@
     "apps/clankie": {
       "entry": [
         "src/fixture-read-worker.ts",
+        "scripts/read-receipt-proof-host.ts",
+        "scripts/read-receipt-proof-driver.ts",
         "scripts/fleet-load.ts",
         "scripts/fleet-resource-burst.ts",
         "scripts/fleet-load-worker.mjs",

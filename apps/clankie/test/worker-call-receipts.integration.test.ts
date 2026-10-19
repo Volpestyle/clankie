@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, readFile, realpath, rename, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
@@ -9,7 +9,7 @@ import {
   type ProviderAccount,
 } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
-import { createLocalTracker } from "@clankie/work-items";
+import { createLocalTracker, type LocalTrackerOptions, type TrackerReadSnapshot } from "@clankie/work-items";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -312,17 +312,25 @@ async function fixture(
     return session;
   };
   const call = async (
-    args: { name?: string; arguments?: unknown; receiptId?: string },
+    args: { name?: string; arguments?: unknown; receiptId?: string; [key: string]: unknown },
     session: string,
     pane?: string,
     receiptId?: string,
+    abandonmentId?: string,
   ) => {
     const response = await post(
       "tools/call",
       {
         name: manual ? args.name : "clankie_call",
         arguments: manual ? args.arguments : args,
-        ...(receiptId === undefined ? {} : { _meta: { clankieReceiptId: receiptId } }),
+        ...(receiptId === undefined && abandonmentId === undefined
+          ? {}
+          : {
+              _meta: {
+                ...(receiptId === undefined ? {} : { clankieReceiptId: receiptId }),
+                ...(abandonmentId === undefined ? {} : { clankieAbandonmentId: abandonmentId }),
+              },
+            }),
       },
       session,
       pane,
@@ -420,6 +428,313 @@ it("a manual grant revoked after its read recheck refuses dispatch without a pro
     controller.abort();
     await pending;
   }
+});
+
+// These supplemental checks exercise the real locked tracker backend only.
+// Its read callbacks are not native admission, account or project proof.
+async function readBackendFixture(options: Omit<LocalTrackerOptions, "directory"> = {}) {
+  const root = await mkdtemp(join(tmpdir(), "clankie-receipt-read-backend-"));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, "tracker");
+  return { root, directory, tracker: createLocalTracker({ ...options, directory }) };
+}
+
+async function trackerDigest(directory: string): Promise<string> {
+  return createHash("sha256")
+    .update(await readFile(join(directory, "tracker.json")))
+    .digest("hex");
+}
+
+async function prepareUserRead(tracker: ReturnType<typeof createLocalTracker>): Promise<TrackerReadSnapshot> {
+  let prepared: TrackerReadSnapshot | undefined;
+  await tracker.call(
+    "get_user",
+    { query: "me" },
+    {
+      beforeRead: async () => {},
+      onReadPrepared: (snapshot) => {
+        prepared = snapshot;
+      },
+    },
+  );
+  if (!prepared) throw new Error("Expected initialized default-clock backend READ proof");
+  return prepared;
+}
+
+it("actual tracker initialization stays UNKNOWN and its next unchanged get_user emits exact READ proof", async () => {
+  const f = await readBackendFixture();
+  const prepared: TrackerReadSnapshot[] = [];
+  let checks = 0;
+  let fences = 0;
+  const options = {
+    beforeRead: async () => {
+      checks++;
+      return () => {
+        fences++;
+      };
+    },
+    onReadPrepared: (snapshot: TrackerReadSnapshot) => {
+      expect(fences).toBe(1);
+      prepared.push(snapshot);
+    },
+  };
+  const first = await f.tracker.call("get_user", { query: "me" }, options);
+  expect(prepared).toHaveLength(0);
+  expect(checks).toBe(0);
+  const originalDigest = await trackerDigest(f.directory);
+  const directoryIdentity = await stat(f.directory, { bigint: true });
+  expect(await f.tracker.call("get_user", { query: "me" }, options)).toEqual(first);
+  expect(prepared).toEqual([
+    {
+      version: 1,
+      classification: "READ",
+      contract: "builtin-strict-no-effect/v1",
+      operation: "get_user",
+      target: {
+        kind: "builtin",
+        canonicalDirectory: await realpath(f.directory),
+        storeId: await f.tracker.storeId(),
+        directoryIdentity: {
+          dev: directoryIdentity.dev.toString(),
+          ino: directoryIdentity.ino.toString(),
+          birthTimeNs: directoryIdentity.birthtimeNs.toString(),
+        },
+      },
+    },
+  ]);
+  expect(checks).toBe(1);
+  expect(await trackerDigest(f.directory)).toBe(originalDigest);
+});
+
+it("actual snapshot recovery preserves the journal and rejects another initialized store without replay", async () => {
+  const original = await readBackendFixture();
+  const other = await readBackendFixture();
+  await original.tracker.call("get_user", { query: "me" });
+  await other.tracker.call("get_user", { query: "me" });
+  const snapshot = await prepareUserRead(original.tracker);
+  const originalDigest = await trackerDigest(original.directory);
+  const otherDigest = await trackerDigest(other.directory);
+  let callbacks = 0;
+  expect(
+    await original.tracker.withReadSnapshot(snapshot, async (assertCurrent) => {
+      assertCurrent();
+      callbacks++;
+      assertCurrent();
+      return "revalidated without calling get_user";
+    }),
+  ).toBe("revalidated without calling get_user");
+  expect(callbacks).toBe(1);
+  await expect(
+    other.tracker.withReadSnapshot(snapshot, async () => {
+      callbacks++;
+    }),
+  ).rejects.toThrow();
+  expect(callbacks).toBe(1);
+  expect(await trackerDigest(original.directory)).toBe(originalDigest);
+  expect(await trackerDigest(other.directory)).toBe(otherDigest);
+});
+
+it("a late scratch-only canonical target replacement fails its final READ fence with both journals untouched", async () => {
+  const original = await readBackendFixture();
+  const other = await readBackendFixture();
+  await original.tracker.call("get_user", { query: "me" });
+  await other.tracker.call("get_user", { query: "me" });
+  const alias = join(original.root, "scratch-target");
+  await symlink(original.directory, alias, "dir");
+  const aliased = createLocalTracker({ directory: alias });
+  const snapshot = await prepareUserRead(aliased);
+  const originalDigest = await trackerDigest(original.directory);
+  const otherDigest = await trackerDigest(other.directory);
+  let committed = false;
+  await expect(
+    aliased.withReadSnapshot(snapshot, async (assertCurrent) => {
+      assertCurrent();
+      // Repoint only this test's scratch alias between stores created by ordinary APIs.
+      // No live binding or tracker.json is edited, transplanted or deleted.
+      await rename(alias, join(original.root, "retained-scratch-target"));
+      await symlink(other.directory, alias, "dir");
+      assertCurrent();
+      committed = true;
+    }),
+  ).rejects.toThrow();
+  expect(committed).toBe(false);
+  expect(await trackerDigest(original.directory)).toBe(originalDigest);
+  expect(await trackerDigest(other.directory)).toBe(otherDigest);
+});
+
+it("actual list_runs with a host runner and mutations never emit READ proof", async () => {
+  let runnerCalls = 0;
+  const f = await readBackendFixture({
+    runner: () => {
+      runnerCalls++;
+      return { source: "supplemental host callback" };
+    },
+  });
+  const prepared: TrackerReadSnapshot[] = [];
+  let readChecks = 0;
+  const options = {
+    beforeRead: async () => {
+      readChecks++;
+    },
+    onReadPrepared: (snapshot: TrackerReadSnapshot) => {
+      prepared.push(snapshot);
+    },
+  };
+  const issue = (await f.tracker.call(
+    "save_issue",
+    { team: "LOCAL", title: "Supplemental runner read" },
+    options,
+  )) as { id: string };
+  expect(prepared).toHaveLength(0);
+  expect(readChecks).toBe(0);
+  await f.tracker.call("save_run", { issueId: issue.id });
+  const before = runnerCalls;
+  const originalDigest = await trackerDigest(f.directory);
+  await f.tracker.call("list_runs", {}, options);
+  expect(runnerCalls).toBeGreaterThan(before);
+  expect(prepared).toHaveLength(0);
+  expect(readChecks).toBe(0);
+  expect(await trackerDigest(f.directory)).toBe(originalDigest);
+});
+
+it("a configured clock stays UNKNOWN even for an initialized get_user", async () => {
+  let clockCalls = 0;
+  const f = await readBackendFixture({
+    clock: () => {
+      clockCalls++;
+      return new Date("2026-01-01T00:00:00Z");
+    },
+  });
+  await f.tracker.call("get_user", { query: "me" });
+  const prepared: TrackerReadSnapshot[] = [];
+  const originalDigest = await trackerDigest(f.directory);
+  await f.tracker.call(
+    "get_user",
+    { query: "me" },
+    {
+      beforeRead: async () => {},
+      onReadPrepared: (snapshot) => {
+        prepared.push(snapshot);
+      },
+    },
+  );
+  expect(clockCalls).toBeGreaterThan(1);
+  expect(prepared).toHaveLength(0);
+  expect(await trackerDigest(f.directory)).toBe(originalDigest);
+});
+
+it("an ordinary cycle rollover stays UNKNOWN and retains its effects on a custom-clock backend", async () => {
+  let clock = new Date("2026-01-01T00:00:00Z");
+  const f = await readBackendFixture({ clock: () => clock });
+  const project = (await f.tracker.call("save_project", {
+    name: "Supplemental cycle",
+    addTeams: ["LOCAL"],
+    cycleDays: 1,
+  })) as { id: string };
+  await f.tracker.call("save_issue", {
+    team: "LOCAL",
+    project: project.id,
+    title: "Roll this unfinished item",
+    cycle: "current",
+  });
+  const originalDigest = await trackerDigest(f.directory);
+  clock = new Date("2026-01-02T00:00:00Z");
+  const prepared: TrackerReadSnapshot[] = [];
+  await f.tracker.call(
+    "get_user",
+    { query: "me" },
+    {
+      beforeRead: async () => {},
+      onReadPrepared: (snapshot) => {
+        prepared.push(snapshot);
+      },
+    },
+  );
+  expect(prepared).toHaveLength(0);
+  expect(await trackerDigest(f.directory)).not.toBe(originalDigest);
+  // Custom clocks are independently UNKNOWN; this does not isolate rollover as the refusal cause.
+  expect(await f.tracker.call("list_cycles", { project: project.id })).toMatchObject({
+    cycles: expect.arrayContaining([expect.objectContaining({ number: 2 })]),
+  });
+});
+
+it("receipt recovery keeps missing and unproven originals uncertain and rejects caller READ assertions", async () => {
+  const f = await fixture({ local: true });
+  const session = await f.initialize();
+  const missing = randomUUID();
+  const decision = randomUUID();
+  expect(await f.call({ receiptId: missing, action: "inspect" }, session)).toMatchObject({
+    outcome: "uncertain",
+    classification: "UNKNOWN",
+    receiptId: missing,
+    toolError: false,
+  });
+  expect(
+    await f.call(
+      { receiptId: missing, action: "abandon-read", reason: "Stop waiting" },
+      session,
+      undefined,
+      undefined,
+      decision,
+    ),
+  ).toMatchObject({
+    outcome: "refused",
+    reason: "original_read_unproven",
+    classification: "UNKNOWN",
+    receiptId: missing,
+    abandonmentId: decision,
+    toolError: true,
+  });
+  const receiptId = randomUUID();
+  const original = await f.call(
+    { name: "linear_get_user", arguments: { query: "me" } },
+    session,
+    undefined,
+    receiptId,
+  );
+  expect(original).toMatchObject({ outcome: "ok", receiptId });
+  expect(await f.call({ receiptId, action: "inspect" }, session)).toMatchObject({
+    outcome: "uncertain",
+    classification: "UNKNOWN",
+    toolError: false,
+  });
+  for (const assertion of [
+    { readOnly: true },
+    { classification: "READ" },
+    { nativeOccupantId: "claimed" },
+    { name: "linear_get_user", arguments: { query: "me" } },
+  ]) {
+    expect(await f.call({ receiptId, action: "inspect", ...assertion }, session)).toMatchObject({
+      outcome: "refused",
+      toolError: true,
+    });
+  }
+  expect(
+    await f.call(
+      { receiptId, action: "abandon-read", reason: "Caller cannot prove READ" },
+      session,
+      undefined,
+      undefined,
+      decision,
+    ),
+  ).toMatchObject({
+    outcome: "refused",
+    reason: "original_read_unproven",
+    classification: "UNKNOWN",
+    receiptId,
+    abandonmentId: decision,
+  });
+  expect(await f.call({ receiptId }, session)).toEqual(original);
+  const other = await f.initialize("w1:p2");
+  expect(await f.call({ receiptId, action: "inspect" }, other, "w1:p2")).toMatchObject({
+    outcome: "refused",
+    toolError: true,
+  });
+  await f.settings.update((current) => ({ ...current, fleet: { ...current.fleet, tools: "off" } }));
+  expect(await f.call({ receiptId, action: "inspect" }, session)).toMatchObject({
+    outcome: "refused",
+    toolError: true,
+  });
 });
 
 it("API-owned reads and writes retain scoped worker receipts without repeating provider calls", async () => {

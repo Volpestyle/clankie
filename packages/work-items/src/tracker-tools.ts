@@ -10,8 +10,30 @@ export interface TrackerToolBackend {
   call(name: string, args: Record<string, unknown>, options?: TrackerToolCallOptions): Promise<unknown>;
 }
 
+/** Backend-owned proof of the exact locked load used by an audited effect-free read. */
+export interface TrackerReadSnapshot {
+  readonly version: 1;
+  readonly classification: "READ";
+  readonly contract: "builtin-strict-no-effect/v1";
+  readonly operation: "get_issue" | "list_runs" | "get_user";
+  readonly target: {
+    readonly kind: "builtin";
+    readonly canonicalDirectory: string;
+    readonly storeId: string;
+    readonly directoryIdentity: {
+      readonly dev: string;
+      readonly ino: string;
+      readonly birthTimeNs: string;
+    };
+  };
+}
+
 /** Host authority is checked at the backend's publish boundary, after preparation. */
 export interface TrackerToolCallOptions {
+  /** Fresh host authority, awaited under the same store lock as the original read. */
+  readonly beforeRead?: () => Promise<void | (() => void)>;
+  /** Synchronous proof, emitted before the audited original read and any domain effects. */
+  readonly onReadPrepared?: (snapshot: TrackerReadSnapshot) => void;
   readonly beforeWrite?: () => void | Promise<void>;
   readonly onDispatch?: () => void;
   readonly effectConfirmed?: () => void;

@@ -6635,6 +6635,61 @@ worker bridge adds `message_clankie`, `message_clankie_status`, and, for a prove
 messages are on, `list_fleet_seats` and `message_peer`. Search connected tools
 with `{query}` for at most 20 names/descriptions,
 or `{names}` for up to 10 input schemas, then call with `{name, arguments}`.
+
+Connected calls retain a `receiptId` when an HTTP reply is lost. The existing
+`clankie_call({receiptId})` reads the original result without dispatching again.
+A native seat can also inspect any of its own receipts and abandon one that is
+a proven READ (LOCAL-VUH-13). The commands exist for every receipt; whether a
+particular original is eligible is decided only from what its receipt retained.
+
+```sh
+clankie agents call-receipt inspect ORIGINAL_UUID [--abandonment-id UUID]
+clankie agents call-receipt abandon-read ORIGINAL_UUID --reason TEXT
+```
+
+These commands use the calling native seat's linked fleet authorization. They
+require the original native authority, current account and original route;
+they do not fall back to an operator credential. UUIDs and per-action flags are
+validated before HTTP; abandonment needs a nonblank reason of at most 500
+characters. The connected-tool equivalents are
+`clankie_call({receiptId, action: "inspect", abandonmentId?})` and
+`clankie_call({receiptId, action: "abandon-read", reason})`.
+
+Only an original backend-owned `builtin-strict-no-effect/v1` READ snapshot can
+qualify. The backend writes it under the store lock, before the read runs and
+before any effect, binding the store directory incarnation, store ID, account
+binding and argument fingerprint; the receipt also retains the original native
+session (occupant, shell and harness process lifetimes). The audited built-in
+branches are `get_user`, `get_issue`, and `list_runs` without a host runner,
+using the default clock. The service's own tracker has a runner, so its
+`list_runs` stays UNKNOWN. Initialization, cycle rollover, custom clocks,
+callbacks without a purity contract, missing proof, changed routes or store
+incarnations, writes, repository-routed calls and remote providers cannot supply
+that proof. A read-looking name or caller-supplied classification never makes
+an original eligible; an unproven original remains UNKNOWN. Abandoning one is
+refused with `original_read_unproven` and records nothing.
+
+Inspection revalidates the original target under its real lock without replaying
+the call. `inspected` and `abandoned-read` describe recovery operations separately
+from the original execution result. Abandonment records a decision to stop
+waiting; it does not cancel execution or authorize repeating the original.
+The bridge mints one reserved `abandonmentId` before sending abandonment. If its
+reply is uncertain, preserve both `receiptId` and `abandonmentId` and use
+`inspect` with those IDs. Never resend abandonment or the original call.
+
+Inspection reports `classification`, `original` (server, tool, fingerprint,
+account binding, native session, READ snapshot), `execution` (`dispatchAdmission`
+and `response`: `confirmed-success`, `confirmed-error` or `UNKNOWN`) and
+`abandonment` (`recorded` with the audit, or `not-observed`) as separate facts.
+A later original result settles into the same receipt without erasing its audit.
+
+Receipts written before this contract retained no classification, so they can
+never qualify. The historical LOCAL-VUH-13 originals
+`70136c4f-43ad-45f3-8434-5de9fd04545a` (`get_issue`) and
+`7065c6aa-fffb-4e55-9c0f-550d139af96c` (`list_runs`) remain UNKNOWN and blocked.
+No lookup, polling, settlement, abandonment or replay of either original is
+authorized; the work they belonged to proceeds with new calls under new receipts.
+
 `message_clankie` reports to the conversation that hired the worker. A
 host-admitted `message_seat` from another conversation adopts that worker, so
 future reports and completion watches follow the new lead. The worker does not

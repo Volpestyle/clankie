@@ -116,8 +116,21 @@ const PEER_TOOLS = [
 ];
 
 const send = (message) => {
-  if (Array.isArray(message.result?.content))
-    message = { ...message, result: readableMcpResult(message.result) };
+  if (Array.isArray(message.result?.content)) {
+    let result = readableMcpResult(message.result);
+    const abandonmentId = result.structuredContent?.abandonmentId;
+    if (
+      typeof abandonmentId === "string" &&
+      /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/iu.test(
+        abandonmentId,
+      )
+    )
+      result = {
+        ...result,
+        content: [...result.content, { type: "text", text: `Abandonment ID ${abandonmentId}.` }],
+      };
+    message = { ...message, result };
+  }
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 };
 const log = (line) => process.stderr.write(`clankie-worker: ${line}\n`);
@@ -171,7 +184,15 @@ function responseReason(value, text) {
  * streamable-HTTP MCP client because nothing beyond Node is installed here.
  * Each call still checks current admission, settings and the connected account.
  */
-function fleetTools(current, refresh, requestTimeoutMs, bridgeId, onMembershipRefused, isMembershipStopped) {
+function fleetTools(
+  current,
+  refresh,
+  requestTimeoutMs,
+  bridgeId,
+  onMembershipRefused,
+  isMembershipStopped,
+  { fetchImpl = fetch, paneId } = {},
+) {
   let membershipRefusal;
   let generation;
   let observedSession;
@@ -198,12 +219,15 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId, onMembershipRe
     signal.throwIfAborted();
     const response = await requestWithAdmissionRetry(
       () =>
-        fetch(new URL("/v1/fleet/mcp", active.link.url), {
+        fetchImpl(new URL("/v1/fleet/mcp", active.link.url), {
           method: "POST",
           // A redirect must not transparently replay an already admitted call.
           redirect: "error",
           headers: {
             ...authorization(active.link),
+            ...(active.link.authentication === "local-process" && paneId !== undefined
+              ? { "x-clankie-pane": paneId }
+              : {}),
             "content-type": "application/json",
             accept: "application/json, text/event-stream",
             "x-clankie-bridge-id": bridgeId,
@@ -381,13 +405,20 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId, onMembershipRe
       }
       throw new Error("Granted catalog pagination exceeds its bound");
     },
-    async call(name, args, receiptId) {
+    async call(name, args, receiptId, abandonmentId) {
       const result = await request(
         "tools/call",
         {
           name,
           arguments: args ?? {},
-          ...(receiptId === undefined ? {} : { _meta: { clankieReceiptId: receiptId } }),
+          ...(receiptId === undefined && abandonmentId === undefined
+            ? {}
+            : {
+                _meta: {
+                  ...(receiptId === undefined ? {} : { clankieReceiptId: receiptId }),
+                  ...(abandonmentId === undefined ? {} : { clankieAbandonmentId: abandonmentId }),
+                },
+              }),
         },
         operationSignal(undefined, requestTimeoutMs),
       );
@@ -407,6 +438,85 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId, onMembershipRe
       ).catch(() => undefined);
     },
   };
+}
+
+/** Shared by the stock stdio bridge and native CLI; caller metadata grants no receipt identity. */
+async function receiptAwareFleetCall(granted, name, args) {
+  const connectedCall = name === "clankie_call";
+  const receiptLookup = connectedCall && Object.hasOwn(args ?? {}, "receiptId");
+  const receiptId = connectedCall && !receiptLookup ? randomUUID() : undefined;
+  // Mint once before the HTTP call. A lost abandonment reply is inspected, never resent.
+  const abandonmentId = receiptLookup && args.action === "abandon-read" ? randomUUID() : undefined;
+  try {
+    return { result: await granted.call(name, args, receiptId, abandonmentId) };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const heldId = receiptId ?? (receiptLookup ? args.receiptId : undefined);
+    const heldAbandonmentId =
+      abandonmentId ?? (receiptLookup && args.action === "inspect" ? args.abandonmentId : undefined);
+    const retryable = error instanceof FleetAdmissionUnavailable && !receiptLookup;
+    const uncertain =
+      typeof heldId === "string" &&
+      (receiptLookup ||
+        (!(error instanceof FleetToolsDenied || error instanceof FleetMembershipRefused) && !retryable));
+    const text =
+      connectedCall &&
+      !receiptLookup &&
+      (error instanceof FleetToolsDenied || error instanceof FleetMembershipRefused || retryable)
+        ? JSON.stringify({
+            outcome: "refused",
+            reason,
+            ...(retryable ? { retryable: true } : {}),
+            detail: retryable
+              ? reason
+              : "The service refused current access. Ask Clankie to confirm this native seat is admitted; repeated retries cannot grant access. Nothing was resubmitted.",
+          })
+        : uncertain
+          ? JSON.stringify({
+              outcome: "uncertain",
+              receiptId: heldId,
+              ...(typeof heldAbandonmentId === "string" ? { abandonmentId: heldAbandonmentId } : {}),
+              detail:
+                abandonmentId === undefined
+                  ? "may have applied; reconcile, don’t retry"
+                  : "abandonment may have been recorded; inspect receiptId and abandonmentId, don’t retry abandonment or the original call",
+              reason,
+            })
+          : `Clankie's ${String(name)} failed: ${reason}`;
+    return {
+      error,
+      result: {
+        content: [{ type: "text", text }],
+        // A usable uncertain receipt must not invite an unsafe native retry.
+        isError: !uncertain,
+      },
+    };
+  }
+}
+
+/** One native receipt operation through this seat's existing linked fleet authority. */
+export async function callNativeReceipt(args, { env = process.env, fetchImpl = fetch } = {}) {
+  const paneId = env.HERDR_PANE_ID?.trim();
+  const socket = env.HERDR_SOCKET_PATH?.trim();
+  if (!paneId || !socket)
+    throw new Error("Call receipts need your native HERDR_PANE_ID and HERDR_SOCKET_PATH.");
+  let link = readLink(socket, env);
+  if (!link) throw new Error("No linked fleet connection for this native seat.");
+  let membershipStopped = false;
+  const granted = fleetTools(
+    () => link,
+    () => {
+      link = readLink(socket, env);
+    },
+    REQUEST_TIMEOUT_MS,
+    randomUUID(),
+    () => {
+      membershipStopped = true;
+    },
+    () => membershipStopped,
+    { fetchImpl, paneId },
+  );
+  return (await receiptAwareFleetCall(granted, "clankie_call", args)).result;
 }
 
 export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_TIMEOUT_MS }) {
@@ -1225,56 +1335,11 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
           },
         });
       }
-      // This host-held ID survives a lost HTTP reply. Never adopt reserved
-      // metadata from the native caller, or generate another ID for a lookup.
-      const connectedCall = params?.name === "clankie_call";
-      const receiptLookup = connectedCall && Object.hasOwn(params?.arguments ?? {}, "receiptId");
-      const receiptId = connectedCall && !receiptLookup ? randomUUID() : undefined;
-      try {
-        const result = await granted.call(params?.name, params?.arguments, receiptId);
-        send({ id, result });
-        report("ready");
-        return;
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        const heldId = receiptId ?? (receiptLookup ? params.arguments.receiptId : undefined);
-        const retryable = error instanceof FleetAdmissionUnavailable && !receiptLookup;
-        const uncertain =
-          typeof heldId === "string" &&
-          (receiptLookup ||
-            (!(error instanceof FleetToolsDenied || error instanceof FleetMembershipRefused) && !retryable));
-        const text =
-          connectedCall &&
-          !receiptLookup &&
-          (error instanceof FleetToolsDenied || error instanceof FleetMembershipRefused || retryable)
-            ? JSON.stringify({
-                outcome: "refused",
-                reason,
-                ...(retryable ? { retryable: true } : {}),
-                detail: retryable
-                  ? reason
-                  : "The service refused current access. Ask Clankie to confirm this native seat is admitted; repeated retries cannot grant access. Nothing was resubmitted.",
-              })
-            : uncertain
-              ? JSON.stringify({
-                  outcome: "uncertain",
-                  receiptId: heldId,
-                  detail: "may have applied; reconcile, don’t retry",
-                  reason,
-                })
-              : `Clankie's ${String(params?.name)} failed: ${reason}`;
-        send({
-          id,
-          result: {
-            content: [{ type: "text", text }],
-            // The receipt is usable even when the mutation's result is unknown.
-            // Marking it as a tool failure can invite an unsafe native retry.
-            isError: !uncertain,
-          },
-        });
-        if (error instanceof FleetRequestTimeout) report("stalled", reason);
-        return;
-      }
+      const { result, error } = await receiptAwareFleetCall(granted, params?.name, params?.arguments);
+      send({ id, result });
+      if (!error) report("ready");
+      else if (error instanceof FleetRequestTimeout) report("stalled", error.message);
+      return;
     }
     if (id !== undefined)
       send({ id, error: { code: -32601, message: `Method not found: ${String(method)}` } });

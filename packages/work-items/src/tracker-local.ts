@@ -7,7 +7,7 @@ import {
   type TrackerSyncResult,
 } from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
-import { constants, lstatSync, realpathSync, readFileSync } from "node:fs";
+import { constants, lstatSync, realpathSync, readFileSync, statSync, type BigIntStats } from "node:fs";
 import { open, readFile, rename, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { compareVersions, type ReleaseHistory } from "./releases.ts";
@@ -40,6 +40,7 @@ import {
   type IssueEventType,
   type TrackerActor,
   type TrackerItemEvent,
+  type TrackerReadSnapshot,
   type TrackerToolBackend,
   type TrackerToolCallOptions,
 } from "./tracker-tools.ts";
@@ -349,6 +350,11 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
     storeId: string;
     storeDigest: string;
   }>;
+  /** Revalidate an original READ target without replaying, seeding or rolling the store. */
+  withReadSnapshot<T>(
+    snapshot: TrackerReadSnapshot,
+    apply: (assertStoreCurrent: () => void) => Promise<T>,
+  ): Promise<T>;
   sync(
     command: TrackerSyncCommand,
     options?: TrackerToolCallOptions,
@@ -3145,6 +3151,51 @@ function appendSync(
  */
 const eventListeners = new Map<string, Set<TrackerEventListener>>();
 
+/** Only these original branches have been audited for the strict no-effect contract. */
+function strictReadOperation(
+  name: string,
+  options: LocalTrackerOptions,
+): TrackerReadSnapshot["operation"] | undefined {
+  // load invokes a caller-authored clock before classification; its purity is unproved.
+  if (options.clock !== undefined) return undefined;
+  switch (name) {
+    case "get_issue":
+    case "get_user":
+      return name;
+    case "list_runs":
+      // runView may call arbitrary host code; that callback has no purity contract.
+      return options.runner === undefined ? name : undefined;
+    default:
+      return undefined;
+  }
+}
+
+interface LockedReadIdentity {
+  readonly canonicalDirectory: string;
+  readonly directory: BigIntStats;
+  readonly file: BigIntStats;
+  readonly bytes: Buffer;
+}
+
+const sameFile = (left: BigIntStats, right: BigIntStats) =>
+  left.dev === right.dev && left.ino === right.ino && left.birthtimeNs === right.birthtimeNs;
+
+/** Synchronous so no target substitution can cross the host's final commit fence. */
+function assertReadIdentity(directory: string, path: string, identity: LockedReadIdentity): void {
+  if (
+    realpathSync(directory) !== identity.canonicalDirectory ||
+    realpathSync(path) !== join(identity.canonicalDirectory, "tracker.json") ||
+    !sameFile(statSync(directory, { bigint: true }), identity.directory) ||
+    !sameFile(statSync(path, { bigint: true }), identity.file) ||
+    !readFileSync(path).equals(identity.bytes) ||
+    !sameFile(statSync(path, { bigint: true }), identity.file) ||
+    realpathSync(path) !== join(identity.canonicalDirectory, "tracker.json") ||
+    realpathSync(directory) !== identity.canonicalDirectory ||
+    !sameFile(statSync(directory, { bigint: true }), identity.directory)
+  )
+    throw new Error("The original tracker READ target changed");
+}
+
 /** Durable local Linear-shaped tracker, also used as ancillary storage for repo backends. */
 /**
  * An item's status spans, replayed from its event stream. State events name their
@@ -3438,13 +3489,70 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     publish(store.events?.slice(firstEvent - 1) ?? []);
     return settled;
   };
-  const load = async ({ mutable = true }: { mutable?: boolean } = {}) => {
+  const loadExisting = async (mutable: boolean, captureRead: boolean) => {
+    let origin: Pick<LockedReadIdentity, "canonicalDirectory" | "directory"> | undefined;
+    if (captureRead) {
+      try {
+        const canonicalDirectory = realpathSync(directory);
+        const directoryIdentity = statSync(directory, { bigint: true });
+        if (
+          directoryIdentity.isDirectory() &&
+          directoryIdentity.ino > 0n &&
+          directoryIdentity.birthtimeNs > 0n
+        )
+          origin = { canonicalDirectory, directory: directoryIdentity };
+      } catch {
+        // An unproven canonical incarnation keeps the ordinary path, without READ proof.
+      }
+    }
+    if (origin === undefined) return { store: await readStore(mutable), readIdentity: undefined };
+    // Proof binds the exact bytes this call parses, so it reads them itself rather
+    // than trusting a cached version taken outside this file handle.
+    let readIdentity: LockedReadIdentity | undefined;
+    let bytes: Buffer;
+    let version: string;
+    const file = await open(path, "r");
+    try {
+      const before = await file.stat({ bigint: true });
+      bytes = await file.readFile();
+      const after = await file.stat({ bigint: true });
+      version = `${after.dev}:${after.ino}:${after.size}:${after.mtimeNs}:${after.ctimeNs}`;
+      if (
+        before.isFile() &&
+        before.ino > 0n &&
+        before.birthtimeNs > 0n &&
+        sameFile(before, after) &&
+        before.size === after.size &&
+        before.mtimeNs === after.mtimeNs &&
+        before.ctimeNs === after.ctimeNs
+      )
+        readIdentity = { ...origin, file: after, bytes };
+    } finally {
+      await file.close();
+    }
+    validated =
+      validated !== undefined && validated.bytes.equals(bytes)
+        ? { ...validated, version }
+        : { version, bytes, store: parseStore(bytes.toString("utf8")) };
+    if (readIdentity !== undefined) {
+      try {
+        assertReadIdentity(directory, path, readIdentity);
+      } catch {
+        readIdentity = undefined;
+      }
+    }
+    return { store: mutable ? structuredClone(validated.store) : validated.store, readIdentity };
+  };
+  const load = async ({
+    mutable = true,
+    captureRead = false,
+  }: { mutable?: boolean; captureRead?: boolean } = {}) => {
     const clock = (options.clock ?? (() => new Date()))().toISOString();
     try {
-      return { store: await readStore(mutable), clock, initialized: false };
+      return { ...(await loadExisting(mutable, captureRead)), clock, initialized: false };
     } catch (error) {
       if (codeOf(error) !== "ENOENT") throw error;
-      return { store: seed(options, clock), clock, initialized: true };
+      return { store: seed(options, clock), clock, initialized: true, readIdentity: undefined };
     }
   };
   return {
@@ -3521,6 +3629,45 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           } finally {
             await file.close();
           }
+        },
+        { existingOnly: true },
+      );
+    },
+    async withReadSnapshot(snapshot, apply) {
+      if (
+        snapshot.version !== 1 ||
+        snapshot.classification !== "READ" ||
+        snapshot.contract !== "builtin-strict-no-effect/v1" ||
+        !["get_issue", "list_runs", "get_user"].includes(snapshot.operation) ||
+        snapshot.target.kind !== "builtin" ||
+        typeof snapshot.target.storeId !== "string" ||
+        snapshot.target.storeId.length === 0 ||
+        !/^\d+$/u.test(snapshot.target.directoryIdentity.dev) ||
+        !/^\d+$/u.test(snapshot.target.directoryIdentity.ino) ||
+        !/^[1-9]\d*$/u.test(snapshot.target.directoryIdentity.birthTimeNs) ||
+        snapshot.target.canonicalDirectory !== realpathSync(directory)
+      )
+        throw new Error("The original tracker READ snapshot does not match this backend");
+      // The logical persisted store identity survives normal atomic tracker replacements.
+      return withTrackerStoreLock(
+        path,
+        async (assertHeld) => {
+          const { store, readIdentity } = await loadExisting(false, true);
+          if (
+            readIdentity === undefined ||
+            readIdentity.canonicalDirectory !== snapshot.target.canonicalDirectory ||
+            readIdentity.directory.dev.toString() !== snapshot.target.directoryIdentity.dev ||
+            readIdentity.directory.ino.toString() !== snapshot.target.directoryIdentity.ino ||
+            readIdentity.directory.birthtimeNs.toString() !== snapshot.target.directoryIdentity.birthTimeNs ||
+            (store.storeId ?? store.team.id) !== snapshot.target.storeId
+          )
+            throw new Error("The original tracker READ store is missing or replaced");
+          const assertStoreCurrent = () => {
+            assertHeld();
+            assertReadIdentity(directory, path, readIdentity);
+          };
+          assertStoreCurrent();
+          return apply(assertStoreCurrent);
         },
         { existingOnly: true },
       );
@@ -4291,11 +4438,49 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     },
     async call(name, args, callOptions) {
       validateTrackerToolArgs(name, args);
+      const operation = strictReadOperation(name, options);
       return withTrackerStoreLock(path, async (assertHeld) => {
         const writing = /^(?:save|create|post)_/u.test(name);
-        let { store, clock, initialized } = await load({ mutable: writing });
+        const captureRead =
+          operation !== undefined &&
+          !writing &&
+          callOptions?.beforeRead !== undefined &&
+          callOptions.onReadPrepared !== undefined;
+        let { store, clock, initialized, readIdentity } = await load({ mutable: writing, captureRead });
+        const rolloverDue = cyclesDue(store, clock);
+        if (
+          captureRead &&
+          !initialized &&
+          !rolloverDue &&
+          (store.storeId ?? store.team.id).length > 0 &&
+          readIdentity !== undefined
+        ) {
+          const fence = await callOptions!.beforeRead!();
+          assertHeld();
+          fence?.();
+          assertReadIdentity(directory, path, readIdentity);
+          assertHeld();
+          callOptions!.onReadPrepared!(
+            Object.freeze({
+              version: 1,
+              classification: "READ",
+              contract: "builtin-strict-no-effect/v1",
+              operation: operation!,
+              target: Object.freeze({
+                kind: "builtin",
+                canonicalDirectory: readIdentity.canonicalDirectory,
+                storeId: store.storeId ?? store.team.id,
+                directoryIdentity: Object.freeze({
+                  dev: readIdentity.directory.dev.toString(),
+                  ino: readIdentity.directory.ino.toString(),
+                  birthTimeNs: readIdentity.directory.birthtimeNs.toString(),
+                }),
+              }),
+            }),
+          );
+        }
         // Cycles roll over on the first access after one ends, as Clankie's own write.
-        if (cyclesDue(store, clock)) {
+        if (rolloverDue) {
           if (!writing) store = structuredClone(store);
           await write(
             store,

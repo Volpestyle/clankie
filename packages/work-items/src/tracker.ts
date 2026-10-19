@@ -43,6 +43,10 @@ export interface TrackerDeps extends WorkWriteCallbacks {
   readonly trackerDirectory?: string;
   /** Host-authenticated writer, recorded by the built-in tracker; never from tool arguments. */
   readonly actor?: TrackerActor;
+  readonly beforeRead?: NonNullable<import("./tracker-tools.ts").TrackerToolCallOptions["beforeRead"]>;
+  readonly onReadPrepared?: NonNullable<
+    import("./tracker-tools.ts").TrackerToolCallOptions["onReadPrepared"]
+  >;
   readonly authorizeLeadClosure?: NonNullable<
     import("./tracker-tools.ts").TrackerToolCallOptions["authorizeLeadClosure"]
   >;

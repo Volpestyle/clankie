@@ -112,6 +112,8 @@ type WorkerAuthorization = {
   validateFleet?(signal?: AbortSignal): boolean | Promise<boolean>;
   /** Optional author attribution only; this never changes the connected tool grant. */
   nativeWriteProof?(signal?: AbortSignal): Promise<ProjectProcessProof | undefined>;
+  /** Required original native ownership for receipt recovery; never attribution or a tool grant. */
+  nativeReceiptProof?(signal?: AbortSignal): Promise<ProjectProcessProof | undefined>;
   currentFleet?: (() => boolean) | undefined;
   /** Admitted through local fleet membership, so the worker shares this machine's files. */
   local?: boolean;
@@ -122,6 +124,18 @@ const FleetSearchSchema = z
     names: z.array(z.string().min(1).max(256)).min(1).max(10).optional(),
   })
   .strict();
+const ReceiptActionSchema = z.union([
+  z.strictObject({
+    receiptId: z.string().uuid(),
+    action: z.literal("inspect"),
+    abandonmentId: z.string().uuid().optional(),
+  }),
+  z.strictObject({
+    receiptId: z.string().uuid(),
+    action: z.literal("abandon-read"),
+    reason: z.string().trim().min(1).max(500),
+  }),
+]);
 const FleetCallSchema = z.union([
   z.strictObject({
     name: z.string().min(1).max(256),
@@ -129,7 +143,61 @@ const FleetCallSchema = z.union([
     background: z.boolean().optional(),
   }),
   z.strictObject({ receiptId: z.string().uuid() }),
+  ReceiptActionSchema,
 ]);
+const ReceiptNativeSubjectSchema = z.strictObject({
+  fleet: z.string(),
+  pane: z.string(),
+  occupantId: z.string().min(1),
+  binding: z.strictObject({ socketPath: z.string().min(1), session: z.string().optional() }),
+  shell: z.strictObject({ pid: z.number().int().positive(), startTime: z.string().min(1) }),
+  processes: z
+    .array(z.strictObject({ pid: z.number().int().positive(), startTime: z.string().min(1) }))
+    .min(1),
+});
+/** Only a backend-owned, pre-effect locked snapshot may author this proof. */
+const WorkerReadSnapshotSchema = z.strictObject({
+  version: z.literal(1),
+  classification: z.literal("READ"),
+  contract: z.literal("builtin-strict-no-effect/v1"),
+  operation: z.enum(["get_issue", "list_runs", "get_user"]),
+  server: z.literal("linear"),
+  tool: z.string().min(1),
+  fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+  /** Immutable original selectors for current routing validation only; never dispatched by recovery. */
+  routingArguments: z.record(z.string(), z.json()),
+  accountBinding: z.string().regex(/^[a-f0-9]{64}$/u),
+  target: z.strictObject({
+    kind: z.literal("builtin"),
+    canonicalDirectory: z.string().min(1),
+    directoryIdentity: z.strictObject({
+      dev: z.string().regex(/^\d+$/u),
+      ino: z.string().regex(/^[1-9]\d*$/u),
+      birthTimeNs: z.string().regex(/^[1-9]\d*$/u),
+    }),
+    storeId: z.string().min(1),
+    resourceBinding: z.string().regex(/^[a-f0-9]{64}$/u),
+    repo: z
+      .strictObject({
+        canonicalPath: z.string().min(1),
+        conventionDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+        projectId: z.string().uuid().optional(),
+      })
+      .optional(),
+  }),
+});
+export type WorkerReadSnapshot = z.infer<typeof WorkerReadSnapshotSchema>;
+/** Optional until the separately coordinated exact-backend seam is installed. Absence never proves READ. */
+export type WorkerReadReceiptHost = {
+  withReadReceiptTarget?<T>(
+    input: {
+      snapshot: WorkerReadSnapshot;
+      principalId: string;
+      signal: AbortSignal;
+    },
+    prepare: (assertTargetCurrent: () => void) => Promise<() => T>,
+  ): Promise<T>;
+};
 const WorkerCallResultSchema = z.strictObject({
   outcome: z.literal("ok"),
   content: z.string(),
@@ -150,6 +218,23 @@ const WorkerCallReceiptSchema = z.object({
   state: z.enum(["uncertain", "settled"]),
   reason: z.string().max(500).optional(),
   result: WorkerCallResultSchema.optional(),
+  nativeSubject: ReceiptNativeSubjectSchema.optional(),
+  readSnapshot: WorkerReadSnapshotSchema.optional(),
+  dispatchAdmissionAt: z.number().optional(),
+  abandonment: z
+    .strictObject({
+      id: z.string().uuid(),
+      receiptId: z.string().uuid(),
+      at: z.number(),
+      reason: z.string().min(1).max(500),
+      owner: z.string(),
+      nativeSubject: ReceiptNativeSubjectSchema,
+      binding: z.string(),
+      originalFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+      requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+      readSnapshotFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+    })
+    .optional(),
 });
 type WorkerCallReceipt = z.infer<typeof WorkerCallReceiptSchema>;
 const uncertainWorkerCall = (receiptId: string, reason?: string) => ({
@@ -160,7 +245,10 @@ const uncertainWorkerCall = (receiptId: string, reason?: string) => ({
 });
 const workerCallResponse = <T extends { outcome: string; isError?: boolean }>(result: T) => ({
   content: [{ type: "text" as const, text: JSON.stringify(result) }],
-  isError: result.outcome === "uncertain" ? false : result.outcome !== "ok" || result.isError === true,
+  isError:
+    result.outcome === "uncertain"
+      ? false
+      : !["ok", "inspected", "abandoned-read"].includes(result.outcome) || result.isError === true,
 });
 const FLEET_TOOLS = [
   {
@@ -172,13 +260,15 @@ const FLEET_TOOLS = [
   {
     name: "clankie_call",
     description:
-      "Call an available tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Tracker calls use the active backend; other provider calls use Clankie's verified connected account. Set background:true for automated polling so reads yield under Linear budget pressure; ordinary owner/lead reads and writes retain priority. Calls return a receiptId. An uncertain call may have applied: reconcile with only {receiptId}, never retry its name and arguments. Receipt lookup is read-only and rechecks current access.",
+      "Call an available tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Tracker calls use the active backend; other provider calls use Clankie's verified connected account. Set background:true for automated polling. An uncertain call may have applied: reconcile with {receiptId}, never repeat name and arguments. Inspect with {receiptId, action:'inspect'}; only an original whose receipt proved a strict no-effect READ, with the same native session, account and target, may use {receiptId, action:'abandon-read', reason}. Abandonment stops waiting, never cancels or proves execution. After an uncertain abandonment inspect receiptId and abandonmentId. Missing/legacy proof stays UNKNOWN; never infer READ or nonexecution.",
     inputSchema: { ...z.toJSONSchema(FleetCallSchema), type: "object" as const },
   },
 ];
 const uuid = z.string().uuid();
 const KEY_ID = "clankie_worker_mcp_signing";
 const WORKER_REQUEST_TIMEOUT_MS = 30_000;
+/** Optional recovery provenance must not consume an ordinary call's entire budget. */
+const READ_RECEIPT_PROOF_TIMEOUT_MS = 1_000;
 /** Fleet seat long polls carry their catalog revision here; bridges list only when it moves. */
 export const FLEET_CATALOG_REVISION_HEADER = "x-clankie-catalog-revision";
 // Settings are owner-authored files; one service-side read covers every parked seat.
@@ -227,7 +317,7 @@ export class WorkerMcp {
   private readonly options: {
     directory: string;
     credentials: CredentialStore;
-    host: McpHost;
+    host: McpHost & WorkerReadReceiptHost;
     projects?(): Promise<ProjectsSettings>;
     fleetTools?(): Promise<FleetSettings["tools"]>;
     fleetPeerMessages?(): Promise<FleetSettings["peerMessages"]>;
@@ -813,6 +903,8 @@ export class WorkerMcp {
     record: GrantRecord,
     tool: string,
     fingerprint: string,
+    nativeSubject?: z.infer<typeof ReceiptNativeSubjectSchema>,
+    readSnapshot?: WorkerReadSnapshot,
   ): WorkerCallReceipt | undefined {
     const records = this.callReceipts.load();
     const previous = records.get(id);
@@ -829,6 +921,9 @@ export class WorkerMcp {
       fingerprint,
       createdAt: Date.now(),
       state: "uncertain",
+      ...(nativeSubject === undefined ? {} : { nativeSubject }),
+      // A READ is admitted here, under the backend lock immediately before its read.
+      ...(readSnapshot === undefined ? {} : { readSnapshot, dispatchAdmissionAt: Date.now() }),
     });
     // Admission is durable before the synchronous hook permits provider dispatch.
     this.callReceipts.save();
@@ -881,12 +976,16 @@ export class WorkerMcp {
     this.callReceipts.save();
   }
 
-  private async reconcileCallReceipt(receiptId: string, authority: WorkerAuthorization, signal: AbortSignal) {
+  private async authorizedCallReceipt(
+    receiptId: string,
+    authority: WorkerAuthorization,
+    signal: AbortSignal,
+  ) {
     receiptId = receiptId.toLowerCase();
     const receipt = this.callReceipts.load().get(receiptId);
     // The original may still be awaiting admission. Mere absence cannot prove
     // that it will never dispatch, and this read never permits a retry.
-    if (!receipt) return uncertainWorkerCall(receiptId);
+    if (!receipt) return undefined;
     if (receipt.owner !== authority.key) throw new Error("Worker call receipt unavailable");
     const records =
       authority.fleet === undefined
@@ -912,8 +1011,263 @@ export class WorkerMcp {
     }
     signal.throwIfAborted();
     // Reload after fresh authorization: the original call may have settled meanwhile.
-    const latest = this.callReceipts.load().get(receiptId)!;
-    return this.callReceiptResult(latest);
+    return this.callReceipts.load().get(receiptId);
+  }
+
+  private async reconcileCallReceipt(receiptId: string, authority: WorkerAuthorization, signal: AbortSignal) {
+    receiptId = receiptId.toLowerCase();
+    const receipt = await this.authorizedCallReceipt(receiptId, authority, signal);
+    return receipt ? this.callReceiptResult(receipt) : uncertainWorkerCall(receiptId);
+  }
+
+  private async receiptNativeSubject(authority: WorkerAuthorization, signal: AbortSignal) {
+    if (authority.local !== true || !authority.nativeReceiptProof) return undefined;
+    const proof = await authority.nativeReceiptProof(signal);
+    signal.throwIfAborted();
+    if (
+      !proof ||
+      proof.nativeSessionPending ||
+      proof.fleet !== authority.fleet ||
+      proof.pane !== authority.pane
+    )
+      return undefined;
+    return ReceiptNativeSubjectSchema.parse({
+      fleet: proof.fleet,
+      pane: proof.pane,
+      occupantId: proof.nativeOccupantId,
+      binding: proof.binding,
+      shell: proof.shell,
+      processes: proof.processes,
+    });
+  }
+
+  private receiptInspection(receipt: WorkerCallReceipt, abandonmentId?: string) {
+    return {
+      receiptId: receipt.id,
+      classification: receipt.readSnapshot ? ("READ" as const) : ("UNKNOWN" as const),
+      original: {
+        server: receipt.server,
+        tool: receipt.tool,
+        fingerprint: receipt.fingerprint,
+        accountBinding: receipt.binding,
+        createdAt: receipt.createdAt,
+        nativeSubject: receipt.nativeSubject,
+        readSnapshot: receipt.readSnapshot,
+      },
+      execution: {
+        dispatchAdmission: receipt.dispatchAdmissionAt === undefined ? "UNKNOWN" : "recorded",
+        response: receipt.result
+          ? receipt.result.isError
+            ? "confirmed-error"
+            : "confirmed-success"
+          : receipt.state === "settled"
+            ? "settled-body-unavailable"
+            : "UNKNOWN",
+        ...(receipt.result === undefined ? {} : { result: receipt.result }),
+      },
+      abandonment:
+        receipt.abandonment && (!abandonmentId || receipt.abandonment.id === abandonmentId)
+          ? { state: "recorded" as const, decision: receipt.abandonment }
+          : { state: "not-observed" as const, ...(abandonmentId === undefined ? {} : { id: abandonmentId }) },
+      detail:
+        "Abandonment records a decision to stop waiting; it does not cancel, prove nonexecution or establish success. Never replay the original.",
+    };
+  }
+
+  private assertReadReceiptIdentity(receipt: WorkerCallReceipt): void {
+    const snapshot = receipt.readSnapshot;
+    if (
+      !snapshot ||
+      !receipt.fingerprint ||
+      snapshot.server !== receipt.server ||
+      snapshot.tool !== receipt.tool ||
+      snapshot.operation !== receipt.tool ||
+      snapshot.fingerprint !== receipt.fingerprint ||
+      snapshot.fingerprint !==
+        createHash("sha256")
+          .update(canonicalJson([`${snapshot.server}_${snapshot.tool}`, snapshot.routingArguments]))
+          .digest("hex") ||
+      snapshot.accountBinding !== receipt.binding
+    )
+      throw new Error("Original READ receipt identity is inconsistent");
+    const audit = receipt.abandonment;
+    if (
+      audit &&
+      (audit.receiptId !== receipt.id ||
+        audit.owner !== receipt.owner ||
+        !isDeepStrictEqual(audit.nativeSubject, receipt.nativeSubject) ||
+        audit.binding !== receipt.binding ||
+        audit.originalFingerprint !== receipt.fingerprint ||
+        audit.readSnapshotFingerprint !==
+          createHash("sha256").update(canonicalJson(snapshot)).digest("hex") ||
+        audit.requestFingerprint !==
+          createHash("sha256")
+            .update(canonicalJson(["abandon-read", receipt.id, audit.id, audit.reason]))
+            .digest("hex"))
+    )
+      throw new Error("Retained READ abandonment audit is inconsistent");
+  }
+
+  private async recoverCallReceipt(
+    action: z.infer<typeof ReceiptActionSchema>,
+    authority: WorkerAuthorization,
+    signal: AbortSignal,
+    suppliedAbandonmentId?: unknown,
+  ) {
+    const receiptId = action.receiptId.toLowerCase();
+    const abandonmentId =
+      action.action === "abandon-read"
+        ? uuid.parse(suppliedAbandonmentId).toLowerCase()
+        : action.abandonmentId?.toLowerCase();
+    // Inspection keeps an unprovable original UNKNOWN. Abandonment of one is a
+    // definite refusal: no audit exists, so its reply must not read as uncertain.
+    const unproven = (reason?: string) =>
+      action.action === "inspect"
+        ? {
+            ...uncertainWorkerCall(receiptId, reason),
+            classification: "UNKNOWN" as const,
+            ...(abandonmentId ? { abandonmentId } : {}),
+          }
+        : {
+            outcome: "refused" as const,
+            receiptId,
+            abandonmentId,
+            classification: "UNKNOWN" as const,
+            reason: "original_read_unproven",
+            detail: `No abandonment was recorded${reason ? `: ${reason}` : ""}. The original stays UNKNOWN; reconcile with {receiptId} only and never repeat it.`,
+          };
+    const receipt = await this.authorizedCallReceipt(receiptId, authority, signal);
+    if (!receipt) return unproven();
+    if (!receipt.readSnapshot || !receipt.fingerprint)
+      return unproven("Original strict no-effect READ and target proof were not retained");
+    if (!receipt.nativeSubject)
+      return unproven("Original native ownership was not retained; recovery is unavailable");
+    const subject = await this.receiptNativeSubject(authority, signal);
+    if (!subject || !isDeepStrictEqual(subject, receipt.nativeSubject))
+      throw new Error("Worker receipt unavailable to this native session");
+    if (!this.options.host.withReadReceiptTarget)
+      return unproven("Current original backend target proof is unavailable");
+    this.assertReadReceiptIdentity(receipt);
+    let auditAttempted = false;
+    try {
+      return await this.options.host.withReadReceiptTarget(
+        { snapshot: receipt.readSnapshot, principalId: authority.principalId, signal },
+        async (assertTargetCurrent) => {
+          // Reprove access and the exact native occupant after acquiring the original target's lock.
+          const authorized = await this.authorizedCallReceipt(receiptId, authority, signal);
+          const currentSubject = await this.receiptNativeSubject(authority, signal);
+          if (
+            !authorized ||
+            !currentSubject ||
+            !isDeepStrictEqual(authorized.nativeSubject, currentSubject) ||
+            !isDeepStrictEqual(authorized.readSnapshot, receipt.readSnapshot) ||
+            authorized.fingerprint !== receipt.fingerprint
+          )
+            throw new Error("Worker receipt ownership or original target changed");
+          const settingsFence = await this.options.fleetToolsSnapshot?.();
+          if (settingsFence?.tools !== "connected")
+            throw new Error("Current recovery tools fence is unavailable");
+          // The host revalidates its account/target after this preparation and invokes this commit without yielding.
+          return () => {
+            const latest = this.callReceipts.load().get(receiptId);
+            if (
+              !latest ||
+              latest.owner !== authority.key ||
+              latest.owner !== receipt.owner ||
+              !isDeepStrictEqual(latest.nativeSubject, currentSubject) ||
+              !isDeepStrictEqual(latest.readSnapshot, receipt.readSnapshot)
+            )
+              throw new Error("Original READ receipt changed during recovery preparation");
+            this.assertReadReceiptIdentity(latest);
+            const assertFinal = () => {
+              signal.throwIfAborted();
+              settingsFence.assertCurrent();
+              assertTargetCurrent();
+              if (authority.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
+            };
+            assertFinal();
+            if (action.action === "inspect") {
+              const inspection = this.receiptInspection(latest, abandonmentId);
+              return abandonmentId && inspection.abandonment.state === "not-observed"
+                ? {
+                    outcome: "uncertain" as const,
+                    operation: "inspect" as const,
+                    abandonmentId,
+                    ...inspection,
+                  }
+                : { outcome: "inspected" as const, operation: "inspect" as const, ...inspection };
+            }
+            const requestFingerprint = createHash("sha256")
+              .update(canonicalJson(["abandon-read", receiptId, abandonmentId, action.reason]))
+              .digest("hex");
+            if (latest.abandonment) {
+              if (
+                latest.abandonment.id !== abandonmentId ||
+                latest.abandonment.requestFingerprint !== requestFingerprint
+              )
+                throw new Error("The original READ already retains a different abandonment decision");
+            } else {
+              // Reload synchronously: a late original response must not be overwritten by an awaited authority check.
+              const retained = this.callReceipts.load().get(receiptId);
+              if (
+                !retained ||
+                retained.owner !== authority.key ||
+                retained.owner !== receipt.owner ||
+                retained.abandonment ||
+                !isDeepStrictEqual(retained.readSnapshot, latest.readSnapshot) ||
+                !isDeepStrictEqual(retained.nativeSubject, currentSubject)
+              )
+                throw new Error("Worker receipt changed before abandonment audit");
+              retained.abandonment = {
+                id: abandonmentId!,
+                receiptId,
+                at: Date.now(),
+                reason: action.reason,
+                owner: authority.key,
+                nativeSubject: currentSubject,
+                binding: retained.binding,
+                originalFingerprint: retained.fingerprint!,
+                requestFingerprint,
+                readSnapshotFingerprint: createHash("sha256")
+                  .update(canonicalJson(retained.readSnapshot))
+                  .digest("hex"),
+              };
+              auditAttempted = true;
+              try {
+                assertFinal();
+                this.callReceipts.save();
+              } catch {
+                return {
+                  ...uncertainWorkerCall(
+                    receiptId,
+                    "Abandonment audit persistence is unconfirmed; inspect both original IDs",
+                  ),
+                  abandonmentId,
+                };
+              }
+            }
+            const recorded = this.callReceipts.load().get(receiptId)!;
+            return {
+              outcome: "abandoned-read" as const,
+              operation: "abandon-read" as const,
+              abandonmentId,
+              ...this.receiptInspection(recorded, abandonmentId),
+            };
+          };
+        },
+      );
+    } catch (error) {
+      const detail = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+      return auditAttempted
+        ? { ...uncertainWorkerCall(receiptId, detail), abandonmentId }
+        : {
+            outcome: "refused" as const,
+            receiptId,
+            ...(abandonmentId ? { abandonmentId } : {}),
+            reason: "receipt_recovery_unavailable",
+            detail,
+          };
+    }
   }
 
   async handle(request: Request): Promise<Response> {
@@ -955,7 +1309,18 @@ export class WorkerMcp {
             return observed;
           },
         );
-        return { ...authorization, local: true };
+        return {
+          ...authorization,
+          local: true,
+          nativeReceiptProof: async (cancellation?: AbortSignal) => {
+            const proofSignal = cancellation ? AbortSignal.any([signal, cancellation]) : signal;
+            proofSignal.throwIfAborted();
+            // The producer owns socket/ancestry/session admission. Optional attribution is not authority.
+            const proof = await identity.admittedProjectProof?.(proofSignal);
+            proofSignal.throwIfAborted();
+            return proof?.fleet === fleet && proof.pane === identity.pane ? proof : undefined;
+          },
+        };
       },
       async (response, signal) => {
         const id = response.headers.get("mcp-session-id") ?? request.headers.get("mcp-session-id") ?? "";
@@ -1255,6 +1620,7 @@ export class WorkerMcp {
     );
     server.setRequestHandler(CallToolRequestSchema, async (call, extra) => {
       let receiptId: string | undefined;
+      let recoveryIds: { receiptId: string; abandonmentId?: string } | undefined;
       let admitted = false;
       let repeatedReceipt: WorkerCallReceipt | undefined;
       let unadmittedSettlement = false;
@@ -1274,7 +1640,27 @@ export class WorkerMcp {
             let name = call.params.name;
             let args = call.params.arguments ?? {};
             if (authorityNow.fleet === undefined && name === "clankie_call") {
-              const reconciliation = z.strictObject({ receiptId: uuid }).parse(args);
+              const reconciliation = z
+                .union([z.strictObject({ receiptId: uuid }), ReceiptActionSchema])
+                .parse(args);
+              if ("action" in reconciliation) {
+                recoveryIds = {
+                  receiptId: reconciliation.receiptId,
+                  ...(reconciliation.action === "inspect" && reconciliation.abandonmentId
+                    ? { abandonmentId: reconciliation.abandonmentId }
+                    : typeof call.params._meta?.clankieAbandonmentId === "string"
+                      ? { abandonmentId: call.params._meta.clankieAbandonmentId }
+                      : {}),
+                };
+                return workerCallResponse(
+                  await this.recoverCallReceipt(
+                    reconciliation,
+                    authorityNow,
+                    signal,
+                    call.params._meta?.clankieAbandonmentId,
+                  ),
+                );
+              }
               return workerCallResponse(
                 await this.reconcileCallReceipt(reconciliation.receiptId, authorityNow, signal),
               );
@@ -1330,10 +1716,29 @@ export class WorkerMcp {
               }
               if (name !== "clankie_call") throw new Error("Use clankie_call for connected tools");
               const invocation = FleetCallSchema.parse(args);
-              if ("receiptId" in invocation)
+              if ("receiptId" in invocation) {
+                if ("action" in invocation)
+                  recoveryIds = {
+                    receiptId: invocation.receiptId,
+                    ...(invocation.action === "inspect"
+                      ? invocation.abandonmentId
+                        ? { abandonmentId: invocation.abandonmentId }
+                        : {}
+                      : typeof call.params._meta?.clankieAbandonmentId === "string"
+                        ? { abandonmentId: call.params._meta.clankieAbandonmentId }
+                        : {}),
+                  };
                 return workerCallResponse(
-                  await this.reconcileCallReceipt(invocation.receiptId, authorityNow, signal),
+                  "action" in invocation
+                    ? await this.recoverCallReceipt(
+                        invocation,
+                        authorityNow,
+                        signal,
+                        call.params._meta?.clankieAbandonmentId,
+                      )
+                    : await this.reconcileCallReceipt(invocation.receiptId, authorityNow, signal),
                 );
+              }
               name = invocation.name;
               args = invocation.arguments;
               background ||= invocation.background === true;
@@ -1426,13 +1831,47 @@ export class WorkerMcp {
               this.assertCallReceipt(previous, authorityNow, current, rule.name, fingerprint);
               return workerCallResponse(await this.reconcileCallReceipt(id, authorityNow, signal));
             }
-            const result = await this.options.host.call({
+            let nativeSubject: z.infer<typeof ReceiptNativeSubjectSchema> | undefined;
+            const hostInput: Parameters<McpHost["call"]>[0] & {
+              onReadPrepared(snapshot: WorkerReadSnapshot): void;
+            } = {
               ...(background ? { requestPriority: "background" as const } : {}),
               timeoutMs: remaining(),
+              readReceiptFence: async () => {
+                // Only the exact locked, eligible backend READ requests this optional provenance.
+                // Provider reads, writes and ordinary publication never observe it.
+                const proofSignal = AbortSignal.any([
+                  signal,
+                  AbortSignal.timeout(
+                    Math.max(1, Math.min(READ_RECEIPT_PROOF_TIMEOUT_MS, Math.floor(remaining() / 2))),
+                  ),
+                ]);
+                try {
+                  nativeSubject = await beforeWorkerDeadline(
+                    proofSignal,
+                    "Optional original READ provenance",
+                    () => this.receiptNativeSubject(authorityNow, proofSignal),
+                  );
+                } catch {
+                  signal.throwIfAborted();
+                  nativeSubject = undefined;
+                }
+                return () => {
+                  signal.throwIfAborted();
+                  if (authorityNow.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
+                };
+              },
               onDispatch: () => {
                 signal.throwIfAborted();
                 if (!admitted) {
-                  const previous = this.beginCallReceipt(id, authorityNow, current, rule.name, fingerprint);
+                  const previous = this.beginCallReceipt(
+                    id,
+                    authorityNow,
+                    current,
+                    rule.name,
+                    fingerprint,
+                    nativeSubject,
+                  );
                   if (previous) {
                     repeatedReceipt = previous;
                     // Another request admitted this ID while host discovery awaited.
@@ -1441,10 +1880,53 @@ export class WorkerMcp {
                   }
                   admitted = true;
                 }
+                const record = this.callReceipts.load().get(id);
+                if (!record) throw new Error("Missing original dispatch receipt");
+                if (record.dispatchAdmissionAt === undefined) {
+                  record.dispatchAdmissionAt = Date.now();
+                  this.callReceipts.save();
+                }
+              },
+              onReadPrepared: (observation) => {
+                signal.throwIfAborted();
+                // Manual grants have no native recovery subject; their ordinary read path is unchanged.
+                if (authorityNow.fleet === undefined) return;
+                const snapshot = WorkerReadSnapshotSchema.parse(observation);
+                if (
+                  snapshot.server !== current.server ||
+                  snapshot.tool !== rule.name ||
+                  snapshot.operation !== rule.name ||
+                  snapshot.fingerprint !== fingerprint ||
+                  snapshot.accountBinding !== current.grant.profileHash
+                )
+                  throw new Error("Backend READ snapshot does not match the original call and account");
+                if (admitted) throw new Error("READ classification must precede original dispatch admission");
+                if (authorityNow.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
+                const previous = this.beginCallReceipt(
+                  id,
+                  authorityNow,
+                  current,
+                  rule.name,
+                  fingerprint,
+                  nativeSubject,
+                  snapshot,
+                );
+                if (previous) {
+                  repeatedReceipt = previous;
+                  throw new Error("Worker call already admitted; reconcile its original receipt");
+                }
+                admitted = true;
               },
               onSettled: (settled, observation) => {
                 if (!admitted) {
-                  const previous = this.beginCallReceipt(id, authorityNow, current, rule.name, fingerprint);
+                  const previous = this.beginCallReceipt(
+                    id,
+                    authorityNow,
+                    current,
+                    rule.name,
+                    fingerprint,
+                    nativeSubject,
+                  );
                   if (previous) {
                     repeatedReceipt = previous;
                     return;
@@ -1512,7 +1994,8 @@ export class WorkerMcp {
                       };
                     },
                   }),
-            });
+            };
+            const result = await this.options.host.call(hostInput);
             if (repeatedReceipt) return workerCallResponse(this.callReceiptResult(repeatedReceipt));
             if (unadmittedSettlement)
               return workerCallResponse(
@@ -1548,6 +2031,7 @@ export class WorkerMcp {
             ? this.uncertainCallReceipt(receiptId, error instanceof Error ? error.message : String(error))
             : {
                 outcome: "refused",
+                ...recoveryIds,
                 reason: "worker_request_failed",
                 detail: error instanceof Error ? error.message : String(error),
               },

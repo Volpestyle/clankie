@@ -2,6 +2,7 @@ import { connectLaneUpstream } from "./mcp.ts";
 import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { FreeAgentIntentSchema } from "@clankie/protocol";
 import { readMessageStatus } from "../../../../integrations/claude-plugin/worker/bin/message-status.mjs";
+import { callNativeReceipt } from "../../../../integrations/claude-plugin/worker/bin/seat-channel.mjs";
 import { runProjectRoleCommand } from "./project-role.ts";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
@@ -23,6 +24,7 @@ import {
 } from "../session/operator-conversations.ts";
 import { commandHost } from "./io.ts";
 import { text } from "node:stream/consumers";
+import { z } from "zod";
 
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
@@ -30,6 +32,8 @@ const AGENTS_USAGE =
   "       clankie agents keep|unkeep PANE --conversation ID [--reason TEXT]\n" +
   "       clankie agents processes [retire] (local host; own confirmed closed hires only)\n" +
   "       clankie agents message-status DELIVERY_ID (current native seat)\n" +
+  "       clankie agents call-receipt inspect ORIGINAL_UUID [--abandonment-id UUID] (current native seat)\n" +
+  "       clankie agents call-receipt abandon-read ORIGINAL_UUID --reason TEXT (current native seat)\n" +
   "       clankie agents readopt SEAT --conversation ID\n" +
   "       clankie agents reports --conversation ID [--limit N] [--delivery-ids ID,ID]\n" +
   "       clankie agents reports ack DELIVERY_ID... --conversation ID [--receipt JSON]\n" +
@@ -96,6 +100,30 @@ export async function runAgentsCommand(
     stdin?: Parameters<typeof text>[0];
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "call-receipt") {
+    const action = args[1];
+    const receiptId = args[2];
+    if (action !== "inspect" && action !== "abandon-read") throw new Error(AGENTS_USAGE);
+    const values = flags(args.slice(3), action === "inspect" ? ["--abandonment-id"] : ["--reason"]);
+    const uuid = z.uuid();
+    const abandonmentId = values.get("--abandonment-id");
+    const reason = values.get("--reason");
+    if (
+      !receiptId ||
+      !uuid.safeParse(receiptId).success ||
+      (abandonmentId !== undefined && !uuid.safeParse(abandonmentId).success) ||
+      (action === "abandon-read" && (!reason?.trim() || reason.length > 500))
+    )
+      throw new Error(AGENTS_USAGE);
+    return decodeMcpResult(
+      await callNativeReceipt(
+        action === "inspect"
+          ? { receiptId, action, ...(abandonmentId === undefined ? {} : { abandonmentId }) }
+          : { receiptId, action, reason: reason! },
+        { env: options.env ?? process.env, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) },
+      ),
+    );
+  }
   // Pane tidy runs as the conversation's own tool, with its checks and receipts.
   const conversationTool = async (conversationId: string, name: string, input: Record<string, unknown>) => {
     const env = options.env ?? process.env;
