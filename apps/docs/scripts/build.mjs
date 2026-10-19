@@ -254,6 +254,22 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/settings/evidence-storage",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read the configured and active evidence storage destination, its revision and whether a restart is required; never credentials.",
+      },
+    ],
+    [
+      "POST /v1/settings/evidence-storage",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Save the evidence storage configuration with revision fencing; it applies after a restart and never activates storage or sets up credentials.",
+      },
+    ],
+    [
       "GET /v1/operator/appearance",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
