@@ -268,7 +268,9 @@ unclaimed when Herdr returns `pane_not_found`. Never substitute
 another account or bridge. Only the explicit pre-forward refusal is safe to
 retry; a later refusal cannot settle an earlier uncertain call.
 Connected calls return a `receiptId`. If a dispatched call times out, its typed
-`outcome: uncertain` means it may have applied. Call `clankie_call` with only
+`outcome: uncertain` means it may have applied. A tracker read the provider
+refused (an unknown issue, say) instead returns `isError: true` with the
+provider's message; that answer is definite. Call `clankie_call` with only
 `{receiptId}` to read the original result; never repeat its name and arguments.
 The bridge keeps that ID even when the HTTP reply is lost. Receipt lookup proves
 current admission, tool grant and account binding and never dispatches a write.

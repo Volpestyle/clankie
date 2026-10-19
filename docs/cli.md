@@ -6638,6 +6638,10 @@ or `{names}` for up to 10 input schemas, then call with `{name, arguments}`.
 
 Connected calls retain a `receiptId` when an HTTP reply is lost. The existing
 `clankie_call({receiptId})` reads the original result without dispatching again.
+When a tracker provider settles a refusal of a read (an unknown issue, say), the
+call returns `outcome: "ok"` with `isError: true` and the provider's message, and
+its receipt holds that answer (LOCAL-VUH-34). A lost, failed or timed-out
+provider call stays `uncertain`, and so does any write.
 A native seat can also inspect any of its own receipts and abandon one that is
 a proven READ (LOCAL-VUH-13). The commands exist for every receipt; whether a
 particular original is eligible is decided only from what its receipt retained.

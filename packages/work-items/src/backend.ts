@@ -122,6 +122,17 @@ export class WorkItemScopeError extends Error {
   }
 }
 
+/**
+ * A provider's settled refusal of a read, such as an unknown issue: its definite
+ * answer, before any effect. A lost, timed-out or ambiguous call never becomes this.
+ */
+export class TrackerReadRejected extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TrackerReadRejected";
+  }
+}
+
 /** Applies a patch's criteria edits to an existing checklist. */
 export function patchCriteria(existing: readonly WorkCriterion[], patch: WorkItemPatch): WorkCriterion[] {
   const next = [...(patch.criteria ?? existing)].map((criterion) => ({ ...criterion }));

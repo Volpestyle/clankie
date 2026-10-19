@@ -47,6 +47,7 @@ import {
   SAVED_ISSUE_VIEW_TOOLS,
   refuseBuiltInTrackerFeatures,
   TRACKER_OWNER,
+  TrackerReadRejected,
   type TrackerActor,
 } from "@clankie/work-items";
 import type { McpHost } from "./mcp-host.ts";
@@ -77,6 +78,12 @@ const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 30_000;
 /** Clankie (the lead) acting for the owner: how operator-bearer tracker writes are attributed. */
 const CLANKIE_FOR_OWNER: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
+
+/** A provider's settled tool error. On a read it is that provider's definite answer. */
+function providerToolError(tool: string, content: string): Error {
+  const message = `Tracker ${tool}: ${content.slice(0, 500)}`;
+  return /^(?:get|list|search)_/u.test(tool) ? new TrackerReadRejected(message) : new Error(message);
+}
 
 export const WorkRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("repos") }).strict(),
@@ -1116,7 +1123,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                       },
                     });
                     if (result.outcome !== "ok") throw new Error(`Tracker ${tool}: ${result.detail}`);
-                    if (result.isError) throw new Error(`Tracker ${tool}: ${result.content.slice(0, 500)}`);
+                    if (result.isError) throw providerToolError(tool, result.content);
                     return JSON.parse(result.content) as unknown;
                   },
                 }),
@@ -1284,7 +1291,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                       }),
                 });
                 if (result.outcome !== "ok") throw new Error(`Tracker ${tool}: ${result.detail}`);
-                if (result.isError) throw new Error(`Tracker ${tool}: ${result.content.slice(0, 500)}`);
+                if (result.isError) throw providerToolError(tool, result.content);
                 return result.content.trim() ? (JSON.parse(result.content) as unknown) : undefined;
               },
             }),

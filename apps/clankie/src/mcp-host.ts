@@ -83,6 +83,7 @@ import {
   TRACKER_LEAD,
   TRACKER_OWNER,
   TRACKER_TOOLS,
+  TrackerReadRejected,
   type TrackerActor,
   type TrackerToolBackend,
   type TrackerToolCallOptions,
@@ -432,6 +433,10 @@ function laneAllows(server: McpServerSettings, lane: CaptainSessionLaneV2): bool
 function credentialDigest(credential: ProviderCredential): string {
   return createHash("sha256").update(JSON.stringify(credential)).digest("hex");
 }
+
+/** Catalogued tracker reads: the get_, list_ and search_ tools. */
+const trackerReadTool = (tool: string) =>
+  /^(?:get|list|search)_/u.test(tool) && TRACKER_TOOLS.some((entry) => entry.name === tool);
 
 export function createMcpHost(options: McpHostOptions): McpHost {
   const googleApps =
@@ -1586,21 +1591,22 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           let result: Awaited<ReturnType<McpConnection["callTool"]>>;
           try {
             result = repositoryCall
-              ? {
-                  content: JSON.stringify(
-                    await options.trackerForRepo!({
-                      name: input.tool,
-                      repo: trackerRepo as string,
-                      args: Object.fromEntries(
-                        Object.entries(input.arguments).filter(([key]) => key !== "repo"),
-                      ),
-                      lane: input.lane,
-                      local: input.lane === "operator" && input.delegation === undefined && !inferredRepo,
-                      ...publication,
-                    }),
-                  ),
-                  isError: false,
-                }
+              ? await options.trackerForRepo!({
+                  name: input.tool,
+                  repo: trackerRepo as string,
+                  args: Object.fromEntries(Object.entries(input.arguments).filter(([key]) => key !== "repo")),
+                  lane: input.lane,
+                  local: input.lane === "operator" && input.delegation === undefined && !inferredRepo,
+                  ...publication,
+                }).then(
+                  (value) => ({ content: JSON.stringify(value), isError: false }),
+                  (error: unknown) => {
+                    // A tracker read whose provider settled a refusal has a definite answer.
+                    // Lost or ambiguous provider calls, and every write, keep their fences.
+                    if (!(error instanceof TrackerReadRejected) || !trackerReadTool(input.tool)) throw error;
+                    return { content: error.message, isError: true };
+                  },
+                )
               : graphqlAccess
                 ? await executeLinearGraphql({
                     plan: graphqlPlan!,
@@ -1738,8 +1744,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           const readOnly =
             !dispatched &&
             (repositoryCall || isLocalTracker(server) || isApiTracker(server) || priorityRead) &&
-            /^(?:get|list|search)_/u.test(input.tool) &&
-            TRACKER_TOOLS.some((tool) => tool.name === input.tool);
+            trackerReadTool(input.tool);
           // These owned backend reads need no mutation admission. Provider
           // responses and unpublished writes must never manufacture that proof.
           input.onSettled?.(settled, readOnly ? { readOnly: true } : undefined);

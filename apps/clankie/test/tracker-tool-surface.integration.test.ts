@@ -7,6 +7,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
+import { serve } from "@hono/node-server";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
@@ -18,7 +23,11 @@ import { githubConnectionToken } from "../src/accounts.ts";
 import { workRequest } from "../../tui/src/command/work.ts";
 
 /** Real fleet HTTP tools, host, settings, credentials and durable local storage. */
-async function surface(root: string, github: Pick<WorkItemsServiceOptions, "gh" | "githubApiBase"> = {}) {
+async function surface(
+  root: string,
+  github: Pick<WorkItemsServiceOptions, "gh" | "githubApiBase"> = {},
+  linearUrl = "http://127.0.0.1:1/mcp",
+) {
   const settings = new SettingsStore(join(root, "settings.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const repo = join(root, "repo");
@@ -29,13 +38,13 @@ async function surface(root: string, github: Pick<WorkItemsServiceOptions, "gh" 
     credentials,
     settings,
     localTracker: local,
-    // A later connection test can only address this unreachable local endpoint.
+    // Offline by default: this endpoint is unreachable unless a test supplies a provider.
     curated: [
       {
         id: "linear",
         credential: "linear",
         transport: "http",
-        url: "http://127.0.0.1:1/mcp",
+        url: linearUrl,
         args: [],
         lane: "everywhere",
         initialTools: [],
@@ -675,6 +684,128 @@ it("allocates stable local identifiers across concurrent tool writes and refuses
     expect((await f.call("linear_list_issues", { team: "LOCAL" })).issues).toHaveLength(8);
   } finally {
     await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+/** A connected Linear MCP provider that settles a refusal for one unknown issue and loses another call. */
+async function linearProvider() {
+  const calls: { name: string; id: unknown }[] = [];
+  const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
+  const server = serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (request) => {
+      if (request.headers.get("authorization") !== "Bearer fixture-linear-secret")
+        return new Response(null, { status: 401 });
+      const body = request.method === "POST" ? await request.clone().json() : undefined;
+      // A lost call: the request reaches the provider and no reply comes back.
+      if (body?.method === "tools/call" && body.params?.arguments?.id === "VUH-LOST")
+        return new Response(null, { status: 502 });
+      const id = request.headers.get("mcp-session-id");
+      if (id) return sessions.get(id)?.handleRequest(request) ?? new Response(null, { status: 404 });
+      const mcp = new Server(
+        { name: "linear-provider-fixture", version: "1" },
+        { capabilities: { tools: {} } },
+      );
+      mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
+        tools: ["get_issue", "save_issue"].map((name) => ({
+          name,
+          inputSchema: { type: "object", properties: { id: { type: "string" } } },
+        })),
+      }));
+      mcp.setRequestHandler(CallToolRequestSchema, async (call) => {
+        calls.push({ name: call.params.name, id: call.params.arguments?.id });
+        // Linear's actual reply for an unknown issue (LOCAL-VUH-34, receipt 77947de3).
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "invalid_request",
+                message: "Could not find referenced Issue.",
+                status: 400,
+                requestId: "a4ced6f06d7ddcf3",
+              }),
+            },
+          ],
+          isError: true,
+        };
+      });
+      const transport = new WebStandardStreamableHTTPServerTransport({
+        sessionIdGenerator: randomUUID,
+        enableJsonResponse: true,
+      });
+      await mcp.connect(transport as unknown as Transport);
+      const response = await transport.handleRequest(request);
+      if (transport.sessionId) sessions.set(transport.sessionId, transport);
+      return response;
+    },
+  });
+  await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing Linear provider fixture address");
+  return {
+    url: `http://127.0.0.1:${address.port}/mcp`,
+    calls,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+it("a connected provider's settled refusal of a worker's repo-routed read is definite; lost calls and writes stay uncertain", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-tracker-provider-refusal-"));
+  const provider = await linearProvider();
+  const f = await surface(root, {}, provider.url);
+  try {
+    await f.work(["init", "--backend", "linear", "--linear-team", "VUH", "--linear-project", "Clankie"]);
+    const repos = (await f.work(["repos"])) as { repos: { id: string; root: string }[] };
+    const repo = repos.repos.find((entry) => entry.root === f.repo)!.id;
+    await f.credentials.set("linear", {
+      type: "api",
+      key: "fixture-linear-secret",
+      account: {
+        provider: "linear",
+        connectionId: randomUUID(),
+        userId: randomUUID(),
+        workspaceId: randomUUID(),
+        name: "Fixture app",
+        actor: "app",
+        workspaceName: "Provider refusal fixture",
+        verifiedAt: new Date().toISOString(),
+      },
+    });
+    expect(await f.host.trackerStatus!()).toMatchObject({ backend: "linear" });
+    const reply = async (args: Record<string, unknown>) => {
+      const result = await f.tool("clankie_call", args);
+      return { ...JSON.parse(result.content[0]!.text), toolError: result.isError === true };
+    };
+
+    const rejected = await reply({ name: "linear_get_issue", arguments: { id: "VUH-404", repo } });
+    expect(rejected).toMatchObject({
+      outcome: "ok",
+      isError: true,
+      receiptId: expect.any(String),
+      content: expect.stringContaining("Could not find referenced Issue."),
+      toolError: true,
+    });
+    // The receipt holds that settled answer; looking it up never calls the provider again.
+    const providerCalls = provider.calls.length;
+    expect(await reply({ receiptId: rejected.receiptId })).toEqual(rejected);
+    expect(provider.calls).toHaveLength(providerCalls);
+
+    expect(await reply({ name: "linear_get_issue", arguments: { id: "VUH-LOST", repo } })).toMatchObject({
+      outcome: "uncertain",
+      receiptId: expect.any(String),
+      toolError: false,
+    });
+    // A write keeps its fence, even when its own scope read was refused before any write.
+    expect(
+      await reply({ name: "linear_save_issue", arguments: { id: "VUH-404", priority: 1, repo } }),
+    ).toMatchObject({ outcome: "uncertain", toolError: false });
+    expect(provider.calls.filter((call) => call.name === "save_issue")).toHaveLength(0);
+  } finally {
+    await f.close();
+    await provider.close();
     await rm(root, { recursive: true, force: true });
   }
 });
