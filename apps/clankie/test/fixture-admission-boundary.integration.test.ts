@@ -170,26 +170,25 @@ it.skipIf(!["darwin", "linux"].includes(process.platform))(
         claimId: randomUUID(),
         bindingHash: "a".repeat(64),
       };
-      expect(
-        (
-          await fetch(`${fixture.descriptor.origin}/v1/fixture/reads`, {
+      // The worker's native caller observation has a fixed bound, and its first
+      // one also starts the helper. A miss refuses before the host callback and
+      // reserves nothing, so only a read that never reached the callback is resent.
+      const read = async () => {
+        const before = callbacks;
+        for (let attempt = 1; ; attempt++) {
+          const response = await fetch(`${fixture!.descriptor.origin}/v1/fixture/reads`, {
             method: "POST",
             body: JSON.stringify(input),
-          })
-        ).status,
-      ).toBe(403);
+          });
+          if (callbacks !== before || attempt === 10) return response.status;
+        }
+      };
+      expect(await read()).toBe(403);
       expect(callbacks).toBe(1);
       expect(callbackPid).toBe(fixture.child.pid);
       expect(await readFile(file)).toEqual(before);
       // A definitive denial does not reserve or write a receipt slot.
-      expect(
-        (
-          await fetch(`${fixture.descriptor.origin}/v1/fixture/reads`, {
-            method: "POST",
-            body: JSON.stringify(input),
-          })
-        ).status,
-      ).toBe(403);
+      expect(await read()).toBe(403);
       expect(callbacks).toBe(2);
       for (const path of ["/v1/fleet/mcp", "/v1/worker-mcp", "/catalog"])
         expect((await fetch(`${fixture.descriptor.origin}${path}`, { method: "POST" })).status).toBe(404);
