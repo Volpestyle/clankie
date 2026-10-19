@@ -99,6 +99,13 @@ export async function savedCodexAccount(
   return matches[0]!;
 }
 
+/** A missing home cannot hold a transcript; any other failure is not proof of absence. */
+function absent(error: unknown): undefined {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+  throw error;
+}
+
 /**
  * The signed-in Claude profile home whose projects hold this transcript. Claude
  * resumes only from its own config home, so the launch must use exactly that
@@ -116,7 +123,7 @@ export async function savedClaudeAccount(
   for (const account of accounts) {
     if (account.harness !== "claude") continue;
     for (const { home } of account.homes ?? [{ home: account.home }]) {
-      const root = await realpath(join(home, "projects")).catch(() => undefined);
+      const root = await realpath(join(home, "projects")).catch(absent);
       if (root === undefined) continue;
       const part = relative(root, path);
       if (part !== "" && part !== ".." && !part.startsWith(`..${sep}`) && !isAbsolute(part))
@@ -141,10 +148,11 @@ export async function savedClaudeAccount(
     throw new Error(`The Claude profile that owns this transcript cannot resume it: ${account.reason}`);
   // As the account probe reads it: only ~/.claude with no CLAUDE_CONFIG_DIR naming
   // it is the native default, which must launch with the variable unset (VUH-2241).
-  const standard = await realpath(join(homedir(), ".claude")).catch(() => undefined);
+  const standard = await realpath(join(homedir(), ".claude")).catch(absent);
   const configured = env.CLAUDE_CONFIG_DIR?.trim();
   const nativeDefault =
-    home === standard && (!configured || (await realpath(configured).catch(() => configured)) !== standard);
+    home === standard &&
+    (!configured || ((await realpath(configured).catch(absent)) ?? configured) !== standard);
   const { nativeDefault: _chosen, ...status } = account;
   return { ...status, home, ...(nativeDefault ? { nativeDefault: true as const } : {}) };
 }
