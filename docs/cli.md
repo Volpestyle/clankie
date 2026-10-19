@@ -2577,7 +2577,10 @@ lead-closure policy. The current host-authorized lead may close an item after
 it has landed and its acceptance evidence bundle has an independent check.
 The item retains its `landed` or `delivered` stage and records `leadCompletion`
 with the lead actor, time and checked bundle ID; it does not claim James checked
-it. Missing, revoked or ambiguous lead scope refuses closure. The owner alone
+it. The current lead is the chat the owner bound to the project while that chat
+exists; otherwise, for an Auto project, the chat Auto routing currently assigns
+its round, rechecked at write time; otherwise, for an unbound project, the
+default chat. Missing, revoked or ambiguous lead scope refuses closure. The owner alone
 may verify or reopen it. Lead closure suppresses new automatic verification asks;
 existing asks and explicit decision, money, account and other owner gates remain.
 Under owner closure, work stays In Review for the owner's ordinary verification.

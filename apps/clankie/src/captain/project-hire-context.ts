@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { projectPathContains, resolveProjectMembership, type ClankieSettings } from "@clankie/settings";
-import type { ProjectsSettings } from "@clankie/protocol/projects";
+import type { Project, ProjectsSettings } from "@clankie/protocol/projects";
 import { autoProjectRounds } from "./auto-projects.ts";
 
 /** The service's local machine ID is `local` (machines.ts); a fleet label is not a machine identity. */
@@ -196,4 +196,27 @@ export async function nativeHireProject(
       "This agent's current project could not be verified. Hire from a project workspace conversation.",
     );
   return project;
+}
+
+/**
+ * The conversation that leads a tracker project's closure: the owner's explicit binding
+ * while its chat exists, else the chat the service's Auto routing currently assigns the
+ * project's round, as when the bound chat is gone (LOCAL-VUH-33), else the default chat for
+ * an unbound project. `routes` are the bindings naming this project; undefined is no lead.
+ */
+export function trackerLeadConversation(
+  project: Project,
+  routes: ClankieSettings["linearWebhook"]["projectChats"],
+  leads: Parameters<typeof autoProjectRounds>[2],
+  defaultConversationId: string,
+  isLead: (conversationId: string) => boolean,
+): string | undefined {
+  if (routes.length > 1) throw new Error("Tracker lead route is ambiguous");
+  const bound = routes[0]?.conversationId;
+  if (bound !== undefined && isLead(bound)) return bound;
+  if (project.auto === true) {
+    const [routed] = autoProjectRounds([project], new Map(), leads, defaultConversationId).keys();
+    return routed !== undefined && isLead(routed) ? routed : undefined;
+  }
+  return bound === undefined && isLead(defaultConversationId) ? defaultConversationId : undefined;
 }

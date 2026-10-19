@@ -300,6 +300,7 @@ import {
   nativeHireProject,
   configuredLeadHireProject,
   leadHireProject,
+  trackerLeadConversation,
   remoteHireMachine,
   remoteWorkspaceProject,
   selectHireProject,
@@ -1502,13 +1503,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (route) => route.projectId.toLowerCase() === trackerProjectId.toLowerCase(),
     );
     if (routes.length > 1) throw new Error("Tracker lead route is ambiguous");
-    const expected = routes[0]?.conversationId ?? conversations.defaultGlobalConversationId();
+    // Auto routing's lead chats, read once; the write-time recheck drops any chat since closed.
+    const leads = projects[0]!.auto === true ? await leadChats() : [];
+    const lead = () => {
+      const current = trackerLeadConversation(
+        projects[0]!,
+        routes,
+        leads.filter((chat) => privateLeadConversation(chat.conversationId)),
+        conversations.defaultGlobalConversationId(),
+        privateLeadConversation,
+      );
+      if (current === undefined) throw new Error("Tracker lead conversation scope is unavailable");
+      return current;
+    };
+    const expected = lead();
     const assertCurrent = () => {
       snapshot.assertCurrent();
-      if (!privateLeadConversation(expected))
-        throw new Error("Tracker lead conversation scope is unavailable");
-      if (routes.length === 0 && conversations.defaultGlobalConversationId() !== expected)
-        throw new Error("Tracker default lead conversation changed");
+      if (lead() !== expected) throw new Error("Tracker lead conversation changed");
     };
     assertCurrent();
     return { expected, assertCurrent };
