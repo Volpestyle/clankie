@@ -5,13 +5,18 @@ independent of terminal placement, process control.
 `AgentHost` exposes `list` and `readBytes`; `@clankie/agent-transcript` owns parsing
 and pagination. Modification time describes a file, never proves a live agent.
 
-The local reader uses the current user's `.claude/projects`, `.codex/sessions`,
+The local reader uses `projects` in every Claude profile (`CLAUDE_CONFIG_DIR`,
+`.claude` and each `.claude-<label>`, a profile reached twice listed once),
+the current user's `.codex/sessions`,
 `.grok/sessions` (only `chat_history.jsonl`), `.pi/agent/sessions`, and Prime
 Agent's root sessions in `.prime/agent/sessions` (`PRIME_AGENT_CODING_AGENT_DIR`
 moves that directory, as it does for Prime itself; Prime's subagent transcripts
 under `session-artifacts` are not listed).
 Clankie's own captain history is not a discovery root.
-Named SSH hosts use those same directories beneath the remote user's home. POSIX
+A `session` given to `list` narrows it before the recency cap, so an exact
+lookup still finds an older transcript.
+Named SSH hosts use those same directories beneath the remote user's home (there,
+only `.claude/projects` for Claude). POSIX
 hosts need standard `sh`, `find`, `stat` (GNU or BSD), `tail`, `head`, and `base64`;
 Windows hosts use Windows PowerShell and .NET. No Clankie or Node installation is
 required remotely. Custom harness history roots are not supported yet, apart from

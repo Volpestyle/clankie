@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, symlink, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -150,4 +150,22 @@ test("Grok and Pi roots are discovered locally and over POSIX; unrelated Grok JS
     expect((await host.readBytes(grok, 0, 10)).bytes.toString()).toBe("{}\n");
     expect((await host.readBytes(pi, 0, 10)).bytes.toString()).toBe("{}\n");
   }
+});
+
+test("local discovery reads every Claude profile once and finds an exact session past the recency cap", async () => {
+  const f = await fixture();
+  const profile = join(f.home, ".claude-work", "projects", "project");
+  await mkdir(profile, { recursive: true });
+  const kept = join(profile, "def41bba-c18a-4cd6-94b9-a88485d1dc51.jsonl");
+  await writeFile(kept, "{}\n");
+  await utimes(kept, new Date(0), new Date(0));
+  await symlink(join(f.home, ".claude"), join(f.home, ".claude-alias"));
+  await writeFile(join(f.home, ".claude-notes"), "not a profile");
+  const host = createLocalAgentHost({ home: f.home });
+  expect((await host.list()).map((file) => file.path).sort()).toEqual([f.path, kept].sort());
+  expect(await host.list({ limit: 1 })).toMatchObject([{ path: f.path }]);
+  expect(await host.list({ limit: 1, session: "def41bba" })).toMatchObject([
+    { path: kept, harness: "claude" },
+  ]);
+  expect((await host.readBytes(kept, 0, 10)).bytes.toString()).toBe("{}\n");
 });

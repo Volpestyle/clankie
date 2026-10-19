@@ -8,7 +8,11 @@ import { parseHerdrSeatTranscript, type HerdrTranscriptEntry } from "./index.ts"
  */
 export interface AgentTranscriptHost {
   readonly id: string;
-  list(options?: { readonly limit?: number }): Promise<readonly AgentSessionFile[]>;
+  /** `session` narrows to files whose name holds it; a host may ignore it. */
+  list(options?: {
+    readonly limit?: number;
+    readonly session?: string;
+  }): Promise<readonly AgentSessionFile[]>;
   readBytes(
     path: string,
     from: number,
@@ -172,7 +176,9 @@ export async function findAgentSession(
   session: string,
   limit = 200,
 ): Promise<AgentSessionFile> {
-  const matches = (await host.list({ limit })).filter((file) => sessionIdFromPath(file).startsWith(session));
+  const matches = (await host.list({ limit, session })).filter((file) =>
+    sessionIdFromPath(file).startsWith(session),
+  );
   if (matches.length === 1) return matches[0]!;
   throw matches.length === 0
     ? new AgentSessionRequestError(`No recent agent session ${session} on ${host.id}`, 404)

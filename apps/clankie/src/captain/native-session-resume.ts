@@ -1,7 +1,9 @@
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { realpath } from "node:fs/promises";
-import { isAbsolute, relative, sep } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, relative, sep } from "node:path";
 import type { CodexAccount } from "@clankie/settings";
+import type { WorkerAccountStatus } from "./harness-accounts.ts";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import type { HerdrFleet } from "../herdr-fleet.ts";
 import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
@@ -95,6 +97,56 @@ export async function savedCodexAccount(
   if (matches.length !== 1 || (requested !== undefined && matches[0]!.label !== requested))
     throw new Error("Resume requires the registered Codex account that owns this transcript");
   return matches[0]!;
+}
+
+/**
+ * The signed-in Claude profile home whose projects hold this transcript. Claude
+ * resumes only from its own config home, so the launch must use exactly that
+ * home; another account or profile is never tried.
+ */
+export async function savedClaudeAccount(
+  session: SavedAgentSession,
+  accounts: readonly WorkerAccountStatus[],
+  requested?: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<WorkerAccountStatus> {
+  if (session.source) throw new Error("Native database history is not a Claude profile transcript");
+  const path = await realpath(session.file.path);
+  const matches: { account: WorkerAccountStatus; home: string }[] = [];
+  for (const account of accounts) {
+    if (account.harness !== "claude") continue;
+    for (const { home } of account.homes ?? [{ home: account.home }]) {
+      const root = await realpath(join(home, "projects")).catch(() => undefined);
+      if (root === undefined) continue;
+      const part = relative(root, path);
+      if (part !== "" && part !== ".." && !part.startsWith(`..${sep}`) && !isAbsolute(part))
+        matches.push({ account, home });
+    }
+  }
+  if (matches.length !== 1)
+    throw new Error(
+      matches.length === 0
+        ? "No signed-in Claude profile on this Mac owns this transcript; no other profile was tried"
+        : "Several Claude profiles claim this transcript; no profile was tried",
+    );
+  const { account, home } = matches[0]!;
+  if (
+    requested !== undefined &&
+    requested !== account.label &&
+    requested !== account.accountKey &&
+    !account.aliases?.includes(requested)
+  )
+    throw new Error("Saved Claude session belongs to a different or unregistered account profile");
+  if (!account.usable)
+    throw new Error(`The Claude profile that owns this transcript cannot resume it: ${account.reason}`);
+  // As the account probe reads it: only ~/.claude with no CLAUDE_CONFIG_DIR naming
+  // it is the native default, which must launch with the variable unset (VUH-2241).
+  const standard = await realpath(join(homedir(), ".claude")).catch(() => undefined);
+  const configured = env.CLAUDE_CONFIG_DIR?.trim();
+  const nativeDefault =
+    home === standard && (!configured || (await realpath(configured).catch(() => configured)) !== standard);
+  const { nativeDefault: _chosen, ...status } = account;
+  return { ...status, home, ...(nativeDefault ? { nativeDefault: true as const } : {}) };
 }
 
 /** Native TUI flags only. No print/exec runner and no fork flag. */

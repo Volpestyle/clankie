@@ -17,9 +17,11 @@ import {
 import {
   existingNativeSession,
   nativeResumeArgs,
+  savedClaudeAccount,
   savedCodexAccount,
   savedSessionFleet,
 } from "../src/captain/native-session-resume.ts";
+import type { WorkerAccountStatus } from "../src/captain/harness-accounts.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 
@@ -42,9 +44,14 @@ function saved(root = "/work"): Extract<SavedAgentSession, { file: unknown }> {
     file: { harness: "claude", path: `${root}/${UUID}.jsonl`, size: 1, mtimeMs: Date.now() },
   };
 }
-async function fixture() {
+async function fixture(
+  options: {
+    session?: (root: string) => Promise<Extract<SavedAgentSession, { file: unknown }>>;
+    workerAccounts?: (root: string) => readonly WorkerAccountStatus[];
+  } = {},
+) {
   const root = await scratch();
-  const session = saved(root);
+  const session = (await options.session?.(root)) ?? saved(root);
   const live: HerdrAgentSnapshot = {
     paneId: "w1:p1",
     terminalId: "term_one",
@@ -97,6 +104,16 @@ async function fixture() {
     runner,
     seatAdapters: [adapter],
     hireCapacity: async () => ({ live: 0, limit: 1 }),
+    ...(options.workerAccounts === undefined
+      ? {}
+      : {
+          workerAccounts: async () => ({
+            machine: "this Mac",
+            shell: "posix" as const,
+            observedAt: new Date().toISOString(),
+            accounts: options.workerAccounts!(root),
+          }),
+        }),
   });
   const hire = (brief?: string) =>
     store.spawnSeat(
@@ -344,6 +361,81 @@ it("resumes Codex with its original real account root and rejects another accoun
   await expect(
     savedCodexAccount({ ...session, file: { ...session.file, path: link } }, [original]),
   ).rejects.toThrow(/owns/);
+});
+
+function claudeProfile(label: string, home: string, extra: Partial<WorkerAccountStatus> = {}) {
+  return {
+    harness: "claude",
+    label,
+    home,
+    signedIn: true,
+    headroom: 0.5,
+    usable: true,
+    ...extra,
+  } satisfies WorkerAccountStatus;
+}
+async function profileSession(root: string) {
+  const project = join(root, ".claude-work", "projects", "project");
+  await mkdir(project, { recursive: true });
+  await mkdir(join(root, ".claude-other", "projects"), { recursive: true });
+  const path = join(project, `${UUID}.jsonl`);
+  await writeFile(path, "history");
+  return { ...saved(root), file: { ...saved(root).file, path } };
+}
+
+it("resumes Claude in the exact profile home that holds its transcript, or refuses", async () => {
+  const root = await scratch();
+  const session = await profileSession(root);
+  const work = claudeProfile("work", join(root, ".claude-work"));
+  const other = claudeProfile("other", join(root, ".claude-other"));
+  expect(await savedClaudeAccount(session, [other, work], undefined, {})).toEqual(work);
+  // One identity signed into several homes still resumes in the one holding the session.
+  const grouped = claudeProfile("account-1", other.home, {
+    accountKey: "account-1",
+    homes: [
+      { label: "other", home: other.home },
+      { label: "work", home: work.home },
+    ],
+    nativeDefault: true,
+  });
+  const pinned = await savedClaudeAccount(session, [grouped], undefined, {});
+  expect(pinned).toMatchObject({ label: "account-1", home: work.home });
+  expect(pinned.nativeDefault).toBeUndefined();
+  await expect(savedClaudeAccount(session, [other, work], "other", {})).rejects.toThrow(/different/);
+  await expect(savedClaudeAccount(session, [other], undefined, {})).rejects.toThrow(/No signed-in/);
+  await expect(
+    savedClaudeAccount(session, [{ ...work, usable: false, reason: "not signed in" }], undefined, {}),
+  ).rejects.toThrow(/not signed in/);
+});
+
+it("launches a saved Claude session with its own profile, and never another one", async () => {
+  const f = await fixture({
+    session: profileSession,
+    workerAccounts: (root) => [
+      claudeProfile("other", join(root, ".claude-other")),
+      claudeProfile("work", join(root, ".claude-work")),
+    ],
+  });
+  expect(await f.hire()).toMatchObject({ outcome: "spawned" });
+  expect(f.adapter.start).toHaveBeenCalledWith(
+    expect.objectContaining({
+      resumeSessionId: UUID,
+      env: expect.objectContaining({ CLAUDE_CONFIG_DIR: join(f.root, ".claude-work") }),
+    }),
+    expect.anything(),
+  );
+
+  const missing = await fixture({
+    session: profileSession,
+    workerAccounts: (root) => [claudeProfile("other", join(root, ".claude-other"))],
+  });
+  expect(await missing.hire()).toMatchObject({
+    outcome: "failed",
+    reason: "harness_unavailable",
+    detail: expect.stringMatching(/No signed-in Claude profile/),
+  });
+  expect(missing.adapter.start).not.toHaveBeenCalled();
+  expect(missing.runner.createTab).not.toHaveBeenCalled();
 });
 
 it("uses each harness's exact interactive resume flags", () => {

@@ -1,6 +1,7 @@
 import { codexAccounts } from "@clankie/settings";
 export type * from "./seat.ts";
 import { execFile } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, relative, isAbsolute } from "node:path";
@@ -14,7 +15,8 @@ export interface AgentSessionFile {
 }
 export interface AgentHost {
   id: string;
-  list(opts?: { limit?: number }): Promise<AgentSessionFile[]>;
+  /** `session` narrows to files whose name holds it; a host may ignore it. */
+  list(opts?: { limit?: number; session?: string }): Promise<AgentSessionFile[]>;
   readBytes(path: string, from: number, maxBytes: number): Promise<{ bytes: Buffer; size: number }>;
 }
 export interface AgentHostConfig {
@@ -50,8 +52,7 @@ export function createLocalAgentHost(
   } = {},
 ): AgentHost {
   const home = options.home ?? homedir();
-  const roots = [
-    { harness: "claude" as const, path: join(home, ".claude", "projects") },
+  const fixed = [
     ...(
       options.codexHomes ??
       (options.home ? [join(home, ".codex")] : codexAccounts().map((account) => account.home))
@@ -67,17 +68,27 @@ export function createLocalAgentHost(
         options.primeSessionRoot ?? join(primeAgentDir(options.home ? {} : process.env, home), "sessions"),
     },
   ];
+  // Every Claude profile a hire may run in, read afresh so a new profile is found.
+  const roots = () => [
+    ...claudeProfileHomes(options.home ? {} : process.env, home).map((profile) => ({
+      harness: "claude" as const,
+      path: join(profile, "projects"),
+    })),
+    ...fixed,
+  ];
   return {
     id: "local",
     async list(opts) {
       const count = limit(opts?.limit);
+      const session = opts?.session;
       const files: AgentSessionFile[] = [];
       async function walk(path: string, harness: AgentSessionFile["harness"]) {
         let entries;
         try {
           entries = await readdir(path, { withFileTypes: true });
         } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === "ENOENT" || code === "ENOTDIR") return;
           throw error;
         }
         for (const entry of entries) {
@@ -86,7 +97,9 @@ export function createLocalAgentHost(
           else if (
             entry.isFile() &&
             entry.name.endsWith(".jsonl") &&
-            (harness !== "grok" || entry.name === "chat_history.jsonl")
+            (harness !== "grok" || entry.name === "chat_history.jsonl") &&
+            // Before the recency cap, so an exact lookup never loses an older session.
+            (session === undefined || (harness === "grok" ? path : entry.name).includes(session))
           ) {
             try {
               const info = await stat(file);
@@ -97,7 +110,15 @@ export function createLocalAgentHost(
           }
         }
       }
-      for (const root of roots) await walk(root.path, root.harness);
+      // A profile reached twice (CLAUDE_CONFIG_DIR naming ~/.claude-x, or a
+      // symlinked home) is listed once, so its sessions are not ambiguous.
+      const walked = new Set<string>();
+      for (const root of roots()) {
+        const real = await realpath(root.path).catch(() => root.path);
+        if (walked.has(real)) continue;
+        walked.add(real);
+        await walk(root.path, root.harness);
+      }
       return files.sort((a, b) => b.mtimeMs - a.mtimeMs || a.path.localeCompare(b.path)).slice(0, count);
     },
     async readBytes(path, from, maxBytes) {
@@ -105,7 +126,7 @@ export function createLocalAgentHost(
       if (!path.endsWith(".jsonl")) throw new Error("Not a transcript path");
       const actual = await realpath(path);
       let allowed = false;
-      for (const root of roots) {
+      for (const root of roots()) {
         try {
           if (within(await realpath(root.path), actual)) allowed = true;
         } catch (error) {
@@ -125,6 +146,32 @@ export function createLocalAgentHost(
       }
     },
   };
+}
+
+/**
+ * Claude config homes, as the seat transcript reader finds them:
+ * CLAUDE_CONFIG_DIR, ~/.claude, then every ~/.claude-<label> profile.
+ */
+export function claudeProfileHomes(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  home = homedir(),
+): readonly string[] {
+  const configured = env.CLAUDE_CONFIG_DIR?.trim();
+  let names: string[] = [];
+  try {
+    names = readdirSync(home, { withFileTypes: true })
+      .filter((entry) => entry.name.startsWith(".claude-") && (entry.isDirectory() || entry.isSymbolicLink()))
+      .map((entry) => entry.name);
+  } catch {
+    // An unreadable home has no extra profiles.
+  }
+  return [
+    ...new Set([
+      ...(configured ? [configured] : []),
+      join(home, ".claude"),
+      ...names.sort().map((name) => join(home, name)),
+    ]),
+  ];
 }
 
 /** Same effective native Pi profile as the selected interactive executable. */

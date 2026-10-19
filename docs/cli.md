@@ -4825,7 +4825,9 @@ clankie agents hosts remove pc
 
 A remote host needs only sshd and its default shell; nothing is installed there.
 Authentication is the owner's SSH configuration (keys, `~/.ssh/config` aliases).
-Reads are confined to `~/.claude/projects`, `~/.codex/sessions`, `~/.grok/sessions`,
+Reads are confined to `~/.claude/projects` (locally, every Claude profile's
+`projects`: `CLAUDE_CONFIG_DIR`, `~/.claude` and each `~/.claude-<label>`),
+`~/.codex/sessions`, `~/.grok/sessions`,
 `~/.pi/agent/sessions` and `~/.prime/agent/sessions` (or
 `$PRIME_AGENT_CODING_AGENT_DIR/sessions`) on that host and capped at 4 MiB per call. `local` is always present. Hosts are stored under
 `agentHosts.connections` (up to 15).
@@ -5054,7 +5056,9 @@ Herdr fleet with the same SSH target and shell as the transcript source, plus a
 grant for its recorded working directory; matching friendly ids alone are
 insufficient. `--fleet` selects among several matching fleets. A local Codex
 resume uses the original registered account that owns its transcript, rather
-than choosing another account by headroom. The TUI's saved-session actions offer
+than choosing another account by headroom. A local Claude resume launches in the
+signed-in profile home whose `projects` holds its transcript; with no such
+usable profile it refuses and tries no other. The TUI's saved-session actions offer
 **Resume in native TUI**.
 
 An optional `--brief` is sent through native control when reusing a live seat;

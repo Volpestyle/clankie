@@ -40,6 +40,7 @@ import {
   nativeResumeArgs,
   nativeSessionId,
   resumePaneLabel,
+  savedClaudeAccount,
   savedCodexAccount,
 } from "./native-session-resume.ts";
 import type { SavedAgentSession } from "../agent-sessions.ts";
@@ -4028,6 +4029,25 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (input.account === undefined) {
         chosen.account = choice.account.label;
         chosen.reason ??= `${choice.account.identity ?? choice.account.displayName ?? choice.account.harness}: ${choice.why}`;
+      }
+    } else if (
+      resume !== undefined &&
+      !resume.source &&
+      identityHarness === "claude" &&
+      remote === undefined &&
+      this.workerAccounts &&
+      this.nativeLaunchPolicy?.prepare === undefined
+    ) {
+      // A saved Claude session resumes only in the profile home that holds it (LOCAL-VUH-31).
+      try {
+        const report = await this.workerAccounts(remote, identityHarness);
+        identityAccount = await savedClaudeAccount(resume, report.accounts, admittedAccount ?? input.account);
+      } catch (error) {
+        return { outcome: "failed", reason: "harness_unavailable", detail: reasonDetail(error) };
+      }
+      if (input.account === undefined) {
+        chosen.account = identityAccount.label;
+        chosen.reason ??= "the saved session's own Claude profile";
       }
     }
     if (this.nativeLaunchPolicy?.prepare) {
