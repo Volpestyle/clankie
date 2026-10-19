@@ -7573,6 +7573,17 @@ cutoff is unknown. No raw audio is saved. See [ADR 0121](adr/0121-development-vo
 
 ### `discord set --field value […]` / `discord clear --field […]`
 
+`clankie discord set --main-conversation-channel-ids CHANNEL_ID` explicitly links
+private text channels to the main conversation. Use comma-separated IDs
+to replace the list, or `none` to unlink all. The shared settings field is
+`mainConversationChannelIds`. Only the configured owner speaking through the
+bot in an owner-only audience under an `owners: me` server policy and current
+machine grant qualifies. A linked room-skill channel is refused. Privacy, owner
+or link changes suppress pending and saved replies. The conversation uses its
+existing native or service runner without a room messenger agent; uncertain
+native deliveries are never replayed. Only the correlated answer returns to
+Discord; unrelated main-conversation output stays private.
+
 Set several fields atomically, or reset fields to their schema defaults.
 Field flags are the `settings.json` camel-case names in kebab-case. Lists are
 comma-separated (`none` clears); booleans accept `on|off`, `true|false`, or

@@ -16,6 +16,34 @@ are inspectable but cannot yet be selected by a native operator seat.
 
 ## Decision
 
+### Amendment — an owner links a private Discord channel to main (2026-10-18)
+
+James explicitly selected his main conversation for his private `#clank` channel.
+The old path ran a room Pi agent that messaged the main lead, watched its pane,
+read its transcript and paraphrased a result. That relay added model turns and
+made one Clankie describe another as "the lead".
+
+`discord.mainConversationChannelIds` records this explicit choice through the
+existing revisioned settings API, CLI and shared settings UI. A linked text
+request enters the default main conversation's existing queue and runner. A live
+native head receives a reply-bearing `discord-main` escalation; otherwise the
+normal service runner continues the same main context. Neither route starts a
+room child or relay agent. The existing handoff record retains the
+room origin, result and `mainConversationId`; its transcript contains only the
+room request and correlated answer, never the main conversation's private log.
+
+Only the configured owner account, bot transport, `owners: me` server policy,
+proven private audience and original machine grant qualify. Room skills and
+voice do not take this path. Admission, result return and saved-result replay
+recheck authority and the link. Ordinary main output is not broadcast. Native
+receipt correlation and the existing conversation admission fence apply;
+only a definite pre-acceptance native refusal may select the main service runner.
+Accepted or uncertain native deliveries never fall back to another executor.
+The escalation envelope preserves compatibility with existing native bridges;
+its host-stamped source distinguishes direct owner input from worker output.
+
+### Conversation attachment
+
 A native operator seat may select any existing service conversation, including
 the default conversation and canonical Discord text or voice rooms. A room
 remains the same room conversation; selecting the default never selects all

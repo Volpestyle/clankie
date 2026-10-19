@@ -109,6 +109,7 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
     showList("approval roles", settings.approvalRoleIds),
     show("owner user id", settings.ownerUserId),
     showList("system actors", settings.systemActorUserIds),
+    showList("main conversation channels", settings.mainConversationChannelIds),
     ...settings.servers.map(
       (entry) =>
         `server ${entry.serverId}: ${entry.role}; owners ${entry.owners}${entry.ownerRoleId ? ` (${entry.ownerRoleId})` : ""}`,

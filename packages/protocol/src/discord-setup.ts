@@ -58,6 +58,13 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
       { key: "servers", label: "Server ownership policies (JSON; Advanced)", kind: "text" },
       { key: "roomSkills", label: "Room skills (JSON; Advanced)", kind: "text" },
       {
+        key: "mainConversationChannelIds",
+        label: "Use my main conversation in these channels",
+        kind: "ids",
+        directoryKinds: ["text"],
+        help: "Private text channels only. Only your verified Discord account can use the link; shared audiences suspend it. Replies return to the asking message, not every main-conversation turn.",
+      },
+      {
         key: "houseHuntingAuthorBindings",
         label: "Household author bindings (JSON; owner-confirmed)",
         kind: "text",

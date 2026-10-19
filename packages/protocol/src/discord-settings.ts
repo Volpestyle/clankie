@@ -80,6 +80,8 @@ export const DiscordSettingsSchema = z
         (values) => new Set(values.map((v) => `${v.serverId}:${v.channelId}`)).size === values.length,
         "Duplicate room grant",
       ),
+    /** Explicit owner choice: these private text channels reach the main conversation. */
+    mainConversationChannelIds: SnowflakeListSchema,
     houseHuntingAuthorBindings: z
       .array(HouseHuntingAuthorBindingSchema)
       .max(64)

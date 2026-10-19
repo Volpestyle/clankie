@@ -1711,7 +1711,12 @@ export class ConversationStore {
 
   public updateRoomHandoff(
     conversationId: string,
-    patch: Partial<Pick<RoomHandoffMetadata, "state" | "doing" | "host" | "nativeChildSessionId" | "result">>,
+    patch: Partial<
+      Pick<
+        RoomHandoffMetadata,
+        "state" | "doing" | "host" | "nativeChildSessionId" | "mainConversationId" | "result"
+      >
+    >,
     result?: CaptainChannelTurnResult,
   ): void {
     const meta = this.metas.get(conversationId);
@@ -1906,6 +1911,61 @@ export class ConversationStore {
       origin,
       ...(delivery === undefined ? {} : { delivery }),
     });
+  }
+
+  /**
+   * One explicitly linked private channel uses this conversation's normal
+   * queue and runner. Only this invocation's final answer is returned; a
+   * subscription to the conversation's output would leak unrelated turns.
+   * The caller owns authentication and rechecks it after queueing and completion.
+   */
+  public async replyToLinkedChannel(
+    conversationId: string,
+    message: string,
+    input: { readonly messageId: string; readonly guard: () => Promise<void> },
+  ): Promise<{ readonly response?: string; readonly deliveryStage?: DeliveryStage }> {
+    const meta = this.metas.get(conversationId);
+    if (meta?.scope.kind !== "global" || !meta.isDefault)
+      throw new Error("Linked owner channels require the main conversation");
+    await input.guard();
+    let response: string | undefined;
+    let deliveryStage: DeliveryStage | undefined;
+    const accepted = this.enqueue(
+      meta,
+      message,
+      undefined,
+      true,
+      async (id, text, publish, context) => {
+        await input.guard();
+        await this.runner(
+          id,
+          text,
+          (event) => {
+            if (event.type === "message" && event.role === "captain" && !event.streaming)
+              response = event.text;
+            publish(event);
+          },
+          {
+            ...context,
+            nativeOriginal: { messageId: input.messageId },
+            deliveryReceipt: (stage) => {
+              deliveryStage = stage;
+              context.deliveryReceipt?.(stage);
+            },
+          },
+        );
+        await input.guard();
+      },
+      { surfaceClientId: "discord-main", delivery: "queue" },
+    );
+    if (accepted.status !== "accepted") throw new Error("Linked owner turn was refused");
+    const result = await this.awaitRunOutcome(accepted.runId);
+    if (!result.ok) throw result.error ?? new Error("Main conversation failed");
+    await input.guard();
+    return {
+      ...(response === undefined ? {} : { response }),
+      ...(deliveryStage === undefined ? {} : { deliveryStage }),
+    };
   }
 
   private restoreInboundReports(meta: ConversationMeta): void {

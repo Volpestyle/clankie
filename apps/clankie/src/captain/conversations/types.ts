@@ -291,6 +291,8 @@ export interface ConversationTurnContext {
   readonly acceptedAt: string;
   /** Receipt of this delivery, separate from completion of the local run. */
   readonly deliveryReceipt?: (stage: DeliveryStage) => void;
+  /** Host-owned linked-channel request identity, never supplied by a model. */
+  readonly nativeOriginal?: { readonly messageId: string };
   /** Aborts when the operator interrupts this run (`cancel` op); the runner stops the live model turn. */
   readonly signal: AbortSignal;
   /**

@@ -1,5 +1,28 @@
 # Discord rooms behind the curtain
 
+An owner may explicitly link a private text channel to the main Clankie
+conversation with `clankie discord set --main-conversation-channel-ids CHANNEL_ID`
+(comma-separated for several; `none` removes all links). The same field is in
+the shared Discord settings API and the settings UI. This sends each admitted
+message directly to the main conversation's existing runner, without a room
+intermediary or child. A live native head receives a correlated escalation;
+otherwise the normal service runner continues that same main conversation.
+The room keeps an execution receipt naming `mainConversationId`.
+Only the correlated answer returns to the original Discord message; ordinary
+main-session output is never mirrored. Attachments arrive as untrusted Discord
+references the head may inspect with its own tools; the room backlog is not
+copied into the main context.
+
+The sender must match the configured owner account, the server policy must be
+`owners: me`, the transport must be the official bot, and the channel must pass
+the existing owner-only audience proof and machine-access checks. Room-skill
+channels cannot use this link. These checks run again before native admission,
+before returning an answer and before replaying a saved private result. A shared
+audience, removed binding or changed owner suspends the route. A definite native
+refusal may select the normal service runner; an accepted or uncertain native
+delivery never moves to another executor. Voice and unlinked rooms retain their
+existing routes.
+
 House-hunting feedback uses authenticated Discord IDs. An owner may explicitly
 bind an exact legacy author label within one household through
 `discord.houseHuntingAuthorBindings` in the shared settings API. Every entry

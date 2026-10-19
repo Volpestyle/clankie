@@ -1090,6 +1090,8 @@ export const RoomHandoffMetadataSchema = z
     host: z.enum(["pi", "claude", "codex", "opencode"]),
     /** Actual native child reference, supplied by the dispatch acknowledgment. */
     nativeChildSessionId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+    /** An explicitly linked private room executes in this existing conversation, without a child. */
+    mainConversationId: OperatorConversationIdSchema.optional(),
     result: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX).optional(),
   })
   .strict();

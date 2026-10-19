@@ -97,6 +97,18 @@ job to its command. JSON is on stdout and progress on stderr. The most common:
 Discord server owners and room skills use `clankie discord owners` and
 `clankie discord room-skill` (see [Discord setup](reference/launcher.md)). A room
 skill never grants the machine; trusted guild/channel shell grants are retired.
+An explicitly owner-approved private text channel can reach the main
+conversation directly: `clankie discord set --main-conversation-channel-ids ID`
+(comma-separated; `none` unlinks). This replaces the list, so preserve existing
+links. The shared settings API/UI exposes the same field. Only the configured
+owner, official bot transport, `owners: me`, a proven private audience and current
+machine access qualify. The native head answers the correlated escalation with `reply`; the service runner
+answers normally;
+other main output stays private. The room receipt names `mainConversationId`.
+The existing main runner selects native or service execution; an uncertain
+native delivery is never replayed through another executor. Do not
+link a room without the owner's explicit choice; never broaden ownership or
+Discord permissions to make a link qualify.
 Legacy house-hunting author labels require the owner's explicit household/ID
 confirmation through `discord legacy-author ... --confirm`; display names and
 message claims never establish identity. Binding alone does not reopen a home.

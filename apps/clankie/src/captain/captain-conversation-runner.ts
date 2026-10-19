@@ -201,13 +201,17 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
               context.origin === "hook"
                 ? ctx.conversations.linearWakeReceipt(conversationId, context.runId)
                 : undefined;
+            const original =
+              context.nativeOriginal === undefined
+                ? linearOriginal
+                : { messageId: context.nativeOriginal.messageId, prepare: () => {} };
             // Surface names are caller claims; only the host-verified principal
             // makes this an ordinary owner turn. Recheck after attachment setup.
             if (kind === "turn") await authorizeQuestion(context.ownerAuthority);
             const delivery = await selectedOutbox.deliver({
-              ...(linearOriginal
+              ...(original
                 ? {
-                    original: linearOriginal,
+                    original,
                     ...(selectedOutbox.recipientBinding()
                       ? { recipientBinding: selectedOutbox.recipientBinding()! }
                       : {}),
