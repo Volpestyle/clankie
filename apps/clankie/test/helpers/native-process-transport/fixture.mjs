@@ -8,6 +8,8 @@ const root = dirname(fileURLToPath(import.meta.url));
 const log = (record) =>
   appendFileSync(join(root, "journal.jsonl"), JSON.stringify({ ...record, pid: process.pid }) + "\n");
 log({ kind: "start", argv: process.argv.slice(2) });
+// A helper whose start outlasts one proof bound, like a first exec under load.
+if (existsSync(join(root, "slow-start"))) await new Promise((resolve) => setTimeout(resolve, 1_500));
 let sequence = 0;
 const reply = (id, mode) => ({
   id,

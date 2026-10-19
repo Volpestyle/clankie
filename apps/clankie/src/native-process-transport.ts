@@ -32,6 +32,16 @@ interface Job {
   abort(): void;
 }
 
+/** A warm helper answers a full kernel proof in milliseconds (about 5 ms at load 30); longer is a stall. */
+const proofTimeoutMs = 1_000;
+/**
+ * A fresh helper's first reply also pays for its start. macOS assesses a binary on
+ * its first exec, which under gate load took up to 2.1 s (VUH-2496) and refused
+ * legitimate callers at the proof bound; Linux's helper is a cold Python start.
+ * A helper that never answers still times out and fails closed.
+ */
+const startupTimeoutMs = 10_000;
+
 function transportDiagnostic(report: Job["report"], reason: NativeTransportReason) {
   try {
     void Promise.resolve(report?.(reason)).catch(() => {});
@@ -53,6 +63,7 @@ class NativeProcessTransport {
   /** A successor spawns only after its timed-out predecessor's child has closed. */
   private readonly predecessor: Promise<void> | undefined;
   private waiting = false;
+  private answered = false;
   constructor(helper: string, predecessor?: { closed: Promise<void>; sequence: number; queue: Job[] }) {
     this.helper = helper;
     if (!predecessor) return;
@@ -160,7 +171,7 @@ class NativeProcessTransport {
     this.active = this.queue.shift();
     if (!this.active) return;
     // Queue time is not kernel-proof time; a burst must not kill unrelated jobs.
-    this.active.timer = setTimeout(() => this.timeout(), 1_000);
+    this.active.timer = setTimeout(() => this.timeout(), this.answered ? proofTimeoutMs : startupTimeoutMs);
     this.child.stdin.write(`${this.active.id} ${this.active.args.join(" ")}\n`);
   }
 
@@ -180,6 +191,7 @@ class NativeProcessTransport {
       if (envelope.id !== this.active.id || (!envelope.ok && envelope.result !== null))
         return this.stop("protocol_invalid");
       const job = this.active;
+      this.answered = true;
       this.output = Buffer.alloc(0);
       this.active = undefined;
       this.finish(job, {

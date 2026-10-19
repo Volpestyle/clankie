@@ -43,7 +43,10 @@ The body keeps one native helper alive on private stdin/stdout pipes. A bounded
 serialized request carries a monotonic ID; each job resets all proof state and
 performs the same complete fresh observations. There is no admission cache or
 helper listener. Each active proof has a 1 s transport timeout; queue wait does
-not consume it. Cancelling a queued job removes only that job. Cancelling an
+not consume it. A fresh helper's first reply also pays for its start, so it gets
+10 s instead: macOS assesses a binary on its first exec, which under gate load
+took up to 2.2 s and refused legitimate callers (VUH-2496, amended 2026-10-19).
+A silent helper still times out and refuses. Cancelling a queued job removes only that job. Cancelling an
 active job drains its reply and discards it before releasing that observation,
 so one caller cannot kill other callers' proofs. Queue depth remains capped at
 128; queued callers can abort, but waiting under a burst can exceed 1 s.

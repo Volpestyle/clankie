@@ -171,10 +171,11 @@ pipeIt("waits for inherited stdout/stderr to close after the helper PID has alre
   expect((await f.journal()).filter((row) => row.kind === "request")).toHaveLength(1);
 });
 
-pipeIt("bounds a silent real child by the production deadline and waits for its death", async () => {
+pipeIt("bounds a silent warm child by the production proof deadline and waits for its death", async () => {
   const f = await fixture();
   const reasons: NativeTransportReason[] = [];
   const metrics = new FleetHealthMetrics();
+  expect(await nativeProcessRequest(f.helper, ["warm"])).toBeDefined();
   const began = performance.now();
   const pending = nativeProcessRequest(f.helper, ["timeout"], undefined, (reason) => {
     reasons.push(reason);
@@ -186,8 +187,37 @@ pipeIt("bounds a silent real child by the production deadline and waits for its 
   expect(reasons).toEqual(["timeout"]);
   expect(metrics.snapshot().totals.transportDiagnostics).toEqual({ timeout: 1 });
   expect(alive(pid)).toBe(false);
-  expect((await f.journal()).filter((row) => row.kind === "request")).toHaveLength(1);
+  expect((await f.journal()).filter((row) => row.kind === "request")).toHaveLength(2);
 });
+
+// VUH-2496: a fresh helper's first reply also pays its start, which under load
+// outlasted the proof bound and refused legitimate callers.
+pipeIt("admits a fresh helper's first reply after a start longer than one proof deadline", async () => {
+  const f = await fixture();
+  await writeFile(join(f.root, "slow-start"), "");
+  const reasons: NativeTransportReason[] = [];
+  const began = performance.now();
+  const first = await nativeProcessRequest(f.helper, ["first"], undefined, (reason) => reasons.push(reason));
+  expect(performance.now() - began).toBeGreaterThan(1_500);
+  expect(JSON.parse(first!.stdout)).toMatchObject({ mode: "first", sequence: 1 });
+  expect(reasons).toEqual([]);
+});
+
+pipeIt(
+  "still fails closed when a fresh helper never answers its first proof",
+  async () => {
+    const f = await fixture();
+    const reasons: NativeTransportReason[] = [];
+    const began = performance.now();
+    const pending = nativeProcessRequest(f.helper, ["timeout"], undefined, (reason) => reasons.push(reason));
+    const pid = (await f.received())[0]!.pid;
+    expect(await pending).toBeUndefined();
+    expect(performance.now() - began).toBeGreaterThan(9_000);
+    expect(reasons).toEqual(["timeout"]);
+    expect(alive(pid)).toBe(false);
+  },
+  20_000,
+);
 
 pipeIt("counts bounded queue overflow and cancellation through an actual held helper", async () => {
   const f = await fixture();
@@ -262,6 +292,7 @@ pipeIt("still kills a stalled helper at its active deadline after caller cancell
   const f = await fixture();
   const signal = new AbortController();
   const reasons: NativeTransportReason[] = [];
+  expect(await nativeProcessRequest(f.helper, ["warm"])).toBeDefined();
   const active = nativeProcessRequest(f.helper, ["timeout"], signal.signal, (reason) => reasons.push(reason));
   const pid = (await f.received())[0]!.pid;
   const queued = nativeProcessRequest(f.helper, ["after-stall"], undefined, (reason) => reasons.push(reason));
@@ -271,6 +302,7 @@ pipeIt("still kills a stalled helper at its active deadline after caller cancell
   expect(alive(pid)).toBe(false);
   expect(reasons).toEqual(["cancelled"]);
   expect((await f.journal()).filter((row) => row.kind === "request").map((row) => row.mode)).toEqual([
+    "warm",
     "timeout",
     "after-stall",
   ]);
@@ -280,6 +312,7 @@ pipeIt("a stalled proof fails alone; queued and arriving callers are served by a
   const f = await fixture();
   const reasons: string[] = [];
   const report = (label: string) => (reason: NativeTransportReason) => reasons.push(`${label}:${reason}`);
+  expect(await nativeProcessRequest(f.helper, ["warm"])).toBeDefined();
   const stalled = nativeProcessRequest(f.helper, ["timeout"], undefined, report("stalled"));
   const pid = (await f.received())[0]!.pid;
   // VUH-2015: one slow scan used to SIGKILL the shared helper and refuse every
@@ -307,9 +340,10 @@ pipeIt("a stalled proof fails alone; queued and arriving callers are served by a
   expect(journal.filter((row) => row.kind === "start")).toHaveLength(2);
   // The stalled job is never replayed; queued frames keep their original ids.
   expect(journal.filter((row) => row.kind === "request").map((row) => [row.id, row.mode])).toEqual([
-    [1, "timeout"],
-    ...[0, 1, 2, 3, 4].map((index) => [index + 2, `queued-${index}`]),
-    [7, "arriving"],
+    [1, "warm"],
+    [2, "timeout"],
+    ...[0, 1, 2, 3, 4].map((index) => [index + 3, `queued-${index}`]),
+    [8, "arriving"],
   ]);
 });
 
