@@ -2789,6 +2789,18 @@ Local records persist across restart and do not automatically migrate on
 connection. Other unavailable repo providers answer `backend_unavailable`. The HTTP
 form is `POST /v1/work` with the operator bearer and `{ "action": ... }`.
 
+### `work review-diff BASE HEAD [--repo PATH]`
+
+Reads the change between two commits of a local Git repository for a guided
+review, as JSON: the resolved full commit IDs, then each file's change kind,
+paths, modes, blob IDs and hunks with old/new line anchors. It reads Git objects
+only, never the checkout, index or a remote, runs no configured diff, textconv,
+pager, fsmonitor or hook command, and needs no service or credential. Option-like,
+unknown or ambiguous refs answer `{ "outcome": "refused", "code" }`. Changes over
+200 files or 1 MiB of patch, or a binary verdict under the repository's own
+`info/attributes`, answer `complete: false` with the reason; exit 0 means a
+complete result. Contract and limits: [guided reviews](guided-reviews.md).
+
 ### `work view save|get|list|apply|delete` (built-in tracker)
 
 Saved views persist named issue filters, never issue snapshots or access rights.

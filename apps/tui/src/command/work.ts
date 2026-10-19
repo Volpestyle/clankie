@@ -9,6 +9,7 @@ import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
+import { readReviewDiff, ReviewDiffError } from "@clankie/work-items";
 import { WorkItemPrioritySchema } from "@clankie/protocol/work-items";
 import { commandHost } from "./io.ts";
 
@@ -28,6 +29,7 @@ const WORK_USAGE = [
   "  | gate ask ITEM --run ID --kind plan|spend|destructive_action|merge|external_write --body TEXT",
   "  | run steer|pause|resume|stop ID [--body TEXT] | ask ITEM --body TEXT",
   "  | lease ITEM [--minutes N] [--release]",
+  "  | review-diff BASE HEAD   (read-only local Git change between two commits of --repo; no service)",
   "  | sync --json COMMAND   (built-in bootstrap, batch, subscribe or keyed transaction)",
   "  | call TOOL [--json ARGS]   (Clankie's call to the built-in tracker, for the owner)",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker; agents never use it)",
@@ -522,6 +524,22 @@ export async function runWorkCommand(
   const parsed = parseWorkArgs(args);
   const repo = await repoRoot(one(parsed, "--repo"), options.cwd ?? process.cwd());
   const withoutRepo = args.filter((arg, index) => arg !== "--repo" && args[index - 1] !== "--repo");
+  const local = parseWorkArgs(withoutRepo);
+  if (local.positional[0] === "review-diff") {
+    if (local.positional.length !== 3 || local.flags.size > 0) throw new Error(WORK_USAGE);
+    try {
+      const diff = await readReviewDiff({
+        repository: repo,
+        base: local.positional[1]!,
+        head: local.positional[2]!,
+      });
+      return { ok: diff.complete, body: diff };
+    } catch (error) {
+      if (error instanceof ReviewDiffError)
+        return { ok: false, body: { outcome: "refused", code: error.code, message: error.message } };
+      throw error;
+    }
+  }
   const tracker = trackerRequest(withoutRepo, repo);
   const request = tracker === undefined ? workRequest(withoutRepo, repo) : tracker.body;
   const credential = await resolveOperatorCredential({ env });

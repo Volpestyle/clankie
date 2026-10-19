@@ -27,6 +27,7 @@
     "@clankie/persona-images": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/settings": "workspace:*",
+    "@clankie/work-items": "workspace:*",
     "@earendil-works/pi-ai": "1.0.0",
     "@earendil-works/pi-coding-agent": "1.0.0",
     "@earendil-works/pi-tui": "1.0.0",

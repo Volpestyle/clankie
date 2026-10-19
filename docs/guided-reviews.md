@@ -1,0 +1,103 @@
+# Guided reviews: local Git changes
+
+A guided review starts from one exact change. The first piece of VUH-1906
+(Requirements E) reads that change from a local Git repository the caller
+names, between two commits, and hands it to a person or agent as typed data. It renders nothing, writes no
+verdict and reaches no host. The Work UI, review-agent runs and host writeback
+build on it later.
+
+## Reading a change
+
+```bash
+clankie work review-diff BASE HEAD [--repo PATH]
+```
+
+```ts
+import { readReviewDiff } from "@clankie/work-items";
+
+const diff = await readReviewDiff({ repository: "/abs/repo", base: "main", head: "feature" });
+```
+
+`--repo` defaults to the Git repository containing the current directory; the
+API takes the absolute path of the repository root (or of a bare repository's
+own directory) and refuses a directory inside it. The CLI needs no running
+service or operator credential. It prints the JSON below and exits 0 only for a
+complete result.
+
+Each ref resolves once to its full commit ID. Everything after that reads only
+those two commit objects, so later branch moves, staged or unstaged edits and
+untracked files never change the result. The result carries:
+
+- `gitDirectory`, `worktree` (null when bare), `base` and `head`, each with the
+  `ref` as given and its resolved `commit`.
+- `files`, in Git's order, each with `change` (`added`, `deleted`, `modified`,
+  `renamed`, `copied` or `type_changed`), `oldPath`/`newPath` (null on the
+  missing side), modes, blob IDs, rename `similarity`, `binary`, `submodule`
+  and `hunks`.
+- Each hunk's `oldStart`/`oldLines`/`newStart`/`newLines`, Git's function
+  `heading`, and `lines` of `context`, `add` or `delete` with their base
+  `oldLine` and head `newLine` anchors and `noNewlineAtEnd`.
+- `complete`, `fileCount` and the `limits` that applied.
+
+A type change (a file becoming a symlink, say) carries the deletion hunk and then
+the addition hunk. A gitlink (`submodule: true`) has one hunk of Git's own
+`Subproject commit OLD` / `Subproject commit NEW` lines: only the recorded commit
+pointer, never the submodule's contents, which are not opened or initialized.
+Binary files and pure renames or mode changes report `hunks: []`. Two equal
+commits report a complete, empty `files` list. Paths and text must be valid
+UTF-8: anything else is refused as `unsupported` rather than reported with
+replacement characters.
+
+## Limits
+
+| Limit           | Default | When exceeded                                                       |
+| --------------- | ------- | ------------------------------------------------------------------- |
+| `maxFiles`      | 200     | `complete: false`, `incomplete.reason: "too_many_files"`, no files  |
+| `maxPatchBytes` | 1 MiB   | `complete: false`, `"patch_too_large"`, files listed, `hunks: null` |
+| `timeoutMs`     | 10 s    | the whole read, across its Git processes; throws code `timeout`     |
+
+A changed-file list too large even to count reports `fileCount: null`. A
+result over a limit is never shortened into something that looks complete.
+The API accepts lower or higher `limits` for programmatic callers; the CLI
+always uses the defaults.
+
+## Refusals
+
+Invalid input throws `ReviewDiffError` (the CLI prints
+`{ "outcome": "refused", "code", "message" }` and exits 1):
+
+- `invalid_repository`: not absolute, missing, not a Git repository, or a
+  directory inside one.
+- `invalid_ref`: empty, option-like (`-p`, `--output=…`), containing
+  whitespace, control characters, `:` or a `..` range.
+- `unknown_ref`: names no commit here (including a tree or blob).
+- `ambiguous_ref`: a name shared by a branch and a tag, or an ambiguous short ID.
+- `unsupported`: a path or text that is not valid UTF-8, Git output this reader
+  does not understand, or patch sections that do not match the changed files by
+  count and blob IDs. It refuses rather
+  than guessing.
+
+## Trust boundary
+
+Paths, hunk headings and line text come from the repository and are untrusted
+content: show them, never follow them. The reader parses filenames from NUL
+separated raw output and counts hunk lines from their headers, so a filename
+or line shaped like `diff --git` or `@@` stays data.
+
+Git runs through an argument array with a fresh environment (no inherited
+`GIT_DIR`, `GIT_INDEX_FILE` or the like), no system or global configuration,
+`GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`, `protocol.allow=never`,
+`--no-replace-objects`, no pager, no fsmonitor and no hooks. The plumbing
+`diff-tree` reads commits, never the index or working tree, and also gets
+`--no-ext-diff --no-textconv`, so repository-configured diff drivers, textconv
+filters and pagers never run. Attributes come from the empty tree
+(`--attr-source`, no system or `core.attributesFile`), so checkout or committed
+`.gitattributes` cannot mark text binary to hide it. Git still reads the
+repository's own `info/attributes`, including the main repository's when the
+named directory is a linked worktree. When either file is non-empty or cannot be
+ruled out and any file is reported binary, the result is `complete: false` with
+reason `repository_attributes`. Nothing fetches, applies a patch, or updates refs,
+the index, the worktree or configuration.
+
+Naming a repository is the authorization: this API exposes no new machine tool,
+HTTP or MCP route, and it does not widen what a remote caller may read.
