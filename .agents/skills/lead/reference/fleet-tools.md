@@ -285,8 +285,14 @@ with `reconcile_seat_call({deliveryId, settle: "not_delivered"})`; proven
 arrival is recorded as delivered instead. Either way nothing is sent and the
 original is never resent; send what still matters as a new message. The owner
 can settle an unknowable original with `seat-delivery settle ID
-abandoned-unknown`. Unattended, an original the idle recipient's own session
-never shows stops blocking after five minutes.
+abandoned-unknown`. The persisted hiring lead may explicitly settle a blocking
+receipt from another conversation when it still matches the hire's exact native
+occupant and pane; foreign leads cannot. After restart, the next reconciliation
+or new send checks the exact channel ACK or transcript. An interrupted receipt
+without arrival proof stops blocking after five minutes even with an unreadable
+transcript or busy worker; its fate stays `abandoned-unknown`. No original is
+replayed. Without a restart, automatic settlement still requires an idle recipient
+and readable exact transcript.
 
 ## Hand-started Claude channels
 

@@ -1085,9 +1085,19 @@ A native fence also blocks different messages to that recipient. The lead can
 settle it with `reconcile_seat_call({deliveryId, settle: "not_delivered"})`.
 Proven arrival is recorded as delivered. Anything else is recorded as not
 delivered (`settled: "not_delivered"`) and kept as `abandoned-unknown` evidence.
-Without any settle, an original that the idle recipient's exact session does not
-show stops blocking different messages after five minutes. Neither path sends
-anything or resends the original (VUH-2358).
+The persisted hiring lead can also settle a blocking receipt recorded by another
+conversation, provided the receipt still matches its hire's exact pane and native
+occupant. Foreign leads gain no access to that hire's receipts.
+
+Reconciliation checks the original channel ACK and exact session transcript.
+If the pre-send transcript baseline is missing, an exact complete message with a
+native timestamp after dispatch can prove arrival; older or undated text cannot.
+On the next reconciliation or send after a restart, an interrupted receipt stops
+blocking after five minutes even if the transcript is unavailable or the worker
+is busy. Its fate stays `abandoned-unknown`; expiry does not prove non-delivery.
+Within one running process, an absent original still requires an idle recipient
+and readable exact transcript before automatic settlement. None of these paths
+sends anything or replays the original (VUH-2358, VUH-2535).
 
 `clankie seat-delivery settle RECEIPT_ID abandoned-unknown [--conversation ID]`
 (default `global-default`) calls `settle_seat_delivery`. It is the owner's

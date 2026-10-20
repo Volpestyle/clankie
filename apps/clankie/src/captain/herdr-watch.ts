@@ -1193,6 +1193,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } catch {
       /* Persisted delivery scope remains authoritative. */
     }
+    // A different conversation may have messaged this hire. Only the persisted
+    // hiring lead of the receipt's exact native occupant may override that scope.
+    if (
+      ownerSettlement &&
+      owner?.conversationId === conversationId &&
+      agent?.session &&
+      agent.paneId === receipt.paneId &&
+      nativeSessionId(agent) === receipt.sessionId &&
+      receipt.occupantId !== undefined &&
+      occupantIdForHerdrSession(agent.session) === receipt.occupantId &&
+      this.seatClaim(agent)?.hired === true
+    )
+      return original;
     if (
       (receipt.conversationId ??
         owner?.conversationId ??

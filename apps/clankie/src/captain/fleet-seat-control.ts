@@ -52,6 +52,7 @@ export function createFleetSeatControl(
   const now = settlement.now ?? Date.now;
   const unarrivedSettleMs = settlement.unarrivedSettleMs ?? UNARRIVED_SETTLE_MS;
   const fence = new DeliveryFence(uncertaintyPath);
+  const interrupted = new Set(fence.entries().map(([, receipt]) => receipt.messageId));
   const questionFence = new DeliveryFence(
     uncertaintyPath === undefined ? undefined : `${uncertaintyPath}.questions.json`,
   );
@@ -404,7 +405,7 @@ export function createFleetSeatControl(
           session.kind === "path" &&
           session.value === pending.nativeSessionPath &&
           pending.nativeMessageId !== undefined)) &&
-      pending.beforeIds !== undefined;
+      (pending.beforeIds !== undefined || pending.beganAt !== undefined);
     const transcript = exact ? await runner.transcript?.(agent).catch(() => undefined) : undefined;
     if (transcript === undefined) return undefined;
     return {
@@ -414,7 +415,9 @@ export function createFleetSeatControl(
           entry.role === "operator" &&
           (!(pi || pending.nativeSessionPath !== undefined) ||
             entry.nativeRequestId === pending.nativeMessageId) &&
-          !pending.beforeIds?.includes(entry.id) &&
+          (pending.beforeIds !== undefined
+            ? !pending.beforeIds.includes(entry.id)
+            : entry.occurredAt !== undefined && Date.parse(entry.occurredAt) > pending.beganAt!) &&
           deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
       ),
     };
@@ -424,6 +427,26 @@ export function createFleetSeatControl(
     const evidence = fence.abandonUnknown(key, pending.messageId, now());
     if (!pending.seatId) fence.archiveAbandoned(key, pending.messageId);
     return evidence;
+  };
+  const expireInterrupted = (key: string, pending: UncertainReceipt) => {
+    // The process that owned this dispatch is gone. Missing transcript baselines,
+    // native ACK IDs or an ongoing worker turn must not make its fence permanent.
+    // Expiry does not prove absence: preserve unknown fate and never replay the original.
+    if (
+      interrupted.has(pending.messageId) &&
+      pending.beganAt !== undefined &&
+      now() - pending.beganAt >= unarrivedSettleMs
+    ) {
+      settleUnarrived(key, pending);
+      return {
+        outcome: "undelivered" as const,
+        deliveryStage: "unavailable" as const,
+        messageId: pending.nativeDeliveryId ?? pending.messageId,
+        settled: "not_delivered" as const,
+        detail: "Restart-interrupted delivery expired as abandoned-unknown; nothing was sent or replayed.",
+      };
+    }
+    return undefined;
   };
   const reconcileDelivery = async (id: string) => {
     const original = await locateDelivery(id);
@@ -437,14 +460,17 @@ export function createFleetSeatControl(
       agent.paneId !== pending.paneId ||
       nativeSessionId(agent) !== pending.sessionId ||
       (pending.occupantId !== undefined && occupantIdForHerdrSession(agent.session) !== pending.occupantId)
-    )
+    ) {
+      const expired = expireInterrupted(key, pending);
+      if (expired) return expired;
       return {
         outcome: "unconfirmed" as const,
         deliveryStage: "uncertain" as const,
         messageId: pending.nativeDeliveryId ?? pending.messageId,
         detail: "Original native occupant is unavailable or changed; nothing was sent.",
       };
-    const channel = await channelReceipt?.(pending.nativeDeliveryId ?? id);
+    }
+    const channel = await channelReceipt?.(pending.nativeDeliveryId ?? id).catch(() => undefined);
     const fresh = await runner.resolveTerminal(seatId).catch(() => undefined);
     if (
       channel?.acknowledged &&
@@ -469,6 +495,22 @@ export function createFleetSeatControl(
         detail: "Exact original channel acknowledgment reconciled; nothing was sent.",
       };
     }
+    const observed = await sessionArrival(pending, fresh);
+    if (active.has(seatId)) throw new Error("Original native delivery is still active");
+    if (observed?.matched) {
+      const messageId = observed.matched.id;
+      if (pending.seatId)
+        fence.complete(key, pending.messageId, { messageId, state: "started", deliveryStage: "consumed" });
+      else fence.reconcile(key, pending.messageId);
+      return {
+        outcome: "delivered" as const,
+        deliveryStage: "consumed" as const,
+        messageId,
+        detail: "The original was found in the recipient's exact session; nothing was sent.",
+      };
+    }
+    const expired = expireInterrupted(key, pending);
+    if (expired) return expired;
     return {
       outcome: "unconfirmed" as const,
       deliveryStage: "uncertain" as const,
@@ -563,7 +605,7 @@ export function createFleetSeatControl(
       const seatId = original.seatId ?? key;
       if (active.has(seatId)) throw new Error("Original native delivery is still active");
       const reconciled = await reconcileDelivery(id);
-      if (reconciled?.outcome === "delivered") return reconciled;
+      if (reconciled?.outcome === "delivered" || (reconciled && "settled" in reconciled)) return reconciled;
       const agent = await runner.resolveTerminal(seatId).catch(() => undefined);
       const matched = (await sessionArrival(original, agent))?.matched;
       if (active.has(seatId)) throw new Error("Original native delivery is still active");
@@ -650,21 +692,26 @@ export function createFleetSeatControl(
       const resolvePending = async (pending: UncertainReceipt): Promise<FleetSeatDelivery | "settled"> => {
         const same = pending.fingerprint === deliveryFingerprint(text);
         const nativeId = pending.nativeDeliveryId;
-        if (nativeId) {
-          const reconciled = await reconcileDelivery(nativeId);
-          if (reconciled?.outcome === "delivered") {
-            if (!same) return "settled";
-            return { ...reconciled, detail: "Original delivery reconciled; nothing was sent." };
-          }
-        }
         const pendingKey = fence.entries().find(([, receipt]) => receipt === pending)?.[0] ?? key;
-        // Another stable ID's original: its transcript may still settle it below.
         const foreign = stableReceiptKey !== undefined && pendingKey !== key;
         const owned = {
           outcome: options?.reconcileOnly ? "unconfirmed" : "undelivered",
           deliveryStage: options?.reconcileOnly ? "uncertain" : "unavailable",
           detail: "A different original delivery owns this recipient; nothing was sent or reconciled.",
         } as FleetSeatDelivery;
+        if (!active.has(seatId) && !(foreign && options?.reconcileOnly)) {
+          const reconciled = await reconcileDelivery(nativeId ?? pending.messageId);
+          if (reconciled && (reconciled.outcome === "delivered" || "settled" in reconciled)) {
+            if (same) return foreign ? owned : reconciled;
+            if (stableReceiptKey !== undefined && pendingKey === key)
+              return {
+                outcome: "undelivered",
+                deliveryStage: "unavailable",
+                detail: "Stable delivery ID already belongs to different content; nothing was sent.",
+              };
+            return "settled";
+          }
+        }
         if (foreign && options?.reconcileOnly) return owned;
         if (options?.reconcileOnly && !same)
           return {

@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import { createFleetSeatControl } from "../src/captain/fleet-seat-control.ts";
+import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fence.ts";
+import { HireOwners } from "../src/captain/hire-owners.ts";
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
@@ -25,13 +28,15 @@ function fixture() {
   const mailbox = new SeatOutbox({ uncertaintyPath: join(root, "mailbox.json"), boundGraceMs: 30 });
   cleanups.push(() => mailbox.close());
   let status = "idle";
+  let transcriptAvailable = true;
+  let sessionId = "session1";
   const agent = (): HerdrAgentSnapshot => ({
     paneId: "w1:p1",
     terminalId: "seat1",
     agent: "claude",
     status,
     title: "worker",
-    session: { source: "herdr:claude", kind: "id", value: "session1" },
+    session: { source: "herdr:claude", kind: "id", value: sessionId },
   });
   let sends = 0;
   const control: SeatControl = {
@@ -63,12 +68,12 @@ function fixture() {
     start: async () => ({ outcome: "started", control }),
   };
   // The recipient's own session: whatever arrived there, nothing else.
-  let entries: { id: string; type: "message"; role: "operator"; text: string }[] = [];
+  let entries: { id: string; type: "message"; role: "operator"; text: string; occurredAt?: string }[] = [];
   const runner: HerdrWatchRunner = {
     get: async () => agent(),
     resolveTerminal: async () => agent(),
     wait: async () => agent(),
-    transcript: async () => ({ entries }) as never,
+    transcript: async () => (transcriptAvailable ? ({ entries } as never) : undefined),
   };
   let now = Date.now();
   const receiptsPath = join(root, "watches.json.delivery-receipts.json");
@@ -117,6 +122,32 @@ function fixture() {
   };
   return {
     root,
+    seedInterrupted: (conversationId = "visiting-conversation") => {
+      const receipt = new DeliveryFence(receiptsPath).begin("seat1", {
+        fingerprint: deliveryFingerprint("handoff: start the release"),
+        beganAt: now,
+        sessionId,
+        paneId: agent().paneId,
+        occupantId: occupantIdForHerdrSession(agent().session!),
+        conversationId,
+        recipientBinding: "binding1",
+      });
+      return receipt.messageId;
+    },
+    hire: (conversationId: string) =>
+      new HireOwners(join(root, "watches.json.owners.json")).bind(
+        agent().paneId,
+        { conversationId },
+        "seat1",
+        undefined,
+        occupantIdForHerdrSession(agent().session!),
+      ),
+    changeOccupant: () => {
+      sessionId = "replacement";
+    },
+    hideTranscript: () => {
+      transcriptAvailable = false;
+    },
     setStatus: (next: string) => {
       status = next;
     },
@@ -126,10 +157,10 @@ function fixture() {
     lostOriginal,
     deliverNext,
     sends: () => sends,
-    arrive: (text: string) => {
+    arrive: (text: string, occurredAt?: string) => {
       entries = [
         ...entries,
-        { id: `entry-${String(entries.length + 1)}`, type: "message", role: "operator", text },
+        { id: `entry-${String(entries.length + 1)}`, type: "message", role: "operator", text, occurredAt },
       ];
     },
     advance: (ms: number) => {
@@ -206,6 +237,98 @@ it("the bounded wait never settles an original the recipient's session shows arr
   // VUH-2034 behavior stands: proven arrival reconciles, and the next message goes.
   expect(await f.deliverNext(native, "status?")).toMatchObject({ outcome: "delivered" });
   expect(f.sends()).toBe(2);
+});
+
+// VUH-2535: persisted state has neither beforeIds nor nativeDeliveryId when
+// the service dies during dispatch and its initial remote transcript read failed.
+it("restart recovery confirms exact post-dispatch transcript arrival without a baseline or channel ID", async () => {
+  const f = fixture();
+  const id = f.seedInterrupted();
+  const native = f.create();
+  f.arrive("handoff: start the release", new Date(Date.now() + 1000).toISOString());
+  expect(await native.reconcileDelivery(id)).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "consumed",
+  });
+  expect(f.create().unresolvedDeliveries()).toEqual([]);
+  expect(f.sends()).toBe(0);
+  expect(await f.deliverNext(f.create(), "status?")).toMatchObject({ outcome: "delivered" });
+});
+
+it("restart timeout releases an unknowable receipt even for a busy seat with an unreadable transcript", async () => {
+  const f = fixture();
+  const id = f.seedInterrupted();
+  const native = f.create();
+  f.hideTranscript();
+  f.setStatus("working");
+  f.advance(59_999);
+  expect(await native.deliverToSeat("seat1", "status?", undefined, options)).toMatchObject({
+    outcome: "undelivered",
+  });
+  expect(native.unresolvedDeliveries()).toHaveLength(1);
+  f.advance(1);
+  // Retrying the original at expiry only settles it, never dispatches it.
+  expect(await native.deliverToSeat("seat1", "handoff: start the release", undefined, options)).toMatchObject(
+    { settled: "not_delivered" },
+  );
+  expect(native.unresolvedDeliveries()).toEqual([]);
+  expect(
+    new DeliveryFence(join(f.root, "watches.json.delivery-receipts.json"))
+      .all()
+      .some(
+        ([, receipt]) => receipt.messageId === id && receipt.abandoned?.disposition === "abandoned-unknown",
+      ),
+  ).toBe(true);
+  expect(f.sends()).toBe(0);
+  expect(await f.deliverNext(f.create(), "status?")).toMatchObject({ outcome: "delivered" });
+  expect(f.sends()).toBe(1);
+});
+
+it("restart recovery accepts the exact retained channel ACK without a transcript", async () => {
+  const f = fixture();
+  const id = await f.lostOriginal(f.create());
+  f.mailbox.acknowledge(id, "binding1");
+  f.hideTranscript();
+  expect(await f.create().reconcileDelivery(id)).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "delivered",
+  });
+  expect(f.create().unresolvedDeliveries()).toEqual([]);
+  expect(f.sends()).toBe(1);
+});
+
+it("an old identical transcript message cannot prove a restart-interrupted delivery arrived", async () => {
+  const f = fixture();
+  const id = f.seedInterrupted();
+  f.arrive("handoff: start the release", new Date(Date.now() - 60_000).toISOString());
+  f.arrive("handoff: start the release"); // Missing timestamps prove nothing either.
+  expect(await f.create().reconcileDelivery(id)).toMatchObject({ outcome: "unconfirmed" });
+  expect(f.create().unresolvedDeliveries()).toHaveLength(1);
+});
+
+it("the persisted hiring lead can settle another conversation's blocking receipt; foreign leads cannot", async () => {
+  const f = fixture();
+  f.hire("hiring-lead");
+  const id = f.seedInterrupted();
+  const watches = f.watches();
+  await expect(watches.settleSeatDelivery(id, "foreign-lead")).rejects.toThrow("another conversation");
+  await expect(watches.reconcileSeatDelivery(id, "hiring-lead")).rejects.toThrow("another conversation");
+  expect(await watches.settleSeatDelivery(id, "hiring-lead")).toMatchObject({ settled: "not_delivered" });
+  expect(f.create().unresolvedDeliveries()).toEqual([]);
+  expect(await f.deliverNext(f.create(), "status?")).toMatchObject({ outcome: "delivered" });
+  expect(f.sends()).toBe(1);
+});
+
+it("a replacement occupant's hiring lead cannot settle the previous occupant's receipt", async () => {
+  const f = fixture();
+  const id = f.seedInterrupted();
+  f.changeOccupant();
+  f.hire("replacement-lead");
+  await expect(f.watches().settleSeatDelivery(id, "replacement-lead")).rejects.toThrow(
+    "another conversation",
+  );
+  expect(f.create().unresolvedDeliveries()).toHaveLength(1);
+  expect(f.sends()).toBe(0);
 });
 
 it("over the lead's MCP tools: message_seat is refused, reconcile_seat_call settles the original by its deliveryId, and the next message_seat is delivered", async () => {
