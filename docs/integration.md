@@ -41,9 +41,10 @@ new commits and composing a fresh batch.
 
 A request accepted while startup worktree reclamation or another live writer
 holds `queue.lock` stays queued until that writer releases it. It keeps its UUID
-and admission order; no manual resubmission or concurrent gate is needed. Only
-queue-drain admission waits: explicit reclamation and other lock users still
-refuse a busy lock. Missing/unreadable owner records and permission failures
+and admission order; no manual resubmission or concurrent gate is needed. Queue-drain admission waits for that writer. Explicit reclamation instead
+frees finished batches' copied download stores alongside the live queue,
+retaining worktrees, installed dependencies, environments and evidence. The full
+scratch sweep still requires the queue lock. Missing/unreadable owner records and permission failures
 remain errors. A newly dead owner reports a retained stale lock; the existing
 recovery of a proven abandoned pre-boot lock still records its interrupted work.
 
@@ -316,8 +317,10 @@ again, so only one process takes it over. When the queue reclaims `queue.lock`,
 the batches the dead owner left running are recorded `interrupted` with that
 reason. Recovery-enabled requests receive their one automatic retry. A lock with a live owner still refuses. Inspect the
 record, logs, processes and origin before starting a fresh batch. Batch
-worktrees, stores and evidence are retained for review; cleanup is manual after
-their processes have ended. Never move a tree while its gate is running.
+records, logs and commit stores remain for review; automatic cleanup and
+`clankie integrate reclaim` remove disposable terminal worktrees and isolation
+caches after their processes and retries have finished. Never move a tree while
+its gate is running.
 
 The operator API is `POST /v1/integrate` with typed `run`, `status`, `push`,
 `cancel`, `hold`, `holds` and `release` actions in

@@ -30,6 +30,7 @@ import type { FleetProgressObservation } from "./fleet-progress.ts";
 
 import { processWorkingDirectories } from "./process-working-directories.ts";
 import { removeDirectory } from "./remove-directory.ts";
+import { withReclamationWindow, reclaimCopiedInstallStores } from "./integrate-reclamation.ts";
 
 const execute = promisify(execFile);
 const now = () => new Date().toISOString();
@@ -812,36 +813,54 @@ export class IntegrationQueue {
     }
   }
 
-  /** Sweep every historical batch under the queue lock; records, logs and commit stores remain. */
+  /** Reclaim full terminal scratch when idle, or only copied download stores beside a live queue. */
   async reclaimWorktrees(
     at = Date.now(),
     guard: () => Promise<void> = async () => {},
   ): Promise<{ reclaimed: string[]; kept: { id: string; reason: string }[]; freedBytes: number }> {
-    return withDirectoryLock(join(this.options.directory, "queue.lock"), async () => {
-      await guard();
-      const result = {
-        reclaimed: [] as string[],
-        kept: [] as { id: string; reason: string }[],
-        freedBytes: 0,
-      };
-      const ids = await readdir(join(this.options.directory, "batches")).catch(
-        (error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return [];
-          throw error;
-        },
-      );
-      if (ids.length > 4096) throw Error("Integration batch census exceeds its bound");
-      const cwds = await processWorkingDirectories();
-      for (const id of ids) {
-        if (!/^[a-f0-9-]{36}$/u.test(id)) continue;
-        try {
-          await this.reclaimBatch(await this.read(id), result, cwds, guard, at);
-        } catch (error) {
-          result.kept.push({ id, reason: error instanceof Error ? error.message : String(error) });
+    return withDirectoryLock(join(this.options.directory, "reclamation.lock"), () =>
+      withReclamationWindow(this.options.directory, async (busy) => {
+        await guard();
+        const result = {
+          reclaimed: [] as string[],
+          kept: [] as { id: string; reason: string }[],
+          freedBytes: 0,
+        };
+        const ids = await readdir(join(this.options.directory, "batches")).catch(
+          (error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return [];
+            throw error;
+          },
+        );
+        if (ids.length > 4096) throw Error("Integration batch census exceeds its bound");
+        const cwds = await processWorkingDirectories();
+        for (const id of ids) {
+          if (!/^[a-f0-9-]{36}$/u.test(id)) continue;
+          try {
+            const batch = await this.read(id);
+            if (busy) {
+              // This branch never saves records or removes worktrees. A terminal
+              // attempt may still be entering recovery in the live queue process.
+              if (active.has(batch.state)) continue;
+              const root = resolve(dirname(this.path(id)));
+              if (batch.evidence !== join(root, "record.json")) throw Error("batch_alias");
+              const logs = batch.repos
+                .flatMap((repo) => [
+                  repo.install?.log,
+                  repo.gate?.log,
+                  repo.push?.log,
+                  ...(repo.revalidations ?? []).map((entry) => entry.log),
+                ])
+                .filter((log): log is string => log !== undefined);
+              await reclaimCopiedInstallStores(root, logs, guard, result);
+            } else await this.reclaimBatch(batch, result, cwds, guard, at);
+          } catch (error) {
+            result.kept.push({ id, reason: error instanceof Error ? error.message : String(error) });
+          }
         }
-      }
-      return result;
-    });
+        return result;
+      }),
+    );
   }
   watchReclamation(onError: (error: unknown) => void): () => void {
     let pending: Promise<unknown> | undefined;

@@ -1251,9 +1251,17 @@ remain explicit failures; do not delete locks or resubmit an uncertain request.
 
 Integration clones keep client hooks disabled.
 
-`clankie integrate reclaim` sweeps every historical terminal batch under the
-queue lock and reports removed paths, retained reasons, and `freedBytes`
+`clankie integrate reclaim` sweeps historical terminal batches even while another
+batch is gating and reports removed paths, retained reasons, and `freedBytes`
 (allocated blocks measured before removal). It also removes empty worktrees folders.
+An idle queue allows the full scratch sweep. While a proven live owner holds
+`queue.lock`, reclaim removes only finished batches' copied download stores:
+`isolation/{core,app}/{pnpm-store,npm-cache}`. Installs copy package contents into
+`node_modules`, so neither pushing nor retrying depends on those stores.
+The busy path preserves worktrees, installed dependencies, private environments,
+records and evidence; it never rewrites a record during a queue transition.
+Concurrent sweeps serialize separately. Active batches, aliased paths, stored
+logs and live process cwd remain protected; an unknown queue owner still refuses.
 
 Pushed batches and failed, cancelled, interrupted or conflicting attempts lose
 their disposable scratch worktrees and private `isolation/` install/gate caches as soon as the queue no longer needs them.
