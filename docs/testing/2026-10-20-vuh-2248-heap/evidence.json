@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "mcp-patched.tar.gz",
+      "size": 62020558,
+      "sha256": "ad98ceb43312e1ccd22d99164109f10919a92d01ec1a1e547958195c068b6a4b",
+      "url": "clankie://evidence/sha256/ad98ceb43312e1ccd22d99164109f10919a92d01ec1a1e547958195c068b6a4b"
+    },
+    {
+      "path": "mcp-unpatched.tar.gz",
+      "size": 67426374,
+      "sha256": "9687489ceb307bd40ac1171054b865eabf563ff382fd7e22c020013b91745b76",
+      "url": "clankie://evidence/sha256/9687489ceb307bd40ac1171054b865eabf563ff382fd7e22c020013b91745b76"
+    },
+    {
+      "path": "methods-and-samples.tar.gz",
+      "size": 34244,
+      "sha256": "41b939212275d8f38293eea7b8829fba82e5922506a3537e2b556ed9bd756523",
+      "url": "clankie://evidence/sha256/41b939212275d8f38293eea7b8829fba82e5922506a3537e2b556ed9bd756523"
+    },
+    {
+      "path": "private-hour.tar.gz",
+      "size": 173915337,
+      "sha256": "4d677f46d7faf0654a367b7896a7f28189ad713391dd69bc419e6b7ffdf7ff1f",
+      "url": "clankie://evidence/sha256/4d677f46d7faf0654a367b7896a7f28189ad713391dd69bc419e6b7ffdf7ff1f"
+    },
+    {
+      "path": "record-census.tar.gz",
+      "size": 171989392,
+      "sha256": "67a67deff9c9a7680cc9426d6d056d7fc1b9fda71e685ecf5abe08c161dcfb80",
+      "url": "clankie://evidence/sha256/67a67deff9c9a7680cc9426d6d056d7fc1b9fda71e685ecf5abe08c161dcfb80"
+    }
+  ]
+}
