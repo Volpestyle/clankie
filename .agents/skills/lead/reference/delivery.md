@@ -83,3 +83,8 @@ remove it ([tidying](fleet-tools.md#closing-panes-and-tidying-worktrees)).
 After a bounded delivery, look at where it actually waited, repeated work or lost
 ownership, and fix that before widening the setup. The user judges the result;
 they should never have to relay messages between workers.
+
+Native subagents of one seat share that seat's scratchpad directory. Give each
+brief its own scratch subdirectory (for example `scratchpad/<deliverable>/`) and
+owned output paths, so one child's helper scripts or captures never overwrite
+another's.

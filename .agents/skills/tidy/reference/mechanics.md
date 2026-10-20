@@ -130,3 +130,13 @@ install metadata or the root pnpm marker plus installed lockfile snapshot naming
 canonical project; changing or unknown evidence is refused. Root caches go last.
 Each sweep examines at most 32 worktrees and every cache within them. Report all
 `cache_worktree_limit` deferred paths and continue with each exact `path`.
+
+## Before a manual close
+
+The roster's `done` or `idle` can lag a pane that is still mid-turn, for example
+answering a peer. Before `close_worker_pane`, read the pane's last output or
+`clankie herdr agent list` status and wait while it is working. A pane's
+background terminal owns its child processes, so a job a successor "inherited"
+still dies with the old pane. If the final output mentions a running background
+terminal, confirm the job's PIDs are outside that pane's process tree (or the
+successor has restarted it) before closing.

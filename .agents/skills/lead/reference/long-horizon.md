@@ -84,6 +84,11 @@ unresolved check needs action again; unknown telemetry is not spare capacity.
 Re-read usage before a hire. Detection does not grant authority, change caps,
 pick an issue or start a worker; those remain your decisions.
 
+A board reset can return finished work to Backlog. Before staffing a Backlog
+item whose history shows a review or verifying stage or a linked commit, check
+the destination branch for its landed fix, and close it with that evidence
+instead of re-staffing it.
+
 ## Milestone reports
 
 A newly completed parent issue or declared tracker milestone asks for exactly

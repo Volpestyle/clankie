@@ -56,6 +56,13 @@ seat can re-read it and the person can inspect it. The brief covers:
 The seat opens in a visible Herdr pane. Name the pane to the person so they can
 watch it or take over.
 
+**The person's machine settings:** display resolution and scaling, text size,
+accessibility, power and privacy settings are off-limits; simulate them in the
+app's renderer or a test window. While the person may be at the machine, do not
+launch newly signed app identities that request screen capture, Accessibility,
+Automation or Keychain access. Reuse an already-granted bundle or measure
+headlessly, and tell the person such prompts are safe to deny.
+
 ## Watch and relay
 
 `herdr_watch` the returned seatId. When it stops for a human check, tell the

@@ -11,9 +11,9 @@ means no new message was sent; report the pane and inspect its native binding.
 Managed PC Codex hires set their assigned worker name on the fresh native thread
 before briefing it. A native naming refusal prevents the brief; inspect the
 original hire receipt and do not replay it. Resumed sessions keep their names.
-Fresh-root bootstrap uses the confirmed metadata after naming: Codex 0.160.1
-replaces its synthesized read-time creation timestamp with the actual creation
-time then. That time must still belong to the exact fresh view's startup window;
+Fresh-root bootstrap uses the metadata confirmed after naming, because an
+unnamed root's read reports a synthesized read-time creation timestamp. That
+time must still belong to the exact fresh view's startup window;
 saved/forked history errors and post-dispatch uncertainty never authorize replay.
 
 With authorized operator access, `clankie hire-receipt settle ORIGINAL_ID
@@ -64,9 +64,10 @@ transport revision on its original thread. Unknown catalog evidence and lost
 mutation acknowledgments still require read-only reconciliation; never replay
 them. Independent loaded roots remain a safe refusal, with their inventory in
 `detail`; a startup observation may become obsolete, so inspect again at idle.
-Roster/doctor versions and runtime-behind fields are observations, not tool authority. Codex 0.160.0
-ignores MCP list-change notifications; a fresh observer connection does not
-refresh the original thread.
+Roster/doctor versions and runtime-behind fields are observations, not tool authority. Codex
+does not refresh a loaded thread's catalog on MCP list-change notifications, and
+a fresh observer connection does not refresh the original thread; the
+controller's transport revision is the refresh path.
 For manual or remote clients, report the stale catalog and ask the owner to
 reconnect the exact thread with its original cwd, account home and flags after
 its runtime unloads. Never restart a shared daemon, fork automatically, or
@@ -75,13 +76,11 @@ replay an uncertain tool call. Controller-owned hires need controller recovery.
 ## Older bridges
 
 Runtime and on-disk plugin updates do not replace an already-imported worker
-receipt parser. An older 0.6.2 bridge cannot consume an exact negative
-`definitive: not_sent` receipt. Keep its claim. Supported current local
-controllers refresh that MCP connection on the same thread; pre-0.6.5 local
-seats instead show `restart needed` and retire naturally. Automatic legacy
-restart is disabled. The lead can close an idle seat after retaining its handoff
-and settling original receipts, then hire a fresh worker; original thread
-evidence stays on disk. A refreshed supported bridge reads the retained original
+receipt parser. Supported local controllers refresh that MCP connection on the
+same thread. A local Codex seat whose roster row shows `restart needed` follows
+that row's remediation: automatic legacy restart is disabled, so the lead closes
+it when idle after retaining its handoff and settling original receipts, then
+hires a fresh worker; original thread evidence stays on disk. A refreshed supported bridge reads the retained original
 once after active calls settle; it sends no replacement.
 An unresolved original stays held. A separate deliberate call after settlement
 sends the later report. Remote Codex controller/config recovery and replacing

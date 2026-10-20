@@ -12,9 +12,10 @@ Tracing deliveries between the service and a native operator or worker seat.
   ACK, replay or settle the original.
 
 - **A stuck `message_clankie` claim.** Compare the exact authenticated receipt
-  with the worker's running bridge version. Older worker bridges (0.6.2)
-  recognize only `stored`; they keep returning `uncertain` even when the service
-  returns an exact sealed `definitive: not_sent`. Updated files on disk do not
+  with the worker's running bridge version. A bridge that does not request
+  `definitive` (the service sends it only to readers that ask) recognizes only
+  `stored` and keeps returning `uncertain` even after the service sealed the
+  original as `not_sent`. Updated files on disk do not
   update an already imported bridge. Keep the original claim and truthful
   receipt; never label an unsent message `stored`, delete runtime state, or send
   a replacement to bypass this gap.

@@ -100,6 +100,12 @@ needed for follow-up or requested by your person; leave borrowed or repurposed
 panes and operator drafts alone. Your own finished-worker cleanup is already
 authorized.
 
+`clankie herdr use NAME` rewrites the saved fleet binding, and a session
+different from the startup one revokes every local fleet binding (proofs,
+simulator leases and admissions fail as `missing_binding`). Never use it to look
+at another session's roster; read remote rosters through worker reports,
+`list_fleet_seats` or `clankie herdr agent list`.
+
 ## Messages to external Codex sessions
 
 `message_seat` first tries the existing Codex app-server proxy on the selected

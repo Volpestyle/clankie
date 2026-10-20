@@ -66,6 +66,11 @@ Add a new commit instead. A slightly untidy history is recoverable; a
 If you genuinely must fix your own last commit, make a second commit that
 fixes it. Squashing is the integrator's job, once the lane is quiet.
 
+Chain multi-step repository commands with `&&` (or `set -e`), never `;`: if a
+`cd`, `git worktree add` or checkout step fails, the rest of the chain runs in
+whatever checkout you are still in, often the owner's main one. Keep destructive
+steps (`checkout --`, `restore`, `reset`) out of such chains entirely.
+
 ## Check an exported snapshot
 
 Checking an exported source snapshot with installed pnpm dependencies has its

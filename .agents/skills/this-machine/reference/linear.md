@@ -70,6 +70,11 @@ console. Turning following off suppresses new and queued wakes; a running turn
 can finish. Following on does not replay skipped events.
 Only events that wake a chat appear in it; the rest are only logged.
 
+Never add `global-default` as a `projectChats` target. That makes it that
+project's configured lead, and hires into other projects then refuse with
+lead-ownership errors. Unrouted projects already wake `global-default`, so
+remove the project's entry instead.
+
 ## Wake rules
 
 Use the operator-only `linear_wake({ action: "show" })` or authenticated

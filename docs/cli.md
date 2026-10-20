@@ -6785,18 +6785,22 @@ actor, route and mouth checks remain in force.
 
 For connected-account tools in a worker, use `mcp --grant FILE` instead; see below.
 
-A fleet pane's stdio MCP server: no tools, only the channel. A message to that
-agent (a DM from the app, or a group-chat turn) arrives as
+A fleet pane's stdio mailbox channel: no tools, only the channel. A message to
+that agent (a DM from the app, or a group-chat turn) arrives as
 `<channel source="clankie" kind="message" conversation="…" event_id="…">`
-instead of being typed into the pane. The bridge polls only when the parent
-`claude` argv loaded `server:clankie-seat` as a channel; otherwise it serves
-empty and does not bind. Claude Code binds that channel when the server is in
-the harness MCP config (`claude mcp add -s user clankie-seat -- clankie mcp --seat`) and
-the session is started with `--dangerously-load-development-channels
-server:clankie-seat`. `--channels server:clankie-seat` starts without the
-development-channels dialog but then rejects `server:` as not on the approved
-allowlist. The service's hire path persists the server and passes the dangerous
-flag for a claude seat.
+instead of being typed into the pane. Identity is `HERDR_PANE_ID`. On a local
+machine the `clankie-worker` Claude plugin's `worker` server runs this command,
+handing it Claude's argv, and it polls only when that session approved
+`plugin:clankie-worker@clankie` through `--channels`. Hires and hand-started
+panes use that plugin channel.
+
+Registering `clankie-seat` yourself (`claude mcp add -s user clankie-seat --
+clankie mcp --seat`, then starting Claude with
+`--dangerously-load-development-channels server:clankie-seat`) is a legacy,
+manual bridge: no hire path registers it, and `--channels server:clankie-seat`
+is rejected as not on the approved allowlist. Without a matching channel in the
+parent argv the bridge serves an empty channel and does not bind, so a
+user-scoped registration never consumes mail beside the selected worker plugin.
 
 <a id="mcp-fleet-fleet-connected-tools"></a>
 

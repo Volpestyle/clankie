@@ -78,6 +78,10 @@ nothing was queued. Answer a lead message the same way, naming the conversation
 it came from ([lead messages](fleet-tools.md#lead-messages-without-a-native-channel)).
 Never type into a lead's pane.
 
+A project lead may hold the owner's approval from its own chat. Before telling
+the owner no approval exists for a lead's action, ask that lead where its
+authorization came from, and never make the owner approve twice.
+
 ## Tracker fence for remote heads
 
 Remote project heads reach only their registered tracker project through the
