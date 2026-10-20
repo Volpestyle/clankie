@@ -9180,3 +9180,15 @@ The default affects new projects without an existing saved convention; existing
 repo conventions and owner-reviewed project proposals take precedence.
 The TUI accepts the same review/apply arguments through `/fleet tracker` and
 `/project settings PROJECT tracker`; `/fleet status` also shows the default.
+
+### Read-only shipping status (VUH-2526)
+
+`GET /v1/integrate/shipping` projects the same durable queue that
+`clankie integrate status` reads. Owner operators and paired Take Control devices
+can read it through the existing relay/device transport. It accepts no mutation.
+Each batch supplies state, updated time, issue keys extracted from commit subjects,
+short commit IDs, failed-check status, and its pending request count. Shared batch
+members count once each. Recent terminal results are bounded to 30 across projects;
+active requests remain visible. Paths, errors, command output and credentials stay
+in the operator-only status response. Unknown issue keys remain unmapped; no title
+or checkout-name guessing is used. Interrupted historical records require resubmit.

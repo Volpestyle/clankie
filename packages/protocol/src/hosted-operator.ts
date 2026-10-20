@@ -1,3 +1,4 @@
+import { SHIPPING_PATH } from "./integrate.ts";
 import { WORK_TRACKER_SETTINGS_PATH } from "./work-tracker-settings.ts";
 import {
   APPEARANCE_SETTINGS_PATH,
@@ -140,6 +141,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       USAGE_SETTINGS_PATH,
       HUDDLES_PATH,
       VIEWS_PATH,
+      SHIPPING_PATH,
       FLEET_ROSTER_PATH,
       ROUTINES_PATH,
       LINEAR_FOLLOW_PATH,

@@ -1,3 +1,4 @@
+import { SHIPPING_PATH } from "./integrate.ts";
 import { WORK_TRACKER_SETTINGS_PATH } from "./work-tracker-settings.ts";
 import {
   MACHINE_JOIN_START_PATH,
@@ -223,6 +224,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: HUDDLES_PATH, target: "relay" },
   { method: "POST", path: HUDDLE_CLOSE_PATH, target: "relay" },
   { method: "GET", path: VIEWS_PATH, target: "relay" },
+  { method: "GET", path: SHIPPING_PATH, target: "relay" },
   { method: "POST", path: VIEWS_PATH, target: "relay" },
   { method: "GET", path: FLEET_ROSTER_PATH, target: "relay" },
   { method: "POST", path: FLEET_ROSTER_RETIRE_PATH, target: "relay" },

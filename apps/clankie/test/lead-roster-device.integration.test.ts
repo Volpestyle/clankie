@@ -94,6 +94,14 @@ it("reuses the private roster for an owner device and refuses visitors, guests, 
       headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
       body: JSON.stringify({ op: "lead_chats", schemaVersion: 1 }),
     });
+  // Shipping has the same owner-device boundary, independently of the mutation route.
+  const shipping = (bearer: string) =>
+    service.app.request("/v1/integrate/shipping", {
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+  expect((await shipping(token("owner"))).status).toBe(503); // admitted; queue not configured
+  for (const id of ["visitor", "guest", "support"]) expect((await shipping(token(id))).status).toBe(403);
+  expect((await shipping("discord")).status).toBe(403);
   const owned = await read(token("owner"));
   expect(owned.status).toBe(200);
   const result = OperatorConversationServiceResultSchema.parse(await owned.json());

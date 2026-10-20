@@ -289,3 +289,20 @@ export const IntegrationResponseSchema = z.object({
   error: z.string().optional(),
 });
 export type IntegrationResponse = z.infer<typeof IntegrationResponseSchema>;
+
+/** Read-only device projection; no paths, command logs or mutation requests. */
+export const SHIPPING_PATH = "/v1/integrate/shipping";
+export const ShippingSnapshotSchema = z.object({
+  batches: z.array(
+    z.object({
+      id: Id,
+      state: IntegrationStateSchema,
+      updatedAt: z.iso.datetime(),
+      issues: z.array(z.string()),
+      commits: z.array(z.string()),
+      gateFailed: z.boolean(),
+      waitingCount: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type ShippingSnapshot = z.infer<typeof ShippingSnapshotSchema>;

@@ -14,6 +14,7 @@ import {
   type IntegrationRepo,
   type IntegrationRun,
   type IntegrationQueueStatus,
+  type ShippingSnapshot,
 } from "@clankie/protocol/integrate";
 import { DeployHolds, durableJson, withDirectoryLock, type LockOwner } from "./deploy-holds.ts";
 import { integrationEnvironment } from "./integrate-environment.ts";
@@ -287,7 +288,7 @@ export class IntegrationQueue {
       };
     return batch;
   }
-  async snapshot(): Promise<IntegrationQueueStatus> {
+  private async readBatches(): Promise<IntegrationBatch[]> {
     const directory = join(this.options.directory, "batches");
     const ids = await readdir(directory).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return [];
@@ -308,6 +309,10 @@ export class IntegrationQueue {
         batches.push(await this.status(id));
     }
     batches.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    return batches;
+  }
+  async snapshot(): Promise<IntegrationQueueStatus> {
+    const batches = await this.readBatches();
     const completed = batches.filter((b) => !active.has(b.state) && b.state !== "interrupted");
     completed.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return {
@@ -321,6 +326,69 @@ export class IntegrationQueue {
         ),
       ...(completed[0] ? { lastResult: completed[0] } : {}),
       interrupted: batches.filter((b) => b.state === "interrupted"),
+    };
+  }
+  private readonly shippingSubjects = new Map<string, string>();
+  private async shippingSubject(source: string, commit: string): Promise<string> {
+    const key = `${source}:${commit}`;
+    const cached = this.shippingSubjects.get(key);
+    if (cached !== undefined) return cached;
+    const subject = await this.git(source, ["show", "-s", "--format=%s", commit]).catch(() => "");
+    if (subject) {
+      if (this.shippingSubjects.size >= 2000) this.shippingSubjects.clear();
+      this.shippingSubjects.set(key, subject);
+    }
+    return subject;
+  }
+  /** The same queue status as the CLI, with commit subjects reduced to issue keys. */
+  async shipping(): Promise<ShippingSnapshot> {
+    const records = await this.readBatches();
+    // Retain recent results across projects, rather than only the global last result.
+    const recent = records
+      .filter((batch) => !active.has(batch.state))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 30);
+    const batches = [...records.filter((batch) => active.has(batch.state)), ...recent];
+    return {
+      batches: await Promise.all(
+        batches.map(async (batch) => {
+          const requests = (batch.members ?? [batch.resolvedRequest ?? batch.request]).filter(
+            (request) => !batch.excluded?.some((excluded) => excluded.id === request.id),
+          );
+          const issues = new Set<string>();
+          const commits = new Set<string>();
+          for (const request of requests) {
+            for (const name of ["core", "app"] as const) {
+              const source = name === "core" ? this.options.core : this.options.app;
+              for (const commit of request[name] ?? []) {
+                commits.add(commit.slice(0, 8));
+                if (!source) continue;
+                // Commits are validated hashes. Never read logs or infer an issue from a checkout name.
+                const subject = await this.shippingSubject(source, commit);
+                for (const match of subject.matchAll(
+                  /\b(?:[A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-\d+|W-[a-f0-9]+)\b/gu,
+                ))
+                  issues.add(match[0]);
+              }
+            }
+          }
+          return {
+            id: batch.id,
+            state: batch.state,
+            updatedAt: batch.updatedAt,
+            issues: [...issues],
+            commits: [...commits],
+            gateFailed: batch.repos.some(
+              (repo) => repo.gate && repo.gate.exitCode !== null && repo.gate.exitCode !== 0,
+            ),
+            waitingCount: ["queued", "composing", "installing", "gating", "isolating", "pushing"].includes(
+              batch.state,
+            )
+              ? requests.length
+              : 0,
+          };
+        }),
+      ),
     };
   }
   /** Only admitted, still live requests hold commits; a historical record is not a handoff. */

@@ -182,3 +182,5 @@ scope is archived; readers should follow the successor for its implementation.
 
 - [0279: Fleet counts come from the host roster](0279-fleet-counts-come-from-the-host-roster.md) — VUH-2448.
 - [0280: Automatic tidy requires positive work proof](0280-automatic-tidy-requires-positive-work-proof.md) — VUH-2462.
+
+- [0281 — Paired devices read a shipping projection](0281-paired-devices-read-a-shipping-projection.md)

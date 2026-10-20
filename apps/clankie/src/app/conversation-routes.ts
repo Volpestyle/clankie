@@ -1,3 +1,4 @@
+import { SHIPPING_PATH, ShippingSnapshotSchema } from "@clankie/protocol/integrate";
 import { INBOX_TOOLS } from "@clankie/work-items";
 import { createWorktreeCacheRoutes } from "../worktree-cache-routes.ts";
 import { legacyWorkItem } from "@clankie/protocol/work-items";
@@ -69,6 +70,25 @@ export interface RegisterConversationRoutesContext {
 }
 
 export function registerConversationRoutes(ctx: RegisterConversationRoutesContext) {
+  ctx.app.get(SHIPPING_PATH, async (context) => {
+    context.header("cache-control", "no-store");
+    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (!operator || operator === "unavailable") {
+      const device = await ctx.authenticateDevice(context.req.raw);
+      if (device === "unavailable" || "denied" in device || !device.grants.terminalControl)
+        return context.json({ error: "forbidden" }, 403);
+      const record = ctx.devices.get(device.deviceId);
+      if (
+        !record ||
+        record.supportGrantId !== undefined ||
+        record.mintedBy === "hosted-account" ||
+        record.mintedBy.startsWith("support:")
+      )
+        return context.json({ error: "forbidden" }, 403);
+    }
+    if (!ctx.dependencies.integration) return context.json({ error: "integration_unavailable" }, 503);
+    return context.json(ShippingSnapshotSchema.parse(await ctx.dependencies.integration.shipping()));
+  });
   for (const path of [FLEET_ROSTER_PATH, FLEET_ROSTER_RETIRE_PATH, FLEET_ROSTER_UNDO_PATH]) {
     ctx.app.on(path === FLEET_ROSTER_PATH ? "GET" : "POST", path, async (context) => {
       context.header("cache-control", "no-store");

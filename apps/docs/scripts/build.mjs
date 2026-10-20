@@ -341,6 +341,15 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/integrate/shipping",
+      {
+        access:
+          "Encrypted owner-paired device bearer with terminalControl (Take Control); no visitors or support",
+        purpose:
+          "Read active integration batches and the latest 30 completed batches: issue keys from commit subjects, commit IDs, check failures, interrupted states and the number waiting to merge. Read-only; no logs, private paths or error details. Returns 503 when the integration queue is unavailable.",
+      },
+    ],
+    [
       "GET /v1/operator/views",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

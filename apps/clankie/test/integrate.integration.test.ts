@@ -2438,3 +2438,52 @@ if (!existsSync(join(root, 'stopped-once'))) {
   expect(landed.repos[0]!.commits[0]!.commit).toBe(request.core[0]);
   expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(2);
 });
+
+it("projects shipping from durable queue records and commit subjects through a read-only owner route", async () => {
+  const f = await fixture();
+  const change = await commit(f.core.source, "VUH-2526 LOCAL-VUH-17 W-ab12cd shipping", "feature");
+  const rejected = await commit(f.core.source, "VUH-9999-conflict", "excluded");
+  const excludedId = randomUUID();
+  const id = randomUUID();
+  const at = new Date().toISOString();
+  await durableJson(join(f.directory, "batches", id, "record.json"), {
+    schemaVersion: 1,
+    id,
+    request: { action: "run", id, core: [change], push: true },
+    members: [
+      { action: "run", id, core: [change], push: true },
+      { action: "run", id: excludedId, core: [rejected], push: true },
+    ],
+    excluded: [{ id: excludedId, state: "conflict", error: "private conflict path" }],
+    state: "pushed",
+    createdAt: at,
+    updatedAt: at,
+    evidence: "private/path",
+    repos: [],
+  });
+  const service = await createClankieApp({
+    captain: createStubCaptain(),
+    integration: f.queue,
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+  });
+  cleanups.push(() => service.close());
+  const path = "/v1/integrate/shipping";
+  expect((await service.app.request(path)).status).toBe(403);
+  const response = await service.app.request(path, { headers: { authorization: "Bearer owner" } });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.batches).toContainEqual(
+    expect.objectContaining({
+      id,
+      state: "pushed",
+      issues: ["VUH-2526", "LOCAL-VUH-17", "W-ab12cd"],
+      waitingCount: 0,
+    }),
+  );
+  expect(JSON.stringify(body)).not.toContain("private/path");
+  expect(JSON.stringify(body)).not.toContain("VUH-9999");
+  expect(
+    (await service.app.request(path, { method: "POST", headers: { authorization: "Bearer owner" } })).status,
+  ).toBe(404);
+});
