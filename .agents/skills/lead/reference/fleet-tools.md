@@ -201,6 +201,15 @@ An uncertain hire, message or answer may already have taken effect. Reconcile
 its original receipt and bound session. Never re-hire, switch bridges, resend
 through terminal keys, or pick whichever transcript is newest.
 
+A remote Codex hire with no recorded pane can time out during host reservation,
+before launch commitment. `not-launched` requires its historical reservation
+window; it refuses a missing journal. The operator may instead use
+`clankie hire-receipt settle ORIGINAL_UUID abandoned-unknown`: with the exact
+admission, no active original and a complete authenticated census, this records
+`launchHistory: uncommitted` and fences delayed reservation/launch calls. It
+claims neither historical non-launch nor delivery. Release a held project
+allocation separately with its UUID and `release-allocation`.
+
 When a result is worth the owner's attention, deliberately call `mail_owner_update`
 with a title, short body and optional issue `{tracker, key, url}`, worker `seatId`,
 links or already published media URLs. It mails news, never an answer or a gate:

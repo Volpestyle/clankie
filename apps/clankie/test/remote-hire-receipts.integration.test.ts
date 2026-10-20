@@ -1103,3 +1103,80 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
   },
   60_000,
 );
+
+it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST !== "1")(
+  "settles uncommitted prelaunch reservations with a real host census and fences late dispatch",
+  async () => {
+    const home = await root();
+    const herdr = await isolatedHerdr(join(home, "logs"));
+    await mkdir(join(herdr.root, "config/herdr"), { recursive: true });
+    await symlink(herdr.socketPath, join(herdr.root, "config/herdr/herdr.sock"));
+    const env = {
+      HERDR_SOCKET_PATH: herdr.socketPath,
+      HERDR_CONFIG_PATH: join(herdr.root, "config/config.toml"),
+      XDG_CONFIG_HOME: join(herdr.root, "config"),
+      XDG_STATE_HOME: join(herdr.root, "state"),
+      XDG_DATA_HOME: join(herdr.root, "data"),
+      XDG_CACHE_HOME: join(herdr.root, "cache"),
+      XDG_RUNTIME_DIR: join(herdr.root, "runtime"),
+    };
+    const native = createRemoteHireReceipts({
+      fleet: async () => ({ id: "pc", session: "default", ssh: { host: "configured-host", shell: "posix" } }),
+      shell: () => async (command) =>
+        (
+          await exec("/bin/sh", ["-c", command], {
+            env: { ...process.env, ...env, HOME: home },
+            timeout: 30_000,
+          })
+        ).stdout,
+    });
+    try {
+      // VUH-2538: SSH can time out before reservation exists, or lose its ACK.
+      // Neither case earns a historical no-launch window. Operator recovery
+      // retains unknown evidence and prevents a delayed reserve/launch.
+      for (const reserved of [false, true]) {
+        const admission = { ...claim(), receiptKey: JSON.stringify(["pc", "codex", home, "new"]) };
+        if (reserved) await host(home, admission, "reserve", env);
+        const admissionPath = join(home, `admission-${reserved}.json`);
+        const admissionFence = new DeliveryFence(`${admissionPath}.hire-receipts.json`);
+        admissionFence.begin(admission.receiptKey, {
+          messageId: admission.receiptId,
+          fingerprint: admission.fingerprint,
+          remoteAdmission: { target: admission.target, nonce: admission.nonce },
+        });
+        const admissionStore = new HerdrWatchStore(admissionPath, { remoteHireReceipts: native });
+        try {
+          const recovered = await admissionStore.settleHireReceipt(
+            admission.receiptId,
+            async () => {},
+            "abandoned-unknown",
+          );
+          expect(recovered).toMatchObject({
+            state: "abandoned",
+            evidence: {
+              disposition: "abandoned-unknown",
+              allocation: { outcome: "unknown", launchHistory: "uncommitted", freshIntentAllowed: true },
+            },
+          });
+          if (recovered.state !== "abandoned") throw new Error(JSON.stringify(recovered));
+          expect(recovered.evidence).not.toHaveProperty("window");
+          expect(recovered.evidence).not.toHaveProperty("allocation.present");
+          expect(recovered.evidence).not.toHaveProperty("delivery");
+          expect(
+            new DeliveryFence(`${admissionPath}.hire-receipts.json`).settlement(admission.receiptId),
+          ).toEqual(recovered.evidence);
+          await expect(host(home, admission, "reserve", env)).rejects.toThrow(/launch-fenced or sealed/u);
+          await expect(host(home, admission, "launch", env)).rejects.toThrow(/cannot launch again/u);
+          expect(
+            await admissionStore.settleHireReceipt(admission.receiptId, async () => {}, "abandoned-unknown"),
+          ).toEqual(recovered);
+        } finally {
+          admissionStore.close();
+        }
+      }
+    } finally {
+      await herdr.close();
+    }
+  },
+  120_000,
+);

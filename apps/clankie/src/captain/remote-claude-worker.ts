@@ -270,7 +270,9 @@ function remoteClaudeSettings(fleet: HerdrFleet, shell: FleetShellRun, prefix = 
               "$dir = Join-Path $env:LOCALAPPDATA 'clankie\\claude-settings'",
               "New-Item -ItemType Directory -Force $dir | Out-Null",
               `$path = Join-Path $dir ${powershellLiteral(name)}`,
-              `[IO.File]::WriteAllText($path, ${powershellLiteral(json)}, (New-Object Text.UTF8Encoding $false))`,
+              // PowerShell treats typographic quotes as syntax too. Transport
+              // UTF-8 bytes, never brief/settings text as PowerShell source.
+              `[IO.File]::WriteAllBytes($path, [Convert]::FromBase64String('${Buffer.from(json, "utf8").toString("base64")}'))`,
               "Write-Output $path",
             ].join("; "),
           )

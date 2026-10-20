@@ -65,9 +65,13 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
             return { reserved: true };
         }
         const unknownRecovery = request.op === "recover" && request.recovery?.disposition === "abandoned-unknown";
-        if (unknownRecovery && !fs.existsSync(file))
+        const uncommitted = unknownRecovery && request.recovery.launchUncommitted === true;
+        if (request.recovery?.launchUncommitted !== undefined && !uncommitted)
+            throw new Error("Uncommitted recovery requires unknown abandonment");
+        if (unknownRecovery && !uncommitted && !fs.existsSync(file))
             throw new Error("Unknown abandonment requires the existing original launch journal");
-        const record = request.op === "recover" && !fs.existsSync(file)
+        const existing = fs.existsSync(file);
+        const record = request.op === "recover" && !existing
             ? { claim, hostIdentity: identity, openedAt: Date.now(), state: "recovered" } : read();
         if (request.op === "launch") {
             if (record.state !== "reserved")
@@ -83,8 +87,11 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
         if (priorUnknown?.request?.disposition === "abandoned-unknown" &&
             (!unknownRecovery || !isDeepStrictEqual(priorUnknown.request, request.recovery)))
             throw new Error("Original unknown abandonment has a different retained disposition");
+        const originalUnknownState = uncommitted
+            ? record.state === "reserved" || (!existing && record.state === "recovered")
+            : record.state === "launching";
         if (unknownRecovery &&
-            ((record.state !== "launching" && !(record.state === "recovered" && priorUnknown?.request?.disposition === "abandoned-unknown")) ||
+            ((!originalUnknownState && !(record.state === "recovered" && priorUnknown?.request?.disposition === "abandoned-unknown")) ||
                 request.recovery.paneId !== undefined || request.recovery.message !== undefined || request.recovery.beforeIds !== undefined))
             throw new Error("Unknown abandonment requires unmapped original launching history");
         if (unknownRecovery) {
@@ -247,7 +254,7 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
                     sessions: agents.filter(agent => agent.agent_session != null).length,
                     sha256: digest([panes,agents,processes]) },
                 journal: "authenticated-recovery", disposition: recovery.disposition,
-                allocation: unknownRecovery ? {outcome:"unknown", launchHistory:"launching",
+                allocation: unknownRecovery ? {outcome:"unknown", launchHistory:uncommitted ? "uncommitted" : "launching",
                     openedAt:record.openedAt, abandonedAt:observedAt, freshIntentAllowed:true} : allocation,
                 ...(delivery ? {delivery} : {}) };
             write({...record, state:"recovered", recoveries:[...(record.recoveries ?? []),{request:recovery,evidence:proof}]}, !fs.existsSync(file));

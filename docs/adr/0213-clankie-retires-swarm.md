@@ -100,8 +100,11 @@ channel remains. James's independent Swarm fleet and installs are unaffected.
   lives in the tracker.
 
 Operator receipt recovery distinguishes a mapped abandonment from
-`abandoned-unknown`. The latter requires an existing authenticated fresh Codex
-launch journal and a complete current host census, retains unknown allocation
+`abandoned-unknown`. After launch commitment, the latter requires an existing
+authenticated fresh Codex launch journal. Before commitment, an exact admission
+whose reservation is missing or unacknowledged can be tombstoned with
+`launchHistory: uncommitted` (VUH-2538). Both require a complete current host
+census. Recovery retains unknown allocation
 fate and permanently fences the original. Choosing it explicitly permits
 separately new work through fresh-intent admission; it cannot prove no launch or
 grant ownership of an observed pane. Every new UUID, brief, owner, project and

@@ -53,7 +53,7 @@ export const HireRecoveryEvidenceSchema = HireNoLaunchEvidenceSchema.omit({ wind
       z
         .object({
           outcome: z.literal("unknown"),
-          launchHistory: z.literal("launching"),
+          launchHistory: z.enum(["launching", "uncommitted"]),
           openedAt: z.number().int().nonnegative(),
           abandonedAt: z.number().int().nonnegative(),
           freshIntentAllowed: z.literal(true),

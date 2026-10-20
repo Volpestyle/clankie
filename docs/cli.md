@@ -1011,11 +1011,16 @@ All original receipts, bridge acknowledgements and host recovery history remain
 retained. Neither recovery command sends, relaunches or adopts an original.
 An abandoned host-operation lock is a refusal, never an invitation to delete it.
 `clankie hire-receipt settle ORIGINAL_NATIVE_HIRE_UUID abandoned-unknown` is a
-separate operator decision for a fresh remote Codex hire whose launch crossed
-the host barrier but whose worker allocation was never recorded. It requires the
-existing exact host journal, original admission and launch commitment, no active
-local original, and a fresh complete authenticated census. Missing history,
-mapped allocations, resumes and other harnesses refuse. The retained disposition
+separate operator decision for a fresh remote Codex hire whose worker allocation
+was never recorded. After launch commitment it requires the existing exact host
+launch journal. Before launch commitment, a lost reservation call or ACK may
+leave a reserved or missing journal: recovery writes a host tombstone after a
+fresh complete authenticated census and records `launchHistory: uncommitted`.
+That disposition preserves uncertainty about the missing history; it does not
+manufacture a no-launch window. Delayed reservation and launch calls refuse the
+tombstone. Both paths require the original admission, no active local original,
+and current authority. Mapped allocations, resumes and other harnesses refuse.
+The retained disposition
 is `abandoned-unknown`: allocation fate stays explicitly unknown, with no pane
 identity, absence assertion or delivery claim. It records the operator's approval
 of separately new work as `freshIntentAllowed: true`; an unobserved original

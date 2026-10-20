@@ -3595,8 +3595,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (originals.length !== 1 || !this.remoteHireReceipts)
         return refused("Original allocated remote hire is missing or ambiguous.");
       const [key, receipt] = originals[0]!;
-      if ((!unknown && !receipt.paneId) || this.activeHires.has(key))
-        return refused("Original allocation is missing or still active.");
+      if (this.activeHires.has(key)) return refused("Original hire is still active.");
+      if (!unknown && !receipt.paneId)
+        return refused(
+          "Original has no mapped pane. A fresh remote Codex admission may be settled with abandoned-unknown; not-launched still requires its retained host reservation window.",
+        );
       const [fleet, harness, cwd, nativeSession] = JSON.parse(key) as string[];
       if (!fleet || !harness || !cwd || (!unknown && splitFleetQualified(receipt.paneId!)?.fleet !== fleet))
         return refused("Original remote allocation identity is incomplete.");
@@ -3605,13 +3608,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
         (harness !== "codex" ||
           nativeSession !== "new" ||
           !receipt.remoteAdmission ||
-          !receipt.remoteLaunchCommitted ||
           receipt.remoteAdmission.target.fleet !== fleet ||
           receipt.paneId ||
           receipt.sessionId ||
           receipt.occupantId)
       )
-        return refused("Unknown abandonment requires an unmapped original fresh Codex launch claim.");
+        return refused("Unknown abandonment requires an unmapped original fresh Codex admission.");
       let claim = this.remoteClaim(key, receipt);
       // Unknown recovery must fence the original before any further authority/host await.
       if (unknown) this.hireReceipts.update(key, receipt.messageId, { recoveryRequested: true });
@@ -3638,6 +3640,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return refused("Original hire is active or service closed; recovery cannot begin.");
       const evidence = await this.remoteHireReceipts.recover(claim, {
         disposition,
+        ...(unknown && !receipt.remoteLaunchCommitted ? { launchUncommitted: true as const } : {}),
         ...(unknown ? {} : { paneId: receipt.paneId! }),
         cwd,
         harness,

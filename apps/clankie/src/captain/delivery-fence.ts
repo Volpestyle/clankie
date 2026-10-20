@@ -254,7 +254,8 @@ export class DeliveryFence {
       proof.fingerprint !== previous.fingerprint ||
       (unknown &&
         (!previous.remoteAdmission ||
-          !previous.remoteLaunchCommitted ||
+          ("outcome" in proof.allocation &&
+            (proof.allocation.launchHistory === "launching") !== !!previous.remoteLaunchCommitted) ||
           !previous.recoveryRequested ||
           previous.paneId ||
           previous.sessionId ||
