@@ -109,7 +109,17 @@ receipt. Cancelling does not undo code already landed by another request.
 Each batch runs real `pnpm install --frozen-lockfile`
 with a private store and copied packages, then each included repository's
 `pnpm check:landing`, or `pnpm check` where it defines none
-([ADR 0247](adr/0247-narrow-checks-have-one-command.md)). `check:landing` runs
+([ADR 0247](adr/0247-narrow-checks-have-one-command.md)). A composed pair installs
+app first, then core. The app workspace includes sibling core packages, so its
+install rewrites their dependency links into the app's store. Installing core
+last restores its own links before either gate. Gates and pushes still run core
+first, then app. Fixture manifests retain their strict repository boundary;
+`../clankie-app` inputs remain refused.
+
+When preparing paired worktrees by hand, install the app before core, and repeat
+core's frozen install after any later app install, before building or checking
+core. Run both installs through `clankie heavy --`; never share node_modules
+between worktrees. `check:landing` runs
 lint, typecheck and the tests related to files changed since the batch base,
 which the queue passes as `CLANKIE_LANDING_BASE`; the full `pnpm check` stays
 for releases and manual runs. Core also runs `pnpm deadcode` before typecheck

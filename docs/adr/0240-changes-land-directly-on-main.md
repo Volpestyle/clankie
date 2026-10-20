@@ -162,3 +162,18 @@ without another push, and keeps the existing uncertain-push reconciliation rules
 This covers a push whose receipt was lost during restart. A second interruption
 stops for review; recovery and exhaustion notify the lead through runtime health
 notices. Neither retries nor holds deploy a runtime or change review authority.
+
+## Canonical sibling dependencies (VUH-2549, 2026-10-20)
+
+Composed batches install the app first, then core, with the same frozen lockfiles,
+private stores and copied packages. The app workspace includes sibling core
+packages; its install can redirect their dependency links into the app's store.
+Core's final install restores links within core before either repository gates.
+Gates and pushes retain their core-then-app order. A failed install still stops
+the plan before any gate starts. Core-only and remote gates keep one install.
+
+The real failed batch `cafb726e` had 79 `../clankie-app` fixture inputs after its
+app install. Fixture admission correctly refused them. Its source boundary stays
+unchanged; widening trust to accommodate a mislinked dependency is not a fix.
+Manual paired worktrees use the same order and repeat core's frozen install after
+any later app install, before building or checking core.

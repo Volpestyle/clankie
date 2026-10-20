@@ -17,7 +17,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, aroundEach, beforeAll, expect, it, vi } from "vitest";
@@ -297,6 +297,63 @@ it("composes in order on fresh origin, installs real siblings, gates privately a
     expect(await git(repo.source, "ls-remote", "origin", "refs/heads/main")).toContain(repo.head);
 });
 
+it("keeps sibling core dependencies inside core after a composed real pnpm install", async () => {
+  const f = await fixture(
+    `const { realpathSync } = await import('node:fs');
+const { relative, isAbsolute, sep } = await import('node:path');
+const dependency = relative(process.cwd(), realpathSync('packages/protocol/node_modules/zod'));
+assert.ok(dependency !== '..' && !dependency.startsWith('..' + sep) && !isAbsolute(dependency), dependency);
+const { schema } = await import('./packages/protocol/index.mjs');
+assert.deepEqual(schema.parse({ linked: true }), { linked: true });`,
+    true,
+    `const { schema } = await import('@fixture/protocol');
+assert.deepEqual(schema.parse({ linked: true }), { linked: true });`,
+  );
+  await mkdir(join(f.core.source, "packages/protocol"), { recursive: true });
+  await writeFile(join(f.core.source, "pnpm-workspace.yaml"), 'packages:\n  - "packages/*"\n');
+  await writeFile(
+    join(f.core.source, "packages/protocol/package.json"),
+    JSON.stringify({
+      name: "@fixture/protocol",
+      version: "1.0.0",
+      type: "module",
+      exports: "./index.mjs",
+      dependencies: { zod: "4.4.3" },
+    }),
+  );
+  await writeFile(
+    join(f.core.source, "packages/protocol/index.mjs"),
+    'import { z } from "zod"; export const schema = z.object({ linked: z.literal(true) });\n',
+  );
+  await execute("pnpm", ["install", "--lockfile-only"], { cwd: f.core.source });
+  await git(f.core.source, "add", "pnpm-workspace.yaml", "pnpm-lock.yaml", "packages/protocol");
+  await git(f.core.source, "commit", "-m", "Core workspace dependency");
+  const core = await git(f.core.source, "rev-parse", "HEAD");
+  const appManifest = JSON.parse(await readFile(join(f.app!.source, "package.json"), "utf8"));
+  appManifest.dependencies = { "@fixture/protocol": "workspace:*" };
+  await writeFile(join(f.app!.source, "package.json"), JSON.stringify(appManifest));
+  await writeFile(
+    join(f.app!.source, "pnpm-workspace.yaml"),
+    'packages:\n  - "../clankie/packages/protocol"\n',
+  );
+  await execute("pnpm", ["install", "--lockfile-only"], { cwd: f.app!.source });
+  await git(f.app!.source, "add", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml");
+  await git(f.app!.source, "commit", "-m", "App consumes sibling protocol");
+  const app = await git(f.app!.source, "rev-parse", "HEAD");
+  const request = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [core], app: [app] });
+  await f.queue.start(request, guard);
+  await f.queue.wait();
+  const batch = await f.queue.status(request.id);
+  expect(batch.state, JSON.stringify(batch)).toBe("passed");
+  expect(batch.repos.map((repo) => repo.gate?.exitCode)).toEqual([0, 0]);
+  const directory = batch.repos[0]!.directory;
+  expect(
+    (await realpath(join(directory, "packages/protocol/node_modules/zod"))).startsWith(
+      join(directory, "node_modules") + sep,
+    ),
+  ).toBe(true);
+});
+
 // VUH-2166: the app's own gate parses its options strictly, so the queue
 // passes it the failed-file retry flag only once its composed tree declares it.
 it("passes the failed-test retry flag to an app landing gate that declares the contract", async () => {
@@ -402,27 +459,35 @@ assert.ok(stopped, 'exact owned driver ancestor must be found');
   );
 });
 
-it("keeps a completed frozen-lockfile install failure failed when later sibling phases never started", async () => {
-  const f = await fixture("", true);
-  const manifest = JSON.parse(await readFile(join(f.core.source, "package.json"), "utf8"));
-  manifest.dependencies = { "not-in-the-installed-lockfile": "1.0.0" };
-  const approved = await commit(f.core.source, "package.json", JSON.stringify(manifest));
-  const appApproved = await commit(f.app!.source, "app-feature", "retain sibling source");
-  const request = IntegrationRunSchema.parse({
-    action: "run",
-    id: randomUUID(),
-    core: [approved],
-    app: [appApproved],
-    push: true,
-  });
-  await f.queue.start(request, guard);
-  await f.queue.wait();
-  const batch = await f.queue.status(request.id);
-  expect(batch.state, JSON.stringify(batch)).toBe("failed");
-  expect(batch.repos[0]!.install?.exitCode).not.toBe(0);
-  expect(batch.repos[1]!.install).toBeUndefined();
-  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
-});
+it.each(["core", "app"] as const)(
+  "keeps a completed %s frozen-lockfile install failure failed before any gate starts",
+  async (name) => {
+    const f = await fixture("", true);
+    const failing = name === "core" ? f.core : f.app!;
+    const other = name === "core" ? f.app! : f.core;
+    const manifest = JSON.parse(await readFile(join(failing.source, "package.json"), "utf8"));
+    manifest.dependencies = { "not-in-the-installed-lockfile": "1.0.0" };
+    const approved = await commit(failing.source, "package.json", JSON.stringify(manifest));
+    const otherApproved = await commit(other.source, "feature", "retain sibling source");
+    const request = IntegrationRunSchema.parse({
+      action: "run",
+      id: randomUUID(),
+      core: [name === "core" ? approved : otherApproved],
+      app: [name === "app" ? approved : otherApproved],
+      push: true,
+    });
+    await f.queue.start(request, guard);
+    await f.queue.wait();
+    const batch = await f.queue.status(request.id);
+    expect(batch.state, JSON.stringify(batch)).toBe("failed");
+    expect(batch.repos.find((repo) => repo.name === name)!.install?.exitCode).not.toBe(0);
+    expect(batch.repos.find((repo) => repo.name !== name)!.install?.exitCode).toBe(
+      name === "core" ? 0 : undefined,
+    );
+    expect(batch.repos.every((repo) => !repo.gate)).toBe(true);
+    expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
+  },
+);
 
 it.each(["process.exit(7);", "execFileSync('git', ['commit', '--allow-empty', '-m', 'gate moved HEAD']);"])(
   "retains exit and tested HEAD when a gate fails or changes HEAD (%s)",

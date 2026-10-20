@@ -237,6 +237,14 @@ composition and gates. An origin move after reuse also requires a fresh gate;
 selection revalidation cannot replace its unchanged-base condition. Priority
 does not authorize an ungated tree.
 
+Composed pairs install app first, core last; gates and pushes remain core first.
+The app workspace includes sibling core packages, and its pnpm install rewires
+their dependency links into the app's store. For manual paired worktrees, run
+the app's frozen install before core's through `clankie heavy --`, and repeat
+core's frozen install after any later app install before checking core. Keep
+each worktree's own node_modules. Do not relax fixture manifest admission for
+`../clankie-app` inputs; they indicate that core's links need restoring.
+
 Passed-canary retention runs once per operation per service boot. It shares the
 maintenance lock with update admission; `retentionMaintenance: held` with empty
 `holds` can be an active scan. Read status and the retention journal before

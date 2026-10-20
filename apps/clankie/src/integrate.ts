@@ -1495,7 +1495,9 @@ export class IntegrationQueue {
 
   private async localGate(batch: IntegrationBatch, root: string): Promise<void> {
     const phases = [];
-    for (const repo of batch.repos) {
+    // The app workspace includes core packages and rewires their dependency links.
+    // Install app first and core last so both gates consume core's own dependency tree.
+    for (const repo of [...batch.repos].reverse()) {
       await this.clean(repo);
       const env = await integrationEnvironment(join(root, "isolation", repo.name));
       phases.push({
