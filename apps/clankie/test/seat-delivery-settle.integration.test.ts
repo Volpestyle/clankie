@@ -68,7 +68,13 @@ function fixture() {
     start: async () => ({ outcome: "started", control }),
   };
   // The recipient's own session: whatever arrived there, nothing else.
-  let entries: { id: string; type: "message"; role: "operator"; text: string; occurredAt?: string }[] = [];
+  let entries: {
+    id: string;
+    type: "message";
+    role: "operator";
+    text: string;
+    occurredAt?: string | undefined;
+  }[] = [];
   const runner: HerdrWatchRunner = {
     get: async () => agent(),
     resolveTerminal: async () => agent(),
