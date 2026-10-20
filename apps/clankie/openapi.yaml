@@ -2352,7 +2352,7 @@ paths:
       tags: [Operator]
       operationId: inspectLinearWakeDeliveries
       summary: Inspect offered Linear wake batches, destinations and target consumption receipts
-      description: Offered batches may have failed before delivery. receivedAt is set only by the target chat confirming its original wake; native transport ACKs alone do not mark Linear notifications read.
+      description: Offered batches may have failed before delivery. receivedAt is set only by the target chat confirming its original wake; native transport ACKs alone do not mark Linear notifications read. Recoveries list missing-receiver holds, pending event IDs and durable per-event rerouted or already_handled resolutions to current lead destinations. Uncertain native takes remain pinned to their original recipient.
       security:
         - operatorBearer: []
       responses:
@@ -2366,6 +2366,9 @@ paths:
                 properties:
                   schemaVersion: { type: integer, const: 1 }
                   deliveries:
+                    type: array
+                    items: { type: object }
+                  recoveries:
                     type: array
                     items: { type: object }
         "401": { description: Operator authentication required }

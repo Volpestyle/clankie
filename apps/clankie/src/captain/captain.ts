@@ -2443,6 +2443,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     (await settings()).linearWebhook.following &&
     (options.linearFollowing === undefined || (await options.linearFollowing()));
   conversations.onLinearWakeReceived = options.linearWakeReceived;
+  conversations.linearWakeRouting = async () => (await settings()).linearWebhook;
+  conversations.linearWakeReceiverAvailable = (id) =>
+    !conversations.hasNativeSeat(id) && !conversations.runsOnRemoteSeat(id)
+      ? conversations.runsCaptainTurns(id)
+      : seatOutbox(id).routesToSeat("Linear activity arrived.");
   conversations.onQuestionChange = ({ phase, question }) => {
     const asker =
       question.workerQuestion === undefined
@@ -8011,6 +8016,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
     },
     linearWakeDeliveries: () => conversations.linearWakeDeliveries(),
+    linearWakeRecoveries: () => conversations.linearWakeRecoveries(),
     receiveLinearActivity: (activity, following, conversationId) =>
       conversations.receiveLinearActivity(activity, following, conversationId),
 

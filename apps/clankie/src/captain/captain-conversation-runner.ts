@@ -278,11 +278,16 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
       },
       async (run) => {
         run.signal.throwIfAborted();
-        // Signed Linear activity alone still waits for an attached native
-        // receiver and is re-offered on its next poll (VUH-1743).
-        if (context.origin === "hook" && ctx.conversations.hasNativeSeat(conversationId)) {
+        // The receiver can disappear after preflight. Only this definite
+        // pre-take refusal permits rerouting; never replay an uncertain take.
+        if (
+          context.origin === "hook" &&
+          (ctx.conversations.hasNativeSeat(conversationId) ||
+            ctx.conversations.runsOnRemoteSeat(conversationId))
+        ) {
           context.deliveryReceipt?.("unavailable");
-          throw new Error("Native conversation receiver is unavailable; Linear activity waits for it");
+          ctx.conversations.deferLinearWake(conversationId);
+          return;
         }
         // ADR 0218: no live seat means the service runs the conversation. The
         // log is the source of truth: a harness that drove since this lane last

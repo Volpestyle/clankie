@@ -133,12 +133,14 @@ import {
 } from "./helpers.ts";
 import {
   discardLinearWake,
+  deferLinearWake,
   flushLinearActivity,
   freshLinearEvents,
   linearWakePrompt,
   linearWakeReceipt,
   receiveLinearWake,
   linearWakeDeliveries,
+  linearWakeRecoveries,
   linearWakeTargetAllowed,
   loadLinearEventReceipts,
   queueLinearActivity,
@@ -336,6 +338,13 @@ export class ConversationStore {
   private readonly linearHookQueued = new Set<string>();
   private readonly linearHookDeferred = new Set<string>();
   private readonly linearHookTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly linearHookFlushes = new Map<string, Promise<void>>();
+  /** Current routing is read again for retained activity, not frozen at webhook ingress. */
+  public linearWakeRouting?: () => Promise<{
+    wakeConversationId: string;
+    projectChats: readonly { projectId: string; conversationId: string }[];
+  }>;
+  public linearWakeReceiverAvailable?: (id: string) => boolean;
   /** Provider delivery receipts outlive conversation history and target changes. */
   private linearEventReceipts: Record<string, number> = {};
   /** Internal turns whose `invoke()` has begun and not yet settled — not merely queued. */
@@ -1460,8 +1469,16 @@ export class ConversationStore {
     return queueLinearActivity(this, id);
   }
 
-  private flushLinearActivity(id: string): void {
-    return flushLinearActivity(this, id);
+  private flushLinearActivity(id: string): Promise<void> {
+    const current = this.linearHookFlushes.get(id);
+    if (current) return current;
+    const pending = flushLinearActivity(this, id).finally(() => this.linearHookFlushes.delete(id));
+    this.linearHookFlushes.set(id, pending);
+    return pending;
+  }
+
+  public deferLinearWake(id: string): void {
+    deferLinearWake(this, id);
   }
 
   private freshLinearEvents(id: string) {
@@ -1512,6 +1529,10 @@ export class ConversationStore {
 
   public linearWakeDeliveries(id?: string) {
     return linearWakeDeliveries(this, id);
+  }
+
+  public linearWakeRecoveries() {
+    return linearWakeRecoveries(this);
   }
 
   public conversationIdForSeat(seatId: string): string | undefined {
@@ -2142,12 +2163,16 @@ export class ConversationStore {
     await this.nativeMessages?.close();
     this.tailShutdown.abort(new DOMException("Conversation tails are closed", "AbortError"));
     for (const conversationId of this.tailListeners.keys()) this.wakeTails(conversationId);
-    for (const id of this.linearHookTimers.keys()) this.flushLinearActivity(id);
-    await Promise.allSettled([
-      ...this.runs.values(),
-      ...this.seatSends.values(),
-      ...this.deliveredFilePublishes.values(),
-    ]);
+    // Recovery may move activity to another chat and queue its first offer.
+    do {
+      await Promise.all([...this.linearHookTimers.keys()].map((id) => this.flushLinearActivity(id)));
+      await Promise.all(this.linearHookFlushes.values());
+      await Promise.allSettled([
+        ...this.runs.values(),
+        ...this.seatSends.values(),
+        ...this.deliveredFilePublishes.values(),
+      ]);
+    } while (this.linearHookTimers.size > 0 || this.linearHookFlushes.size > 0);
   }
 
   private create(
@@ -3767,6 +3792,8 @@ export class ConversationStore {
         .filter(
           (meta) =>
             !meta.isDefault &&
+            !meta.linearWakeBlocked &&
+            this.freshLinearEvents(meta.conversationId).length === 0 &&
             !this.hasUnreadInboundReports(meta) &&
             !meta.questions?.records.some((record) => record.question.status === "pending") &&
             meta.sessionState !== "active" &&

@@ -79,19 +79,25 @@ export function queueLinearActivity(ctx: ConversationStore, id: string): void {
   ctx["linearHookTimers"].set(
     id,
     setTimeout(() => {
-      try {
-        ctx["flushLinearActivity"](id);
-      } catch (error) {
+      void ctx["flushLinearActivity"](id).catch((error) => {
         ctx["linearHookQueued"].delete(id);
         console.error(`Linear wake in ${id} failed to queue`, error);
-      }
+      });
     }, LINEAR_BURST_WINDOW_MS),
   );
 }
 
 /** Retry only a definite pre-delivery refusal when this chat's native poll returns. */
 export function recoverLinearActivity(ctx: ConversationStore, id: string): void {
-  if (ctx["linearHookDeferred"].has(id)) ctx["queueLinearActivity"](id);
+  const meta = ctx["metas"].get(id);
+  if (meta?.linearWakeBlocked) {
+    if (meta.title === `${meta.linearWakeBlocked.originalTitle.slice(0, 240)} (inactive)`)
+      meta.title = meta.linearWakeBlocked.originalTitle;
+    delete meta.linearWakeBlocked;
+    ctx["saveMeta"](meta);
+  }
+  if (ctx["linearHookDeferred"].has(id) || ctx["freshLinearEvents"](id).length)
+    ctx["queueLinearActivity"](id);
 }
 
 export function freshLinearEvents(ctx: ConversationStore, id: string) {
@@ -101,6 +107,7 @@ export function freshLinearEvents(ctx: ConversationStore, id: string) {
       event.type === "message" &&
       event.role === "external" &&
       event.linear?.following === true &&
+      meta.linearWakeResolutions?.[event.linear.eventId] === undefined &&
       event.cursor > (meta.linearWakeCursor ?? ZERO_CURSOR),
   );
 }
@@ -259,6 +266,23 @@ export function linearWakeDeliveries(ctx: ConversationStore, id?: string) {
     .slice(0, 100);
 }
 
+export function linearWakeRecoveries(ctx: ConversationStore) {
+  return [...ctx["metas"].values()].flatMap((meta) =>
+    meta.linearWakeBlocked || Object.keys(meta.linearWakeResolutions ?? {}).length
+      ? [
+          {
+            conversationId: meta.conversationId,
+            unavailable: meta.linearWakeBlocked,
+            pendingEventIds: ctx["freshLinearEvents"](meta.conversationId).map(
+              (event) => event.linear!.eventId,
+            ),
+            resolutions: meta.linearWakeResolutions ?? {},
+          },
+        ]
+      : [],
+  );
+}
+
 export function loadLinearEventReceipts(ctx: ConversationStore): void {
   try {
     ctx["linearEventReceipts"] = z
@@ -327,12 +351,105 @@ export function linearWakeTargetAllowed(ctx: ConversationStore, conversationId: 
   );
 }
 
-export function flushLinearActivity(ctx: ConversationStore, id: string): void {
+/** A missing native receiver is an observable hold, never a model-turn failure. */
+function holdLinearActivity(ctx: ConversationStore, id: string): void {
+  const meta = ctx["metas"].get(id)!;
+  if (!meta.linearWakeBlocked) {
+    const since = new Date().toISOString();
+    ctx.recordServiceNotice(
+      ctx.defaultGlobalConversationId(),
+      `Linear receiver unavailable: ${id} (${meta.title}). Undelivered activity is being resolved against the current lead route. If the lead receiver is also unavailable, it stays queued until that receiver polls; no failed-turn retry loop.`,
+    );
+    meta.linearWakeBlocked = { since, originalTitle: meta.title };
+    if (id !== ctx.defaultGlobalConversationId()) meta.title = `${meta.title.slice(0, 240)} (inactive)`;
+    if (meta.sessionState !== "active") meta.sessionState = "unbound";
+    ctx["saveMeta"](meta);
+  }
+  ctx["linearHookDeferred"].add(id);
+}
+
+/** Definite refusal after admission; the native driver never took this original. */
+export function deferLinearWake(ctx: ConversationStore, id: string): void {
+  const meta = ctx["metas"].get(id)!;
+  if (meta.linearWakeCheckpoint) {
+    meta.linearWakeCursor = meta.linearWakeCheckpoint.previous;
+    delete meta.linearWakeCheckpoint;
+  }
+  holdLinearActivity(ctx, id);
+  ctx["linearHookQueued"].delete(id);
+  // One route reconciliation, then only a new burst, restart or proven native
+  // poll can retry. No autonomous timer or growing turn queue is installed.
+  if (ctx.linearWakeRouting) ctx["queueLinearActivity"](id);
+}
+
+export async function flushLinearActivity(ctx: ConversationStore, id: string): Promise<void> {
   const timer = ctx["linearHookTimers"].get(id);
   if (timer !== undefined) clearTimeout(timer);
   ctx["linearHookTimers"].delete(id);
   const meta = ctx["metas"].get(id);
   if (!meta || !ctx["linearWakeTargetAllowed"](id)) {
+    ctx["linearHookQueued"].delete(id);
+    return;
+  }
+  if (ctx["linearFollowing"] && !(await ctx["linearFollowing"]())) {
+    ctx["discardLinearWake"](id);
+    return;
+  }
+  const routes = await ctx.linearWakeRouting?.();
+  const available = (target: string) =>
+    ctx.linearWakeReceiverAvailable?.(target) ?? !ctx["metas"].get(target)?.linearWakeBlocked;
+  const fallback = ctx.defaultGlobalConversationId();
+  for (const event of ctx["freshLinearEvents"](id)) {
+    const linear = event.linear!;
+    const project = linear.project;
+    const configured = project
+      ? routes?.projectChats.find((route) => route.projectId.toLowerCase() === project.id.toLowerCase())
+          ?.conversationId
+      : routes?.wakeConversationId;
+    let target = routes ? (configured ?? (project ? fallback : id)) : id;
+    if (!ctx["linearWakeTargetAllowed"](target)) target = fallback;
+    if (!available(target)) {
+      holdLinearActivity(ctx, target);
+      target = fallback;
+    }
+    if (target === id) continue;
+    if (!available(id)) holdLinearActivity(ctx, id);
+    const destination = ctx["metas"].get(target)!;
+    // Write destination first. A crash before the source receipt is saved
+    // finds that same event (or its retained offered receipt) and cannot resend.
+    const seen =
+      ctx["readEvents"](target).some(
+        (entry) => entry.type === "message" && entry.linear?.eventId === linear.eventId,
+      ) ||
+      Object.values(destination.linearWakeReceipts ?? {}).some((receipt) =>
+        receipt.eventIds.includes(linear.eventId),
+      );
+    if (!seen) {
+      destination.revision += 1;
+      ctx["append"](destination, {
+        type: "message",
+        role: "external",
+        text: `Linear activity recovered from ${id} to current lead ${target}. Original ingress context:\n${event.text}`,
+        streaming: false,
+        linear: {
+          ...linear,
+          conversationId: target,
+          route: project ? (target === configured ? "project_lead" : "project_fallback") : "default",
+        },
+      });
+      destination.updatedAt = new Date().toISOString();
+      ctx["saveMeta"](destination);
+    }
+    (meta.linearWakeResolutions ??= {})[linear.eventId] = {
+      conversationId: target,
+      state: seen ? "already_handled" : "rerouted",
+      resolvedAt: new Date().toISOString(),
+    };
+    ctx["saveMeta"](meta);
+    ctx["queueLinearActivity"](target);
+  }
+  if (ctx["freshLinearEvents"](id).length === 0 || !available(id)) {
+    if (ctx["freshLinearEvents"](id).length) holdLinearActivity(ctx, id);
     ctx["linearHookQueued"].delete(id);
     return;
   }

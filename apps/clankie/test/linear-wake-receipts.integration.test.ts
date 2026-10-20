@@ -536,9 +536,9 @@ it("routes sparse signed issue/update comments to the configured lead and confir
   const channel = await wake(f, f.leadId, e.raw);
   expect(channel.conversationId).toBe(f.leadId);
   expect(channel.content).toContain("KH2");
-  expect(
-    f.events("global-default").filter((event) => event.type === "message" && event.role === "external"),
-  ).toHaveLength(0);
+  expect(f.events("global-default").filter((event) => event.type === "message" && event.linear)).toHaveLength(
+    0,
+  );
   expect(f.marks).toEqual([]);
   await f.ack(f.leadId, channel.id);
   expect(f.notifications[0]!.readAt).toBeNull();

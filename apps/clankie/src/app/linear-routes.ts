@@ -31,7 +31,12 @@ export interface RegisterLinearRoutesContext {
       ClankieAppDependencies["captain"],
       "receiveLinearActivity" | "linearWakeTargetAllowed"
     > &
-      Partial<Pick<ClankieAppDependencies["captain"], "linearWakeDeliveries" | "recordInbound">>;
+      Partial<
+        Pick<
+          ClankieAppDependencies["captain"],
+          "linearWakeDeliveries" | "linearWakeRecoveries" | "recordInbound"
+        >
+      >;
   };
   readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;
@@ -75,6 +80,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
     return context.json({
       schemaVersion: 1,
       deliveries: ctx.dependencies.captain.linearWakeDeliveries?.() ?? [],
+      recoveries: ctx.dependencies.captain.linearWakeRecoveries?.() ?? [],
     });
   });
   ctx.app.get(LINEAR_REQUEST_BUDGET_PATH, async (context) => {

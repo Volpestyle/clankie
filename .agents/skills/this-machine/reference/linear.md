@@ -39,6 +39,14 @@ unread. Only matching signed notifications for events included in that batch
 are marked read. Delayed inbox creation is retried for ten minutes; uncertain
 read mutations settle by read-only observation, without another write or wake.
 `clankie linear deliveries` records destinations and consumption receipts.
+Its `recoveries` list accounts for queued activity moved to the current lead:
+each event is `rerouted` or `already_handled`, with its destination. Missing
+receivers generate one default-lead notice and a quiet hold, not repeated failed
+turns. New bursts/restarts each perform one preflight; a proven native poll
+resumes a held wake. Unavailable project leads fall back to `global-default`;
+if that receiver is also absent, pending IDs stay listed. An unavailable
+nondefault chat is labelled `(inactive)` with its history intact. An uncertain
+original remains pinned to its original native recipient.
 For a native seat outside the fleet roster, a wake without `recipientBinding`
 retains its host-synchronized `recipientSessionKey`. Confirmation requires that
 exact current session and the original outbox ID/fingerprint; a missing saved

@@ -103,7 +103,13 @@ flowchart TD
     Rules -->|No| Logged
     Rules -->|Yes| History[External activity in selected ordinary chat]
     History --> Coalesce[Coalesce compact events]
-    Coalesce --> Wake[Wake selected chat through its existing receiver]
+    Coalesce --> Current[Resolve unread activity against current lead routes]
+    Current --> Available{Receiver available?}
+    Available -->|Yes| Wake[Wake selected chat through its existing receiver]
+    Available -->|No| Recover[One lead notice; idempotent transfer to fallback]
+    Recover --> Fallback{Fallback receiver available?}
+    Fallback -->|Yes| Wake
+    Fallback -->|No| Hold[Retain pending IDs; quiet until a proven native poll]
     Wake --> Lead[Lead decides and delegates]
     Wake --> Receipt{Target confirms original wake?}
     Receipt -->|No| Unread[Leave notifications unread]
@@ -111,6 +117,34 @@ flowchart TD
     Match -->|No| Unread
     Match -->|Yes| Read[Persist read claim, then mark read; no uncertain replay]
 ```
+
+## Amendment — recover undelivered activity to the current lead, 2026-10-20
+
+[VUH-2511](https://linear.app/vuhlp/issue/VUH-2511): an unread backlog must not
+remain owned by a removed project route or a remembered, disconnected native
+head. Before offering retained activity (including after restart), resolve its
+verified project against current lead routes. An absent or unavailable project
+receiver falls back to `global-default`. Nonproject activity uses the current
+default target, with the same unavailable-receiver fallback.
+
+Move only activity not already carried by an admitted original. Preserve event
+IDs, signed context and notification-receiver identity. Persist the destination
+copy before its source resolution; a retained destination event or original
+receipt makes recovery idempotent. Expose every source resolution as `rerouted`
+or `already_handled` through the existing deliveries API/CLI. An uncertain native
+take stays with its original recipient; it never becomes recovery permission.
+
+Missing receivers produce one durable notice in the default lead chat, rather
+than a failed turn for each offer. Retry admission is bounded to one preflight
+per coalesced burst or restart, plus a proven returning native poll; there is no
+blind retry timer. If the fallback receiver is also absent, retain the backlog
+and expose its pending event IDs. Nondefault unavailable chats are labelled
+`(inactive)` without removing their history; a returning receiver restores the
+title if it has not been edited. Follow off still consumes queued wakes without
+running or transferring them. Pending Linear activity and missing-receiver
+histories are protected from automatic conversation pruning. Provider
+notifications require the same original
+target confirmation as before.
 
 ## Historical decision — 2026-10-02
 

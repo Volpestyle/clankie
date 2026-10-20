@@ -89,7 +89,9 @@ Connecting Linear and following its activity are separate. `/connect linear`
 does both; bare `/linear` opens **Follow Linear** with its **Wake rules** and
 destination chats. Project activity goes to its configured lead chat, otherwise
 `global-default` with the project named. Notifications become read after the target
-chat confirms its wake. Default rules wake for signed
+chat confirms its wake. Queued activity follows current routes, with unavailable
+lead receivers falling back to `global-default`; a missing receiver gets one
+notice and waits quietly while its chat history stays intact. Default rules wake for signed
 comments and mentions from the owner emails in those rules, assignments or
 delegations to Clankie, and reactions on his comments. Other activity is visible
 without waking him. He can adjust the rules himself (`linear_wake`,

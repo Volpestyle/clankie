@@ -1851,6 +1851,16 @@ authentication. `clankie linear deliveries` reads `GET /v1/linear/deliveries`:
 offered wake ID, conversation ID, included event IDs/projects/routes, native
 original receipt, and `receivedAt` when the target confirms. An offered batch
 can have failed before delivery; `offeredAt` is not a consumption receipt.
+The response also includes `recoveries`: missing-receiver holds, pending event
+IDs and source resolutions (`rerouted` or `already_handled`, with destination
+and timestamp). Retained unread activity is resolved against current routes
+before admission, including on upgrade/restart. An unavailable lead falls back
+to `global-default`; if that receiver is absent too, the activity stays queued.
+One notice appears in the default lead chat. New bursts/restarts perform one
+preflight; a returning native poll resumes delivery. No blind retry timer creates
+failed turns. Unavailable nondefault chats show `(inactive)` while keeping their
+history; a returning receiver restores an unedited title. An uncertain original
+is never automatically rerouted or resent.
 Native originals retain the exact recipient binding, or the host-synchronized
 `recipientSessionKey` when no fleet binding exists. The target's `linear_wake`
 `received` call must match that saved identity and the original outbox ID and

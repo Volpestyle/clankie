@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "baseline-and-focused.zip",
+      "size": 451761,
+      "sha256": "f4d1196dca981829703572a797d174b2653f54347ce233c92e91f45bbbf23949",
+      "url": "clankie://evidence/sha256/f4d1196dca981829703572a797d174b2653f54347ce233c92e91f45bbbf23949"
+    }
+  ]
+}

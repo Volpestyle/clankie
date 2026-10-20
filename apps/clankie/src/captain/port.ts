@@ -558,6 +558,7 @@ export interface CaptainPort {
   /** Missing or ambiguous policy/scope retains the ordinary owner verification ask. */
   trackerClosurePolicy?(trackerProjectId: string | null): Promise<"lead" | "owner">;
   linearWakeDeliveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeDeliveries"]>;
+  linearWakeRecoveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeRecoveries"]>;
   /** Append verified external context to the selected ordinary chat and optionally wake it. */
   receiveLinearActivity(
     activity: LinearActivityEvent,
@@ -679,6 +680,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     }),
     linearWakeTargetAllowed: (conversationId) => conversationId === "global-default",
     linearWakeDeliveries: () => [],
+    linearWakeRecoveries: () => [],
     receiveLinearActivity: () => true,
     fleetConversationAuthority: async () => undefined,
     fleetWriteAuthority: async () => undefined,

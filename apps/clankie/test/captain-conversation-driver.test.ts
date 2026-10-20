@@ -567,6 +567,10 @@ it("a Linear event reaches the selected ordinary chat driver exactly once across
   });
   if (created.op !== "create") throw new Error("Create failed");
   const target = created.conversation.conversationId;
+  await new SettingsStore(join(root, "settings.json")).update((value) => ({
+    ...value,
+    linearWebhook: { ...value.linearWebhook, wakeConversationId: target },
+  }));
   const poll = captain.pollSeatEvents(10000, undefined, target);
   const activity = {
     eventId: "1".repeat(64),

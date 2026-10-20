@@ -184,6 +184,13 @@ export interface ConversationMeta {
   retainedFromCursor?: string;
   /** Newest external event already carried by a Linear hook turn. */
   linearWakeCursor?: string;
+  /** A definite missing receiver is held without creating another failed turn. */
+  linearWakeBlocked?: { since: string; originalTitle: string };
+  /** Durable source-side receipts for idempotent movement of undelivered activity. */
+  linearWakeResolutions?: Record<
+    string,
+    { conversationId: string; state: "rerouted" | "already_handled"; resolvedAt: string }
+  >;
   linearWakeCheckpoint?: { previous: string; cursor: string; runId?: string; wakeId?: string };
   /** Exact offered batches; a native transport ACK alone does not mark provider notifications read. */
   linearWakeReceipts?: Record<
