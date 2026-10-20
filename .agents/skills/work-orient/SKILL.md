@@ -1,16 +1,18 @@
 ---
-name: linear-orient
-description: Orient to a Linear project or issue before working or reporting its state. Read current deliverables, active work, dependencies and decision threads first; expand into history for contradictions or an explicit full audit. Read-only; use linear-issues for writes.
+name: work-orient
+description: Orient to a tracked project or issue (Linear, GitHub, Markdown or Clankie's built-in tracker) before working on it or reporting its state. Read current deliverables, active work, dependencies and decision threads first; expand into history for contradictions or an explicit full audit. Read-only; use work-items for writes.
 ---
 
-# Linear Orientation
+# Work orientation
 
 Build a sourced picture of what is shipping, what is in flight, and what blocks
 the next result. Start with current work; a full historical audit is opt-in.
-Resolve the workspace and team from the project or issue prefix. In Clankie's
-confirmed fleet, discover connected Linear tools through `clankie_tools` and
-`clankie_call`; load `clankie` for actor and admission boundaries. The unprefixed
-examples below describe `linear-server`; use the exposed schema for your route.
+Find the repo's tracker with `clankie work` and resolve the workspace and team
+from the project or issue prefix. In Clankie's fleet, the same `linear_*` tracker
+tools work on every backend, discovered through `clankie_tools`/`clankie_call` or
+`mcp_tool_search`; load `clankie` for actor and admission boundaries. The tool
+names below are those shapes; use the exposed schema for your route, and
+`clankie work show|activity|list` where that is the repo's interface.
 
 Start from current scope, acceptance criteria and the latest result, then read
 the relevant decisions and replies, including inline comments (`quotedText`).
@@ -29,7 +31,7 @@ scope; incremental reads must not silently drop human changes.
 1. **Current goal** — `get_project` with `includeMilestones: true`,
    `includeResources: true`, `includeMembers: true`; read its description,
    active milestone and latest project status update. Read recent project
-   comments for changed priorities. Note the project UUID.
+   comments for changed priorities. Note the project ID.
 2. **Work inventory** — list active issues and recently completed deliverables,
    requesting compact fields such as title, state, owner and update time.
    Paginate the selected scope; do not silently use one page as the whole project.
@@ -70,11 +72,9 @@ unavailable scope rather than claiming completeness.
 
 ## Mechanics
 
-- `list_issues` and `list_comments` cap at 250 per page (default 50). Follow
-  pagination until the selected collection is exhausted.
-- `milestoneId` and `statusUpdateId` require UUIDs: resolve with
-  `list_milestones` / `get_status_updates`. Projects and issues accept names or
-  identifiers; documents accept IDs or slugs.
+- Paginate every list and comment collection until the provider says it is
+  exhausted; Linear's page sizes and UUID-only fields are in work-items'
+  [Linear reference](../work-items/reference/linear.md).
 - Batch independent reads in parallel. Keep full responses outside the main
   context when possible and return relevant excerpts; inspect every result and
   follow truncated descriptions with `get_issue`/`get_document`. Do not dump a
@@ -82,7 +82,7 @@ unavailable scope rather than claiming completeness.
 - Prefer freshly fetched state over memory. Preserve later human edits; a
   contradiction is something to resolve, not permission to restore old text.
 - This skill is read-only. Route authorized follow-up writes through
-  `linear-issues`; orientation alone does not authorize posting.
+  `work-items`; orientation alone does not authorize posting.
 
 ## Output
 

@@ -51,14 +51,9 @@ owned, linked follow-up. Close an accepted slice only under that decision; never
 mark missing verification as passed. Blockers name the missing prerequisite and
 next action, not merely "waiting."
 
-For Clankie's fleet, read effective `fleet.closure` before the transition:
-`lead` closes landed work with passing checks and attached evidence to Done;
-`owner` parks it In Review. The owner can reopen either. A genuine owner-only
-gate (App Store submission, payments, evals or owner-account sign-ups) becomes a
-linked follow-up and does not hold the delivered issue open. Keep the gate's
-unperformed action explicit; missing product behavior still needs the scope
-owner's disposition above. Workers report to the transition owner rather than
-waiting for a separate owner acceptance under `lead`.
+For Clankie's fleet, `fleet.closure` and owner-only gates follow "Status stays
+true" in `work-items`; missing product behavior still needs the scope owner's
+disposition above.
 
 ## What stays out of the record
 
@@ -80,29 +75,18 @@ changes, and make scoped edits rather than replacing files from old copies.
 Keep durable records under version control and land them with the relevant work
 under repository policy. A scratchpad is a continuation aid, not the sole home
 of an accepted result. Link retained evidence from the record; do not duplicate
-archives or commit large media merely to make it discoverable. Publish raw
-captures through `clankie evidence push <folder> --issue <KEY>` and commit only
-the folder README and `evidence.json`; cite the printed
-`clankie://evidence/sha256/...` links in the tracker comment. Upload a Linear
-screenshot only when its inline display helps the reader; the store copy
-remains the record.
+archives or commit large media merely to make it discoverable; raw captures go
+through `clankie evidence push`, as `work-items` describes.
 
 ## Mapping to Linear
 
 For Clankie's fleet, write through Clankie's connected Linear account (his own
 tools, or `clankie_tools` / `clankie_call` for a worker), never a harness's own
-connector, and load `linear-issues` before writing; it owns read-before-write,
+connector, and load `work-items` before writing; it owns read-before-write,
 media publication and result-update mechanics.
 Inspect the existing project, issues and workflow before creating anything.
-Remote project heads reach only their registered tracker project through the
-seat-bound bridge. Use `mcp_tool_search` for its supported tracker tools; both
-direct and deferred calls enforce the same project fence. Lists default to that
-project. Reads/writes of another project's issues, moves out of the project and
-cross-project relations refuse. Comment edits/replies need the explicit scoped
-issue/project/status-update target as well as their comment ID. `get_user` accepts
-`me` only. A missing/conflicting binding needs the owner's project configuration;
-do not substitute an inherited tracker connector or `repo` override. Expanded
-issue relations/releases and tools without a safe project policy are unavailable.
+Remote project heads write only inside their registered tracker project
+([tracker fence](project-leads.md#tracker-fence-for-remote-heads)).
 
 | Work concept                                  | Linear representation                                               |
 | --------------------------------------------- | ------------------------------------------------------------------- |

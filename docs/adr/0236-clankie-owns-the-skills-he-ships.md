@@ -26,7 +26,7 @@ skill was kept, folded into another, or dropped:
 | this-machine                                                   | 44 / 86                   | Keep; core cut from 6,241 to 1,348 words, detail in references                                  |
 | herdr                                                          | 20 / 124                  | Keep (generated from the pinned binary)                                                         |
 | lead                                                           | 21 / 58                   | Keep; rewritten, see below                                                                      |
-| linear-orient, linear-issues                                   | 11 / 57, 6 / 124          | Keep                                                                                            |
+| linear-orient, linear-issues                                   | 11 / 57, 6 / 124          | Keep; merged into tracker-agnostic `work-items` and `work-orient` (2026-10-20)                  |
 | trace-clankie                                                  | 10 / 51                   | Keep                                                                                            |
 | minecraft                                                      | 24 / 10                   | Keep                                                                                            |
 | shared-checkout                                                | 2 / 148                   | Keep                                                                                            |

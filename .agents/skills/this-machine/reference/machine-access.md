@@ -34,7 +34,7 @@ Ordinary local/SSH enforcement is reported as `service-preference`: the service 
 its own tools but runs under the owner's account. Do not call this an OS
 sandbox. Approved join registrations report `joined-host`: the public receiver
 checks access and canonical working-directory intersection, but live gateway
-proof and native worker/screen adapters remain VUH-1800 gaps. An authorized shell
+proof and native worker/screen adapters remain open gaps. An authorized shell
 still runs as the owner; its file effects are not confined by the working-directory
 check. A prepared installed macOS launch reports `os-sandbox` only after a
 refused outside read. Inventory names its immutable `accessCeiling` and
@@ -55,8 +55,10 @@ then starts it again. No reinstall or workspace/home deletion is needed. A
 bounded worker cannot remove its controls or raise the OS ceiling. A changed
 installed runtime needs owner re-preparation. Do not activate/restart or provision
 live credentials without owner authority. Live lower/hire/refusal and restore
-proof remain the owner-held VUH-1804 gap. Apple's deprecated `sandbox-exec` is
+proof remain an owner-held gap. Apple's deprecated `sandbox-exec` is
 the process boundary; do not describe it as a signed App Sandbox app or VM.
+
+## Joined machines
 
 A joined receiver
 must check its own owner-approved level and directory grants before executing
@@ -84,6 +86,41 @@ gateway cannot read or forge work or broker capabilities. Never print or copy
 its broker capability into evidence.
 The gateway's machine routes require separate clankie-ops delivery; do not claim
 production readiness from the loopback integration fixture.
+
+On a joined install, Clankie's service, memory and accounts stay at the home.
+`clankie join status` reads its registration and `join resume` restores the
+outbound machine channel. `clankie claude [--new | --conversation ID | --resume … |
+--reset]` in an approved folder opens a local seat in the home's workspace chat:
+plain `clankie claude` reuses that machine/folder's chat, `--new` makes another,
+and exact conversation IDs must belong to that machine and folder. The home
+supplies delegated lead tools and maximum trust through encrypted join traffic;
+no SSH or second local service is needed. Resume keeps the native session and
+chat in its original approved folder. Reset keeps the folder chat, retires old
+sessions and reports earlier launches without closing their panes. The joined
+lead hires native Claude workers through the running join channel; they report
+with `message_clankie` using one UUID deliveryId per report, then reconcile with
+`message_clankie_status` after uncertainty. The lead uses `worker_reports`,
+`acknowledge_worker_reports` and `message_seat` to the returned seat. Run service
+start/restart/recover at the home; a joined install refuses them locally. If
+access is revoked, the lease is erased and local commands retain that specific
+refusal. Use `clankie join leave` to forget it, or join again with fresh owner
+approval.
+
+## Lent screens
+
+For a lent screen, use the same `clankie computer request` API with an explicit
+registered `machineId: "join-UUID"`. Screen level does not grant local session
+consent or input. The host asks its owner and shows a pet with Stop; observation
+is the default. Desktop parents can supervise `join resume --json` with local
+`screen_status` / `screen_stop` stdin controls; neither can enable input.
+An unavailable or held Stop is not quiescence proof. Native accessibility
+press/text and bounded navigation key/drag/scroll require exact receipts; no
+fallback or replay. Native observer acknowledgments do not prove queue drain:
+after any attempted input, Stop keeps the lease held. Read the
+[desktop-control skill](../../desktop-control/SKILL.md) before driving, and the
+[CLI contract](../../../../docs/cli.md#lent-computer-selection).
+
+## Existing SSH machines
 
 Existing SSH machines with a saved enabled fleet connection and no recorded
 access choice migrate to `workers`; the next settings write persists that

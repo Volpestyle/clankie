@@ -11,16 +11,12 @@ An owner request to start the local world and play includes running its host
 through the machine tools available in that turn, including trusted Discord
 voice handoffs. Keep the existing room authority boundary.
 
-Pokémon's native connector and execution live in `integrations/pokemon`, using
-the shared game-extension lifecycle; its mind and journal remain in `packages/play`.
-Core retains the shared `play` lease and exact-session recovery. Extension
-`health: ready` describes local lifecycle state, not world reachability or
-visible frames; use the existing status/check/watch evidence below.
-
-Use `clankie games extensions` (TUI `/games extensions`) for registered game
-lifecycle/health discovery. It does not join a world or probe credentials. An
-uncertain stay blocks removal and reuse until core proves exact connector end;
-a requested stop, lost adapter or deadline is not termination evidence.
+Pokémon runs as a game extension under the shared `play` lease with exact-session
+recovery. Extension `health: ready` (`clankie games extensions`, TUI
+`/games extensions`) describes local lifecycle state, not world reachability or
+visible frames; use the status/check/watch evidence below. An uncertain stay
+blocks removal and reuse until core proves the exact connector end; a requested
+stop, lost adapter or deadline is not termination evidence.
 
 ## Get the world running
 

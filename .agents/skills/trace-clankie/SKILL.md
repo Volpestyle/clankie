@@ -46,133 +46,42 @@ lifetime. Join their `runId` to the accepted/completed/failed `events.jsonl` tur
 A service-interrupted attempt stays uncertain. Read first and acknowledge only
 fully reviewed offered IDs with `clankie agents reports ack ID... --conversation ID`.
 
-For an owner app turn missing from a native operator seat, read `clankie status`
-(`seatBridges`) or doctor and the `seat_bridges` operator dispatch observation.
-Capabilities describe the loaded bridge, not installed source. No handshake is
-a legacy receiver; new owner turns use its plain message format and omit new
-wire fields. A stale bridge or lost ACK produces a conversation reconnect notice
-(`/mcp`). Match the original ID, conversation journal, bridge pump journal and
-head delivery fence. Diagnostic reads never ACK, replay or settle the original.
-
-For a stuck `message_clankie` claim, compare the exact authenticated receipt with
-the worker's running bridge version. Worker bridge 0.6.2 recognizes only `stored`;
-it keeps returning `uncertain` even when the service returns an exact sealed
-`definitive: not_sent`. Updated files on disk do not update an already imported
-bridge. Keep the original claim and truthful receipt; never label an unsent
-message `stored`, delete runtime state, or send a replacement to bypass this gap.
-
-## Where to look
-
-- Operator console chat (the TUI dialogue): `~/.clankie/captain/conversations/<conversationId>/`
-- Native seat turns: the harness transcript, projected into `~/.clankie/captain/conversations/<conversationId>/events.jsonl`; use `clankie agents read HOST:SESSION --tail 20` for bounded native history.
-- Per-turn tool-shape metrics: `~/.clankie/captain/turn-settled.jsonl`, read with `clankie metrics` or `GET /v1/captain/turn-metrics`
-- The pi session behind a conversation: `~/.clankie/captain/conversations/<conversationId>/pi/`
-- What he heard/said per room: `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`
-- Tool calls he made in a room: `~/.clankie/captain/rooms/<sessionKey>/`, `~/.clankie/captain/voice/<sessionKey>/`, `~/.clankie/captain/turns/<lane>~<encoded-target>/*.jsonl`
-- Presence + system events: `~/.clankie/events.jsonl` (override: `CLANKIE_EVENT_LOG`)
-- Durable memory: `~/.clankie/memory/discord-people/*.json`, `captain-episodes/*.jsonl`
-- Play sessions (GBA): `~/.local/state/clankie/gba-play/*.jsonl`, `.screenshots/<journal-stem>/*.png`
-- Historical shared-body artifacts: `~/.local/state/clankie/gba-body/possession-events.jsonl` and `body.lock`, when left by an older build
-- Official-bot Discord actions: `~/.local/state/clankie/discord-live-receipts.jsonl` (override: `DISCORD_BRIDGE_RECEIPT_PATH`)
-- User-session Discord actions: `~/.local/state/clankie/discord-user-session-receipts.jsonl` (override: `DISCORD_USER_SESSION_RECEIPT_PATH`)
-- Opt-in development voice transcript: `~/.local/state/clankie/discord-voice-transcripts.jsonl`
-- Browser recordings (opt-in): `~/.clankie/runner/browser/recordings/*.webm`, named by start time
-- Service stdout + lifecycle: `~/.local/state/clankie/<id>.log`, `<id>-service.json`; older lines in the rotated `<id>.log.1.gz`…`.3.gz` (`gzip -dc`). Per-request timing events (`remote.observation.timings`, `remote.proof.timings`, `fleet.projection.timings`, local proof checkpoints) are debug-level: start the service with `CLANKIE_LOG_LEVEL=debug` to see them.
-- Live status: `clankie status` / `/trace` in the face
-- Opt-in service CPU profiles: set `CLANKIE_CPU_PROFILE_DIR` in the actual launcher's environment for the next planned start/restart; Node writes `.cpuprofile` on graceful service exit. Only Clankie is profiled, not preparation or helpers. Relative directories resolve against the runtime root. Existing live processes are unchanged; a prefixed `clankie update` does not forward this variable into its live-service-owned update helper. Arrange it for the next planned deployment with the operator; do not introduce an extra restart. See `docs/cli.md` under service lifecycle.
-- What's on the TUI screen right now: `herdr pane read <pane> --source visible`
-
-Shapes, retention and the Discord media and Linear activity details are in
-[the trail map](reference/trail-map.md).
-
-For fleet proof alerts, start with `clankie metrics --fleet` and its coverage
-start; compare rates only within a settled runtime. In the private service log,
-join `fleet.local_proof.refusal_context` and project-stage diagnostics by
-`requestId`. The fixed route and `operation` distinguish fleet admission from
-project membership. `claimedPane` and `claimedBridgeId` are caller claims;
-`callerPid` plus `callerBirth` comes from a kernel observation. Check
-`callerAttribution` and `callerObservedAt`: a previous observation is historical,
-and `unknown` does not identify a sender. A project pane-not-found is distinct
-from harness, launcher, foreground, process/session/binding and transport failures.
-For `launcher_mismatch`, compare the foreground group leader with the actual
-harness: `clankie claude` leaves its Node launcher in front of a direct Claude
-child. Only the exact installed launcher/command and kernel-proven child chain
-are supported; never exempt a mismatch just because the pane looks healthy.
-ESRCH/EBADF retry diagnostics from the global process/FD scan are not terminal
-refusals; join the final proof result before diagnosing an outage.
-Aggregate proof alerts appear as conversation service notices. Caller-specific
-alerts can go directly to the lead's native mailbox without a conversation
-journal entry. Before claiming a quiet interval, check the lead's matching native
-transcript and delivery receipts as well as retained aggregate notices; journal
-coverage alone does not establish that no caller alerts were delivered.
-For `launcher_unavailable` on Claude, check the service's PATH: prepared panes
-put Clankie's shell shim before the actual Claude binary. Project proof resolves
-past those shims using the launcher's real-Claude lookup; the shim itself never
-proves membership. A launcher refusal is not evidence of a failed socket lookup.
-An empty or all-relative service PATH supplies no installed launcher; proof
-never falls back to an executable in the working directory.
-Do not infer the historic sender from today's connected processes. Retain actual
-PID/pane/socket details privately and publish sanitized counts and stages. See
-`docs/cli.md` under `metrics --fleet` for the bounded diagnostic sampling.
-For idle Codex panes, distinguish persistent worker discovery from temporary
-`mcpServerStatus/list` snapshot clients. A snapshot may end its bridge immediately
-after `tools/list`; bridge health must finish before that response, or its
-fire-and-forget notification can fail proof after the caller exits. This is a
-caller-lifetime defect, not authority granted by an idle pane or reason to mute alerts.
-
-For remote Windows `remote_pane_required`, compare the kernel's loaded image
-with the independently installed launcher before blaming workspace grants.
-A replaced Claude image may still run as `claude.exe.old.<timestamp>.<updater-pid>`;
-several workers can share that image, so its suffix need not equal the worker's
-PID. The observer admits only that launcher's exact predecessor renamed during
-the worker's lifetime; native PID/birth, pane ancestry and socket ownership still
-have to match. A bridge can reconnect to the new fleet port yet fail this native
-proof: connected tools can work while both mailbox polling and reports are refused.
-Readoption does not repair a failed native proof. A host-side probe fix can help
-an existing bridge that keeps polling; deploy it through the scheduled runtime
-restart, then observe recovery without replaying uncertain mail or touching a busy pane.
-Remote process/pane admission and project workspace membership are separate
-checks. A read-only process observation without the original request socket
-does not prove successful native report binding.
-
-For a model credential rejection, inspect doctor's `credentialRejections` and
-the original conversation receipt. Owner-typed Pi turns force one OAuth refresh
-and continue only on success, within the same run. Pi's context edit hides the
-rejected assistant from active context without deleting its audit record; it
-does not append the owner's input again or replay completed tools. A second
-rejection or cancellation stops continuation. Hosted `operator_required` means
-service-owned credential repair. For local and hosted turns, join service-log
-`model.credential_rejected` (`providerId`, recovery `outcome`) with later
-`model.credential_accepted` and the original receipt. These fixed diagnostics
-exclude upstream errors and credentials. Doctor is current health, not a history:
-a cleared entry or later provider success alone does not prove forced refresh.
-Retained Pi assistant records prove provider acceptance or rejection; distinguish
-that from evidence of a refresh grant. Inspect existing failed-turn telemetry too. Never tell a hosted customer to run
-`/auth`; no dedicated credential-escalation acknowledgment is implied. Local
-`reconnect_required` retains the console reconnect path. See `docs/cli.md` under
-doctor for the states. Do not run a paid model probe just to refresh diagnostics.
+For a Discord room, start with `clankie discord rooms` and its `/conversation`
+heard/said/tool history. Counters are bounded observed deliveries, not proof of
+complete gateway coverage. Pending/absorbed is not confirmed answered.
+`clankie discord call` shows current voice activity and handoffs; exact words
+require opt-in transcript logging. See `docs/discord-rooms.md`. Private owner
+guidance queues through its dedicated API/CLI and never posts as the owner or
+grants room tools.
 
 ## Read next, only for the question at hand
 
+- [The trail map](reference/trail-map.md): every durable trail, its path,
+  shape and retention, plus Discord media and Linear activity.
 - [Captain turns and Discord text](reference/captain-and-discord.md): replies
-  that never arrived, absorbed or declined turns, presence, the TUI viewport
-  and the roster.
+  that never arrived, absorbed or declined turns, presence, the TUI viewport,
+  the roster and model credential rejections.
+- [Seat bridges](reference/seat-bridges.md): owner turns missing from a native
+  seat, stuck `message_clankie` claims and no-install remote leads.
+- [Fleet proof](reference/fleet-proof.md): fleet proof alerts and launcher or
+  remote-pane refusals.
 - [Voice](reference/voice.md): hearing versus answering, cutoffs, mute mouths,
   Vox readiness, watch and publish, leaves.
 - [Play](reference/play.md): journals, screenshots, journeys, hosted worlds.
 - [Queries](reference/queries.md): copy-ready `jq` reads for the trails above.
 
-For a Discord room, start with `clankie discord rooms` and its `/conversation` heard/said/tool history. Counters are bounded observed deliveries, not proof of complete gateway coverage. Pending/absorbed is not confirmed answered. `clankie discord call` shows current voice activity and handoffs; exact words require opt-in transcript logging. See `docs/discord-rooms.md`. Private owner guidance queues through its dedicated API/CLI and never posts as the owner or grants room tools.
+## Where to look first
+
+- Operator console chat and native seat turns: `~/.clankie/captain/conversations/<conversationId>/`
+  (`events.jsonl`; `clankie agents read HOST:SESSION --tail 20` for bounded native history)
+- Per-turn tool-shape metrics: `clankie metrics` (`~/.clankie/captain/turn-settled.jsonl`)
+- What he heard/said per room: `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`
+- Presence + system events: `~/.clankie/events.jsonl`
+- Service stdout + lifecycle: `~/.local/state/clankie/<id>.log` (rotated `.log.1.gz`…)
+- Live status: `clankie status` / `/trace` in the face; the TUI screen itself:
+  `herdr pane read <pane> --source visible`
+
+The rest, with shapes and overrides, is in [the trail map](reference/trail-map.md).
 
 When the trail ends in a defect in Clankie's own code, the fix, runtime update
 and restart loop is in `this-machine` under "Changing yourself".
-
-For a no-install remote lead, the home service persists the launch delegation’s
-hash and original native proof. Its bridge rereads the fleet link file on each
-request, so a restarted SSH relay may publish a new loopback address without a
-head relaunch. `clankie doctor` names disconnected or reconnecting lead chats;
-the fleet round’s `leadChats` includes their receiver state. Inspect the remote
-hooks log only with authority for that machine. A missing proof, replaced native
-process, changed connection identity or revoked grant must never be repaired by
-rotating credentials. A deliberate relaunch into the same conversation reuses
-its recorded account label unless an explicit label overrides it.

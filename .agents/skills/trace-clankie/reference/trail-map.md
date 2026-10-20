@@ -22,6 +22,15 @@ Durable trails and their source references: read them, never write runtime state
 | Live status                              | `clankie status` / `/trace` in the face                                                                                                        | `/trace` lists rooms and tails their bounded `heard`/`said` lane logs through the service.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | What's on the TUI screen right now       | `herdr pane read <pane> --source visible`                                                                                                      | Viewport only; see the fullscreen caveat in [captain-and-discord](captain-and-discord.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
+Opt-in service CPU profiles: set `CLANKIE_CPU_PROFILE_DIR` in the actual
+launcher's environment for the next planned start/restart; Node writes
+`.cpuprofile` on graceful service exit. Only Clankie is profiled, not preparation
+or helpers. Relative directories resolve against the runtime root. Existing live
+processes are unchanged; a prefixed `clankie update` does not forward this
+variable into its live-service-owned update helper. Arrange it for the next
+planned deployment with the operator; do not introduce an extra restart. See
+`docs/cli.md` under service lifecycle.
+
 Past 8 MiB a receipt journal drops repeated retry receipts and keeps its
 newest 4 MiB, so older history may be gone. Discord media proof uses the log owned by the active body. Bot voice evidence is
 in `discord-live-receipts.jsonl`; user-session voice, watch, and publish evidence

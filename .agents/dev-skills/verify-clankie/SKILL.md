@@ -32,7 +32,7 @@ a separate reviewed effort. Choose checks for the changed claim and risk, reuse
 valid evidence for unchanged inputs, and record what actually ran. Whoever lands
 a change runs the root `pnpm check:landing` before pushing
 ([ADR 0240](../../../docs/adr/0240-changes-land-directly-on-main.md)); the full
-`pnpm check` runs for releases and on request. Evals are manual-only, never implicit in a build, release or `pnpm check`.
+`pnpm check` runs for releases and on request.
 
 Report advertised capabilities as `live`, `refused`, or `absent`. A receipt
 that fails because a promised capability is absent is useful evidence; do not
@@ -139,32 +139,8 @@ Receipts may contain schemas, logical observations, and SHA-256 digests.
 identity is deny-by-default, so every join refuses `unauthenticated` — which
 reads as a bad credential and is not one.
 
-### Getting a cold body to the overworld
-
-**A fresh join starts at the intro, every time**, unless the game was saved
-_in-game_. The host restores a cartridge save; walking around does not write
-one, so the position a previous run reached is not where the next run begins.
-Budget for the intro rather than assuming a resume.
-
-**Press A, and only A.** `start` during the intro and naming screens navigates
-away and the sequence never completes. An `a`/`start`/`a` loop ran 1,085 actions
-to frame 62,000 — seventeen emulated minutes — without ever reaching the
-overworld; A alone gets there in about 83 presses (~frame 7,900). This is the
-concrete case of the fixed-button-loop warning above, and it was written by the
-same run that then fell into it.
-
-**Diagnose unpaced, judge paced.** `WORLD_PACE=0` runs flat out, so "is this
-stuck or just slow?" resolves in seconds instead of minutes. Probe the raw
-world with `play.observe` and log `scene.mode` after each press: a plateau names
-the screen you are stuck on. Then take the actual verdict at `WORLD_PACE=1`,
-because pacing is what a watcher sees and what frame delivery is measured under.
-
-**Do not "just check" a running session with a stop or a changed join.** An
-exact join retry reuses the live body, but an explicit operator stop ends it and
-a join with a different fingerprint replaces it. Use an isolated holder/world
-for intrusive probes. To watch the default player's live session, tail its
-journal instead — one JSON line per action with the frame number, under
-`$WORLD_STATE_DIR/players/<hash>/games/<game>/journal/`.
+Getting a cold body to the overworld (intro, button choice, pacing, not
+disturbing a live session): [cold FireRed body](reference/hosted-firered.md).
 
 A useful receipt names the code revision and artifact digests, the public path,
 each advertised capability and outcome, exact check commands and exit codes,
@@ -236,7 +212,7 @@ comparable evidence; a merged fix alone is applied.
 For an explicitly requested comparison, use the checkout-only subscription eval runner described in [docs/evals.md](../../../docs/evals.md)
 for instruction-quality comparisons (ADR 0203); objective stale-command/path repairs do not require an eval ritual. Preview with
 `node scripts/evals/run.mjs --dry-run`; default execution is up to three Claude calls,
-with no retries. Keep Codex sampling small while its weekly budget is low.
+with no retries. Keep Codex sampling small.
 Compare matched cases under `current`, `plain`, and `trimmed`, and retain failed
 attempts, token counts and rework. This runner owns isolated fixture worktrees
 and state; never turn a fixture into a live service probe or toggle owner settings.

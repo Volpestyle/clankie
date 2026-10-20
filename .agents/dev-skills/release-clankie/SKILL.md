@@ -43,8 +43,8 @@ and the files being changed before editing. The active implementation lives in:
   workers. A neighboring working tree is never a release input. Keep its native license
   inventory, including libghostty-vt, in the bundle. Cloudflared and optional
   machine integrations remain external.
-- Every shipped skill comes from this repo's `.agents/skills`. The generated
-  Herdr skill must match the checksum-verified binary.
+- Every shipped skill comes from this repo's `.agents/skills`. The Herdr
+  skill is a loader, and the checksum-verified binary must serve `--skill`.
   Rebuild native seat projections from source; never package stale copied skills.
 - Evals are manual-only, including releases. The full repository check excludes
   them; do not add instruction comparisons or live assessments to that gate.
@@ -86,10 +86,10 @@ Make the smallest change in the owner above, update distribution docs and ADRs
 when the contract changes, then run:
 
 ```bash
-pnpm check
-pnpm check:load
-pnpm release:build
-pnpm release:smoke
+clankie heavy -- pnpm check
+clankie heavy -- pnpm check:load
+clankie heavy -- pnpm release:build
+clankie heavy -- pnpm release:smoke
 (cd dist && shasum -a 256 -c clankie-darwin-arm64.tar.gz.sha256)
 ```
 

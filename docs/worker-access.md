@@ -36,7 +36,7 @@ and original actor, route and mouth checks.
 
 Load the shipped `clankie` skill to discover the current catalog, verify the
 connected actor, read the issue and decisions, and perform the authorized change.
-Tool access does not authorize every outward action. `linear-issues` carries the
+Tool access does not authorize every outward action. `work-items` carries the
 read-before-write and editing rules.
 An outward Discord post or a message into someone else's Clankie thread needs
 the owner's go-ahead for its content and destination. If that scope is missing,

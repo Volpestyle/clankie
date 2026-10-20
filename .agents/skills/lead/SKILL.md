@@ -8,12 +8,13 @@ description: Lead authorized work across Clankie's fleet - choose what to start,
 Clankie's job is to get the most useful work done for this owner, in parallel
 across all their projects, fitted to what they have: their plans and usage
 left, their machines, and how hands-on they want to be. Every owner differs;
-learn their limits and fill them. Size, harness, account, model and scheduling
-choices all serve that.
+learn their limits and fill them. "Your fleet" in your instructions says how to
+stay reachable, match ceremony to risk, spend plan capacity and stay quiet;
+this skill applies it.
 
 A lead earns its place by deciding, unblocking ownership, or getting accepted
-work to its destination. A busier roster, another handoff packet or a longer
-status report is not progress.
+work to its destination. A busier roster, another handoff packet, a longer
+status report or a message that nothing changed is not progress.
 
 Leading needs the user's authorization: "lead", "dispatch", "harvest and
 continue". Census and read-only triage need none. Keep the user's existing
@@ -21,101 +22,21 @@ division of priority, dispatch, tracking and integration, with one dispatch and
 integration authority; do not redo a planner's queue audit or a tracker's
 ticket upkeep.
 
-## Project leads are chats
+## Each turn
 
-A remote lead reports any fleet-link or delegation failure to the Mac lead or
-owner, including the specific refusal and recovery instruction. A changed
-binding or revoked workspace needs a fresh launch from the Mac after approval
-is restored. Never work around a link failure by driving the Mac desktop or
-rotating credentials. Workspace grants can change while a lead stays connected;
-its own working directory must remain granted on every request.
+1. Answer the owner's message, if there is one.
+2. Decide and land ready results. Lanes need not finish together.
+3. Unblock a real ownership, interface, resource or acceptance problem.
+4. Give spare capacity a concrete, independent deliverable.
 
-A project lead is Clankie in a named workspace conversation with its own native
-head, not a worker sub-lead. Its hires, reports and watches belong to that chat.
-Local heads use `clankie claude --conversation ID` or `clankie codex --conversation ID`.
-For a new Windows Claude head on an already-linked fleet, the owner CLI offers
-`clankie conversations lead prepare FLEET`, `launch --json-stdin`, and
-`revoke DELEGATION_ID`; the full input and receipt contract is in
-[the CLI reference](../../../docs/cli.md#conversations-lead-prepare-fleet--launch---json-stdin--revoke-id).
-Remote heads use a seat/chat/machine-bound, revocable delegation and require the
-machine's current `workers` ceiling and approved working directory.
-Launch allows the session's delegated lead MCP tools, including `message_seat`,
-in auto mode independently of maximum trust; other harness permissions remain
-subject to the selected profile and mode.
-Launch may name `account` using the stable identity key (`label`/`accountKey`)
-from `worker_accounts --fleet`. Discovery groups homes signed into the same
-account; cards show the signed-in name or email. Existing profile aliases stay
-bound to their original identity after a home re-signs. Saved preferences, holds
-and usage follow the identity. A hire or remote lead picks a current home signed
-into that identity and verifies it before launch; an absent or changed identity
-refuses with a sign-in prompt. Never create a profile, copy credentials or
-substitute another account. A deliberate relaunch into the same conversation,
-fleet and workspace reuses its recorded identity when `account` is omitted;
-a fresh launch chooses a usable, unheld identity from the account list.
+Before any other coordination action or message, name what it will change; if
+nothing depends on it, skip it. Do not commission another audit of the same
+plan, and do not manufacture supervision when nothing needs judgment.
 
-Remote bridges retry temporary transport and native-proof loss. Restart recovery
-requires the original pane, shell/harness lifetime, native session and chat;
-explicit revocation is permanent. A launch that never proved its native process
-before shutdown stops with one clear fresh-launch reason. Doctor lists known
-bridges by lead chat name, including disconnected and reconnecting channels.
-Never relaunch or choose another pane as
-reconnection. `clankie status` shows `reconnecting` then `current` when polling
-resumes. Verify live tool/channel recovery after a deploy; fixture proof alone
-cannot establish the PC outcome.
-
-Keep the original request ID after uncertain launch; rereading it never launches
-again. `dispatched` is not tool readiness. Prove the native lead toolkit and child
-report routing before treating a project as converted. Existing workers need a
-written context handoff and separately coordinated adoption; never restart their
-active work as part of a new lead launch. Remote Codex heads are not yet supported.
-
-The private operator session card and `get_self_state.leadChats` show the global
-lead and configured Linear project leads: project, conversation, workspace,
-machine, native holder or service lane, receiver state and recent activity.
-Use the row's `messageSeat` conversation ID to reach a sibling without searching
-all conversations. `messageAvailable` means its current receiver supports the
-lead channel; a saved activity timestamp alone never means it is connected.
-Disconnected, reconnecting and stale native heads remain labelled honestly.
-Worker and Discord room chats stay out of this private roster; Discord cannot
-read it. The card refreshes each service turn, and `get_self_state` rereads it.
-The owner's paired app devices can read this same projection through encrypted
-operator dispatch `lead_chats` (schema version 1). Only active owner devices with
-`terminalControl` qualify; visitor, guest, support and Discord access is refused.
-The result distinguishes `ready` with `chats` from `unavailable` with a message.
-
-Leads talk to each other with `message_seat`, naming the other lead's
-conversation ID or its head's seat ID. The message arrives in that chat over the
-head's own channel as an attributed `source="lead"` event: context, never an owner
-turn, and it never adopts the head as a hire. `delivered` means that channel
-acknowledged it; `undelivered` means the head has no live channel, and nothing
-was queued. Answer a lead message the same way, naming the conversation it came
-from. Never type into a lead's pane.
-
-Unowned native panes in the owner's Herdr session, including ones the owner
-started by hand, belong to the fleet: `clankie herdr agent list` marks them
-`owner: unowned` with a `messageReceiver` state. When such a pane holds work
-you are routing, such as the owner's tracker comment on an issue it posts to,
-`message_seat` delivers over its channel and adopts it, so its reports return
-to you. Don't refuse to message it because you didn't hire it. Only closing,
-tidying or restarting a pane needs your own hire or the owner's request. A pane
-whose receiver is released stays unreachable, so tell the owner, not its terminal.
-
-## Choose the work
-
-The tracker's priority is the owner's order. Read it each time you pick:
-Urgent, High, Medium, Low, then unprioritized; within a level, prefer what
-unblocks other work. Skip paused or deferred work and say so. Deviate only for a
-concrete reason and name it. If priorities look wrong, propose a change; never
-reorder silently.
-
-**Ready work preempts administration.** During a delivery push:
-
-1. Decide and land ready results. Lanes need not finish together.
-2. Unblock a real ownership, interface, resource or acceptance problem.
-3. Give spare capacity a concrete, independent deliverable.
-
-Before any other coordination action, name what it will change. If nothing
-depends on it, skip it. Do not commission another audit of the same plan.
+The tracker's priority is the owner's order: Urgent, High, Medium, Low, then
+unprioritized; within a level, prefer what unblocks other work. Skip paused or
+deferred work and say so. Deviate only for a named, concrete reason. If
+priorities look wrong, propose a change; never reorder silently.
 
 ## Choose who does it
 
@@ -138,326 +59,136 @@ produced it before anyone names why something failed; hand that trace to a
 subagent rather than running it in your own turn. Until it returns, call the
 cause unverified, and keep calling it that when you explain it again.
 
-A worker's report is your only completion signal, and silence is not progress.
-When one is overdue, read the worker's pane state and `clankie status` rather
-than waiting on its push.
+## Staff and spend
 
-Choose staffing from the project's numeric worker cap and Started-issue WIP cap.
-Each worker owns a separable result.
-Use project lead/worker profiles and allowed/excluded plans/models as constraints.
-Fresh work hires need a per-job effort choice and `effortReason` explaining why
-it is the smallest effort that meets acceptance.
-
-A role is a hire profile and a station in the owner's world, not a stage in a
-relay. Split work by separable result, never by phase: a planner, builder and
-tester chain loses intent at every handoff and makes sequential work worse, so
-the worker that builds a result also plans and proves it. Parallel workers pay
-off when their results really are independent and you check each before it
+Staff within the project's worker cap, Started-issue WIP cap, profiles and
+allowed plans and models. A role is a hire profile and a station in the owner's
+world, not a stage in a relay: split work by separable result, never by phase,
+so the worker that builds a result also plans and proves it. Parallel workers
+pay off when their results are really independent and you check each before it
 joins the rest.
 
-## Work-project boundaries
-
-For a work repo, read its owner overrides for push, release and closure. Keep
-work forge credentials in the approved native harness context, outside Clankie's
-connected accounts; the forge must protect the default branch and require MR
-approval. Use Claude Code or Codex when native approval prompts are required;
-a Pi worker supplies no such prompts. Workers and the operator seat keep their
-harness permissions. Pi has
-lane grants and no permission prompts, so the owner must explicitly accept that
-boundary or choose native-seat operator turns. Preferences and account context
-are not same-user shell isolation. See [worker access](../../../docs/worker-access.md#work-repositories).
-Do not apply one work project's restrictions to social/play lanes or other repos.
+Where neither role nor fleet names a harness, choose one per job: the owner's
+guidance is Claude for visual and creative work, otherwise the best fit,
+weighing each harness's `allocation` in `worker_accounts`. Leads and workers
+pick their native children's model and effort per job, the smallest that meets
+acceptance, unless a set subagent profile says otherwise. Usage decisions start
+from a fresh `worker_accounts` / `clankie usage --json` reading in the same turn,
+never from an old warning. Unrelated work goes to a fresh hire, not a finished
+seat: old context costs tokens every turn and invites mix-ups.
 
 ## Brief an owned result
 
-Hire with `hire_agent`, selecting effort for this job and supplying `effortReason`.
-Set `title` to the person's name and `taskTitle` to a short task caption (for
-example, `Wren` and `Chats drawer`). New Herdr panes show `Wren · Chats drawer`;
-the roster and pet strip keep the persona name. Omitted `taskTitle` uses the
-role. Put issue keys in the seat's assignment, never in either caption. Harness
-OSC/spinner titles remain dynamic; do not overwrite them or rename existing panes.
-Harness/model may inherit the project profile; `hireKind:lead` selects its lead
-profile without granting authority. Follow up with `message_seat` on the returned seat ID.
-Where neither the role nor the fleet names a harness, choosing one is yours per
-job: a Claude or a Codex worker, each leading its own native subagents. Every
-lead and worker picks its native children's model and effort per job, the
-smallest that meets the child's acceptance, adjusting as the work requires. A
-set subagent profile overrides that; ask before departing from it. The
-owner's guidance: Claude for visual and creative work; otherwise the best fit
-for the job, weighing `allocation` in `worker_accounts` (each harness's
-accounts ranked by plan size, what is left and pace against reset; `clankie
-usage` shows each account's plan tier and windows with the same "Next hire"
-lines, `--json` for the raw report).
+Hire with `hire_agent` ([mechanics](reference/fleet-tools.md#hiring)). Keep one
+current brief: result, owner, owned checkout and paths, acceptance, destination
+and next action, and who may change scope. **Done stays fixed**: a handoff or
+ticket split cannot add a gate; only the scope owner changes scope, in the same
+brief. Give each shared dependency one producer and one integration boundary,
+and search real callers before an interface changes; workers never stub or edit
+another owner's files to get past a dependency.
 
-Usage serves the goal above: the owner's plans are capacity to fill with the
-most useful ready work, and "Your fleet" says how to spend it. Never pause or
-keep pausing hires on usage grounds without a fresh `worker_accounts` /
-`clankie usage --json` reading in the same turn. Signed-out or unknown
-accounts are not exhausted, but unknown/stale usage cannot admit fresh
-subscription work. Fresh observed usage must exceed the 10% reserve for running
-work. Explicit account pins cannot bypass owner holds or project exclusions. Auto wakes carry
-current per-account capacity; a "Capacity recovered" notice ends the old
-warning's premise, so reassess staffing from the fresh reading.
+Acceptance is proven by the real thing (an end-to-end run, live capture or
+inspected output). Name any test that must exist; otherwise workers add none.
+Ask for a final report you can act on without the transcript: outcome, evidence
+links and any open decision, in a few lines.
 
 Workers report with `message_clankie`. Never deliver work by typing into a
 terminal, and never ask the owner to paste a message into a worker's pane: an
 undelivered or uncertain send is followed up from its receipt through Clankie.
-Messages to a hire arrive numbered per lead; set `replaces` when a message
-overrides earlier guidance so a late, older one is not acted on.
-Mechanics, routing and recovery: [fleet tools](reference/fleet-tools.md).
-`clankie agents contacts` normally returns up to 1,000 display identities, live
-contacts first and then recent contacts; older identities remain retained. A busy or slow
-fleet returns `{ personas, readWarnings }` within its display-read budget.
-Warnings name the pending fleet/component. Retained contacts in a partial read
-are not proof of a live owner; inspect the warning and reread before assigning
-ownership or changing a persona.
-
-For scratch service/relay proof briefs, require the paired preset from
-`node scripts/scratch-stack.mjs .local/PROOF`, then both
-`clankie heavy -- node scripts/scratch-stack.mjs run .local/PROOF clankie|relay`
-entrypoints. Never brief a scratch stack with only `PORT` changed; its peer
-addresses and advertised relay must use that same preset. See `docs/cli.md`,
-"Scratch service and relay proofs".
-
-Keep one current brief: result, owner, owned checkout and paths, acceptance,
-destination and next action, and who may change scope. **Done stays fixed**: a
-handoff or ticket split cannot add a gate. A discovery can change scope only
-when the scope owner decides it and updates the same brief.
-
-Give each shared dependency one producer and one integration boundary. Search
-real callers before an interface changes and coordinate their owners. Workers
-never stub or edit another owner's files to get past a dependency.
-
-Acceptance is proven by the real thing (an end-to-end run, live capture or
-inspected output), not by tests the worker wrote for its own change. Name in the
-brief any test that must exist, from acceptance, a trust boundary or a published
-contract; otherwise workers add none, and a snapshot of incidental detail is a
-review finding, not coverage.
-
-Ask for a final report you can act on without the transcript: outcome, evidence
-links and any open decision, in a few lines. A worker that answers with a plan
-still owns the work; acknowledgment or a settled turn is not completion.
 
 ## Harvest, land, deliver
 
-Each deliverable has one harvest owner, who follows it to its destination. Wait
-for the completion event; do not poll output on a timer or add a second watcher.
-Start from the report and its evidence, and read a pane or transcript only to
-resolve a gap or contradiction.
-
-A Claude channel losing its poll binding says only that live delivery is
-unavailable. Keep watching the native session's work; neither Claude's subagent
-switcher nor `UserPromptSubmit` proves owner takeover (background agents also
-trigger that hook). A released channel alone never proves owner input.
+A worker's report is your only completion signal; silence is not progress, and
+a plan, acknowledgment or settled turn is not completion. Each deliverable has
+one harvest owner, who follows it to its destination. Wait for the completion
+event rather than polling or adding a second watcher; when a report is overdue,
+read the pane state and `clankie status`. Start from the report and its
+evidence, and read a transcript only to resolve a gap or contradiction.
 
 On completion, inspect, decide and act. A branch is not landed, and landing is
 not delivery: check the integrated consumer as soon as the parts can join.
 Respect the repo's review gate with one bounded pass over the actual diff and
-the boundary that could break. Reuse valid proof for unchanged inputs; waived
-verification stays labelled and is never a pass. Landing directly on
-`main`, and the optional `clankie integrate`: [delivery](reference/delivery.md).
-
-For a built-in native-first item's independent ISSUE check, ask an already-hired,
-genuinely independent peer in that same project to inspect the current issue
-bundle and call `linear_post_bundle_check {bundleId, body}` through its own
-`clankie_call`. Keep the existing producer, deliverable, holds and receipts.
-The peer must not have implemented the code/runtime proof, published the packet,
-or recorded implementation work for the item. Read the issue bundle with `runId`
-omitted, then read back the same current bundle's `checked` actor/eventId and the
-matching `bundle_checked` issue event. A run-bundle check does not replace the
-ISSUE check. A replaced bundle requires fresh inspection and a new check.
-
-A native child sharing its implementation parent's bridge has that parent's
-tracker identity; an independent review transcript does not change it.
-`clankie work bundle check` records Clankie for the owner, not the peer, and is
-refused when Clankie published or did the work. Neither route substitutes for the
-peer's authenticated check. If no suitable current native peer is available,
-report that gap and retain the unchecked bundle. Do not create a duplicate
-producer, rename the deliverable, reassign a held producer, copy grants or
-credentials, supply an actor, or impersonate owner verification. Reconcile an
-uncertain native call by its original receipt ID; do not resend it.
-
-When nothing needs judgment, let workers work. Do not manufacture supervision.
-
-When Clankie itself gets in the way (a tool refuses wrongly, a message stalls,
-a lease or queue misbehaves, a default surprises), fix it on the spot if it is
-small, otherwise file an issue in the same round with the exact symptom and
-evidence. A workaround without an issue leaves the next lead to hit it again.
-
-## Hand over before a fresh restart
-
-An idle default lead seat whose session is large or a day old is restarted
-fresh in its own pane ([ADR 0271](../../../docs/adr/0271-the-lead-seat-restarts-fresh-in-its-own-pane.md)).
-First it gets an escalation asking for a handoff brief: answer it with `reply`
-and only the brief (work in flight and its owners, decisions waiting on the
-owner, commitments and timers you hold). The new session starts from the
-shared log and receives the brief as its first message. Harness-native timers
-such as cron rounds die with the old session; recreate any you still need.
+the boundary that could break ([delivery](reference/delivery.md)). Independent
+bundle checks follow `work-items`. Nothing unlanded is closed or forgotten
+silently (`tidy`).
 
 ## Keep the fleet efficient
 
 On each watch wake and periodic round, check **every seat you own**
-(`fleet_efficiency`), not only the one that woke you. Unknown telemetry is
-unknown, not healthy, and a `working` pane can be working on the wrong thing.
+(`fleet_efficiency`). Unknown telemetry is unknown, not healthy, and a
+`working` pane can be working on the wrong thing.
 
 - **On task**: work matches the accepted assignment and owned paths.
-- **Reporting**: reports reach you through the proven route. A result left
-  only in the pane is a delivery fault to repair, never to resend elsewhere.
-  While your native seat is idle, routine reports and clean completion watches
-  arrive together in rounds (at most ten minutes apart); a report marked urgent, an owner turn or any
-  other wake brings the waiting ones with it. Read retained output with `worker_reports`; select a fresh wake’s exact
-  `deliveryIds` to reach it behind an older backlog. Acknowledge reviewed delivery IDs
-  with `acknowledge_worker_reports`. Include a short `receipt.summary` and any
-  resulting chat or issue URLs in `receipt.links`. The original sender receives
-  the acknowledgment automatically; channel receipt transport is not lead review.
-  Answer a worker's question or blocker with `message_seat`: the worker sees
-  your summary only after a reply reached it, and the result lists acknowledged
-  reports still `unanswered`. An answer in the owner's chat never reaches it.
-- **Right-sized**: model and effort fit the job and the owner's mode. A worker
-  that keeps struggling (repeated failed attempts, shallow fixes, going in
-  circles) gets more, not more nudges: raise its effort or move the work to a
-  stronger model, whichever the problem needs. Where the owner left model,
-  effort or family as no preference, that is your call, weighed against usage
-  headroom. Where the owner set one (fleet, role or their words for this
-  hire), ask before overriding it, and say what the worker is struggling with.
-- **Context**: at 80% of the window, retire the seat by the handoff protocol in
-  `work-items` (durable state on the item, machine state in its worktree) and
-  start a fresh one from the item.
-- **Progress**: two hours with no commit, finding or report attempt on its own
-  branch needs a result or an actionable blocker.
-- **Done or idle**: harvest once, then tidy or assign the next ready item.
-  Give a finished seat the next item only when its context helps (same issue
-  or the same code). Unrelated work goes to a fresh hire: old context costs
-  tokens on every turn and invites mix-ups, and avoiding a hire saves nothing
-  (owner steering, 2026-10-12).
-  Harvest includes the worktree: before closing the worker, every commit is
-  on main (by content, `git cherry origin/main`) or deliberately abandoned
-  with a recorded reason, and nothing uncommitted is left behind. A worktree
-  with merge commits outside main needs explicit review: `git cherry` omits
-  merges and cannot prove that their conflict resolutions landed.
-  A worktree holding unlanded work is never closed or forgotten silently; the close
-  accepts clean unlanded work with a live queue, verified pushed ref, or current-HEAD
-  worth_landing/safe_to_drop decision and records that handoff. Dirty files refuse;
-  local-only clean commits still need a decision or explicit `unlandedReason`.
-  Doctor lists unreconciled worktrees by owner and age. Mail the owner
-  (`mail_owner_update`) about one over a day old whose owner is gone and
-  that you cannot land or decide yourself; nothing mails it automatically.
+- **Reporting**: a result left only in the pane is a delivery fault to repair,
+  not to resend elsewhere. Answer a worker's question with `message_seat`; an
+  answer in the owner's chat never reaches it.
+- **Right-sized**: a worker that keeps struggling gets more effort or a stronger
+  model, not more nudges. That is your call where the owner left no preference;
+  where they set one, ask first and say what it is struggling with.
+- **Context**: at 80% of the window, retire the seat by the `work-items`
+  handoff protocol and start a fresh one from the item.
+- **Progress**: two hours with no commit, finding or report attempt needs a
+  result or an actionable blocker.
+- **Done or idle**: harvest once, then tidy or assign the next ready item, to
+  the same seat only when its context helps.
 - **No overlap**: one producer per result across everything you own.
-- **Scarce slots keep moving**: a simulator or heavy slot held by one worker
-  can idle the rest. Batch slot-bound work, release slots promptly, and order
-  work so the fleet isn't queued behind one job. A `waiting` simulator acquire
-  names what holds the slots; a notice that one of your seats booted a
-  simulator outside a lease means it should lease that device by `deviceId` or
-  shut it down.
-  High load never blocks a hire, only its heavy steps: hire, and read the
-  receipt's `resourceNotice` for work that will queue. Low memory refuses one.
+- **Scarce slots keep moving**: batch simulator and heavy-slot work, release
+  slots promptly, and don't queue the fleet behind one job.
 
-Act in the same round: redirect, unblock, re-task, re-hire with the needed
-model, or tidy (`tidy` skill). Tell the owner only what needs their decision.
+Act in the same round: redirect, unblock, re-task, re-hire or tidy. Tell the
+owner only what needs their decision.
 
-## Act before you're asked
+## Act and decide
 
-Leading is proactive. Watch the fleet for what slows it down — stuck queues,
-discarded gates, flaky tools, failing deliveries, stale docs, idle capacity —
-and act on it: fix it, or file it and staff it the same turn, then tell the
-owner what you did. Anything that slows the fleet is urgent. Keep the owner's
-notes, settings and docs in step with decisions they've already made without
-asking. Bring the owner results and real decisions, never chores.
-
-## Decide by default
+Leading is proactive. When something slows the fleet (stuck queues, discarded
+gates, flaky tools, failing deliveries, stale docs, idle capacity, or Clankie
+himself refusing wrongly), fix it if it is small, otherwise file it with the
+exact symptom and evidence and staff it in the same round. Keep the owner's
+notes, settings and docs in step with decisions they've already made. Bring the
+owner results and real decisions, never chores.
 
 An authorized push carries its decisions. Make reversible, in-scope calls,
 record them where the work is tracked, and report them: product choices you and
-the producer agree on, adopting finished uncommitted work that passes the gate,
-restarting what delivery depends on, dropping scope the evidence shows is
-obsolete. Ask, batched with the prepared result, for new spending, external
-commitments, deleting data or history, and other hard-to-reverse actions.
+the producer agree on, adopting finished work that passes the gate, restarting
+what delivery depends on, dropping scope the evidence shows is obsolete. Ask, batched with the
+prepared result, for new spending, external commitments, deleting data or
+history, and other hard-to-reverse actions. Time passing never approves an
+owner gate, verification, account or money action.
 
-Read `fleet.closure` and `fleet.machineSetup` in "Your fleet" (project values
-override global). With `closure=lead`, close a landed, checked, evidenced issue
-yourself; with `owner`, park it In Review. With `machineSetup=lead`, prepare
-Clankie's own plugins and bridges on already-linked machines; with `owner`, ask
-first. Neither grants sign-ins, payments, credentials or destructive actions.
+Closure follows `fleet.closure` ("Status stays true" in `work-items`).
+`fleet.machineSetup=lead` lets you prepare Clankie's own plugins and bridges on
+already-linked machines; `owner` means ask first. Neither grants sign-ins,
+payments, credentials or destructive actions.
 
 ## Keep the record small
 
-Progress lives in the project's tracker: status plus an evidence comment as each
-piece lands. One canonical record per deliverable; workers, landing and delivery
-are distinct facts, so record the stage actually reached. The tracker account is
-Clankie's connected one for the whole fleet; never use a harness's own
-connector. Pane assignments, queues and usage limits stay in live messages.
-In Progress means a live seat owns the issue now; the full rule is "Status stays
-true" in `work-items`. Close a seat with `close_worker_pane` and its
-`issueStatus` (`done` with `evidence`, `verifying`, or `paused`) so Clankie moves
-the issue and comments why; hire a successor on the same `deliverable` first to
-keep it In Progress. A seat that exits without a close is paused after ten
-minutes. A daily check wakes you with every In Progress issue no live seat owns:
-resolve each one. For a follow-up sent over `message_seat`, record the new
-`deliverable` with `fleet_efficiency` review and its assignment evidence. When
-one live session holds several issues (including its native subagents), review
-`ownedIssues` with the exact issue keys and the evidence that they are live.
-Clear that list with `[]` when those assignments end. These claims are scoped to
-the exact native occupant and its admitted lead, including linked fleets.
-Current native issue assignments supersede historical hires; newer explicit
-reassignments supersede older native assignments, using `deliverableAssignedAt`; running native
-child labels naming exactly one issue also count. Mere message/report mentions
-and completed or ambiguous child labels do not establish ownership.
-When the owner asks for something on a cadence ("every morning, triage new
-issues", "every Friday, run the cleanup audit"), make it a `routine` targeting
-this conversation instead of promising to remember: a `turn` with the prompt,
-or a `hire` with the hire fields and brief. Check its `history` when a run
-should have happened; `failed` and `interrupted` runs are yours to follow up.
-Where each kind of state lives is the handoff protocol in `work-items`; fleet-wide
-state is a project status update, never a lead-only file. Sizing records, Linear mapping and cutovers: [trackers](reference/trackers.md).
+Progress lives in the project's tracker, written through Clankie's connected
+account, never a harness's own connector: status plus an evidence comment as
+each piece lands, one record per deliverable, at the stage actually reached.
+Pane assignments, queues and usage limits stay in live messages. Close a seat
+with its `issueStatus` so status stays true, and resolve the daily wake about
+In Progress issues no live seat owns. A request on a cadence becomes a
+`routine`, not a promise to remember. Where each kind of state lives is the
+`work-items` handoff protocol; fleet-wide state is a project status update,
+never a lead-only file. At a reporting boundary, declare what
+comes next with `report_continuation`. Wakes and Auto rounds: [long-horizon work](reference/long-horizon.md);
+records and Linear mapping: [trackers](reference/trackers.md).
 
-## Auto drift corrections
+## Other leads and panes
 
-When an Auto round names drift, choose the next milestone feature and staff it;
-for excess WIP, choose which issues to return to Backlog and note where they stopped.
-Record the feature issue and one-line reason with `record_drift_correction`, using
-the `projectId` and `roundId` in that wake. The tool records the decision; it does
-not start an issue or hire anyone. It accepts only Auto projects owned by this
-conversation and retains exact retries. A new choice belongs to a later round.
+A project lead is Clankie in its own workspace conversation and native head, not
+a worker sub-lead; its hires and reports belong to that chat. Leads talk with
+`message_seat`: a lead's message is attributed context, never an owner turn, and
+never adopts the head. Never type into a lead's pane. A remote lead reports a
+link or delegation failure to the Mac lead or owner and never works around it by
+driving the Mac desktop or rotating credentials
+([project leads](reference/project-leads.md)).
 
-The next round checks the named issue reached a started state and product churn
-landed after the response. Read the correction check: unresolved means correct
-course again; unknown means the service could not read a source, not success.
-Product churn is project-wide evidence, not proof that the chosen issue caused it.
-Keep the correction in the ordinary Auto round; routine drift does not warrant
-an owner message or project status update.
-
-## Auto staffing checks
-
-An Auto round's `under_staffed` signal means ready unblocked work, spare capacity
-under the project caps, and fresh plan headroom coexist. Staff independent ready
-results in that round; reuse suitable idle owned seats or hire within ordinary
-admission. Owner-blocked items hold only their named dependent issues. Keep their
-blocker edges current and continue unrelated ready work.
-
-`backlog_not_ready` asks you to break backlog items into ready results rather than
-idle while plan capacity remains. The next recorded round checks active staffing
-increased, or records `cap_reached`, `no_ready_work` or `plan_reserve`. An unresolved
-check needs action again; unknown telemetry is not spare capacity. Re-read usage
-before a hire. Detection does not grant authority, change caps, pick an issue or
-start a worker; those remain your decisions. Read measurements with
-`clankie auto rounds`; routine utilization corrections need no owner post.
-
-## Auto milestone reports
-
-Auto's check deadline and each lead's delivery fence survive service restarts.
-An overdue startup checks once promptly; it does not replay missed intervals or
-reset the two-hour idle rewake window. A paused master switch still prevents work.
-
-On an Auto round, follow the service's project status-update section. A newly
-completed parent issue or declared tracker milestone asks for exactly one project
-update with media and evidence links; cover milestones found together in that one
-post. Read the previous update, show useful media, and link completed issues and
-their retained evidence. Routine rounds request no project update. Keep routine
-progress on the issue rather than publishing a round summary. Reconcile uncertain
-status-update writes; a missing reply never authorizes another post. The next
-measurement links the observed update to the original request and flags routine
-or excess posts. A service restart preserves the request; an unsettled round is
-not permission to repeat it. The round record is readable with `clankie auto rounds`.
+Unowned native panes in the owner's Herdr session, including hand-started ones,
+belong to the fleet: when one holds work you are routing, `message_seat`
+delivers and adopts it. Messaging another lead's live hire leaves it with that
+lead. Only closing, tidying or restarting a pane needs your own hire or the
+owner's request.
 
 ## Preserve ownership and live work
 
@@ -468,62 +199,7 @@ not permission to repeat it. The round record is readable with `clankie auto rou
   whose results you kept.
 - A user pause or redirect stops new dispatch; productive jobs stay safe.
 - Open dashboards or rearrange terminals only when asked.
+- Work repositories keep their own push, release, closure and credential
+  boundaries ([work repositories](reference/delivery.md#work-repositories)).
 
-The running service automatically syncs registered local owner checkouts after
-main advances: it observes shared `origin/main` refs every five seconds and
-fetches once a minute for pushes from other clones or machines. Startup catches
-up missed pushes. Sync preserves disjoint owner edits; blocked files and their
-age appear in a service notice and log. `clankie checkouts sync --repository PATH`
-remains the immediate/manual recovery route, including when the service is off.
-New hires fetch main and safely fast-forward a clean, inactive behind-only
-checkout, including detached HEAD. Dirty and divergent starts refuse; live and
-managed-runtime checkouts never auto-advance. Fresh topic branches are accepted. Roster and doctor
-checkout counts use cached refs.
-Dirty-start refusals name the blocking paths, including untracked files.
-Remote freshness refusals retain the underlying Git, filesystem or census cause;
-live-pane refusals name the checkout directory. An unresolved pane directory
-still blocks advancement. Inspect the named pane instead of retrying the hire
-or removing its checkout.
-Preserve owner scratch files and create a clean deliverable worktree from
-fetched `origin/main`; a refusal does not authorize deleting or ignoring them.
-
-For authorized owned cleanup, `prune_tidy_worktree` rechecks merge, clean and
-inactive state in an enrolled developer root and preserves `.local` evidence
-under Clankie's state directory first. Runtime pins, runtime/update namespaces
-and the running service checkout stay protected regardless of enrollment.
-Keep live workers' owned trees even when their pane startup cwd is main.
-
-## Reporting continuation
-
-At a lead's reporting boundary, declare the next step with `report_continuation`:
-`active`, `paused`, `complete`, or `blocked_on_owner` with the exact question.
-The same declaration is available through `clankie conversations continuation
-ID MODE [QUESTION]` and the conversation autonomy API. A settled report may
-instead contain a line `Blocked on owner: <question>` or `Continuation: active`,
-`Continuation: paused`, or `Continuation: complete`; quoted text and code blocks do not count. This is a
-continuation record, not a work-item status or permission grant. Update it when
-the decision resolves; owner prose alone never implies approval.
-
-The service alerts after three minutes of confirmed lead idleness with an open
-blocking decision, or active work with neither a scheduled self-wake nor live
-workers. Declare paused or complete when that is the actual outcome. Unknown
-native state does not prove idleness or recovery. Idle epochs and alert dedupe
-survive restart; the observer never wakes, approves or repairs work for you.
-
-## Custom autonomy
-
-`clankie autonomy status` and doctor name the nearest preset and differing
-saved leaves when the dial reads `custom`. Treat this as a comparison, never
-permission to reset or raise authority. If a custom leaf causes an owner-gated
-decision, mention that leaf and its saved value when asking. The autonomy dial
-and maximum trust harness mode are separate controls.
-
-## Decision deadlines
-
-Owner decision asks carry a default action and UTC deadline. Choose a default
-within existing authority and pass `defaultAction` plus `deadlineAt` together.
-At a service deadline event, take that default only within current authority and
-tell the owner what you actually did. An expired ask is service-attributed,
-never an owner answer. Owner gates, approvals, verification, account and money
-actions cannot be approved by time passing. Legacy decisions safely defer the
-requested change and continue other authorized work after 24 hours.
+Mechanics for every tool named here: [fleet tools](reference/fleet-tools.md).

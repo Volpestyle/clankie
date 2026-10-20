@@ -63,11 +63,10 @@ WORKDIR /workspace
 RUN cd /opt/clankie && node --input-type=module -e 'await import("@browser_use/pi")'
 # Verify as the actual runtime user, without an owner's global skill installation.
 RUN test "$(herdr --version)" = "herdr $(node -p 'require("/opt/clankie/release.json").herdr.release.version')" \
- && herdr --skill > /tmp/herdr-skill \
- && cmp /tmp/herdr-skill /opt/clankie/.agents/skills/herdr/SKILL.md \
- && cmp /tmp/herdr-skill /opt/clankie/integrations/claude-plugin/skills/herdr/SKILL.md \
- && cmp /tmp/herdr-skill /opt/clankie/integrations/worker-skills/skills/herdr/SKILL.md \
- && rm /tmp/herdr-skill
+ && herdr --skill | sed -n 2p | grep -qx 'name: herdr' \
+ && grep -q 'herdr --skill' /opt/clankie/.agents/skills/herdr/SKILL.md \
+ && cmp /opt/clankie/.agents/skills/herdr/SKILL.md /opt/clankie/integrations/claude-plugin/skills/herdr/SKILL.md \
+ && cmp /opt/clankie/.agents/skills/herdr/SKILL.md /opt/clankie/integrations/worker-skills/skills/herdr/SKILL.md
 ENTRYPOINT ["clankie-hosted"]
 # The whole body under the launcher, so an update can stop and restart its services.
 CMD ["clankie-body"]

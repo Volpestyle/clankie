@@ -1,10 +1,13 @@
 ---
 name: work-items
 description: >-
-  Use when you create, update, close, or report on tracked work in a repo on
-  this machine: tasks, issues, acceptance criteria, or the evidence behind a
-  result. Tracks work where the repo already does (Linear, GitHub issues, its own
-  Markdown directory) and in .clankie/work/ only when it has nothing.
+  Use when you create, update, close, comment on or report tracked work in a
+  repo: issues, acceptance criteria, status, evidence, result and project status
+  updates, or a handoff. Tracks work where the repo already does (Linear, GitHub
+  issues, its own Markdown directory, Clankie's built-in tracker) and in
+  .clankie/work/ only when it has nothing. Covers read-before-write, where each
+  kind of work state lives, what status means, and how to write a post that
+  carries only what a reader cannot re-derive.
 ---
 
 # Work items
@@ -33,113 +36,31 @@ from inside the repo (or pass `--repo PATH`); output is JSON.
 | Review a local Git change      | `clankie work review-diff BASE HEAD` (read-only, two commits) |
 | Review a supplied patch file   | `clankie work review-patch FILE` (patch claims only, no Git)  |
 
-Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `canceled`. Items carry
-the backend's `labels` (Linear, GitHub, or Markdown `labels:` front matter);
-label an item with a role name (`designer`, `builder`, …) to put it on that
-role's station in the owner's world. Criterion numbers are 1-based.
+Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `canceled`.
+Label an item with a role name (`designer`, `builder`, …) to put it on that
+role's station in the owner's world. Criterion numbers are 1-based. Clankie and
+workers use the same `linear_*` tracker tools on every backend, discovered through
+`mcp_tool_search` or `clankie_tools`; a `repo` argument selects that repository's
+convention. `clankie doctor` reports the active backend and why. Use the full
+identifier everywhere: a built-in `LOCAL-…` key never becomes another tracker's key.
 Issue summaries have no separate 20,000-character limit: `work create --summary`
 matches canonical `save_issue` descriptions, and `work show`/API reads return
 the full summary. Provider and transport request limits still apply.
-Clankie and workers use the same `linear_*` tracker tools, discovered through
-`mcp_tool_search` or `clankie_tools` and called through the corresponding tool
-directory. Their issue, comment, project and status-update shapes work with
-owner-connected Linear or durable local storage. A `repo` selects an existing
-repository convention; GitHub and Markdown are adapters to that same surface.
-`clankie work` remains a compatibility CLI. `clankie doctor` reports the active
-backend and why it was selected. Follow `linear-orient` and `linear-issues` for
-the shared read/write shapes on either backend; a local identity is visibly local.
 
-Owner verification and owner ask answers belong to the owner. Do not use
-`clankie work owner` or answer as the owner. The current shared operator bearer
-still permits explicit owner calls and ask answers; this is a known boundary
-gap (LOCAL-VUH-4), not a secure distinction between James's terminal and a
-same-user agent shell. An environment/seat marker or another same-user secret
-does not close it. See [ADR 0253](../../../docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md)
-for the proposed isolated authority. Report missing isolation honestly and
-keep owner-verified acceptance open.
+Backend specifics: [Linear](reference/linear.md) (data-destroying mechanics,
+media, threading, worker posts) and [built-in tracker](reference/builtin-tracker.md)
+(idempotency, events, leases, runs, evidence bundles, cycles, releases, sync,
+import and cutover). Project facts, project settings, narrow owner writes and seat
+retirement bookkeeping: [projects and seats](reference/projects.md). To read a
+project or issue before working, load `work-orient`.
 
-Priority is `0` (none), `1` (Urgent), `2` (High), `3` (Medium), `4` (Low).
-Issue writes accept `priority`; `clankie work create` and `update` accept
-`--priority 0..4`. Open-work lists sort Urgent through Low, then unprioritized,
-before limiting or paginating. Local identifiers remain stable across restart.
-
-The built-in namespace is deliberate: default new stores allocate `LOCAL-n`;
-a writable store holding an imported `VUH` team allocates `LOCAL-VUH-n` from its own counter,
-starting at 1. Imported items keep their `VUH-n` identifiers and UUIDs. The
-numeric suffixes belong to separate sequences. Use the entire identifier for
-reads, links, evidence and commits: `LOCAL-VUH-2` must never become `VUH-2`.
-Do not renumber items or alter the counter to continue Linear's sequence.
-Keyed create retries return the original item without allocating another number.
-The supported scheme is in [docs/cli.md](../../../docs/cli.md#built-in-item-identifiers-after-cutover).
-
-When the owner's Linear convention uses an existing repo label, record it with
-`clankie work init --backend linear --linear-team KEY --linear-project NAME
---linear-label LABEL` (the project is optional), or `linearLabel` on
-the compatibility HTTP init request. This saves `linear.label` in the convention.
-The board then includes only issues with that label; `list --label designer`
-intersects it with the role, status and owner filters. New items carry the saved
-label. Omitting the saved label keeps the existing team/project-wide board;
-direct `show ID` reads are unchanged. Choose an existing label under the owner's
-authorization; the command never creates labels or selects another account.
-Edits and attachments keep existing labels and uploaded media; an ambiguous
-Evidence heading is refused rather than replaced.
-
-During conversational project onboarding, a missing convention can be included
-in `propose_project_create` as `trackerSetup` with these same explicit work-init
-inputs. The existing CREATE review covers both tracker initialization and the
-project config. Preference answers do not write either. An existing convention
-must be read and reused; initialization refuses to replace it. A partial failure
-may leave a saved tracker without a project, so reconcile the original proposal
-rather than repeating confirmation.
-
-## Project facts for the world
-
-`clankie work project` reads planned milestones, shipped versions and Linear
-initiative goals through the saved tracker. The device op is `work_project`;
-its repo id has the same registered/project binding as `work_items`.
-`/work project` opens the same read in the TUI. To select release facts, use
-`clankie work init --release-source tags|milestones|both --release-lane NAME`;
-this preserves an existing tracker. Both is the default, and `repository` is
-an explicit unspecified-platform lane until the owner names `macos`, `mobile`,
-or another lane. Separate repos carry separate lanes.
-
-Backlog stays distinct from todo: Linear backlog/triage, GitHub's explicit
-`status: backlog` label, and Markdown `status: backlog`. Device item reads
-opt in with `statusVersion: 2`; older reads project backlog to todo. Items may
-state `milestone: {id, name}`; Markdown supplies both `milestone_id` and
-`milestone_name`. Priority is the native optional 0–4 projection.
-
-Read the `unavailable` entries before describing releases or goals. A completed
-milestone is not shipment; version-tag dates state their `dateKind`. Local tags
-are read without a fetch. GitHub published releases take precedence for the same
-tag. Store builds and release item membership remain unstated unless the source
-supplies them. GitHub/Markdown have no initiative goals; Markdown has no planned
-milestone collection. Device renders use the shared host snapshots, never a
-separate provider poller.
+Owner verification and owner ask answers belong to the owner. Never use
+`clankie work owner` or answer as the owner. The shared operator bearer still
+permits those calls from a same-user shell; that is a known boundary gap, not a
+secure distinction ([ADR 0253](../../../docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md)).
+Report missing isolation honestly and keep owner-verified acceptance open.
 
 ## Rules
-
-For an existing project's team settings, `clankie project list` returns the
-current revision. `clankie project update PROJECT --changes FILE.json --revision
-REVISION` changes only the reviewed name, roles, worker cap or tracker binding;
-`/project` exposes the same commands in the console. Follow explicit task or
-owner authorization before changing those settings. A tracker binding points
-to an already enrolled workspace's existing `.clankie/tracking.json`; it does
-not initialize tracking or choose a connected account. The app reads local
-bindings through project repo references. Remote or missing sources
-remain unavailable, never a reason to select another local repo or backend.
-
-Owner-authorized devices with `terminalControl` can set work metadata owner,
-add/remove a role label, or append a prerequisite using `work_item_write`.
-`clankie work write ID --owner NAME|--no-owner|--add-label ROLE|--remove-label
-ROLE|--add-blocker ID` uses the same narrow receipt path. It returns a
-`requestId` and `applied`, `refused`, or `uncertain`. Keep the ID; use
-`clankie work receipt ID --request-id UUID` or `work_item_write_receipt` after
-uncertainty. Never resend the change with a new ID. This path requires a saved
-local tracker and connected provider account; it preserves unrelated labels
-and prerequisites. Broader agent updates retain the existing CLI and tools.
-Items may have an optional backend-native `parent`; it groups work and does
-not imply a prerequisite.
 
 1. **Discover before creating.** If `clankie work` returns a `question`, the
    repo tracks work in more than one place or only in a single `TODO.md`. Ask
@@ -156,71 +77,49 @@ not imply a prerequisite.
 3. **Follow what is recorded.** `.clankie/tracking.json` is the owner's answer.
    Do not create `.clankie/work/` files in a repo whose convention is Linear,
    GitHub or its own directory.
-4. **Prefer real visuals; every result carries evidence.** When creating,
-   planning, updating or reporting tracked work, default to useful visuals:
-   screenshots or short clips of tangible results, charts of measured data,
-   and diagrams grounded in the actual system, dependencies or flow. This
-   applies to headless work too. Inspect visuals before attaching them; caption
-   what they show, their source or revision, and what they establish. Label
-   proposals, sample data and unverified states clearly. Before reporting work
-   finished, attach inspectable evidence, with decisive test output, numbers
-   and commit links supporting the result. Reuse meaningful artifacts; when
-   no visual adds information, use the decisive evidence without decorative
-   filler. Large media belongs in an artifact store; attach the link.
-   Show it where people read: embed screenshots and clips inline in the
-   comment, issue description or status update body (`linear-issues` covers
-   the stable-URL form), not only as an attachment. A demo that shows a
-   milestone working also goes in the project's status update, so it plays in
-   project Activity.
+4. **Every result carries evidence; prefer real visuals.** Screenshots or short
+   clips of tangible results, charts of measured data and diagrams of the actual
+   system, also for headless work. Inspect visuals before attaching them; caption
+   what they show, their source or revision and what they establish. Label
+   proposals, sample data and unverified states. Before reporting work finished,
+   attach decisive test output, numbers and commit links. Embed media inline where
+   people read (comment, description, status update), not only as an attachment.
+   Raw captures (media, large JSON and logs) go under `docs/testing/<folder>`:
+   write its README, run `clankie evidence push <folder> --issue <KEY>` (or
+   `evidence_push`), commit only `README.md` and `evidence.json`, and cite the
+   printed `clankie://evidence/sha256/...` links. A tracker upload may display a
+   screenshot, but the evidence-store copy is the record. Listing, key inference
+   and backfill: `docs/cli.md` under `evidence push|fetch`.
 5. **One owner per item.** Set `--owner` when you take an item; do not edit an
    item another agent owns without telling them.
 6. **Keep it small.** Status, criteria, ownership and evidence only. No sprints,
    estimates or extra workflow.
 
-## Status stays true
+For a bug investigation where a tracker is in use, search in-progress and recent
+closed items for the symptom or related changes before forming a code hypothesis.
 
-Status says who is working now (VUH-1990):
+## The tracker is the source of truth
 
-- **In Progress**: a live seat is working on it right now.
-- **Verifying**: the core work is on main and a seat is finishing proof or polish.
-- **Paused**: real progress, no seat right now, with one line on where it stopped.
-- **Done**: landed, with an evidence comment (commit, checks, evidence link).
-- **Todo**: not started.
+People edit items outside this conversation. **Assume every difference between
+what you remember and what the tracker holds is intentional.**
 
-When a seat closes, hands off or exits, Clankie moves the issue it owned (its
-hire `deliverable` key) to Done, Verifying or Paused with a one-line comment, or
-keeps it In Progress when another live seat holds the same key. Gaps only the
-owner or a physical device can close become linked follow-up issues and the
-original closes. Where Verifying or Paused does not exist yet, the issue falls
-back to In Progress or Todo and the comment names the intended status.
+- **Read immediately before each write**, not once at the start of the task, and
+  base the new text on what you just read, not on your own earlier draft.
+- **Their edit wins, even when it reverses something agreed.** Do not restore a
+  dropped label, revert a changed priority or re-add deleted text unless asked.
+- After a timed-out write, inspect the record before retrying: a missing
+  acknowledgment does not prove the write failed.
 
-Retirement and automatic exit bookkeeping retain the full issue key and its
-resolved UUID. They use the confirmed native hire's **current saved project
-tracker**, never a suffix from `LOCAL-*`, the lead's cwd, or an implicit default
-connector. Key and UUID assignments refer to the same item only within that
-tracker scope. Missing, revoked, ambiguous or changed attribution refuses the
-issue effect even if the pane itself closed successfully; inspect the returned
-`issue` settlement. A saved Linear scope needs its original connected account;
-disconnection does not select a local compatibility store.
+## Write within the authorized scope
 
-Built-in retirement cannot set Done or impersonate owner verification, and it
-cannot move delivery backwards. Existing evidence, independent-check and owner
-verification gates still apply. Report the actual refusal and leave the lead to
-settle the item's delivery state. Historical pause entries without a verified
-scope do not authorize restoration. Daily ownership checks include verified hire
-scopes; unscoped operator-head/native-child claims are not counted until their
-tracker can be attributed, and do not authorize automatic issue writes.
-
-## Ownership and useful updates
-
-When work needs the user specifically (a decision, credentials, a physical or
-live check), assign that item to their tracker account and make their part an
-explicit acceptance criterion. The lead owns scope and assignment boundaries;
-workers publish their own results and evidence directly, following the project's
-rules for status transitions. Shared integration, disputed acceptance and scope
-changes go to their decision owner. Keep the latest scope, decisions, result and
-actionable blockers on the item; [where work state lives](#where-work-state-lives)
-says what goes elsewhere.
+The tracker holds durable product, engineering and design work, decisions and
+evidence. A mandate to lead and keep work tracked covers routine evidence, status
+and current-document maintenance within that work; do not ask again for each
+write. A request to draft, review or suggest stays a draft: editing a draft does
+not authorize sending it, while "reply with…" in an authorized posting task does.
+Ask only when an action exceeds the mandate, such as a new external commitment or
+a tracker restructuring the user reserved. Tracking authorized work does not
+authorize expanding its scope.
 
 ## Where work state lives
 
@@ -228,229 +127,111 @@ This is the handoff protocol for every agent here, lead and workers alike,
 whatever the backend. Each kind of state has one home, so a fresh seat, a lead
 after a reset or the owner can pick work up cold from the item:
 
-| State                                                                                            | Home                                                                                |
-| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| Status, what landed (commit), evidence, remaining acceptance, decisions                          | The work item in this repo's tracker (Linear, GitHub, Markdown or `.clankie/work/`) |
-| Briefs, questions, reports, "done at SHA"                                                        | Agent messages (`message_seat`, `message_clankie`)                                  |
-| Code and committed evidence                                                                      | The repository, linked from the item                                                |
-| Seat-swap machine state: worktree, uncommitted or unpushed changes, background jobs, local paths | `.local/HANDOFF-<name>.md` in the owned worktree, linked from the item              |
-| Fleet-wide state across items                                                                    | A project status update (`linear_save_status_update`, same local fallback)          |
+| State                                                                                            | Home                                                                    |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| Status, what landed (commit), evidence, remaining acceptance, decisions                          | The work item in this repo's tracker                                    |
+| Briefs, questions, reports, "done at SHA"                                                        | Agent messages (`message_seat`, `message_clankie`)                      |
+| Code and committed evidence                                                                      | The repository, linked from the item                                    |
+| Seat-swap machine state: worktree, uncommitted or unpushed changes, background jobs, local paths | `.local/HANDOFF-<name>.md` in the owned worktree, linked from the item  |
+| Fleet-wide state across items                                                                    | A project status update (`linear_save_status_update`, on every backend) |
 
 - A message is never the only copy of something needed later; put it on the item.
-- A worker that cannot write the tracker sends the durable part to its lead,
-  who posts it. Questions for the lead go through `message_clankie`: a harness's
-  own ask-the-user prompt reaches the lead only on a managed seat that routes
-  it, and otherwise waits unseen in the pane.
+- Pane assignments, leadership transfers, usage limits and queue coordination
+  stay in agent messages or the worktree handoff, never in issue comments.
+- A worker that cannot write the tracker sends the durable part to its lead, who
+  posts it. Questions for the lead go through `message_clankie`.
 - Before retiring a seat (context near full, stale tools), put its durable state
   on the item and its machine state in the worktree handoff; the fresh seat
   starts from the item.
 - Never keep work state in personal files outside the repo or in a lead-only log.
 
-For a bug investigation where a tracker is in use, search in-progress and recent
-closed items for the symptom or related changes before forming a code hypothesis.
-Use `linear-issues` when available for Linear-specific formatting and attachments.
+When work needs the user specifically (a decision, credentials, a physical or
+live check), assign that item to their tracker account and make their part an
+explicit acceptance criterion. The lead owns scope and assignment; workers
+publish their own results and evidence. Shared integration, disputed acceptance
+and scope changes go to their decision owner.
 
-## Linear worker results
+## Status stays true
 
-With a verified Clankie Linear app connection, publish a worker's result using
-`linear_create_worker_comment` (or `clankie linear post comment --json-stdin`
-from the operator seat), with its existing fleet `personaId`, `issueId` and
-`body`. The service derives the worker's name and colored portrait. This is one
-app identity, not an email alias or a separate Linear member. A worker bridge
-grant must pin the exact `personaId`; without that grant, send the result to
-the lead to publish. Never substitute an inherited personal tracker connector.
+Status says who is working now. Map these meanings onto the project's own states
+and follow its workflow; leave automation-owned transitions to the automation and
+do not assume a branch name changes state.
 
-A worker reports through `message_clankie` to its hiring/adopting conversation:
-outcome, branch and commits, checks, evidence links, unresolved gaps and open
-decisions. Peer collaboration uses `list_fleet_seats` / `message_peer` when
-exposed; it does not replace the lead's outcome report. Return that same short
-final report at turn completion. Leads start from that report and evidence and open the retained
-thread only when needed. Keep routine coordination out of issue comments.
-For setup and supported paths, read `docs/linear-worker-posts.md` in Clankie's
-repository or the worker-posts section of the CLI reference.
+- **In Progress**: a live seat is working on it right now.
+- **Verifying**: the core work is on main and a seat is finishing proof or polish.
+- **Paused**: real progress, no seat right now, with one line on where it stopped.
+- **Done**: landed, with an evidence comment (commit, checks, evidence link).
+- **Todo**: not started.
 
-## When the backend is unavailable
+Where Verifying or Paused does not exist, use In Progress or Todo and name the
+intended status in the comment. When a seat closes, hands off or exits, Clankie
+moves the issue it owned (its hire `deliverable` key) to Done, Verifying or
+Paused with a one-line comment, or keeps it In Progress when another live seat
+holds the same key. Built-in retirement never sets owner verification or moves
+delivery backwards; report its refusal and let the lead settle the item.
 
-When Linear is not connected, the same tools select durable local storage.
-Read `clankie doctor` for the active backend and reason; local records do not
-automatically migrate when Linear is connected. A failed connected Linear call
-stays a failure and never writes locally. GitHub connection failures still name
-the recorded convention with `backend_unavailable`; report them to your lead.
-Do not create another queue to compensate for an uncertain write. Explicit
-export/import identity mapping is designed in ADR 0226; migration is not yet
-implemented.
+In Clankie's fleet, read the effective `fleet.closure` from "Your fleet" before
+closing (`clankie project settings PROJECT` shows overrides). `lead`, the
+default, lets the lead close to Done after landing, passing relevant checks and
+attaching evidence; workers report without waiting for owner acceptance. `owner`
+parks completed work In Review for the owner to close. The owner can reopen
+either. Genuine owner-only gates (App Store submission, payments, evals or
+owner-account sign-ups) become linked follow-ups, recorded as unperformed,
+without holding a delivered issue open. Never hide missing implementation or
+verification; a setting grants no permission for the owner-only action.
 
-On the built-in (local) tracker, send writes with an `idempotencyKey` you choose,
-unique per intended change. Retrying with the same key and arguments returns the
-original result instead of writing twice; after a lost reply, read
-`linear_get_write_receipt` with that key: `applied`, `refused` or `unknown`
-(safe to send again). Pass the `updatedAt` you read as `ifUpdatedAt` on updates
-so a concurrent change is refused (`precondition_failed`) rather than
-overwritten. Records show who wrote them (`createdByActor`, `updatedByActor`,
-with the on-behalf-of chain); `linear_list_audit_events` reads the append-only
-history. You never name yourself: the host stamps your identity. Other backends
-refuse these arguments explicitly.
+## Writing
 
-On the built-in tracker, report progress with `linear_post_issue_event`
-(`ack`, `plan`, `action`, `blocked`, `ask`, `result`, `error`) instead of setting
-state by hand; the item's state is derived from it. Advance delivery with
-`stage`: `ack` accepts, then `landed` when merged and `delivered` when released.
-Under the owner's effective `closure: lead` policy, the host-authorized lead
-may set Done after landing, relevant acceptance checks, and a checked evidence
-bundle. Lead completion records its actor and bundle separately; it never sets
-`owner-verified`. Workers report to the lead. Actor names, titles, project IDs,
-and the ordinary CLI's operator credential do not establish lead scope.
-Only the owner verifies or reopens work. Under `closure: owner`, landing raises
-a "check it works" ask; its answer verifies the item or sends it back to accepted.
-Lead closure creates no automatic verification ask. Existing pending and
-resolved asks and genuine owner-only gates retain their identities and authority.
-Read `linear_list_issue_events` (resume
-with its cursor) for the item's history; `selfEcho` marks Clankie's and workers'
-own events.
+Most agent verbosity is a register error. Pick one before writing:
 
-Releases are records on the built-in tracker. `clankie work releases sync`
-reads the repository's `v*` tags and assigns each release the item keys named
-in its commits since the previous version: built-in keys (`LOCAL-…`) and the
-convention's Linear team (`VUH-…`). Built-in items move to `delivered` on the
-first release that ships them, as a `stage` event `via: release`, when their
-evidence bundle has an independent check. Imported items without a recorded
-delivery stage retain release membership without a stage move. An item refusal
-does not abort the sync; read `skipped` for each unchanged built-in item's version,
-reason and detail. A delivery move raises
-the owner's "check it works" ask under owner closure if landing has not already raised one. Linear keys
-are listed by key only. Nobody types a release's items, so name the item key in
-the commit message. Read releases with `linear_list_releases` (`query` also
-matches an item key), `linear_get_release` and
-`linear_get_issue {includeReleases: true}`, or `clankie work releases`,
-`work release ID|VERSION` and `work releases --item KEY`.
+- **Working list** (the default): plans, review feedback, scope decisions, TODO
+  capture for readers who were already there. A bare label line ending in `:`,
+  then a flat list, numbered only when order matters.
+- **Report**: status update, findings, verification results, for readers who
+  weren't there. Bold labels, bullets, exact identifiers.
+- **Discussion reply**: plain sentences. When a decision is needed, end with a
+  direct question and an @-mention. A reply resolving a design point states the
+  mechanism and stops: `if <goal> then <constraint> because <mechanism>`.
 
-Cycles are per project on the built-in tracker. The default length is one week,
-and `clankie work cycle length PROJECT DAYS` changes it. The owner or the lead
-plans a cycle with `linear_save_issue {cycle: "current"|"next"|N|null}` (or
-`clankie work cycle add|remove ITEM`); a worker is refused. Unfinished items
-roll over into the next cycle on the first access after a cycle ends.
-`linear_list_cycles {project, type: "current"}`, `linear_get_cycle` and
-`clankie work cycle` show each cycle's summary from the event stream: planned,
-added, rolled in, removed, finished, rolled over, in flight.
-`linear_list_issues {project, cycle: "current"}` lists the current cycle's items.
+Cut before posting: open on the content, with no greeting, sign-off or
+restatement of the ticket. Post the conclusion and its evidence, not the walk.
+**Prefer editing inaccurate existing text over adding a correction comment.**
+Preserve decisions, blockers, acceptance criteria, links and active dependencies
+when condensing. When a decision is accepted, update the affected issue bodies
+and canonical documents in the same work, keeping the historical rationale.
+Backtick every identifier (`file:line` for code), use arrows for transitions
+(`CREATED→DEPLOYED`), exact strings for errors and statuses, and inline links
+where the fact lives.
 
-Pick work from `linear_list_ready_issues {project}`. These are open, unblocked,
-unleased items with no active run, current cycle first, then by priority.
-Take `linear_save_lease {issueId}` while you work: it lasts 30 minutes by
-default, renew it before it expires, and release it with `release: true` when
-done. Record each attempt with
-`linear_save_run {issueId, worktree, branch}`. Finish the run with
-`{id, status, tokens, costUsd, summary}`, and start a retry with
-`parentRunId`. Your seat and hire are linked from your identity. Owner and lead
-see `linear_list_drift` (stale leases, runs on closed items, idle items) and
-`clankie work ready|drift|runs|lease`.
+**Result updates.** Publish when there is something meaningfully new to inspect,
+a finding that changes the work, a consequential decision or a specific need for
+the user. Queue changes, routine retries, acknowledgments and unchanged check
+results do not earn another post. Lead with inspected media for visible work
+(motion needs a clip), then use only the parts that carry new information:
+**Media + what to look at**, **Result** (what the evidence establishes, delivery
+stage, remaining gap), **Biggest hurdle**, **Decision**, **Need you** (only when
+the user must act: the artifact, exact question, recommendation and what waits),
+**Evidence link**. Label what is observed and what remains unproven; never
+rewrite a failed run as a success. Keep the item's current scope, acceptance and
+latest-result link readable without reconstructing the thread.
 
-Evidence bundles and run gates are built-in tracker features. Publish
-`linear_save_evidence_bundle {issueId, references, gaps, runId?}` with real store
-record IDs, matching sha256 and `clankie://evidence/sha256/…` links, typed
-`log|screenshot|video|diff|eval|other`. Upload bytes through the evidence store
-first. Read with `linear_get_evidence_bundle`; item/run reads include their
-current bundle. Completion past landed requires the item's bundle and an
-independent `linear_post_bundle_check {bundleId, body?}`. Whoever did the work
-cannot check it. The owner's verify answer counts as a check. Replacing a bundle
-requires another check; the owner must reopen an item past landed before its
-completion bundle can be replaced. Name gaps honestly. Release sync obeys the same gate.
+**Issue bodies.** Write for someone picking the work up cold, with no
+implementation details or estimates: a one-to-two-sentence summary of what needs
+to change and why; **Background** only when the why can't be re-derived (the
+constraint, the failure it came from, the approach already ruled out);
+**Acceptance Criteria** as verifiable checkboxes; **Context** links. Length
+follows the context that can't be re-derived; past a couple of screens it is a
+design doc ([design docs](reference/design-docs.md)). If you can't write one
+concrete acceptance criterion, ask before drafting.
 
-For native-first work, an already-hired genuinely independent peer in the same
-project inspects the current ISSUE bundle (`runId` omitted) and calls the check
-through its own authenticated `clankie_call`. Read back the same current bundle's
-`checked.actor` and `checked.eventId` and the matching `bundle_checked` issue event.
-Children sharing the implementer's bridge retain the parent's actor; the CLI
-writes as Clankie for the owner, not as that peer. Keep the source producer, holds
-and receipts; an unavailable checker stays a gap, never a reason to rename the
-deliverable or copy identity/grants. See
-[lead harvest](../lead/SKILL.md#harvest-land-deliver).
-
-Use `linear_post_issue_ask {issueId, purpose: "decision", body}` for an item
-question. This raises the existing ADR 0245 owner ask, linked by `requestId`,
-not a "Needs owner" comment. For a gate, supply `purpose: "gate"`, `runId` and
-`gate: plan|spend|destructive_action|merge|external_write`. The run blocks
-immediately, then the host links the mailbox ask. Only its authenticated owner
-answer choosing Approve clears it; no tracker tool approves. Lead controls do
-not become owner approvals. The owner and lead can use
-`linear_post_run_control {runId, action: steer|pause|resume|stop, body?}`;
-a worker is refused. Resume clears the pause only; stop cancels the attempt.
-These are tracker events, not proof of native delivery or process termination.
-
-CLI equivalents are `clankie work bundle set|show|check`, `work ask`,
-`work gate ask` and `work run steer|pause|resume|stop`; the owner answers through
-the existing `clankie conversations questions|answer` mailbox. Every
-`clankie work` write, from any seat or terminal, is recorded as Clankie for the
-owner, never as the owner: so the lead cannot check a bundle he published, and
-the owner's "It works" is the check. Only the owner's app and his explicit
-`clankie work owner` call speak as the owner; agents never use `work owner`
-and reach any other tool with `clankie work call TOOL --json ARGS`. Other
-tracker backends refuse these additions.
-
-## Built-in tracker sync
-
-The same enrolled-device `tracker_sync` route reads named filters with
-`list_issue_views` and applies one with `list_issue_view_issues`. Send exact
-`project` UUID and `storeId`, plus saved view `id` for apply. Optional `limit`,
-`cursor` and `orderBy` use normal tracker pagination. Read results are
-`issue_views` (`views`) or `issue_view_issues` (`issues`), with scope IDs,
-`hasNextPage` and optional `cursor`. These require current chat access and
-delegate to canonical current tools; saved definitions never grant authority.
-Use existing sync commits to refresh, including empty-delta definition commits.
-In the app, open a built-in project's Issues page and choose View. Leaving that
-project or losing the pairing/store/access clears its selection. A selected
-read's failure never substitutes All issues; choose All issues explicitly to
-return to the ordinary list. Creation, rename and deletion stay in the API/CLI.
-
-`clankie work sync --json COMMAND` reads project-scoped bootstrap/batch data,
-waits for deltas from `(storeId,lastSyncId)`, or sends one keyed atomic
-transaction of existing write tools. It uses the existing authenticated service
-route, never a connected Linear sync. Bootstrap is JSON lines ending with model
-count and cursor metadata. Apply a whole commit before persisting the cursor;
-`rebootstrap` requires replacing the named groups from partial bootstrap.
-Hydrate comment bodies and run details in batches, retaining newer deltas.
-Use `get_write_receipt` for the original actor/key after uncertainty; replaying
-that same keyed transaction returns its original outcome. New arguments need a
-new key, and `ifUpdatedAt` conflicts need a fresh read. Send the bootstrapped
-`expectedStoreId` with queued replays; `store_replaced` means the store was
-swapped and the queued edit was not applied. Device live subscriptions
-ride the existing relay tail route. Contract and command shapes live in
-[docs/cli.md](../../../docs/cli.md#work-sync---json-command).
-
-`clankie work project-details --repo REPO` reads the saved tracker project’s summary, description, status, priority, lead, dates, teams, resources and latest 200 authored status updates. Paired devices use the additive `work_project_details` operation. Linear and the built-in tracker share the canonical project/status-update tools. Unsupported or failed reads answer unavailable; an empty feed means a successful read with no updates. The read never infers health, author or delivery from issue state.
-
-## Read-only Linear import
-
-For an authorized mirror proof, use `clankie work import linear --project UUID
---scratch NAME`. It always targets a named scratch store under `tracker-imports`,
-never the live tracker. Linear stays authoritative until the separate cutover.
-Use Clankie's connected account only. The importer paginates archived issues and
-all supported collections and obeys his background request budget; a budget
-refusal names its retry time. Keep the report (`import-report.json` in the printed
-scratch directory), compare counts and inspect five issue graphs and evidence
-links. A rerun on unchanged source must report zero created/updated records.
-Changes made in Linear during the run are legitimate updates, not duplicates.
-Do not infer authorship from worker names mentioned in prose; original Linear
-identity is retained when a persona cannot be proven.
-
-To keep that scratch copy current, the owner runs `clankie work mirror linear
---scratch NAME --project UUID enable`. Signed Linear webhooks then apply through
-the import mapper, once per event id, with the original actor. The copy refuses
-built-in writes (`mirror_read_only`): change mirrored work in Linear until cutover.
-`... status` shows counters and drift reports; drift is repaired by a scoped
-re-read through the connected account. It only ever targets scratch imports.
-
-Cutting a World project over (VUH-1987) is the owner's decision. Run
-`clankie work cutover linear --world-project ID --scratch NAME --project UUID
---dry-run` first and show the plan: counts against Linear, the mirror, the store,
-binding and convention changes, and the switch-back command. Without `--dry-run`
-it applies the plan, and it refuses on drift or a non-empty live store. Afterwards
-that project's convention is `backend: builtin`: its work is in the built-in
-tracker, not Linear. A worker or lead hired for that project reaches it with
-`linear_*` calls without `repo` (VUH-2014). Writes outside the project are
-refused, and so is `linear_graphql`. Anyone else passes the project's `repo`, or
-uses `clankie work --repo`. Clankie's own unhired operator calls without `repo`
-still reach connected Linear. A hire whose project has no saved convention is
-refused rather than guessed; an explicit `repo` always wins.
-`... --switch-back [--dry-run]` restores Linear as the project's tracker and
-reports the pilot writes Linear never saw.
+**Project status updates** curate meaningful results since the previous update
+for people who were not in the threads. Read the previous update and survey
+changed issues and landed work; select the results, hurdles and decisions that
+change the reader's understanding. Embed media grouped by outcome, cut clips to
+the interesting seconds and say what was cut, caption the actual method and scope,
+and never imply the strongest claim from an unlabeled capture. Publish only media
+authorized for that audience: permission to inspect third-party reference
+footage is not permission to publish it. Distinguish a candidate from
+a delivered build, keep important blockers, and end with what lands next and any
+decision waiting on a human. A demo that shows a milestone working also goes in
+the status update, so it plays in project Activity.

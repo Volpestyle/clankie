@@ -44,16 +44,12 @@ This repository is public. Both neighbors are private and consume
   seat as an output style, hooks, the `clankie mcp` stdio bridge, and linked
   product skills (ADR 0152). `clankie claude` launches it; it carries only what
   a plugin can uniquely declare, like the herdr plugin.
-- `.agents/skills` — product skills shipped with every install (`this-machine`,
-  `trace-clankie`). They teach Clankie, his seat and his workers his own
-  capabilities; general-purpose skills are the user's or the harness's
-  ([ADR 0236](docs/adr/0236-clankie-owns-the-skills-he-ships.md)). Checkout-only skills live in `.agents/dev-skills`. He also
-  reads the workspace's own `.agents/skills`, Pi's agent directory, and
-  `~/.agents/skills`, the roots he shares with every other agent on the
-  machine; `clankieSkillRoots` in `@clankie/settings` is the one list, so what
-  the composer offers is what a session can load. Only his own and the
-  workspace's skills are listed each turn; the machine-wide ones are found
-  with `skill_search` (`captain/skill-catalog.ts`).
+- `.agents/skills` — product skills shipped with every install. They teach
+  Clankie, his seat and his workers his own capabilities; general-purpose skills
+  are the user's or the harness's
+  ([ADR 0236](docs/adr/0236-clankie-owns-the-skills-he-ships.md)). Checkout-only
+  skills live in `.agents/dev-skills`. Skill roots and loading:
+  [bundled skills](docs/bundled-skills.md).
 - `packages/play` — his play mind above one body seam; the body itself is his
   seat in a hosted PokeAgents world (ADR 0145). No emulator lives in this repo.
 - `packages/` — shared contracts and adapters; `protocol` has no other workspace
@@ -64,55 +60,31 @@ This repository is public. Both neighbors are private and consume
 ## Rules
 
 - Project planning and issue tracking live in the [Clankie Linear project](https://linear.app/vuhlp/project/clankie-7f2de0de4a75/overview).
-- Match the surrounding code. Use focused checks while iterating, and run the
-  repository-root `pnpm check:landing` before pushing. Its own `--changed`
-  selection is the landing gate; hand-picked test subsets do not substitute for
-  it. Follow the current worker/lead gate assignment.
-  The timing-sensitive release-only file list is in
-  [`scripts/testing/landing-test-policy.ts`](scripts/testing/landing-test-policy.ts);
-  those files still run in release/manual `pnpm test`.
-  New tests follow [ADR 0221](docs/adr/0221-tests-prove-the-product-and-its-boundaries.md):
-  full E2E with real dependencies and nothing mocked, then integration across
-  data/API/schema boundaries, then goldens grounded in real examples. Do not add
-  unit tests by default; existing unit tests stay until separately reviewed pruning.
-  Add no test nobody asked for: only from acceptance criteria, a trust boundary
-  or a published contract, asserting behaviour, never incidental detail. Prove
-  the change with the real thing (ADR 0221 amendment, 2026-10-09).
-  On a shared machine, run builds, typechecks, test suites and installs through
-  `clankie heavy --` (the `fleet-resources` skill); CI runs them directly.
-  Before landing, format/lint explicit touched files with `clankie heavy -- pnpm fmt FILE...`,
-  `clankie heavy -- pnpm fmt:check FILE...` or `clankie heavy -- pnpm lint FILE...`.
-  Up to 64 existing files use the light lane; directories, globs and whole-repository
-  checks use the full lane. These do not replace the root `pnpm check:landing`
-  each lander runs before pushing (ADR 0240).
-- Read resolved owner working preferences through `clankie fleet status` or
-  `clankie doctor --json` for this workspace before committing, pushing or releasing.
-  Global defaults permit commit/push without asking and require asking before
-  official releases. Clankie releases weekly on Fridays (routine `rt_5e57aab32a7d`,
-  James 2026-10-17) when `main` has user-visible changes worth shipping
-  (`release-clankie`). Explicit task and
-  integrator gates take precedence; the private app reads its own project policy.
+- Match the surrounding code and iterate with focused checks. On a shared
+  machine, run builds, typechecks, test suites, installs and formatting/linting
+  through `clankie heavy --` (the `fleet-resources` skill); CI runs them directly.
+- New tests follow [ADR 0221](docs/adr/0221-tests-prove-the-product-and-its-boundaries.md)
+  (`verify-clankie`): E2E with real dependencies first, then integration across
+  boundaries, then real-data goldens. No unit tests by default, and no test
+  nobody asked for. Prove the change with the real thing.
 - Land clankie and clankie-app changes directly on `main`
   ([ADR 0240](docs/adr/0240-changes-land-directly-on-main.md)): stage only your
-  files, commit, and `git pull --rebase origin main`. Then run
-  `clankie heavy -- pnpm check:landing` from the repository root against the
-  fetched `origin/main`, and push only after it passes. If `main` moves after a
-  green gate, rebase and run `pnpm check:landing --revalidate`: it compares the
-  incoming commits with the gate's recorded selection and exits 0 when the gate
-  still covers HEAD, so push without rerunning. When an incoming commit touches
-  the change's files, a selected test's imports, the compiler inputs of an
-  affected file, repository-wide configuration or gate scripts, or deletes a
-  file, it exits 1: run the root gate again. A changed source always needs a new
-  gate. Don't judge overlap yourself. Resolve conflicts only in your
-  own files. The full `pnpm check` runs for
-  releases and on request; `clankie integrate` is optional, never required.
-- Under load, if the root gate's only failures are unchanged timing-sensitive
-  cases outside your change and its affected imports, the lead may accept the
-  landing after every exact failing case passes in isolation on unchanged inputs.
-  Retain the nonzero gate result, exact errors, load samples and isolated results,
-  labelled **Full-gate result** and **Isolated passes**. Do not report a green
-  full gate or weaken assertions, timeouts or product defaults. Failures in
-  changed code or affected consumers still block.
+  files, commit, `git pull --rebase origin main`, then run
+  `clankie heavy -- pnpm check:landing` from the repository root and push only
+  after it passes. Its own `--changed` selection is the gate; hand-picked subsets
+  do not count, and a changed source needs a new gate. If only `main` moved, rebase
+  and run `pnpm check:landing --revalidate`: exit 0 pushes as is, exit 1 reruns
+  the gate. Don't judge overlap yourself, and resolve conflicts only in your own
+  files. ADR 0240 also sets when a lead may accept unchanged timing-sensitive
+  failures (the release-only list is
+  [`scripts/testing/landing-test-policy.ts`](scripts/testing/landing-test-policy.ts));
+  never report that as a green gate. The full `pnpm check` runs for releases and
+  on request; `clankie integrate` is optional.
+- Before committing, pushing or releasing, read the resolved owner working
+  preferences (`clankie fleet status` or `clankie doctor --json`). Defaults permit
+  commit and push and ask before official releases; explicit task gates take
+  precedence, and the private app reads its own project policy. Releasing
+  follows `release-clankie`.
 - Build every feature API- and CLI-first, and update the relevant agent-facing
   skill and human-facing docs. A setting the owner cares about is settable from
   every UI (TUI, app on phone, web and desktop, and the hosted dashboard)

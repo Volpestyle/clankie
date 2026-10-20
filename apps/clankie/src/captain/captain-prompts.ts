@@ -131,9 +131,9 @@ export function assembleLanePrompt(
 ): string {
   const identity = captainInstructions();
   const persona = personaInstructions(currentSettings.persona, REGISTER_FOR_LANE[lane]);
-  // Machine access says only whether this room has a shell. The herdr contract —
-  // joining, the census, the bare-`herdr-lead` hang — is identity, stated once in
-  // instructions.md, and every lane that gets this section gets that one too.
+  // Machine access says only whether this room has a shell. The fleet census is
+  // stated once in instructions.md; the rest of the herdr contract is in the
+  // this-machine skill.
   // Computer-use harnesses drive the owner's own apps and sessions, so they are
   // named only where a hire could happen at all: a room with the machine grant
   // (ADR 0199). The owner can take them off the card to save those plans.

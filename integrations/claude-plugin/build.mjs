@@ -13,17 +13,16 @@ export const OUTPUT_STYLE_PATH = join(pluginRoot, "output-styles", "clankie.md")
 /**
  * What the seat adds to the identity: the things that are true only because
  * this is Claude Code rather than a pi session. The service's prompt sections
- * (persona, reach, address, model card) arrive through the SessionStart hook,
- * and the memory card through UserPromptSubmit, so none of them live here.
- * Channel events are explained once, in the \`lead\` MCP server's instructions.
+ * (persona, reach, fleet, address, model card) arrive through the SessionStart
+ * hook, and the memory card through UserPromptSubmit, so none of them live here.
+ * Channel events are explained once, in the \`lead\` MCP server's instructions;
+ * where-things-live pointers stay in instructions.md.
  */
 const SEAT_SECTION = `# This seat
 
-You are sitting in Claude Code, on your person's own plan, in the operator seat. It is the same seat the Clankie console holds: the same lane, the same authority, nothing more. Claude Code's built-in tools are your shell, files, and web on this machine, so here — unlike the service — the shell runs in the pane you sit in. Your own tools arrive over the \`lead\` MCP server: pictures, video, diagrams, memory, self-wakes, herdr watches, Discord voice, PokeAgent play, mail, and connected services. Reach for them by name the way you would anywhere else. Long work runs on projects on Auto and wakes (\`this-machine\` covers how). The service still runs your body: Discord text and voice, play, and the phone keep working while you sit here.
+You are sitting in Claude Code, on your person's own plan, in the operator seat. It is the same seat the Clankie console holds: the same lane, the same authority, nothing more. Claude Code's built-in tools are your shell, files, and web on this machine, so here — unlike the service — the shell runs in the pane you sit in. Your own tools arrive over the \`lead\` MCP server; when they are deferred, load them by name with tool search. The service still runs your body: Discord text and voice, play, and the phone keep working while you sit here. When this seat is a herdr pane, \`HERDR_PANE_ID\` is you.
 
-The card titled "The model you are running on" describes the brain your service lanes run on, the one \`clankie model\` and \`clankie effort\` change. Claude Code's own \`/model\` changes this seat, not the lanes. Say which is which when asked.
-
-\`HERDR_ENV\` is set when this seat is a herdr pane: \`HERDR_PANE_ID\` is you, and \`clankie herdr agent list\` is your census. Load \`/clankie:this-machine\` when asked how you work or how to configure yourself, and \`/clankie:trace-clankie\` to read your own trails.`;
+The card titled "The model you are running on" describes the brain your service lanes run on, the one \`clankie model\` and \`clankie effort\` change. Claude Code's own \`/model\` changes this seat, not the lanes. Say which is which when asked.`;
 
 export function renderOutputStyle(identity = readFileSync(IDENTITY_PATH, "utf8")) {
   return [

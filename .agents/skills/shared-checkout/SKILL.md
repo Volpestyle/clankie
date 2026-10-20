@@ -54,9 +54,11 @@ The stash stack is also **repository-global, not worktree-local**: `refs/stash`
 is shared by every worktree of one repo, so your own worktree is not the
 shelter it looks like. A `stash push` there lands on the same stack a sibling
 in another worktree pops from, and `git stash list` shows you their entries
-next to yours. Use `cp` for your own copy; if you must stash, pop by name
-(`git stash pop stash@{n}` after checking `git stash list`) rather than
-trusting the top of the stack.
+next to yours. Use `cp` for your own copy. If you must stash, push with a
+unique message, record your entry's SHA from `git stash list --format='%H %gs'`,
+restore with `git stash apply <sha>` and drop that entry afterwards: a sibling's
+push shifts every `stash@{n}`, so neither the top of the stack nor an index is
+yours.
 
 Add a new commit instead. A slightly untidy history is recoverable; a
 `reset` is what someone reconstructs from reflog at 3am.
@@ -66,18 +68,9 @@ fixes it. Squashing is the integrator's job, once the lane is quiet.
 
 ## Check an exported snapshot
 
-When checking an exported source snapshot with already-installed pnpm 11
-dependencies, use `pnpm_config_verify_deps_before_run=false pnpm check`.
-The default preflight can launch an install even for a check command and
-rewrite dependency links. Keep the sibling-directory layout declared by
-`pnpm-workspace.yaml`; linked dependencies alone do not satisfy workspace checks.
-Make each sibling a real directory, never a symlink: pnpm links through a
-symlinked sibling but does not register it as an importer, so a lockfile
-generated there omits its dependencies and a frozen install passes in the
-scratch copy but fails in a real checkout or CI.
-Pin linked workspace sources too: a clean app export can still bundle dirty
-sibling code through dependency links. For JavaScript bundles, compare source-map
-contents against each workspace's committed revision, not just the app's.
+Checking an exported source snapshot with installed pnpm dependencies has its
+own traps (install preflight, symlinked siblings, dirty linked sources): see
+[exported snapshots](reference/exported-snapshot.md).
 
 ## Photograph the tree before you touch it
 

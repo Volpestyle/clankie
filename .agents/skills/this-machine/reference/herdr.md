@@ -1,6 +1,6 @@
 # Machines and Herdr workspaces
 
-Machines and devices, which Herdr session Clankie uses and how to change it, messages to external Codex sessions, and delivery receipt stages.
+Machines and devices, worker defaults, which Herdr session Clankie uses and how to change it, and messages to external Codex sessions.
 
 ## Machines and devices
 
@@ -36,11 +36,8 @@ limits and the remaining gateway/native-adapter gaps.
 fleet worker defaults one field at a time. Use `auto` for a field to remove its
 default and let Clankie choose per job; project roles take the same `auto`
 (`clankie agents role ROLE --project P --harness auto --model auto --effort auto`).
-With no harness at any layer, Clankie picks Claude or Codex for each hire; a hire
-that still names none falls back to the machine's usable, unheld accounts (the
-only harness with one; else the one whose best account is not on pace to run
-out before its reset; else Codex only when it has strictly more of its tightest
-window left; else Claude) and never to a fixed harness. Other hire-profile fields and fleet
+With no harness at any layer, Clankie chooses per hire; the fallback when a hire
+names none is in `lead`'s [hiring reference](../../lead/reference/fleet-tools.md#hiring). Other hire-profile fields and fleet
 resource settings are preserved. `--hire-profile FILE.json` replaces the whole
 profile; use it separately from these flags. Explicit hire choices override
 project roles, which override fleet defaults. New hires use the result; existing
@@ -85,18 +82,11 @@ stays unavailable until restart; no replacement fleet is silently created.
 service liveness. `/v1/herdr` returns 503 without an active binding.
 Doctor's `commands.herdr` probes the selected CLI. `commands.herdr-lead` and
 `herdrPlugin` describe the optional dashboard integration.
-Mac zsh panes can also select Clankie's automatic Claude PATH shim: bundled
-panes get it at service start; prepare the active local external session with
-`clankie herdr prepare local --claude-path-shim install`, then open a new pane.
-Plain `claude` and `claude --resume ID` add the worker channel when enabled;
-explicit channels/settings, bare/print launches and disabled plugins pass through.
-Preparation changes only Herdr's stable `default_shell` reference, preserving
-its config symlink and owner zsh startup files. Undo with the same command and
-`--claude-path-shim remove`. It affects future panes, never running sessions.
-Doctor's `herdrPlugin.claudePathShim` distinguishes active PATH from a shell
-configured for new panes. It does not prove native channel delivery. Windows
-PowerShell/Git Bash automatic activation remains a follow-up; use the explicit
-channel-enabled launch there. See the [shim setup](../../../../integrations/herdr-plugin/README.md#hand-started-claude-on-mac).
+Mac zsh panes can also select Clankie's automatic Claude PATH shim, so plain
+`claude` adds the worker channel when enabled: `clankie herdr prepare local
+--claude-path-shim install|remove` for the active local external session. It
+affects future panes, never running sessions, and does not prove native channel
+delivery. See the [shim setup](../../../../integrations/herdr-plugin/README.md#hand-started-claude-on-mac).
 Load `lead` for native hiring, messaging and harvest; Herdr is the inspection/runtime surface. The optional dashboard CLI is installed separately. Never run `herdr-lead`
 bare or with `--version` — that starts a TUI and hangs the shell. `herdr-lead
 state` and `herdr-lead split` are the headless verbs. If the plugin is
@@ -128,20 +118,10 @@ MCP tools: shared-daemon local MCP membership continues to fail closed. Private
 
 ## Delivery receipt stages
 
-Read `deliveryStage` separately from the native outcome and work status:
-`stored` is service retention, `delivered` is bridge receipt, `consumed` is native
-queue/turn acceptance, and `responded` is a correlated response or turn outcome.
-Native queues count as consumed even while waiting for an active turn or goal;
-this never means model-seen or completed work. `unavailable`, `expired`, and
-`rejected` say where delivery stopped. `uncertain` blocks every retry and every
-fallback until the original receipt is reconciled, including after restart.
-
-Keep the native queue/steer state and detail when reporting to the owner.
-
-For inbound `message_clankie`, `stored` is retained conversation acceptance,
-not proof Clankie read it or completed work. Both `mcp --seat` and `mcp --fleet`
-retain the original ID, native binding and payload through bridge replacement.
-After `uncertain`, another call only reads that original receipt. Do not change
-text, generate a new ID, switch bridges, or remove receipt files to retry.
-Different follow-ups remain unsent while resolving the original; missing,
-revoked or corrupt evidence stays blocked. No-ID legacy writes are rejected.
+`deliveryStage` (`stored`, `delivered`, `consumed`, `responded`, and where it
+stopped) is read separately from the native outcome and work status; none of them
+proves the model read or finished it, and `uncertain` blocks every retry and
+fallback until the original receipt is reconciled. Leads: `lead`'s
+[receipts](../../lead/reference/fleet-tools.md#receipts-questions-and-recovery);
+workers: the `clankie` skill. Keep the native queue/steer state and detail when
+reporting to the owner.

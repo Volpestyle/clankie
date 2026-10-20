@@ -16,16 +16,10 @@ answer a question that no longer matters; a well-executed task can serve the
 wrong priority. Research leadership considers the whole effort, connects its
 activities to the person's goal and changes direction when the evidence warrants it.
 
-For authorized dispatch, load `lead`. Local and remote hires use `hire_agent` and `message_seat`; remote seat IDs
-retain their fleet prefix. Workers report with `message_clankie` to the hiring
-or adopting conversation. Native Codex children remain part of their parent
-seat; use them for bounded analysis when available. Workers can resolve a
-shared boundary with `list_fleet_seats` / `message_peer` while peer messages
-are enabled, without transferring scope or waking the lead. Missing
-harness control never permits automated terminal typing. Use `work-items` when
-a tracker is in play and `shared-checkout`
-before commits. An advisory check-in does not itself authorize more workers,
-compute, data access or external actions.
+For authorized dispatch, load `lead`; it covers hiring, messaging, reports and
+peers. Use `work-items` when a tracker is in play and `shared-checkout` before
+commits. An advisory check-in does not itself authorize more workers, compute,
+data access or external actions.
 
 ## Roles
 
@@ -48,9 +42,9 @@ compute, data access or external actions.
   its next usable result, with named files and explicit handoffs. Keep their
   lane notes under one writer while that ownership holds.
 - **Reviewers.** When independent review is warranted, use someone outside
-  the authoring lane, preferably with a different model family or perspective.
+  the authoring lane ([lead delivery](../lead/reference/delivery.md#review)).
   The lead checks findings before sending fixes back to the owner. Author tests
-  are evidence, not independent review; follow the project's review rules.
+  are evidence, not independent review.
 - **The person.** Owns the goal, domain judgment, tradeoffs and funding.
   Bring consequential decisions and results, and check their assumptions too.
 

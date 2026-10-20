@@ -32,7 +32,7 @@ private location. This package ships only generic contracts and deterministic
 tooling. Image generation, spend limits, catalog publication and applying the
 live look require their own authorized flow.
 
-# Durable owner pose approval
+## Durable owner pose approval
 
 Use `clankie skin draft` or the operator-lane `skin_draft` tool to prepare a
 brief and already-owned rest/work/comms poses. The [draft contract](../../../docs/skin-drafts.md)
@@ -51,12 +51,6 @@ three native digests; it does not authorize animation generation, spending,
 independent visual review, publication or changing the live look. Those later
 stages must verify the exact approved revision again.
 
-`clankie skin draft generate ID REVISION --request UUID` and tool action
-`generate` join the configured media seam to the same draft journal, but paid
-generation currently refuses until the owner credit-admission policy exists.
-No request argument opens that gate. Never substitute another media tool to
-evade the admission refusal. Reconcile a lost reply by reading the draft and
-retaining the original UUID/input revision. An uncertain journal is not a failed
-charge and must never be retried with a fresh UUID. Completed media receipts,
-including upstream request IDs where available, survive restart. The private
-app can review/edit these exact poses; approving them remains the owner's act.
+Paid `generate` follows the tool's own credit-admission gate; never substitute
+another media tool to evade its refusal, and reconcile a lost reply by reading
+the draft with the original request UUID, never by retrying with a fresh one.

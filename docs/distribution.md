@@ -186,11 +186,12 @@ and worktrees. See [resource commands](cli.md#fleet-resource-governor).
 Herdr ships as an official stable release binary, verified against the
 platform checksum in `scripts/release/herdr.json`. Its matching source archive
 is retained for license inventory; no fork or Rust/Zig build is needed for Herdr.
-The build generates the bundled `herdr` skill directly from that executable's
-`--skill` output, including both Claude plugin copies. `pnpm herdr:skill` refreshes
-the checkout copy from the same checksum-verified pin; `pnpm check` rejects drift.
-The hosted image verifies the skill bytes and pinned version as its runtime user,
-so a fresh body needs no globally installed Herdr skill.
+The bundled `herdr` skill is a loader for that executable's `--skill` output.
+The build checks that the pinned binary serves `--skill` and that both Claude
+plugin copies carry the same loader; `pnpm herdr:skill:check` (part of
+`pnpm check`) runs the same checks in a checkout. The hosted image repeats them
+with the pinned version as its runtime user, so a fresh body needs no globally
+installed Herdr skill.
 The service checks `https://herdr.dev/latest.json` at startup and every six hours,
 staging verified releases outside the immutable install. Live workers keep a
 matching server/CLI copy. Staged releases apply when Clankie's own fleet starts

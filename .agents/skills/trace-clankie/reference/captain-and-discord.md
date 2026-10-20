@@ -123,7 +123,7 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   (`.delivered` holds exact acknowledgements). An entry there without
   `completed`, `settlement` or `abandoned` is unresolved: a resend of that ID or
   exact content returns `uncertain` with the original's ID, while unrelated
-  wakes, watches and reports keep delivering (VUH-1779). The seat gets one
+  wakes, watches and reports keep delivering. The seat gets one
   `seat-delivery-alert` message per unresolved receipt. `clankie seat-delivery
 list` and `clankie doctor` show each with its age (legacy entries have none).
   Never edit the journal. If the native transcript proves the event arrived,
@@ -172,3 +172,21 @@ list` and `clankie doctor` show each with its age (legacy entries have none).
   `discord.voice.floor_decision`, `model_response`, `realtime_tool`, and
   `response`. The receipt is content-free; exact text remains in Discord, and
   the opt-in voice transcript log stays speech-only.
+
+- **A model credential rejection.** Inspect doctor's `credentialRejections` and
+  the original conversation receipt. Owner-typed Pi turns force one OAuth refresh
+  and continue only on success, within the same run. Pi's context edit hides the
+  rejected assistant from active context without deleting its audit record; it
+  does not append the owner's input again or replay completed tools. A second
+  rejection or cancellation stops continuation. Hosted `operator_required` means
+  service-owned credential repair. For local and hosted turns, join service-log
+  `model.credential_rejected` (`providerId`, recovery `outcome`) with later
+  `model.credential_accepted` and the original receipt. These fixed diagnostics
+  exclude upstream errors and credentials. Doctor is current health, not a
+  history: a cleared entry or later provider success alone does not prove forced
+  refresh. Retained Pi assistant records prove provider acceptance or rejection;
+  distinguish that from evidence of a refresh grant. Inspect existing failed-turn
+  telemetry too. Never tell a hosted customer to run `/auth`; no dedicated
+  credential-escalation acknowledgment is implied. Local `reconnect_required`
+  retains the console reconnect path. See `docs/cli.md` under doctor for the
+  states. Do not run a paid model probe just to refresh diagnostics.

@@ -1,6 +1,6 @@
-# Presence, desktop body and activity shares
+# Presence, body leases and activity shares
 
-What he is doing, his desktop expressions and pet face, and sharing live activity or artifacts.
+What he is doing, his desktop expressions and pet face, who holds each body resource, and sharing live activity or artifacts.
 
 ## Presence and desktop body
 
@@ -17,6 +17,29 @@ come from live committed owner-conversation events and expire; they do not
 replay historical notifications. They leave the body animation and `desktop`
 expressions separate. Reduce Motion keeps a static face. A published face
 does not establish that the owner saw it.
+
+## Body leases
+
+`clankie body status` shows the stable conversation holding each of Discord
+mouth, voice/Go Live, browser and play. Inspecting status grants no control.
+Use the current conversation's `body_lease_request` tool to explicitly ask a
+holder or queue a notification. Requests expire and never perform an effect
+or transfer ownership. Recheck authority and reacquire when notified.
+`clankie body request JSON` exposes the same operator API; see `docs/cli.md`
+under the reported service root for its exact fields and recovery behavior.
+Do not treat expiry or a process restart as proof that a send/session stopped.
+
+A body lease marked `recovery_required` is still held. The service retries its
+verified stop-check after a known service-owned holder's turn and body
+operations end, at boot and with 5–60 second backoff. Missing or unreadable
+holders and native-owned turns stay held for explicit owner recovery; display
+activity is not native completion proof. Never infer release from expiry or a
+failed close. A native seat holding an expired lease with no live operation is
+woken once with the exact recover command; recover it promptly when finished,
+because every other conversation, Discord rooms included, waits behind it. If it
+persists, an authorized owner can inspect `clankie body status` and use
+`clankie body request '{"action":"recover","resource":"browser","conversationId":"CONVERSATION_ID"}'`
+from an existing writable conversation. Computer recovery uses its own contract.
 
 ## Activity artifact shares
 

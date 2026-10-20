@@ -27,8 +27,8 @@ this public repo or the landing page's source comments.
 
 Skills are also product surfaces: every shipped skill is authored in
 `.agents/skills` here ([ADR 0236](../../../docs/adr/0236-clankie-owns-the-skills-he-ships.md)),
-and `docs/bundled-skills.md` lists them. The Herdr skill is
-binary-generated; `pnpm herdr:skill:check` verifies it. Native seat instructions
+and `docs/bundled-skills.md` lists them. The Herdr skill is a
+loader for `herdr --skill`; `pnpm herdr:skill:check` verifies it. Native seat instructions
 come from their build scripts; never repair only a generated projection.
 
 Generated pages rebuild from their sources. Fix `docs/cli.md`,

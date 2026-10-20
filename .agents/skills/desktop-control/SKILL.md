@@ -18,6 +18,10 @@ directly. `peekaboo agent` and `--analyze` start separate model reasoning and ar
 unnecessary for this workflow. Operator and authenticated Discord machine grants
 own machine access; social rooms do not.
 
+The loop is always: observe, **read the actual image**, decide one action, act,
+observe again. A shell response containing a filename does not show the image to
+the model, and dispatch alone does not prove the intended result.
+
 When your reach card lists a computer-use harness, a long flow in your
 person's apps usually goes better as a hired seat:
 [delegating to a computer-use seat](reference/delegation.md) covers choosing the
@@ -28,76 +32,6 @@ The `desktop` tool expresses Clankie's presence (emote, bubble, movement); it
 does not drive apps. Peekaboo is his own hands, guided by this session's current
 observation. A hired Codex computer-use seat is another visible driver; coordinate
 one active driver on the display instead of overlapping it with Peekaboo.
-
-The shared computer body is available through `clankie computer request JSON`
-(`conversationId`, `command`). Acquire its driver lease, inventory PID/window
-IDs, capture and save its frame with `--image-path NEW_PNG_PATH`. Read that image,
-then send ordered input against the
-fresh screenshot UUID. Coordinates are image pixels; foreground input is an
-explicit choice. Reconcile the same request UUID after transport loss and never
-replay an uncertain input. Its macOS adapter preserves Peekaboo's limitations;
-ordinary recovery needs host stop proof. For an expired local macOS lease only,
-the owner may explicitly accept unknown native drain with `recover.ownerRecovery`:
-record a reason and copy `expectedHolder` and `expectedExpiresAt` from fresh status.
-Confirm the old native driver has stopped first. Fresh operator authority, no
-service-tracked holder work and no computer operation are required; the host
-durably records this decision before release. This exception cannot recover
-Windows or lent screens, and never authorizes replaying uncertain input. Contract and examples:
-[desktop control](../../../docs/desktop-control.md#shared-computer-body).
-
-## Lend a joined screen
-
-For an explicitly lent computer, pass its registered `machineId: "join-UUID"`
-through `clankie computer request` alongside `conversationId` and `command`.
-Omitting machineId uses the local body; failed selection never picks another
-screen. A hosted Clankie can use this body without a local owner desktop.
-
-`screen` level only permits asking. The host owner confirms observation for
-one session locally and separately allows input. Keep the visible pet and Stop
-available. Capture, save and read the actual image before choosing one native
-accessibility press/text append or bounded navigation key/drag/scroll. Use explicit `foreground: true`
-and an exact changed `expect` field. Keys are named navigation keys only; no chords or Return.
-Scroll requires an `at` image-pixel anchor and 1–10 ticks; drag remains in the
-captured window. Native acknowledgments never release a post-input lease: true
-queue drain stays unknown/held (VUH-1840). Stop on person takeover, access reduction or uncertain
-results. Preserve the original request UUID; never replay unknown input.
-Recovery remains usable after reduction, but unknown native quiescence holds
-the lease. Real Mac/PC driving proof is open; do not infer it from an HTTP
-fixture or compile. Setup: [lent screens](../../../docs/desktop-control.md#lend-a-joined-screen).
-
-## Windows native control
-
-On a Windows machine, use the native Codex computer-use plugin's trusted
-`node_repl` and `@oai/sky` through the Windows computer host, not Peekaboo.
-The host exposes the same computer contract, bound to the owning conversation
-and the machine (`windows:studio:console`, for example). Use an SSH loopback forward
-when leading from another machine. Setup and limits:
-[Windows observation host](../../../docs/desktop-control.md#windows-observation-host).
-
-Every attachment defaults to read-only, even with the full `sky` client. An owner
-must deliberately pass `allowInput: true` in a clear driving window before
-acquiring a new input lease; lease and status record this choice. An explicitly
-enabled full client supports click, literal type, key, scroll and drag. Inspect the exact-window PNG and raw
-`accessibility` fields before choosing one primitive. Every Windows input
-requires explicit `foreground: true` and `expect: {field, equals}` for an intended
-changed native UIA field (`tree`, `focused_element`, `document_text` or
-`selected_text`). Only an exact changed value in a fresh same-window observation
-confirms the action. A returned call or repaint alone cannot. Re-capture after
-each primitive; clear-and-type, control characters and guessed element IDs
-refuse. Scroll requires an explicit image-pixel `at` point.
-
-A configured harness in `browser harnesses` does not prove app grants, a free
-driving window, or live input readiness. Arrange the driving window with the
-person; never overlap their use or another driver. Host Win32 person-activity
-checks run before each dispatch; wait two seconds between primitives. A new
-input stamp, failed query or session mismatch fences the attachment. Every
-native error, revocation and uncertain receipt stops continuation; recovery requires
-independent native stop proof. Keep ADR 0127's sign-ins, codes, CAPTCHAs, payments,
-account changes and destructive steps with the person. Respect the installed
-Windows plugin's app/shortcut denies. Do not bypass native grants or fall back
-to `C:\desk`. The adapter denies shell/system apps, Explorer Run, Windows-key
-aliases, Ctrl+Escape, Ctrl+Shift+Escape, Alt+F4 and Alt+Tab. Treat Windows input
-as unreleased until owner-run live stop evidence passes the manual release fixture.
 
 ## Discover the target
 
@@ -122,8 +56,7 @@ Assign `IMAGE_PATH` to a caller-owned temporary PNG path, then capture:
 peekaboo see --app "$APP" --window-id "$WINDOW_ID" --path "$IMAGE_PATH" --json
 ```
 
-Check the receipt and **read the actual image at the returned path** with `read`.
-A shell response containing a filename does not show the image to the model.
+Check the receipt and read the image at the returned path with `read`.
 Use screenshot evidence when AX omits content; a sparse tree does not establish
 that the window is empty. For text-only inspection:
 
@@ -185,8 +118,32 @@ to get around a no-focus constraint. Named AX actions must be advertised by the
 observed element; do not guess them.
 
 After each action, observe the same target again and inspect the new image/state
-before deciding the next action. Dispatch alone does not prove the intended
-result. Inspect indeterminate results before considering another action; do not
-blindly replay clicks or keys. Report capture, inspection, and interaction proof
-separately. An unavailable action path is a provider limitation to resolve,
-not a reason to build an app-specific desktop driver.
+before deciding the next action. Inspect indeterminate results before considering
+another action; do not blindly replay clicks or keys. Report capture, inspection,
+and interaction proof separately. An unavailable action path is a provider
+limitation to resolve, not a reason to build an app-specific desktop driver.
+
+## The shared computer body, lent screens and Windows
+
+The shared computer body is available through `clankie computer request JSON`
+(`conversationId`, `command`, and `machineId` for an explicitly lent screen).
+Acquire its driver lease, inventory PID/window IDs, capture and save its frame
+with `--image-path NEW_PNG_PATH`, read that image, then send ordered input
+against the fresh screenshot UUID. Reconcile the same request UUID after
+transport loss and never replay an uncertain input. Omitting `machineId` uses
+the local body; failed selection never picks another screen.
+
+- A **lent screen** at `screen` level only permits asking: its host owner
+  confirms observation for one session locally and separately allows input.
+  Keep the visible pet and Stop available, and stop on person takeover, access
+  reduction or uncertain results.
+- On **Windows**, use the native Codex computer-use plugin through the Windows
+  computer host, not Peekaboo. Every attachment defaults to read-only; input
+  needs an owner's deliberate `allowInput: true` in a clear driving window, and
+  is implemented but not yet released for live use. Never overlap the person's
+  use or another driver, and keep ADR 0127's sign-ins, codes, CAPTCHAs,
+  payments, account changes and destructive steps with the person. Respect the
+  installed plugin's app/shortcut denies and never bypass native grants.
+
+Leases, recovery, input bounds and the Windows adapter's rules:
+[shared body](reference/shared-body.md).

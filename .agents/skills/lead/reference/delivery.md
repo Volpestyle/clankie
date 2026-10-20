@@ -32,69 +32,41 @@ investigation. Waived or deferred verification stays labelled and is never a
 pass. When the user authorizes partial closure, close the accepted slice and
 keep what is missing in a focused follow-up.
 
-## Landing Clankie's own changes
+## Landing
 
-Everyone, including James's interactive panes and their subagents, lands
-clankie and clankie-app directly on `main` (ADR 0240). Brief workers to stage
-only their files, commit, and `git pull --rebase origin main`. Before pushing,
-require the repository-root `clankie heavy -- pnpm check:landing`, using its own
-`--changed` test selection against fetched `origin/main`. Focused checks are for
-iteration; a hand-picked subset is not the landing gate. A source change after
-the gate requires another root gate. After a base-only move, the worker rebases
-and runs `pnpm check:landing --revalidate`; exit 0 keeps the green gate, exit 1
-names the overlapping incoming paths and requires another root gate. Require the checked HEAD, fixed base,
-exit status and evidence path in the worker's report; a clean-main zero-test run
-does not verify an earlier landing. Then `git push origin main`, reporting the SHA.
-If the root gate's only failures are unchanged timing-sensitive cases outside
-the change and its affected imports, the lead may accept the landing after
-every exact failing case passes in isolation on unchanged test/product inputs.
-Retain the gate's real nonzero exit, exact errors, load samples and isolated
-results, labelled **Full-gate result** and **Isolated passes**. This is a lead
-acceptance decision, not a green full gate. Failures in changed code or affected
-consumers still block; do not weaken assertions, timeouts or product defaults.
+Brief workers to land by the workspace's own landing rules (for Clankie's own
+repositories, the repository's agent instructions and ADR 0240). Require the
+checked HEAD, fixed base, gate exit status and evidence path in the worker's
+report, then the pushed SHA; a clean-main zero-test run does not verify an
+earlier landing. Where those rules let the lead accept a gate whose only
+failures are unchanged timing-sensitive cases, that is a lead acceptance
+decision labelled as such, never a green full gate; failures in changed code or
+affected consumers still block, and assertions, timeouts and product defaults
+are never weakened to pass.
 
-The full `pnpm check` runs for releases and on request. The running service
-automatically syncs registered local owner checkouts when main advances,
-including direct pushes; blocked edits are preserved and reported.
-`clankie checkouts sync` is the immediate/manual recovery route.
-
-`clankie integrate` remains optional for a composed, gated batch. The service composes fresh origin in independent worktrees. Compatible requests
-waiting during a gate join the next batch, with one root landing gate for the composed
-core/app pair. Conflicting requests roll back as a whole; failed shared gates
-split into smaller batches until the failing request is reported. Each receipt
-keeps its original input, shared batch ID and attempted evidence. Push requests
-coalesce past gate-only ones, which batch among themselves; restores run alone.
-A green batch whose main moved lands without a new gate when `check:landing
---revalidate` says its gate still covers the rebased HEAD (its `revalidations`
-name the incoming commits); otherwise the queue gates it again and says why.
-A mistaken request that is still
-waiting, yours or a worker's, is withdrawn with `integrate cancel UUID --actor
-NAME --reason TEXT`. The receipt keeps who and why; a request already gating
-runs on.
-
-Read the receipt before claiming delivery: a passing gate is not a confirmed
-push, and a partial batch can land core while the app is still pending. Retry
-after a definite app rejection skips landed core; reconcile an uncertain send
+The optional `clankie integrate` queue composes and gates a batch; its batching,
+cancel, revert and deploy-hold commands are in
+[the CLI reference](../../../../docs/cli.md#integrate). Read the receipt before
+claiming delivery: a passing gate is not a confirmed push, and a partial batch
+can land core while the app is still pending. Reconcile an uncertain send
 through origin first. Never switch a worktree while its gate runs, accept a pass
-for another HEAD, gate against live shared state, or force push a rollback:
-`integrate revert PASSED_BATCH_UUID` restores a known good tree with a new gated
-commit. Integration clones disable client hooks; the live checkout guard does
-not affect their attested landing.
-Remote placement/staging has a shared two-minute deadline and falls back to the
-local gate with its reason in the batch receipt. Cleanup is bounded to ten
-seconds, so an unavailable linked machine cannot hold the serial queue there.
+for another HEAD, gate against live shared state, or force push a rollback. A
+deploy hold keeps `clankie update` from replacing the running service for a live
+test and never holds `main`; release one that has outlived its purpose, yours or
+a worker's, with a recorded reason.
 
-A deploy hold keeps `clankie update` from replacing the running service, for a
-live test against it: `integrate hold --holder NAME --reason TEXT --minutes N
---pane ID` (or `--seat ID`), at most 60 minutes. It lifts on its own at expiry
-with a receipt naming the holder. It never holds `main`: pushes and integrate
-landings go ahead, and a gate main moved under keeps its result through
-`check:landing --revalidate`. Fleet status, your round and `update` refusals show
-each hold's holder, age and time left. Release a hold that has outlived its
-purpose, yours or a worker's, with `integrate release UUID --actor NAME --reason
-TEXT`; the receipt records who held it, who released it and why. The owner can
-instead override a hold for one update with `update --override-holds --reason
-TEXT`.
+## Work repositories
+
+For a work repo, read its owner overrides for push, release and closure. Keep
+work forge credentials in the approved native harness context, outside
+Clankie's connected accounts; the forge must protect the default branch and
+require MR approval. Use Claude Code or Codex when native approval prompts are
+required: Pi has lane grants and no permission prompts, so the owner must
+explicitly accept that boundary or choose native-seat operator turns. Workers
+and the operator seat keep their harness permissions. Preferences and account
+context are not same-user shell isolation. See
+[worker access](../../../../docs/worker-access.md#work-repositories). Do not
+apply one work project's restrictions to social/play lanes or other repos.
 
 ## Ownership while delivering
 

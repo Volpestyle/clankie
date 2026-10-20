@@ -207,7 +207,7 @@ it("hires and checks run as their conversation, and leads only reach their own r
         target: {
           kind: "hire",
           hire: { title: "Ada", role: "builder", workingDirectory: f.root },
-          brief: "Run the codebase-cleanup audit.",
+          brief: "Run the weekly dependency audit.",
         },
       },
       lead,
@@ -241,7 +241,7 @@ it("hires and checks run as their conversation, and leads only reach their own r
     {
       conversationId: "lead-kh2",
       title: "Ada",
-      brief: expect.stringContaining("Run the codebase-cleanup audit."),
+      brief: expect.stringContaining("Run the weekly dependency audit."),
     },
   ]);
   const runs = await history(store);

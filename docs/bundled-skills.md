@@ -13,15 +13,15 @@ install and is always on. There is one class and no selection setting:
 `clankie doctor` includes it. Checkout-only skills live in `.agents/dev-skills`
 and do not ship.
 
-The catalog holds 20 skills: leadership and process skills (`lead`,
-`shared-checkout`, `tidy`, `linear-issues`, `linear-orient`, `codebase-cleanup`)
-beside product and tool skills (`clankie`, `this-machine`, `trace-clankie`,
-`work-items`, `views`, `research-team`, `browser-use`, `connected-accounts`,
-`desktop-control`, `herdr`, `fleet-resources`, `pokeagents`, `minecraft`, `lead-skin-tools`). Each teaches Clankie,
+The catalog holds 18 skills: leadership and process skills (`lead`,
+`shared-checkout`, `tidy`, `work-items`, `work-orient`) beside product and tool
+skills (`clankie`, `this-machine`, `trace-clankie`, `views`, `research-team`,
+`browser-use`, `connected-accounts`, `desktop-control`, `herdr`,
+`fleet-resources`, `pokeagents`, `minecraft`, `lead-skin-tools`). Each teaches Clankie,
 his seat or his workers how to use his own body and tools
 ([ADR 0236](adr/0236-clankie-owns-the-skills-he-ships.md)). The directory listing is the authoritative inventory.
 
-The `lead` and `linear-issues` skills read the current effective
+The `lead` and `work-items` skills read the current effective
 `fleet.closure` and `fleet.machineSetup`, including project overrides. Defaults
 delegate closure and already-linked machine setup to the lead, while genuine
 owner-only actions retain their boundary. See
@@ -54,6 +54,11 @@ Clankie through `~/.agents/skills`; the repo carries no links outside itself, wh
   `clankie@clankie` for that session and enables `clankie@inline`.
 - Local Claude hires load the skills-only `integrations/worker-skills` plugin;
   it carries neither Clankie's identity nor operator hooks.
+- The standalone `clankie-worker` plugin, for hand-started, remote and PC seats,
+  carries snapshots of `clankie`, `fleet-resources`, `work-items` and
+  `work-orient` (`WORKER_SKILLS` in
+  `integrations/claude-plugin/worker/bin/skill-bundle.mjs`), so a seat without
+  the catalog still has the fleet, tracker and orientation guidance.
 - Local Pi hires receive `--no-skills` plus explicit `--skill` paths, including
   the supported owner and workspace roots.
 - Local Codex hires receive a private `CODEX_HOME` under the body's state
@@ -76,20 +81,17 @@ settings, so an installed body needs no sibling checkout.
 
 Herdr is both a bundled tool skill and an independently selectable global skill.
 Fresh installs and hosted bodies need its instructions without any owner-global
-skills. Its source is the pinned executable's `--skill` output, not a
-hand-maintained copy. Release assembly runs `libexec/herdr --skill` after
-installing the checksum-verified pin from `scripts/release/herdr.json`, and
-writes identical bytes into `.agents/skills` and both Claude plugin projections.
-The hosted image also verifies all three copies and the pinned version as its
+skills. The shipped `herdr` skill is a short loader: it tells the reader to run
+`herdr --skill` and follow that output, so the instructions always match the
+runtime in use, including one updated beyond the packaged pin. Release assembly
+installs the checksum-verified pin from `scripts/release/herdr.json`, checks that
+it serves `--skill`, and checks that `.agents/skills` and both Claude plugin
+projections carry the same loader; the hosted image repeats those checks as its
 unprivileged runtime user.
 
-In a source checkout, `pnpm herdr:skill` regenerates the checked-in skill from the
-same checksum-verified pin; `pnpm herdr:skill:check` fails on drift and runs as part
-of `pnpm check`. The binary is cached under `.data/herdr/bin`; a fresh checkout
-downloads it from the official release. Do not edit or format the generated prose.
-James's global `herdr` skill may remain for plain harnesses and should likewise
-mirror the resolved `herdr --skill`. A runtime upgraded beyond the packaged pin
-owns its current reference through `herdr --skill`.
+In a source checkout, `pnpm herdr:skill:check` runs the same checks against the
+cached binary under `.data/herdr/bin` (a fresh checkout downloads it from the
+official release) and runs as part of `pnpm check`.
 
 The owned `tidy` and `lead` sources teach safe owner-checkout sync, fetched-main
 hire admission and exact-worktree pruning. Update these sources directly; no

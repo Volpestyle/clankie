@@ -1,6 +1,7 @@
 import { cp, mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { bundledSkills } from "../../packages/settings/src/bundled-skills.ts";
+import { WORKER_SKILLS } from "../../integrations/claude-plugin/worker/bin/skill-bundle.mjs";
 
 /** Ship the selected bundle, independent of the build machine's owner settings. */
 export async function copySkillAssets(repoRoot, targetRoot) {
@@ -12,10 +13,11 @@ export async function copySkillAssets(repoRoot, targetRoot) {
       dereference: true,
       filter: (path) =>
         path !== join(source, "skills") &&
-        path !== join(source, "worker/skills/clankie") &&
-        path !== join(source, "worker/skills/clankie.bundle.json") &&
-        path !== join(source, "worker/skills/fleet-resources") &&
-        path !== join(source, "worker/skills/fleet-resources.bundle.json") &&
+        !WORKER_SKILLS.some(
+          (name) =>
+            path === join(source, "worker/skills", name) ||
+            path === join(source, "worker/skills", `${name}.bundle.json`),
+        ) &&
         basename(path) !== ".DS_Store",
     });
   }

@@ -1290,6 +1290,24 @@ Recursive scratch and cache deletion runs in an awaited child process, so large
 installs do not occupy the live service's filesystem threadpool. The same
 ownership, retry and live-process checks still authorize each removal.
 
+Progress alerts. The service observes an integration head every 30 seconds and
+alerts after three minutes without progress or a proven active install/gate job;
+the alert names the batch and last checkpoint. Read `integrate status UUID` and
+its evidence: an alert does not authorize cancellation or another submission.
+Opening and recovery notices survive restarts without replay, and an unavailable
+observation does not prove recovery. Remote install/gate output is observed too:
+three minutes without output alerts, ten minutes triggers a fresh local gate, and
+a ninety-minute wall-clock limit holds even with output. The remote timeout cause
+and log remain evidence; fallback never attests a remote pass, and these
+deadlines stop only that request's owned transport. A request waiting behind a
+proven live queue-lock writer (including startup worktree reclamation) is read by
+its UUID, never resubmitted or unlocked; an unproven owner or unrecoverable stale
+lock retains its actual error for review. Failed shared gates retry members at
+their original admission priority, before later arrivals. A retained `gateReuse`
+pass covers only its unchanged exact tree, base, approved contributions and
+sibling core candidate; excluding a core member requires a new app gate, and an
+origin move after reuse requires a fresh gate.
+
 ### Scratch service and relay proofs
 
 From a source checkout, generate one private preset for both processes:
@@ -2643,7 +2661,7 @@ Built-in Done and owner verification are separate under the owner's effective
 lead-closure policy. The current host-authorized lead may close an item after
 it has landed and its acceptance evidence bundle has an independent check.
 The item retains its `landed` or `delivered` stage and records `leadCompletion`
-with the lead actor, time and checked bundle ID; it does not claim James checked
+with the lead actor, time and checked bundle ID; it does not claim the owner checked
 it. The current lead is the chat the owner bound to the project while that chat
 exists; otherwise, for an Auto project, the chat Auto routing currently assigns
 its round, rechecked at write time; otherwise, for an unbound project, the
@@ -2986,7 +3004,7 @@ read. Changed filters invalidate it. Existing tracker commits drive refresh,
 including definition writes whose sync deltas are empty; no new poller is needed.
 
 This API/CLI contract does not establish native iPhone, iPad or Mac presentation
-or James's visual acceptance. Those remain separate Work UI checks.
+or the owner's visual acceptance. Those remain separate Work UI checks.
 
 ### `evidence push|fetch` / `evidence list|receipt`
 
@@ -4204,8 +4222,8 @@ Pruning preserves the exact HEAD of content-equivalent work under
 `refs/clankie/dropped-worktrees/`. Native HEAD/branch locks prevent a new commit
 from losing its only ref during removal; changing or busy refs keep the tree.
 A live non-Git parent directory also protects worktrees nested below it.
-After VUH-2462, automatic tidy stays off in the affected fleet until James
-decides to enable it again; installing the fix does not change that setting.
+Where the owner turned automatic tidy off, it stays off until they decide
+otherwise; installing an update does not change that setting.
 
 `--remote-gates on` lets an integrate batch gate on a linked machine while this
 one is saturated; it defaults to off. Remote placement/staging times out after two minutes and falls back to the local gate with the reason recorded; cleanup is bounded to ten seconds. See [gates on a linked machine](integration.md#gates-on-a-linked-machine).
@@ -5618,7 +5636,7 @@ requires `expectedRevision`; stale requests refuse without changing history.
 clankie routines                      # list, with next and last run
 clankie routines add "Morning triage" --when "every weekday at 9:00" --turn "Triage new KH2 issues"
 clankie routines add "Cleanup audit" --when "every friday at 17:30" --conversation ID \
-  --hire '{"title":"Ada","role":"builder","workingDirectory":"/path/to/repo"}' --brief "Run the codebase-cleanup audit."
+  --hire '{"title":"Ada","role":"builder","workingDirectory":"/path/to/repo"}' --brief "Run the weekly dependency audit."
 clankie routines add "Typecheck" --when "every 2 hours" --check --cwd /path/to/repo --report failure -- pnpm typecheck
 clankie routines edit ID [--name NAME] [--when WHEN] [--tz ZONE] [--missed catch_up|skip]
 clankie routines pause|resume|run-now|remove ID

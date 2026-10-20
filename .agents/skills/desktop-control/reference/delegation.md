@@ -17,7 +17,7 @@ sessions and apps.
 
 - **Native app, or a flow that crosses apps:** the Codex desktop capability on
   the intended machine. Windows entries name their fleet; its shared body
-  adapter currently observes only. Verify native app grants and input before
+  adapter observes by default, and its input is not yet released. Verify native app grants and input before
   promising a driving task, and use the fleet-qualified seat on that machine.
 - **Browser-only work in their Chrome:** either Chrome harness. Chrome-only work
   drives tabs without taking the pointer, so prefer it whenever the person may

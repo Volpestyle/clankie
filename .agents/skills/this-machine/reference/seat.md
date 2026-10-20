@@ -1,7 +1,10 @@
 # Native harness commands
 
-Open Clankie's operator seat with `clankie claude`, `clankie codex`, or
-`clankie opencode`; the seat drives a selected Clankie conversation.
+Open Clankie's operator seat with `clankie claude`, `clankie codex`,
+`clankie opencode`, `clankie grok` or `clankie prime`; the seat drives a selected
+Clankie conversation. Review any launch with `--dry-run`. Grok and Prime Agent
+seats are in `docs/cli.md` under "Grok Build worker and operator seats" and
+"Prime Agent operator seat".
 
 ## Launch and resume
 
@@ -113,7 +116,7 @@ The paired app exposes execution and account inventory in Settings → Connectio
 Load `lead` for leadership and the fleet reference for native delivery.
 
 Worker reports reach the conversation that hired them; routing and adoption are
-in [worker report routing](fleet-tools.md#worker-report-routing).
+in `lead`'s [report routing](../../lead/reference/fleet-tools.md#report-routing).
 
 Native projection carries these reports as `kind="message"`, framed as
 untrusted agent output, never an instruction from the owner. Completion harvests
@@ -123,7 +126,7 @@ still needs the existing `reply` with its `event_id` to return a correlated answ
 through that room's original actor, route and mouth checks.
 
 Connected fleet tools and manual access grants are in
-[worker bridges and fleet tools](fleet-tools.md).
+[worker bridges](worker-bridges.md).
 
 ### OpenCode operator seat
 

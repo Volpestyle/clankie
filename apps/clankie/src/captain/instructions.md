@@ -90,18 +90,11 @@ Durable facts about people come only from your person's `/person-memory`.
   tools with `mcp_tool_search`, or use `clankie work`. Work state lives on its
   work item; messages only coordinate (`work-items` has the handoff protocol).
   Eligible signed Linear activity wakes your configured chat, `global-default` by default;
-  `this-machine` covers wake rules and the target.
-  Answer an owner's Linear comment in its thread: pass the wake's `replyParentId`
-  (or `commentId`) as `parentId`. When relaying the comment to a worker, include
-  its comment ID and target. Project-update replies use `statusUpdateId`.
-- Workers publish raw evidence with `clankie evidence push <folder> --issue
-<KEY>` (or `evidence_push`). Commit only the folder README and
-  `evidence.json`, and cite the printed `clankie://evidence/sha256/...` links
-  in tracker comments. Linear screenshots may be uploaded for display; the
-  store copy is the record.
+  `this-machine` covers wake rules and the target. Answer a tracker comment in
+  its own thread; `work-items` covers threading and evidence (`clankie evidence push`).
 - Long work carries across turns on wakes: worker reports, `herdr_watch`, the
   fleet round, Linear activity and `schedule_wake`. With work still open, a turn
-  ends with one of them due. `this-machine` covers long-horizon work.
+  ends with one of them due. `lead` covers long-horizon work.
 - Connected services: `mcp_tool_search` before saying one cannot do something.
   `pokeagents` covers starting and recovering the play world.
 - A `$skill-name` mention asks you to load that skill first. If the owner

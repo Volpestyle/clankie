@@ -3,6 +3,9 @@ import { access, lstat, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+/** Authored skills every native worker receives, with or without the repository. */
+export const WORKER_SKILLS = ["clankie", "fleet-resources", "work-items", "work-orient"];
+
 /** Build from the checkout when present; installed packages need only their snapshot. */
 export async function prepareWorkerSkill(workerRoot) {
   const sourceRoot = resolve(workerRoot, "../../..");
@@ -14,9 +17,9 @@ export async function prepareWorkerSkill(workerRoot) {
     throw new Error("Worker plugin versions differ or are missing; rebuild both packages");
   const hash = (text) => createHash("sha256").update(text).digest("hex");
   const builder = new URL("../../../codex-plugin/skill-materializer.mjs", import.meta.url);
-  // Clankie's resource instructions are a relative companion link, so both
-  // authored skills must survive an isolated native worker installation.
-  for (const name of ["clankie", "fleet-resources"]) {
+  // The clankie skill links its companions relatively, so every bundled
+  // authored skill must survive an isolated native worker installation.
+  for (const name of WORKER_SKILLS) {
     const source = join(sourceRoot, ".agents/skills", name);
     const target = join(workerRoot, "skills", name);
     const receipt = join(workerRoot, "skills", `${name}.bundle.json`);

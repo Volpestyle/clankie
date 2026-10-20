@@ -1,69 +1,6 @@
-# Leading work across turns
+# Project work settings
 
-Long-horizon work on wakes, lead review rounds, watching workers, cost evidence, showing current work, turning Auto on, tidying, and project onboarding and membership.
-
-## Long-horizon work
-
-The owner hands you standing work by putting a project on Auto with an optional
-one-line focus (ADR 0264). The Auto round names those projects; work their
-backlogs without waiting to be asked, within each project's worker cap and the
-autonomy dial, and bring the owner only the decisions the dial leaves to him.
-A project not on Auto gets no new work you start yourself. Carry work across
-turns on wakes:
-
-| Wakes you when                    | Source                                     | Limits                                                                                                                                              |
-| --------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A worker finishes, blocks or asks | its `message_clankie` report               | only workers that report; read with `worker_reports`                                                                                                |
-| A watched pane settles            | `herdr_watch SEAT`                         | one-shot; arm it again after each wake                                                                                                              |
-| Owned seats need review           | the periodic fleet round, every 30 minutes | only while this conversation owns live seats; skipped when nothing changed                                                                          |
-| Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you                                                                 |
-| A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while the `clankie auto` master switch is on                                     |
-| A project is on Auto              | the Auto round, on the fleet-round cadence | the project's configured lead chat, else the global head; on changed evidence or every two hours; only while the `clankie auto` master switch is on |
-
-The loop: keep the objective, done criteria and boundaries on the work item
-(the handoff protocol is in `work-items`), because a wake starts from the conversation, not from a fixed
-goal. On each wake, harvest what changed, land or redirect, and assign the next
-ready item in tracker order. Before ending the turn, check that one of the sources
-above will fire. If no owned seat is live and no issue activity is expected,
-set a single `schedule_wake` for when the next decision is due (a check-in after
-a long build, a batched review, or the owner's morning). Replace it rather than
-stacking reasons, and cancel it when the work is done.
-
-Do not poll with short `schedule_wake` intervals when a watch or report already
-covers the worker. Do not start a second lead in another conversation to get
-continuation. Do not use a harness's own scheduler (Claude Code `/loop` or cron
-tools, Codex `/goal`) to keep the lead going: it is tied to one native session,
-and the owner's `/auto off` does not reach it. A worker may still use its
-harness's goal for its own ticket. `/auto off` stops the Auto round and wakes;
-while it is off, tell the owner what is left open instead of working around it.
-Separately, the owner's autonomy dial (`off`, `low`, `high` by default, or
-`full`; `clankie autonomy` reads it) sets which decisions you take without
-asking; the effective gates arrive in your fleet guidance.
-
-In the service lane, an autonomous `hire_agent` needs the master switch on,
-saved global Full autonomy, and a resolved project on Auto. Project preferences
-must still allow everyday/outward work and lead-owned machine setup. Native
-admission retains the project and role caps, machine governor and account
-holds. Other autonomous turns may propose a hire but cannot execute it; read
-the refusal's reason rather than retrying or starting a pane by shell.
-
-Configured project lead ownership determines a hire's source project, even if
-the lead conversation runs from another project's folder. Its saved tracker
-UUID must match the project's built-in or Linear binding; name `projectId` when
-the lead owns several projects. The destination must still match, and native
-identity, project caps and governors remain checked at admission.
-
-In the app's Project settings, Linear project accepts the UUID supplied by
-Clankie; leaving it empty clears that separate binding through the owner project
-API. This preserves the built-in tracker and saved workspace convention. Older
-services omit the control.
-
-## Lead review rounds
-
-Every watch wake and periodic round (30 minutes by default) reviews all seats
-this conversation owns. Load `lead`: its
-[fleet tools](../../lead/reference/fleet-tools.md#efficiency-rounds) reference
-covers `fleet_efficiency`, the CLI equivalent and what each observation proves.
+Watching workers, cost evidence, showing current work, turning Auto on, product paths and drift replay, project onboarding and membership, worktree roots and tracker bindings. The long-horizon loop and wake sources are in `lead`'s [long-horizon reference](../../lead/reference/long-horizon.md#wakes) ([standing work on Auto](../../lead/reference/long-horizon.md#standing-work-on-auto)); review rounds and tidying are in `lead` and `tidy`.
 
 ## Watching workers
 
@@ -136,25 +73,24 @@ requires an isolated authority as well as a protected signer; it is not implemen
 Do not claim that a Keychain bearer, device token or same-user helper proves
 human confirmation, and do not enroll or move owner keys without authorization.
 
-## Tidying worktrees
+## Product paths and drift replay
 
-Load `tidy`; `lead`'s [fleet tools](../../lead/reference/fleet-tools.md#closing-panes-and-tidying-worktrees)
-covers `list_tidy_worktrees`, pane closes and what makes a worktree safe to remove.
+Projects can declare `productPaths` through `clankie project update PROJECT
+--changes FILE.json --revision REVISION`, using the revision from `project list`.
+The list holds 1–32 repository-relative globs (256 characters each, no absolute
+paths, backslashes or `..`); directory entries include descendants. Only matching
+paths count as product; docs/Markdown stay docs and the rest is tooling, with
+lockfiles/generated/binary files excluded first. `null` restores the default:
+tests, fixtures, rigs, scripts, tools and CI are tooling, docs/Markdown are docs,
+and the rest is product. `/project` → Product paths edits the same setting.
 
-Tidying also runs on its own under the owner's fleet setting `autoTidy`
-(`off`, `30m`, `1h` default, `4h`, `1d`; `clankie fleet set --auto-tidy`, `/fleet`,
-or `POST /v1/operator/fleet-settings` with `changes.autoTidy`). Every five
-minutes the service closes a local hire's pane once it has sat idle or done for
-that long, its authenticated report is kept, every report it sent is
-acknowledged, and nobody kept it with `keep_worker_pane`. The close goes through
-`close_worker_pane`'s own checks: landed worktrees, no unsent draft, still idle.
-Hand-started and owner-interactive panes are never closed this way. Each close
-lands in `worker_pane_history` with the usual five-minute Undo, settles its seat
-issue as a close would, and leaves one notice per sweep in the hiring lead's
-conversation. Hourly, linked worktrees in enrolled worktree roots whose HEAD is
-in `origin/main`, clean, with no pane or process inside and untouched for a day
-are removed through `prune_tidy_worktree`'s path, at most 16 per repository
-per sweep. `off` stops both.
+For read-only historical drift proof, use `clankie auto rounds --replay --project
+ID --since ISO --until ISO` (at most 14 days, complete local days). It reads tracker
+state spans and fetched git/mirror history without waking anyone, writing tracker
+or round records, or consuming pending drift. Replay applies today's project
+`wipCap` and can emit `over_wip`; an unset cap stays null, and never substitute
+worker cap. Project/parent/milestone membership and Auto selection are current,
+with those limits stated in output.
 
 ## Project onboarding and membership
 
@@ -214,74 +150,14 @@ Remove only the enrollment with `clankie project remove-worktree-root NAME
 --worktree-root ROOT` and the same machine/platform flags. Remove root enrollments
 before their repo workspace. Neither command deletes filesystem content.
 
-## Giving a free hand work from World
+## Tracker bindings
 
-World holds an original drop for four seconds with Undo before any write. Busy
-agents remain play only when picked up themselves. A real free-agent drop requires confirmed idle, no assignment or
-active goal and observed zero running children; an unknown count is not zero.
-The optional `freeAgent` field on existing role, conversation and owner work
-writes binds persona, native seat/occupant and project. CLI equivalents append
-`--free-agent JSON` to `agents role`, `send` or `work assign`. It is a restriction,
-never authority; the host refreshes addressed native child and membership proof
-at its existing effect fences. Ordinary commands without it retain their behavior.
-
-Work assignment and the original “Please pick up…” note have separate receipts.
-Report an applied assignment with an uncertain note plainly; never reverse or
-replay either effect. A teammate drop uses the exact conversation's `co-w`
-quick-action catalog entry and actual native pane ID in the same project/session.
-Display names are tracker data, never native addresses. A ground drop is local
-idle play toward the campfire and writes no machine position.
-
-## Handing a work piece to a current worker
-
-Picking up the work itself is an explicit owner handoff and may address a busy
-current non-lead worker. The app holds the original item and recipient for four
-seconds with Undo; empty ground returns the visual object without effects.
-Hand to and VoiceOver use that same original intent. API `workHandoff` and CLI
-`--work-handoff JSON` on `work write ID --owner NAME` / `send` bind exact persona, native seat,
-occupant and confirmed project. Never combine it with `freeAgent`, infer a
-recipient from its name, or strip it after refusal. Missing Take Control, tracker
-scope, native recipient or original thread refuses before the owner write. The
-assignment and original note retain separate receipts; uncertainty is checked,
-never replayed or reversed.
-
-## Saved issue views (built-in API/CLI)
-
-Use `clankie work view save|get|list|apply|delete` for named project filters.
-Name the exact `--project UUID` and `--store-id ID` on every operation.
-The CLI follows `--repo` (default current git repo) and requires its current
-host project binding to that built-in project; unknown or unsupported repos
-refuse without a global/local fallback. Read a view
-before updating/deleting, preserve its `updatedAt` with `--if-updated-at`, and use
-one `--idempotency-key` per intended write. Create with
-`view save --json '{"name":"Urgent","filter":{"priority":1}}'`; update by adding
-the view UUID and only changed fields. Apply runs the normal current issue list;
-follow `--cursor` with the same filter and use `--limit` for paging.
-
-Canonical tools: `save_issue_view`, `get_issue_view`, `list_issue_views`,
-`list_issue_view_issues` (apply), `post_delete_issue_view`. Records are version 1,
-exact-store/project bound, limited to 1000 per store; names are 1–120 characters,
-filters at most 8192 characters. Filters reuse `list_issues` fields, excluding
-project and pagination. Store IDs come from sync bootstrap metadata; project
-UUIDs come from project reads. Never infer either from a display name or reuse a
-view after a store replacement. Current access is checked on every operation;
-filters carry no authority or cached issues. Unsupported backends, including
-disconnected Linear, refuse this capability; never substitute a local tracker.
-The Work UI picker and iPhone/iPad/Mac presentation remain unimplemented/unproved
-by this slice; parent milestone and owner visual review remain open.
-
-## Built-in tracker sync discovery
-
-`clankie work sync --json COMMAND` uses the authenticated tracker sync API.
-Full bootstrap `projects: ["*"]` expands all tracker project UUIDs plus
-`unprojected` and `workspace`; metadata `syncGroups` lists the exact IDs.
-Always subscribe to `workspace` for project create/rename/archive and project-level
-metadata. Discover a new project from its delta, partially bootstrap exactly its
-UUID, preserve other cached groups and add that UUID to the subscription.
 Use explicit settings-to-tracker UUID bindings; unmatched projects stay unbound.
-Bind one with `clankie project update PROJECT --changes-json
+Bind a built-in tracker project with `clankie project update PROJECT --changes-json
 '{"trackerProjectId":"UUID"}' --revision REVISION` (`null` unbinds); `work_repos`
-then returns `trackerProjectId` on that project's repo.
+then returns `trackerProjectId` on that project's repo. Built-in tracker sync
+mechanics are in `work-items`.
+
 A connected Linear reference is separate:
 `clankie project settings PROJECT --linear-project UUID` (or `clear`) writes
 `linearProjectBinding: {provider: "linear", projectId: UUID}` through the same
@@ -289,7 +165,9 @@ owner API. The service validates that exact UUID against the connected Clankie
 app, without a local fallback. Auto rounds carry it and explicit lead routing
 uses it. It neither changes the repo's saved tracker backend nor removes its
 built-in binding. `/project` exposes the same control; plain snapshots hide it.
-Never infer bindings from names or poll for discovery.
+In the app's Project settings, Linear project accepts the UUID supplied by
+Clankie; leaving it empty clears that binding. Never infer bindings from names
+or poll for discovery.
 
 ## Work inbox attention
 

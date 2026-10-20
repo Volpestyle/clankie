@@ -1,12 +1,6 @@
 # Launcher details
 
-The full command table, updating and restarting the runtime, models and voice, Discord setup, devices and doorways, memory, steering a turn, setup and conflicts. The flag/JSON/exit-code contract is `{repoRoot}/docs/cli.md`.
-
-Fleet contact reads use `clankie agents contacts`. The API accepts up to 768
-occupied seats across connections and refuses larger complete reads rather than
-silently truncating them. `readWarnings` means cached or partial observations,
-not confirmed live ownership. Display input capabilities do not authorize a send;
-the send performs its own fresh native and authority checks.
+The full command table, updating and restarting the runtime, models and voice, Discord setup, devices and doorways, memory, steering a turn, setup, Linux installs and conflicts. The flag/JSON/exit-code contract is `{repoRoot}/docs/cli.md`.
 
 ## Command table
 
@@ -47,12 +41,13 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Fleet responsibility defaults          | `clankie fleet set --closure lead\|owner --machine-setup lead\|owner`; both default to lead                                                                        |
 | Project responsibility overrides       | `clankie project settings PROJECT --closure lead\|owner\|inherit --machine-setup lead\|owner\|inherit`                                                             |
 | Fleet connected tools / peer messages  | `clankie fleet status`, `clankie fleet set --tools off`, `clankie fleet set --peer-messages off`                                                                   |
-| Native conversation seats              | `clankie claude`, `codex`, `opencode`, `grok` with `--conversation ID`; inspect with `--dry-run`                                                                   |
+| Native conversation seats              | `clankie claude`, `codex`, `opencode`, `grok`, `prime` with `--conversation ID`; inspect with `--dry-run`                                                          |
 | Herdr session                          | `clankie herdr status --json`, `clankie herdr use NAME`, `clankie herdr create`                                                                                    |
 | His working directory                  | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                                                                                      |
 | State your assignment (for agents)     | `clankie work-on "Objective" [--repo REPO_ID --issue ISSUE_ID]`, `clankie work-on clear`                                                                           |
 | Say what you are doing (for agents)    | `clankie stance working --activity testing --for 60` (`reading`, `editing`, `testing`, `planning`, `waiting`; optional note)                                       |
 | Public doorway                         | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                                                                                             |
+| Browser app origins                    | `clankie http show`, `clankie http allow-origins ORIGIN...` (see below)                                                                                            |
 | Pick up model/provider config          | `clankie restart`                                                                                                                                                  |
 | Machine access                         | `clankie machines access NAME portal\|workers\|shell\|screen`                                                                                                      |
 | Machines / discovery / sessions        | `clankie machines --json`, `clankie machines discover --json`, `clankie machines sessions NAME --json`                                                             |
@@ -70,140 +65,112 @@ Owner-only local macOS setup: `clankie machines sandbox prepare LEVEL --workspac
 Installed releases only; activation/restoration requires an owner relaunch and
 private-home provisioning. Read [machine access](machine-access.md) before using it.
 
+For the browser app reaching a self-hosted service, `clankie http allow-origins`
+replaces the owner-configured exact-origin list (empty by default; applies to
+core and relay, including `/v1/*` and Work's `/operator/v1/*`). Include each app
+origin and its port, with no path or trailing slash; no origins clears access.
+Never add an untrusted origin as a diagnostic shortcut. CORS permits browser
+transport only; pairing, bearer grants and native-loopback checks still apply.
+See `docs/cli.md` under "Browser access to a self-hosted service".
+
 ## Updating the runtime
 
 On a release install (`clankie doctor` says `kind: release`), `update_runtime` or
 `clankie update` moves to the latest official release, or `--ref vX.Y.Z`, and
-answers `upToDate` when already current; read status the same way. A hosted body
-is a release install too: it runs `/state/install/current`, seeded from the
-image's `/opt/clankie`, and also installs official releases on its own while
-idle (no turn, activity share, voice call or hired worker), hourly. A managed body installs
-nothing newer than its fleet-approved release: "holding releases" or "not
-approved" is the fleet's decision, not a fault, so report it and wait. Self-run
-owners switch idle installs with `clankie update auto on|off`. Scheduling
-rechecks enabled/idle state after release lookup before accepting the helper.
-After staging it checks again before stopping services. Work beginning during
-download, or disabling automatic installs, leaves the verified release staged
-for the next enabled idle check without downloading it again. Cutover closes
-turn admission before idle shutdown; it cannot stop a running turn. The helper's
-`update cutover --operation UUID --instance UUID` requires the exact scheduled
-operation, current boot and operator authority; uncertainty keeps staging only.
-Hourly checks keep a newer image seed when the approved release is older;
-explicit `--ref vX.Y.Z` retains rollback within the approval cap. The rest of this
-section is a source checkout.
+answers `upToDate` when already current. A hosted body is a release install too
+and installs official releases on its own while idle, hourly. A managed body
+installs nothing newer than its fleet-approved release: "holding releases" or
+"not approved" is the fleet's decision, not a fault, so report it and wait.
+Self-run owners switch idle installs with `clankie update auto on|off`. The
+rest of this section is a source checkout.
 
-Landed code is not live until the pinned runtime is updated. From an admitted
-machine turn, use `update_runtime` or `clankie update [--ref REF]` to fetch the
-requested branch from origin, install its exact commit and detach a guarded
-restart. Default is fetched `origin/main`, never the local `main` branch. A failed
-fetch refuses the operation. Full SHAs, `HEAD` and `refs/tags/TAG` are explicit
-local targets. Review `resolvedRef`, `newCommit` and any older/diverged warning;
-update does not merge or publish your working branch. The external activity
-tunnel survives cutover under its current owner, and so do the relay, activity
-surface and keep-awake when none of their code changed (`keptServices`); the
-Discord bodies always restart with you.
+From an admitted machine turn, `update_runtime` or `clankie update [--ref REF]`
+fetches the requested branch from origin, installs its exact commit and
+detaches a guarded restart. Default is fetched `origin/main`, never the local
+`main` branch. A failed fetch refuses the operation. Full SHAs, `HEAD` and
+`refs/tags/TAG` are explicit local targets. Review `resolvedRef`, `newCommit` and
+any older/diverged warning; update does not merge or publish your working
+branch. The relay, activity surface and keep-awake survive cutover when none of
+their code changed (`keptServices`); the Discord bodies always restart with you.
 
-Updates that follow `main` batch (VUH-2393). Unless the body is idle (no turn,
-share, voice call or `working` worker in any fleet) or this service has run for
-two hours (`CLANKIE_UPDATE_BATCH_MINUTES`), the request is recorded instead:
-`accepted: false`, HTTP 202, with `deferred` (`requests`, `firstRequestedAt`,
-`dueAt`, `initiator`). The service checks each minute and installs the newest
-`main` once idle or due, through the same holds, canary and rollback, and drops a
-batch with no new commits. Report a deferral as "batched for <dueAt>", not as a
-failure, and do not resend it. `clankie update now` / `now: true` and an explicit
-`--ref` or hold override apply at once; `clankie update cancel` drops the batch.
+Updates that follow `main` batch. Unless the body is idle (no turn, share, voice
+call or `working` worker in any fleet) or this service has run for two hours,
+the request is recorded instead: `accepted: false`, HTTP 202, with `deferred`
+(`requests`, `firstRequestedAt`, `dueAt`, `initiator`). Report a deferral as
+"batched for <dueAt>", not as a failure, and do not resend it. `clankie update
+now` / `now: true` and an explicit `--ref` or hold override apply at once;
+`clankie update cancel` drops the batch.
 
 `accepted: true` means pending, not completed. Finish the turn, then read
 `runtime_update_status` or `clankie update status` on your next turn and report
-the old/new commit, initiator and actual health or rollback. Unreadable saved
-records return a JSON reconciliation error without changing the journal or lock. The TUI has `/update` and
-`/update status`. Never repeat an uncertain update; inspect its existing operation.
-Scheduled means the helper has not reported progress; installing means it is
-preparing the replacement. Finish the initiating turn and check status next turn.
-An uncertain ending your restarted service can prove (helper finished, clean pin,
-booted from it) retires itself and shows `latest.reconciled`; then another update
-is permitted, subject to remaining deploy holds. Until that proof appears, keep
-the original operation and lock, report its reason, error and rollback details,
-and ask the owner to review it. Do not resend a `stop-unconfirmed` or other
-uncertain failure, delete its lock, or restart to work around it. Such an ending
-already retried each unconfirmed step and alerts once through runtime health when
-the next service boots; its attempts are in `service-attempts.jsonl` beside the
-operation.
-An update that never left `scheduled` because its helper crashed on start (no
-`claimed` file beside `helper.log`) changed nothing. The helper can record it
-`failed` with `pre-cutover-failed`; otherwise, an unclaimed scheduled operation is
-recorded that way after ten minutes on service startup or update admission.
-Status reads alone never retire or reconcile it. A recorded pre-cutover failure
-means the live runtime was not replaced: the next `clankie update` can safely
-retire the lock and retry, subject to deploy holds. A runtime whose own copied
-helper cannot start cannot repair itself this way; that needs an owner reinstall
-of a fixed pin.
+the old/new commit, initiator and actual health or rollback. The TUI has
+`/update` and `/update status`. Scheduled means the helper has not reported
+progress; installing means it is preparing the replacement.
+
+An uncertain ending that your restarted service can prove (helper finished,
+clean pin, booted from it) retires itself and shows `latest.reconciled`. Until
+that proof appears, keep the original operation and lock, report its reason,
+error and rollback details, and ask the owner to review it. Do not resend a
+`stop-unconfirmed` or other uncertain failure, delete its lock, or restart to
+work around it. A recorded `pre-cutover-failed` operation changed nothing: the
+next `clankie update` can safely retire the lock and retry. A runtime whose own
+copied helper cannot start needs an owner reinstall of a fixed pin.
+
 Do not run `clankie restart` while an update is mid-cutover: it refuses, and the
-update restarts services itself.
-A dirty pin or failed install leaves the old runtime untouched.
-The old service must actually leave: a stop waits on its whole process group and
-SIGKILLs the group after the grace. While closing, it answers seat polls and
-acknowledgments `503 service_shutting_down` and closes keep-alive connections, so
-seat bridges reconnect to the replacement. Two Clankie processes after an update
+update restarts services itself. A dirty pin or failed install leaves the old
+runtime untouched. During the drain a brief disconnection is expected; wait for
+reconnect and check status. Two Clankie processes after an update
 (`ps -Ao pid,pgid,command | grep 'clankie.*src/index.ts'`) is a defect to report,
 not a state to work around.
-During this drain, a brief disconnection is expected. Wait for reconnect and
-check status; do not submit another update while the original is in progress.
 
-New service liveness starts a five-minute `/health` canary;
-`healthy: true` alone does not mean it passed. Read `latest.canary` and deploy
-holds in update status. A pending canary holds further landings. A failed canary
-keeps the new pin running, retains its hold, names `previousHealthyCommit`, and
-records the failed check, underlying transport error and alert delivery state;
-unavailable samples retry while pending, failing after three sample intervals
-without verified health (30 seconds by default) or at the window's end.
-Recovered samples clear the temporary error; failed samples never count as
-healthy observation. Do not claim a rollback or successful delivery
-from a claimed receipt. Rollback is the owner's decision. A full pass clears
-its own canary hold and verified older canary holds admitted by that update
-override or superseded through the recorded installed-runtime chain. Source installs then inspect runtime-worktree retention:
-keep current and immediate previous, protect live/canary/recovery dependencies,
-and remove only verified obsolete worktrees without force. `update status --json`
-shows `retention`; full effect evidence stays in the private updates directory's
-`retention.log`. Operation/receipt evidence and worker worktrees stay intact.
-Unreadable state, incomplete process observations and an uncertain maintenance
-lock refuse cleanup; never remove that lock based on age. Independent, changed-owner and unreadable holds still
-block until the owner explicitly releases them. Terminal output groups
-holds by cause; `--json` or piped output keeps structured results. Only the
-authenticated owner can use `clankie update --override-holds --reason TEXT`,
-which records one override audit per hold and keeps each hold recorded. Interactive
-confirmation requires a reason; declining or leaving it blank keeps the update
-held. A newly acquired hold still blocks after confirmation. `clankie update
-canary` reads its policy; configure the next
-observation with `--window-seconds`, `--sample-seconds`, `--cpu-percent`, and
-`--health-ms`, or use `/update` → Canary settings. A restart begins a full new
-window. Only unhealthy, stale or slow `/health` holds; captain CPU (100% is one
-core) is report-only. Compare `canaryCpu` with its `previous` runtime's mean on
-this machine instead of judging the absolute advisory `cpuPercent`. Older
-`runtime-canary-cpu-budget-exceeded` holds and failed health canary holds can be
-explicitly released after review with `clankie integrate release UUID --actor
-NAME --reason TEXT`. Read the full UUID from update status or `clankie integrate
-holds`; release audits the actor and reason, leaving the historical failure
-intact. An owner update override leaves the hold recorded and authorizes only
-that update. Its full canary pass releases the exact overridden canary holds;
-a superseding full pass also releases verified canary holds from its recorded
-runtime predecessors. Historical failed results stay failed. Recovery repeats
-this cleanup even if the passing canary already released its own hold.
-Completed operations are no longer reported as `pending`; the next update
-retires their terminal lock. A refusal names `blockedReason`: an in-progress
-operation or busy runtime maintenance. An override cannot bypass either.
-On an older running version, explicitly release the reviewed stale hold first,
-then run `clankie update --ref main --json` and check `accepted: true`. A confirmed
+### Canaries, holds and alerts
+
+New service liveness starts a five-minute `/health` canary; `healthy: true`
+alone does not mean it passed. Read `latest.canary` and deploy holds in update
+status. A pending canary holds further landings. A failed canary reports
+`phase: canary-failed`, keeps the new pin running, retains its hold, and names
+`previousHealthyCommit`, the measurements and the explicit rollback target.
+Clankie receives the failure in the initiating lead conversation, or the default
+owner conversation for CLI/scheduled updates. External machine pressure keeps
+`phase: canary-pending` and reruns a full window when load clears; inspect
+`canary.pressure` rather than calling a slow pressured window a regression. No
+automatic rollback occurs; rollback is the owner's decision. Do not claim a
+rollback or successful alert delivery from a claimed receipt. Captain CPU is
+report-only: compare `canaryCpu` with its `previous` runtime on this machine.
+
+Independent, changed-owner and unreadable holds block until the owner releases
+them. Reviewed failed canary holds can be released with `clankie integrate
+release UUID --actor NAME --reason TEXT` (full UUID from update status or
+`clankie integrate holds`); release audits the actor and leaves the historical
+failure intact. Only the authenticated owner can use `clankie update
+--override-holds --reason TEXT`; every hold gets an audited override and stays
+recorded. A refusal names `blockedReason` (an in-progress operation or busy
+runtime maintenance), which an override cannot bypass. A confirmed
 `accepted: false` is a refusal, not an uncertain send; inspect its reason before
-retrying. Never edit update journals or remove locks to recover.
+retrying. Never edit update journals or remove locks to recover; an uncertain
+maintenance lock (`retentionMaintenance: held` with empty `holds` can be an
+active scan) is never removed by age.
+
+An integration-head progress alert names the batch and last checkpoint. Read
+`clankie integrate status UUID` and its evidence; an alert does not authorize
+cancellation or another submission. An accepted integration request waiting
+behind a live queue-lock writer is read by its UUID, never resubmitted or
+unlocked. A retained `gateReuse` pass covers only its unchanged exact tree and
+base; priority never authorizes an ungated tree. A pending canary belongs to
+the candidate commit; an observer's own commit is not a replacement sample.
+Preserve identity-error diagnostics when investigating a hold.
+
+Thresholds, retention, canary policy flags (`clankie update canary`) and the
+remote install/gate deadlines are in `docs/cli.md` under `update` and
+`integrate`.
 
 `source-managed: needs setup in <home>` is a refused installer refresh, not a
 failed active thread refresh. Update status names the local/remote homes in
 `harnessRefresh.sourceManaged`; doctor names the configuration source. Ask its
 owner for a source-owned script, then use `clankie harness install
 --codex-source-setup /absolute/source-owned/script --approve` in that profile.
-Preserve generated symlinks. A linked machine with other refusals still needs
-those resolved; the full `harness-refresh.json` receipt retains them.
+Preserve generated symlinks. The full `harness-refresh.json` receipt retains
+other refusals.
 
 Social turns cannot update the machine. Older already-loaded MCP bridges may
 need their MCP process refreshed to understand newer protocols; repinning files
@@ -213,39 +180,62 @@ it, and an HTTP 400 for a missing durable delivery ID must not be bypassed.
 ## Native health alerts
 
 Runtime and canary alerts use the owner's exact native `global-default`
-attachment, with no service model turn. A kernel-proven operator catalog can
-preserve that attachment; a bare transcript mapping needs complete registered
-inventories. If delivery is unavailable, inspect `native.health_alert.delivery`
-in the service log for its fixed reason and original content fingerprint.
-`submitted` can retain an uncertain dispatch: reconcile its original receipt,
-never send a replacement. Include the alarm, recovery and duration in the next
-Linear check-in; an available notifier does not prove that check-in occurred.
-For matched local health measurements, use the runtime sampler's fresh native
-HTTP transport on both versions. Idle pooled fetch sockets can delay sending;
-a profiler or frequent event-loop histogram can hide that delay.
+attachment, with no service model turn. If delivery is unavailable, inspect
+`native.health_alert.delivery` in the service log for its fixed reason and
+original content fingerprint. `submitted` can retain an uncertain dispatch:
+reconcile its original receipt, never send a replacement. Include the alarm,
+recovery and duration in the next Linear check-in; an available notifier does
+not prove that check-in occurred.
 
-## Integration queue recovery
+## Integration queue
 
-Direct landing is the default in Clankie's repositories
-([ADR 0240](../../../../docs/adr/0240-changes-land-directly-on-main.md)):
-commit to `main`, `git pull --rebase origin main`,
-`clankie heavy -- pnpm check:landing`, then push. Use `integrate` when you want
-an optional composed batch.
+Follow the workspace's own landing rules; `integrate` is an optional composed
+batch, never a substitute for them. `clankie integrate status [UUID]` shows the
+scheduled position, isolation chain and conditional completion ETA. When your
+input is obsolete, `clankie integrate cancel UUID --actor NAME --reason TEXT`
+withdraws a waiting request or an active isolated retry before landing; remaining
+members need a fresh gated tree. Check the original receipt before submitting a
+replacement after an uncertain cancellation; never infer withdrawal from a
+timeout. [Integration](../../../../docs/integration.md) owns the full contract.
 
-`clankie integrate status [UUID]` shows the scheduled position, isolation chain
-and conditional completion ETA from recent completed gates (unknown before
-measurements). Compatible batches have at most three requests; a failed shared
-gate retries members separately and interleaves them with new work. Restores
-remain order barriers. The queue keeps exact-tree gate and push checks.
+Integration scratch trees and batch-owned isolation caches are removed after push
+or an unused terminal failure. A five-minute sweep retries deferred cleanup.
+`clankie integrate reclaim` can also free finished batches' copied-install
+`pnpm-store` and `npm-cache` directories while another batch is gating. That busy
+path preserves worktrees, node_modules, private environments, records, logs,
+receipts and Git stores; it never rewrites records during queue transitions.
+Terminal worktrees can also be reclaimed beside a live queue: durable queued,
+recoverable-interrupted and interruptionRetry dependencies fence their sources,
+including the failure-to-retry admission window. Unknown receipts defer tree
+cleanup. Passed/held/partial batches stay available for push, and retry sources
+keep their trees until their requests finish. `freedBytes` measures allocated
+blocks removed. Aliases, stored logs and live process cwd stay protected;
+incomplete cwd observations defer cleanup. Never manually delete a batch or a
+lock. Retained integration records reuse validated data only while their file
+generation is unchanged, checked on every read including ctime; status and
+cleanup still observe external edits, replacements and deletions without
+restarting the service.
 
-When your input is obsolete, `clankie integrate cancel UUID --actor NAME
---reason TEXT` withdraws a waiting request or an active isolated retry before
-landing. An in-flight isolated gate finishes, but its pass cannot land withdrawn
-input. Remaining members need a fresh gated tree. The first non-isolated gate
-and a landing already under way cannot be cancelled. Check the original receipt
-before submitting a replacement after an uncertain cancellation; never infer
-withdrawal from a timeout. [Integration](../../../../docs/integration.md) owns the
-full contract.
+Each active integration attempt automatically holds deploys for at most sixty
+minutes, through composition, gate and push. Immediate and due deferred updates
+wait; `clankie update status` names their blocking batch UUIDs and expiry. An
+immediate request returns a durable `waitingForIntegration` intent promptly rather
+than keeping the CLI connected for the whole gate. `update cancel` cancels it. New
+attempts wait once a deploy is waiting or accepted. Do not override an automatic
+hold merely to hasten a routine update. Runner interruptions and service restarts
+resubmit newly accepted requests once with their exact approved commits. Follow
+the original UUID; the lead receives a recovery notice. Recovery reads remote main
+before any push and records an already-present candidate without sending twice.
+A second interruption needs review. Historical records without restart recovery
+metadata still need manual inspection.
+
+Composed pairs install app first, core last; gates and pushes remain core first.
+The app workspace includes sibling core packages, and its pnpm install rewires
+their dependency links into the app's store. For manual paired worktrees, run
+the app's frozen install before core's through `clankie heavy --`, and repeat
+core's frozen install after any later app install before checking core. Keep
+each worktree's own node_modules. Do not relax fixture manifest admission for
+`../clankie-app` inputs; they indicate that core's links need restoring.
 
 ## Changing yourself
 
@@ -259,29 +249,32 @@ shared repository; change that source checkout or a new worktree of it under its
 own `AGENTS.md`/`CLAUDE.md`, and keep anyone else's uncommitted work intact.
 Doing it yourself or hiring a worker is your call.
 
-Commit, run the repo's narrow checks, and land through the repo's own path
-(in Clankie's repo, direct landing on `main` under ADR 0240; see its `AGENTS.md`), following doctor's
-`workingPreferences`. Because the pin shares that repository, `clankie update --ref FULL_SHA`
-installs a local commit without pushing; no ref takes fetched `origin/main`.
-Update performs the guarded restart, so do not also run `clankie restart`.
-Finish the turn, then report `clankie update status` and the canary next turn.
-Plain `clankie restart` is for a wedged process or changed config with no code
-change. This loop is for self-hosted contributors. A Mac release install has
-no source: update to a newer release, or offer your person a source checkout
-(`CONTRIBUTING.md`) to fix it there. A hosted body never changes its own code:
-give your person the trace evidence; its fix arrives as an official release.
+Commit, run the repo's narrow checks, and land through the workspace's own
+landing rules, following doctor's `workingPreferences`. Because the pin shares
+that repository, `clankie update --ref FULL_SHA` installs a local commit without
+pushing; no ref takes fetched `origin/main`. Update performs the guarded
+restart, so do not also run `clankie restart`. Finish the turn, then report
+`clankie update status` and the canary next turn. Plain `clankie restart` is for
+a wedged process or changed config with no code change. This loop is for
+self-hosted contributors. A Mac release install has no source: update to a newer
+release, or offer your person a source checkout (`CONTRIBUTING.md`) to fix it
+there. A hosted body never changes its own code: give your person the trace
+evidence; its fix arrives as an official release.
+
+## Owner checkouts
+
+The running service keeps registered owner checkouts synced with `main`;
+`clankie checkouts sync --repository PATH` is the manual route. Sync, hire
+fast-forward and refusal rules are in
+[tidy's mechanics](../../tidy/reference/mechanics.md#owner-checkout-sync).
 
 ## Restarting yourself
 
-You can restart yourself with `clankie restart` from your own bash tool when
-that restart is authorized. The launcher detaches a helper and waits for your
-current console or Discord turn to finish; `status: "scheduled"` means it is
-queued, not already healthy. Finish your reply so the helper can proceed. Its
-`logPath` records the result; check `clankie status` afterward, including Discord.
-There is no need to hire a worker, write a delayed script, or ask the owner to
-run the command. A worker's backend can share your process lifetime, so handing
-it the restart does not make that worker survive. Named service targets are for
-an intentionally narrower restart; the normal command needs no extra `clankie`.
+The launcher detaches a helper and waits for your current console or Discord
+turn to finish. Its `logPath` records the result; check `clankie status`
+afterward, including Discord. A worker's backend can share your process
+lifetime, so handing it the restart does not make that worker survive. Named
+service targets are for an intentionally narrower restart.
 
 ## Resetting a conversation
 
@@ -305,6 +298,19 @@ For `model add-local`, a bare `--base-url` origin is rewritten to `/v1` and `--s
 selects the first listed model. If the probe fails, pass `--models id,id`. Local LLM servers (ds4,
 Ollama, LM Studio) are not launcher-owned; start them yourself.
 
+`clankie model status` reads the authenticated shared settings API; `model set
+provider/model` writes it for new turns. Read `settings.effective.actual` for
+provider/model identity, `settings.routing` for automatic targets and
+`settings.choices` before selecting; `display` is the same identity as plain
+text. Included aliases are not evidence of the served model: response
+observations name fallback models, and missing hosted metadata is unknown. Do not
+infer historical usage from the current preference. For per-turn evidence,
+inspect conversation replay/tail `activity.modelCall` (requested/observed/completed
+provider attempts) and `activity.routingDecision` (refused or unavailable
+targets); reported tokens are not a charged amount. Completed work continues in
+the same session after a model change. Do not choose an internal tier for the
+owner; credit-rate and included-catalog policy gaps stay explicitly unavailable.
+
 Voice brain providers are `openai`, `xai`, and `anthropic`. Anthropic defaults
 to `claude-sonnet-5-5` and needs an existing ElevenLabs voice ID plus separate
 brokered API keys for `anthropic`, `openai` transcription, and `elevenlabs`.
@@ -319,13 +325,11 @@ the brain; an originally unset brain model can be restored with `brain model cle
 
 Voice model selection preserves the configured voice ID and providers. Explicit
 `eleven_v4_turbo` uses Text to Dialogue WebSockets; an unset model retains Flash
-v2.5. `voice status` reports stored/effective settings and environment overrides.
-`voice model clear` restores an originally unset model; restore any explicit
-previous model with `voice model set ID`. The launcher does not restart for these
-writes. When authorized, `clankie restart` reloads the service and its
-dependent bodies. Older installations have only the console `/voice` wizard.
-A readiness check skips paid ElevenLabs synthesis: separate offline tests, real
-provider audio, and actual Discord audibility when reporting verification.
+v2.5. `voice model clear` restores an originally unset model; restore any explicit
+previous model with `voice model set ID`. When authorized, `clankie restart`
+reloads the service and its dependent bodies. A readiness check skips paid
+ElevenLabs synthesis: separate offline tests, real provider audio, and actual
+Discord audibility when reporting verification.
 
 ## Discord server setup
 
@@ -342,9 +346,9 @@ Inviting another server does not change existing settings; outreach requires an 
 grants the bounded household adapter. It exposes criteria, ledger, feedback and
 listing research, never shell, arbitrary files, fleet or connected account tools.
 Use `house_hunting` in that room instead of the installed skill's shell examples.
-Mixed rooms keep owner work/fleet/machine detail private even when an owner asks.
-Legacy trusted guild/channel IDs no longer grant machine tools. Migration is on
-load; do not edit live settings by hand. App/dashboard pickers are follow-ups.
+A room skill never grants the machine. Mixed rooms keep owner work/fleet/machine
+detail private even when an owner asks. Legacy trusted guild/channel IDs no
+longer grant machine tools. Migration is on load; do not edit live settings by hand.
 
 `clankie discord legacy-author --household existing|SERVER-CHANNEL --user ID
 --author LABEL --confirm` binds one exact legacy author label after the owner
@@ -355,6 +359,25 @@ each new binding. Never infer identity from display names, aliases or messages.
 Binding alone reopens nothing. A new ID-attributed reconsideration records
 explicit legacy targets, preserving original authors and others' rejections.
 Do not edit live settings or the ledger to bypass confirmation.
+
+An explicitly owner-approved private text channel can reach the main
+conversation directly: `clankie discord set --main-conversation-channel-ids ID`
+(comma-separated; `none` unlinks). This replaces the list, so preserve existing
+links. Only the configured owner, official bot transport, `owners: me`, a proven
+private audience and current machine access qualify. The native head answers the
+correlated escalation with `reply`; the service runner answers normally; other
+main output stays private. The room receipt names `mainConversationId`. An
+uncertain native delivery is never replayed through another executor. Do not
+link a room without the owner's explicit choice; never broaden ownership or
+Discord permissions to make a link qualify.
+
+`clankie discord rooms` and doctor expose unrecovered failed text deliveries.
+The inbox reconciles existing replies, retries once after recovery and confirms
+its reply or once-only resend notice before closing. A reply the service refuses
+for want of the message's origin closes as `abandoned` after three refusals,
+never posted or retried. Do not manually repost an uncertain answer or clear a
+mouth lease by age. `room_turn` reports its concrete refusal;
+`discord_owner_audience_required` preserves the owner-only audience boundary.
 
 Managed (hosted) Discord connections are in [Hosted Clankie](hosted.md#managed-discord-connection).
 
@@ -370,7 +393,7 @@ beside it, but never the official application's own token.
 If account status is unavailable, `status` keeps the local on/running facts and
 returns `fleetError` with a plain-language `next` step; that does not confirm a
 server connection. A refused `on` changes nothing, and `off` still stops local
-ingress. Refresh after the account route recovers.
+ingress.
 `discord.wakeTrigger` (`mention`, `name`, `any`) sets what wakes him for text:
 `mention` is an @mention, DM, reply or command and ignores his plain name,
 `name` adds it, `any` is every message; unset keeps `persona.replyPolicy`, and a
@@ -378,10 +401,9 @@ stored `addressed` reads as `mention`. Explicit `mention`/`name` settings stay
 strict after a reply and across inbox restarts; the persona's live-message
 window applies only when the trigger is unset. Waking grants no authority:
 server ownership, audience privacy and room skills still follow ADR 0251.
-`persona.chattiness` (`quiet`,
-`balanced`, `chatty`) is only how readily he joins in when nobody addressed him,
-never how long he talks. `/discord` → What wakes him / how much he talks edits
-all three. `ambientChannelIds` lets the hosted or
+`persona.chattiness` (`quiet`, `balanced`, `chatty`) is only how readily he joins
+in when nobody addressed him, never how long he talks. `/discord` → What wakes
+him / how much he talks edits all three. `ambientChannelIds` lets the hosted or
 official edge keep a short encrypted buffer of a channel's chat as context for
 his next wake.
 
@@ -393,53 +415,36 @@ permission and registration belong to the phone; the hosted gateway holds APNs
 signing and delivery registrations. Tokens and delivery keys never go to the host.
 
 `clankie pair --json` returns `localCode` for same-Mac **On this Mac** pairing,
-even when `code` is a gateway link. Review offers do not expose it. Keep the offer
-private; a pairing receipt is not proof the device connected.
+even when `code` is a gateway link. Keep the offer private; a pairing receipt is
+not proof the device connected. If `clankie pair` exits with "No pairing code was
+made", this Mac is signed out of remote access: sign it back in (`/remote-access`
+→ "Sign this Mac back in", or `clankie remote-access on --email EMAIL
+--code-stdin`), restart the captain, and pair again. `clankie doctor` and
+`clankie gateway status` show `doorway: signed out since …`; `status` and `doctor`
+carry a `nextStep` line.
 
-If `clankie pair` exits with "No pairing code was made", this Mac is signed out of
-remote access: sign it back in (`/remote-access` → "Sign this Mac back in", or
-`clankie remote-access on --email EMAIL --code-stdin`), restart the captain, and
-pair again. `clankie doctor`/`clankie gateway status` show `doorway: signed out since …`.
 `clankie status` also reports loaded operator `seatBridges`. Doctor names a stale
 bridge: reconnect its MCP server with `/mcp`. Updating the service does not reload
-an existing native bridge. The `seat_bridges` operator dispatch read reports its
-declared wire kinds/owner attribution capability, last poll, and loaded source
-hash when supplied. Legacy bridges get owner turns as compatible messages; a
-reconnect notice is visible in the shared conversation. A taken turn that loses
-ACK stays uncertain under its original ID, even after reconnect. Inspect it;
-never replay or settle it merely to clear a warning.
+an existing native bridge. A taken turn that loses ACK stays uncertain under its
+original ID, even after reconnect. Inspect it; never replay or settle it merely
+to clear a warning.
 
-`clankie status` also reports `connection` (what `whoami` says), the live `doorway` and
-a `nextStep` line; `doctor` carries the same `nextStep`. Console: `/login` signs in,
-`/devices` lists/revokes phones. A pair code that lacks the gateway route while remote
-access is signed out carries a sign-in note (`nextStep` in `--json`).
-For the installed Mac companion, `clankie pair --local-companion --json` writes
-a five-minute, single-use offer privately under `CLANKIE_STATE/companion`
-(default `~/.clankie/companion`). Output names only the file. Run as the owner,
-never root; never print, message or copy its secret into a shared location.
-The companion redeems only through the native primary loopback listener;
-repeating the handoff preserves its active device ID. This is the service
-contract; signed app distribution and installer wiring remain separate work.
-Official Mac installs with an approved `scripts/release/mac-app.json` pin put
-`Clankie.app` in `/Applications`; `install.sh --no-app` persists opt-out for
-release updates. Linux and source updates never install it. The current pin is
-null pending signed distribution; never invent an artifact URL or digest.
-Installer/update handoff uses `clankie pair --local-companion` without printing
-its capability. Signing, notarization and publishing remain separate gates.
+For the installed Mac companion, `clankie pair --local-companion --json` writes a
+five-minute, single-use offer privately under `CLANKIE_STATE/companion` (default
+`~/.clankie/companion`). Output names only the file. Run as the owner, never root;
+never print, message or copy its secret into a shared location. Never invent a
+companion artifact URL or digest; signing, notarization and publishing are
+separate gates (`docs/local-companion.md`).
+
 For device setup, read `/v1/captain/readiness`; never create an app-owned setup
-flag. Subscription start/status/cancel routes are documented in
-`docs/model-keys.md` under the service root. Headless operator access uses
-`clankie model subscriptions methods|list`, `start PROVIDER --method browser|device
---model PROVIDER/MODEL`, and `status|cancel SESSION_UUID`. Poll the original job;
-never retry an uncertain start or copy a pending login URL/code into evidence.
-These commands use the running service, so completion updates shared readiness
-without a restart. Device API-key entry on a
-self-hosted Mac is refused when readiness passes; the terminal keeps owner key
-management. Claude subscription sign-in remains unsupported.
+flag. Headless subscription sign-in uses `clankie model subscriptions
+methods|list`, `start PROVIDER --method browser|device --model PROVIDER/MODEL`, and
+`status|cancel SESSION_UUID` (`docs/model-keys.md` under the service root). Poll
+the original job; never retry an uncertain start or copy a pending login URL/code
+into evidence. Claude subscription sign-in remains unsupported.
 
-A provider that rejects a stored OAuth token early (openai-codex did, with
-"Your authentication token has expired") gets one forced refresh from the
-service. If that fails, the turn and `clankie doctor` (`credentialRejections`)
+A provider that rejects a stored OAuth token early gets one forced refresh from
+the service. If that fails, the turn and `clankie doctor` (`credentialRejections`)
 say to reconnect the provider with `/auth PROVIDER` in the console; that is the
 owner's action, so report it rather than retrying turns.
 
@@ -452,35 +457,35 @@ selection/expiry checks. `clankie gateway rotate-encryption-key` changes the
 broker wrapping key; coordinate a captain restart separately and re-pair every
 device afterward. It never restarts the service itself.
 
-After sleep, an account doorway stays `connecting` while its network probe fails;
-lost refresh replies get bounded retries inside rotation grace. `sign_in_required`
-in `clankie gateway status` or `doctor` means the owner must use the sign-in wizard.
+After sleep, an account doorway stays `connecting` while its network probe fails.
+`sign_in_required` in `clankie gateway status` or `doctor` means the owner must
+use the sign-in wizard.
 
 Host sleep is a normal condition (ADR 0203). `doctor` reports `power` (`always_on`,
 `sleep_allowed`, `unknown`) and the same object is on `/health`; `sleep_allowed`
 carries advice, and `lastSleep` is what the service noticed on waking. The owner's
 always-on Mac is `clankie awake on|off|status` (`/awake`): a launcher-supervised
 `caffeinate -s`, AC power only, on by default for a self-hosted Mac unless the
-owner stored `off`, never a `pmset` write. Do not run
-`caffeinate` or change power settings for them; suggest `awake` or a hosted body
-(`docs/always-on.md`).
+owner stored `off`, never a `pmset` write. Do not run `caffeinate` or change
+power settings for them; suggest `awake` or a hosted body (`docs/always-on.md`).
+`awake --local-setup on|off` is only for a local Mac before the service runs; a
+running service refuses that bypass. If keep-awake returns `saved: true` with an
+apply error, read its host settings and sleep-assertion status before choosing a
+repair. Bootstrap machine wiring, local harness profiles and signed webhook URL
+setup retain their documented local paths; these are separate operations, not
+API-error fallbacks.
 
 ## Memory
 
 The `memory` tool handles ordinary write/search/edit/forget within its admitted
-conversation. Notes stay until forgotten; no retention flag or quota applies.
-Search when the bounded automatic card does not show what you need. An edit or
-forget requires the note's own source conversation; reading a shared note does
-not give another conversation control over it. Console notes remain private to
-the operator lane; Discord notes are shareable. The host supplies source and
-visibility.
-
-`/memory` (the console browser) and `clankie memory` are explicit operator
-management across conversations, including older notes without a source
-conversation: `clankie memory status`, `memory search <terms...>`,
-`memory forget <episodeId>`, or `memory correct <episodeId> --summary "…"`.
-Person facts still come from your person's `/person-memory`, not this tool. See
-`{repoRoot}/docs/memory.md` for the storage and authority contract.
+conversation; its description carries the rules. `/memory` (the console browser)
+and `clankie memory` are explicit operator management across conversations,
+including older notes without a source conversation: `clankie memory status`,
+`memory search <terms...>`, `memory forget <episodeId>`, or `memory correct
+<episodeId> --summary "…"`. Reading a shared note does not give another
+conversation control over it. Person facts still come from your person's
+`/person-memory`, not this tool. See `{repoRoot}/docs/memory.md` for the storage
+and authority contract.
 
 ## Steering a turn
 
@@ -500,9 +505,17 @@ instruction. Full contract: `{repoRoot}/docs/cli.md`.
 
 ## Setup and console commands
 
+Plain `clankie` opens the existing main conversation. Use `clankie --chat ID` for
+another thread, `/new` for a fresh chat, or `/cd PATH` for a workspace
+conversation. The console opens on a blank page; the latest messages wait just
+above it. Scroll up to load older retained history; loading a page preserves the
+visible text and does not pause live events.
+
 `/setup` is the console's front door: while he cannot take a turn it asks how
 he should think and which model, then chains `/remote-access`, `/pair`, optional
-`/connect`, and a first-agent request through his normal conversation. Pairing
+`/connect`, and a first-agent request through his normal conversation. It asks
+the owner to choose an autonomy preset (Off, Low, High or Full, described by
+`clankie autonomy`), writing the same fleet-settings API as `/autonomy`. Pairing
 is complete only when the devices API reports an active phone with chat access.
 `/setup rooms` lists the other settings. When someone asks you to walk them
 through setup or hire their first agent, read `clankie doctor --json`, guide any
@@ -518,16 +531,27 @@ existing wizards, or the credential broker — never flags.
 
 ## Games
 
-`play stop` prints `Nothing is playing.` (not JSON) when idle.
+`play stop` prints `Nothing is playing.` (not JSON) when idle. External game
+extensions such as Spider-Man (Rivals) are not installed by default. Do not
+install, deploy, reconnect or start sittings on your own; installing one does not
+authorize a sitting. `{repoRoot}/docs/rivals.md` says where it lives and its
+current state; once installed, its own tool description and skill carry the rules.
 
-Spider-Man (Rivals) is an external game extension that lives in the Rivals Agent
-repository; it is not installed by default and its bridge is disabled
-(VUH-1325). Do not install, deploy, reconnect or start sittings on your own: those
-wait for the lead's schedule and verification of the explicit cooldown argument.
-Once the owner installs it, its own `rivals` tool description and skill carry the
-rules; `{repoRoot}/docs/rivals.md` says where it lives.
+## Linux installs
 
-## Conflicts
+On Ubuntu 24.04 LTS+, arm64/x64 glibc releases use the same checksum-verified
+`install.sh` as macOS ([distribution](../../../../docs/distribution.md#linux)).
+The portable launcher supervisor starts the service; no systemd user session or
+root service is required, so start again after login with `clankie start
+clankie`. Linux credentials use the private file broker. Do not claim phone
+pairing or model authentication from service health alone.
+
+## Local state and conflicts
+
+Owner-managed state-home symlinks are supported. Keep the link and target owned
+by the service user and deny group/world writes; capability and update
+subdirectories remain private (`0700`). A shared writable target or replaceable
+link is refused, and file symlinks are refused for private update records.
 
 Launcher conflicts for Clankie, relay and activity use their configured listen
 ports. Linux needs `lsof` for that inspection; without it, a matching process

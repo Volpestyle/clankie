@@ -1,6 +1,6 @@
 # Fleet, hires and agent history
 
-Owner working preferences, skill selection for hires, Codex accounts, hiring and roles, native worker control (Codex, Claude, Pi, OpenCode, Grok, Prime Agent), uncertain hires, where workers run, peer messages and agent history. Bridges and connected tools are in [worker bridges and fleet tools](fleet-tools.md).
+Owner working preferences, accounts, naming and roles, uncertain hires, native worker control (Codex, Claude, Pi, OpenCode, Grok, Prime Agent), where workers run, closure policy, cross-device conversations, peer messages, worker MCP servers and agent history. Hire choice, placement, report routing, receipts and closing panes are in `lead`'s [fleet tools](../../lead/reference/fleet-tools.md); bridges and connected tools are in [worker bridges](worker-bridges.md).
 
 ## Owner working preferences
 
@@ -32,9 +32,8 @@ skills discovered independently by a harness are outside Clankie's bundle switch
 Extra Codex accounts are registered homes: `clankie accounts codex add HOME
 --label LABEL`, `list`, and `remove LABEL` (also `/accounts codex` in the TUI).
 The owner signs in and trusts hooks in that home; never copy credentials or
-approve hook trust for them. Local Codex hires choose the most headroom across
-the windows returned by Codex’s read-only quota API, including weekly-only plans.
-Recent rollout usage is the fallback if that query fails. Missing or stale usage is unknown,
+approve hook trust for them. Hires rank accounts from `worker_accounts`
+`allocation` (see `lead`'s hiring reference); missing or stale usage is unknown,
 not an empty plan. `hire_agent` can pin `account: "LABEL"`; the hire and roster
 report the chosen account. Registration changes apply to new hires only.
 Account list/API reads expose native `hookTrust` (`ready`, `review_required`,
@@ -57,256 +56,109 @@ worker. A lost native turn acknowledgment remains uncertain. Catalog reads
 must name the original thread and its pinned `worker` server; an unfiltered
 status read creates discovery runtimes and cannot prove the loaded catalog.
 
-Give every hire a short human name in `title`, in any language, and an assignment
-`role`. Do not use a routing ID, task slug or issue key as the name. Older API
-callers can still omit the role; the model-facing tool requires it. Rename later
-with `clankie agents rename NAME|PERSONA_ID "NEW NAME"`; this preserves native
-identity, appearance and project assignment.
-`update_persona` preserves omitted fields from the current saved persona:
-send only `name` for a rename, and omit `name` when saving appearance or an
-avatar. Background image work must not resend a cached display name.
+## Names and roles
 
-`hire_agent` sets `role`. The built-ins are planner, designer, builder,
-tester, reviewer and researcher; you can also use a custom role such as "sound
-designer" (1–24 letters, digits, spaces, hyphens). The owner's world places the
-agent at that station and reads its backlog from work items labelled with the
-role. Prefer a role already in use (`clankie agents roles`) over a near-duplicate.
+Rename a hire with `clankie agents rename NAME|PERSONA_ID "NEW NAME"`; this
+preserves native identity, appearance and project assignment. `update_persona`
+preserves omitted fields from the current saved persona: send only `name` for a
+rename, and omit `name` when saving appearance or an avatar. Background image
+work must not resend a cached display name.
+
 `clankie agents role NAME "ROLE"|none [--project PROJECT]` changes a current
-member's saved role in that project; omission selects `default`. The host checks
-the exact native seat and original hire assignment or verified workspace
-membership for agents Clankie did not start, refusing offline, unknown
-or other-project agents. This changes the semantic station role without changing
-the live harness's launch profile. With one positional role,
-`clankie agents role ROLE --project PROJECT [profile flags]` still edits the
-project's hire profile. Fleet seats you hired or opened report native
-Claude, Codex and registered local OpenCode worker subagents as `subagents`;
-absent means unknown (ADR 0208).
-Recent entries can carry a stable native `id` and `startedAt`/`endedAt`; older
-hosts may omit them. Running children omit `endedAt`. Codex idle endings are
-estimates at last file write plus five minutes. Codex entries combine nickname and task path. Parent collection/status records
-settle children on the next fleet read; without a current parent status, five
-minutes of file idleness is a fallback and may misclassify a quiet running tool.
-Remote and unaddressed seats remain unknown.
-OpenCode entries use the task call ID, agent type/description and native task
-times. Background launch results remain running until a synthetic parent
-completion/error notification. Reads retain the native history adapter's
-1.18.18 pin and registered-profile boundary: at most 500 parent messages,
-2,000 parts, 4 MiB and 64 task calls. Owner-wide stores and v2-only histories
-are not read, and file idleness does not settle an OpenCode task.
-Local OpenCode hires preserve the chosen persona and conversation across native
-title changes. `close_seat` asks an owned live worker's original TUI to exit and
-reports success after its terminal disappears. A switched, replaced or cold
-session refuses this control; inspect it rather than retrying physical closure.
+member's saved station role in that project; omission selects `default`. The host
+checks the exact native seat and original hire assignment or verified workspace
+membership for agents Clankie did not start, refusing offline, unknown or
+other-project agents. It does not change the live harness's launch profile.
+With one positional role, `clankie agents role ROLE --project PROJECT [profile
+flags]` edits the project's hire profile; `clankie fleet status` shows effective
+profiles and `/agents roles` edits them through the revision-bearing owner API.
+These preferences affect new hires, not live seats. Prefer a role already in use
+(`clankie agents roles`) over a near-duplicate.
 
-Project hire profiles resolve explicit owner-authorized fields before role
-preferences, then `fleet.hire` defaults. Omit launch fields to inherit and inspect
-the result's `profile`. `clankie fleet status` shows effective project profiles;
-`clankie agents role ROLE --project PROJECT` and `/agents roles` edit them through
-the revision-bearing owner API. These preferences affect new hires, not live seats.
+Fleet seats you hired or opened report native Claude, Codex and registered local
+OpenCode worker subagents as `subagents`; absent means unknown (ADR 0208).
+Entries can carry a stable native `id` and `startedAt`/`endedAt`; running
+children omit `endedAt`, and Codex idle endings are estimates. Remote and
+unaddressed seats remain unknown. OpenCode reads stop at 500 parent messages,
+2,000 parts, 4 MiB and 64 task calls; file idleness does not settle an OpenCode task.
+`close_seat` asks an owned live worker's original TUI to exit and reports success
+after its terminal disappears. A switched, replaced or cold session refuses this
+control; inspect it rather than retrying physical closure.
 
-A `native-first` role requires a stable `deliverable` key, normally its issue ID;
-the worker owns its slices through native children with the configured child
-model/effort in the first brief. Another pane for that project/deliverable is
-refused while starting, live or uncertain. Message that worker rather than
-changing the key. `panes` permits independent slices in separate authorized hires.
-New hires target the repo's Herdr workspace in the selected fleet. Linked Git
-worktrees share it. Omitted placement fills named 2x2 worker tabs, at most four
-per tab before opening the next numbered tab. Group names come from the
-project's display name or deliverable (otherwise the repo, or `Workers` outside Git); `pipeline` overrides the group
-name. Explicit `new-tab` keeps a solo `Name · role` tab. Explicit `split` still
-requires a pipeline. Owner/role/fleet placement preferences win. Matching
-repo/group/grid tokens keep new hires out of unmarked and older lanes.
-Prepared initial-command hires move only their new pane from a temporary tab
-into the grid. Existing mixed workspaces, labels and panes stay untouched.
-Sub-leads use the exact [worker grid commands](../../clankie/reference/worker-layout.md).
-A live-session resume keeps its pane; a new resume uses the repo rule. An
-explicit move allocates a solo tab at its destination with its known role. Never rearrange existing lanes to adopt this layout.
-Local account labels select registered profiles; on a linked machine they are
-that machine's own profiles (see below).
-Friendly model names are registry-validated, and incompatible/retired names refuse.
-A cross-family override includes its harness; `subagents: null` clears inherited
-child settings for that hire. With no harness from the hire, role or fleet,
-Clankie chooses per job; passing none falls back to the hire machine's usable,
-unheld accounts (the only harness with one; else the one whose best account is
-not on pace to run out before its reset; else Codex only when its best account
-has strictly more of its tightest window left; else Claude), and refuses when
-none is usable.
-Inspect the current schema on an older install.
+`clankie herdr agent list` shows every worker's `owner` conversation (or
+`unowned`) and, from a seat with `CLANKIE_CONVERSATION_ID`, `mine: true|false`.
 
-Use the role already configured for the intended project. `projectId`, when
-supplied, must match the hiring conversation's verified project or canonical
-workspace; it cannot select another project's worker allowance. Conflicting or
-ambiguous workspaces refuse the hire. Role and project limits count starting,
-running and uncertain hires. A completed turn does not free a slot; close its
-Herdr pane and let the next complete inventory confirm the pane is gone. Exiting
-the harness while leaving its pane open keeps the slot. A zero
-limit prevents new hires. An existing exact live session can be reused at its
-limit, but a resume cannot change its recorded role settings or launch a second
-agent after losing the original. Inspect an uncertain hire instead of changing
-its model, harness or project to retry.
+## Uncertain hires
 
-## Uncertain remote hires
+An uncertain hire may already have taken effect: inspect the retained receipt
+and original pane, and never replay its brief, change its cwd, model, harness or
+project, delete receipts or rewrite project-hire state files to escape a fence.
+A freshly named Codex root may defer its first history read only while proving a
+new, idle, non-forked root before first dispatch; never create or repair a
+rollout file to bypass this. A post-dispatch history failure is uncertain.
 
-A freshly named Codex root may have native metadata before its rollout exists.
-Clankie can defer that exact history read only while proving a new, idle,
-non-forked root on its initially empty dedicated server, before first dispatch.
-He hydrates after persistence; saved, forked and corrupt history stays refused.
-Never create or repair a rollout file to bypass this boundary. A post-dispatch
-history failure is uncertain, so inspect the retained receipt and never replay
-the brief. A stopped pre-dispatch view needs explicit recovery, not a hire retry.
+`clankie hire-receipt settle UUID DISPOSITION` is the operator boundary (the
+lead tool `settle_hire_receipt({receiptId, disposition})` settles only its own
+conversation's fresh hires):
 
-For a fenced native remote hire, `clankie hire-receipt settle ORIGINAL_NATIVE_HIRE_UUID`
-can seal only a host-authenticated, recorded no-launch window. The native UUID is
-distinct from an MCP call ID or a `seat-…` message acknowledgement. Legacy missing
-history, an allocated pane or an attempted launch refuses; current absence is not
-historical proof. Settlement retains the receipt/evidence and permanently blocks
-its original key. Never delete receipts, resubmit the original, or change its cwd
-to escape the fence. For explicitly authorized legacy recovery, `settle seat-UUID delivered` requires the original native channel event and authenticated historical
-proof; `settle NATIVE_HIRE_UUID abandoned` retains uncertainty and blocks that intent.
-Both retain originals and evidence. Abandonment does not close or adopt the pane;
-list uncertain ownership/activity/drafts for the lead. A new acceptance requires
-its own authorized intent, never an automatic retry. See `docs/cli.md` under
-`repoRoot` for the operator boundary.
+- `abandoned` for a local hire whose original pane, in this machine's complete
+  Herdr inventory, holds no harness; a live harness refuses — adopt or retire it.
+- `adopt` for a local hire that launched but never confirmed (for example stopped
+  at `trust_required` and trusted by hand); the harness must run in the hire's own
+  pane and directory. Brief delivery stays unknown, so message the worker to
+  confirm the task or retire it with `close_worker_pane`.
+- `release-allocation` for an inactive, unconfirmed project allocation held after
+  a refusal, once a complete inventory shows neither its pane nor a worker there.
+- Remote fenced hires: only a host-authenticated, recorded no-launch window
+  settles; settlement permanently blocks the original key.
 
-Fresh-hire recovery also accepts the retained `freshIntent.id` instead of the native
-receipt UUID: `clankie hire-receipt settle FRESH_INTENT_UUID abandoned` (or
-`abandoned-unknown` / `not-launched`, subject to the same host evidence requirements).
-The lead tool `settle_hire_receipt({receiptId, disposition})` may settle only its
-own conversation's fresh hires; operator API/CLI recovery retains operator authority.
-The result names the requested UUID; its evidence keeps the original native receipt
-UUID and key. No old brief is sent, and no pane is closed. A separately authorized
-new hire may name either settled UUID in `freshIntent.afterReceiptId`.
+Separately authorized new remote work after settlement uses `hire_agent` with
+`freshIntent: {id, afterReceiptId}` (or `clankie hire-receipt fresh
+--json-stdin`): choose one new UUID, keep it across uncertainty, and name the
+exact settled UUID at the same fleet/harness/cwd. Dispositions, evidence
+requirements and a JSON example are in `docs/cli.md` under `hire-receipt`.
 
-For an inactive, unconfirmed project allocation left held after a refusal, use
-`clankie hire-receipt settle PROJECT_ALLOCATION_UUID release-allocation` through
-the operator boundary. This UUID is the project allocation, not its native
-receipt. A complete inventory must show neither its original pane nor a worker
-in that directory; unresolved native hire receipts must be settled first.
-Retain handoff evidence and explicitly retire a present worker before releasing.
-The command preserves launch history, records a release disposition and starts
-nothing. Never rewrite project-hire state files to bypass these checks.
-
-An uncertain local hire (receipt key fleet `local`) settles with
-`clankie hire-receipt settle ORIGINAL_UUID abandoned` when this machine's
-complete Herdr inventory shows no occupant in its original pane: absent, or only
-its own shell in the foreground with no reported harness. The evidence claims
-neither launch nor delivery; the original is archived and a new hire into that
-directory starts normally. A live harness in the pane refuses: adopt or retire it.
-
-A local hire that launched but never confirmed (its lead's `message_seat` refuses
-"native occupant no longer matches its persisted owner", including a hire stopped
-at `trust_required` and trusted by hand) is adopted with
-`clankie hire-receipt settle RECEIPT_OR_ALLOCATION_UUID adopt`. The harness must
-run in the hire's own pane and directory, with matching process proof for a
-project allocation. Its occupant is bound to the hiring conversation and its
-allocation confirmed; delivery of the brief stays unknown, so that lead messages
-the worker to confirm the task or retires it with `close_worker_pane`.
-
-After authenticated settlement, separately authorized new remote work can use
-`hire_agent` with `freshIntent: {id, afterReceiptId}` or
-`clankie hire-receipt fresh --json-stdin` with the public `spawn_seat` body.
-Choose one new lowercase UUID, save it with the new brief, and name the exact
-settled native hire UUID at the same fleet/harness/cwd. Keep that ID across
-uncertainty; an exact retry only inspects its native binding. An unresolved
-sibling or a changed owner, project/launch scope or configured host refuses.
-Never reuse a retained brief, resume an abandoned allocation, change aliases to
-bypass the fence, or delete receipts. Completed fresh IDs and original evidence
-stay retained permanently; follow-up uses the admitted seat. Details and a JSON
-example are in `docs/cli.md` under `hire-receipt` recovery.
-
-Each hire belongs to the conversation that hired it. `clankie herdr agent list`
-shows every worker's `owner` conversation (or `unowned`) and, from a seat with
-`CLANKIE_CONVERSATION_ID`, `mine: true|false`. You may message another lead's
-hire: `message_seat` delivers, names its `ownerConversationId`, and the hire
-keeps its lead, so its reports go there, not to you. Only that lead closes it:
-`close_worker_pane` on another lead's hire returns `not_owner`. A hire whose
-lead conversation is gone, or a hand-started seat, is adopted by the
-conversation that messages it.
+## Codex and Claude worker control
 
 Local briefed Codex hires use a private app-server and remain native interactive
 Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion
-comes from turn events, and the owner can type into the same bound session.
-The app-server survives a Clankie service restart, so the native worker keeps
-running in its pane. Completed local launch registrations persist under the
-service's state root, so the same live native worker can still report with
-`message_clankie` after a restart or re-pin. Restored membership requires the
-original server PID lifetime, Herdr socket/session and current native occupant.
-New local hires also receive `HERDR_ENV=1` alongside their pane/socket identity.
-A worker hired before durable launch registration was introduced needs the
-lead's existing watch to report and a fresh hire after that work is settled;
-do not reconstruct membership from a claimed PID or switch to an operator bearer.
-After a restart, Clankie loses that adapter's in-memory
-turn state; inspect the pane and transcript before relying on a new delivery.
-Codex messages can steer an active turn; a `steered` receipt is not an after-turn
-queue. Windows control supports an existing private loopback backend with its
-native TUI (`--remote`), preserving the pane's environment and MCP. Automatic
-supervision of new Windows launches is not established by this adapter.
-Fleet SSH control requires fresh native process,
-pane/session, private-home and exact connected TCP ownership proof. Existing
-embedded `--no-daemon` sessions and explicit named profiles retain their launch
-mode. Steering requires a proven private endpoint. Queueing may use the existing
-SSH CLI only after fresh kernel observations prove the pane and CLI share the
-SSH account's canonical default `~/.codex` and positively identify a standalone
-TUI. A missing or rejected remote endpoint alone cannot prove that mode.
-The same pane/session and home proof are repeated after preparation, then caller
-authority is rechecked with a 250 ms deadline immediately before sending. Timeout
-means undelivered; late approval cannot send. Private or unproved
-homes refuse the CLI fallback, and private native receipts never authorize a
-second send. Large finite SSH commands stream their quoted wrapper over stdin,
-keeping message bodies out of the multiplexing control request. On Windows the
-default-home `codex queue` fallback takes its message only as an argument, so a
-message too long for the command line is staged in full as
-`%USERPROFILE%\.clankie\seat-messages\<id>.md` (SHA-256 checked on the PC) and
-the queued message points to that file; a failed staging is not-sent (VUH-2258).
-A proven
-pre-launch transport failure returns undelivered and releases its exact delivery
-fence; a later deliberate follow-up may send. A reset, timeout or lost native
-acknowledgment remains uncertain and must not be replayed. An unavailable endpoint grants no tools or authority to another
-session. Other routes need a supported native channel or session API. Automated
-briefs and messages never fall back to terminal typing. An uncertain start or
-delivery retains its pane for inspection; reconcile it before retrying. A saved
-Codex session reference alone cannot recover its in-memory control after a
-service restart. Never replay uncertainty through another delivery path.
+comes from turn events, and the owner can type into the same bound session. The
+app-server survives a Clankie service restart, and completed local launch
+registrations persist under the service's state root, so the same live worker can
+still report with `message_clankie` after a restart or re-pin. Clankie loses the
+adapter's in-memory turn state on restart; inspect the pane and transcript before
+relying on a new delivery. Never reconstruct membership from a claimed PID or
+switch to an operator bearer. Codex messages can steer an active turn; a
+`steered` receipt is not an after-turn queue.
 
-Remote hire addresses include their fleet (`studio/wC:p2`); the native host census
-uses the bare pane (`wC:p2`). Both forms refer to the same pane only within that
-exact registered fleet. Process proof and project membership preserve the
-original allocation and native process binding. A legacy bare allocation or
-missing original process proof stays unconfirmed; it cannot become an
-owner-started workspace member through address normalization.
+Remote and Windows Codex control requires fresh native process, pane/session,
+private-home and connected-endpoint proof, rechecked immediately before sending;
+a timeout means undelivered and late approval cannot send. The SSH `codex queue`
+fallback runs only after fresh proof that the pane uses the account's default
+`~/.codex` standalone TUI; private or unproved homes refuse it, a private native
+receipt never authorizes a second send, and an unavailable endpoint grants no
+tools or authority to another session. A message too long for a Windows command line is
+staged in full under `%USERPROFILE%\.clankie\seat-messages\` and the queued
+message points to it; a failed staging is not-sent. A proven pre-launch
+transport failure returns undelivered; a reset, timeout or lost native
+acknowledgment remains uncertain and must not be replayed. Automated briefs and
+messages never fall back to terminal typing. A saved Codex session reference
+alone cannot recover in-memory control after a service restart.
+
+Remote hire addresses include their fleet (`<fleet>/wC:p2`); the native host
+census uses the bare pane (`wC:p2`). Both forms refer to the same pane only within
+that exact registered fleet. A legacy bare allocation or missing original process
+proof stays unconfirmed; it cannot become an owner-started workspace member
+through address normalization.
 
 Briefed local Claude hires use the approved `clankie-worker` channel and report
-`control.mode: "channel"`; Codex, supported OpenCode workers and prepared Pi report `adapter`.
-Prepared Pi is off by default on owner-run bodies; managed body images enable it.
-Pi must pass native capability and model/authentication checks in the same
-`worker_accounts` report as Claude/Codex. An owner hold excludes Pi `default`
-from automatic selection. Automatic hires prefer eligible Claude/Codex accounts
-then usable Pi, within model constraints; a local report cannot qualify remote Pi.
-Only `CLANKIE_PI_NATIVE_ENABLED=1` in the service's
-environment registers its local adapter; changing it and restarting remain
-owner actions. Inspect `clankie accounts workers` before hiring: a disabled
-Pi row does not establish native authentication. A read-only enabled prerequisite
-check can still refuse an expired OAuth credential in the separate native Pi
-profile. The owner refreshes that profile in Pi; service credentials do not
-replace it. No account observation refreshes a token.
-Without opt-in, unbriefed Pi launches retain hosted model/provider preparation,
-while automated briefs remain unavailable. Opt-in uses whatever Pi is installed:
-a release of at least 0.87.1 that passes the hire-time capability probe, plus the
-original visible process/session. No pin or manual validation follows a Pi
-upgrade. A refused release shows `Native Pi VERSION ...` with the failed surface
-in `worker_accounts` and the hire result; report that reason rather than
-downgrading Pi. `{repoRoot}/docs/testing/2026-10-04-pi-workers/README.md`
-keeps native hosted/billing and the remaining owner acceptance open. Prepared Pi
-workers consume `clankie mcp --fleet` through their original native extension;
-server-advertised schemas and original receipts pass through without an operator
-fallback. Controller/session loss or MCP process loss ends this consumer; it
-never reconnects, retries an uncertain tool call or hires a replacement. The
-consumer has installed Pi SDK / MCP subprocess coverage without provider turns;
-`{repoRoot}/docs/testing/2026-10-17-vuh-2417-pi-latest/README.md` records the
-live Mac hire, not hosted proof. Missing
-structured control reports `unavailable` with `control.reason` (and `control.fix` when owner action
-is needed). `terminal` is only an unbriefed native launch. Each hire logs its
-lane. Folder trust and channel consent remain owner decisions; a visible prompt
+`control.mode: "channel"`; Codex, supported OpenCode workers and prepared Pi
+report `adapter`. Missing structured control reports `unavailable` with
+`control.reason` (and `control.fix` when owner action is needed). `terminal` is
+only an unbriefed native launch. Folder trust and channel consent remain owner
+decisions; a visible prompt does not authorize sending it keystrokes or launching
+a replacement.
+
 does not authorize sending it keystrokes or launching a replacement.
 
 For `brief_delivery_unverified`, inspect `hire_agent.receipt_rejected` in the
@@ -316,45 +168,47 @@ failed hire. Claude writes channel receipts as internal `isMeta`/system user
 records. A standalone `clankie-seat` bridge must not poll when only the worker
 plugin's channel is selected, or it can consume mail Claude never receives.
 
+## Pi worker control
+
+Prepared Pi is off by default on owner-run bodies; managed body images enable it.
+Only `CLANKIE_PI_NATIVE_ENABLED=1` in the service's environment registers its
+local adapter; changing it and restarting remain owner actions. Pi must pass
+native capability and model/authentication checks in the same `worker_accounts`
+report as Claude/Codex (`clankie accounts workers`); a disabled row does not
+establish native authentication, and an expired OAuth credential in the separate
+native Pi profile is refreshed by the owner in Pi. An owner hold excludes Pi
+`default` from automatic selection. Opt-in uses whatever Pi is installed (at
+least 0.87.1, passing the hire-time capability probe); a refused release shows
+`Native Pi VERSION ...` with the failed surface — report that reason rather than
+downgrading Pi. Prepared Pi workers consume `clankie mcp --fleet` through their
+original native extension; controller or MCP process loss ends the consumer, which
+never reconnects, retries an uncertain tool call or hires a replacement. Current
+acceptance status: `{repoRoot}/docs/testing/2026-10-04-pi-workers/README.md`.
+
 ## OpenCode worker control
 
 A local `hire_agent` may select `opencode` with the installed direct native binary
-on macOS: any release at or above **1.18.18** whose worker probe passes. Before
-the brief, the TUI plugin checks every plugin API call a worker makes and the
-history reader checks its tables and migrations; a failure refuses the hire with
-the found version and the missing surface. Report that refusal to the owner
-rather than downgrading OpenCode or retrying. `model` is `provider/model`;
-`effort` requires that model and a supported native variant. Account, skill, Chrome and extra-argv overrides are refused. One native
-initial argv pane is bound to its original process/socket, cwd and displayed
-session before briefing. Its worker MCP uses the fleet projection, without
-operator authority. Permissions and questions remain owner decisions.
+on macOS: any release at or above **1.18.18** whose worker probe passes. A probe
+failure refuses the hire with the found version and the missing surface; report
+that refusal to the owner rather than downgrading OpenCode or retrying. `model` is
+`provider/model`; `effort` requires that model and a supported native variant.
+Account, skill, Chrome and extra-argv overrides are refused. Its worker MCP uses
+the fleet projection, without operator authority. Permissions and questions remain
+owner decisions.
 
 Accepted means native queue receipt; completion requires the matching finished
 native reply. Never retry an uncertain start or send. A route switch or endpoint
-loss retires control without adopting a replacement. Native interrupt stays
-exact-session. An owned live worker can exit through its original TUI; success
-requires its original terminal to disappear. Cold, replaced or switched sessions
-refuse, with no unconditional physical pane-close fallback.
+loss retires control without adopting a replacement. Cold, replaced or switched
+sessions refuse exit control, with no unconditional physical pane-close fallback.
 
-On a linked Mac POSIX fleet, pass its `fleet` ID to `hire_agent`. The same native
-TUI/controller uses a private loopback SSH forward; fresh probes check the exact
-SSH child, remote UID/process birth, executable, cwd, Herdr binding and displayed
-session. Disconnects and retargets refuse without local fallback or reconnect.
-The remote machine needs Node 24+, Python 3, Herdr, native OpenCode 1.18.18 or
-newer that passes the same probe, and its existing Clankie fleet link. Windows
-remote OpenCode remains unsupported.
-Registered remote history uses `<fleet>:ses_…` with the existing agent APIs/CLI;
-resume requires the original live controller on that exact SSH target. The helper
-reads only dedicated native worker profiles; it is not a model/session writer.
-Remote integration fixtures establish these boundaries; do not claim live remote
-acceptance from them.
-
-Use `clankie agents list` and `clankie agents read` for registered dedicated worker
-SQLite history and `clankie agents resume … --conversation ID` only with the
-original live controller and fresh identity/cwd checks. History is bounded stored
-v1 content, not proof of current TUI selection or control. General profile
-discovery, new-process resume and restart reattachment remain unavailable. Keep deterministic fixtures, later native persona/exit evidence and
-remaining live acceptance separate; read
+On a linked Mac POSIX fleet, pass its `fleet` ID to `hire_agent`; the remote
+machine needs Node 24+, Python 3, Herdr, native OpenCode 1.18.18 or newer that
+passes the same probe, and its existing Clankie fleet link. Disconnects and
+retargets refuse without local fallback or reconnect. Windows remote OpenCode
+remains unsupported. Registered history (`<fleet>:ses_…` remotely) is read with
+`clankie agents list|read`; `clankie agents resume … --conversation ID` requires
+the original live controller and fresh identity/cwd checks. History is bounded
+stored content, not proof of current TUI selection or control. Acceptance status:
 `{repoRoot}/docs/testing/2026-10-04-opencode-workers/README.md`.
 
 ## Grok Build worker control
@@ -413,12 +267,10 @@ lead|owner --machine-setup lead|owner` changes the defaults. Use `clankie projec
 settings PROJECT --closure lead|owner|inherit --machine-setup lead|owner|inherit`
 to override or restore inheritance for either field.
 
-With closure `lead`, the lead closes landed work to Done once relevant checks
-pass and evidence is attached; workers report without parking for owner
-acceptance, and the owner may reopen. Closure `owner` parks delivered work In
-Review. Genuine owner-only gates such as App Store submission, payments, evals
-or owner-account sign-ups get linked follow-ups without keeping delivered work
-open. Never mark unperformed work or missing verification as passed.
+Closure `lead` lets the lead close landed, verified work; `owner` parks
+delivered work for the owner. What each means for an issue's status is in
+`work-items` under "Status stays true". Never mark unperformed work or missing
+verification as passed.
 
 Machine setup `lead` permits Clankie's own harness plugins, bridges and worker
 setup on already-linked machines through existing authorized access. `owner`
@@ -452,7 +304,7 @@ pane. Codex gets its own app-server on that machine through his ssh. Claude uses
 the `clankie-worker` plugin over the fleet's link, so a briefed remote Claude
 hire fails with the fix until `clankie herdr prepare NAME` has prepared
 that linked machine. Machine setup policy, source-managed Codex setup and verification are in
-[preparing linked machines](fleet-tools.md#preparing-linked-machines). This
+[preparing linked machines](worker-bridges.md#preparing-linked-machines). This
 does not grant operator CLI credentials to fleet workers. `herdr fleets` reports
 each link's state. Setup never restarts or steers existing lanes.
 
@@ -486,8 +338,7 @@ missing. Signing in is the owner's step on that machine.
 With `fleet.peerMessages: "on"` (default), a proven native worker discovers
 same-fleet peers using `list_fleet_seats({})`, then sends
 `message_peer({seat: returnedSeatId, text})`. Use the returned fleet-qualified
-
-terminal ID, for example `studio/term_…`; never construct one from a local pane.
+terminal ID, for example `<fleet>/term_…`; never construct one from a local pane.
 
 Peer content carries `source: peer`, is untrusted agent output and does not wake
 Clankie. Both peers retain their assignments and lead. An uncertain send keeps
@@ -514,6 +365,12 @@ IDs on older hosts remain display-only. Missing native locators and remote child
 history report unavailable. Reading a child does not create, resume or steer a
 conversation.
 
+The fleet snapshot's `edges` include confirmed native peer delivery UUIDs and
+verbatim bounded excerpts. `leadVisits` records confirmed captain deliveries and
+pane closure separately. Uncertain, refused and merely stored peer attempts earn
+no exchange; read the original receipt to reconcile, never resend for a visual.
+These bounded five-minute facts describe delivery, not work completion.
+
 ## Chats, agents, rooms, and history
 
 In the TUI, `/chats` means personal/workspace chats with Clankie; `/agents`
@@ -535,6 +392,12 @@ shell and workspace grant; local Codex resumes keep their original account.
 named pane, never dispatch a replacement or replay the brief blindly. A saved
 session in an unregistered terminal must be closed there before resuming.
 
+Fleet contact reads (`clankie agents contacts`) accept up to 768 occupied seats
+across connections and refuse larger complete reads rather than silently
+truncating them. `readWarnings` means cached or partial observations, not
+confirmed live ownership. Display input capabilities do not authorize a send;
+the send performs its own fresh native and authority checks.
+
 ## Bundled working skills
 
 Read `docs/bundled-skills.md` under the `repoRoot` reported by doctor for the
@@ -552,7 +415,7 @@ checkout declares (`.mcp.json` for Claude, `.codex/config.toml` for Codex), and
 only the owner's own servers its hire profile names in `mcpServers`. Opt-ins add
 up across `fleet.hire`, the project role and the hire. Every other server in the
 owner's configuration stays off for that session; the owner's files and their
-own sessions are untouched (VUH-2388).
+own sessions are untouched.
 
 - Every worker: `clankie fleet set --mcp-servers github,xcode` (`none` clears).
   One role: `clankie agents role ROLE --project ID --mcp-servers NAME,...`
@@ -586,16 +449,6 @@ in its `links` directory, defaulting to `~/.clankie/links`. Local hires receive
 the absolute service state path. An explicit private state directory never
 falls back to the shared descriptor. Doctor uses the same state selection.
 SSH fleets retain their own machine's state; no local state path is sent there.
-
-## Proof-refusal alert bursts
-
-`clankie metrics --fleet` retains every refusal. An active aggregate outage
-alert lists affected panes and suppresses matching worker pages, including the
-same native proof outage observed at initial and final checks. Worker notices
-remain for distinct reason profiles or rates at least twice the fleet rate and
-five percentage points higher; workers sharing that exception are grouped.
-Alert delivery receipts and the existing five-minute cooldown still apply.
-See `docs/cli.md` under `metrics --fleet` for the exact comparison thresholds.
 
 ## Project work policy
 

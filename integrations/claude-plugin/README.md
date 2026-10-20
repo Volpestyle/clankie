@@ -418,11 +418,13 @@ Linear connector guard starts only for an MCP server whose name contains
 `linear`, matched case-insensitively, and still denies every one of them.
 
 Before a checkout worker install or fleet copy, the existing Codex materializer
-refreshes both snapshots. Release assembly does the same.
+refreshes every bundled skill snapshot (`clankie`, `fleet-resources`,
+`work-items`, `work-orient`; `WORKER_SKILLS` in `skill-bundle.mjs`). Release
+assembly does the same.
 `node integrations/claude-plugin/worker/bin/skill-bundle.mjs` builds them manually.
 Each has a separate `skills/NAME.bundle.json` recording its content SHA-256 and
-worker version. A standalone package validates both regular snapshots without
-importing a repository or builder. An older clankie-only package must be refreshed
+worker version. A standalone package validates every regular snapshot without
+importing a repository or builder. An older package missing a snapshot must be refreshed
 from the complete artifact; replacing the helper alone is refused. This does not
 refresh a running harness or its plugin cache.
 Doctor checks the installed skill marker separately from native membership.

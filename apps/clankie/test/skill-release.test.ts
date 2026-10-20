@@ -8,7 +8,10 @@ import { bundledSkills } from "@clankie/settings";
 // @ts-expect-error -- release assembly is plain ESM.
 import { copySkillAssets } from "../../../scripts/release/skills.mjs";
 
-import { prepareWorkerSkill } from "../../../integrations/claude-plugin/worker/bin/skill-bundle.mjs";
+import {
+  prepareWorkerSkill,
+  WORKER_SKILLS,
+} from "../../../integrations/claude-plugin/worker/bin/skill-bundle.mjs";
 
 import { inspectHarnessProfiles } from "../../../integrations/claude-plugin/worker/bin/harness-status.mjs";
 
@@ -72,7 +75,7 @@ it("assembles every shipped skill in all release projections, with no checkout d
   // Rebuild from canonical target content with neither snapshot nor target builder.
   // Only the repository-side helper's own materializer may be loaded.
   const releaseWorker = join(release, "integrations/claude-plugin/worker");
-  for (const name of ["clankie", "fleet-resources"]) {
+  for (const name of WORKER_SKILLS) {
     await rm(join(releaseWorker, "skills", name), { recursive: true });
     await rm(join(releaseWorker, "skills", `${name}.bundle.json`));
   }
@@ -87,23 +90,21 @@ it("assembles every shipped skill in all release projections, with no checkout d
     "integrations/worker-skills/skills",
     "integrations/claude-plugin/worker/skills",
   ]) {
-    expect(await readFile(join(release, directory, "clankie/SKILL.md"), "utf8")).toBe(canonical);
-    expect((await lstat(join(release, directory, "clankie/SKILL.md"))).isFile()).toBe(true);
-    expect(await readFile(join(release, directory, "fleet-resources/SKILL.md"), "utf8")).toBe(
-      resourceCanonical,
-    );
-    expect((await lstat(join(release, directory, "fleet-resources/SKILL.md"))).isFile()).toBe(true);
+    for (const name of WORKER_SKILLS) {
+      const file = join(release, directory, name, "SKILL.md");
+      expect(await readFile(file, "utf8")).toBe(
+        await readFile(join(repo, ".agents/skills", name, "SKILL.md"), "utf8"),
+      );
+      expect((await lstat(file)).isFile()).toBe(true);
+    }
     const parsed = loadSkills({
       cwd: release,
       agentDir: release,
-      skillPaths: [join(release, directory, "clankie"), join(release, directory, "fleet-resources")],
+      skillPaths: WORKER_SKILLS.map((name) => join(release, directory, name)),
       includeDefaults: false,
     });
     expect(parsed.diagnostics, directory).toEqual([]);
-    expect(parsed.skills.map((skill) => skill.name).sort(), directory).toEqual([
-      "clankie",
-      "fleet-resources",
-    ]);
+    expect(parsed.skills.map((skill) => skill.name).sort(), directory).toEqual([...WORKER_SKILLS].sort());
   }
   // Isolate the actual installable worker: no repo source or builder remains.
   const standalone = await mkdtemp(join(tmpdir(), "standalone-worker-"));
@@ -118,7 +119,7 @@ it("assembles every shipped skill in all release projections, with no checkout d
     includeDefaults: false,
   });
   expect(standaloneSkill.diagnostics).toEqual([]);
-  expect(standaloneSkill.skills.map((skill) => skill.name).sort()).toEqual(["clankie", "fleet-resources"]);
+  expect(standaloneSkill.skills.map((skill) => skill.name).sort()).toEqual([...WORKER_SKILLS].sort());
   const companionLink = /\[fleet-resources\]\(([^)]+)\)/u.exec(
     await readFile(join(worker, "skills/clankie/SKILL.md"), "utf8"),
   );

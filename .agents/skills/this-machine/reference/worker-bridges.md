@@ -1,42 +1,42 @@
 # Worker bridges and fleet tools
 
-Connected tools for fleet panes, bridge health in doctor and the roster, worker report routing, preparing linked machines, and Windows fleets.
+Remote project heads, connected tools for fleet panes, bridge health in doctor and the roster, local harness processes, preparing linked machines, and Windows fleets. Hiring, report routing and receipts are in `lead`'s [fleet tools](../../lead/reference/fleet-tools.md).
 
-Remote project heads use `clankie conversations lead launch --json-stdin` on an
-approved Windows fleet/workspace. They reuse an existing signed-in Claude.ai
-profile; optional `account` selects exactly `~/.claude-<label>` on that machine,
-ahead of the SSH `CLAUDE_CONFIG_DIR`. A missing, logged-out or unverifiable
-selection refuses without fallback, profile creation or credential copying.
-Omitting `account` retains environment selection or exactly one signed-in profile.
-They install the dedicated `clankie-remote-lead@clankie-remote-leads` plugin
-and approve its channel before allocating a pane. Profile ambiguity, missing
-sign-in or administrator policy access returns a setup refusal in the original
-launch journal. Never answer a development warning or substitute the worker
-channel. `dispatched` proves handoff only; verify a native tool call after deploy.
-Relaunch preparation keeps the user-scope lead plugin disabled for ordinary
-sessions. Native Claude's exact already-disabled result is accepted only with a
-disabled-state readback. A previous head may still have session-only activation;
-do not close its pane to repair an already-disabled setup result. Its revoked
-delegation remains revoked; any cleanup is a separate owner decision.
-Runtime updates build the standalone bridge before cutover; a source-only
-missing-bridge refusal names `clankie heavy -- node scripts/build-remote-lead.mjs`.
+## Remote project heads
 
-SessionStart transcript sync retries a restarting home service within its
-startup budget; ordinary hooks keep their short upload deadline. A launch
-reports a created pane before inspecting its native shell, so failed inspection
-still names the pane left open. That early pane report is cleanup information,
-not native admission or permission to replay the launch. Inspect the original
-receipt and coordinate cleanup; do not close another lead's pane as a probe.
+Launch, accounts, link-failure recovery and the tracker fence for remote project
+heads are in `lead`'s [project leads](../../lead/reference/project-leads.md); the
+CLI contract is `docs/cli.md` under `conversations lead`. Bridge and plugin
+specifics:
 
-Remote heads get ordinary `linear_*` tracker tools from the bound lead chat.
-Use their tracker-only `mcp_tool_search` / `mcp_tool_call` for tools beyond the
-initial list. Writes require current seat delegation and chat attribution; do
-not substitute Claude's inherited tracker connector. Other connected services,
-raw GraphQL, owner repository overrides, persona-selectable worker publishing and owner settings are not
-delegated. `linear_wake` only confirms `action: received` with a wake's original
-`wakeId` in this chat. Configure project wake routing as the owner through
-`clankie linear routes set --json-stdin`, preserving existing routes. After
-redeploy/relaunch, verify an issue read and comment from the actual head.
+- Launch installs the dedicated `clankie-remote-lead@clankie-remote-leads` plugin
+  and approves its channel before allocating a pane. Profile ambiguity, missing
+  sign-in or administrator policy access returns a setup refusal in the original
+  launch journal. Never answer a development warning or substitute the worker
+  channel. `dispatched` proves handoff only; verify a native tool call after deploy.
+- Relaunch preparation keeps the user-scope lead plugin disabled for ordinary
+  sessions. Native Claude's exact already-disabled result is accepted only with a
+  disabled-state readback. A previous head may still have session-only activation;
+  do not close its pane to repair an already-disabled setup result. Its revoked
+  delegation remains revoked; any cleanup is a separate owner decision.
+- Runtime updates build the standalone bridge before cutover; a source-only
+  missing-bridge refusal names `clankie heavy -- node scripts/build-remote-lead.mjs`.
+- SessionStart transcript sync retries a restarting home service within its
+  startup budget; ordinary hooks keep their short upload deadline. Read
+  `~/.clankie/remote-leads/hooks.log` on that machine for hook/request timing; a
+  short hook timeout does not retire or restart the lead, and missing checkpoints
+  replay safely ([native seat transcript sync](../../../../docs/cli.md#native-seat-transcript-sync)).
+- A launch reports a created pane before inspecting its native shell, so failed
+  inspection still names the pane left open. That early pane report is cleanup
+  information, not native admission or permission to replay the launch. Inspect
+  the original receipt and coordinate cleanup; do not close another lead's pane
+  as a probe.
+- Remote heads get ordinary `linear_*` tracker tools from the bound lead chat;
+  writes require current seat delegation and chat attribution, and Claude's
+  inherited tracker connector is never a substitute. Other connected services,
+  raw GraphQL, owner repository overrides, persona-selectable worker publishing
+  and owner settings are not delegated. After redeploy/relaunch, verify an issue
+  read and comment from the actual head.
 
 ## Connected fleet tools
 
@@ -100,7 +100,7 @@ HTTP/native-binding refusal. The idle observer retries through fresh link
 discovery; each cause is logged once per Claude session, even across healthy checks.
 For persistent native binding failures, use `/mcp` → reconnect `clankie-worker`,
 then save and restart/resume Claude if needed. Transport failures need the PC
-fleet link/SSH diagnosis from Clankie's machine (`clankie doctor --machine pc`),
+fleet link/SSH diagnosis from Clankie's machine (`clankie doctor --machine FLEET_ID`),
 not another pane's restart. A remote observer timeout appears as
 `remote_observation_timeout` and in the fleet-link log; its original late reply
 is never accepted as fresh proof. Keep uncertain message receipts untouched.
@@ -165,32 +165,18 @@ binding hold, so a high attempt rate means many new connections or failed
 rechecks, not busy requests. Preserve and reconcile uncertain originals; health observations
 never authorize deleting receipts or replaying reports.
 
-Native `process_census_changed` with `retry: false` can accompany a successful
-admission: changing PID lists are reconciled and every candidate is inspected.
-Unrelated descriptor/process races retry that PID within the existing job budget.
-Instability after a matching socket observation requests a fresh bounded census
-to include new inheritors. Read the
-terminal proof reason and refusal rate before treating a churn counter as lost
-membership. A pre-dispatch `fleet_admission_unavailable` 503 means proof is
-temporarily unavailable; Claude and Codex bridges retry once, then explain how
-to retry or ask the lead to inspect persistent uncertainty. A definite
+A pre-dispatch `fleet_admission_unavailable` 503 means proof is temporarily
+unavailable; Claude and Codex bridges retry once, then explain how to retry or ask
+the lead to inspect persistent uncertainty. A definite
 `local_process_membership_required` 403 asks for admission and is not retried.
-`caller_exited` confirms that the socket claimant exited. `ancestor_exited`
-confirms an intermediate exited while the same claimant lifetime was checked
-live; it does not establish membership. The native helper can re-walk once
-within the same budgets, revalidating that claimant and socket and discarding
-the old chain. A second exit or changed/unavailable identity refuses; a
-non-member is always refused from its current ancestry. Join private native `ancestryFailure`
-facts and `fleet.local_proof.refusal_context` by the existing `requestId` for
-failure-time liveness and the zero-based failed chain position. Keep PID/birth
-private when publishing evidence; previous caller observations do not prove
-current liveness. An earlier uncertain call still requires its original receipt.
-Proof-refusal floods also alert the owner's default conversation, even when the
-caller has no identifiable or currently owned pane. The aggregate notice names
-counts and reasons; it does not attribute the requests to a seat. Logs omit pane
-IDs, so an absent log field alone does not mean the collector lacked one.
-Details: `{repoRoot}/docs/worker-access.md` and
-`{repoRoot}/integrations/fleet-proof/README.md`.
+Read the terminal proof reason and refusal rate before treating a churn counter
+as lost membership; an earlier uncertain call still requires its original
+receipt. Keep PID/birth private when publishing evidence. Proof-refusal floods
+alert the owner's default conversation with counts and reasons, without
+attributing requests to a seat. Refusal reasons, ancestry re-walks and alert
+thresholds: `{repoRoot}/docs/worker-access.md`,
+`{repoRoot}/integrations/fleet-proof/README.md` and `docs/cli.md` under
+`metrics --fleet`.
 
 Remote reports also include `linkState`: an `unreachable` link's `error` is the
 decoded remote reason, independently of harness installation health. Fleet
@@ -204,12 +190,22 @@ including actual cwd, native session and hire state. `nativeTools: "not-verified
 means it has not checked that pane's bridge socket, catalog or reply delivery;
 confirm those through the native harness. Unavailable observations stay unproven.
 
-## Worker report routing
-
-Reports reach the hiring or adopting conversation; the worker never chooses.
-`workerReportRouting` on the roster and `linkedSession.parentLeads` in doctor
-show the route and any lead pane missing a bridge. Routing rules and recovery:
+Report routing (`workerReportRouting`, `linkedSession.parentLeads`) is in
 `lead`'s [fleet tools](../../lead/reference/fleet-tools.md#report-routing).
+
+## Local harness processes
+
+`clankie fleet processes` is the read-only operator census (API:
+`GET /v1/fleet/processes`): parent, cwd, kernel start, activity proxy and live
+pane/seat ownership. A thread log mtime is only a proxy; unknown activity stays
+unknown. Detached Codex app servers intentionally survive service replacement.
+Age, PPID 1, an absent pane or a recorded pane name alone never authorizes killing.
+`clankie fleet processes retire` shares the service's five-minute automatic
+closed-hire recovery: it can TERM only a controller-created server whose original
+hire is proven closed, with no live pane, reattached client or busy native thread;
+everything else stays report-only. Read the before/after outcomes; never retry an
+uncertain retirement or fall back to `kill`, group signals or KILL. Exact
+conditions are in `docs/cli.md` under `fleet processes`.
 
 ## Preparing linked machines
 
