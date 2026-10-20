@@ -7762,25 +7762,29 @@ See [Discord settings](discord-rooms.md) and
 
 ### `discord setup`
 
-Read the connected server, Clankie's role, fleet toggle, tracking level and
-setup checks. TUI `/discord` uses the same host definition and revision-fenced
-writer. The server is chosen by name; channel and Discord-role pickers do not
-appear in normal setup. Raw IDs and individual compatibility grants live under Advanced.
-Server owners and room skills are common controls.
+Read all configured guild policies and setup checks. TUI `/discord` edits each
+joined server's role, owners and options independently through the same
+revision-fenced settings API. Inviting another server never changes existing
+servers. Raw policy JSON and individual compatibility grants live in Advanced.
 
 ```sh
-clankie discord setup choices connect
+clankie discord status
 clankie discord setup invite --role participant
-clankie discord setup connect --server Studio --role participant
-clankie discord setup connect --server Oathkeeper --role admin
-clankie discord setup fleet --enabled on
-clankie discord setup fleet --enabled off
-clankie discord setup tracking --level project_updates
-clankie discord setup tracking --level project_activity
-clankie discord setup tracking --level all_issues
-clankie discord setup tracking --level off
+clankie discord server --server 10001 --role admin --owners me --fleet on
+clankie discord server --server 10002 --role participant --owners role --owner-role 60001 --fleet on --fleet-channel 20002
+clankie discord server --server 10002 --tracking project_activity
+clankie discord server --server 10001 --fleet off
 clankie discord setup check
 ```
+
+`discord.guilds` holds each guild's `role`, `owners`, optional `ownerRoleId`,
+`fleetEnabled`, optional `fleetChannelId` and `trackingLevel`. The old
+`discord setup connect|fleet|tracking` commands remain compatibility writers
+for the legacy selected guild. Prefer `discord server` for independent edits.
+Existing single-server options migrate unchanged; other known policies retain
+role and owners and begin with fleet/tracking off. New automatic Admin group
+rooms use the first enabled Admin; existing groups retain one webhook in their
+own guild. Participant messages go to each enabled guild's designated channel.
 
 Participant uses Discord's own permissions to decide which rooms Clankie can
 read and speak in. Admin is for a dedicated server: the invitation requests

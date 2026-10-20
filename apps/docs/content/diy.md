@@ -128,7 +128,7 @@ explains discovery.
 ## Discord
 
 “Hang out in our server, but only jump in when we address you.” `/discord`
-connects a server with a **Participant** or **Admin** role and picks his rooms.
+edits each joined server with a **Participant** or **Admin** role, owners and options.
 The quickest way in is the free **official Clankie bot**: sign in with
 `clankie remote-access on`, run `clankie discord official on` (or turn it on in
 the app's Discord settings), then choose **Add to Discord** on your account page. No

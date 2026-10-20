@@ -1,5 +1,6 @@
 import {
   discordSetupDefinition,
+  discordGuildSettings,
   type DiscordSetupSnapshot,
   type DiscordSettings,
   type DiscordPermissionsRequest,
@@ -7,7 +8,7 @@ import {
 } from "@clankie/protocol";
 
 /** Verify the role’s server grants; channel overwrites remain Discord’s participation policy. */
-export async function discordSetupChecks(
+async function checksForGuild(
   settings: DiscordSettings,
   read: (query: DiscordPermissionsRequest) => Promise<DiscordPermissionsSnapshot>,
 ): Promise<NonNullable<DiscordSetupSnapshot["checks"]>> {
@@ -45,4 +46,22 @@ export async function discordSetupChecks(
       for (const check of checks) check.status = "not_checked";
   }
   return checks;
+}
+
+/** Permission evidence is read independently for every configured guild. */
+export async function discordSetupChecks(
+  settings: DiscordSettings,
+  read: (query: DiscordPermissionsRequest) => Promise<DiscordPermissionsSnapshot>,
+): Promise<NonNullable<DiscordSetupSnapshot["checks"]>> {
+  const ids = Object.keys(settings.guilds);
+  if (!ids.length) return checksForGuild(settings, read);
+  const result: NonNullable<DiscordSetupSnapshot["checks"]> = [];
+  for (const guildId of ids)
+    result.push(
+      ...(await checksForGuild(discordGuildSettings(settings, guildId), read)).map((check) => ({
+        ...check,
+        guildId,
+      })),
+    );
+  return result;
 }

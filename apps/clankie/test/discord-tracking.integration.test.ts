@@ -745,3 +745,52 @@ it("changed tracker/account proof and uncertain native receipts never replay a m
   await f.post(event);
   expect(f.effects).toHaveLength(1);
 });
+
+it("journals independent deliveries and levels for two guilds and disables only the named destination", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => ({
+    ...current,
+    discord: {
+      ...current.discord,
+      guilds: {
+        ...current.discord.guilds,
+        "99999": {
+          role: "participant",
+          owners: "everyone",
+          fleetEnabled: false,
+          fleetChannelId: "20002",
+          trackingLevel: "all_issues",
+        },
+      },
+    },
+  }));
+  const update = f.payload("ProjectUpdate", "create", { projectId: f.projectId, body: "Both guilds" });
+  await f.post(update);
+  expect(f.effects.map((effect) => effect.path)).toEqual([
+    "/guilds/10001/channels",
+    "/channels/50000/messages",
+    "/channels/20002/messages",
+  ]);
+  await f.post(f.payload("Issue", "create", f.issue("Participant only")));
+  expect(f.effects.at(-1)?.path).toBe("/channels/20002/messages");
+  expect(f.effects.filter((effect) => effect.path.endsWith("/threads"))).toHaveLength(0);
+  await f.settings.update((current) => ({
+    ...current,
+    discord: {
+      ...current.discord,
+      guilds: {
+        ...current.discord.guilds,
+        "99999": { ...current.discord.guilds["99999"]!, trackingLevel: "off" },
+      },
+    },
+  }));
+  const before = f.effects.length;
+  const second = f.payload("ProjectUpdate", "create", { projectId: f.projectId, body: "Admin only" });
+  await f.post(second);
+  expect(f.effects.slice(before).map((effect) => effect.path)).toEqual(["/channels/50000/messages"]);
+  const delivered = f.effects.length;
+  await f.restart();
+  await f.post(update);
+  await f.post(second);
+  expect(f.effects).toHaveLength(delivered);
+});

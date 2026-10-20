@@ -133,6 +133,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
             )
               throw new Error("discord_server_authority_changed");
             if (
+              JSON.stringify(current.guilds) !== JSON.stringify(authority.guilds) ||
               JSON.stringify(current.servers) !== JSON.stringify(authority.servers) ||
               current.ownerUserId !== authority.ownerUserId
             )
@@ -287,11 +288,11 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
  */
 async function provisionGuildId(env: NodeJS.ProcessEnv = process.env): Promise<string> {
   const authority = await readDiscordServerSettings(env);
-  if (authority.serverId !== undefined) {
-    if (authority.role !== "admin") throw new Error("discord_channel_provision_requires_admin");
-    if (!authority.fleetEnabled) throw new Error("discord_fleet_disabled");
-    return authority.serverId;
-  }
+  const enabled = Object.entries(authority.guilds).find(
+    ([, policy]) => policy.role === "admin" && policy.fleetEnabled,
+  );
+  if (enabled) return enabled[0];
+  if (Object.keys(authority.guilds).length) throw new Error("discord_fleet_disabled");
   const swarm = discordManagedGuildId(env);
   if (!swarm) throw new Error("discord_swarm_guild_unset");
   if (authority.servers.find((entry) => entry.serverId === swarm)?.role !== "admin")

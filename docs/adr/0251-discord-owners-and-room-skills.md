@@ -8,8 +8,8 @@ and supersedes ADR 0133's trusted guild/channel machine grant.
 Each connected server has two choices: Clankie's role (Participant or Admin)
 and owners (Just me, Everyone, or a Discord role). Just me is the default and
 uses the configured owner identity. Admin describes what Clankie can manage;
-it never makes the server's members owners. The existing fleet and tracking
-choices stay on the selected projection server. Raw IDs stay in Advanced.
+it never makes the server's members owners. Fleet and tracking choices also live per guild in `discord.guilds`
+(VUH-2554, 2026-10-20; ADR 0227). Raw IDs stay in Advanced.
 
 Owners have machine authority. Everyone else has social tools. A room may add
 a named skill through one choice, “This room can use: house hunting”. Skills

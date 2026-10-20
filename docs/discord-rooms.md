@@ -180,20 +180,23 @@ self-member role evidence. Missing evidence is never success. Actual Participant
 room access follows channel overwrites and Discord's platform permissions.
 Opening setup, reading checks and saving controls do not post.
 
-`fleetEnabled` and `trackingLevel` are independent. Participant fleet/tracking
+`discord.guilds[GUILD_ID]` holds each server’s role, owners, `fleetEnabled`,
+`fleetChannelId` and `trackingLevel`. Fleet and tracking are independent per server. Participant fleet/tracking
 messages use the designated `fleetChannelId`; Admin can create and place fleet
 channels. Admin tracks each already bound project in the verified workspace as
 a channel or forum, with one thread/post per issue. Levels are `off`,
 `project_updates`, `project_activity` (status changes, milestones, new/finished
 issues) and `all_issues`. Private event and destination mappings survive
 turning tracking off. Unconfirmed mutations stay uncertain without automatic
-replay. Disabling fleet display retains its selected server and room webhooks.
+replay. Disabling fleet display retains that server’s room webhooks.
 
 Each server has a role (`participant` or `admin`) and owners: Just me (`me`,
 the configured `ownerUserId`), Everyone (`everyone`), or a Discord role (`role`
-with `ownerRoleId`). `discord.servers` records these choices. Admin manages the
-server but gives its members no machine authority. The selected `serverId`
-retains fleet and tracking settings; other connected policies remain independent.
+with `ownerRoleId`). `discord.guilds` records these choices. Admin manages the
+server but gives its members no machine authority. `discord.servers` and the
+single selected fields remain compatibility projections for older clients.
+Migrating a single choice retains its projection options; other policies start
+with fleet and tracking off. Tracking deliveries are journaled per guild.
 
 `discord.roomSkills` adds one named skill to a room. The initial `house-hunting`
 adapter reads and maintains that room's household criteria and listing ledger,
@@ -205,13 +208,13 @@ household. A skill room has no shell, fleet tools or owner work context.
 The CLI writes the same revision-fenced `GET`/`POST /v1/discord/settings` API:
 
 ```sh
-clankie discord owners --server SERVER_ID --owners me --role participant
+clankie discord server --server SERVER_ID --owners me --role participant --fleet off
 clankie discord owners --server SERVER_ID --owners role --owner-role ROLE_ID
 clankie discord room-skill --server SERVER_ID --channel CHANNEL_ID --skill house-hunting
 clankie discord room-skill --server SERVER_ID --channel CHANNEL_ID --skill off
 ```
 
-TUI `/discord` offers **Server owners** and **This room can use**, using names
+TUI `/discord` offers **Server owners and options** and **This room can use**, using names
 from the connected account. Raw policy JSON and IDs stay under Advanced. App
 and hosted dashboard ownership/skill pickers are follow-ups in their respective
 repositories; their existing setup controls retain the new fields when saving.

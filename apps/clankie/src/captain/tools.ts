@@ -1819,9 +1819,10 @@ function discordServerTools(
             execute: async (_callId, input) => {
               const settings = await deps.discordSettings?.();
               if (
-                settings?.role !== "admin" ||
-                settings.serverId === undefined ||
-                (lane !== "operator" && turn.guildId !== settings.serverId)
+                !settings ||
+                (lane === "operator"
+                  ? !Object.values(settings.guilds).some((policy) => policy.role === "admin")
+                  : !turn.guildId || settings.guilds[turn.guildId]?.role !== "admin")
               )
                 return json({
                   ok: false,

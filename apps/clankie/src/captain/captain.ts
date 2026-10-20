@@ -1,3 +1,4 @@
+import { discordGuildSettings } from "@clankie/protocol";
 import { createDurableSessions } from "./durable-sessions.ts";
 import { projectTrackerTool } from "./project-tracker-access.ts";
 import {
@@ -5983,7 +5984,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     reconcileFleetPeerMessage: (authority, delivery, fingerprint) =>
       peerMessages.reconcile(authority, delivery, fingerprint),
     async submitChannelProjectionMessage(request) {
-      const discord = await readDiscordServerSettings(options.discordEnvironment, settingsStore);
+      const discord = discordGuildSettings(
+        await readDiscordServerSettings(options.discordEnvironment, settingsStore),
+        request.guildId,
+      );
       if (
         !discord.fleetEnabled ||
         discord.teamVisible === false ||

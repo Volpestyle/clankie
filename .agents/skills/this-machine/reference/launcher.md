@@ -38,7 +38,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Gameplay availability                  | `clankie games status`, `clankie games set on`, `clankie games set off`                                                                                            |
 | Discord picker directory               | `clankie discord directory [servers\|channels\|roles\|people] --server ID` (omit server for servers; inspect state/reason before claiming coverage)                |
 | Shared Discord settings definition     | `clankie discord definition` (host wording, picker/check kinds, Advanced fields; no credentials)                                                                   |
-| Discord server setup                   | `clankie discord setup`, `… connect --server NAME --role participant\|admin`, `… fleet --enabled on\|off`, `… tracking --level LEVEL` (see `docs/cli.md`)          |
+| Discord server setup                   | `clankie discord status`, `… server --server ID --role participant\|admin --fleet on\|off --tracking LEVEL` (see `docs/cli.md`)                                    |
 | Free official Clankie bot              | `clankie discord official [status\|on\|off]` (needs `remote-access on`; no restart; Add to Discord on the account page; status names limits and any block)         |
 | Non-secret Discord setup               | `clankie discord status`, `clankie discord set --active-body bot …`                                                                                                |
 | Explicit Discord test post             | `clankie discord setup test-post --channel NAME` only when the owner asks to post; no automatic probe                                                              |
@@ -334,8 +334,9 @@ Discord servers have a role and owners. `clankie discord owners --server ID
 revision-fenced API; Just me is the default. Role ownership requires membership
 proved by the body. Admin manages its dedicated server through
 `discord_server_action`, never grants machine access to other members, and
-never deletes the server or transfers ownership. Fleet and tracking remain on
-the selected projection server; outreach requires an owner-only audience.
+never deletes the server or transfers ownership. Fleet and tracking are independent per guild in `discord.guilds`; use
+`clankie discord server --server ID --fleet on|off --tracking LEVEL`.
+Inviting another server does not change existing settings; outreach requires an owner-only audience.
 
 `clankie discord room-skill --server ID --channel ID --skill house-hunting|off`
 grants the bounded household adapter. It exposes criteria, ledger, feedback and

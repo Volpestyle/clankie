@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import {
   DiscordPermissionsSnapshotSchema,
+  discordGuildSettings,
   type DiscordPermissionsSnapshot,
   type DiscordServerAction,
   type DiscordServerActionResult,
@@ -20,6 +22,7 @@ const Mode = z.enum(["channel", "forum"]);
 const EventSchema = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/u),
   organizationId: z.string().min(1),
+  serverId: Snowflake.optional(),
   projectId: Id.optional(),
   issueId: Id.optional(),
   labels: z.array(z.string()).optional(),
@@ -115,7 +118,7 @@ export class DiscordTracking {
       this.journal.projections.some(
         (projection) =>
           projection.localProjectId === projectId &&
-          projection.serverId === settings.discord.serverId &&
+          Object.hasOwn(settings.discord.guilds, projection.serverId) &&
           projection.mode !== mode,
       )
     )
@@ -152,7 +155,21 @@ export class DiscordTracking {
       visited.add(event.id);
       if (this.closed) return;
       try {
-        await this.deliver(event);
+        if (!event.serverId) {
+          const { discord } = await this.options.settings();
+          const targets = Object.entries(discord.guilds).filter(
+            ([, policy]) =>
+              policy.trackingLevel !== "off" && includesLevel(policy.trackingLevel, event.level),
+          );
+          if (this.journal.events.length + targets.length > 5000) return;
+          for (const [serverId] of targets) {
+            const id = createHash("sha256").update(`${event.id}:${serverId}`).digest("hex");
+            if (!this.journal.events.some((saved) => saved.id === id))
+              this.journal.events.push({ ...event, id, serverId, completedProjects: [] });
+          }
+          event.state = targets.length ? "done" : "skipped";
+          this.save();
+        } else await this.deliver(event);
       } catch (error) {
         this.options.onError?.(error);
       }
@@ -161,7 +178,7 @@ export class DiscordTracking {
 
   private async deliver(event: Event): Promise<void> {
     const settings = await this.options.settings();
-    const discord = settings.discord;
+    const discord = discordGuildSettings(settings.discord, event.serverId!);
     if (
       !discord.serverId ||
       discord.trackingLevel === "off" ||
@@ -260,7 +277,7 @@ export class DiscordTracking {
             : [];
       const guard = async () => {
         await validateRead();
-        const fresh = (await this.options.settings()).discord;
+        const fresh = discordGuildSettings((await this.options.settings()).discord, event.serverId!);
         if (JSON.stringify(fresh) !== JSON.stringify(discord) || this.closed)
           throw new Error("Discord tracking settings changed before dispatch.");
         if (memberId && (await this.verifiedMember(discord)) !== memberId)

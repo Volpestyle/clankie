@@ -315,6 +315,7 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
           "trackingLevel",
           "teamVisible",
           "servers",
+          "guilds",
           "roomSkills",
           "houseHuntingAuthorBindings",
         ] as const)

@@ -32,6 +32,7 @@ const DISCORD_USAGE = [
   "       clankie discord rooms",
   "       clankie discord definition",
   "       clankie discord setup [check | choices connect|fleet|tracking]",
+  "       clankie discord server --server ID [--role participant|admin] [--owners me|everyone|role] [--owner-role ID] [--fleet on|off] [--fleet-channel ID|none] [--tracking LEVEL]",
   "       clankie discord owners --server ID --owners me|everyone|role [--owner-role ID] [--role participant|admin]",
   "       clankie discord room-skill --server ID --channel ID --skill house-hunting|off",
   "       clankie discord legacy-author --household existing|SERVER-CHANNEL --user ID --author LABEL --confirm|--remove",
@@ -93,11 +94,7 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
   const showList = (label: string, values: readonly string[]): string =>
     `${label}: ${values.length === 0 ? "—" : values.join(", ")}`;
   return [
-    show("connected server", settings.serverId),
-    `role: ${settings.role}`,
-    `fleet in Discord: ${settings.fleetEnabled ? "on" : "off"}`,
-    `project tracking: ${settings.trackingLevel}`,
-    show("participant fleet channel (Advanced)", settings.fleetChannelId),
+    `configured servers: ${Object.keys(settings.guilds).length}`,
     "",
     show("application id", settings.applicationId),
     `command server: ${settings.guildId ?? "— (commands register globally)"}`,
@@ -112,7 +109,7 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
     showList("main conversation channels", settings.mainConversationChannelIds),
     ...settings.servers.map(
       (entry) =>
-        `server ${entry.serverId}: ${entry.role}; owners ${entry.owners}${entry.ownerRoleId ? ` (${entry.ownerRoleId})` : ""}`,
+        `server ${entry.serverId}: ${entry.role}; owners ${entry.owners}${entry.ownerRoleId ? ` (${entry.ownerRoleId})` : ""}; fleet ${settings.guilds[entry.serverId]?.fleetEnabled ? "on" : "off"}; tracking ${settings.guilds[entry.serverId]?.trackingLevel ?? "off"}`,
     ),
     ...settings.roomSkills.map((entry) => `room ${entry.serverId}/${entry.channelId}: ${entry.skill}`),
     ...settings.houseHuntingAuthorBindings.map(
@@ -208,6 +205,7 @@ export function parseDiscordSettingValue(
   raw: string,
   current: DiscordSettings,
 ): unknown {
+  if (field === "guilds") return raw === "none" ? {} : JSON.parse(raw);
   if (field === "servers" || field === "roomSkills" || field === "houseHuntingAuthorBindings")
     return raw === "none" ? [] : JSON.parse(raw);
   if (field === "systemActorGuildIds" || field === "systemActorChannelIds")
@@ -290,6 +288,55 @@ export async function runDiscordCommand(
   | DiscordOfficialResult
 > {
   const verb = args[0];
+  if (verb === "server") {
+    const { values, positionals } = parseArgs({
+      args: args.slice(1),
+      allowPositionals: true,
+      options: {
+        server: { type: "string" },
+        role: { type: "string" },
+        owners: { type: "string" },
+        "owner-role": { type: "string" },
+        fleet: { type: "string" },
+        "fleet-channel": { type: "string" },
+        tracking: { type: "string" },
+      },
+    });
+    if (positionals.length || !values.server) throw new Error(DISCORD_USAGE);
+    return discordTransform(
+      (current) => ({
+        ...current,
+        guilds: {
+          ...current.guilds,
+          [values.server!]: {
+            role: "participant",
+            owners: "me",
+            fleetEnabled: false,
+            trackingLevel: "off",
+            ...current.guilds[values.server!],
+            ...(values.role ? { role: values.role as "participant" | "admin" } : {}),
+            ...(values.owners
+              ? {
+                  owners: values.owners as "me" | "everyone" | "role",
+                  ownerRoleId: values.owners === "role" ? values["owner-role"] : undefined,
+                }
+              : {}),
+            ...(values["owner-role"] ? { ownerRoleId: values["owner-role"] } : {}),
+            ...(values.fleet
+              ? { fleetEnabled: parseDiscordSettingValue("fleetEnabled", values.fleet, current) as boolean }
+              : {}),
+            ...(values["fleet-channel"]
+              ? { fleetChannelId: values["fleet-channel"] === "none" ? undefined : values["fleet-channel"] }
+              : {}),
+            ...(values.tracking
+              ? { trackingLevel: values.tracking as DiscordSettings["trackingLevel"] }
+              : {}),
+          },
+        },
+      }),
+      options,
+    );
+  }
   if (verb === "legacy-author") {
     const { values, positionals } = parseArgs({
       args: args.slice(1),

@@ -851,7 +851,6 @@ async function editServerOwners(shell: ClankieFaceShell, services: DiscordComman
     })) ?? snapshot.settings.servers.map((entry) => ({ value: entry.serverId, label: entry.serverId }));
   const serverId = await shell.setupFlow.readSelect({ message: "Server", options, allowBack: true });
   if (!serverId) return;
-  const previous = snapshot.settings.servers.find((entry) => entry.serverId === serverId);
   const role = await shell.setupFlow.readSelect({
     message: "Clankie's role",
     options: [
@@ -887,21 +886,58 @@ async function editServerOwners(shell: ClankieFaceShell, services: DiscordComman
     });
     if (!ownerRoleId) return;
   }
+  const fleet = await shell.setupFlow.readSelect({
+    message: "Fleet in this server",
+    options: [
+      { value: "off", label: "Off" },
+      { value: "on", label: "On" },
+    ],
+    allowBack: true,
+  });
+  if (!fleet) return;
+  const tracking = await shell.setupFlow.readSelect({
+    message: "Project tracking in this server",
+    options: [
+      { value: "off", label: "Off" },
+      { value: "project_updates", label: "Project updates" },
+      { value: "project_activity", label: "Project activity" },
+      { value: "all_issues", label: "All issues" },
+    ],
+    allowBack: true,
+  });
+  if (!tracking) return;
+  const fleetChannelId =
+    role === "participant" && (fleet === "on" || tracking !== "off")
+      ? await shell.setupFlow.readSelect({
+          message: "Fleet and tracking channel",
+          options:
+            (
+              await (services.setup
+                ? new DiscordSetupClient(services.setup).directory({ kind: "channels", guildId: serverId })
+                : undefined)
+            )?.entries
+              .filter((entry) => entry.kind === "text" || entry.kind === "announcement")
+              .map((entry) => ({ value: entry.id, label: entry.name })) ?? [],
+          allowBack: true,
+        })
+      : undefined;
+  if (role === "participant" && (fleet === "on" || tracking !== "off") && !fleetChannelId) return;
   await apply(services, snapshot, (current) => ({
     ...current,
-    ...(serverId === current.serverId ? { role: role as "participant" | "admin" } : {}),
-    servers: [
-      ...current.servers.filter((entry) => entry.serverId !== serverId),
-      {
-        ...previous,
-        serverId,
+    guilds: {
+      ...current.guilds,
+      [serverId]: {
+        ...current.guilds[serverId],
         role: role as "participant" | "admin",
         owners: owners as "me" | "everyone" | "role",
         ownerRoleId,
+        fleetEnabled: fleet === "on",
+        fleetChannelId,
+        trackingLevel: tracking as DiscordSettings["trackingLevel"],
       },
-    ],
+    },
   }));
-  shell.setupFlow.renderLine("Saved server owners and role.", "success");
+  shell.setupFlow.renderLine("Saved this server's role, owners and options.", "success");
 }
 
 async function editRoomSkill(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
@@ -1422,7 +1458,7 @@ async function editAllDiscordSettings(
     options: fields.map((entry) => ({
       value: entry.key,
       label: entry.label,
-      hint: ["servers", "roomSkills", "houseHuntingAuthorBindings"].includes(entry.key)
+      hint: ["guilds", "servers", "roomSkills", "houseHuntingAuthorBindings"].includes(entry.key)
         ? JSON.stringify(current[entry.key])
         : String(current[entry.key] ?? "unset"),
     })),
@@ -1430,8 +1466,8 @@ async function editAllDiscordSettings(
   if (field === undefined) return;
   const key = field as keyof DiscordSettings;
   const raw = await shell.setupFlow.readText({
-    message: `${key} — ${["servers", "roomSkills", "houseHuntingAuthorBindings"].includes(key) ? "JSON array" : "lists use commas"}; 'none' clears; blank keeps`,
-    placeholder: ["servers", "roomSkills", "houseHuntingAuthorBindings"].includes(key)
+    message: `${key} — ${["guilds", "servers", "roomSkills", "houseHuntingAuthorBindings"].includes(key) ? "JSON" : "lists use commas"}; 'none' clears; blank keeps`,
+    placeholder: ["guilds", "servers", "roomSkills", "houseHuntingAuthorBindings"].includes(key)
       ? JSON.stringify(current[key])
       : String(current[key] ?? "unset"),
     validate: (value) => {
