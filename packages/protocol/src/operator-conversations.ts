@@ -1213,6 +1213,14 @@ export const SpawnOperatorSeatSchema = z
       .optional(),
     /** What the roster calls it; herdr's own agent name is derived from this. */
     title: OperatorAgentNameSchema,
+    /** Short human task caption for the pane; assignment keys remain in seat metadata. */
+    taskTitle: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .regex(/^[^\p{Cc}]+$/u)
+      .optional(),
     /** Absolute path it starts in — the district it joins (ADR 0022). */
     workingDirectory: z.string().trim().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX),
     /**

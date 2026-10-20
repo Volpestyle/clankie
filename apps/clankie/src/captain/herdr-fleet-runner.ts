@@ -237,6 +237,11 @@ export function routeHerdrFleets(
       await guard?.();
       await runner.closePane(id, guard);
     },
+    renamePane: async (target, label) => {
+      const { runner, id } = await route(target);
+      if (runner.renamePane === undefined) throw new Error("Herdr pane rename is unavailable");
+      await runner.renamePane(id, label);
+    },
     createTab: async (options) => {
       const runner = options.fleet === undefined ? local : (await current()).get(options.fleet);
       if (runner?.createTab === undefined) throw new Error(`Unknown Herdr fleet ${String(options.fleet)}`);

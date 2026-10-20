@@ -31,7 +31,9 @@ The positions fill right, down, then right. Herdr splits individual leaves:
 the fourth position uses `down` on the top-right pane, rather than `right` on
 the bottom-left (which would make two narrow panes in the left column).
 Never add a fifth pane to the full tab. Give each new pane a human worker name
-with `herdr pane rename PANE "Name · role"`. For a plain Herdr native launch:
+with `herdr pane rename PANE "Name · short task"` (`hire_agent.taskTitle`, falling
+back to the role). Keep the persona name alone in roster data and work keys in
+seat assignments; the harness owns its dynamic terminal title. For a plain Herdr native launch:
 
 ```sh
 herdr agent start ada --kind codex --pane P1 --timeout 30000

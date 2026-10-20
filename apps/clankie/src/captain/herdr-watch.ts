@@ -7,6 +7,7 @@ import type {
 import { nativeHerdrRead } from "../herdr-native-read.ts";
 import { nativeAgentWait } from "../herdr-native-wait.ts";
 import { createHireLayout, HireLayoutNotStarted, HireLayoutUnconfirmed } from "./hire-layout.ts";
+import { hirePaneLabel } from "./hire-name.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { ResourceAdmissionError, type FleetResourceRuntime } from "../fleet-resource-runtime.ts";
 import { realpath } from "node:fs/promises";
@@ -276,6 +277,8 @@ export interface HerdrWatchRunner {
   ): Promise<boolean | FleetSeatDelivery>;
   codexSettled?: typeof codexProxySettled;
   closePane?(target: string, guard?: () => Promise<void>): Promise<void>;
+  /** Change the manual label of an owned newly allocated pane, never its OSC title. */
+  renamePane?(target: string, label: string): Promise<void>;
   /** Open a tab in a working directory; resolves with its root pane id. */
   createTab?(options: {
     readonly cwd: string;
@@ -659,6 +662,9 @@ export function createHerdrWatchRunner(
   return {
     list: async () => Promise.all(parseHerdrPaneList(await runHerdr(["pane", "list"]), true).map(recover)),
     get: async (target) => recover(parseHerdrAgentResult(await runHerdr(["agent", "get", target]))),
+    renamePane: async (target, label) => {
+      await runHerdr(["pane", "rename", target, label]);
+    },
     resolveTerminal: async (terminalId) => {
       const agent = parseHerdrPaneList(await runHerdr(["pane", "list"])).find(
         (pane) => pane.terminalId === terminalId,
@@ -4374,7 +4380,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(input.pipeline === undefined ? {} : { pipeline: input.pipeline }),
         ...(input.placement === undefined ? {} : { placement: input.placement }),
         cwd: input.workingDirectory,
-        label: input.role ? `${input.title} · ${input.role}` : input.title,
+        label: hirePaneLabel(input.title, input.taskTitle, input.role),
         ...(resume === undefined ? {} : { paneLabel: resumePaneLabel(resume) }),
         ...(nativePrepared === undefined
           ? skillLaunch.env === undefined
@@ -4414,6 +4420,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
       };
     }
     const projectAllocation = this.projectAllocations.get(input);
+    const labelConfirmedResume = async (agent: HerdrAgentSnapshot) => {
+      if (resume === undefined || this.runner.renamePane === undefined) return;
+      const current = await this.runner.get(paneId);
+      if (current.terminalId !== agent.terminalId || nativeSessionId(current) !== resume.sessionId)
+        throw new Error("Resumed pane changed before its label was confirmed");
+      if (authority !== undefined) await assertConversationAuthority(authority);
+      await this.runner.renamePane(paneId, hirePaneLabel(input.title, input.taskTitle, input.role));
+    };
     let control: SeatControlMode | undefined;
     let startAttempted = nativePrepared !== undefined;
     try {
@@ -4642,6 +4656,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
             nativePrepared !== undefined,
             finalNativeProof,
           );
+          await labelConfirmedResume(agent);
           return {
             ...spawnedSeat(agent, paneId, subject, input, account),
             control,
@@ -4692,6 +4707,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         );
       }
       await this.observeHireIdentity(receiptKey, agent, input, authority);
+      await labelConfirmedResume(agent);
       return {
         ...spawnedSeat(agent, paneId, subject, input, account),
         control,

@@ -171,6 +171,11 @@ Do not apply one work project's restrictions to social/play lanes or other repos
 ## Brief an owned result
 
 Hire with `hire_agent`, selecting effort for this job and supplying `effortReason`.
+Set `title` to the person's name and `taskTitle` to a short task caption (for
+example, `Wren` and `Chats drawer`). New Herdr panes show `Wren · Chats drawer`;
+the roster and pet strip keep the persona name. Omitted `taskTitle` uses the
+role. Put issue keys in the seat's assignment, never in either caption. Harness
+OSC/spinner titles remain dynamic; do not overwrite them or rename existing panes.
 Harness/model may inherit the project profile; `hireKind:lead` selects its lead
 profile without granting authority. Follow up with `message_seat` on the returned seat ID.
 Where neither the role nor the fleet names a harness, choosing one is yours per

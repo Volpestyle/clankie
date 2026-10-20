@@ -11,6 +11,7 @@ import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import { assertRemoteHerdrArgs } from "../src/herdr-fleet.ts";
 import { createHerdrWatchRunner, HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { createPreparedNativeHost } from "../src/captain/prepared-native-host.ts";
+import { hirePaneLabel } from "../src/captain/hire-name.ts";
 
 const exec = promisify(execFile);
 const binary = process.env.VUH1550_HERDR_BINARY ?? "herdr";
@@ -216,7 +217,7 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       "--no-focus",
     ]);
     const before = await snapshot();
-    const runner = createHerdrWatchRunner(undefined, run);
+    const runner = createHerdrWatchRunner(undefined, run, firstNative.createCommandTab);
     const request = (cwd: string, title: string, pipeline?: string) =>
       SpawnOperatorSeatSchema.parse({
         schemaVersion: 1,
@@ -259,6 +260,47 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     expect(afterSolo.tabs.find((t: any) => t.tab_id === p2.tab_id).label).toBe("Rafa · reviewer");
     expect(afterSolo.focused_pane_id).toBe(before.focused_pane_id);
     // Same basename, different repo identity: reuse B's existing workspace.
+    // Recorded harness titles from VUH-2541. Exercise real OSC updates on an
+    // isolated Herdr socket; these are terminal producers, not paid model hires.
+    for (const [harness, title, dynamicTitles] of [
+      ["claude", "Wren", ["Claude Code", "✳ Claude Code"]],
+      ["codex", "Ines", ["Chats drawer | /tmp/wt-vuh2541", "Working | C:\\dev\\wt-vuh2541"]],
+    ] as const) {
+      const hire = SpawnOperatorSeatSchema.parse({
+        schemaVersion: 1,
+        harness,
+        title,
+        taskTitle: "VUH-2541 Chats drawer",
+        workingDirectory: repoA,
+      });
+      const label = hirePaneLabel(hire.title, hire.taskTitle, hire.role);
+      const titleFile = join(root, `${harness}-title`);
+      await writeFile(titleFile, dynamicTitles[0]);
+      const pane = await runner.createTab!({
+        cwd: hire.workingDirectory,
+        label,
+        placement: "new-tab",
+        command: [
+          process.execPath,
+          "-e",
+          `const fs=require('node:fs');let last;setInterval(()=>{const title=fs.readFileSync(process.argv[1],'utf8');if(title!==last){process.stdout.write('\\x1b]0;'+title+'\\x07');last=title}},20)`,
+          titleFile,
+        ],
+      });
+      for (const dynamicTitle of dynamicTitles) {
+        await writeFile(titleFile, dynamicTitle);
+        let observed: any;
+        for (let attempt = 0; attempt < 100; attempt++) {
+          observed = (await snapshot()).panes.find((p: any) => p.pane_id === pane);
+          if (observed?.terminal_title === dynamicTitle) break;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(observed.terminal_title).toBe(dynamicTitle);
+        expect(observed.label).toBe(`${title} · Chats drawer`);
+      }
+      await runner.closePane!(pane);
+      ownedClosedPanes.push(pane);
+    }
     const third = await runner.createTab!({ cwd: repoB, label: "Mei · designer" });
     expect((await snapshot()).panes.find((p: any) => p.pane_id === third).workspace_id).toBe(
       original.workspace.workspace_id,

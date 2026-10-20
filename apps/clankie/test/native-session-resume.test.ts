@@ -99,6 +99,7 @@ async function fixture(
     startAgent: vi.fn(async () => undefined),
     promptAgent: vi.fn(async () => undefined),
     closePane: vi.fn(async () => undefined),
+    renamePane: vi.fn(async () => undefined),
   };
   const store = new HerdrWatchStore(join(root, "watches.json"), {
     runner,
@@ -150,6 +151,7 @@ describe("native saved-session hires", () => {
       expect.objectContaining({ paneId: "w1:p1" }),
     );
     expect(f.runner.promptAgent).not.toHaveBeenCalled();
+    expect(f.runner.renamePane).toHaveBeenCalledWith("w1:p1", "Resume · Work");
   });
   it("serializes concurrent resumes and reuses the first native seat", async () => {
     const f = await fixture();
@@ -157,6 +159,7 @@ describe("native saved-session hires", () => {
     expect(results.map((result) => result.outcome)).toEqual(["spawned", "spawned"]);
     expect(f.runner.createTab).toHaveBeenCalledOnce();
     expect(f.adapter.start).toHaveBeenCalledOnce();
+    expect(f.runner.renamePane).toHaveBeenCalledOnce();
     expect(f.send).toHaveBeenCalledWith("follow-up");
     expect(f.runner.list).toHaveBeenCalledTimes(2);
   });

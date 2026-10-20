@@ -5061,7 +5061,16 @@ opening the next numbered tab. After a pane closes, a compacted layout that cann
 starts a fresh numbered grid; surviving workers stay in place. Positions fill top-left, top-right, bottom-left,
 bottom-right. The name defaults to the project's display name or deliverable (otherwise the
 repository, or `Workers` outside Git); a per-hire `pipeline`, such as `"VUH-1869 authors"`, overrides it.
-Explicit `new-tab` requests a solo `Name · role` tab. Explicit `split` requires
+Hire `title` is the persona's human name. Optional `taskTitle` supplies a short
+task caption: `title: "Wren", taskTitle: "Chats drawer"` gives a manual Herdr
+pane label of `Wren · Chats drawer` on local and linked machines, for Claude
+and Codex alike. Omitted `taskTitle` falls back to the role, then `Work`.
+Issue keys, harness names and worktree paths are filtered out of captions;
+work grouping reads seat assignments, never titles. The roster and pet strip
+prefer the persona name alone. Harness terminal OSC titles (including Claude's
+spinner) remain dynamic and do not change the manual pane label.
+
+Explicit `new-tab` requests a solo `Name · task` tab. Explicit `split` requires
 a pipeline and fills its grid. Existing unmarked pipeline tabs refuse instead
 of appending to an unrelated lane. Existing owner placement preferences still
 win; unset a `new-tab` preference to use the grid default.

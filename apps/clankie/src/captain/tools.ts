@@ -991,6 +991,14 @@ function hireAgentTool(
         description:
           "A short human name you choose for this person, in any language; never a routing ID, issue key, task slug or job title.",
       }),
+      taskTitle: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 120,
+          description:
+            "Short task caption, e.g. Chats drawer. Herdr shows Name · task; omit issue keys, harness names and paths. Omitted uses the role. Assign work items through seat metadata.",
+        }),
+      ),
       projectId: Type.Optional(
         Type.String({
           pattern: "^[a-z][a-z0-9_-]{0,63}$",

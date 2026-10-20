@@ -109,7 +109,10 @@ async function fixture(owner?: ConversationAuthority) {
     seatAdapters: [adapter],
     codexAccounts: async () => [{ label: "fixture", home: root }],
     runner: {
-      createTab: async () => agent.paneId,
+      createTab: async (options) => {
+        expect(options.label).toBe("Test · Chats drawer");
+        return agent.paneId;
+      },
       startAgent,
       get: async () => agent,
       resolveTerminal: async () => agent,
@@ -133,6 +136,7 @@ async function fixture(owner?: ConversationAuthority) {
       effortReason: "Native channel delivery and question handling need boundary verification.",
       harness: "codex",
       title: "Test",
+      taskTitle: "Chats drawer",
       workingDirectory: root,
     },
     undefined,

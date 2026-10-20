@@ -2646,7 +2646,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // Runs synchronously behind the final authority check, before the native
         // receipt is cleared. A revoked/replaced origin keeps its uncertain claim.
         if (!authority.current()) throw new Error("Hiring conversation was replaced before adoption");
-        const title = resume === undefined ? request.title : hireDisplayName(spawned.seat.title);
+        const title = request.title;
         const seat = personas.adoptSpawn(
           spawned.seat,
           title,

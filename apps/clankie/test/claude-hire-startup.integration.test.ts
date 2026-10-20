@@ -186,7 +186,10 @@ it.each([false, true])(
     let nativeBrief = "";
     let absent = false;
     const runner: HerdrWatchRunner = {
-      createTab: async () => f.agent.paneId,
+      createTab: async (options) => {
+        expect(options.label).toBe("Worker · Chats drawer");
+        return f.agent.paneId;
+      },
       startAgent: async ({ args }) => {
         launches++;
         nativeBrief = args!.at(-1)!;
@@ -242,6 +245,7 @@ it.each([false, true])(
       schemaVersion: 1 as const,
       harness: "claude" as const,
       title: "Worker",
+      taskTitle: "Chats drawer",
       workingDirectory: f.root,
       effort: "medium" as const,
       effortReason: "Verify native startup receipt and ownership boundaries.",

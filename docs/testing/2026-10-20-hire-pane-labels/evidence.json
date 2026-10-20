@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "herdr-layout-calls.json",
+      "size": 4242577,
+      "sha256": "459e306a035e04360bbdc675353190c5d7efc3cbf312e231bb84fc581821fb5f",
+      "url": "clankie://evidence/sha256/459e306a035e04360bbdc675353190c5d7efc3cbf312e231bb84fc581821fb5f"
+    },
+    {
+      "path": "herdr-layout-journey.json",
+      "size": 4376000,
+      "sha256": "81a0ff0bda0e894160132a796ddbe5225ee90858b9de433cd276154cdd1b143f",
+      "url": "clankie://evidence/sha256/81a0ff0bda0e894160132a796ddbe5225ee90858b9de433cd276154cdd1b143f"
+    }
+  ]
+}
