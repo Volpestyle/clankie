@@ -423,3 +423,114 @@ it("allows observe devices to read body attribution but never mutate leases", as
   await app.request(`/v1/devices/${device.deviceId}/revoke`, { method: "POST", headers: OPERATOR });
   expect((await deviceGet(app, "/v1/body-leases", device.token)).status).toBe(401);
 });
+
+describe("automation pairing lifecycle and real device grouping (VUH-2565)", () => {
+  async function automationOffer(app: Hono, runId: string, purpose = "simulator", ttlSeconds = 60) {
+    const response = await app.request("/v1/pairing/offer", {
+      method: "POST",
+      headers: { ...OPERATOR, "content-type": "application/json" },
+      body: JSON.stringify({ run: { runId, purpose, ttlSeconds } }),
+    });
+    expect(response.status).toBe(200);
+    return response.json() as Promise<{ code: string }>;
+  }
+  async function activate(app: Hono, code: string) {
+    const pending = await redeem(app, { code, device: IOS });
+    expect(pending.status).toBe(200);
+    const record = await pending.json();
+    const activated = await complete(app, {
+      completionToken: record.completionToken,
+      acceptedGrants: SUPERVISE_GRANTS,
+    });
+    expect(activated.status).toBe(200);
+    return { deviceId: record.deviceId as string, token: (await activated.json()).deviceToken as string };
+  }
+  const end = (app: Hono, id: string, headers = OPERATOR) =>
+    app.request(`/v1/pairing/runs/${id}/end`, { method: "POST", headers });
+
+  it("capture teardown revokes only its marked pairings, including pending and unused offers", async () => {
+    const store = await makeStore();
+    const { app } = await makeApp(store);
+    const owner = await pairDevice(app);
+    const offer = await automationOffer(app, "capture");
+    const capture = await activate(app, offer.code);
+    const unused = await automationOffer(app, "capture");
+    const pending = await automationOffer(app, "capture");
+    expect((await redeem(app, { code: pending.code, device: IOS })).status).toBe(200);
+    const other = await activate(app, (await automationOffer(app, "other", "gateway-probe")).code);
+    expect((await end(app, "capture", { authorization: `Bearer ${capture.token}` })).status).toBe(401);
+    try {
+      expect((await deviceGet(app, "/v1/devices/self", capture.token)).status).toBe(200);
+      throw new Error("capture failed");
+    } catch (error) {
+      expect((error as Error).message).toBe("capture failed");
+    } finally {
+      expect((await end(app, "capture")).status).toBe(200);
+    }
+    expect((await end(app, "capture")).status).toBe(200);
+    expect((await deviceGet(app, "/v1/devices/self", capture.token)).status).toBe(401);
+    expect((await deviceGet(app, "/v1/devices/self", owner.token)).status).toBe(200);
+    expect((await deviceGet(app, "/v1/devices/self", other.token)).status).toBe(200);
+    expect((await redeem(app, { code: unused.code, device: IOS })).status).toBe(410);
+    const rows = await (await app.request("/v1/devices", { headers: OPERATOR })).json();
+    expect(
+      rows.filter(
+        (row: { run?: { runId: string }; status: string }) =>
+          row.run?.runId === "capture" && row.status !== "revoked",
+      ),
+    ).toEqual([]);
+    const restarted = await makeApp(store);
+    expect((await deviceGet(restarted.app, "/v1/devices/self", capture.token)).status).toBe(401);
+  });
+
+  it("a dead run expires after replay without expiring ordinary owner devices", async () => {
+    const store = await makeStore();
+    const original = await makeApp(store);
+    const owner = await pairDevice(original.app);
+    const capture = await activate(original.app, (await automationOffer(original.app, "dead")).code);
+    const restarted = await makeApp(store);
+    restarted.advanceMs(60_001);
+    expect((await deviceGet(restarted.app, "/v1/devices/self", capture.token)).status).toBe(401);
+    expect((await devicePost(restarted.app, "/v1/devices/self/session/refresh", capture.token)).status).toBe(
+      401,
+    );
+    expect((await deviceGet(restarted.app, "/v1/devices/self", owner.token)).status).toBe(200);
+    const rows = await (await restarted.app.request("/v1/devices", { headers: OPERATOR })).json();
+    expect(rows.find((row: { deviceId: string }) => row.deviceId === capture.deviceId)).toMatchObject({
+      status: "revoked",
+      revokedBy: "automation-run-expired",
+    });
+  });
+
+  it("groups shared push registrations, preserves same-name unrelated devices and last-seen", async () => {
+    const { app, advanceMs } = await makeApp(await makeStore());
+    const old = await pairDevice(app);
+    advanceMs(1000);
+    const current = await pairDevice(app);
+    const ipad = await pairDevice(app);
+    const registrationId = "11111111-1111-4111-8111-111111111111";
+    for (const device of [old, current]) {
+      const response = await app.request("/v1/devices/self/push", {
+        method: "POST",
+        headers: { authorization: `Bearer ${device.token}`, "content-type": "application/json" },
+        body: JSON.stringify({ registrationId, sequence: device === old ? 1 : 2, enabled: true }),
+      });
+      expect(response.status).toBe(200);
+    }
+    await deviceGet(app, "/v1/devices/self", old.token);
+    const rows = await (await app.request("/v1/devices?grouped=true", { headers: OPERATOR })).json();
+    expect(rows).toHaveLength(2);
+    const phone = rows.find((row: { deviceId: string }) => row.deviceId === current.deviceId);
+    expect(phone.pairingIds.sort()).toEqual([old.deviceId, current.deviceId].sort());
+    expect(phone.lastSeenAt).toBeTruthy();
+    expect(rows.find((row: { deviceId: string }) => row.deviceId === ipad.deviceId).pairingIds).toEqual([
+      ipad.deviceId,
+    ]);
+    expect(await (await app.request("/v1/devices", { headers: OPERATOR })).json()).toHaveLength(3);
+    for (const id of phone.pairingIds)
+      expect(
+        (await app.request(`/v1/devices/${id}/revoke`, { method: "POST", headers: OPERATOR })).status,
+      ).toBe(200);
+    expect((await deviceGet(app, "/v1/devices/self", ipad.token)).status).toBe(200);
+  });
+});

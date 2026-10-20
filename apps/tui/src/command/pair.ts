@@ -1,6 +1,9 @@
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { endPairingRun } from "../../bin/devices.ts";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { writeLocalCompanionHandoff } from "../../bin/local-companion.ts";
-import { directOriginTransport } from "@clankie/protocol";
+import { directOriginTransport, PairingRunRequestSchema, type PairingOfferRequest } from "@clankie/protocol";
 import QRCode from "qrcode";
 import {
   pairingFailureMessage,
@@ -20,7 +23,7 @@ const DEFAULT_REVIEW_COUNT = 3;
 const REVIEW_COUNT_MAX = 10;
 const REVIEW_DAYS_MAX = 31;
 const PAIR_USAGE =
-  "Usage: clankie pair [--json] [--timeout SEC] [--local-companion | --review --days N [--count N]]";
+  "Usage: clankie pair [--json] [--timeout SEC] [--run ID [--purpose test|proof|simulator|gateway-probe] [--ttl SEC] | --local-companion | --review --days N [--count N]] [-- COMMAND ARGS]";
 
 /** The loopback stack is the only one this launcher can start or speak for. */
 function isLocalControlPlane(controlPlaneUrl: string): boolean {
@@ -168,6 +171,7 @@ export interface PairCommandOptions extends CreateServiceOptionsInput {
 }
 
 interface PairCliOptions {
+  readonly run?: PairingOfferRequest["run"];
   readonly localCompanion?: true;
   readonly json: boolean;
   readonly timeoutMs: number;
@@ -176,6 +180,9 @@ interface PairCliOptions {
 }
 
 function parsePairArgs(args: readonly string[]): PairCliOptions {
+  let runId: string | undefined;
+  let purpose = "proof";
+  let ttlSeconds = 900;
   let json = false;
   let timeoutMs = DEFAULT_PAIR_TIMEOUT_MS;
   let review = false;
@@ -193,6 +200,14 @@ function parsePairArgs(args: readonly string[]): PairCliOptions {
   };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === "--run" || arg === "--purpose" || arg === "--ttl") {
+      const value = args[++index];
+      if (value === undefined) throw new Error(PAIR_USAGE);
+      if (arg === "--run") runId = value;
+      if (arg === "--purpose") purpose = value;
+      if (arg === "--ttl") ttlSeconds = Number(value);
+      continue;
+    }
     if (arg === "--local-companion") {
       localCompanion = true;
       continue;
@@ -226,9 +241,19 @@ function parsePairArgs(args: readonly string[]): PairCliOptions {
     }
     throw new Error(PAIR_USAGE);
   }
+  if (runId === undefined && (purpose !== "proof" || ttlSeconds !== 900))
+    throw new Error("--purpose and --ttl require --run.");
+  const run = runId === undefined ? undefined : PairingRunRequestSchema.parse({ runId, purpose, ttlSeconds });
+  if (run !== undefined && (localCompanion || review))
+    throw new Error("--run cannot be combined with --local-companion or --review.");
   if (!review) {
     if (days !== undefined || count !== undefined) throw new Error("--days and --count require --review.");
-    return { json, timeoutMs, ...(localCompanion ? { localCompanion: true } : {}) };
+    return {
+      json,
+      timeoutMs,
+      ...(run === undefined ? {} : { run }),
+      ...(localCompanion ? { localCompanion: true } : {}),
+    };
   }
   if (days === undefined) throw new Error("--review requires --days N.");
   if (localCompanion) throw new Error("--local-companion cannot be combined with --review.");
@@ -236,7 +261,14 @@ function parsePairArgs(args: readonly string[]): PairCliOptions {
 }
 
 export async function runPairCommand(args: readonly string[], options: PairCommandOptions): Promise<number> {
-  const { json, timeoutMs, review, localCompanion } = parsePairArgs(args);
+  const separator = args.indexOf("--");
+  const command = separator < 0 ? undefined : args.slice(separator + 1);
+  if (command?.length === 0) throw new Error(PAIR_USAGE);
+  const parsed = parsePairArgs(separator < 0 ? args : args.slice(0, separator));
+  if (command && (parsed.review || parsed.localCompanion)) throw new Error(PAIR_USAGE);
+  const { json, timeoutMs, review, localCompanion } = parsed;
+  const run =
+    parsed.run ?? (command ? { runId: randomUUID(), purpose: "proof" as const, ttlSeconds: 900 } : undefined);
   const env = options.env ?? process.env;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
@@ -294,6 +326,7 @@ export async function runPairCommand(args: readonly string[], options: PairComma
           ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
           signal: controller.signal,
           ...(review === undefined ? {} : { review: { days: review.days } }),
+          ...(run === undefined ? {} : { run }),
         }),
       );
     }
@@ -360,6 +393,41 @@ export async function runPairCommand(args: readonly string[], options: PairComma
 
   const offer = offers[0];
   if (offer === undefined) throw new Error("No pairing offer was minted.");
+  if (command && run) {
+    // The wrapper owns only its child's run. Tokens are not exported; the offer is single use.
+    let child: ReturnType<typeof spawn> | undefined;
+    const interrupt = (signal: NodeJS.Signals) => {
+      child?.kill(signal);
+    };
+    const onInt = () => interrupt("SIGINT");
+    const onTerm = () => interrupt("SIGTERM");
+    process.on("SIGINT", onInt);
+    process.on("SIGTERM", onTerm);
+    try {
+      return await new Promise<number>((resolve, reject) => {
+        child = spawn(command[0]!, command.slice(1), {
+          stdio: "inherit",
+          env: {
+            ...env,
+            CLANKIE_PAIRING_RUN_ID: run.runId,
+            CLANKIE_PAIRING_CODE: offer.localCode ?? offer.code,
+            CLANKIE_PAIRING_URL: offer.deepLink,
+          },
+        });
+        child.once("error", reject);
+        child.once("exit", (code) => resolve(code ?? 1));
+      });
+    } finally {
+      process.off("SIGINT", onInt);
+      process.off("SIGTERM", onTerm);
+      await endPairingRun(run.runId, {
+        controlPlaneUrl,
+        operatorToken: operatorCredential!.token,
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    }
+  }
   const signedOutNoteText = signedOutNote(offer, signedOut);
   if (json) {
     outputJson(stdout, {

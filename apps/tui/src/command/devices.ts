@@ -4,12 +4,14 @@ import {
   devicesFailureMessage,
   grantSummary,
   listDevices,
+  endPairingRun,
   revokeDevice,
   type DeviceListItem,
 } from "../../bin/devices.ts";
 import { commandHost, outputJson, type Writable } from "./io.ts";
 
-const DEVICES_USAGE = "Usage: clankie devices [--json] | clankie devices revoke <id> [--json]";
+const DEVICES_USAGE =
+  "Usage: clankie devices [--json] | clankie devices revoke <id> [--json] | clankie devices end-run <run-id> [--json]";
 const DEFAULT_DEVICES_TIMEOUT_MS = 10_000;
 
 export interface DevicesCliCommandOptions {
@@ -22,6 +24,7 @@ export interface DevicesCliCommandOptions {
 }
 
 type DevicesCliOptions =
+  | { readonly json: boolean; readonly subcommand: "end-run"; readonly runId: string }
   | { readonly json: boolean; readonly subcommand: "list" }
   | { readonly json: boolean; readonly subcommand: "revoke"; readonly deviceId: string };
 
@@ -36,6 +39,8 @@ function parseDevicesArgs(args: readonly string[]): DevicesCliOptions {
     positional.push(arg);
   }
   if (positional.length === 0) return { json, subcommand: "list" };
+  if (positional[0] === "end-run" && positional.length === 2)
+    return { json, subcommand: "end-run", runId: positional[1]! };
   if (positional[0] === "revoke") {
     const deviceId = positional[1];
     if (deviceId === undefined || positional.length > 2) throw new Error(DEVICES_USAGE);
@@ -46,16 +51,27 @@ function parseDevicesArgs(args: readonly string[]): DevicesCliOptions {
 
 function formatDevicesTable(devices: readonly DeviceListItem[]): string {
   if (devices.length === 0) return "No paired devices. Pair one with `clankie pair` (or /pair).";
-  const header = ["DEVICE", "NAME", "PLATFORM", "STATUS", "SOURCE", "GRANTS", "PUSH", "PAIRED"] as const;
+  const header = [
+    "DEVICE",
+    "NAME",
+    "PLATFORM",
+    "STATUS",
+    "SOURCE",
+    "GRANTS",
+    "PUSH",
+    "PAIRED",
+    "LAST SEEN",
+  ] as const;
   const rows = devices.map((device) => [
     device.deviceId,
     device.name,
     device.platform,
     device.status,
-    device.review === true ? "review" : "pair",
+    device.run?.purpose ?? (device.review === true ? "review" : "pair"),
     grantSummary(device),
     device.push?.enabled === true && device.status === "active" && device.grants.chat ? "enabled" : "off",
     device.activatedAt ?? device.createdAt,
+    device.lastSeenAt ?? "never",
   ]);
   const widths = header.map((label, column) =>
     Math.max(label.length, ...rows.map((row) => (row[column] ?? "").length)),
@@ -91,6 +107,12 @@ export async function runDevicesCommand(
     signal: controller.signal,
   };
   try {
+    if (parsed.subcommand === "end-run") {
+      await endPairingRun(parsed.runId, request);
+      if (parsed.json) outputJson(stdout, { ok: true, runId: parsed.runId });
+      else stdout.write(`Ended pairing run ${parsed.runId}.\n`);
+      return 0;
+    }
     if (parsed.subcommand === "revoke") {
       const device = await revokeDevice(parsed.deviceId, request);
       if (parsed.json) outputJson(stdout, { ok: true, device });

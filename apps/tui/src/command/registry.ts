@@ -263,7 +263,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["pair"],
     lines: [
-      "  pair [--json] [--timeout SEC]",
+      "  pair [--json] [--timeout SEC] [--run ID --purpose PURPOSE --ttl SEC] [-- COMMAND ARGS]",
       "                           One-time device pairing QR + code (human default; --json for agents)",
     ],
   },
@@ -287,7 +287,10 @@ const HEADLESS_COMMAND_HELP = [
   },
   {
     nouns: ["devices"],
-    lines: ["  devices revoke <id> [--json]", "                           Revoke a device"],
+    lines: [
+      "  devices end-run <run-id> [--json] | devices revoke <id> [--json]",
+      "                           Revoke a device",
+    ],
   },
   {
     nouns: ["operator-credential"],

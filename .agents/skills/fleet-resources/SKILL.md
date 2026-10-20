@@ -85,6 +85,18 @@ budgets still bind, and a source or default change does not authorize raising
 live capacity. Admission rules, holder alerts, disk guards and platform notes
 are in [admission](reference/admission.md).
 
+## Pairings created by automation
+
+Use `clankie pair --run UNIQUE_ID --purpose simulator --ttl 900 -- COMMAND ARGS`
+inside the governed command for captures and probes. The child receives
+`CLANKIE_PAIRING_CODE`, `CLANKIE_PAIRING_URL` and `CLANKIE_PAIRING_RUN_ID`;
+wrapper teardown revokes only its marked pairings and cancels unused offers.
+Purposes are `test`, `proof`, `simulator` and `gateway-probe`. A fixed short TTL
+revokes abandoned runs even after service replay. For custom runners, mint with
+`pair --run UNIQUE_ID --purpose proof --json`, then call
+`clankie devices end-run UNIQUE_ID` in `finally`. Never reuse an owner pairing,
+mark a real owner's device as automation, or infer disposable identity by name.
+
 ## Proofs and fixtures
 
 For source-checkout scratch service/relay proofs, use

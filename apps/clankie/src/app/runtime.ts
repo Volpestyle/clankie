@@ -80,7 +80,12 @@ import { ActivitySharingRequestSchema } from "../activity-sharing.ts";
 import { ActivityShareRequestError } from "@clankie/rendered-surface-client";
 import { changeRuntime } from "../connections.ts";
 import { DeviceSessionError, DeviceSessionSigner } from "../device-session.ts";
-import { applyDeviceEvent, isDevicePendingExpired, type DeviceRegistry } from "../devices.ts";
+import {
+  applyDeviceEvent,
+  isDevicePendingExpired,
+  isDeviceRunExpired,
+  type DeviceRegistry,
+} from "../devices.ts";
 import { createDiscordIngressRoutes } from "../discord-ingress.ts";
 import {
   DiscordPresenceSessionProjection,
@@ -570,7 +575,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     let record = devices.get(claims.deviceId);
     if (record === undefined || isDevicePendingExpired(record, now)) return { denied: "invalid" };
-    if (record.status === "revoked") return { denied: "revoked" };
+    if (record.status === "revoked" || isDeviceRunExpired(record, now)) return { denied: "revoked" };
     if (record.status !== "active") return { denied: "invalid" };
     try {
       if (await dependencies.hostedDeviceSecurity?.isRevoked?.(record.deviceId)) return { denied: "revoked" };
@@ -581,7 +586,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     now = clock();
     record = devices.get(claims.deviceId);
     if (record === undefined || isDevicePendingExpired(record, now)) return { denied: "invalid" };
-    if (record.status === "revoked") return { denied: "revoked" };
+    if (record.status === "revoked" || isDeviceRunExpired(record, now)) return { denied: "revoked" };
     if (record.status !== "active") return { denied: "invalid" };
     if (claims.expiresAt <= Math.floor(now.getTime() / 1000)) return { denied: "expired" };
     if (record.supportGrantId !== undefined) {
@@ -2868,7 +2873,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }),
     );
   });
-  const { wakeRevocationTimer } = registerPairingRoutes({
+  const { wakeRevocationTimer, runRevocationTimer } = registerPairingRoutes({
     get supportGrants() {
       return supportGrants;
     },
@@ -3038,6 +3043,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       dependencies.composerTranscriptions?.close();
       if (securityRetryTimer !== undefined) clearInterval(securityRetryTimer);
       if (wakeRevocationTimer !== undefined) clearInterval(wakeRevocationTimer);
+      clearInterval(runRevocationTimer);
       stopObservingMessages?.();
       stopObservingRoomFailures?.();
       pushDispatcher?.close();

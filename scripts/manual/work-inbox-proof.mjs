@@ -235,54 +235,65 @@ if (phase === "setup") {
     422,
   );
   // Ordinary pairing/completion mints a genuine signed device; no synthetic auth callback.
-  const offer = await api("/v1/pairing/offer", {}, credential.token, 200, true);
-  const redeemed = await api(
-    "/v1/pairing/redeem",
-    {
-      code: offer.localCode ?? offer.code,
-      device: { name: "Synthetic inbox proof device", platform: "ios" },
-    },
-    "",
-    200,
-    true,
-  );
-  const device = await api(
-    "/v1/pairing/complete",
-    { completionToken: redeemed.completionToken, acceptedGrants: redeemed.offeredGrants },
-    "",
-    200,
-    true,
-  );
-  const deviceToken = device.deviceToken ?? device.token;
-  assert(deviceToken, "Pairing did not return a device token");
-  const inventory = await api("/v1/work", { action: "repos" });
-  const matches = inventory.repos.filter((entry) => entry.trackerProjectId === scope.project);
-  assert.equal(matches.length, 1);
-  const deviceRepo = matches[0].id;
-  const privateRead = await raw("inbox_pending_questions", {}, scope, deviceToken, 200, deviceRepo);
-  assert.equal(privateRead.result.rows[0].attention, "active");
-  const refusedState = await raw(
-    "post_unsnooze_inbox_item",
-    {
-      target: row.target,
-      expectedRevision: row.expectedRevision,
-      ifUpdatedAt: snoozed.updatedAt,
-      idempotencyKey: "other-actor-cannot-edit",
-    },
-    scope,
-    deviceToken,
-    422,
-    deviceRepo,
-  );
-  assert.match(refusedState.detail, /precondition_failed/);
-  await api(`/v1/devices/${redeemed.deviceId}/revoke`, {}, credential.token);
-  await raw("inbox_pending_questions", {}, scope, deviceToken, 401, deviceRepo);
-  report("actor privacy and revoked device", {
-    pairedViaPublicAPI: true,
-    privateReadWasActive: true,
-    otherActorUpdateRefused: true,
-    revokedReadRefused: true,
-  });
+  const pairingRunId = `inbox-proof-${Date.now()}`;
+  try {
+    const offer = await api(
+      "/v1/pairing/offer",
+      { run: { runId: pairingRunId, purpose: "proof", ttlSeconds: 900 } },
+      credential.token,
+      200,
+      true,
+    );
+    const redeemed = await api(
+      "/v1/pairing/redeem",
+      {
+        code: offer.localCode ?? offer.code,
+        device: { name: "Synthetic inbox proof device", platform: "ios" },
+      },
+      "",
+      200,
+      true,
+    );
+    const device = await api(
+      "/v1/pairing/complete",
+      { completionToken: redeemed.completionToken, acceptedGrants: redeemed.offeredGrants },
+      "",
+      200,
+      true,
+    );
+    const deviceToken = device.deviceToken ?? device.token;
+    assert(deviceToken, "Pairing did not return a device token");
+    const inventory = await api("/v1/work", { action: "repos" });
+    const matches = inventory.repos.filter((entry) => entry.trackerProjectId === scope.project);
+    assert.equal(matches.length, 1);
+    const deviceRepo = matches[0].id;
+    const privateRead = await raw("inbox_pending_questions", {}, scope, deviceToken, 200, deviceRepo);
+    assert.equal(privateRead.result.rows[0].attention, "active");
+    const refusedState = await raw(
+      "post_unsnooze_inbox_item",
+      {
+        target: row.target,
+        expectedRevision: row.expectedRevision,
+        ifUpdatedAt: snoozed.updatedAt,
+        idempotencyKey: "other-actor-cannot-edit",
+      },
+      scope,
+      deviceToken,
+      422,
+      deviceRepo,
+    );
+    assert.match(refusedState.detail, /precondition_failed/);
+    await api(`/v1/devices/${redeemed.deviceId}/revoke`, {}, credential.token);
+    await raw("inbox_pending_questions", {}, scope, deviceToken, 401, deviceRepo);
+    report("actor privacy and revoked device", {
+      pairedViaPublicAPI: true,
+      privateReadWasActive: true,
+      otherActorUpdateRefused: true,
+      revokedReadRefused: true,
+    });
+  } finally {
+    await api(`/v1/pairing/runs/${pairingRunId}/end`, {}, credential.token);
+  }
   const unsupported = join(root, "markdown");
   await mkdir(unsupported);
   execFileSync("git", ["init", "--quiet", unsupported]);

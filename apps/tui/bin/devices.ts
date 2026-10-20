@@ -46,6 +46,7 @@ export interface DevicesRequestOptions {
   readonly operatorToken?: string | undefined;
   readonly fetchImpl?: typeof fetch;
   readonly signal?: AbortSignal;
+  readonly grouped?: boolean;
 }
 
 async function operatorFetch(
@@ -68,7 +69,11 @@ async function operatorFetch(
 
 /** List paired devices. Throws {@link DevicesCommandError} on every failure. */
 export async function listDevices(options: DevicesRequestOptions = {}): Promise<DeviceListItem[]> {
-  const response = await operatorFetch(DEVICES_PATH, "GET", options);
+  const response = await operatorFetch(
+    options.grouped ? `${DEVICES_PATH}?grouped=true` : DEVICES_PATH,
+    "GET",
+    options,
+  );
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new DevicesCommandError("unauthorized");
     throw new DevicesCommandError("unavailable");
@@ -108,4 +113,10 @@ export function grantSummary(device: DeviceListItem): string {
   if (device.grants.terminalObserve) parts.push("observe");
   if (device.grants.terminalControl) parts.push("control");
   return parts.length > 0 ? parts.join("+") : "none";
+}
+
+/** End an automation run without authority over any ordinary owner pairing. */
+export async function endPairingRun(runId: string, options: DevicesRequestOptions = {}): Promise<void> {
+  const response = await operatorFetch(`/v1/pairing/runs/${encodeURIComponent(runId)}/end`, "POST", options);
+  if (!response.ok) throw new DevicesCommandError(response.status === 401 ? "unauthorized" : "unavailable");
 }

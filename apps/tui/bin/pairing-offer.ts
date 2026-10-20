@@ -70,6 +70,7 @@ export interface RequestPairingOfferOptions {
   readonly signal?: AbortSignal;
   /** Mint a long-lived review offer instead of the five-minute default (ADR 0154). */
   readonly review?: PairingOfferRequest["review"];
+  readonly run?: PairingOfferRequest["run"];
 }
 
 /**
@@ -89,9 +90,10 @@ export async function requestPairingOffer(options: RequestPairingOfferOptions = 
     },
     PairingOfferError,
     {
-      jsonBody: (options.review === undefined
-        ? {}
-        : { review: options.review }) satisfies PairingOfferRequest,
+      jsonBody: {
+        ...(options.review === undefined ? {} : { review: options.review }),
+        ...(options.run === undefined ? {} : { run: options.run }),
+      } satisfies PairingOfferRequest,
       contentType: "application/json",
     },
   );

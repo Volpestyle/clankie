@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "core-tests.log",
+      "size": 22533,
+      "sha256": "8d7c5025bd1fe4de036c0ca1fff6657cbf7eb3d25a1a32fa3caf6f535d396e8f",
+      "url": "clankie://evidence/sha256/8d7c5025bd1fe4de036c0ca1fff6657cbf7eb3d25a1a32fa3caf6f535d396e8f"
+    }
+  ]
+}

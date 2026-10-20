@@ -30,6 +30,7 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
         mintedBy,
         review,
         localCompanion,
+        run,
         supportGrantId,
         browserSessionId,
         pendingExpiresAt,
@@ -45,6 +46,7 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
           grants: offeredGrants,
           offerId,
           mintedBy,
+          ...(run === undefined ? {} : { run }),
           ...(review === undefined ? {} : { review }),
           ...(localCompanion === undefined ? {} : { localCompanion }),
           ...(supportGrantId === undefined ? {} : { supportGrantId }),
@@ -156,6 +158,7 @@ export function deviceListItem(record: DeviceRecord): DeviceListItem {
     platform: record.platform,
     status: record.status,
     grants: record.grants,
+    ...(record.run === undefined ? {} : { run: record.run }),
     ...(record.review === undefined ? {} : { review: record.review }),
     createdAt: record.createdAt,
     ...(record.activatedAt !== undefined ? { activatedAt: record.activatedAt } : {}),
@@ -171,4 +174,39 @@ function requireDevice(devices: DeviceRegistry, deviceId: string): DeviceRecord 
   const record = devices.get(deviceId);
   if (record === undefined) throw new Error(`device ${deviceId} not found on replay`);
   return record;
+}
+
+/** Group proven shared registrations only; names never establish physical identity. */
+export function groupDeviceListItems(items: DeviceListItem[]): DeviceListItem[] {
+  const groups = new Map<string, DeviceListItem[]>();
+  for (const item of items) {
+    const key =
+      item.run === undefined && item.push !== undefined
+        ? `push:${item.platform}:${item.push.registrationId}`
+        : `device:${item.deviceId}`;
+    const group = groups.get(key) ?? [];
+    group.push(item);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map((group) => {
+    group.sort(
+      (a, b) =>
+        Number(b.status === "active") - Number(a.status === "active") ||
+        b.createdAt.localeCompare(a.createdAt) ||
+        a.deviceId.localeCompare(b.deviceId),
+    );
+    const latestSeen = group
+      .flatMap((item) => (item.lastSeenAt ? [item.lastSeenAt] : []))
+      .sort()
+      .at(-1);
+    return {
+      ...group[0]!,
+      pairingIds: group.map((item) => item.deviceId),
+      ...(latestSeen === undefined ? {} : { lastSeenAt: latestSeen }),
+    };
+  });
+}
+
+export function isDeviceRunExpired(record: DeviceRecord, now: Date): boolean {
+  return record.run !== undefined && Date.parse(record.run.expiresAt) <= now.getTime();
 }

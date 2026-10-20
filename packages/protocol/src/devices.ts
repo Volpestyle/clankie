@@ -45,6 +45,19 @@ export const TAKE_CONTROL_GRANTS: DeviceGrantSet = {
 export const DeviceStatusSchema = z.enum(["pending", "active", "revoked"]);
 export type DeviceStatus = z.infer<typeof DeviceStatusSchema>;
 
+/** Explicit operator-created automation scope; never inferred from names or platforms. */
+export const PairingRunRequestSchema = z
+  .object({
+    runId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u),
+    purpose: z.enum(["test", "proof", "simulator", "gateway-probe"]),
+    ttlSeconds: z.number().int().min(60).max(3600).default(900),
+  })
+  .strict();
+export const PairingRunSchema = PairingRunRequestSchema.omit({ ttlSeconds: true }).extend({
+  expiresAt: z.string().datetime(),
+});
+export type PairingRun = z.infer<typeof PairingRunSchema>;
+
 /**
  * Durable device record projected from the `device:${deviceId}` event stream.
  * Secret-free: it never carries the session token, its hash, or the offer
@@ -68,6 +81,7 @@ export const DeviceRecordSchema = z
     /** Paired through a long-lived review offer (ADR 0154); revoke after the review. */
     review: z.literal(true).optional(),
     localCompanion: z.literal(true).optional(),
+    run: PairingRunSchema.optional(),
     createdAt: z.string().datetime(),
     pendingExpiresAt: z.string().datetime(),
     activatedAt: z.string().datetime().optional(),
@@ -110,6 +124,7 @@ export const PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS = 31 * 24 * 60 * 60_00
  * (ADR 0154). Its ceiling is the gateway's route window, never more.
  */
 export const PairingOfferRequestSchema = z.object({
+  run: PairingRunRequestSchema.optional(),
   review: z
     .object({
       days: z
@@ -311,6 +326,9 @@ export const DeviceListItemSchema = z.object({
   status: DeviceStatusSchema,
   grants: DeviceGrantSetSchema,
   review: z.literal(true).optional(),
+  run: PairingRunSchema.optional(),
+  /** All registrations in an explicitly requested grouped row. */
+  pairingIds: z.array(z.string().min(1)).optional(),
   createdAt: z.string().datetime(),
   activatedAt: z.string().datetime().optional(),
   lastRefreshAt: z.string().datetime().optional(),
@@ -355,6 +373,7 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
         .optional(),
       review: z.literal(true).optional(),
       localCompanion: z.literal(true).optional(),
+      run: PairingRunSchema.optional(),
       pendingExpiresAt: z.string().datetime(),
     }),
   }),

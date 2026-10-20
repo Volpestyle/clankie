@@ -1728,11 +1728,40 @@ command still exits 1 and displays those live offers: JSON adds `partial: true`,
 `review: true`, and `offers`; terminal output starts with `PARTIAL`. Each offer
 remains usable until consumed or expired through its supported pairing path.
 
+### Automated pairing runs
+
+Run proof captures, simulator automation, tests and gateway probes inside a pairing
+run, for example:
+
+```sh
+clankie heavy -- clankie pair --run capture-unique-id --purpose simulator --ttl 900 -- node capture.mjs
+```
+
+The child receives `CLANKIE_PAIRING_CODE`, `CLANKIE_PAIRING_URL` and
+`CLANKIE_PAIRING_RUN_ID`. The wrapper revokes its run's pending and active
+pairings and cancels unused offers when the child exits, including a failure or
+interrupt. Use a unique run ID for each invocation. If the wrapper dies, the
+fixed TTL (default 15 minutes, allowed 1–60 minutes) denies access and the service
+records revocation automatically. These pairings are explicitly marked; ordinary
+owner devices never qualify for automatic revocation. Do not use a real device's
+pairing for a proof run.
+
+For a runner that owns its lifecycle, `pair --run ID --purpose proof --ttl 900
+--json` mints the marked offer. Always call `clankie devices end-run ID` from its
+`finally` teardown. Run metadata cannot combine with review or local companion.
+The API equivalent is `POST /v1/pairing/offer` with a `run` object and
+`POST /v1/pairing/runs/ID/end` under the same operator identity.
+
+`GET /v1/devices?grouped=true` groups shared push registrations into a row with
+`pairingIds` and the latest `lastSeenAt`. Grouping never mutates access. Each ID
+can be revoked through the existing device revoke API. Devices without a shared
+registration stay separate even if their names match.
+
 ### `devices [--json]`
 
 List paired devices. Human mode is a table whose `SOURCE` column reads `review`
 for devices paired through a review offer (revoke those after the review) and
-`pair` otherwise; `--json` is `{ "ok": true, "devices": [ … ] }` with
+the run purpose for automation, and `pair` otherwise; `--json` is `{ "ok": true, "devices": [ … ] }` with
 `"review": true` on those rows. Empty human output is `No paired devices.`
 The `PUSH` column shows `enabled` for an active device with chat access and an
 enabled delivery reference, otherwise `off`. This is the host's registration

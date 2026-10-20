@@ -15,6 +15,7 @@ import {
   PairingCompleteRequestSchema,
   PairingOfferRequestSchema,
   PairingRedeemRequestSchema,
+  PairingRunRequestSchema,
   TAKE_CONTROL_GRANTS,
   type DeviceRecord,
   type DeviceGrantSet,
@@ -37,7 +38,14 @@ import {
 import { bodyLimit } from "hono/body-limit";
 import { randomBytes } from "node:crypto";
 import { COMPLETION_TOKEN_TTL_MS, DeviceSessionSigner, mintDeviceSessionClaims } from "../device-session.ts";
-import { applyDeviceEvent, deviceListItem, isDevicePendingExpired, type DeviceRegistry } from "../devices.ts";
+import {
+  applyDeviceEvent,
+  deviceListItem,
+  groupDeviceListItems,
+  isDevicePendingExpired,
+  isDeviceRunExpired,
+  type DeviceRegistry,
+} from "../devices.ts";
 import {
   PairingOfferStore,
   mintPairingOffer,
@@ -101,6 +109,11 @@ function sameMacAddresses(request: Request): { controlPlaneUrl: string; relayUrl
 }
 
 export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
+  // Expire before any HTTP route can use an automation credential, including after replay.
+  ctx.app.use("*", async (_context, next) => {
+    await expireRuns();
+    await next();
+  });
   // Deliberately separate: these offers cannot redeem through the gateway or
   // ordinary pairing routes, even if a proxy forwards them from loopback.
   let localOffers = new PairingOfferStore();
@@ -296,6 +309,8 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     const parsed = PairingOfferRequestSchema.safeParse((await readJson(context.req.raw)) ?? {});
     if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    if (parsed.data.run !== undefined && parsed.data.review !== undefined)
+      return context.json({ error: "run_review_conflict" }, 400);
     // A configured doorway wins (ADR 0151), so an offer it cannot carry is a code
     // that can never be redeemed. Refusing beats printing a QR that fails on the
     // phone as "not recognized" with nothing on this Mac to say why.
@@ -319,6 +334,15 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       mintedBy: operator.operatorId,
       idFactory: ctx.idFactory,
       ...(parsed.data.review === undefined ? {} : { review: parsed.data.review }),
+      ...(parsed.data.run === undefined
+        ? {}
+        : {
+            run: {
+              runId: parsed.data.run.runId,
+              purpose: parsed.data.run.purpose,
+              expiresAt: new Date(now.getTime() + parsed.data.run.ttlSeconds * 1000).toISOString(),
+            },
+          }),
     });
     let publisher = ctx.dependencies.pairingOfferPublisher;
     if (publisher !== undefined) {
@@ -337,6 +361,8 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         publisher = undefined;
       }
     }
+    if (offer.run !== undefined && ctx.pairingOffers.isRunEnded(offer.run.runId, offer.mintedBy))
+      return context.json({ error: "run_ended" }, 409);
     const record = pairingOfferRecord(offer);
     ctx.pairingOffers.add(record);
     // A review offer must survive a restart, so its gateway hashes go to the
@@ -389,6 +415,11 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     const browser = taken.offer.browser;
     const deviceId = browser?.deviceId ?? `device-${ctx.idFactory().slice(0, 12)}`;
     return withSerializedLock(ctx.deviceLocks, deviceId, async () => {
+      if (
+        taken.offer.run !== undefined &&
+        ctx.pairingOffers.isRunEnded(taken.offer.run.runId, taken.offer.mintedBy)
+      )
+        return context.json({ error: "run_ended" }, 410);
       const existing = ctx.devices.get(deviceId);
       if (existing && browser === undefined) return context.json({ error: "device_identity_conflict" }, 409);
       if (browser !== undefined) {
@@ -433,6 +464,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
             mintedBy: taken.offer.mintedBy,
             ...(supportGrantId === undefined ? {} : { supportGrantId }),
             ...(browser === undefined ? {} : { browserSessionId: browser.sessionId }),
+            ...(taken.offer.run === undefined ? {} : { run: taken.offer.run }),
             ...(taken.offer.review === undefined ? {} : { review: true }),
             pendingExpiresAt,
           },
@@ -497,7 +529,8 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       const record = ctx.devices.get(pending.deviceId);
       if (record === undefined || isDevicePendingExpired(record, now))
         return context.json({ error: "expired" }, 410);
-      if (record.status === "revoked") return context.json({ error: "revoked" }, 403);
+      if (record.status === "revoked" || isDeviceRunExpired(record, now))
+        return context.json({ error: "revoked" }, 403);
       if (record.status !== (pending.reissue ? "active" : "pending"))
         return context.json({ error: "consumed" }, 409);
       // Reissue preserves the accepted grants; this is not a grant-change API.
@@ -761,6 +794,56 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
   wakeRevocationTimer?.unref();
   if (ctx.dependencies.hostedBody !== undefined) void retryWakeRevocations();
 
+  // Shared teardown path: only explicitly marked records are eligible for automatic revocation.
+  const revokeRunDevice = async (deviceId: string, revokedBy: string) =>
+    withSerializedLock(ctx.deviceLocks, deviceId, async () => {
+      const record = ctx.devices.get(deviceId);
+      if (record?.run === undefined || record.status === "revoked") return;
+      applyDeviceEvent(
+        ctx.devices,
+        ctx.recordEvent("device.revoked", `device:${deviceId}`, ctx.clock().toISOString(), {
+          schemaVersion: 1,
+          deviceId,
+          revokedBy,
+        }),
+      );
+      ctx.dependencies.captain.invalidateQuestionPrincipal?.(deviceId);
+      if (ctx.dependencies.hostedBody !== undefined) {
+        pendingWakeRevocations.add(deviceId);
+        await revokeWakeKey(deviceId);
+      }
+    });
+  const expireRuns = async () => {
+    for (const record of ctx.devices.values()) {
+      if (record.status !== "revoked" && isDeviceRunExpired(record, ctx.clock()))
+        await revokeRunDevice(record.deviceId, "automation-run-expired");
+    }
+  };
+  const runRevocationTimer = setInterval(() => {
+    void expireRuns().catch((error) => logger.error({ error }, "automation pairing expiry failed"));
+  }, 15_000);
+  runRevocationTimer.unref();
+
+  ctx.app.post("/v1/pairing/runs/:id/end", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (!operator || operator === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    const runId = context.req.param("id");
+    if (!PairingRunRequestSchema.shape.runId.safeParse(runId).success)
+      return context.json({ error: "malformed" }, 400);
+    // Synchronously cancel outstanding offers before yielding to any revocation.
+    ctx.pairingOffers.endRun(runId, operator.operatorId);
+    const records = [...ctx.devices.values()].filter(
+      (record) => record.run?.runId === runId && record.mintedBy === operator.operatorId,
+    );
+    for (const record of records) await revokeRunDevice(record.deviceId, operator.operatorId);
+    for (const record of records) {
+      if (pendingWakeRevocations.has(record.deviceId) && !(await revokeWakeKey(record.deviceId)))
+        return context.json({ error: "wake_unavailable" }, 503);
+    }
+    return context.json({ revokedDeviceIds: records.map((record) => record.deviceId) });
+  });
+
   // Device management: paired devices may read; removing access requires Take Control.
   ctx.app.get("/v1/devices", async (context) => {
     const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
@@ -786,7 +869,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       .filter((record) => !isDevicePendingExpired(record, now))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .map(deviceListItem);
-    return context.json(items);
+    return context.json(context.req.query("grouped") === "true" ? groupDeviceListItems(items) : items);
   });
 
   ctx.app.post("/v1/devices/:id/revoke", async (context) => {
@@ -931,5 +1014,5 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       (await supportCommand(command, () => Promise.resolve(true))).json(),
     );
   });
-  return { wakeRevocationTimer };
+  return { wakeRevocationTimer, runRevocationTimer };
 }

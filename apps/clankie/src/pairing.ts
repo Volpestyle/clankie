@@ -1,5 +1,10 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import { PAIRING_DIRECT_PARAM, type DomainEvent, type PairingOfferWire } from "@clankie/protocol";
+import {
+  PAIRING_DIRECT_PARAM,
+  type DomainEvent,
+  type PairingRun,
+  type PairingOfferWire,
+} from "@clankie/protocol";
 import { z } from "zod";
 import type { HostedBrowserBinding } from "@clankie/protocol/hosted-browser-session";
 
@@ -48,6 +53,7 @@ export interface PairingOfferRecord {
   readonly expiresAt: string;
   /** Long-lived review offer (ADR 0154). */
   readonly review?: true;
+  readonly run?: PairingRun;
   readonly supportGrantId?: string;
   readonly browser?: HostedBrowserBinding;
   readonly authorizedByBrowserSession?: string;
@@ -82,6 +88,7 @@ export interface MintPairingOfferOptions {
   readonly now: Date;
   readonly mintedBy: string;
   readonly ttlMs?: number;
+  readonly run?: PairingRun;
   readonly supportGrantId?: string;
   readonly browser?: HostedBrowserBinding;
   readonly authorizedByBrowserSession?: string;
@@ -107,6 +114,7 @@ export function mintPairingOffer(options: MintPairingOfferOptions): StoredPairin
     offerHash: hashPairingSecret(offerSecret),
     codeHash: hashPairingCode(code),
     mintedBy: options.mintedBy,
+    ...(options.run === undefined ? {} : { run: options.run }),
     createdAt: options.now.toISOString(),
     expiresAt: new Date(options.now.getTime() + ttlMs).toISOString(),
     ...(options.review === undefined ? {} : { review: true as const }),
@@ -217,6 +225,7 @@ export type TakePairingOfferResult =
  * outlive the mint response.
  */
 export class PairingOfferStore {
+  private readonly endedRuns = new Set<string>();
   private readonly offers = new Map<string, PairingOfferRecord>();
   private readonly bySecretHash = new Map<string, string>();
   private readonly byCodeHash = new Map<string, string>();
@@ -233,11 +242,27 @@ export class PairingOfferStore {
     this.byCodeHash.set(record.codeHash, record.offerId);
   }
 
+  /** Cancel only offers minted by this operator for this automation run. */
+  public isRunEnded(runId: string, mintedBy: string): boolean {
+    return this.endedRuns.has(JSON.stringify([mintedBy, runId]));
+  }
+
+  public endRun(runId: string, mintedBy: string): void {
+    this.endedRuns.add(JSON.stringify([mintedBy, runId]));
+    for (const offer of this.offers.values()) {
+      if (offer.run?.runId === runId && offer.mintedBy === mintedBy) this.evict(offer);
+    }
+  }
+
   /** Drop expired offers and consumed markers whose grace window has passed. */
   public prune(now: Date): void {
     const nowMs = now.getTime();
     for (const offer of this.offers.values()) {
-      if (Date.parse(offer.expiresAt) <= nowMs) this.evict(offer);
+      if (
+        Date.parse(offer.expiresAt) <= nowMs ||
+        (offer.run !== undefined && Date.parse(offer.run.expiresAt) <= nowMs)
+      )
+        this.evict(offer);
     }
     for (const [hash, graceExpiryMs] of this.consumed) {
       if (graceExpiryMs <= nowMs) this.consumed.delete(hash);
@@ -263,7 +288,10 @@ export class PairingOfferStore {
       (codeHash !== undefined ? this.byCodeHash.get(codeHash) : undefined);
     const offer = offerId !== undefined ? this.offers.get(offerId) : undefined;
     if (offer === undefined) return { ok: false, error: "expired" };
-    if (Date.parse(offer.expiresAt) <= nowMs) {
+    if (
+      Date.parse(offer.expiresAt) <= nowMs ||
+      (offer.run !== undefined && Date.parse(offer.run.expiresAt) <= nowMs)
+    ) {
       this.evict(offer);
       return { ok: false, error: "expired" };
     }

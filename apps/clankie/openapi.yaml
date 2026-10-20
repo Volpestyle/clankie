@@ -6913,11 +6913,41 @@ paths:
       tags: [Pairing]
       operationId: postPairingOffer
       summary: Mint a one-time pairing offer
-      description: The offer secret appears once in the response. Do not log it.
+      description: |
+        The offer secret appears once in the response. Do not log it.
+        Automation may supply run {runId, purpose, ttlSeconds}: purpose is test,
+        proof, simulator or gateway-probe; TTL is 60–3600 seconds (default 900).
+        Redemption persists the fixed run expiry. Cannot combine with review.
+      requestBody:
+        content:
+          application/json:
+            example: { run: { runId: capture-123, purpose: simulator, ttlSeconds: 900 } }
       security: [{ operatorBearer: [] }]
       responses:
         "200":
           description: Offer wire (deep link + code); ordinary offers also include the existing single-use localCode for same-Mac direct pairing; review offers omit localCode
+
+  /v1/pairing/runs/{id}/end:
+    post:
+      tags: [Pairing, Devices]
+      operationId: endPairingRun
+      summary: End an automation pairing run
+      description: |
+        Operator-only, idempotent teardown. Cancels unredeemed offers and revokes
+        pending and active devices explicitly marked with this run ID and minted
+        by the authenticated operator. Ordinary owner devices are never selected.
+        Run expiry also revokes after a crash, survives replay and denies auth
+        immediately at the deadline; a 15-second sweep records durable revocation.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$" }
+      responses:
+        "200": { description: revokedDeviceIds array }
+        "400": { description: malformed }
+        "401": { description: Operator authentication required }
 
   /v1/pairing/redeem:
     post:
@@ -7000,9 +7030,18 @@ paths:
     get:
       tags: [Devices, Operator]
       operationId: listDevices
+      parameters:
+        - in: query
+          name: grouped
+          schema: { type: boolean, default: false }
       summary: List paired devices
       description: |
         Owner operators and active paired devices may read these secret-free rows.
+        With grouped=true, shared push registrations on the same platform become
+        one row with pairingIds and the maximum lastSeenAt. Active registrations
+        take precedence over revoked ones, then newest creation. Automation rows
+        stay separate and include run metadata. Revoke every pairingId explicitly
+        to remove a grouped device's access; listing never revokes a device.
         Optional lastSeenAt records successful authenticated device activity,
         at most once per minute per device. `push` carries the device's last delivery state —
         `{ registrationId, sequence, enabled }` — so the listing is truthful
