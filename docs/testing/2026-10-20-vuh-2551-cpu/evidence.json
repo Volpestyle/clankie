@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "after-reads.jsonl",
+      "size": 1069709,
+      "sha256": "ca96bf4e175ff3358bfad7f295650896b0f09f7a17bd571a6f8a549584e763d4",
+      "url": "clankie://evidence/sha256/ca96bf4e175ff3358bfad7f295650896b0f09f7a17bd571a6f8a549584e763d4"
+    },
+    {
+      "path": "after.cpuprofile",
+      "size": 322078,
+      "sha256": "411c1ca921812074439d861918f69c0d24e84375f578fa6bf415839e88806a68",
+      "url": "clankie://evidence/sha256/411c1ca921812074439d861918f69c0d24e84375f578fa6bf415839e88806a68"
+    },
+    {
+      "path": "baseline-reads.jsonl",
+      "size": 80630,
+      "sha256": "436aac5202517d873c3d880e445b11eea615c2b000f2bf70111c2c2119acf7ab",
+      "url": "clankie://evidence/sha256/436aac5202517d873c3d880e445b11eea615c2b000f2bf70111c2c2119acf7ab"
+    },
+    {
+      "path": "baseline.cpuprofile",
+      "size": 440622,
+      "sha256": "6da6653c0c2f3d89bc1e9f128eeb908097f3f52ea5ef9ed3450f91cd53f1936b",
+      "url": "clankie://evidence/sha256/6da6653c0c2f3d89bc1e9f128eeb908097f3f52ea5ef9ed3450f91cd53f1936b"
+    },
+    {
+      "path": "live-sample.txt",
+      "size": 5217395,
+      "sha256": "69524823bb848442fb117a77ba52fe225ba20ddaf75f0cb959bed9df72a4cd43",
+      "url": "clankie://evidence/sha256/69524823bb848442fb117a77ba52fe225ba20ddaf75f0cb959bed9df72a4cd43"
+    },
+    {
+      "path": "measurements-and-methods.tar",
+      "size": 81920,
+      "sha256": "3896b5288dd0af95fb17e03ab3e51c2297d630fd7cdcffb566c73c0d9a8ea950",
+      "url": "clankie://evidence/sha256/3896b5288dd0af95fb17e03ab3e51c2297d630fd7cdcffb566c73c0d9a8ea950"
+    },
+    {
+      "path": "source-before-reads.jsonl",
+      "size": 173563,
+      "sha256": "10740203a07f8a6b3f898012d9bc1957d474dfe97b61784f91cab2341e104abc",
+      "url": "clankie://evidence/sha256/10740203a07f8a6b3f898012d9bc1957d474dfe97b61784f91cab2341e104abc"
+    },
+    {
+      "path": "source-idle.cpuprofile",
+      "size": 339590,
+      "sha256": "05fb9e53bbc1a4b44388ffb02590cdc828394fa5c1faf46ef14351125237ace6",
+      "url": "clankie://evidence/sha256/05fb9e53bbc1a4b44388ffb02590cdc828394fa5c1faf46ef14351125237ace6"
+    }
+  ]
+}

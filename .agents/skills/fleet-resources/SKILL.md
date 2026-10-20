@@ -378,3 +378,6 @@ keep their trees until their requests finish. `freedBytes`
 measures allocated blocks removed. Aliases, stored logs and live process cwd stay
 protected; incomplete cwd observations defer cleanup. Never manually delete a
 batch or a lock.
+Retained integration records reuse validated data only while their file generation
+is unchanged, checked on every read including ctime. Status and cleanup still
+observe external edits, replacements and deletions without restarting the service.

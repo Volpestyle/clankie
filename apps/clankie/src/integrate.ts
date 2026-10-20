@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { syncOwnerCheckout } from "@clankie/settings";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, open, readdir, rmdir, realpath, lstat } from "node:fs/promises";
+import { mkdir, readFile, open, readdir, rmdir, realpath, lstat, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve, relative, isAbsolute, sep } from "node:path";
 import { promisify } from "node:util";
 import { Writable } from "node:stream";
@@ -155,6 +155,7 @@ export class IntegrationQueue {
   private withdrawn = new Set<string>();
   private durations: number[] = [];
   private writes = new Map<string, Promise<void>>();
+  private readonly records = new Map<string, { version: string; batch: IntegrationBatch }>();
   private draining = false;
   private closing = false;
   private readonly commands = new Map<
@@ -181,6 +182,7 @@ export class IntegrationQueue {
       .then(async () => {
         batch.updatedAt = now();
         await durableJson(this.path(batch.id), IntegrationBatchSchema.parse(batch));
+        this.records.delete(batch.id);
       });
     this.writes.set(batch.id, write);
     try {
@@ -190,10 +192,25 @@ export class IntegrationQueue {
     }
   }
   private async read(id: string): Promise<IntegrationBatch> {
-    return IntegrationBatchSchema.parse(JSON.parse(await readFile(this.path(id), "utf8")));
+    const path = this.path(id);
+    // Status readers and the reclaim census revisit the same retained history.
+    // Check every file generation, including ctime for edits that restore mtime;
+    // reuse only validation, never a timed authority or queue-state snapshot.
+    const info = await stat(path, { bigint: true });
+    const version = `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+    const cached = this.records.get(id);
+    if (cached?.version === version) return structuredClone(cached.batch);
+    const batch = IntegrationBatchSchema.parse(JSON.parse(await readFile(path, "utf8")));
+    // A write racing the read leaves an older version, refreshed on the next read.
+    // Callers mutate their copies during status projection and reclamation.
+    if (this.records.size >= 4096) this.records.delete(this.records.keys().next().value!);
+    this.records.set(id, { version, batch: structuredClone(batch) });
+    return batch;
   }
   async status(id: string): Promise<IntegrationBatch> {
-    const batch = await this.stored(id);
+    return this.projectStatus(await this.stored(id));
+  }
+  private async projectStatus(batch: IntegrationBatch): Promise<IntegrationBatch> {
     // A push request's pass is one step: while its run continues, it is landing. So is a
     // hold it is about to gate again past (VUH-2068): the request itself is still running.
     if (
@@ -257,8 +274,8 @@ export class IntegrationQueue {
       },
     };
   }
-  private async stored(id: string): Promise<IntegrationBatch> {
-    const receipt = await this.read(id);
+  private async stored(id: string, receipt?: IntegrationBatch): Promise<IntegrationBatch> {
+    receipt ??= await this.read(id);
     const shared = receipt.batchId ? await this.read(receipt.batchId) : receipt;
     const batch = receipt.batchId
       ? {
@@ -306,7 +323,7 @@ export class IntegrationQueue {
         receipt &&
         (!receipt.batchId || this.retries.some((job) => job.members.some((member) => member.batch.id === id)))
       )
-        batches.push(await this.status(id));
+        batches.push(await this.projectStatus(await this.stored(id, receipt)));
     }
     batches.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
     return batches;

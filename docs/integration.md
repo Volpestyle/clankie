@@ -26,6 +26,9 @@ follow with `clankie integrate status`. `status` without a UUID shows
 running batches, waiting requests, the last result and interrupted work;
 `status UUID` follows one request through shared batches and failure isolation.
 The TUI `/integrate` shows the same queue.
+Retained record validation is cached by file generation (device, inode, size,
+mtime and ctime), checked on every read. Status still projects current queue
+state; replacing, editing or deleting a record takes effect on the next read.
 
 Core inputs are positional; repeat `--app SHA` in order for the optional app.
 Core may be empty when only app commits are supplied. The service uses its own
