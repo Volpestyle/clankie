@@ -470,6 +470,7 @@ export function createFleetSeatControl(
         detail: "Original native occupant is unavailable or changed; nothing was sent.",
       };
     }
+    // allow-swallowed-rejection -- Failed ACK reads prove nothing; try the transcript, then retain unknown fate.
     const channel = await channelReceipt?.(pending.nativeDeliveryId ?? id).catch(() => undefined);
     const fresh = await runner.resolveTerminal(seatId).catch(() => undefined);
     if (
