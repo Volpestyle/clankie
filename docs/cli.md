@@ -1254,14 +1254,22 @@ Integration clones keep client hooks disabled.
 `clankie integrate reclaim` sweeps historical terminal batches even while another
 batch is gating and reports removed paths, retained reasons, and `freedBytes`
 (allocated blocks measured before removal). It also removes empty worktrees folders.
-An idle queue allows the full scratch sweep. While a proven live owner holds
-`queue.lock`, reclaim removes only finished batches' copied download stores:
+A proven live queue owner no longer blocks terminal tree reclamation. The sweep
+fences durable request dependencies before deleting: `batchId`,
+`isolation.rootBatchId`, prior attempts, reused gates and `interruptionRetry.batchId`.
+Raw queued receipts protect a shared attempt between failure and retry admission;
+recoverable interrupted requests protect their sources before startup recovery
+saves a retry claim. Those old sources become disposable when the request finishes.
+An unreadable or mismatched receipt defers tree cleanup rather than hiding a retry
+dependency. Concurrent sweeps serialize, and per-batch locks serialize automatic
+cleanup with explicit reclamation. Each writer rereads its record under that lock.
+
+Finished passes and retry sources can shed copied download stores independently:
 `isolation/{core,app}/{pnpm-store,npm-cache}`. Installs copy package contents into
-`node_modules`, so neither pushing nor retrying depends on those stores.
-The busy path preserves worktrees, installed dependencies, private environments,
-records and evidence; it never rewrites a record during a queue transition.
-Concurrent sweeps serialize separately. Active batches, aliased paths, stored
-logs and live process cwd remain protected; an unknown queue owner still refuses.
+`node_modules`, so neither pushing nor retrying depends on those stores. This
+cache-only path preserves worktrees, private environments and records. Active
+batches, aliased paths, stored logs and live process cwd remain protected; an
+unknown queue owner still refuses.
 
 Pushed batches and failed, cancelled, interrupted or conflicting attempts lose
 their disposable scratch worktrees and private `isolation/` install/gate caches as soon as the queue no longer needs them.

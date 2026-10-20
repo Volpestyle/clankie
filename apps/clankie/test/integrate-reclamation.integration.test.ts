@@ -106,6 +106,18 @@ console.log('completed real gate');
       await expect.poll(() => existsSync(join(root, "entered")), { timeout: 30_000 }).toBe(true);
       expect((await queue.status(liveId)).state).toBe("gating");
       const live = await queue.status(liveId);
+      // Its trees are still a queued retry source; copied stores are independent.
+      const retryId = randomUUID();
+      await durableJson(join(directory, "batches", retryId, "record.json"), {
+        ...historical,
+        id: retryId,
+        request: { ...receipts, id: retryId },
+        state: "queued",
+        restartRecovery: false,
+        repos: [],
+        evidence: join(directory, "batches", retryId, "record.json"),
+        isolation: { rootBatchId: historicalId },
+      });
       const repository = join(directory, "batches", historicalId, "repositories", "core");
       await git(repository, "update-ref", "refs/clankie/retained/core", head);
       const recordBytes = await readFile(historical.evidence);

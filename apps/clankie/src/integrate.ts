@@ -30,7 +30,12 @@ import type { FleetProgressObservation } from "./fleet-progress.ts";
 
 import { processWorkingDirectories } from "./process-working-directories.ts";
 import { removeDirectory } from "./remove-directory.ts";
-import { withReclamationWindow, reclaimCopiedInstallStores } from "./integrate-reclamation.ts";
+import {
+  withReclamationWindow,
+  reclaimCopiedInstallStores,
+  integrationRetrySources,
+  integrationReclamationState,
+} from "./integrate-reclamation.ts";
 
 const execute = promisify(execFile);
 const now = () => new Date().toISOString();
@@ -702,12 +707,30 @@ export class IntegrationQueue {
     guard: () => Promise<void>,
     at: number,
   ): Promise<void> {
+    // Automatic cleanup and sweeps share a per-batch writer lock. A fresh read
+    // keeps reclamation metadata from overwriting another cleanup's evidence.
+    await withDirectoryLock(join(this.options.directory, "reclamation-batches", batch.id), async () => {
+      const latest = await this.read(batch.id);
+      if (latest.id !== batch.id) throw Error("batch_alias");
+      await this.reclaimBatchUnlocked(latest, result, cwds, guard, at);
+    });
+  }
+  private async reclaimBatchUnlocked(
+    batch: IntegrationBatch,
+    result: { reclaimed: string[]; kept: { id: string; reason: string }[]; freedBytes: number },
+    cwds: string[],
+    guard: () => Promise<void>,
+    at: number,
+  ): Promise<void> {
     const id = batch.id;
+    const shared = batch.batchId ? await this.read(batch.batchId) : undefined;
+    if (shared && shared.id !== batch.batchId) throw Error("batch_alias");
+    const state = integrationReclamationState(batch, shared);
     if (
       this.running.has(id) ||
       this.retries.some((job) => job.reuse?.id === id) ||
       this.current?.job.reuse?.id === id ||
-      !["pushed", "failed", "cancelled", "interrupted", "conflict"].includes(batch.state)
+      !["pushed", "failed", "cancelled", "interrupted", "conflict"].includes(state)
     )
       return;
     const root = resolve(dirname(this.path(id)));
@@ -813,7 +836,7 @@ export class IntegrationQueue {
     }
   }
 
-  /** Reclaim full terminal scratch when idle, or only copied download stores beside a live queue. */
+  /** Sweep terminal scratch beside a live queue, fenced by durable retry dependencies. */
   async reclaimWorktrees(
     at = Date.now(),
     guard: () => Promise<void> = async () => {},
@@ -833,15 +856,28 @@ export class IntegrationQueue {
           },
         );
         if (ids.length > 4096) throw Error("Integration batch census exceeds its bound");
-        const cwds = await processWorkingDirectories();
+        const records = new Map<string, IntegrationBatch>();
+        let dependenciesKnown = true;
         for (const id of ids) {
           if (!/^[a-f0-9-]{36}$/u.test(id)) continue;
           try {
-            const batch = await this.read(id);
-            if (busy) {
-              // This branch never saves records or removes worktrees. A terminal
-              // attempt may still be entering recovery in the live queue process.
-              if (active.has(batch.state)) continue;
+            const record = await this.read(id);
+            if (record.id !== id) throw Error("batch_alias");
+            records.set(id, record);
+          } catch (error) {
+            // This receipt may fence a retry source. Cache-only cleanup can
+            // continue, but no tree is disposable without the complete census.
+            dependenciesKnown = false;
+            result.kept.push({ id, reason: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        const sources = integrationRetrySources(records);
+        const cwds = await processWorkingDirectories();
+        for (const [id, batch] of records) {
+          try {
+            if ((busy || !dependenciesKnown) && !active.has(batch.state)) {
+              // Copied stores are independent of held passes and retry sources.
+              // This branch never saves a record during a queue transition.
               const root = resolve(dirname(this.path(id)));
               if (batch.evidence !== join(root, "record.json")) throw Error("batch_alias");
               const logs = batch.repos
@@ -853,7 +889,13 @@ export class IntegrationQueue {
                 ])
                 .filter((log): log is string => log !== undefined);
               await reclaimCopiedInstallStores(root, logs, guard, result);
-            } else await this.reclaimBatch(batch, result, cwds, guard, at);
+            }
+            if (!dependenciesKnown) continue;
+            if (sources.has(id)) {
+              result.kept.push({ id, reason: "retry_source" });
+              continue;
+            }
+            await this.reclaimBatch(batch, result, cwds, guard, at);
           } catch (error) {
             result.kept.push({ id, reason: error instanceof Error ? error.message : String(error) });
           }
@@ -1303,11 +1345,16 @@ export class IntegrationQueue {
         )
           throw Error("Restore source does not match a recorded passed tree");
         const retained = join(dirname(dirname(good.directory)), "repositories", name);
-        await this.git(directory, [
-          "fetch",
-          (await lstat(good.directory).catch(() => undefined)) ? good.directory : retained,
-          good.head,
-        ]);
+        let restoreSource = retained;
+        if (restore.state !== "pushed") {
+          try {
+            await lstat(good.directory);
+            restoreSource = good.directory;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+        }
+        await this.git(directory, ["fetch", restoreSource, good.head]);
         await this.git(directory, ["read-tree", "--reset", "-u", `${good.head}^{tree}`]);
         await this.git(directory, [
           "commit",

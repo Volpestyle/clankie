@@ -42,9 +42,10 @@ new commits and composing a fresh batch.
 A request accepted while startup worktree reclamation or another live writer
 holds `queue.lock` stays queued until that writer releases it. It keeps its UUID
 and admission order; no manual resubmission or concurrent gate is needed. Queue-drain admission waits for that writer. Explicit reclamation instead
-frees finished batches' copied download stores alongside the live queue,
-retaining worktrees, installed dependencies, environments and evidence. The full
-scratch sweep still requires the queue lock. Missing/unreadable owner records and permission failures
+sweeps disposable terminal worktrees and caches alongside the live queue,
+fencing queued and recoverable requests' durable retry sources before removing
+trees. Finished passes and retry sources can shed copied download stores while
+retaining their worktrees, installed dependencies, environments and evidence. Missing/unreadable owner records and permission failures
 remain errors. A newly dead owner reports a retained stale lock; the existing
 recovery of a proven abandoned pre-boot lock still records its interrupted work.
 

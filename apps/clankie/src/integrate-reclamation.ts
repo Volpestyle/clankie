@@ -1,3 +1,4 @@
+import type { IntegrationBatch } from "@clankie/protocol/integrate";
 import { readFile, lstat, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -54,7 +55,7 @@ export async function reclaimCopiedInstallStores(
 
 /**
  * An idle queue permits its normal scratch sweep. A proven busy queue permits
- * only download-store cleanup, which neither changes records nor removes trees.
+ * reclamation fenced by the durable receipt census and live-process guards.
  * Unknown owners never authorize the fallback.
  */
 export async function withReclamationWindow<T>(
@@ -95,4 +96,47 @@ export async function withReclamationWindow<T>(
     }
     return sweep(true);
   }
+}
+
+/** A receipt keeps its own state while a later attempt carries its result. */
+export function integrationReclamationState(
+  record: IntegrationBatch,
+  shared?: IntegrationBatch,
+): IntegrationBatch["state"] {
+  if (!record.batchId || !shared || !["queued", "passed", "held", "partial"].includes(record.state))
+    return record.state;
+  if (shared.state === "pushed") return "pushed";
+  if (shared.state === "interrupted" && record.restartRecovery !== true) return "interrupted";
+  // A failed singleton has no further isolation retry. A shared failure still
+  // needs its queued member receipts to fence the failure-to-retry window.
+  if (shared.state === "failed" && (shared.members ?? [shared.request]).length === 1) return "failed";
+  return record.state;
+}
+
+/** Durable dependencies fence startup recovery before in-memory retry jobs exist. */
+export function integrationRetrySources(records: ReadonlyMap<string, IntegrationBatch>): Set<string> {
+  const sources = new Set<string>();
+  const active = new Set(["queued", "composing", "installing", "gating", "isolating", "pushing"]);
+  for (const record of records.values()) {
+    const shared = record.batchId ? records.get(record.batchId) : record;
+    // Member receipts can still say queued while their shared attempt has just
+    // failed. Those pointers precede the gate and fence the failure→retry window.
+    const state = integrationReclamationState(record, shared);
+    if (state === "pushed") continue;
+    const recoverable = record.restartRecovery === true && state === "interrupted";
+    // Held receipts can preserve their attestation while an in-memory regate
+    // runs. Keep their lineage until an unambiguous terminal completion too.
+    const resumable = ["passed", "held", "partial"].includes(state);
+    if (!active.has(state) && !recoverable && !resumable) continue;
+    sources.add(record.id);
+    for (const source of [
+      record.batchId,
+      record.isolation?.rootBatchId,
+      record.interruptionRetry?.batchId,
+      ...(record.attempts ?? []),
+      ...record.repos.map((repo) => repo.gateReuse?.batchId),
+    ])
+      if (source) sources.add(source);
+  }
+  return sources;
 }

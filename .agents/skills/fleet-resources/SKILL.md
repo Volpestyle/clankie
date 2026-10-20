@@ -370,8 +370,11 @@ or an unused terminal failure. A five-minute sweep retries deferred cleanup.
 `pnpm-store` and `npm-cache` directories while another batch is gating. That busy
 path preserves worktrees, node_modules, private environments, records, logs,
 receipts and Git stores; it never rewrites records during queue transitions.
-The full worktree/isolation sweep still needs the queue lock. Passed/held/partial
-batches stay available for push, and retry sources keep their trees. `freedBytes`
+Terminal worktrees can also be reclaimed beside a live queue: durable queued,
+recoverable-interrupted and interruptionRetry dependencies fence their sources,
+including the failure-to-retry admission window. Unknown receipts defer tree
+cleanup. Passed/held/partial batches stay available for push, and retry sources
+keep their trees until their requests finish. `freedBytes`
 measures allocated blocks removed. Aliases, stored logs and live process cwd stay
 protected; incomplete cwd observations defer cleanup. Never manually delete a
 batch or a lock.
