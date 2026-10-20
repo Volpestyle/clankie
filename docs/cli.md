@@ -964,8 +964,14 @@ inventory digest. It claims neither launch nor delivery. The original moves to
 `local-settled:ORIGINAL_UUID` in the receipt journal, so a new hire into that
 directory starts normally. Nothing is sent, replayed or closed, and repeating
 the command reads the retained disposition. A local project allocation whose
-original pane never held an observed occupant and now holds only its shell can
-then be released with `release-allocation`.
+original pane is absent or holds only its own shell can then be released with
+`release-allocation`. Failed starts expose the original native `receiptId` to
+the hiring lead. Older failures that omitted it can be recovered by the operator
+with `clankie hire-receipt settle ALLOCATION_UUID abandoned`: the service resolves
+exactly one retained local receipt with the same harness, directory and pane,
+then applies the same two-census abandonment. The result returns that native
+receipt UUID. Follow with `clankie hire-receipt settle ALLOCATION_UUID
+release-allocation`; no launch history is rewritten and no brief is replayed.
 
 `clankie hire-receipt settle ID adopt` is the operator's path for a local hire
 that launched but never confirmed, so its hiring lead cannot reach it (`message_seat`
@@ -5426,7 +5432,7 @@ What crosses the link, and what cannot:
   retained for inspection. Retrying that hire does not send its brief or create
   another worker. Failures after the native turn RPC retain uncertainty.
 - A remote Claude hire uses the `clankie-worker` plugin there, as a local one
-  does: its fresh brief is the native CLI startup prompt, follow-ups use the
+  does: its fresh brief is a private file referenced by the native startup prompt, follow-ups use the
   plugin's channel, and its hooks report each settled turn. Messages and hooks
   travel over the fleet's **link**, which the
   service keeps up for every ssh fleet: an `ssh -R` forward from that machine's
@@ -6325,11 +6331,16 @@ explaining missing structured control. Registered remote fleets do not change th
 local hire. Native questions remain visible in the pane; approvals and
 folder-trust prompts remain owner decisions.
 
-Fresh Claude hires pass the brief once as the native CLI startup prompt, so
-Claude schedules it after its own startup. They do not also send the brief over
-the channel. Resumed hires and follow-ups use the channel; its stdout ACK alone
-does not establish native prompt acceptance. A confirmed Claude brief requires
-the complete prompt in that exact session's transcript. Slow or unavailable
+Fresh Claude hires write the brief once to a private, exclusively created JSON
+file in session state (directory `0700`, file `0600` locally). A short native CLI
+startup prompt references it with `@file`, so Claude expands it after startup.
+JSON keeps arbitrary brief characters and line breaks out of Herdr’s shell
+arguments and Claude’s binary-file/line limits. The file remains available for
+inspection of an uncertain start. They do not also send the brief over the channel. Resumed hires and follow-ups use the channel; its stdout ACK alone
+does not establish native prompt acceptance. A confirmed fresh Claude brief requires the complete decoded JSON file attachment
+in that exact session’s active native transcript; a file-reference prompt alone,
+partial attachment or changed contents cannot confirm it. Resumed briefs require
+the complete channel prompt. Slow or unavailable
 transcripts leave delivery uncertain, retaining the original receipt: inspection
 can reconcile a late prompt without sending it again.
 

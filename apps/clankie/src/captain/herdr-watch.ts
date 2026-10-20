@@ -2646,10 +2646,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
         detail:
           "This fresh intent already settled its admission. Its retained UUID cannot launch again; inspect its original seat.",
       };
-    let pending = this.hireReceipts.pending(receiptKey);
+    const pending = this.hireReceipts.pending(receiptKey);
     if (pending?.briefNotSent)
       return {
         outcome: "failed",
+        receiptId: pending.messageId,
         reason: "not_ready",
         briefDelivery: "not_sent",
         deliveryStage: "unavailable",
@@ -2658,27 +2659,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (pending?.recoveryRequested)
       return {
         outcome: "failed",
+        receiptId: pending.messageId,
         reason: "delivery_unconfirmed",
         deliveryStage: "uncertain",
         detail:
           "This original intent is under explicit operator recovery. It cannot launch, adopt or reconcile through a hire retry.",
       };
-    if (
-      pending?.paneId !== undefined &&
-      input.fleet === undefined &&
-      !this.activeHires.has(receiptKey) &&
-      (await this.runner.list?.().catch(() => undefined))?.some((pane) => pane.paneId === pending!.paneId) ===
-        false
-    ) {
-      // Its pane is closed, so the uncertain hire can never start later:
-      // release it instead of refusing every retry forever.
-      this.hireReceipts.reconcile(receiptKey, pending.messageId);
-      pending = undefined;
-    }
     if (pending !== undefined) {
       if (this.activeHires.has(receiptKey))
         return {
           outcome: "failed",
+          receiptId: pending.messageId,
           reason: "delivery_unconfirmed",
           deliveryStage: "uncertain",
           detail: "Original hire is still active; no recovery or new dispatch began.",
@@ -2736,6 +2727,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           } catch (error) {
             return {
               outcome: "failed",
+              receiptId: pending.messageId,
               reason: "delivery_unconfirmed",
               deliveryStage: "uncertain",
               detail: reasonDetail(error),
@@ -2769,6 +2761,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           } catch (error) {
             return {
               outcome: "failed",
+              receiptId: pending.messageId,
               reason: "delivery_unconfirmed",
               deliveryStage: "uncertain",
               detail: reasonDetail(error),
@@ -2784,6 +2777,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         }
         return {
           outcome: "failed",
+          receiptId: pending.messageId,
           reason: "delivery_unconfirmed",
           deliveryStage: "uncertain",
           detail: `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
@@ -2892,7 +2886,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (result.outcome === "failed" && authority?.intentId) {
       const detail = bounded(
         redactSensitiveText(
-          `Hire did not confirm its first turn: ${result.reason}. ${result.detail ?? ""} Do not replay an uncertain brief.`,
+          `Hire did not confirm its first turn: ${result.reason}. Native receipt ${receipt.messageId}. ${result.detail ?? ""} Do not replay an uncertain brief.`,
         ),
         4000,
       );
@@ -2944,7 +2938,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
           : { reason: result.reason, detail: redactSensitiveText(result.detail ?? "") }),
       }),
     );
-    return { ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) };
+    return {
+      ...result,
+      ...(result.outcome === "failed" && this.hireReceipts.pending(receiptKey)
+        ? { receiptId: receipt.messageId }
+        : {}),
+      deliveryStage: hireDeliveryStage(result, brief !== undefined),
+    };
   }
 
   private remoteClaim(
@@ -3077,6 +3077,25 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (matches.length > 1) return refused("Hire identity is ambiguous; nothing settled.");
       const record = matches[0]?.[1];
       const projectAllocation = this.projectHires.recoveryCandidate(receiptId);
+      // Old failed starts omitted their native UUID. Resolve the retained
+      // allocation to exactly one local original; never infer a replacement.
+      if (projectAllocation && disposition === "abandoned" && !owner) {
+        const originals = this.hireReceipts.entries().filter(([key, original]) => {
+          const [fleet, harness, cwd] = JSON.parse(key) as string[];
+          return (
+            fleet === "local" &&
+            !projectAllocation.request.fleet &&
+            harness === projectAllocation.request.harness &&
+            cwd === projectAllocation.request.workingDirectory &&
+            original.paneId === projectAllocation.pane &&
+            !original.freshHire &&
+            !original.remoteAdmission
+          );
+        });
+        if (originals.length !== 1)
+          return refused("Allocation has no unique unresolved local native receipt; nothing settled.");
+        return this.settleNativeHireReceipt(originals[0]![1].messageId, guard, "abandoned");
+      }
       if (projectAllocation && disposition !== "release-allocation")
         return refused(
           `Project allocation ${receiptId} is not a native hire receipt. The operator may use release-allocation after settling any original native receipt and proving complete pane-absent inventory; abandoned-unknown cannot describe a project-only claim.`,

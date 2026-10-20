@@ -2,7 +2,7 @@
  * VUH-1458: the hire path drives a seat through its harness adapter, with herdr
  * as the view, and reports blocked or uncertain delivery without terminal input.
  */
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -307,7 +307,14 @@ it.each([
       runner.startAgent.mockImplementation(async ({ args }) => {
         runner.transcript.mockResolvedValue({
           sessionKey: "k",
-          entries: [{ type: "message", id: "native-first-prompt", role: "operator", text: args!.at(-1)! }],
+          entries: [
+            {
+              type: "message",
+              id: "native-first-prompt",
+              role: "operator",
+              text: JSON.parse(await readFile(args!.at(-1)!.split("@").at(-1)!, "utf8")).clankieBrief,
+            },
+          ],
         });
       });
     const adapter = createClaudeWorkerSeatAdapter({
@@ -374,7 +381,7 @@ it.each([
       } else {
         expect(result.outcome).toBe("spawned");
         expect(deliver).not.toHaveBeenCalled();
-        expect(runner.startAgent.mock.calls.at(-1)?.[0].args?.slice(-2)).toEqual(["--", "the brief"]);
+        expect(runner.startAgent.mock.calls.at(-1)?.[0].args?.at(-1)).toContain("@");
         expect(runner.closePane).not.toHaveBeenCalled();
       }
       expect(JSON.parse(log.mock.calls.at(-1)![1] as string)).toMatchObject({

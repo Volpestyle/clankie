@@ -108,8 +108,6 @@ it("a worker launch enables its plugin for this session only and asks for the ap
     "high",
     "--plugin-dir",
     "/skills",
-    "--",
-    "b",
   ]);
   expect(
     claudeWorkerLaunchArgs({ harness: "claude", cwd: "/w", brief: "b" }, [

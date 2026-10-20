@@ -564,14 +564,19 @@ Describe what the receipt establishes:
 - **seen**: claim model awareness only with evidence that actually establishes
   it. A queue acknowledgment or successful hook output pipe does not.
 
-Fresh Claude hires submit the brief once through the native CLI startup prompt,
-never both startup and channel. Their confirmed brief receipt requires the
-complete prompt in the exact native transcript; a bridge stdout ACK alone is
+Fresh Claude hires stage the brief in a private JSON file and submit one short
+native CLI prompt referencing it. The full brief never crosses Herdr’s shell
+argument encoder. Never send a second channel copy. Confirmation requires the
+complete decoded file attachment in the exact native transcript; a bridge stdout ACK alone is
 insufficient. A slow transcript leaves `delivery_unconfirmed` / `uncertain`,
 not permission to resend. Inspect or reconcile the original hire. Its observed
 session keeps the hiring conversation even when startup fails. The roster's
 persisted startup-failure summary and the existing hiring-conversation wake
 surface a missing first turn. A pending pane claim grants no native authority.
+Failed starts return `receiptId`. For an old local failure that omitted it, the
+operator can settle its unique original with `clankie hire-receipt settle
+ALLOCATION_UUID abandoned`, then `release-allocation` after complete pane-absent
+inventory. Settlement never replays the brief or claims it was delivered.
 
 Claude sessions with an observed, process/session-bound worker prompt hook can
 receive held replies once at the next `UserPromptSubmit` without `--channels`.

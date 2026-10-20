@@ -1112,8 +1112,20 @@ function claudeEntries(
   return claudeFold(entries, includeChannelPrompts).entries;
 }
 
+function claudeBriefAttachment(entry: Record<string, unknown>): Record<string, unknown> | undefined {
+  const attachment = entry.type === "attachment" ? record(entry.attachment) : undefined;
+  return attachment?.type === "file" &&
+    typeof attachment.filename === "string" &&
+    /(?:^|[\\/])clankie-brief-[0-9a-f-]{36}\.json$/u.test(attachment.filename)
+    ? attachment
+    : undefined;
+}
+
 const claudeIncluded = (entry: Record<string, unknown>) =>
-  (entry.type === "user" || entry.type === "assistant" || queuedCommand(entry) !== undefined) &&
+  (entry.type === "user" ||
+    entry.type === "assistant" ||
+    queuedCommand(entry) !== undefined ||
+    claudeBriefAttachment(entry) !== undefined) &&
   entry.isSidechain !== true;
 
 /** Claude's walk link: a compact boundary has no parent; its logical parent continues the history. */
@@ -1211,6 +1223,42 @@ function claudeRecordEntries(
   includeChannelPrompts: boolean,
 ): HerdrTranscriptEntry[] {
   const nativeId = string(entry.uuid) ?? String(entryIndex);
+  // Claude's native @file expansion retains the full file as an attachment.
+  // A startup reference alone is not a receipt: require the complete JSON body.
+  if (includeChannelPrompts && entry.type === "attachment") {
+    const attachment = claudeBriefAttachment(entry);
+    const content = record(attachment?.content);
+    const file = record(content?.file);
+    if (
+      attachment?.type === "file" &&
+      content?.type === "text" &&
+      file !== undefined &&
+      file?.filePath === attachment.filename &&
+      file.startLine === 1 &&
+      file.numLines === 1 &&
+      file.totalLines === 1 &&
+      typeof file.content === "string"
+    ) {
+      try {
+        const body: unknown = JSON.parse(file.content);
+        const brief = record(body);
+        if (brief && Object.keys(brief).length === 1 && typeof brief.clankieBrief === "string")
+          return [
+            {
+              type: "message",
+              id: `claude:${nativeId}`,
+              role: "operator",
+              internal: true,
+              text: brief.clankieBrief,
+              ...timestamp(entry),
+            },
+          ];
+      } catch {
+        // A partial or malformed attachment proves no brief was read.
+        return [];
+      }
+    }
+  }
   // Claude stores channel deliveries as user records with isMeta: true
   // and promptSource: "system". Keep their opt-in internal receipts before
   // dropping other metadata; they must never become visible operator chat.

@@ -259,9 +259,9 @@ export function remoteClaudeTrackerDeny(fleet: HerdrFleet, shell: FleetShellRun)
 }
 
 /** Writes the launch's settings JSON on that machine and returns its path. */
-function remoteClaudeSettings(fleet: HerdrFleet, shell: FleetShellRun) {
+function remoteClaudeSettings(fleet: HerdrFleet, shell: FleetShellRun, prefix = "") {
   return async (json: string): Promise<string> => {
-    const name = `${randomUUID()}.json`;
+    const name = `${prefix}${randomUUID()}.json`;
     const stdout = await shell(
       fleet.ssh.shell === "powershell"
         ? powershellScriptCommand(
@@ -304,5 +304,6 @@ export function createRemoteClaudeWorkerSeatAdapter(
     consent: remoteClaudeConsent(fleet, shell),
     trackerDeny: remoteClaudeTrackerDeny(fleet, shell),
     settingsArg: remoteClaudeSettings(fleet, shell),
+    briefFile: remoteClaudeSettings(fleet, shell, "clankie-brief-"),
   });
 }

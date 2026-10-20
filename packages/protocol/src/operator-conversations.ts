@@ -1322,6 +1322,8 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
       outcome: z.literal("failed"),
+      /** Original native hire fence; inspect/settle it, never replay an uncertain start. */
+      receiptId: z.string().uuid().optional(),
       deliveryStage: DeliveryStageSchema.optional(),
       /** The native launch may exist; this original brief did not cross the turn boundary. */
       briefDelivery: z.literal("not_sent").optional(),

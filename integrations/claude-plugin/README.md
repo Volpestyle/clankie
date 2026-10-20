@@ -231,10 +231,11 @@ Until both steps are done, a Claude hire reports `consent_required` with the
 missing step and unavailable control. It does not type the brief into the
 terminal or launch a replacement worker.
 
-Fresh hires take their brief once through Claude's native CLI startup prompt;
+Fresh hires stage the brief in a private JSON file and take it once through a
+short native CLI startup prompt referencing that file;
 the channel carries resumed briefs and follow-ups. A stdout ACK alone cannot
-confirm prompt acceptance: the exact native transcript must contain the whole
-brief. Missing evidence stays uncertain and must not trigger a replacement send.
+confirm prompt acceptance: the exact native transcript must contain the complete
+decoded file attachment (or whole channel brief for a resumed session). Missing evidence stays uncertain and must not trigger a replacement send.
 The observed session retains its hiring conversation when startup fails, with a
 persisted roster failure summary and a wake to that conversation.
 

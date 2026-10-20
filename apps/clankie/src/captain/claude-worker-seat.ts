@@ -6,7 +6,7 @@ import type { ClaudeHookQuestions } from "./claude-hook-questions.ts";
  * owner can type into it and everything Claude ships keeps working. Control
  * rides the harness's own extension points:
  *
- * - A fresh hire takes its brief as Claude's native CLI startup prompt.
+ * - A fresh hire takes its brief from a private JSON file referenced by its native startup prompt.
  * - Follow-up messages are channel notifications from the plugin's
  *   MCP server, which serves the seat's mailbox (`clankie mcp --seat`).
  * - Acknowledgment is the message in the session's native transcript, the
@@ -20,6 +20,7 @@ import type { ClaudeHookQuestions } from "./claude-hook-questions.ts";
  * lane, naming the one-time fix.
  */
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
@@ -97,6 +98,8 @@ export interface ClaudeWorkerSeatDeps {
    * would not carry its quotes intact (VUH-1527).
    */
   readonly settingsArg?: (json: string) => Promise<string>;
+  /** Stage the private first brief on the launch host; never pass its body through a shell. */
+  readonly briefFile?: (json: string) => Promise<string>;
 }
 
 const READY_MS = 30_000;
@@ -152,6 +155,7 @@ export function claudeWorkerLaunchArgs(
   trackerDeny: readonly string[] = [],
   /** The settings JSON itself, or a path to a file holding it. */
   settings = claudeWorkerSettings(trackerDeny),
+  startupPrompt?: string,
 ): string[] {
   return [
     "--settings",
@@ -167,7 +171,7 @@ export function claudeWorkerLaunchArgs(
     // A fresh session takes its first prompt through Claude's native startup,
     // after its hooks and channel handlers are installed. An MCP stdout write
     // during discovery is not proof the native channel receiver exists yet.
-    ...(launch.resumeSessionId === undefined && launch.brief.length > 0 ? ["--", launch.brief] : []),
+    ...(startupPrompt === undefined ? [] : ["--", startupPrompt]),
   ];
 }
 
@@ -242,6 +246,14 @@ export class SeatHookLog {
   public constructor(path: string) {
     this.path = path;
     this.sessions = this.read();
+  }
+
+  public writeBrief(json: string): string {
+    const directory = join(dirname(this.path), "claude-briefs");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const path = join(directory, `clankie-brief-${randomUUID()}.json`);
+    writeFileSync(path, json, { mode: 0o600, flag: "wx" });
+    return path;
   }
 
   public record(paneId: string, hook: FleetSeatHook, at = new Date().toISOString()): void {
@@ -867,10 +879,22 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
             ? undefined
             : claudeWorkerMcpAllowlist(launch.cwd, launch.env ?? {}, launch.mcpServers),
         );
+        // A one-line JSON file also keeps control characters and arbitrarily
+        // many brief lines out of Claude's text-file/binary and line limits.
+        const briefPath = nativePrompt
+          ? await (deps.briefFile ?? ((json) => deps.hooks.writeBrief(json)))(
+              JSON.stringify({ clankieBrief: launch.brief }),
+            )
+          : undefined;
+        if (briefPath !== undefined && /[\p{Cc}"\s]/u.test(briefPath))
+          throw new Error("Claude brief file requires a path without whitespace, quotes or controls");
         const args = claudeWorkerLaunchArgs(
           launch,
           trackerDeny,
           deps.settingsArg ? await deps.settingsArg(settings) : settings,
+          briefPath === undefined
+            ? undefined
+            : `Execute the assignment in the clankieBrief JSON field of @${briefPath}`,
         );
         await view.guard?.();
         startAttempted = true;
