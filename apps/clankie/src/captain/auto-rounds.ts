@@ -159,7 +159,8 @@ export class AutoRoundRecord {
         (round) =>
           round.delivery?.delivered !== false &&
           (round.projects[0]!.report!.milestones.length > 0 ||
-            (round.projects[0]!.report!.landings?.length ?? 0) > 0) &&
+            (round.projects[0]!.report!.landings?.length ?? 0) > 0 ||
+            (round.projects[0]!.report!.progress?.length ?? 0) > 0) &&
           !round.projects[0]!.report!.updates.some((entry) => !entry.unexpected),
       );
       const target = requested ?? eligible.at(-1);
@@ -217,11 +218,43 @@ export class AutoRoundRecord {
               ]),
             ).values(),
           ].filter((landing) => !claimedLandings.has(landing.sha));
+    const accepted = history.filter((round) => round.delivery?.delivered !== false);
+    const latestUpdate =
+      velocity.statusUpdates?.state === "known"
+        ? velocity.statusUpdates.updates.reduce(
+            (latest, update) => (update.createdAt > latest ? update.createdAt : latest),
+            "",
+          )
+        : undefined;
+    // Any report request counts towards daily pacing, including unsettled claims.
+    // Definitively refused deliveries claim neither the events nor the daily slot.
+    const latestRequest =
+      accepted.find((round) => {
+        const report = round.projects[0]?.report;
+        return report && (report.milestones.length || report.landings?.length || report.progress?.length);
+      })?.at ?? "";
+    const cutoff =
+      latestUpdate === undefined ? undefined : latestUpdate > latestRequest ? latestUpdate : latestRequest;
+    const candidates =
+      cutoff === undefined ? [] : (velocity.progress ?? []).filter((event) => event.at > cutoff);
+    const enough =
+      new Set(candidates.map((event) => event.issue)).size >= 2 ||
+      candidates.some((event) => event.kind === "landing");
+    const progress =
+      velocity.autoUpdates !== false &&
+      cadence !== "silent" &&
+      velocity.tracker &&
+      cutoff !== undefined &&
+      (!cutoff || Date.parse(velocity.measuredAt) - Date.parse(cutoff) >= 24 * 60 * 60_000) &&
+      enough
+        ? candidates
+        : [];
     return {
       ...velocity,
       report: {
         cadence,
         landings,
+        progress,
         milestones:
           velocity.tracker === undefined || cadence === "silent"
             ? []

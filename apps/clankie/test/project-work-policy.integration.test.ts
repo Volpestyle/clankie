@@ -49,6 +49,8 @@ it("edits project work policy through authenticated CLI/HTTP, fences revisions a
     };
     const initial = await list();
     expect(initial.projectWorkPolicy).toBe(true);
+    expect(initial.projectAutoUpdates).toBe(true);
+    expect(initial.settings.projects[0]?.autoUpdates ?? true).toBe(true);
     const hiring = {
       lead: { harness: "claude" },
       worker: { harness: "codex" },
@@ -56,17 +58,24 @@ it("edits project work policy through authenticated CLI/HTTP, fences revisions a
       excludedPlans: ["claude:pro"],
     };
     const file = join(root, "changes.json");
-    await writeFile(file, JSON.stringify({ wipCap: 6, ownerLoop: "milestones", hiring }));
+    await writeFile(file, JSON.stringify({ wipCap: 6, ownerLoop: "milestones", autoUpdates: false, hiring }));
     const command = ["update", "kh2", "--changes", file, "--revision", initial.revision];
     await runProjectSettingsCommand(command, options);
     const saved = await list();
-    expect(saved.settings.projects[0]).toMatchObject({ wipCap: 6, ownerLoop: "milestones", hiring });
+    expect(saved.settings.projects[0]).toMatchObject({
+      wipCap: 6,
+      ownerLoop: "milestones",
+      autoUpdates: false,
+      hiring,
+    });
     await expect(runProjectSettingsCommand(command, options)).rejects.toThrow("Project settings changed");
     for (const query of ["", "?includeAutonomy=true"]) {
       const plain = await fetch(`${host}${PROJECTS_PATH}${query}`, {
         headers: { authorization: `Bearer ${token}` },
       }).then((response) => response.json());
       expect(plain).not.toHaveProperty("projectWorkPolicy");
+      expect(plain).not.toHaveProperty("projectAutoUpdates");
+      expect(plain.settings.projects[0]).not.toHaveProperty("autoUpdates");
       expect(plain).not.toHaveProperty("retiredWorkingPreferences");
       const legacy = z
         .object(ProjectSchema.shape)
@@ -75,11 +84,20 @@ it("edits project work policy through authenticated CLI/HTTP, fences revisions a
       expect(legacy.parse(plain.settings.projects[0]).id).toBe("kh2");
       expect(plain.revision).toBe(saved.revision);
     }
+    const previousPolicyView = await fetch(
+      `${host}${PROJECTS_PATH}?includeAutonomy=true&includeWorkPolicy=true`,
+      {
+        headers: { authorization: `Bearer ${token}` },
+      },
+    ).then((response) => response.json());
+    expect(previousPolicyView.settings.projects[0]).not.toHaveProperty("autoUpdates");
+    expect(previousPolicyView).not.toHaveProperty("projectAutoUpdates");
     for (const changes of [
       { wipCap: 0 },
       { wipCap: 1.5 },
       { wipCap: 1001 },
       { ownerLoop: "daily" },
+      { autoUpdates: "on" },
       { hiring: { allowedPlans: [] } },
       { hiring: { allowedPlans: ["codex:pro", "codex:pro"] } },
       { hiring: { excludedPlans: ["some-account"] } },
@@ -95,16 +113,21 @@ it("edits project work policy through authenticated CLI/HTTP, fences revisions a
       expect(response.status).toBe(400);
     }
     await runProjectSettingsCommand(
-      ["settings", "kh2", "--wip-cap", "none", "--owner-loop", "silent"],
+      ["settings", "kh2", "--wip-cap", "none", "--owner-loop", "silent", "--auto-updates", "on"],
       options,
     );
-    expect((await list()).settings.projects[0]).toMatchObject({ ownerLoop: "silent", hiring });
+    expect((await list()).settings.projects[0]).toMatchObject({
+      ownerLoop: "silent",
+      autoUpdates: true,
+      hiring,
+    });
     expect((await list()).settings.projects[0]).not.toHaveProperty("wipCap");
     const revision = (await list()).revision;
-    await writeFile(file, JSON.stringify({ ownerLoop: null, hiring: null }));
+    await writeFile(file, JSON.stringify({ ownerLoop: null, autoUpdates: null, hiring: null }));
     await runProjectSettingsCommand(["update", "kh2", "--changes", file, "--revision", revision], options);
     expect((await list()).settings.projects[0]).not.toHaveProperty("ownerLoop");
     expect((await list()).settings.projects[0]).not.toHaveProperty("hiring");
+    expect((await list()).settings.projects[0]?.autoUpdates ?? true).toBe(true);
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),

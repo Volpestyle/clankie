@@ -84,12 +84,22 @@ const ProjectStatusUpdateSchema = z
   })
   .strict();
 export const VelocityLandingSchema = z.object({ sha: z.string(), at: z.string() }).strict();
+export const ProgressEvidenceSchema = z
+  .object({
+    key: z.string(),
+    issue: z.string(),
+    at: z.string(),
+    kind: z.enum(["media", "landing"]),
+    refs: z.array(z.string()),
+  })
+  .strict();
 export const MilestoneReportSchema = z
   .object({
     /** Exactly one update is requested for these newly seen milestones together. */
     milestones: z.array(VelocityMilestoneSchema),
     cadence: ProjectOwnerLoopSchema.optional(),
     landings: z.array(VelocityLandingSchema).optional(),
+    progress: z.array(ProgressEvidenceSchema).optional(),
     updates: z.array(ProjectStatusUpdateSchema.extend({ unexpected: z.boolean() })),
   })
   .strict();
@@ -177,6 +187,8 @@ export const ProjectVelocitySchema = z
     projectId: z.string(),
     staffing: AutoProjectStaffingSchema.optional(),
     ownerLoop: ProjectOwnerLoopSchema.optional(),
+    autoUpdates: z.boolean().optional(),
+    progress: z.array(ProgressEvidenceSchema).optional(),
     landings: z
       .union([
         z.object({ state: z.literal("known"), commits: z.array(VelocityLandingSchema) }).strict(),

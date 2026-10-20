@@ -32,6 +32,7 @@ import {
 import type { LinearMirrorRemoval, LinearMirrorView } from "./linear-mirror.ts";
 import {
   summarizeOutcomes,
+  outcomeMedia,
   type OutcomeHistory,
   type OutcomeIssue,
   type OutcomeStateSpan,
@@ -458,6 +459,7 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
     readonly projectId: string;
     readonly window: OutcomeWindow;
     readonly history?: boolean;
+    readonly media?: boolean;
     readonly asOf?: string;
   }): Promise<TrackerOutcomes>;
 }
@@ -3336,12 +3338,23 @@ function statusSpans(store: Store, issue: Issue): OutcomeStateSpan[] {
 
 function builtInOutcomes(
   store: Store,
-  input: { projectId: string; window: OutcomeWindow; history?: boolean; asOf?: string },
+  input: { projectId: string; window: OutcomeWindow; history?: boolean; media?: boolean; asOf?: string },
   readAt: string,
 ): TrackerOutcomes {
   findProject(store, input.projectId);
   const members = store.issues.filter((issue) => issue.projectId === input.projectId);
   const spans = new Map(members.map((issue) => [issue.id, statusSpans(store, issue)]));
+  const recentComments = new Map<string, Comment[]>();
+  if (input.media) {
+    const memberIds = new Set(members.map((issue) => issue.id));
+    for (const comment of store.comments) {
+      if (comment.issueId === null || !memberIds.has(comment.issueId)) continue;
+      const recent = [...(recentComments.get(comment.issueId) ?? []), comment]
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, 3);
+      recentComments.set(comment.issueId, recent);
+    }
+  }
   const issues = members.map((issue): OutcomeIssue => {
     const status = store.issueStatuses.find((entry) => entry.id === issue.statusId)!;
     const last = spans.get(issue.id)!.at(-1);
@@ -3356,6 +3369,14 @@ function builtInOutcomes(
     return {
       id: issue.id,
       identifier: issue.identifier,
+      media: !input.media
+        ? []
+        : [
+            ...outcomeMedia(issue.description, issue.updatedAt),
+            ...(recentComments.get(issue.id) ?? []).flatMap((comment) =>
+              outcomeMedia(comment.body, comment.updatedAt),
+            ),
+          ],
       title: issue.title,
       state: { name: status.name, type: status.type },
       completedAt: status.type === "completed" && last?.state.type === "completed" ? last.startedAt : null,

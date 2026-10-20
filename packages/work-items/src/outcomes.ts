@@ -25,6 +25,8 @@ export interface OutcomeIssue {
   readonly parent: { readonly id: string; readonly identifier: string } | null;
   readonly hasChildren: boolean;
   readonly milestoneId: string | null;
+  /** Positive hints only: a bounded sample, never proof that an issue has no media. */
+  readonly media?: readonly { at: string; url: string }[];
 }
 export interface OutcomeMilestone {
   readonly id: string;
@@ -165,9 +167,32 @@ export function summarizeOutcomes(input: {
   };
 }
 
+/** Captioned Markdown images and video links; bodies remain untrusted evidence for the lead to review. */
+export function outcomeMedia(body: string, at: string): { at: string; url: string }[] {
+  return [...body.matchAll(/(!?)\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/gu)]
+    .filter(
+      (match) =>
+        match[1] === "!" ||
+        /\.(mp4|webm|mov|png|jpe?g|gif)(?:[?#]|$)/iu.test(match[3]!) ||
+        /\.(mp4|webm|mov)$/iu.test(match[2]!),
+    )
+    .slice(0, 3)
+    .flatMap((match) => {
+      try {
+        const url = new URL(match[3]!);
+        // Linear reads can return expiring signatures; keep the stable asset identity.
+        if (url.hostname === "uploads.linear.app") url.search = "";
+        return [{ at, url: url.toString() }];
+      } catch {
+        return []; // Malformed evidence must not make the entire tracker read unknown.
+      }
+    });
+}
+
 const STATE = "state { name type }";
 const SPAN = `startedAt endedAt ${STATE}`;
 const OUTCOME_ISSUE = `id identifier title updatedAt completedAt ${STATE} parent { id identifier } children(first:1) { nodes { id } } projectMilestone { id }`;
+const MEDIA = "description comments(first:3, orderBy:updatedAt) { nodes { body updatedAt } }";
 const WITH_HISTORY = `${OUTCOME_ISSUE} stateHistory(first:25) { nodes { ${SPAN} } pageInfo { hasNextPage } }`;
 
 function outcomeState(value: unknown): OutcomeState {
@@ -225,6 +250,12 @@ function outcomeIssue(record: LinearRecord, history?: OutcomeHistory): OutcomeIs
   const last = history?.spans.at(-1);
   return {
     id: record.id,
+    media: [
+      ...outcomeMedia(String(record.description ?? ""), String(record.updatedAt)),
+      ...((linearRow(record.comments).nodes ?? []) as LinearRecord[]).flatMap((comment) =>
+        outcomeMedia(String(comment.body ?? ""), String(comment.updatedAt)),
+      ),
+    ],
     identifier: String(record.identifier),
     title: String(record.title),
     state: outcomeState(record.state),
@@ -255,6 +286,7 @@ export async function collectLinearOutcomes(input: {
   query: LinearQuery;
   window: OutcomeWindow;
   history?: boolean;
+  media?: boolean;
   now?: () => Date;
   asOf?: string;
 }): Promise<TrackerOutcomes> {
@@ -266,8 +298,8 @@ export async function collectLinearOutcomes(input: {
       projectId,
       "issues",
       `, includeArchived:true, filter:${filter}`,
-      fields,
-      50,
+      input.media ? `${fields} ${MEDIA}` : fields,
+      input.media ? 10 : 50,
     );
   const started = await issuePage(
     `{ state: { type: { eq: "started" } } }`,
@@ -369,6 +401,7 @@ export async function collectLinearOutcomes(input: {
 }
 
 const LINEAR_CAVEATS = [
+  "Media hints sample each issue description and its three most recently updated comments; the lead reviews full evidence only when reporting is due.",
   "Project membership is current: an issue that moved projects counts where it sits now.",
 ];
 

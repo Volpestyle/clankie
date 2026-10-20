@@ -2443,6 +2443,12 @@ paths:
             schema: { const: "true" },
             description: "Include additive staffing facts and totals (VUH-2335); historical rounds may omit them.",
           }
+        - {
+            name: includeAutoUpdates,
+            in: query,
+            schema: { const: "true" },
+            description: Include automatic-update policy and evidenced progress candidates and requests,
+          }
         - { name: project, in: query, required: false, schema: { type: string } }
         - {
             name: limit,
@@ -3242,6 +3248,12 @@ paths:
             schema: { type: string, enum: ["true"] },
             description: Opt into work policy response fields,
           }
+        - {
+            name: includeAutoUpdates,
+            in: query,
+            schema: { type: string, enum: ["true"] },
+            description: Opt into automatic project update settings and capability,
+          }
       requestBody:
         required: true
         content:
@@ -3259,6 +3271,11 @@ paths:
                   properties:
                     wipCap: { type: [integer, "null"], minimum: 1, maximum: 1000 }
                     ownerLoop: { type: [string, "null"], enum: [silent, milestones, landings, null] }
+                    autoUpdates:
+                      {
+                        type: [boolean, "null"],
+                        description: "Evidence-first progress reports; null restores default on.",
+                      }
                     hiring:
                       {
                         type: [object, "null"],
@@ -3300,7 +3317,7 @@ paths:
       tags: [Operator]
       operationId: getOperatorProjects
       summary: Read owner project settings and their current revision
-      description: Legacy responses omit autonomy and work-policy fields. includeAutonomy=true adds autonomy overrides and defaults. includeWorkPolicy=true adds wipCap, ownerLoop, hiring, projectWorkPolicy=true and a read-only retiredWorkingPreferences receipt. Revision always covers the full stored settings.
+      description: Legacy responses omit autonomy and work-policy fields. includeAutonomy=true adds autonomy overrides and defaults. includeWorkPolicy=true adds wipCap, ownerLoop, hiring, projectWorkPolicy=true and a read-only retiredWorkingPreferences receipt. includeAutoUpdates=true adds autoUpdates and projectAutoUpdates=true. Revision always covers the full stored settings.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {
@@ -3315,6 +3332,12 @@ paths:
             schema: { type: string, enum: ["true"] },
             description: Opt into project work policy and retired-value receipt,
           }
+        - {
+            name: includeAutoUpdates,
+            in: query,
+            schema: { type: string, enum: ["true"] },
+            description: Opt into automatic project update settings and capability,
+          }
       responses:
         "200": { description: Project settings and SHA-256 revision }
         "401": { description: Owner authentication required }
@@ -3326,7 +3349,7 @@ paths:
       summary: Create a reviewed project with one canonical local workspace
       description: >-
         Owner only. Strict fields are projectId, name, workspacePath, expectedRevision,
-        roles, workerCap, trackerRef, trackerSetup, productPaths, wipCap, ownerLoop and hiring.
+        roles, workerCap, trackerRef, trackerSetup, productPaths, wipCap, ownerLoop, autoUpdates and hiring.
         The service supplies primary/local workspace identity and its platform.
         Nullable worker caps inherit; zero is preserved. Retired fleet preferences cannot be created. Optional trackerRef must name primary
         and .clankie/tracking.json, an existing valid canonical convention unless
@@ -3432,6 +3455,8 @@ paths:
                     note: { type: string, maxLength: 1000 }
                 wipCap: { type: integer, minimum: 1, maximum: 1000 }
                 ownerLoop: { type: string, enum: [silent, milestones, landings] }
+                autoUpdates:
+                  { type: [boolean, "null"], description: "Evidence-first progress reports; default on." }
                 hiring:
                   type: object
                   additionalProperties: false

@@ -20,7 +20,12 @@ export type ProjectOutcomesRead =
  */
 export async function readProjectOutcomes(
   project: Project,
-  input: { readonly window: OutcomeWindow; readonly history?: boolean; readonly asOf?: string },
+  input: {
+    readonly window: OutcomeWindow;
+    readonly history?: boolean;
+    readonly media?: boolean;
+    readonly asOf?: string;
+  },
   deps: {
     readonly route: (projectId: string) => Promise<string | undefined>;
     readonly linearQuery: () => Promise<LinearQuery>;

@@ -201,6 +201,15 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
               },
             ]
           : []),
+        ...(snapshot.projectAutoUpdates === true
+          ? [
+              {
+                value: "auto-updates",
+                label: "Automatic project updates",
+                hint: project.autoUpdates === false ? "off" : "on (default)",
+              },
+            ]
+          : []),
         ...(snapshot.projectWorkPolicy === true
           ? [
               { value: "wip-cap", label: "Started issue cap", hint: project.wipCap?.toString() ?? "none" },
@@ -336,6 +345,18 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
       });
       if (value !== undefined)
         await update({ wipCap: value.trim() === "" ? null : Number(value) }, "Started issue cap saved.");
+    } else if (choice === "auto-updates") {
+      const value = await flow.readSelect({
+        message: "Post evidence-first updates on noteworthy progress?",
+        options: [
+          { value: "on", label: "On (default)" },
+          { value: "off", label: "Off (existing report cadence)" },
+        ],
+        currentValue: project.autoUpdates === false ? "off" : "on",
+        allowBack: true,
+      });
+      if (value !== undefined)
+        await update({ autoUpdates: value === "on" }, "Automatic project updates saved.");
     } else if (choice === "owner-loop") {
       const value = await flow.readSelect({
         message: "When should the owner hear project updates?",

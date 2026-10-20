@@ -30,6 +30,16 @@ separate provider poller.
 
 ## Project settings and narrow writes
 
+`clankie project settings PROJECT --auto-updates on|off` sets evidence-first
+progress reports (default on), through the revision-fenced project settings API's
+`autoUpdates`. Off preserves the project's existing owner-loop cadence; silent
+still suppresses posts. Auto reuses measured outcomes and bounded media hints to
+request one update after noteworthy progress accumulates, roughly daily unless a
+new milestone lands. Read the previous update and changed issues when asked;
+lead with issue clips and stills at stable asset URLs and short captions, then
+what is open and what comes next. A hint is not proof of delivery or publication
+authority. Reconcile uncertain status-update writes before doing anything else.
+
 For an existing project's team settings, `clankie project list` returns the
 current revision. `clankie project update PROJECT --changes FILE.json --revision
 REVISION` changes only the reviewed name, roles, worker cap or tracker binding;

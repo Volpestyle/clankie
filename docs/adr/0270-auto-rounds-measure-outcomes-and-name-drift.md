@@ -1,6 +1,7 @@
 # ADR 0270: Auto rounds measure outcomes and name drift
 
-Status: accepted by the lead for VUH-2255, 2026-10-14.
+Status: accepted by the lead for VUH-2255, 2026-10-14. Default reporting is amended by
+[ADR 0283](0283-evidence-first-automatic-project-updates.md).
 Tracked by [VUH-2255](https://linear.app/vuhlp/issue/VUH-2255). Builds on
 [ADR 0264](0264-projects-on-auto-replace-goals.md); reads the per-project WIP
 cap and owner-loop level that

@@ -171,6 +171,10 @@ it("measures a project's velocity from its built-in tracker and origin, and keep
   const velocity = await measureVelocity(project, null, deps, now);
 
   expect(routes).toEqual(["mod"]);
+  expect(velocity.autoUpdates).toBe(true);
+  expect(velocity.progress).toEqual(
+    expect.arrayContaining([expect.objectContaining({ issue: product.identifier, kind: "landing" })]),
+  );
   expect(velocity.lastMilestone).toMatchObject({ kind: "parent", ref: parent.identifier });
   expect(velocity.window).toMatchObject({ from: "milestone", until: now.toISOString() });
   expect(velocity.window.since.startsWith("2026-10-11T17:00")).toBe(true);
@@ -878,4 +882,98 @@ it("retains a drift response across restart and keeps unreadable correction chec
   );
   expect(older.correctionCheck).toMatchObject({ state: "unknown", issueStarted: null, productLines: null });
   expect(older.correctionCheck!.reasons.join("; ")).toContain("predates retained tracker range");
+});
+
+it("reports accumulated issue media daily through the existing durable claims and reconciles its tracker update", async () => {
+  const { project, deps, call, at, product, rig, parent, trackerProject } = await measuredProject();
+  const directory = join(roots.at(-1)!, "progress-reporting");
+  let record = new AutoRoundRecord(directory);
+  const baselineAt = new Date("2026-10-14T04:00:00Z");
+  const baseline = record.withReporting(
+    await measureVelocity({ ...project, autoUpdates: false }, null, deps, baselineAt),
+  );
+  record.settled(record.measured("lead", [baseline], baselineAt), true, undefined, baselineAt);
+  await at("2026-10-14T04:01:00Z", () =>
+    call("save_status_update", {
+      type: "project",
+      project: trackerProject.id,
+      body: "Previous milestone update.",
+    }),
+  );
+  for (const issue of [product, rig])
+    await at("2026-10-15T05:00:00Z", () =>
+      call("create_comment", {
+        issueId: issue.id,
+        body: `![${issue.identifier} verified take](https://uploads.linear.app/${issue.identifier}.mp4?signature=expiring) ![bad](https://[)`,
+      }),
+    );
+  const now = new Date("2026-10-15T06:00:00Z");
+  const velocity = await measureVelocity(project, record.lastMilestone(project.id), deps, now);
+  const due = record.withReporting(velocity);
+  expect(due.report!.milestones).toEqual([]);
+  expect(due.report!.progress).toHaveLength(2);
+  expect(
+    due.report!.progress?.flatMap((event) => event.refs).every((url) => !url.includes("signature")),
+  ).toBe(true);
+  expect(reportingSection([due]).join(" ")).toContain("Lead with clips and stills");
+  expect(reportingSection([due]).join(" ")).not.toContain("Do not post a project status update");
+  expect(record.withReporting({ ...velocity, autoUpdates: false }).report!.progress).toEqual([]);
+  expect(record.withReporting({ ...velocity, ownerLoop: "silent" }).report!.progress).toEqual([]);
+  expect(
+    record.withReporting({ ...velocity, statusUpdates: { state: "unknown", reason: "offline" } }).report!
+      .progress,
+  ).toEqual([]);
+  const refused = record.measured("lead", [due], now);
+  record.settled(refused, false, "offline", now);
+  expect(record.withReporting(velocity).report!.progress).toHaveLength(2);
+  const request = record.measured("lead", [record.withReporting(velocity)], now);
+  record = new AutoRoundRecord(directory); // An unsettled native delivery remains claimed across restart.
+  expect(record.withReporting(velocity).report!.progress).toEqual([]);
+  expect(milestoneSignals(record.withReporting(velocity))).toEqual(milestoneSignals(due));
+  const update = (await at("2026-10-15T06:01:00Z", () =>
+    call("save_status_update", {
+      type: "project",
+      project: trackerProject.id,
+      body: "![Verified take](https://example.invalid/take.mp4)\nNext: route testing.",
+    }),
+  )) as { id: string };
+  const after = await measureVelocity(
+    project,
+    record.lastMilestone(project.id),
+    deps,
+    new Date("2026-10-15T07:00:00Z"),
+  );
+  record.observeUpdates(after);
+  expect(
+    record.read().find((round) => round.roundId === request)!.projects[0]!.report!.updates,
+  ).toMatchObject([{ id: update.id, unexpected: false }]);
+  for (const issue of [product, rig])
+    await at("2026-10-15T08:00:00Z", () =>
+      call("create_comment", {
+        issueId: issue.id,
+        body: `![Next take](https://example.invalid/${issue.identifier}-next.png)`,
+      }),
+    );
+  const sameDay = await measureVelocity(
+    project,
+    record.lastMilestone(project.id),
+    deps,
+    new Date("2026-10-15T09:00:00Z"),
+  );
+  expect(record.withReporting(sameDay).report!.progress).toEqual([]);
+  const nextDay = await measureVelocity(
+    project,
+    record.lastMilestone(project.id),
+    deps,
+    new Date("2026-10-16T07:00:00Z"),
+  );
+  expect(record.withReporting(nextDay).report!.progress).toHaveLength(2);
+  // A newly reached major milestone still bypasses daily progress pacing.
+  const major = {
+    ...sameDay,
+    milestones: [
+      { kind: "parent" as const, id: "new-parent", ref: parent.identifier, at: sameDay.measuredAt },
+    ],
+  };
+  expect(record.withReporting(major).report!.milestones).toHaveLength(1);
 });

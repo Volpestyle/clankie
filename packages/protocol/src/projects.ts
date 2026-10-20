@@ -145,6 +145,8 @@ export const ProjectSchema = z
     productPaths: ProductPathsSchema.optional(),
     wipCap: ProjectWipCapSchema.optional(),
     ownerLoop: ProjectOwnerLoopSchema.optional(),
+    /** Evidence-first progress reports; absent means on. */
+    autoUpdates: z.boolean().optional(),
     hiring: ProjectHiringPolicySchema.optional(),
     fleet: z
       .object({
@@ -265,6 +267,7 @@ export const ProjectsSnapshotSchema = z
     productPaths: z.literal(true).optional(),
     /** Opt-in work-policy view only, so existing strict clients retain their response shape. */
     projectWorkPolicy: z.literal(true).optional(),
+    projectAutoUpdates: z.literal(true).optional(),
     retiredWorkingPreferences: RetiredWorkingPreferencesSchema.optional(),
     linearProjectBindings: z.literal(true).optional(),
     /** Each project's status line by project ID, in the autonomy-aware view of a current service. */
@@ -329,6 +332,7 @@ export const CreateProjectSettingsSchema = z
     workerCap: z.number().int().min(0).max(1000).nullable().optional(),
     wipCap: ProjectWipCapSchema.nullable().optional(),
     ownerLoop: ProjectOwnerLoopSchema.nullable().optional(),
+    autoUpdates: z.boolean().nullable().optional(),
     hiring: ProjectHiringPolicySchema.nullable().optional(),
     trackerRef: z
       .object({ workspaceId: z.literal("primary"), path: z.literal(".clankie/tracking.json") })
@@ -453,6 +457,7 @@ export const UpdateProjectSettingsSchema = z
         productPaths: ProductPathsSchema.nullable().optional(),
         wipCap: ProjectWipCapSchema.nullable().optional(),
         ownerLoop: ProjectOwnerLoopSchema.nullable().optional(),
+        autoUpdates: z.boolean().nullable().optional(),
         hiring: ProjectHiringPolicySchema.nullable().optional(),
       })
       .strict()

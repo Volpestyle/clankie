@@ -34,7 +34,12 @@ import {
 } from "@clankie/protocol/projects";
 
 /** Legacy strict clients keep their existing view; the revision always binds full stored policy. */
-function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean, includeWorkPolicy = false) {
+function projectSnapshot(
+  current: ClankieSettings,
+  includeAutonomy: boolean,
+  includeWorkPolicy = false,
+  includeAutoUpdates = false,
+) {
   const projects = current.projects.projects.map((saved) => {
     const project = { ...saved };
     if (!includeAutonomy) {
@@ -45,6 +50,7 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean, inc
       delete project.focus;
       delete project.productPaths;
     }
+    if (!includeAutoUpdates) delete project.autoUpdates;
     if (!includeWorkPolicy) {
       delete project.wipCap;
       delete project.ownerLoop;
@@ -73,6 +79,7 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean, inc
             : { retiredWorkingPreferences: current.retiredWorkingPreferences }),
         }
       : {}),
+    ...(includeAutoUpdates ? { projectAutoUpdates: true } : {}),
     revision: projectsRevision(current.projects),
   };
 }
@@ -124,7 +131,12 @@ export function createProjectRoutes(
         ? await options.status(current.projects.projects).catch(() => undefined)
         : undefined;
     return context.json({
-      ...projectSnapshot(current, includeAutonomy, context.req.query("includeWorkPolicy") === "true"),
+      ...projectSnapshot(
+        current,
+        includeAutonomy,
+        context.req.query("includeWorkPolicy") === "true",
+        context.req.query("includeAutoUpdates") === "true",
+      ),
       ...(status === undefined ? {} : { projectStatus: status.projects, needsYou: status.needsYou }),
     });
   });
@@ -149,6 +161,7 @@ export function createProjectRoutes(
         { ...current, projects: result.settings },
         context.req.query("includeAutonomy") === "true",
         context.req.query("includeWorkPolicy") === "true",
+        context.req.query("includeAutoUpdates") === "true",
       );
       return context.json({ ...projected, revision: result.revision }, 201);
     } catch (error) {
@@ -244,6 +257,7 @@ export function createProjectRoutes(
           updated,
           context.req.query("includeAutonomy") === "true",
           context.req.query("includeWorkPolicy") === "true",
+          context.req.query("includeAutoUpdates") === "true",
         ),
       );
     } catch {
@@ -271,6 +285,7 @@ export function createProjectRoutes(
           updated,
           context.req.query("includeAutonomy") === "true",
           context.req.query("includeWorkPolicy") === "true",
+          context.req.query("includeAutoUpdates") === "true",
         ),
       );
     } catch {
@@ -303,6 +318,7 @@ export function createProjectRoutes(
           updated,
           context.req.query("includeAutonomy") === "true",
           context.req.query("includeWorkPolicy") === "true",
+          context.req.query("includeAutoUpdates") === "true",
         ),
       );
     } catch {
@@ -330,6 +346,7 @@ export function createProjectRoutes(
           updated,
           context.req.query("includeAutonomy") === "true",
           context.req.query("includeWorkPolicy") === "true",
+          context.req.query("includeAutoUpdates") === "true",
         ),
       );
     } catch {

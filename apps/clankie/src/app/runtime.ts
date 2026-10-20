@@ -2779,10 +2779,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
                 projects: round.projects.map(({ staffing: _projectStaffing, ...project }) => project),
               })),
             };
-      if (context.req.query("includeWorkPolicy") === "true") return response;
+      const progressView =
+        context.req.query("includeAutoUpdates") === "true"
+          ? response
+          : {
+              ...response,
+              rounds: response.rounds.map((round) => ({
+                ...round,
+                projects: round.projects.map(
+                  ({ autoUpdates: _autoUpdates, progress: _progress, report, ...velocity }) => ({
+                    ...velocity,
+                    ...(report === undefined
+                      ? {}
+                      : { report: (({ progress: _reportProgress, ...legacy }) => legacy)(report) }),
+                  }),
+                ),
+              })),
+            };
+      if (context.req.query("includeWorkPolicy") === "true") return progressView;
       return {
-        ...response,
-        rounds: response.rounds.map((round) => ({
+        ...progressView,
+        rounds: progressView.rounds.map((round) => ({
           ...round,
           projects: round.projects.map(({ ownerLoop, landings: _landings, report, ...velocity }) => ({
             ...velocity,
@@ -2790,7 +2807,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
               velocity.started.state === "known" ? { ...velocity.started, cap: null } : velocity.started,
             ...(report === undefined
               ? {}
-              : { report: { milestones: report.milestones, updates: report.updates } }),
+              : {
+                  report: {
+                    milestones: report.milestones,
+                    updates: report.updates,
+                    ...(report.progress === undefined ? {} : { progress: report.progress }),
+                  },
+                }),
             caveats: [
               ...velocity.caveats,
               ...(ownerLoop === undefined &&
@@ -2828,6 +2851,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         limit: z.coerce.number().int().min(1).max(200).optional(),
         includeWorkPolicy: z.literal("true").optional(),
         includeStaffing: z.literal("true").optional(),
+        includeAutoUpdates: z.literal("true").optional(),
       })
       .strict()
       .safeParse(context.req.query());

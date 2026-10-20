@@ -4422,18 +4422,28 @@ service measured before waking the lead, and whether that wake was delivered
   not attribution to the issue.
 
 - `report`: newly seen `milestones` requesting one combined project status update,
-  and the later `updates` linked back to that request. Each update carries its id,
+  optional evidenced `progress`, and the later `updates` linked back to that request. Each update carries its id,
   URL, creation time and `unexpected`: true for routine posts or extra posts after
   a request was already fulfilled. Updates are reconciled every measured tick,
   even when no wake is due; association is by tracker identity and time, not proof
   of authorship or of the update body's media and evidence.
 
 A closed parent or a nonempty tracker milestone with all counted issues completed
-asks the lead for exactly one update with media and evidence links. Routine rounds
-explicitly ask for none. Claims use stable tracker ids, survive renames and service
+asks the lead for exactly one update with media and evidence links. With project
+`autoUpdates` on (the default), accumulated evidenced progress also qualifies:
+captioned media on two distinct completed/started issues, or a completed issue
+linked to landed product code. The service reuses its tracker/origin reads and
+samples descriptions plus the three latest comments per issue; it does not scan
+full comment threads or download assets each round. The lead reviews the evidence
+when due and leads with clips/stills at stable asset URLs and short captions, then
+open work and next steps. Progress requests are spaced at least 24 hours after the
+latest observed update or claimed request; new milestones can report sooner.
+`autoUpdates:false` keeps the existing owner-loop cadence. Silent always suppresses
+posts, and explicit landing cadence still reports new landings. Routine rounds
+without a due request ask for none. Claims use stable tracker ids, survive renames and service
 restarts, and are recorded before dispatch. A definite delivery refusal can retry;
 an uncertain delivery stays claimed and unsettled to prevent duplicate requests.
-Historical velocity-only rounds claim no posts. Milestone cadence is the default;
+Historical velocity-only rounds claim no posts. The owner-loop default is milestones;
 project `ownerLoop` can suppress requests (`silent`) or include newly observed
 landings (`landings`). First landing observation establishes a baseline.
 
@@ -7347,7 +7357,7 @@ preference answers do not authorize creation.
 
 The file requires `name` and `workspacePath`; `PROJECT` and `REVISION` are explicit
 arguments and cannot be supplied or overridden by the file. Optional `roles`,
-`workerCap`, `trackerRef`, `trackerSetup`, `wipCap`, `ownerLoop` and `hiring`
+`workerCap`, `trackerRef`, `trackerSetup`, `wipCap`, `ownerLoop`, `autoUpdates` and `hiring`
 use the shared project policy vocabulary. Worker caps may be `null` to inherit;
 zero stays an explicit zero. Retired fleet size/model settings cannot be created.
 
@@ -7520,12 +7530,21 @@ clankie project settings garden --closure inherit
 clankie project settings clankie --release time_rule --release-rule "Release without asking every Friday when main has user-visible changes worth shipping."
 clankie project settings garden --commit owner --push inherit
 clankie project settings garden --wip-cap 6 --owner-loop milestones
+clankie project settings garden --auto-updates off
 ```
 
 Projects expose work policy with `projectWorkPolicy:true` when API readers use
 `?includeAutonomy=true&includeWorkPolicy=true`. Older views omit these new fields
 but retain the revision of the full settings document. The CLI and TUI use this
 opt-in automatically; unsupported hosts cannot accept the new controls.
+
+`--auto-updates on|off` controls evidence-first progress updates (default on).
+The shared revision-fenced API accepts `changes.autoUpdates` as a boolean; `null`
+restores the default. Creation accepts it too. Project settings and round readers
+opt into the additive fields with `includeAutoUpdates=true`; project responses
+advertise `projectAutoUpdates:true`. CLI and TUI opt in automatically. Existing
+app builds need a project Settings control and this query capability before
+exposing the toggle.
 
 `--wip-cap 1..1000|none` caps Started tracker issues, independently of running
 workers. Above the cap, Auto measurement and read-only historical replay emit

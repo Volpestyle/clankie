@@ -58,8 +58,10 @@ Clankie, several at once, and the answer returns to the room that asked.
 Memory recall is filtered by who is asking: private operator notes never reach
 a social Discord room. Auto rounds and self-wakes use the conversation's existing
 permissions. They flag ready work left unstaffed when seats and plan usage have room,
-and ask him to plan ready work when the queue is empty. Completed project milestones ask for one status update with media and
-evidence; routine rounds request none ([round record](/cli/)).
+and ask him to plan ready work when the queue is empty. Automatic project updates
+are on by default: noteworthy evidenced progress prompts a visual-first update,
+roughly daily, and milestones can report sooner. Each project can turn progress
+updates off through its settings ([round record and settings](/cli/)).
 See [memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md).
 
 ## Models, skills, and tools

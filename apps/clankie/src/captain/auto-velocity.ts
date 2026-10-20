@@ -33,6 +33,7 @@ export interface VelocityDeps {
     input: {
       readonly window: { since: string; until: string };
       readonly history: boolean;
+      readonly media?: boolean;
       readonly asOf?: string;
     },
   ) => Promise<ProjectOutcomesRead>;
@@ -150,7 +151,11 @@ export async function measureVelocity(
 
   let outcomes: TrackerOutcomes | Unknown;
   try {
-    const read = await deps.outcomes(project, { window: { since: readSince, until }, history: true });
+    const read = await deps.outcomes(project, {
+      window: { since: readSince, until },
+      history: true,
+      media: project.autoUpdates !== false,
+    });
     outcomes = read.state === "read" ? read.outcomes : { state: "unknown", reason: read.reason };
   } catch (error) {
     outcomes = { state: "unknown", reason: reasonOf(error) };
@@ -279,8 +284,49 @@ export async function measureVelocity(
     };
   }
 
+  // Reuse this round's bounded tracker and cached origin reads, including events before
+  // the newest milestone: progress has its own cutoff at the last status update.
+  const progress: NonNullable<ProjectVelocity["progress"]> = [];
+  if (!("state" in outcomes) && project.autoUpdates !== false) {
+    for (const issue of [...outcomes.closed, ...outcomes.started.issues]) {
+      for (const media of issue.media ?? []) {
+        const at = issue.completedAt && issue.completedAt > media.at ? issue.completedAt : media.at;
+        if (at >= readSince && at < until)
+          progress.push({
+            key: `media:${issue.id}:${media.url}:${at}`,
+            issue: issue.identifier,
+            at,
+            kind: "media",
+            refs: [media.url],
+          });
+      }
+      if (issue.completedAt) {
+        const evidence =
+          known?.filter(
+            (commit) => commit.buckets.includes("product") && commit.issueKeys.includes(issue.identifier),
+          ) ?? [];
+        if (evidence.length) {
+          const at = evidence.reduce(
+            (at, commit) => (commit.landedAt > at ? commit.landedAt : at),
+            issue.completedAt,
+          );
+          if (at >= readSince && at < until)
+            progress.push({
+              key: `landing:${issue.id}:${at}`,
+              issue: issue.identifier,
+              at,
+              kind: "landing",
+              refs: evidence.map((commit) => commit.sha),
+            });
+        }
+      }
+    }
+  }
+
   return {
     projectId: project.id,
+    autoUpdates: project.autoUpdates !== false,
+    progress,
     ownerLoop: project.ownerLoop ?? "milestones",
     landings:
       commits.state === "unknown"

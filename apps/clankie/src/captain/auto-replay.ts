@@ -13,6 +13,7 @@ export const AutoReplayQuerySchema = z
     since: z.iso.datetime({ offset: true }),
     until: z.iso.datetime({ offset: true }),
     includeWorkPolicy: z.literal("true").optional(),
+    includeAutoUpdates: z.literal("true").optional(),
     includeStaffing: z.literal("true").optional(),
   })
   .strict()

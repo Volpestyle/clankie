@@ -545,7 +545,13 @@ New completed parents and tracker milestones add their stable identities to the
 fingerprint and, at the default milestone owner-loop cadence, request one combined
 project status update with media and evidence links. Silent cadence requests none;
 landings cadence also aggregates newly observed commits after its first baseline.
-Routine rounds ask for none. The append-only measurement claims that request
+Project `autoUpdates` defaults on and extends the same request path to accumulated
+evidenced progress: captioned media on two started/completed issues, or a completed
+issue with landed product commits. Bounded media hints reuse tracker reads; the
+lead reviews full evidence only when a report is due. Progress reports wait 24
+hours after the latest known update or request, while milestones and explicit
+landing cadence can report sooner. Off preserves the existing cadence; silent
+suppresses all requests. The append-only measurement claims that request
 before dispatch, so a restart or uncertain native delivery cannot duplicate it.
 Only definite refusal releases the claim. Later tracker reads append update links
 to the original request, flag routine or excess updates, and keep tracker bindings
