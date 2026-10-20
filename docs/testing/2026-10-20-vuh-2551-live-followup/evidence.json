@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "measurements-and-probe.tar",
+      "size": 102400,
+      "sha256": "50c887f2a8ca9b72877e4601cf12db05b15fe11144d5d634c6fb2435ac3c2c68",
+      "url": "clankie://evidence/sha256/50c887f2a8ca9b72877e4601cf12db05b15fe11144d5d634c6fb2435ac3c2c68"
+    },
+    {
+      "path": "private-readers.cpuprofile",
+      "size": 690964,
+      "sha256": "386261270ea5cd2b4aba9bb0cd394a38b09ddb049a39ba3664f1e70475dfdd40",
+      "url": "clankie://evidence/sha256/386261270ea5cd2b4aba9bb0cd394a38b09ddb049a39ba3664f1e70475dfdd40"
+    },
+    {
+      "path": "sample-1.txt",
+      "size": 1453916,
+      "sha256": "ca5ecb7760cead99495c335e289862475bceec728f3c3b6e6a235036cf97aa84",
+      "url": "clankie://evidence/sha256/ca5ecb7760cead99495c335e289862475bceec728f3c3b6e6a235036cf97aa84"
+    },
+    {
+      "path": "sample-2.txt",
+      "size": 1155280,
+      "sha256": "b1685f0a344a88195875fd1d433f9ffdb8e66078bf5dcacfed5a48ca06d2a33a",
+      "url": "clankie://evidence/sha256/b1685f0a344a88195875fd1d433f9ffdb8e66078bf5dcacfed5a48ca06d2a33a"
+    },
+    {
+      "path": "sample-3.txt",
+      "size": 1165682,
+      "sha256": "37bc51038e1ee85fb487e0f06b4014553342dca493157893dd21ca3d8abc6cab",
+      "url": "clankie://evidence/sha256/37bc51038e1ee85fb487e0f06b4014553342dca493157893dd21ca3d8abc6cab"
+    }
+  ]
+}
