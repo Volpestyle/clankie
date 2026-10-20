@@ -699,7 +699,14 @@ export function createFleetSeatControl(
           deliveryStage: options?.reconcileOnly ? "uncertain" : "unavailable",
           detail: "A different original delivery owns this recipient; nothing was sent or reconciled.",
         } as FleetSeatDelivery;
-        if (!active.has(seatId) && !(foreign && options?.reconcileOnly)) {
+        if (foreign && options?.reconcileOnly) return owned;
+        if (options?.reconcileOnly && !same)
+          return {
+            outcome: "unconfirmed",
+            deliveryStage: "uncertain",
+            detail: "A different original receipt is unresolved; nothing was sent.",
+          };
+        if (!active.has(seatId)) {
           const reconciled = await reconcileDelivery(nativeId ?? pending.messageId);
           if (reconciled && (reconciled.outcome === "delivered" || "settled" in reconciled)) {
             if (same) return foreign ? owned : reconciled;
@@ -712,13 +719,6 @@ export function createFleetSeatControl(
             return "settled";
           }
         }
-        if (foreign && options?.reconcileOnly) return owned;
-        if (options?.reconcileOnly && !same)
-          return {
-            outcome: "unconfirmed",
-            deliveryStage: "uncertain",
-            detail: "A different original receipt is unresolved; nothing was sent.",
-          };
         // Only a newly observed, complete operator message in the original session
         // can reconcile a lost receipt. Inspection never sends a replacement.
         const observed = active.has(seatId) ? undefined : await sessionArrival(pending, agent);
