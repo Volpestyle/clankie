@@ -10,6 +10,7 @@ import {
 } from "@clankie/protocol/work-items";
 import {
   TrackerSyncCommandSchema,
+  TrackerSyncResultSchema,
   type TrackerSyncCommand,
   type TrackerSyncModel,
   type TrackerSyncCommit,
@@ -3817,6 +3818,41 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             (target, now, context) => rolloverCycles(target, clock, context, now),
           );
       };
+      if (command.action === "list_issue_views" || command.action === "list_issue_view_issues") {
+        const { action, ...args } = command;
+        validateTrackerToolArgs(action, args);
+        return withTrackerStoreLock(path, async (assertHeld) => {
+          // The existing service callback checks the original device's live grant.
+          // Check it after lock admission and again after canonical dispatch, before disclosure.
+          await callOptions?.beforeWrite?.();
+          signal?.throwIfAborted();
+          assertHeld();
+          const { store, clock } = await load();
+          issueViewProject(store, args);
+          await roll(store, clock, assertHeld);
+          issueViewProject(store, args);
+          const result = await read(
+            store,
+            action,
+            args,
+            options,
+            callOptions?.actor ?? localActor(store),
+            clock,
+          );
+          await callOptions?.beforeWrite?.();
+          signal?.throwIfAborted();
+          assertHeld();
+          issueViewProject(await readStore(false), args);
+          return TrackerSyncResultSchema.parse({
+            ...(result as Record<string, unknown>),
+            storeId: command.storeId,
+            projectId: command.project,
+            ...(command.action === "list_issue_view_issues"
+              ? { outcome: "issue_view_issues", viewId: command.id }
+              : { outcome: "issue_views" }),
+          });
+        });
+      }
       if (command.action === "transaction") {
         // Validate every operation before dispatch; one receipt owns the whole transaction.
         for (const operation of command.operations) {

@@ -23,7 +23,44 @@ export const TrackerSyncModelNameSchema = z.enum([
 const id = z.string().min(1).max(512);
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const projects = z.array(id).min(1).max(100);
+const savedViewScope = {
+  project: z.uuid(),
+  storeId: z.string().min(1).max(128),
+};
+const savedViewPagination = {
+  limit: z.number().int().min(1).max(250).optional(),
+  cursor: z.string().optional(),
+  orderBy: z.enum(["createdAt", "updatedAt"]).optional(),
+};
+/** Canonical persisted definition. Applying it always reads the current tracker. */
+export const TrackerSavedIssueViewSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    id: z.uuid(),
+    storeId: z.string().min(1).max(128),
+    projectId: z.uuid(),
+    name: z.string().min(1).max(120),
+    filter: z.record(z.string(), z.unknown()),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .passthrough();
 export const TrackerSyncCommandSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("list_issue_views"),
+      ...savedViewScope,
+      ...savedViewPagination,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("list_issue_view_issues"),
+      ...savedViewScope,
+      id: z.uuid(),
+      ...savedViewPagination,
+    })
+    .strict(),
   z
     .object({
       action: z.literal("bootstrap"),
@@ -96,6 +133,28 @@ export const TrackerSyncCommitSchema = z
   })
   .strict();
 export const TrackerSyncResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("issue_views"),
+      storeId: z.string().min(1).max(128),
+      projectId: z.uuid(),
+      views: z.array(TrackerSavedIssueViewSchema),
+      hasNextPage: z.boolean(),
+      cursor: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("issue_view_issues"),
+      storeId: z.string().min(1).max(128),
+      projectId: z.uuid(),
+      viewId: z.uuid(),
+      /** Normal list_issues records, with the canonical mapper's fields unchanged. */
+      issues: z.array(z.record(z.string(), z.unknown())),
+      hasNextPage: z.boolean(),
+      cursor: z.string().optional(),
+    })
+    .strict(),
   z.object({ outcome: z.literal("bootstrap"), ndjson: z.string() }).strict(),
   z
     .object({
@@ -127,6 +186,7 @@ export const TrackerSyncResultSchema = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("refused"), reason: z.string(), message: z.string() }).strict(),
 ]);
 export type TrackerSyncCommand = z.infer<typeof TrackerSyncCommandSchema>;
+export type TrackerSavedIssueView = z.infer<typeof TrackerSavedIssueViewSchema>;
 export type TrackerSyncModel = z.infer<typeof TrackerSyncModelSchema>;
 export type TrackerSyncDelta = z.infer<typeof TrackerSyncDeltaSchema>;
 export type TrackerSyncCommit = z.infer<typeof TrackerSyncCommitSchema>;
