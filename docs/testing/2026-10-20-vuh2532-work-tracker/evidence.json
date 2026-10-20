@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "cli-transcript.txt",
+      "size": 28812,
+      "sha256": "70693dd6e19454435d27fb6a248cecf8938e09e1b9bd7bf662a0f995783a4357",
+      "url": "clankie://evidence/sha256/70693dd6e19454435d27fb6a248cecf8938e09e1b9bd7bf662a0f995783a4357"
+    }
+  ]
+}

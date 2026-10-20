@@ -1,3 +1,4 @@
+import type { TrackerToolBackend } from "@clankie/work-items";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
@@ -128,11 +129,17 @@ export function proposalResult(creation: ProjectCreation, revision: number): Pro
 export function projectOnboarding(
   settings: Pick<SettingsStore, "load" | "update">,
   resources: () => ResourceSnapshot | undefined = () => undefined,
+  tracker?: TrackerToolBackend,
 ) {
   return {
     load: () => settings.load(),
     async defaults(workspace: string) {
-      const result = await inferProjectDefaults(workspace, resources());
+      const result = await inferProjectDefaults(
+        workspace,
+        resources(),
+        undefined,
+        (await settings.load()).workTrackerDefault ?? (tracker ? { backend: "builtin" } : undefined),
+      );
       if (result.draft) {
         const existing = (await settings.load()).projects.projects;
         const base = result.draft.projectId;
@@ -155,14 +162,20 @@ export function projectOnboarding(
       };
     },
     apply: (creation: ProjectCreation, guard: () => Promise<void>) =>
-      applyProjectCreate(settings, creation.immutable.command, guard, {
-        directories: creation.immutable.observation.directories,
-        ...(creation.immutable.observation.tracker
-          ? { tracker: creation.immutable.observation.tracker }
-          : {}),
-        ...(creation.immutable.observation.trackerSetup
-          ? { trackerSetup: creation.immutable.observation.trackerSetup }
-          : {}),
-      }),
+      applyProjectCreate(
+        settings,
+        creation.immutable.command,
+        guard,
+        {
+          directories: creation.immutable.observation.directories,
+          ...(creation.immutable.observation.tracker
+            ? { tracker: creation.immutable.observation.tracker }
+            : {}),
+          ...(creation.immutable.observation.trackerSetup
+            ? { trackerSetup: creation.immutable.observation.trackerSetup }
+            : {}),
+        },
+        tracker,
+      ),
   };
 }

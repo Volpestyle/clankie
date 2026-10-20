@@ -26,6 +26,7 @@ import type { ProjectHireProcessProof } from "./project-hires.ts";
 import { type TurnContext } from "./tools.ts";
 
 export interface CaptainOptions {
+  readonly builtInTracker?: import("@clankie/work-items").TrackerToolBackend;
   /** Current owner-selected machine ceiling, separate from Discord actor authority. */
   readonly requireMachineAccess?: (
     fleet: string | undefined,

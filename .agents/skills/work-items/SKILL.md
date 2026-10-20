@@ -142,10 +142,17 @@ not imply a prerequisite.
    repo tracks work in more than one place or only in a single `TODO.md`. Ask
    the owner (or your lead) once, then record the answer with
    `clankie work init --backend ...`. Never pick silently.
-2. **Follow what is recorded.** `.clankie/tracking.json` is the owner's answer.
+2. **Settings use the same tracker.** `clankie fleet tracker` reads the default
+   for new projects; `clankie project settings PROJECT` reads the saved project
+   choice. Add `tracker JSON` to propose a project change, then apply the exact
+   preview with `--revision REV --confirm-retain-items`. `clankie fleet tracker
+JSON --revision REV` applies the new-project default. Existing items stay in
+   the old tracker; nothing migrates or is deleted. Linear/GitHub use connected
+   accounts; built-in and repo files need none. See the CLI's Work tracker settings.
+3. **Follow what is recorded.** `.clankie/tracking.json` is the owner's answer.
    Do not create `.clankie/work/` files in a repo whose convention is Linear,
    GitHub or its own directory.
-3. **Prefer real visuals; every result carries evidence.** When creating,
+4. **Prefer real visuals; every result carries evidence.** When creating,
    planning, updating or reporting tracked work, default to useful visuals:
    screenshots or short clips of tangible results, charts of measured data,
    and diagrams grounded in the actual system, dependencies or flow. This
@@ -161,9 +168,9 @@ not imply a prerequisite.
    the stable-URL form), not only as an attachment. A demo that shows a
    milestone working also goes in the project's status update, so it plays in
    project Activity.
-4. **One owner per item.** Set `--owner` when you take an item; do not edit an
+5. **One owner per item.** Set `--owner` when you take an item; do not edit an
    item another agent owns without telling them.
-5. **Keep it small.** Status, criteria, ownership and evidence only. No sprints,
+6. **Keep it small.** Status, criteria, ownership and evidence only. No sprints,
    estimates or extra workflow.
 
 ## Status stays true

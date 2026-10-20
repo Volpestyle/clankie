@@ -811,3 +811,16 @@ these cases over the HTTP route:
   `linear` project, bound or unbound, reaches the Linear path (the local fallback
   in tests); a worker whose project has no saved convention is refused; and an
   explicit `repo` still wins.
+
+## Amendment: owner tracker settings (2026-10-20, VUH-2532)
+
+The owner chooses a default for new projects and an explicit per-project
+backend/target through one owner service API. Existing `.clankie/tracking.json`
+conventions remain authoritative. A new-project default never rewrites an
+existing project's convention. Project changes require a preview-bound explicit
+confirmation: items stay in their original stores, with no migration or deletion.
+Switching back reopens those items; built-in project bindings are retained.
+Linear and GitHub reuse connected accounts. Built-in needs none. The Discord
+forum slot remains unavailable pending VUH-2531: it will be a two-way view of
+the built-in source of truth, not another store. CLI/API shapes are in
+[the CLI reference](../cli.md#work-tracker-settings).

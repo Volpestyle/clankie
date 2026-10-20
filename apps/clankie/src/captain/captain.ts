@@ -2158,7 +2158,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ? options.reportRoundMs
       : undefined;
   };
-  conversations.projectOnboarding = projectOnboarding(settingsStore, () => options.fleetResources?.status());
+  conversations.projectOnboarding = projectOnboarding(
+    settingsStore,
+    () => options.fleetResources?.status(),
+    options.builtInTracker,
+  );
   // Legacy workspace preferences/project proposals retain their native-seat fence.
   // Semantic surface asks use their independently admitted source binding.
   conversations.questionEligible = (id) =>

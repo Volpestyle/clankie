@@ -2867,6 +2867,67 @@ paths:
         "401": { description: Operator authentication required }
         "403": { description: Owner approval or existing linked target required }
         "409": { description: Preparation or context verification failed }
+  /v1/operator/work-tracker:
+    get:
+      tags: [Operator]
+      operationId: readWorkTrackerSettings
+      summary: Read the new-project default or one project's saved tracker
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      parameters:
+        - in: query
+          name: projectId
+          schema: { type: string, pattern: "^[a-z][a-z0-9_-]{0,63}$" }
+      responses:
+        "200":
+          description: WorkTrackerSettingsSnapshotSchema with current selection, default, effect and connection status
+        "403":
+          description: Owner authority required
+        "409":
+          description: Project or workspace unavailable
+    post:
+      tags: [Operator]
+      operationId: workTrackerSettings
+      summary: Read, preview or set the new-project default or a project's work tracker
+      description: Owner-only API shared by every surface. Built-in and repo files need no account; Linear and GitHub use existing connected accounts. Project changes require a matching preview revision and confirmRetainItems. Existing items stay in their old tracker; nothing migrates or is deleted. Discord forum remains a future built-in view (VUH-2531).
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [read, preview, apply] }
+                projectId: { type: string, maxLength: 256 }
+                selection:
+                  type: object
+                  description: WorkTrackerSelectionSchema; required for preview/apply. Built-in may name an existing projectId UUID for a project override. Linear requires team and project, GitHub requires owner/repo, repo files require a relative directory.
+                  required: [backend]
+                  properties:
+                    backend: { type: string, enum: [builtin, linear, github, markdown] }
+                    projectId: { type: string, format: uuid }
+                    team: { type: string }
+                    project: { type: string }
+                    label: { type: string }
+                    repo: { type: string }
+                    directory: { type: string }
+                expectedRevision: { type: string, pattern: "^[a-f0-9]{64}$" }
+                confirmRetainItems: { type: boolean }
+      responses:
+        "200":
+          description: WorkTrackerSettingsSnapshotSchema; revision, default, current selection/source, proposed selection, connection status, effect on existing items and confirmation requirement
+        "400":
+          description: Malformed selection or command
+        "401":
+          description: Authentication required
+        "403":
+          description: Owner authority required
+        "409":
+          description: Stale preview, explicit confirmation required, disconnected account or unavailable target/workspace; no items migrated
+        "503":
+          description: Settings are read-only or unavailable
   /v1/operator/fleet-settings:
     get:
       tags: [Operator]

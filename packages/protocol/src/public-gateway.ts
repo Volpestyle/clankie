@@ -1,3 +1,4 @@
+import { WORK_TRACKER_SETTINGS_PATH } from "./work-tracker-settings.ts";
 import {
   MACHINE_JOIN_START_PATH,
   MACHINE_JOIN_STATUS_PATH,
@@ -204,6 +205,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: LINEAR_FOLLOW_PATH, target: "relay" },
   { method: "GET", path: LINEAR_WAKE_PATH, target: "relay" },
   { method: "POST", path: LINEAR_WAKE_PATH, target: "relay" },
+  { method: "GET", path: WORK_TRACKER_SETTINGS_PATH, target: "relay" },
+  { method: "POST", path: WORK_TRACKER_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: FLEET_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: FLEET_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: FLEET_HIRE_DEFAULTS_PATH, target: "relay" },
@@ -394,6 +397,8 @@ export function publicGatewayTargetFor(
   additionalRoutes: readonly PublicGatewayRoute[] = [],
 ): PublicGatewayTarget | undefined {
   if (method === "POST" && /^\/v1\/devices\/[A-Za-z0-9_-]{1,128}\/revoke$/u.test(path)) return "control";
+  if (method === "GET" && /^\/v1\/operator\/work-tracker\?projectId=[a-z][a-z0-9_-]{0,63}$/u.test(path))
+    path = WORK_TRACKER_SETTINGS_PATH;
   // Normalize only the explicitly validated queries. The forwarded path keeps
   // its query for the receiving route to validate again.
   if (method === "GET" && path === `${PROJECTS_PATH}?includeAutonomy=true`) path = PROJECTS_PATH;

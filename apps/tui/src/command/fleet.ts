@@ -1,3 +1,4 @@
+import { workTrackerSettings } from "./work-tracker.ts";
 import {
   effectiveHireProfile,
   FleetAutonomySchema,
@@ -45,6 +46,7 @@ const FLEET_USAGE = [
   "       clankie fleet room [--older CURSOR] [--limit N] [--follow]",
   "       clankie fleet roster [retire SEAT OCCUPANT | undo HISTORY_ID]",
   "       clankie fleet processes [retire]",
+  "       clankie fleet tracker [SELECTION_JSON [--revision PREVIEW_REVISION]]",
   "       clankie fleet clear",
 ].join("\n");
 
@@ -58,6 +60,7 @@ export type FleetCommandOptions = NonNullable<Parameters<typeof machineSetupCont
 
 export interface FleetCommandResult {
   readonly ok: true;
+  readonly workTracker?: Awaited<ReturnType<typeof workTrackerSettings>> | undefined;
   readonly resourceMachines?: string[];
   readonly revision: string;
   readonly fleet: FleetSettings & FleetAutonomy;
@@ -254,6 +257,8 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
   return {
     ...report,
     revision: snapshot.revision,
+    // allow-swallowed-rejection -- Older services lack this additive read; fleet settings remain usable.
+    workTracker: await workTrackerSettings([], options).catch(() => undefined),
     ...(snapshot.retiredWorkingPreferences
       ? { retiredWorkingPreferences: snapshot.retiredWorkingPreferences }
       : {}),
@@ -318,6 +323,7 @@ const AUTONOMY_USAGE = `Usage: clankie autonomy [status|${AutonomyLevelSchema.op
 
 export interface AutonomyCommandResult {
   readonly ok: true;
+  readonly workTracker?: Awaited<ReturnType<typeof workTrackerSettings>> | undefined;
   readonly revision: string;
   readonly level: AutonomyLevelReading;
   readonly description: string;
@@ -510,6 +516,10 @@ export async function runFleetCommand(
   options: FleetCommandOptions = {},
 ): Promise<FleetCommandResult> {
   const verb = args[0];
+  if (verb === "tracker") {
+    const workTracker = await workTrackerSettings(args.slice(1), options);
+    return { ...(await fleetStatus(options)), workTracker };
+  }
   if (verb === undefined || verb === "status" || verb === "show") {
     if (args.length <= 1) return await fleetStatus(options);
     if (args.length === 3 && args[1] === "--working-directory" && args[2])

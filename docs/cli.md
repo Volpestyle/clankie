@@ -9085,3 +9085,40 @@ Linear does not have. The switch-back restores the convention's and the live
 store's exact pre-cutover bytes and the previous binding. It keeps the pilot
 store as `tracker/cutover/<time>/pilot-<time>.json`. The mirror stays disabled.
 To cut over again, re-import into a new scratch name and cut over that import.
+
+### Work tracker settings
+
+`clankie fleet tracker` reads the default for new projects. `clankie project
+settings PROJECT` includes the project's saved work tracker; `clankie fleet
+status` includes the global default. To propose a change, pass a selection as JSON:
+
+```sh
+clankie fleet tracker '{"backend":"builtin"}'
+clankie project settings PROJECT tracker '{"backend":"github","repo":"owner/repo"}'
+```
+
+These commands only preview. Apply the exact preview by adding
+`--revision PREVIEW_REVISION`; project changes also require
+`--confirm-retain-items`. Existing items remain in their original tracker.
+Nothing is migrated or deleted; switching back makes the previous items
+accessible again. A changed project, convention, workspace or connection
+invalidates the preview. Review again rather than automatically retrying.
+
+Selections are `{"backend":"builtin"}` (a separate built-in project is created
+when needed), `{"backend":"linear","team":"TEAM","project":"PROJECT"}`,
+`{"backend":"github","repo":"owner/repo"}`, or
+`{"backend":"markdown","directory":"docs/tasks"}`. Built-in project overrides
+may name an existing `projectId` UUID; global built-in defaults always create a
+separate project. Linear may include an existing board `label`. Linear and GitHub
+require their existing connected account; connect through Settings → Accounts
+or `clankie connect`. Built-in and repo files need no account. The future Discord
+forum is a view of the built-in tracker (VUH-2531), not a selectable backend yet.
+
+All surfaces read `GET /v1/operator/work-tracker` (optional `?projectId=ID`) and
+use `POST /v1/operator/work-tracker` with `action: preview|apply`,
+optional `projectId`, and `selection` on preview/apply. Apply carries the preview's
+`expectedRevision` and `confirmRetainItems: true` for projects. The response
+reports the selection, default, source, connection status and item retention
+policy. It is owner-only, including through the hosted encrypted bridge.
+The default affects new projects without an existing saved convention; existing
+repo conventions and owner-reviewed project proposals take precedence.

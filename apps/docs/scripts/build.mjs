@@ -425,6 +425,22 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/operator/work-tracker",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read the default work tracker or an exact project's saved choice without a mutation request.",
+      },
+    ],
+    [
+      "POST /v1/operator/work-tracker",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read or preview a work tracker choice, then confirm a revision-bound global default or project change while retaining existing items.",
+      },
+    ],
+    [
       "GET /v1/operator/fleet-settings",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

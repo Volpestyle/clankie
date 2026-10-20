@@ -9,7 +9,8 @@ import {
   type SettingsStore,
 } from "@clankie/settings";
 import type { CreateProjectSettings } from "@clankie/protocol/projects";
-import { initializeConvention } from "@clankie/work-items";
+import { trackerInit } from "./work-tracker-settings.ts";
+import { readConvention, type TrackerToolBackend, initializeConvention } from "@clankie/work-items";
 
 /** The direct owner route and question confirmation share this existing commit boundary. */
 export async function applyProjectCreate(
@@ -17,8 +18,19 @@ export async function applyProjectCreate(
   input: CreateProjectSettings,
   requireOwner: () => Promise<void>,
   expectedObservation?: Awaited<ReturnType<typeof observeProjectEnrollment>>,
+  tracker?: TrackerToolBackend,
 ) {
   const original = await settings.load();
+  if (!expectedObservation && input.trackerRef === undefined && !input.trackerSetup) {
+    const saved = await readConvention(input.workspacePath);
+    if (saved) input = { ...input, trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" } };
+    else if (original.workTrackerDefault || tracker)
+      input = {
+        ...input,
+        trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+        trackerSetup: trackerInit(original.workTrackerDefault ?? { backend: "builtin" }),
+      };
+  }
   createProjectSettings(original.projects, input);
   const catalog = await createModelRegistry().catalog();
   for (const role of [
@@ -38,6 +50,14 @@ export async function applyProjectCreate(
   let initial = await observeProjectEnrollment(original.projects, input);
   if (expectedObservation && !isDeepStrictEqual(initial, expectedObservation))
     throw new Error("Project enrollment changed");
+  let builtinProjectId: string | undefined;
+  if (input.trackerSetup?.backend === "builtin") {
+    if (!tracker) throw new Error("Built-in tracker unavailable");
+    await requireOwner();
+    builtinProjectId = (
+      (await tracker.call("save_project", { name: input.name, addTeams: ["LOCAL"] })) as { id: string }
+    ).id;
+  }
   if (input.trackerSetup) {
     const reviewed = initial;
     let trackerParent = reviewed.trackerSetup?.parent;
@@ -71,7 +91,12 @@ export async function applyProjectCreate(
   const updated = await settings.update(
     (current) => {
       before = JSON.stringify(current);
-      return { ...current, projects: createProjectSettings(current.projects, input) };
+      const projects = createProjectSettings(current.projects, input);
+      if (builtinProjectId)
+        projects.projects = projects.projects.map((p) =>
+          p.id === input.projectId ? { ...p, trackerProjectId: builtinProjectId } : p,
+        );
+      return { ...current, projects };
     },
     async () => {
       await requireOwner();

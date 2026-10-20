@@ -256,6 +256,9 @@ covers storage and identity.
 
 Work is tracked where the project already tracks it: Linear, GitHub issues, or
 files ([work items](https://github.com/Volpestyle/clankie/blob/main/packages/work-items/README.md)).
+Choose a default for new projects and a project-specific tracker with the
+[work tracker settings](/cli/#work-tracker-settings). Switching keeps existing
+items in their original tracker.
 Following Linear activity is a separate opt-in
 ([Linear setup](/cli/#linear-status-linear-follow-on-off)). Workers do not
 inherit your accounts automatically; [worker access](https://github.com/Volpestyle/clankie/blob/main/docs/worker-access.md)

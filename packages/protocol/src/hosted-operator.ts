@@ -1,3 +1,4 @@
+import { WORK_TRACKER_SETTINGS_PATH } from "./work-tracker-settings.ts";
 import {
   APPEARANCE_SETTINGS_PATH,
   EVIDENCE_STORAGE_SETTINGS_PATH,
@@ -32,6 +33,12 @@ import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */
 export function hostedOperatorAllows(method: string, path: string, body?: string): boolean {
+  if (
+    method === "GET" &&
+    (path === WORK_TRACKER_SETTINGS_PATH ||
+      /^\/v1\/operator\/work-tracker\?projectId=[a-z][a-z0-9_-]{0,63}$/u.test(path))
+  )
+    return true;
   if (isSkinDraftRoute(method, path)) return true;
   if (hostedDiscordAllows(method, path)) return true;
   // A self-hosted machine's free official bot (VUH-1766); never the edge's web permits.
@@ -158,6 +165,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/support/grants",
     ],
     POST: [
+      WORK_TRACKER_SETTINGS_PATH,
       HTTP_SETTINGS_PATH,
       EVIDENCE_STORAGE_SETTINGS_PATH,
       HOST_SETTINGS_PATH,

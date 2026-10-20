@@ -1,3 +1,5 @@
+import { trackerInit } from "../work-tracker-settings.ts";
+import type { WorkTrackerSelection } from "@clankie/protocol";
 import { open, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { discoverConvention, readConvention, type CommandRunner } from "@clankie/work-items";
@@ -51,6 +53,7 @@ export async function inferProjectDefaults(
   workspace: string,
   resources: ResourceSnapshot | undefined,
   run: CommandRunner = defaultRun,
+  trackerDefault?: WorkTrackerSelection,
 ): Promise<{ draft?: ProjectProposalDraft; question?: string }> {
   const recorded = await readConvention(workspace);
   const discovery = recorded ? undefined : await discoverConvention(workspace, run);
@@ -129,21 +132,24 @@ export async function inferProjectDefaults(
       .replace(/[^a-z0-9_-]+/gu, "-")
       .replace(/^-+/u, "")}` || "project"
   ).slice(0, 54);
-  const setup = recorded
-    ? undefined
-    : {
-        backend: tracker.backend,
-        ...(tracker.linear
-          ? {
-              linearTeam: tracker.linear.team,
-              linearProject: tracker.linear.project,
-              linearLabel: tracker.linear.label,
-            }
-          : {}),
-        ...(tracker.github ? { githubRepo: tracker.github.repo } : {}),
-        ...(tracker.directory ? { directory: tracker.directory } : {}),
-        ...(tracker.decisions ? { decisions: tracker.decisions } : {}),
-      };
+  const setup =
+    !recorded && trackerDefault && !discovery?.signals.some((s) => s.suggests?.backend)
+      ? trackerInit(trackerDefault)
+      : recorded
+        ? undefined
+        : {
+            backend: tracker.backend,
+            ...(tracker.linear
+              ? {
+                  linearTeam: tracker.linear.team,
+                  linearProject: tracker.linear.project,
+                  linearLabel: tracker.linear.label,
+                }
+              : {}),
+            ...(tracker.github ? { githubRepo: tracker.github.repo } : {}),
+            ...(tracker.directory ? { directory: tracker.directory } : {}),
+            ...(tracker.decisions ? { decisions: tracker.decisions } : {}),
+          };
   return {
     draft: ProjectProposalDraftSchema.parse({
       projectId: /^[a-z]/u.test(projectId) ? projectId : `p-${projectId}`,
@@ -161,7 +167,10 @@ export async function inferProjectDefaults(
                 .filter((s) => s.suggests?.backend)
                 .map((s) => s.detail)
                 .join("; ")
-                .slice(0, 450) || "No tracker detected; use local work records."
+                .slice(0, 450) ||
+              (trackerDefault
+                ? `Use the saved ${trackerDefault.backend} default.`
+                : "No tracker detected; use local work records.")
             }`,
         ...roleReasons,
         `at most ${workerCap} workers; ${sourceCount} source files, ${activity} commits in 14 days; ${resources === undefined ? "resource governor unavailable" : resources.pressure.healthy ? `governor capacity ${available}` : "resource pressure blocks hires"}.`,

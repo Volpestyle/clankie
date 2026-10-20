@@ -1,3 +1,4 @@
+import { WorkTrackerSelectionSchema } from "@clankie/protocol";
 import { EvidenceSettingsSchema, HttpSettingsSchema } from "@clankie/protocol/owner-settings";
 import { LinearWakeSettingsSchema } from "@clankie/protocol/linear-settings";
 import { MachineAccessSettingsSchema } from "@clankie/protocol/machine-access";
@@ -790,6 +791,7 @@ export const ClankieSettingsSchema = z
       )
       .default(() => ({ connections: [] })),
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
+    workTrackerDefault: WorkTrackerSelectionSchema.optional(),
     fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
     /**
      * Maximum trust mode (VUH-2048): every harness Clankie launches next runs

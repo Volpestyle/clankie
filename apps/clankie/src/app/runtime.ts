@@ -1,3 +1,4 @@
+import { createWorkTrackerSettingsRoutes } from "../work-tracker-settings.ts";
 import { createMachineFleetResources } from "../machine-fleet-resources.ts";
 import { createMachineJoinRoutes } from "../machine-join-routes.ts";
 import { createJoinedSeats } from "../joined-seats.ts";
@@ -1168,7 +1169,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   );
   app.route(
     "/",
+    createWorkTrackerSettingsRoutes(authorizeOwnerSecrets, settingsSource, {
+      ...(dependencies.accounts ? { accounts: dependencies.accounts } : {}),
+      ...(dependencies.builtInTracker ? { tracker: dependencies.builtInTracker } : {}),
+    }),
+  );
+  app.route(
+    "/",
     createProjectRoutes(authorizeOwnerSecrets, settingsSource, {
+      ...(dependencies.builtInTracker ? { tracker: dependencies.builtInTracker } : {}),
       ...(dependencies.linearProjectExists ? { linearProjectExists: dependencies.linearProjectExists } : {}),
       ...(dependencies.projectWorktreeRoot ? { worktreeRoot: dependencies.projectWorktreeRoot } : {}),
       ...(dependencies.captain.projectStatus

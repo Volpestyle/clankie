@@ -1,3 +1,4 @@
+import { readConvention, type TrackerToolBackend } from "@clankie/work-items";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { effectiveHireProfile } from "@clankie/protocol";
 import { applyProjectCreate } from "./project-create.ts";
@@ -82,6 +83,7 @@ export function createProjectRoutes(
   settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>,
   options: {
     worktreeRoot?: ObserveProjectWorktreeRoot;
+    tracker?: TrackerToolBackend;
     /** True only when the built-in tracker holds a project with exactly this UUID. */
     trackerProjectExists?: (id: string) => Promise<boolean>;
     /** Captures the current built-in store identity; a replacement invalidates the reviewed binding. */
@@ -138,6 +140,8 @@ export function createProjectRoutes(
         { load: () => settings.load(), update: (mutate, guard) => settings.update!(mutate, guard) },
         input.data,
         requireOwner,
+        undefined,
+        options.tracker,
       );
       // Keep the committed generation's full revision while projecting the caller's view.
       const current = await settings.load();
@@ -184,6 +188,19 @@ export function createProjectRoutes(
       return context.json({ error: "invalid_hire_model", detail: String(error) }, 400);
     }
     const trackerProjectId = input.data.changes.trackerProjectId;
+    // Legacy binding edits must not bypass the item-retention confirmation on an active built-in tracker.
+    if (trackerProjectId !== undefined) {
+      const saved = (await settings.load()).projects.projects.find((p) => p.id === input.data.projectId);
+      const workspace = saved?.workspaces.find((w) => w.id === saved.trackerRef?.workspaceId);
+      if (saved && workspace && trackerProjectId !== saved.trackerProjectId) {
+        try {
+          if ((await readConvention(workspace.path))?.backend === "builtin")
+            return context.json({ error: "tracker_change_requires_preview" }, 409);
+        } catch {
+          return context.json({ error: "tracker_settings_unavailable" }, 409);
+        }
+      }
+    }
     const trackerStoreId =
       typeof trackerProjectId === "string"
         ? await options.trackerStoreId?.().catch(() => undefined)

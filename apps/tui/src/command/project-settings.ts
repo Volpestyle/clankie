@@ -1,3 +1,4 @@
+import { workTrackerSettings } from "./work-tracker.ts";
 import { readFile, stat } from "node:fs/promises";
 import {
   inspectOperatorCredential,
@@ -174,6 +175,7 @@ interface ProjectFleetSettingsResult extends ProjectsSnapshot {
   auto?: boolean;
   focus?: string;
   trackerProjectId?: string;
+  workTracker?: Awaited<ReturnType<typeof workTrackerSettings>> | undefined;
   fleet: {
     closure: FleetAutonomyMode | "inherit";
     machineSetup: FleetAutonomyMode | "inherit";
@@ -195,6 +197,11 @@ async function runProjectFleetSettings(
   args: readonly string[],
   options: Parameters<typeof runProjectSettingsCommand>[1],
 ): Promise<ProjectFleetSettingsResult> {
+  let workTracker: Awaited<ReturnType<typeof workTrackerSettings>> | undefined;
+  if (args[2] === "tracker" || args[2] === "--tracker") {
+    workTracker = await workTrackerSettings(args.slice(3), options, args[1]);
+    args = args.slice(0, 2);
+  }
   if (!args[1] || args.length % 2 !== 0)
     throw new Error(
       "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear]",
@@ -329,6 +336,8 @@ async function runProjectFleetSettings(
   return {
     ...snapshot,
     projectId: project.id,
+    // allow-swallowed-rejection -- Older services lack this additive read; existing project settings still work.
+    workTracker: workTracker ?? (await workTrackerSettings([], options, project.id).catch(() => undefined)),
     ...(project.trackerProjectId === undefined ? {} : { trackerProjectId: project.trackerProjectId }),
     ...(snapshot.projectsAuto === true
       ? { auto: project.auto === true, ...(project.focus === undefined ? {} : { focus: project.focus }) }

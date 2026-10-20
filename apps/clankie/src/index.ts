@@ -1594,6 +1594,7 @@ const captain = createCaptain(
   },
   {
     fleetResources,
+    builtInTracker,
     onHealthAlertDelivery: (result) => logger.info({ event: "native.health_alert.delivery", ...result }),
     projectHireIdentity: projectProcessObserver,
     projectHireIdentityBatch: remoteProjectBatchObserver,

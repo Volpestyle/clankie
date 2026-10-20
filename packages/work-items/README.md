@@ -21,7 +21,10 @@ Work items in the repo's own tracking convention ([ADR 0191](../../docs/adr/0191
 
 The service (`apps/clankie/src/work-items.ts`) owns which repos a paired device
 may read or write; `clankie work` and the device API remain compatibility callers.
-The wire shapes live in `@clankie/protocol/work-items`.
+The wire shapes live in `@clankie/protocol/work-items`. Owner tracker settings
+use `POST /v1/operator/work-tracker`: one new-project default, or an explicit
+project convention change after preview and confirmation. Existing items stay
+in their original tracker. See [the CLI reference](../../docs/cli.md#work-tracker-settings).
 
 The canonical tracker surface is the Linear-shaped subset in `tracker-tools.ts`
 ([ADR 0226](../../docs/adr/0226-one-tracker-tool-surface.md)). `createLocalTracker`
