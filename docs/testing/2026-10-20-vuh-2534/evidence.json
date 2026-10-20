@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "focused-checks.log",
+      "size": 8405354,
+      "sha256": "02bff508c33f7c3aa075308d8e2a2136de0db6a9cdb091c177aa104985f0991e",
+      "url": "clankie://evidence/sha256/02bff508c33f7c3aa075308d8e2a2136de0db6a9cdb091c177aa104985f0991e"
+    },
+    {
+      "path": "integration-core-gate.log",
+      "size": 922025,
+      "sha256": "db0dddc669c04ca3354783b1a346a21f51aab749d5c6c6be7e683ce285b28d03",
+      "url": "clankie://evidence/sha256/db0dddc669c04ca3354783b1a346a21f51aab749d5c6c6be7e683ce285b28d03"
+    },
+    {
+      "path": "integration-landing.log",
+      "size": 929133,
+      "sha256": "330b2393059843b9f8c66a66a7c4d15edf4db9699a097645cec19329299ebdca",
+      "url": "clankie://evidence/sha256/330b2393059843b9f8c66a66a7c4d15edf4db9699a097645cec19329299ebdca"
+    },
+    {
+      "path": "landing-final.log",
+      "size": 84289,
+      "sha256": "ad626c4c877217b77e9f2a32aecaf252d57d9d735f8791e02148bccc4c59085a",
+      "url": "clankie://evidence/sha256/ad626c4c877217b77e9f2a32aecaf252d57d9d735f8791e02148bccc4c59085a"
+    },
+    {
+      "path": "landing-retry.log",
+      "size": 495687,
+      "sha256": "99554e677a85d5775f1507436717eae55ffb9b37ba7582e4e7c1843063cdff2a",
+      "url": "clankie://evidence/sha256/99554e677a85d5775f1507436717eae55ffb9b37ba7582e4e7c1843063cdff2a"
+    }
+  ]
+}

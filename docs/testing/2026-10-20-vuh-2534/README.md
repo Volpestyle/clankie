@@ -41,9 +41,25 @@ checks (`acceptance-shutdown.log`). This is not a claim that the earlier
 broader run was green. A separate typecheck found a test-only Promise/Response
 union error; the fixture now normalizes the awaitable with Promise.resolve.
 
-Final checks, checked revision/base, and landing evidence are recorded in the
-issue's evidence comment and attached logs. Raw logs are retained in the evidence
-store; only this README and its evidence receipt belong in Git.
+The final root `pnpm check:landing --retry-failed-tests` passed on
+`5252a7e68b3d08ea6db8f590cabd0e1c6a6bcf21`, against fetched origin/main
+`78824e78f551b2eea81d40c0b7e728f8dc9ee7e7`: 314 test files passed, five
+skipped; 2,295 tests passed, twelve skipped. All selected typechecks and static
+checks passed. The eight acceptance checks and 23 update API/CLI contracts passed
+separately. The preceding root attempt failed on an unchanged runtime-provider
+fixture's ENOTEMPTY cleanup race. Its exact case passed in isolation, and the
+entire suite passed in the final root run; the nonzero original remains attached.
+
+[Evidence receipts](./evidence.json) retain the green root log, the original
+nonzero root log, and focused checks with incident records and gate selection.
+Integration request `9b7d26e0-7ecb-41ab-a721-baf3f675b8d2` landed through batch
+`b061c109-b615-44a6-b7f5-f8bc7ec851cf`, with a confirmed push at 10:36:45Z.
+Remote main independently matched `279fb1235856a2d007445c4313b1b48f8da61169`.
+The actual composed gate passed 751 files and 6,706 tests, with 31 files and 84
+tests skipped. The integration landing artifact contains the request, attempt
+and full composed gate log. The issue's evidence comment links these receipts.
+Raw logs live in the evidence store; only this README and its evidence receipt
+belong in Git.
 
 ## Remaining live proof
 
