@@ -54,8 +54,8 @@ failed-start path: Claude `35ea9259-c91a-45a6-b6fc-578434876fc9`, Codex
 `181c9542-cfb2-432e-a8cf-27fa2c90dd65`. The Claude native receipt `18a96dd2` already
 has retained authenticated abandonment. Releasing these already-gone allocations
 again is refused rather than manufacturing an operator-release receipt.
-Live settlement of the Codex native receipt requires deployment of this change;
-run `clankie hire-receipt settle db443061-0803-4538-ad21-4b5001fe2293 abandoned-unknown`.
+The deployed follow-up below records successful supported live settlement of
+the Codex native receipt.
 
 ## Checks
 
@@ -75,3 +75,47 @@ runnable by its test name; the ordinary receipt suite passes. The integrator
 supplies the required root landing gate.
 
 [Native capture, source drivers and check logs](captures.tar)
+
+## Deployed public proof and live recovery
+
+The lead deployed landed commit `2a16da2f0` and reported its runtime healthy.
+On 2026-10-20 at 06:23Z, the supported CLI settled Codex receipt
+`db443061-0803-4538-ad21-4b5001fe2293` as `abandoned-unknown`, with authenticated
+`launchHistory: uncommitted` evidence (2 panes, 439 processes, 2 sessions).
+
+A public `hire_agent` call initially hit an older unresolved Wren receipt
+`9b7009dd-3d79-49e6-b856-c3e8a2f2d9d6` and started nothing. Its exact MCP hire ID
+`6827bf37-8ab9-466f-b529-3735463f4be3` was reconciled read-only. The old native
+receipt was abandoned through the supported operator path after authenticated
+census proved `pc/w1A:p1` absent. The lead then explicitly authorized new work
+referencing that predecessor.
+
+Fresh intent `3f310dc0-8a38-479f-bd68-beb8762a4722` launched **one public PC
+Claude hire**, in owned `pc/w1B:p1` and the granted `fleet-proof` workspace.
+Claude Code 2.1.304 / Haiku 4.5 read the staged JSON and answered
+`VUH2538_PUBLIC_FIRST_TURN_OK` on its first turn. Session:
+`824f6394-6766-4ec1-9da0-4ed878cef056`. Read-back and native parsing prove:
+
+- **2,150 UTF-8 bytes**, including all requested punctuation/newline/unicode
+  cases and the service-appended standing preferences.
+- **One complete decoded brief**, one launch, **zero channel copies**.
+- Staged text matches the retained receipt fingerprint exactly; **no BOM**.
+
+The public hire returned a false negative `start_unconfirmed` /
+`brief_delivery_unverified`, native receipt `efc313f9-7023-4347-a12e-e64942ab4c3b`.
+The pane showed: `clankie-worker: its classic.SessionStart hook was skipped.
+"cc-plugin-sec-default" runs first and sent the event on past it.` The visible
+read and the native transcript prove the first-turn answer despite that receipt.
+`clankie agents read` also reported no recent session for the exact ID; direct
+read of the exact `.claude-james` native transcript recovered it. These startup
+and reader findings belong to VUH-2535; no hook changes were made in this lane.
+
+Supported abandonment of `efc313f9` retained its exact present, done session.
+The CLI rejected an extra `detail` response field after settlement had applied;
+read-only journal verification and the supported settlement tool returned the
+retained evidence. No hire was replayed. `close_worker_pane` then returned
+**closed**, history `a3bbd246-575d-447e-a30b-43ef6b355f44`, at
+**2026-10-20T06:31:51.662Z**, preserving the visible output and report. The
+proof allocation and both original failed allocations are released.
+
+[Deployed public hire, native transcript, pane read, settlement and closure](public-proof.tar)

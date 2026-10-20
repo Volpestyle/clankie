@@ -6,6 +6,12 @@
       "size": 84480,
       "sha256": "5671a436f2d5529c7f02c18dae565860154dffeadda3a3b0b965193014f2858b",
       "url": "clankie://evidence/sha256/5671a436f2d5529c7f02c18dae565860154dffeadda3a3b0b965193014f2858b"
+    },
+    {
+      "path": "public-proof.tar",
+      "size": 94720,
+      "sha256": "52011d71869ab154feb8ba2fcdd00c6fd271bb0fdf256aa01ffda2afdf87e2aa",
+      "url": "clankie://evidence/sha256/52011d71869ab154feb8ba2fcdd00c6fd271bb0fdf256aa01ffda2afdf87e2aa"
     }
   ]
 }
