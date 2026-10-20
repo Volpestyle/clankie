@@ -1,3 +1,4 @@
+import { INBOX_TOOLS } from "@clankie/work-items";
 import { createWorktreeCacheRoutes } from "../worktree-cache-routes.ts";
 import { legacyWorkItem } from "@clankie/protocol/work-items";
 import {
@@ -38,7 +39,7 @@ import { manageConnections } from "../connections.ts";
 import { type DeviceRegistry } from "../devices.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { FleetRosterLimitError } from "../captain/herdr-census.ts";
-import { WorkRequestError } from "../work-items.ts";
+import { WorkRequestError, type WorkInboxContext } from "../work-items.ts";
 import { CutoverRequestSchema } from "../linear-cutover.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
 import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
@@ -1029,6 +1030,16 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       if (!(await authority.authorize()) || !authority.current())
         return context.json({ error: "owner_required" }, 401);
       const actor = authority.principal.kind === "device" ? appActor(authority.principal.id) : operatorActor;
+      const inboxCall = INBOX_TOOLS.has(parsed.data.name);
+      const inbox: WorkInboxContext | undefined = inboxCall
+        ? { authority, captain: ctx.dependencies.captain }
+        : undefined;
+      // Inbox reads are repository-scoped and never fall back to the unscoped tracker.
+      if (inboxCall && parsed.data.repo === undefined)
+        return context.json(
+          { error: "tracker_refused", detail: "Inbox questions require a repository" },
+          422,
+        );
       try {
         if (parsed.data.repo !== undefined) {
           if (ctx.dependencies.workItems === undefined) throw new Error("Work tracking is unavailable");
@@ -1038,6 +1049,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
             {
               repo: parsed.data.repo,
               local: authority.principal.kind !== "device",
+              ...(inbox ? { inbox } : {}),
               actor,
               beforeWrite: async () => {
                 if (!(await authority.authorize()) || !authority.current())
@@ -1047,6 +1059,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           );
           if (!(await authority.authorize()) || !authority.current())
             throw new Error("Owner authority expired");
+          // The last await is behind us: recheck the live question/project/link fences before publishing.
+          if (inbox) {
+            if (!inbox.finalCheck) throw new Error("Inbox publication guard is unavailable");
+            inbox.finalCheck();
+          }
           return context.json({ result });
         }
         const result = await tracker.call(parsed.data.name, parsed.data.arguments, {
@@ -1058,6 +1075,17 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
         return context.json({ result });
       } catch (error) {
+        if (inbox?.effect)
+          return context.json(
+            {
+              error: "tracker_uncertain",
+              mayHaveCommitted: true,
+              idempotencyKey: inbox.idempotencyKey,
+              detail:
+                "Attention may have committed before current authority or data changed. Inspect current attention and the original write receipt; do not resend with a new key.",
+            },
+            409,
+          );
         return context.json(
           { error: "tracker_refused", detail: error instanceof Error ? error.message : String(error) },
           422,

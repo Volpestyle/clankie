@@ -180,6 +180,7 @@ import {
   syncRoomTranscript,
   syncSeatTranscript,
 } from "./native-seats.ts";
+import { prepareInboxQuestions, type InboxQuestionReadFence } from "./inbox-fence.ts";
 import {
   assertQuestionContext,
   cancelPendingQuestion,
@@ -3668,6 +3669,17 @@ export class ConversationStore {
       return this.questionResult(meta, record, "revision_conflict");
     this.cancelPendingQuestion(conversationId, "lead_cancelled", undefined, record.question.requestId);
     return this.questionResult(meta, record, "resolved");
+  }
+
+  /**
+   * Demand-only, pure read of live tracker-linkable owner questions for the work inbox.
+   * The fence proves currentness; it grants no right to answer or cancel (see inbox-fence.ts).
+   */
+  public prepareInboxQuestions(
+    requestIds: readonly string[],
+    authority: QuestionAuthority,
+  ): Promise<InboxQuestionReadFence> {
+    return prepareInboxQuestions(this, requestIds, authority);
   }
 
   /** Current immutable targets for a lead's cleanup round; no answer or cancellation side effect. */

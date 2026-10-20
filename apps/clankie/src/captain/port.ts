@@ -537,6 +537,11 @@ export interface CaptainPort {
   ): () => void;
   /** Host-only receipt lookup for an ask this host raised; never an owner mailbox route. */
   readOwnerAsk(requestId: string): import("@clankie/protocol").ConversationQuestion | undefined;
+  /** Pure, bounded live-question fence for the work inbox; absent means the inbox refuses. */
+  prepareInboxQuestions?(
+    requestIds: readonly string[],
+    authority: import("./conversation-questions.ts").QuestionAuthority,
+  ): Promise<import("./conversations/inbox-fence.ts").InboxQuestionReadFence>;
   /** Raise an owner ask from the host in an existing chat (ADR 0245 surface ask). */
   requestOwnerAsk(
     conversationId: string,

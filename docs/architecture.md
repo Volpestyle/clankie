@@ -476,6 +476,23 @@ confirmation. Multiple asks can remain open in each source conversation;
 exact-ID answers leave siblings open. Both asks and updates accept optional
 `issue: {tracker, key, url}` navigation references.
 
+The work inbox reads pending asks through a pure live-question fence
+(`ConversationStore.prepareInboxQuestions`, optional `CaptainPort` member forwarded
+to the captain's own store). It returns bounded metadata for tracker-linked
+`decision`, `verify` and `gate` asks plus a non-serializable currentness fence; it
+answers, cancels, expires and reconciles nothing and is not new authority. The
+`inbox_pending_questions` tracker call on `/v1/tracker/call` composes it with the
+caller's existing owner capability, the repository's current project binding and
+the canonical `ownerAsks` links under the existing tracker lock. The same path
+filters private attention before current-data pagination.
+Routes without the mailbox capability, such as native MCP, refuse. The fence is a
+request-boundary check, not a cross-store transaction: a later tracker write that
+races an ask's resolution must report an uncertain effect rather than claim none.
+Versioned actor-private `inboxSnoozes` persist in the existing tracker store and
+reuse its write guards, receipts and audit; they are not question or sync models.
+Expiry/unsnooze never resolves or revives work. The API/CLI contract, bounded
+scope and source map are in [Work inbox attention](work-inbox.md).
+
 Clankie deliberately sends chosen results/media through `mail_owner_update`.
 The disk-backed update store is independent of answer/claim receipts and keeps
 bounded per-source records. There is no automatic event feed. Owner-authenticated

@@ -1,5 +1,39 @@
 import { z } from "zod";
 
+/** Attention is private to the authenticated actor; these selectors confer no authority. */
+export const WorkInboxTargetSchema = z
+  .object({
+    issueId: z.string().uuid(),
+    eventId: z.string().uuid(),
+    conversationId: z.string().min(1).max(512),
+    incarnationId: z.string().uuid(),
+    requestId: z.string().uuid(),
+  })
+  .strict();
+export type WorkInboxTarget = z.infer<typeof WorkInboxTargetSchema>;
+const InboxScopeSchema = z.object({ project: z.string().uuid(), storeId: z.string().min(1).max(128) });
+export const WorkInboxListSchema = InboxScopeSchema.extend({
+  attention: z.enum(["active", "snoozed", "all"]).default("active"),
+  limit: z.number().int().min(1).max(250).optional(),
+  cursor: z.string().min(1).max(2048).optional(),
+}).strict();
+export const WorkInboxGetSchema = InboxScopeSchema.extend({ target: WorkInboxTargetSchema }).strict();
+export const WorkInboxUnsnoozeSchema = WorkInboxGetSchema.extend({
+  expectedRevision: z.number().int().nonnegative(),
+  ifUpdatedAt: z.iso.datetime({ offset: true }).nullable(),
+  idempotencyKey: z.string().min(8).max(128),
+}).strict();
+export const WorkInboxSnoozeSchema = WorkInboxUnsnoozeSchema.extend({
+  until: z.iso.datetime({ offset: true }),
+}).strict();
+export interface WorkInboxPendingQuestion {
+  readonly target: WorkInboxTarget;
+  readonly expectedRevision: number;
+  readonly purpose: "decision" | "verify" | "gate";
+  readonly createdAt: string;
+  readonly deadlineAt?: string;
+}
+
 /**
  * The work-item contract (ADR 0191): one shape for an item whichever backend
  * the repo records, so the CLI, the captain's tools and the app agree.

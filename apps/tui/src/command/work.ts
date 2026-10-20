@@ -10,7 +10,13 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { readReviewDiff, readReviewPatch, ReviewDiffError, ReviewPatchError } from "@clankie/work-items";
-import { WorkItemPrioritySchema } from "@clankie/protocol/work-items";
+import {
+  WorkItemPrioritySchema,
+  WorkInboxListSchema,
+  WorkInboxGetSchema,
+  WorkInboxSnoozeSchema,
+  WorkInboxUnsnoozeSchema,
+} from "@clankie/protocol/work-items";
 import { commandHost } from "./io.ts";
 
 const WORK_USAGE = [
@@ -22,6 +28,7 @@ const WORK_USAGE = [
   "  | close ID [--canceled] | attach ID --url URL --caption TEXT [--kind image|video|log|link]",
   "  | releases [--lane L] [--item KEY] [--limit N] | releases sync | release ID|VERSION",
   "  | view save|get|list|apply|delete [ID] --project UUID --store-id ID [--json DEFINITION] [--limit N] [--cursor C]",
+  "  | inbox list|get|snooze|unsnooze --project UUID --store-id ID [--target JSON] [--until RFC3339] [--revision N] [--if-updated-at RFC3339|null] [--idempotency-key KEY] [--attention active|snoozed|all] [--limit N] [--cursor C]",
   "  | cycle [--project P] [--type current|previous|next|all] | cycle show ID [--project P]",
   "  | cycle add ITEM [--to current|next|NUMBER] | cycle remove ITEM | cycle length PROJECT DAYS",
   "  | ready [--project P] [--limit N] | drift [--project P] [--idle-days N] | runs [ITEM] [--status S]",
@@ -276,6 +283,69 @@ function trackerRequest(
     body: { name, arguments: toolArgs },
   });
   switch (verb) {
+    case "inbox": {
+      const [action, ...extra] = rest;
+      if (extra.length || !one(parsed, "--project") || !one(parsed, "--store-id"))
+        throw new Error(WORK_USAGE);
+      const names: Record<string, string> = {
+        list: "inbox_pending_questions",
+        get: "get_inbox_item",
+        snooze: "post_snooze_inbox_item",
+        unsnooze: "post_unsnooze_inbox_item",
+      };
+      const name = names[action ?? ""];
+      if (!name) throw new Error(WORK_USAGE);
+      const allowed = new Set([
+        "--project",
+        "--store-id",
+        ...(action === "list"
+          ? ["--attention", "--limit", "--cursor"]
+          : [
+              "--target",
+              ...(action === "get"
+                ? []
+                : [
+                    "--revision",
+                    "--if-updated-at",
+                    "--idempotency-key",
+                    ...(action === "snooze" ? ["--until"] : []),
+                  ]),
+            ]),
+      ]);
+      for (const [flag, values] of parsed.flags)
+        if (!allowed.has(flag) || values.length !== 1) throw new Error(WORK_USAGE);
+      const scope = { project: one(parsed, "--project"), storeId: one(parsed, "--store-id") };
+      const toolArgs =
+        action === "list"
+          ? {
+              ...scope,
+              ...(one(parsed, "--attention") === undefined ? {} : { attention: one(parsed, "--attention") }),
+              ...(one(parsed, "--limit") === undefined ? {} : { limit: Number(one(parsed, "--limit")) }),
+              ...(one(parsed, "--cursor") === undefined ? {} : { cursor: one(parsed, "--cursor") }),
+            }
+          : {
+              ...scope,
+              target: JSON.parse(one(parsed, "--target") ?? "null"),
+              ...(action === "get"
+                ? {}
+                : {
+                    expectedRevision: Number(one(parsed, "--revision") ?? "NaN"),
+                    ifUpdatedAt:
+                      one(parsed, "--if-updated-at") === "null" ? null : one(parsed, "--if-updated-at"),
+                    idempotencyKey: one(parsed, "--idempotency-key"),
+                    ...(action === "snooze" ? { until: one(parsed, "--until") } : {}),
+                  }),
+            };
+      const schema =
+        action === "list"
+          ? WorkInboxListSchema
+          : action === "get"
+            ? WorkInboxGetSchema
+            : action === "snooze"
+              ? WorkInboxSnoozeSchema
+              : WorkInboxUnsnoozeSchema;
+      return { path: "/v1/tracker/call", body: { repo, name, arguments: schema.parse(toolArgs) } };
+    }
     case "view": {
       const viewCall = (name: string, toolArgs: Record<string, unknown>) => ({
         path: "/v1/tracker/call",

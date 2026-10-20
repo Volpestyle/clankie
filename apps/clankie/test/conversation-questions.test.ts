@@ -811,3 +811,58 @@ it("refuses stale incarnation/revision, cross-source targeting and a revoked lea
   expect((await f.read()).question?.status).toBe("pending");
   expect(questionTools({}, false).some((tool) => tool.name === "cancel_question")).toBe(false);
 });
+
+it("prepares a pure inbox fence that holds only while the exact live decision stays pending", async () => {
+  const f = await fixture();
+  const admission = { current: () => true, authorize: async () => true };
+  // The fixture's preference ask is not an inbox question.
+  expect((await f.store.prepareInboxQuestions([f.target.requestId], owner)).rows).toEqual([]);
+  const { conversationId: _source, ...target } = f.target;
+  await f.store.cancelSurfaceQuestion(f.id, target, admission);
+  const asked = await f.store.requestSurfaceQuestion(
+    f.id,
+    { ...draft, purpose: "decision", prompt: "Which?", waitingOn: "The choice", recommendation: "Small" },
+    admission,
+  );
+  const question = asked.question!;
+  const snapshot = () =>
+    fs
+      .readdirSync(join(f.root, "conversations"), { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => fs.readFileSync(join(entry.parentPath, entry.name), "utf8"));
+  const before = snapshot();
+  await expect(
+    f.store.prepareInboxQuestions([question.requestId, question.requestId], owner),
+  ).rejects.toThrow("inbox_request_ids_invalid");
+  let live = true;
+  const revocable: QuestionAuthority = { ...owner, current: () => live };
+  const fence = await f.store.prepareInboxQuestions([question.requestId], revocable);
+  expect(fence.rows).toEqual([
+    {
+      target: { conversationId: f.id, incarnationId: question.incarnationId, requestId: question.requestId },
+      expectedRevision: expect.any(Number),
+      purpose: "decision",
+      createdAt: question.createdAt,
+      deadlineAt: expect.any(String),
+    },
+  ]);
+  expect(JSON.stringify(fence.rows)).not.toContain("Which?");
+  await fence.recheck();
+  fence.assertCurrent();
+  expect(snapshot()).toEqual(before); // reading wrote nothing
+  expect((await f.read(question.requestId)).question?.status).toBe("pending");
+  live = false;
+  expect(() => fence.assertCurrent()).toThrow("question_owner_unavailable");
+  live = true;
+  await f.store.cancelSurfaceQuestion(
+    f.id,
+    {
+      incarnationId: question.incarnationId,
+      requestId: question.requestId,
+      expectedRevision: (await f.read(question.requestId)).revision!,
+    },
+    admission,
+  );
+  expect(() => fence.assertCurrent()).toThrow("inbox_fence_stale");
+  expect((await f.store.prepareInboxQuestions([question.requestId], owner)).rows).toEqual([]);
+});

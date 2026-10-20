@@ -2855,6 +2855,40 @@ hunks), non-UTF-8, truncated, contradictory or unsupported patches answer
 `{ "outcome": "refused", "code" }` and exit 1. Contract: [guided
 reviews](guided-reviews.md#reading-a-supplied-patch).
 
+### `work inbox list|get|snooze|unsnooze` (built-in tracker)
+
+Defer attention on a current tracker-linked pending decision, gate or verification
+question. This never answers, approves, cancels, verifies or controls the work.
+Use the exact bound tracker project UUID and current `storeId` from Work sync
+bootstrap, and the `target` and revisions returned by the inbox read.
+
+```bash
+clankie work inbox list --repo /absolute/repo --project UUID --store-id STORE
+clankie work inbox list --repo /absolute/repo --project UUID --store-id STORE --attention all
+clankie work inbox get --repo /absolute/repo --project UUID --store-id STORE --target 'TARGET_JSON'
+clankie work inbox snooze --repo /absolute/repo --project UUID --store-id STORE \
+  --target 'TARGET_JSON' --revision 12 --if-updated-at null \
+  --until 2026-10-21T09:00:00-05:00 --idempotency-key my-snooze-001
+clankie work inbox unsnooze --repo /absolute/repo --project UUID --store-id STORE \
+  --target 'TARGET_JSON' --revision 12 --if-updated-at ATTENTION_UPDATED_AT \
+  --idempotency-key my-unsnooze-001
+```
+
+`TARGET_JSON` is the full returned target object, never a latest-pending selector.
+`--until` must be explicit RFC3339, future and within 30 days. Use the returned
+`updatedAt`, or literal `null` when no record exists. Normal reads omit active
+snoozes; `--attention snoozed|all` inspects them. Expiry and unsnooze re-read current
+pending work. List supports `--limit 1..250` and `--cursor`; continue while
+`hasNextPage`. A changed query/data/expiry can invalidate its cursor.
+
+Attention is private to the authenticated actor and exact current project/store;
+other devices do not share it through names or on-behalf-of chains. Unsupported
+backends and native tools without owner mailbox authority refuse. A
+`tracker_uncertain` reply can follow a committed rename: inspect the original
+actor/key's write receipt and current attention without sending a new key.
+See [Work inbox attention](work-inbox.md) for the minimal contract, limits,
+authority and file map. Visual Work discovery remains a subsequent slice.
+
 ### `work view save|get|list|apply|delete` (built-in tracker)
 
 Saved views persist named issue filters, never issue snapshots or access rights.

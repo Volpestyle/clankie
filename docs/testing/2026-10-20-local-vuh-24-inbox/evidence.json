@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "candidate.diff.txt",
+      "size": 100418,
+      "sha256": "0657cd4469b0275b5eea8d4cf0ba4f4ae36d31dbe13a7079872e97a933a46e98",
+      "url": "clankie://evidence/sha256/0657cd4469b0275b5eea8d4cf0ba4f4ae36d31dbe13a7079872e97a933a46e98"
+    },
+    {
+      "path": "proof.log",
+      "size": 35675,
+      "sha256": "2e27df395bae530d7c1f7fdde1dbcebd145ba964dae8a24ade3867f48e0be290",
+      "url": "clankie://evidence/sha256/2e27df395bae530d7c1f7fdde1dbcebd145ba964dae8a24ade3867f48e0be290"
+    }
+  ]
+}

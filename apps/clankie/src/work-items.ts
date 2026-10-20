@@ -44,14 +44,19 @@ import {
   type TrackerToolCallOptions,
   type TrackerToolBackend,
   createLocalTracker,
+  type LocalTrackerBackend,
   TRACKER_LEAD,
   SAVED_ISSUE_VIEW_TOOLS,
+  INBOX_TOOLS,
+  type InboxPendingFence,
   refuseBuiltInTrackerFeatures,
   TRACKER_OWNER,
   TrackerReadRejected,
   type TrackerActor,
 } from "@clankie/work-items";
 import type { McpHost, TrackerRouteFence } from "./mcp-host.ts";
+import type { CaptainPort } from "./captain/port.ts";
+import type { QuestionAuthority } from "./captain/conversation-questions.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
 import { WORK_REPO_LIST_MAX } from "@clankie/protocol/work-items";
 import { createProjectWorkReader } from "./project-work-items.ts";
@@ -160,6 +165,20 @@ export const WorkHttpRequestSchema = z.union([
 const RegistrySchema = z.object({
   repos: z.array(z.object({ id: z.string(), path: z.string(), name: z.string() }).strict()).max(50),
 });
+
+/** Inbox reads need the caller's existing owner capability and the live question fence; neither is minted here. */
+export interface WorkInboxContext {
+  readonly authority: QuestionAuthority;
+  readonly captain: Pick<CaptainPort, "prepareInboxQuestions">;
+  /**
+   * Host-only, set by the inbox call and read by its route after the route's last await.
+   * It rechecks the live question, project and link fences; it is never serialized.
+   */
+  finalCheck?: () => void;
+  effect?: "uncertain" | "applied";
+  idempotencyKey?: string;
+}
+export const INBOX_PENDING_QUESTIONS_TOOL = "inbox_pending_questions";
 
 export interface WorkItemsServiceOptions {
   readonly projects?: () => Promise<ProjectsSettings>;
@@ -813,6 +832,132 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (writeLocks.get(key) === pending) writeLocks.delete(key);
     }
   };
+
+  /**
+   * Pending, tracker-linked owner questions for one bound built-in project. Read only: the
+   * rows name questions; they grant no right to answer, cancel or approve them.
+   */
+  const inboxPendingQuestions = async (
+    repo: string,
+    local: boolean,
+    toolArgs: Record<string, unknown>,
+    inbox: WorkInboxContext | undefined,
+    name: string,
+    callbacks: TrackerToolCallOptions,
+  ) => {
+    const prepareInboxQuestions = inbox?.captain.prepareInboxQuestions?.bind(inbox.captain);
+    // Native MCP and other routes without the owner mailbox capability refuse; there is no fallback.
+    if (!inbox || !prepareInboxQuestions)
+      throw new Error("Inbox questions need the owner's authenticated mailbox capability");
+    const parsed = z.object({ project: z.string().uuid() }).passthrough().safeParse(toolArgs);
+    if (!parsed.success) throw new Error("Invalid inbox scope");
+    if (!callbacks.actor) throw new Error("Authenticated inbox actor is unavailable");
+    if (!options.projectsFence) throw new Error("Current project authority is unavailable");
+    const snapshot = await options.projectsFence();
+    snapshot.assertCurrent();
+    const target = await prepareWorkWriteTarget({
+      repoId: repo,
+      localMachineId: options.localMachineId ?? "local",
+      projectsFence: async () => snapshot,
+      locate: async () => {
+        const entry = await locate(repo, local);
+        snapshot.assertCurrent();
+        return { path: entry.path, assertCurrent: snapshot.assertCurrent };
+      },
+    });
+    if (target.convention.backend !== "builtin")
+      throw new Error("Inbox questions are only available on the built-in tracker");
+    const projects = snapshot.projects.projects.filter(
+      (project) =>
+        project.trackerRef !== undefined &&
+        project.workspaces.some(
+          (workspace) =>
+            workspace.id === project.trackerRef?.workspaceId &&
+            workspace.machineId === (options.localMachineId ?? "local") &&
+            workspace.platform === (process.platform === "win32" ? "windows" : "posix") &&
+            resolve(workspace.path) === target.path,
+        ),
+    );
+    const project = projects.length === 1 ? projects[0] : undefined;
+    if (
+      !project?.trackerProjectId ||
+      project.trackerProjectId !== parsed.data.project ||
+      snapshot.projects.projects.filter((entry) => entry.trackerProjectId === project.trackerProjectId)
+        .length !== 1
+    )
+      throw new Error("Inbox project does not match this repo's current built-in tracker binding");
+    const tracker = openBuiltIn() as Partial<LocalTrackerBackend>;
+    if (!tracker.inboxAttention) throw new Error("This tracker backend does not support inbox attention");
+    const validate = () => {
+      snapshot.assertCurrent();
+      target.assertCurrent();
+      if (!inbox.authority.current()) throw new Error("Owner authority expired");
+    };
+    validate();
+    const result = await tracker.inboxAttention(name, toolArgs, {
+      ...callbacks,
+      actor: callbacks.actor,
+      beforeWrite: async () => {
+        await callbacks.beforeWrite?.();
+        if (!(await inbox.authority.authorize())) throw new Error("Owner authority expired");
+        validate();
+      },
+      onDispatch: () => {
+        validate();
+        callbacks.onDispatch?.();
+        inbox.effect = "uncertain";
+        inbox.idempotencyKey = toolArgs.idempotencyKey as string;
+      },
+      effectConfirmed: () => {
+        inbox.effect = "applied";
+        callbacks.effectConfirmed?.();
+      },
+      prepare: async (links): Promise<InboxPendingFence> => {
+        const fences: Awaited<ReturnType<typeof prepareInboxQuestions>>[] = [];
+        const rows: InboxPendingFence["rows"][number][] = [];
+        const assertCurrent = () => {
+          validate();
+          for (const fence of fences) fence.assertCurrent();
+        };
+        // Use the existing bounded live-question read; no capped input_list or second inbox store.
+        for (let offset = 0; offset < links.length; offset += 250) {
+          const batch = links.slice(offset, offset + 250);
+          const fence = await prepareInboxQuestions(
+            batch.map((link) => link.requestId),
+            inbox.authority,
+          );
+          fences.push(fence);
+          assertCurrent();
+          const byRequest = new Map(batch.map((link) => [link.requestId, link]));
+          for (const row of fence.rows) {
+            const link = byRequest.get(row.target.requestId)!;
+            if (row.purpose !== link.purpose)
+              throw new Error("Inbox link does not match the live question purpose");
+            rows.push({ ...row, target: { ...row.target, issueId: link.issueId, eventId: link.eventId } });
+          }
+        }
+        return {
+          rows,
+          assertCurrent,
+          async recheck() {
+            for (const fence of fences) {
+              await fence.recheck();
+              assertCurrent();
+            }
+            assertCurrent();
+          },
+        };
+      },
+    });
+    validate();
+    inbox.finalCheck = () => {
+      validate();
+      result.assertCurrent();
+    };
+    inbox.finalCheck();
+    return result.value;
+  };
+
   return {
     handleOwnerWrite,
     /**
@@ -1205,10 +1350,15 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     async callTracker(
       name: string,
       args: Record<string, unknown>,
-      callOptions: { readonly repo: string; readonly local: boolean } & TrackerToolCallOptions,
+      callOptions: {
+        readonly repo: string;
+        readonly local: boolean;
+        readonly inbox?: WorkInboxContext;
+      } & TrackerToolCallOptions,
     ): Promise<unknown> {
-      const { repo, local, ...callbacks } = callOptions;
+      const { repo, local, inbox, ...callbacks } = callOptions;
       const { repo: _repo, ...toolArgs } = args;
+      if (INBOX_TOOLS.has(name)) return inboxPendingQuestions(repo, local, toolArgs, inbox, name, callbacks);
       if (SAVED_ISSUE_VIEW_TOOLS.has(name)) {
         // Saved views use a fresh canonical project fence, never discovery's
         // frozen options.projects snapshot as authority. Other tools retain

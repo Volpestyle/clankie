@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createLocalTracker, trackerToolsFor } from "@clankie/work-items";
-import { createWorkItemsService } from "../src/work-items.ts";
+import { createWorkItemsService, INBOX_PENDING_QUESTIONS_TOOL } from "../src/work-items.ts";
 import { authorizeProjectTrackerCall } from "../src/captain/project-tracker-access.ts";
 
 it("keeps saved views inside the repo binding and remote lead project fence with real storage", async () => {
@@ -112,6 +113,43 @@ it("refuses saved-view service routing when current project authority is unavail
         { project: "00000000-0000-0000-0000-000000000001", storeId: "store" },
         { repo: "unknown", local: true },
       ),
+    ).rejects.toThrow("Current project authority is unavailable");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("refuses inbox questions without the owner's mailbox capability or current project authority", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "inbox-questions-refusal-"));
+  try {
+    const service = createWorkItemsService({ stateDirectory: directory });
+    const args = { project: randomUUID() };
+    const authority = {
+      principal: { kind: "operator" as const, id: "owner" },
+      authorize: async () => true,
+      current: () => true,
+    };
+    // Native MCP and other routes carry no mailbox capability: explicit refusal, no fallback.
+    await expect(
+      service.callTracker(INBOX_PENDING_QUESTIONS_TOOL, args, { repo: "unknown", local: true }),
+    ).rejects.toThrow("mailbox capability");
+    await expect(
+      service.callTracker(INBOX_PENDING_QUESTIONS_TOOL, args, {
+        repo: "unknown",
+        local: true,
+        inbox: { authority, captain: {} },
+      }),
+    ).rejects.toThrow("mailbox capability");
+    await expect(
+      service.callTracker(INBOX_PENDING_QUESTIONS_TOOL, args, {
+        repo: "unknown",
+        local: true,
+        actor: { type: "agent-worker", id: "clankie", onBehalfOf: [] },
+        inbox: {
+          authority,
+          captain: { prepareInboxQuestions: async () => Promise.reject(new Error("unused")) },
+        },
+      }),
     ).rejects.toThrow("Current project authority is unavailable");
   } finally {
     await rm(directory, { recursive: true, force: true });

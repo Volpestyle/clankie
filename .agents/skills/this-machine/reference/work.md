@@ -290,3 +290,24 @@ app, without a local fallback. Auto rounds carry it and explicit lead routing
 uses it. It neither changes the repo's saved tracker backend nor removes its
 built-in binding. `/project` exposes the same control; plain snapshots hide it.
 Never infer bindings from names or poll for discovery.
+
+## Work inbox attention
+
+`clankie work inbox list|get|snooze|unsnooze --repo ABSOLUTE_REPO --project UUID
+--store-id STORE` uses the built-in tracker's current linked pending questions.
+List defaults to active attention; use `--attention snoozed|all` to inspect,
+and follow `cursor` while `hasNextPage`. Get/writes take `--target` with the full
+returned JSON target. Writes need `--revision`, `--if-updated-at` (literal `null`
+when no snooze exists) and `--idempotency-key`; snooze also needs `--until` with
+an explicit future RFC3339 timestamp within 30 days. At most 100 active snoozes
+per authenticated actor and 1000 retained records per store are allowed. Expired
+records are reclaimed only by writes in their exact actor/project scope.
+
+Snooze only defers attention; never describe it as answering, approving,
+cancelling, verifying or stopping work. State is exact actor-private, including
+separate devices. Expiry/unsnooze use current question and issue data, so terminal
+work cannot revive. Unsupported backends and native MCP without mailbox authority
+refuse without fallback. After `tracker_uncertain`, retain the original key and
+inspect current attention plus `get_write_receipt`; never retry with a new key.
+The API/CLI contract and file map are in `docs/work-inbox.md`; UI discovery and
+phone/tablet/Mac visual acceptance remain separate.

@@ -81,8 +81,17 @@ export const SAVED_ISSUE_VIEW_TOOLS: ReadonlySet<string> = new Set([
   "post_delete_issue_view",
 ]);
 
+/** Mailbox capability is supplied by the authenticated HTTP route, never MCP arguments. */
+export const INBOX_TOOLS: ReadonlySet<string> = new Set([
+  "inbox_pending_questions",
+  "get_inbox_item",
+  "post_snooze_inbox_item",
+  "post_unsnooze_inbox_item",
+]);
+
 /** Built-in tracker only: write receipts, the audit log, preconditions and the item event stream. */
 export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
+  ...INBOX_TOOLS,
   ...SAVED_ISSUE_VIEW_TOOLS,
   "get_write_receipt",
   "list_audit_events",
@@ -321,6 +330,57 @@ function tool(
 
 /** Schemas deliberately cover the supported subset; unavailable features fail explicitly. */
 export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
+  {
+    name: "inbox_pending_questions",
+    description:
+      "Built-in Work inbox: current tracker-linked pending owner questions, excluding this actor's active snoozes by default. Requires repository, exact project/store and an authenticated owner mailbox capability; native MCP without that capability refuses. Pagination filters current attention first.",
+    inputSchema: object(
+      {
+        project: string,
+        storeId: string,
+        attention: { type: "string", enum: ["active", "snoozed", "all"] },
+        limit: pagination.limit,
+        cursor: string,
+      },
+      ["project", "storeId"],
+    ),
+  },
+  ...["get_inbox_item", "post_snooze_inbox_item", "post_unsnooze_inbox_item"].map((name) => ({
+    name,
+    description:
+      "Built-in Work inbox attention only. Inspect, defer until an explicit timestamp (maximum 30 days), or restore attention for an exact current pending question. Never answers, approves, verifies or controls work. Authenticated actor-private; requires owner mailbox capability. Writes require an idempotency key, current question revision and ifUpdatedAt (null when no snooze record). Unsupported routes/backends refuse.",
+    inputSchema: object(
+      {
+        project: string,
+        storeId: string,
+        target: object(
+          {
+            issueId: string,
+            eventId: string,
+            conversationId: string,
+            incarnationId: string,
+            requestId: string,
+          },
+          ["issueId", "eventId", "conversationId", "incarnationId", "requestId"],
+        ),
+        ...(name === "get_inbox_item"
+          ? {}
+          : {
+              expectedRevision: { type: "integer", minimum: 0 },
+              ifUpdatedAt: nullableString,
+              idempotencyKey,
+            }),
+        ...(name === "post_snooze_inbox_item" ? { until: string } : {}),
+      },
+      [
+        "project",
+        "storeId",
+        "target",
+        ...(name === "get_inbox_item" ? [] : ["expectedRevision", "ifUpdatedAt", "idempotencyKey"]),
+        ...(name === "post_snooze_inbox_item" ? ["until"] : []),
+      ],
+    ),
+  })),
   tool(
     "save_issue_view",
     "Built-in only. Create or update a named version-1 issue filter in an exact store/project. No saved authority or issue snapshot. Read before updating; use ifUpdatedAt and idempotencyKey.",

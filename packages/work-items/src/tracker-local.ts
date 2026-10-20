@@ -1,5 +1,14 @@
 import type { AutoWorkQueue } from "@clankie/protocol/auto-rounds";
 import {
+  WorkInboxTargetSchema,
+  WorkInboxListSchema,
+  WorkInboxGetSchema,
+  WorkInboxSnoozeSchema,
+  WorkInboxUnsnoozeSchema,
+  type WorkInboxTarget,
+  type WorkInboxPendingQuestion,
+} from "@clankie/protocol/work-items";
+import {
   TrackerSyncCommandSchema,
   type TrackerSyncCommand,
   type TrackerSyncModel,
@@ -35,6 +44,7 @@ import {
   TRACKER_OWNER,
   TRACKER_TOOLS,
   SAVED_ISSUE_VIEW_TOOLS,
+  INBOX_TOOLS,
   validateTrackerToolArgs,
   type DeliveryStage,
   type IssueEventType,
@@ -268,6 +278,8 @@ interface SavedIssueView extends Entity {
 
 interface Store {
   version: 1;
+  /** Private attention metadata in the existing store; never a question lifecycle or sync model. */
+  inboxSnoozes?: InboxSnooze[];
   issueViews?: SavedIssueView[];
   /** Import keeps the native store identity separate from the provider's team id. */
   storeId?: string;
@@ -341,7 +353,59 @@ interface WriteContext {
 
 /** Live delivery of newly committed item events, after their write is durable. */
 export type TrackerEventListener = (event: TrackerItemEvent) => void;
+export interface OwnerAskLink {
+  readonly eventId: string;
+  readonly issueId: string;
+  readonly requestId: string;
+  /** What the host owner loop raises for this source event: an ask's purpose, or a landed check. */
+  readonly purpose: "decision" | "gate" | "verify";
+}
+/** The source-event shapes the owner loop links an ask to; anything else is not a valid relation. */
+function ownerAskSourcePurpose(event: {
+  readonly type: string;
+  readonly purpose?: string;
+  readonly from?: string;
+  readonly to?: string;
+}): OwnerAskLink["purpose"] | undefined {
+  if (event.type === "ask")
+    return event.purpose === "decision" || event.purpose === "gate" ? event.purpose : undefined;
+  const landed = DELIVERY_STAGES.indexOf("landed");
+  if (event.type === "reopened") return event.to === "landed" ? "verify" : undefined;
+  if (event.type !== "stage") return undefined;
+  const from = DELIVERY_STAGES.indexOf((event.from ?? "reported") as (typeof DELIVERY_STAGES)[number]);
+  const to = DELIVERY_STAGES.indexOf(event.to as (typeof DELIVERY_STAGES)[number]);
+  return from < landed && to >= landed ? "verify" : undefined;
+}
+
+interface InboxSnooze extends Entity {
+  schemaVersion: 1;
+  storeId: string;
+  projectId: string;
+  actorKey: string;
+  target: WorkInboxTarget;
+  until: string;
+}
+export interface InboxPendingFence {
+  readonly rows: readonly WorkInboxPendingQuestion[];
+  recheck(): Promise<void>;
+  assertCurrent(): void;
+}
+export interface InboxAttentionOptions extends TrackerToolCallOptions {
+  readonly actor: TrackerActor;
+  /** Host-only: the canonical live mailbox, authorized by the current request. */
+  readonly prepare: (links: readonly OwnerAskLink[]) => Promise<InboxPendingFence>;
+}
+
 export interface LocalTrackerBackend extends TrackerToolBackend {
+  inboxAttention(
+    name: string,
+    args: Record<string, unknown>,
+    options: InboxAttentionOptions,
+  ): Promise<{
+    readonly value: unknown;
+    /** Current tracker file + live mailbox + current host authorization, for the final response. */
+    readonly assertCurrent: () => void;
+  }>;
   /** Fixture-only existing-store read. Never enters ordinary dispatch, seed or rollover. */
   strictGetUser(
     beforeRead: (snapshot: { storeId: string; storeDigest: string }) => Promise<() => void>,
@@ -374,11 +438,11 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
   storeId(): Promise<string>;
   /** Host-only: persisted store identity for an exact project UUID; safe inside publication fences. */
   projectStoreId(id: string): Promise<string | undefined>;
-  /** Replays events after the cursor (seq), then pushes new ones. Returns an unsubscribe. */
   /** Host-only: link the existing mailbox record to its requesting item event. */
   linkOwnerAsk(eventId: string, requestId: string): Promise<void>;
   /** Host-only: apply an authenticated ADR 0245 resolution. Public tools cannot approve. */
   resolveOwnerAsk(eventId: string, requestId: string, approved: boolean, body: string): Promise<void>;
+  /** Replays events after the cursor (seq), then pushes new ones. Returns an unsubscribe. */
   subscribe(listener: TrackerEventListener, after?: number): Promise<() => void>;
   /**
    * Upserts a repository's shipped versions and moves each built-in item a version
@@ -586,6 +650,29 @@ function parseStore(content: string): Store {
         JSON.stringify(view.filter).length > 8192
       )
         throw new Error("Invalid local saved issue view binding");
+    }
+  }
+  if (store.inboxSnoozes !== undefined) {
+    if (!Array.isArray(store.inboxSnoozes) || store.inboxSnoozes.length > 1000)
+      throw new Error("Invalid inbox snooze collection");
+    const keys = new Set<string>();
+    for (const entry of store.inboxSnoozes) {
+      const key = canonical([entry.projectId, entry.actorKey, entry.target]);
+      if (
+        entry.schemaVersion !== 1 ||
+        entry.storeId !== (store.storeId ?? store.team.id) ||
+        !store.projects.some((project) => project.id === entry.projectId) ||
+        !/^(human|agent-worker|app):.+/u.test(entry.actorKey) ||
+        !WorkInboxTargetSchema.safeParse(entry.target).success ||
+        typeof entry.id !== "string" ||
+        keys.has(key) ||
+        !Number.isFinite(Date.parse(entry.createdAt)) ||
+        !Number.isFinite(Date.parse(entry.updatedAt)) ||
+        !Number.isFinite(Date.parse(entry.until)) ||
+        Date.parse(entry.until) <= Date.parse(entry.createdAt)
+      )
+        throw new Error("Invalid inbox snooze binding");
+      keys.add(key);
     }
   }
   if (store.issueStatuses.length === 0 || store.projectStatuses.length === 0)
@@ -3323,9 +3410,47 @@ function builtInOutcomes(
   });
 }
 
+function ownerAskLinks(store: Store, projectId: string): OwnerAskLink[] {
+  const links: OwnerAskLink[] = [];
+  const eventIds = new Set<string>();
+  const requestIds = new Set<string>();
+  for (const ref of store.ownerAsks ?? []) {
+    // A repeated event or request is ambiguous; never retarget by first match.
+    if (eventIds.has(ref.eventId) || requestIds.has(ref.requestId))
+      throw new Error("Owner ask links are ambiguous");
+    eventIds.add(ref.eventId);
+    requestIds.add(ref.requestId);
+    const issue = store.issues.find((entry) => entry.id === ref.issueId);
+    const event = store.events?.find((entry) => entry.id === ref.eventId);
+    if (!issue || !event || event.issueId !== issue.id)
+      throw new Error("Owner ask link lost its source event or issue");
+    const purpose = ownerAskSourcePurpose(event);
+    if (purpose === undefined) throw new Error("Owner ask link source event is not an owner-ask source");
+    if (purpose === "gate") {
+      const run = store.runs?.find((entry) => entry.id === event.runId && entry.issueId === issue.id);
+      // Use the real gate's event identity, not a request ID or a copied blocked flag.
+      if (run?.status !== "active" || !run.pendingGates?.includes(event.id)) continue;
+    }
+    const category = store.issueStatuses.find((status) => status.id === issue.statusId)?.type;
+    if (
+      category === "canceled" ||
+      issue.stage === "owner-verified" ||
+      (category === "completed" && purpose !== "verify")
+    )
+      continue;
+    if (issue.projectId === projectId)
+      links.push({ eventId: ref.eventId, issueId: ref.issueId, requestId: ref.requestId, purpose });
+  }
+  return links;
+}
+
 export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBackend {
   const directory = resolve(options.directory);
   const path = join(directory, "tracker.json");
+  const fileVersion = () => {
+    const file = statSync(path, { bigint: true });
+    return `${file.dev}:${file.ino}:${file.size}:${file.mtimeNs}:${file.ctimeNs}`;
+  };
   const listeners = eventListeners.get(path) ?? new Set<TrackerEventListener>();
   eventListeners.set(path, listeners);
   let validated: { version: string; bytes: Buffer; store: Store } | undefined;
@@ -3433,9 +3558,9 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           reason: refusal.reason,
           detail,
         });
-      // Bookkeeping only: no tracker record changed, so no publication callbacks.
+      // Inbox refusals still require live mailbox/project/store authority before bookkeeping.
       appendSync(before, store, actor, name, now, key);
-      await persist(path, store, assertHeld);
+      await persist(path, store, assertHeld, INBOX_TOOLS.has(name) ? callOptions : undefined);
       for (const listener of syncListeners.get(path) ?? []) listener();
       throw refusal;
     }
@@ -4316,6 +4441,224 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         appliedEvents: new Set((store.linearMirror.events ?? []).map((event) => event.id)),
       };
     },
+    async inboxAttention(name, args, callOptions) {
+      if (!INBOX_TOOLS.has(name)) throw new Error("Unsupported inbox operation");
+      const schema =
+        name === "inbox_pending_questions"
+          ? WorkInboxListSchema
+          : name === "get_inbox_item"
+            ? WorkInboxGetSchema
+            : name === "post_snooze_inbox_item"
+              ? WorkInboxSnoozeSchema
+              : WorkInboxUnsnoozeSchema;
+      const input = schema.parse(args);
+      const writing = name.startsWith("post_");
+      return withTrackerStoreLock(
+        path,
+        async (assertHeld) => {
+          let version = fileVersion();
+          const store = await readStore(writing);
+          const assertStore = () => {
+            assertHeld();
+            if (fileVersion() !== version) throw new Error("Inbox tracker store changed. Read again.");
+          };
+          assertStore();
+          if (input.storeId !== (store.storeId ?? store.team.id)) throw new Error("store_replaced");
+          if (!store.projects.some((project) => project.id === input.project))
+            throw new Error("Inbox project is not in the current tracker store");
+          if (mirroring(store)) throw new Error("Inbox requires a writable built-in tracker");
+          const links = ownerAskLinks(store, input.project);
+          await callOptions.beforeWrite?.();
+          assertStore();
+          const pending = await callOptions.prepare(links);
+          assertStore();
+          let assertTime = () => {};
+          const assertCurrent = () => {
+            assertStore();
+            pending.assertCurrent();
+            assertTime();
+          };
+          const beforeWrite = async () => {
+            await callOptions.beforeWrite?.();
+            await pending.recheck();
+            assertCurrent();
+          };
+          await beforeWrite();
+          const actor = callOptions.actor;
+          if (!actor.id || !["human", "agent-worker", "app"].includes(actor.type))
+            throw new Error("Authenticated inbox actor is unavailable");
+          const privateKey = actorKey(actor);
+          const now = (options.clock?.() ?? new Date()).toISOString();
+          const owned = (store.inboxSnoozes ?? []).filter(
+            (entry) => entry.actorKey === privateKey && entry.projectId === input.project,
+          );
+          const entryFor = (target: WorkInboxTarget) =>
+            owned.find((entry) => canonical(entry.target) === canonical(target));
+          const view = (row: WorkInboxPendingQuestion) => {
+            const state = entryFor(row.target);
+            const active = state !== undefined && state.until > now;
+            return {
+              ...row,
+              id: row.target.requestId,
+              attention: active ? "snoozed" : "active",
+              until: state?.until ?? null,
+              updatedAt: state?.updatedAt ?? null,
+            };
+          };
+          // The pending set and every selector are supplied by the canonical host mailbox/link join.
+          const rows = pending.rows.map(view);
+          assertTime = () => {
+            const current = (options.clock?.() ?? new Date()).toISOString();
+            if (owned.some((entry) => entry.until > now !== entry.until > current))
+              throw new Error("Inbox attention expired. Read again.");
+          };
+          if (name === "inbox_pending_questions") {
+            const list = WorkInboxListSchema.parse(input);
+            const filtered = rows.filter(
+              (row) => list.attention === "all" || row.attention === list.attention,
+            );
+            // Reuse tracker pagination, with an actor/store/project/mode and current-result fingerprint.
+            const result = page(
+              filtered,
+              {
+                ...list,
+                actorKey: privateKey,
+                snapshot: createHash("sha256").update(canonical(filtered)).digest("hex"),
+              },
+              "rows",
+              name,
+            );
+            assertCurrent();
+            return {
+              value: {
+                storeId: input.storeId,
+                projectId: input.project,
+                ...result,
+                complete: result.hasNextPage === false,
+              },
+              assertCurrent,
+            };
+          }
+          const target = WorkInboxGetSchema.parse({
+            project: input.project,
+            storeId: input.storeId,
+            target: args.target,
+          }).target;
+          const row = pending.rows.find((entry) => canonical(entry.target) === canonical(target));
+          if (!row) throw new Error("Inbox target is not a current eligible pending question");
+          if (!writing) return { value: view(row), assertCurrent };
+          const mutation = WorkInboxUnsnoozeSchema.parse(
+            Object.fromEntries(Object.entries(input).filter(([key]) => key !== "until")),
+          );
+          const request = Object.fromEntries(
+            Object.entries(input).filter(([key]) => key !== "idempotencyKey"),
+          );
+          const fingerprint = createHash("sha256")
+            .update(canonical([name, request]))
+            .digest("hex");
+          // Current actor, store, project and pending target are checked BEFORE receipt replay.
+          const prior = store.receipts?.find(
+            (entry) => entry.actorKey === privateKey && entry.idempotencyKey === mutation.idempotencyKey,
+          );
+          if (prior) {
+            if (prior.fingerprint !== fingerprint)
+              throw new TrackerWriteRefused(
+                "idempotency_conflict",
+                "Inbox key already used for another write",
+              );
+            if (prior.state === "refused") throw new TrackerWriteRefused(prior.reason!, prior.detail!);
+            assertCurrent();
+            return { value: structuredClone(prior.result), assertCurrent };
+          }
+          if (row.expectedRevision !== mutation.expectedRevision) throw new Error("inbox_fence_stale");
+          const existing = entryFor(target);
+          if ((existing?.updatedAt ?? null) !== mutation.ifUpdatedAt)
+            throw new TrackerWriteRefused("precondition_failed", "Inbox attention changed; inspect it again");
+          let until: string | undefined;
+          const retained = (store.inboxSnoozes ?? []).filter(
+            (entry) =>
+              entry !== existing &&
+              !(entry.actorKey === privateKey && entry.projectId === input.project && entry.until <= now),
+          );
+          if (name === "post_snooze_inbox_item") {
+            until = new Date(WorkInboxSnoozeSchema.parse(input).until).toISOString();
+            const duration = Date.parse(until) - Date.parse(now);
+            if (duration <= 0 || duration > 30 * 24 * 60 * 60 * 1000)
+              throw new Error("Snooze until must be in the future and within 30 days");
+            const active = (store.inboxSnoozes ?? []).filter(
+              (entry) => entry.until > now && entry !== existing,
+            );
+            if (
+              retained.length >= 1000 ||
+              active.filter((entry) => entry.actorKey === privateKey).length >= 100
+            )
+              throw new Error("Inbox active snooze limit reached");
+          }
+          // The old attention projection is being replaced. Fence the new timestamp at
+          // dispatch and final publication, including expiry during an asynchronous rename.
+          assertTime = () => {
+            if (until !== undefined && until <= (options.clock?.() ?? new Date()).toISOString())
+              throw new Error("Inbox snooze expired before publication. Read again.");
+          };
+          const result = await write(
+            store,
+            now,
+            name,
+            request,
+            { key: mutation.idempotencyKey, fingerprint },
+            actor,
+            {
+              ...callOptions,
+              beforeWrite,
+              onDispatch: () => {
+                assertCurrent();
+                callOptions.onDispatch?.();
+                assertCurrent();
+              },
+              effectConfirmed: () => {
+                version = fileVersion();
+                if (!readFileSync(path).equals(Buffer.from(`${JSON.stringify(store, null, 2)}\n`)))
+                  throw new Error("Inbox store changed after dispatch; attention may have committed");
+                callOptions.effectConfirmed?.();
+              },
+            },
+            assertHeld,
+            (draft, at) => {
+              // Only this actor's attention changes; no issue, question, gate, run or event edits.
+              draft.inboxSnoozes = retained;
+              let saved: InboxSnooze | undefined;
+              if (until !== undefined) {
+                saved = {
+                  schemaVersion: 1,
+                  id: existing?.id ?? randomUUID(),
+                  storeId: input.storeId,
+                  projectId: input.project,
+                  actorKey: privateKey,
+                  target,
+                  until,
+                  createdAt: existing?.createdAt ?? at,
+                  updatedAt: at,
+                  createdByActor: actor,
+                  updatedByActor: actor,
+                };
+                draft.inboxSnoozes.push(saved);
+              }
+              return {
+                ...row,
+                id: target.requestId,
+                attention: saved ? "snoozed" : "active",
+                until: saved?.until ?? null,
+                updatedAt: saved?.updatedAt ?? null,
+              };
+            },
+          );
+          // Rename is asynchronous: failure here may follow a commit, and the HTTP route reports it honestly.
+          assertCurrent();
+          return { value: result, assertCurrent };
+        },
+        { existingOnly: true },
+      );
+    },
     async linkOwnerAsk(eventId, requestId) {
       await withTrackerStoreLock(path, async (assertHeld) => {
         const { store, clock } = await load();
@@ -4441,6 +4784,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     },
     async call(name, args, callOptions) {
       validateTrackerToolArgs(name, args);
+      if (INBOX_TOOLS.has(name)) throw new Error("Inbox requires the authenticated owner mailbox route");
       const operation = strictReadOperation(name, options);
       return withTrackerStoreLock(path, async (assertHeld) => {
         const writing = /^(?:save|create|post)_/u.test(name);

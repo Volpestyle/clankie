@@ -7952,6 +7952,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     readOwnerAsk(requestId) {
       return conversations.readOwnerAsk(requestId);
     },
+    // Forwarded to this captain's own store; shutdown invalidates a fence already issued.
+    async prepareInboxQuestions(requestIds, authority) {
+      shutdown.signal.throwIfAborted();
+      const fence = await conversations.prepareInboxQuestions(requestIds, authority);
+      shutdown.signal.throwIfAborted();
+      return {
+        rows: fence.rows,
+        async recheck() {
+          shutdown.signal.throwIfAborted();
+          await fence.recheck();
+          shutdown.signal.throwIfAborted();
+        },
+        assertCurrent() {
+          shutdown.signal.throwIfAborted();
+          fence.assertCurrent();
+        },
+      };
+    },
     requestOwnerAsk(conversationId, draft, publicationId) {
       return conversations.requestSurfaceQuestion(conversationId, draft, {
         ...(publicationId === undefined ? {} : { publicationId }),
