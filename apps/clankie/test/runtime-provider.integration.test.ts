@@ -786,7 +786,7 @@ it("an isolated Auto runtime records the lead's drift choice and checks started 
     AutoRoundsResponseSchema.parse(
       await (
         await f.request(
-          "/v1/auto/rounds?project=led&includeWorkPolicy=true&includeStaffing=true",
+          "/v1/auto/rounds?project=led&includeWorkPolicy=true&includeStaffing=true&includeAutoUpdates=true",
           "fixture-owner",
         )
       ).json(),
@@ -867,6 +867,15 @@ it("an isolated Auto runtime records the lead's drift choice and checks started 
     }),
   ).toBe(0);
   expect(AutoRoundsResponseSchema.parse(JSON.parse(cliOutput)).rounds).toEqual(proof);
+  const legacy = await (
+    await f.request(
+      "/v1/auto/rounds?project=led&includeWorkPolicy=true&includeStaffing=true",
+      "fixture-owner",
+    )
+  ).json();
+  expect(legacy.rounds[0].projects[0]).not.toHaveProperty("autoUpdates");
+  expect(legacy.rounds[0].projects[0]).not.toHaveProperty("progress");
+  expect(legacy.rounds[0].projects[0].report).not.toHaveProperty("progress");
   if (process.env.AUTO_DRIFT_PROOF_DIRECTORY) {
     await mkdir(process.env.AUTO_DRIFT_PROOF_DIRECTORY, { recursive: true });
     await writeFile(
