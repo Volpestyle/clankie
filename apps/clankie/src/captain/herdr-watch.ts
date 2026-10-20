@@ -2884,7 +2884,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
               guard,
             ),
           )
-          .catch(() => {});
+          .catch((error) => {
+            console.warn(
+              "hire_agent.startup_wake_failed:",
+              JSON.stringify({
+                conversationId: owner.conversationId,
+                paneId: pane,
+                detail: bounded(redactSensitiveText(reasonDetail(error)), 1000),
+              }),
+            );
+          });
       }
     }
 

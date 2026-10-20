@@ -954,9 +954,11 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
             };
           // A signed-out or expired credential lets Claude start and take the
           // brief, then refuses its first turn. That is a failed hire, not a worker.
+          // allow-swallowed-rejection -- finishing this watch aborts its deadline timer; no work is cancelled.
+          const firstTurnTimeout = sleep(firstTurnMs, watch.signal).catch(() => undefined);
           const stop =
             (nativePrompt ? deps.hooks.snapshot(sessionId)?.lastStop?.event : undefined) ??
-            (await Promise.race([firstStop, sleep(firstTurnMs, watch.signal).catch(() => undefined)]));
+            (await Promise.race([firstStop, firstTurnTimeout]));
           if (stop?.type === "turn_completed" && !stop.ok && stop.stopReason === "authentication_failed")
             return {
               outcome: "failed",

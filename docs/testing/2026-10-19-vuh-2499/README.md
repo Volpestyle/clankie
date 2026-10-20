@@ -66,7 +66,7 @@ with a failure flag and no manufactured native control.
   in owned Herdr panes, **23:23:11–23:24:18Z** and **23:30:24–23:30:38Z**. Each exact native transcript
   contains **one** complete brief, **zero** channel copies, and assistant reply
   `VUH2499_NATIVE_FIRST_TURN_OK`. The adapter's mailbox implementation would
-  throw on any attempted fallback. Both panes were closed after capture. The second run records hashes of the final source inputs in `native-final.json`.
+  throw on any attempted fallback. Both panes were closed after capture. The second run records hashes of the source inputs at capture in `native-final.json`.
 - **Regression integration:** real adapter, parser, and durable hire/owner stores,
   with process discovery/launch supplied at the existing runner seam. Covers
   stdout ACK without native acceptance, fresh startup with no channel send,
@@ -77,6 +77,16 @@ with a failure flag and no manufactured native control.
 - **Focused checks:** **69 tests passed** in four files; focused compilation of all touched source/tests and file-scoped lint/format checks passed. Recorded in `focused-tests.log` and `focused-typecheck.log`.
   The first broad app typecheck found test-fixture typing errors; those were fixed.
   The assigned integrator supplies the exact-tree landing gate.
+
+## Landing-gate follow-up
+
+Rebased onto `dd6647b39`. The deadline timer's abort rejection now documents why
+it can be dropped; startup-wake failures log a redacted diagnostic while keeping
+the durable failure summary. `node scripts/check-swallowed-rejections.mjs dd6647b39`
+passed over 135 added code lines, and the two focused Claude startup/seat test
+files passed all 47 tests. The native-start captures above are retained evidence
+from the original implementation; the follow-up changes deadline cleanup and
+wake-failure diagnostics.
 
 ## Limits
 
