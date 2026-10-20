@@ -2811,7 +2811,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
                   report: {
                     milestones: report.milestones,
                     updates: report.updates,
-                    ...(report.progress === undefined ? {} : { progress: report.progress }),
+                    ...(!("progress" in report) || report.progress === undefined
+                      ? {}
+                      : { progress: report.progress }),
                   },
                 }),
             caveats: [
