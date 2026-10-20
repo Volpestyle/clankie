@@ -7330,8 +7330,9 @@ allows a custom proposal after an ambiguous answer or a requested choice.
 Preference answers alone never save settings. Confirmation consumes the proposal
 once. Tracker and project settings are two file writes: a failure after tracker
 save can leave only the tracker. An uncertain confirmation or tweak is checked
-with the original locator, never replayed. No provider project, label or account
-is created, and no workers are hired by acceptance. Project village visuals
+with the original locator, never replayed. A chosen built-in tracker gets its
+own local project. No external provider project, label or account is created,
+and no workers are hired by acceptance. Project village visuals
 belong to VUH-1710.
 
 ### `project list`, `project settings` and `project update`
@@ -7391,8 +7392,11 @@ current project shape (`?includeAutonomy=true`) omit it, like `autonomy`.
 the revision-bearing owner API. Unknown projects, revoked owner authority and a
 tracker store replaced before commit refuse the edit; a duplicate binding
 returns a conflict. Unavailable tracker reads preserve the saved reference and
-withhold it from work-repo projections until it can be verified again. Clearing
-the reference leaves the project and its workspace tracker choice in place.
+withhold it from work-repo projections until it can be verified again. If the
+saved backend is built-in, changing or clearing this reference through the
+legacy route is refused: use the work tracker preview and explicit confirmation
+instead. Clearing an inactive reference leaves the project and its workspace
+tracker choice in place.
 `linearProjectBinding: {"provider":"linear","projectId":"UUID"}` separately
 names an exact project in Clankie's connected Linear app. The service reads that
 provider directly, never the local tracker fallback; names, another provider,
@@ -9118,7 +9122,8 @@ when needed), `{"backend":"linear","team":"TEAM","project":"PROJECT"}`,
 `{"backend":"github","repo":"owner/repo"}`, or
 `{"backend":"markdown","directory":"docs/tasks"}`. Built-in project overrides
 may name an existing `projectId` UUID; global built-in defaults always create a
-separate project. Linear may include an existing board `label`. Linear and GitHub
+separate project. Linear's `project` is optional for team-wide work, preserving
+existing team-only conventions; it may include an existing board `label`. Linear and GitHub
 require their existing connected account; connect through Settings → Accounts
 or `clankie connect`. Built-in and repo files need no account. The future Discord
 forum is a view of the built-in tracker (VUH-2531), not a selectable backend yet.
@@ -9131,3 +9136,5 @@ reports the selection, default, source, connection status and item retention
 policy. It is owner-only, including through the hosted encrypted bridge.
 The default affects new projects without an existing saved convention; existing
 repo conventions and owner-reviewed project proposals take precedence.
+The TUI accepts the same review/apply arguments through `/fleet tracker` and
+`/project settings PROJECT tracker`; `/fleet status` also shows the default.

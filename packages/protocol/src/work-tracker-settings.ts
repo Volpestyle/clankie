@@ -13,7 +13,12 @@ const Target = z.string().trim().min(1).max(256);
 export const WorkTrackerSelectionSchema = z.discriminatedUnion("backend", [
   z.object({ backend: z.literal("builtin"), projectId: z.string().uuid().optional() }).strict(),
   z
-    .object({ backend: z.literal("linear"), team: Target, project: Target, label: Target.optional() })
+    .object({
+      backend: z.literal("linear"),
+      team: Target,
+      project: Target.optional(),
+      label: Target.optional(),
+    })
     .strict(),
   z.object({ backend: z.literal("github"), repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/u) }).strict(),
   z

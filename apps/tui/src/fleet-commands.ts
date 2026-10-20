@@ -25,6 +25,7 @@ import {
   type FleetAutoTidy,
 } from "@clankie/protocol";
 import { formatWorkingPreferences } from "./command/working-preferences.ts";
+import { splitQuotedArguments } from "./command/agents.ts";
 
 export interface FleetCommandServices extends FleetCommandOptions {
   settings: SettingsStore;
@@ -37,9 +38,25 @@ export function buildFleetCommands(services: FleetCommandServices): FaceShellCom
       name: "fleet",
       aliases: [],
       description: "Edit how Clankie routes work across the agents he leads",
-      argumentHint: "[status|show|resources|clear]",
+      argumentHint: "[status|show|resources|clear|tracker [SELECTION_JSON [--revision REVISION]]]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
+        if (/^tracker(?:\s|$)/iu.test(argument.trim())) {
+          try {
+            const result = await runFleetCommand(
+              ["tracker", ...splitQuotedArguments(argument).slice(1)],
+              services,
+            );
+            shell.insertCommandResult("/fleet tracker", JSON.stringify(result, null, 2), "success");
+          } catch (error) {
+            shell.insertCommandResult(
+              "/fleet tracker",
+              error instanceof Error ? error.message : String(error),
+              "error",
+            );
+          }
+          return;
+        }
         const verb = argument.trim().toLowerCase();
         if (verb === "status" || verb === "show") {
           await showFleetStatus(shell, services);
@@ -78,6 +95,9 @@ async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandSe
       ...formatDeployHoldLines(result.deployHolds),
       "",
       ...formatWorkingPreferences(result.workingPreferences),
+      ...(result.workTracker
+        ? [`Work tracker for new projects: ${JSON.stringify(result.workTracker.default)}`]
+        : []),
       ...result.roleProfiles.map((r) => `${r.projectId}/${r.role}: ${r.summary}`),
     ].join("\n"),
     "success",

@@ -22,6 +22,9 @@ import { runProjectSettingsCommand } from "../../tui/src/command/project-setting
 import { createProjectRoutes } from "../src/project-routes.ts";
 import { createWorkTrackerSettingsRoutes } from "../src/work-tracker-settings.ts";
 import { projectOnboarding } from "../src/captain/project-onboarding.ts";
+import { buildFleetCommands } from "../../tui/src/fleet-commands.ts";
+import type { ClankieFaceShell } from "../../tui/src/shell/shell.ts";
+import { createFleetSettingsRoutes } from "../src/fleet-settings-routes.ts";
 
 it("previews and confirms tracker switches through the CLI/API without moving items, with stale and disconnected changes refused", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "work-tracker-settings-")));
@@ -70,6 +73,7 @@ it("previews and confirms tracker switches through the CLI/API without moving it
     const app = new Hono();
     app.route("/", createWorkTrackerSettingsRoutes(authorize, store, { tracker }));
     app.route("/", createProjectRoutes(authorize, store, { tracker }));
+    app.route("/", createFleetSettingsRoutes(authorize, store));
     server.removeAllListeners("request");
     const { getRequestListener } = await import("@hono/node-server");
     server.on("request", getRequestListener(app.fetch));
@@ -164,6 +168,51 @@ it("previews and confirms tracker switches through the CLI/API without moving it
     const read = await workTrackerSettings([], client);
     expect(WorkTrackerSettingsSnapshotSchema.parse(read).default.backend).toBe("builtin");
     expect(await readFile(join(workspace, ".clankie/tracking.json"), "utf8")).toContain('"markdown"');
+    const teamWorkspace = join(root, "team-work");
+    await mkdir(teamWorkspace);
+    await writeConvention(teamWorkspace, {
+      schemaVersion: 1,
+      backend: "linear",
+      linear: { team: "LOCAL" },
+      decidedBy: "owner",
+      decidedAt: new Date().toISOString(),
+    });
+    await store.update((current) => ({
+      ...current,
+      projects: ProjectsSettingsSchema.parse({
+        ...current.projects,
+        projects: [
+          ...current.projects.projects,
+          {
+            id: "team-wide",
+            name: "Team work",
+            workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: teamWorkspace }],
+            trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+          },
+        ],
+      }),
+    }));
+    expect((await workTrackerSettings([], client, "team-wide")).selection).toEqual({
+      backend: "linear",
+      team: "LOCAL",
+    });
+    const output: Array<{ text: string; status: string }> = [];
+    const shell = {
+      insertCommandResult: (_command: string, text: string, status: string) => output.push({ text, status }),
+    } as unknown as ClankieFaceShell;
+    const fleet = buildFleetCommands({ ...client, settings: store })[0]!;
+    await fleet.run("tracker", shell);
+    expect(JSON.parse(output.pop()!.text).workTracker.default.backend).toBe("builtin");
+    const tuiSelection = JSON.stringify({ backend: "markdown", directory: "tui-work" });
+    await fleet.run(`tracker '${tuiSelection}'`, shell);
+    const tuiPreview = JSON.parse(output.pop()!.text).workTracker;
+    expect((await store.load()).workTrackerDefault?.backend).toBe("builtin");
+    await fleet.run(`tracker '${tuiSelection}' --revision ${tuiPreview.revision}`, shell);
+    expect(output.pop()!.status).toBe("success");
+    expect((await store.load()).workTrackerDefault).toEqual({ backend: "markdown", directory: "tui-work" });
+    await fleet.run("status", shell);
+    expect(output.pop()!.text).toContain("tui-work");
+    expect(await files.get(item.id)).toEqual(originalItem);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
     await rm(root, { recursive: true, force: true });

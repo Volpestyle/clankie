@@ -145,9 +145,10 @@ not imply a prerequisite.
 2. **Settings use the same tracker.** `clankie fleet tracker` reads the default
    for new projects; `clankie project settings PROJECT` reads the saved project
    choice. Add `tracker JSON` to propose a project change, then apply the exact
-   preview with `--revision REV --confirm-retain-items`. `clankie fleet tracker
-JSON --revision REV` applies the new-project default. Existing items stay in
-   the old tracker; nothing migrates or is deleted. Linear/GitHub use connected
+   preview with `--revision REV --confirm-retain-items`. For the new-project
+   default, use `clankie fleet tracker JSON --revision REV`. The TUI accepts the
+   same arguments through `/fleet tracker` and `/project settings PROJECT tracker`.
+   Existing items stay in the old tracker; nothing migrates or is deleted. Linear/GitHub use connected
    accounts; built-in and repo files need none. See the CLI's Work tracker settings.
 3. **Follow what is recorded.** `.clankie/tracking.json` is the owner's answer.
    Do not create `.clankie/work/` files in a repo whose convention is Linear,
