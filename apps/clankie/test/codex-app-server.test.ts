@@ -577,7 +577,13 @@ describe("trusted native seat policy", () => {
       const f = await fixture(
         {
           launch: {
-            environment: { PATH: "/trusted/bin", HOME: "/protected/home" },
+            environment: {
+              PATH: "/trusted/bin",
+              HOME: "/protected/home",
+              CLANKIE_SEAT_HARNESS: "claude",
+              CLANKIE_SEAT_SESSION_ID: "lead-session",
+              CLANKIE_SEAT_PARENT_ARGV: "lead-argv",
+            },
             socketRoot: "/protected/socket",
             config: ["features.multi_agent=false"],
           },
@@ -602,6 +608,9 @@ describe("trusted native seat policy", () => {
             PATH: "/trusted/bin",
             HOME: "/protected/home",
             CLANKIE_RESOURCE_HOLDER: "",
+            CLANKIE_SEAT_HARNESS: "",
+            CLANKIE_SEAT_SESSION_ID: "",
+            CLANKIE_SEAT_PARENT_ARGV: "",
             CODEX_THREAD_ID: "",
             CLAUDE_SESSION_ID: "",
             CLAUDE_AGENT_ID: "",
