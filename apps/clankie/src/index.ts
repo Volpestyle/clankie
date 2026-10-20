@@ -1494,6 +1494,12 @@ const captain = createCaptain(
     conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
     workItems,
     ...(computerUseHarnesses === undefined ? {} : { computerUseHarnesses: computerUseHarnesses.current }),
+    ...(hostedBody === undefined
+      ? {}
+      : {
+          localNativeHireRefusal:
+            "Managed Clankie uses AI credits only. Local Claude and Codex hires are unavailable until a credit-backed native adapter exists. Hire on linked self-hosted hardware instead.",
+        }),
     ...(runtimeProvider.model?.piSeatModel === undefined
       ? {}
       : { piSeatModel: () => runtimeProvider.model!.piSeatModel!() }),

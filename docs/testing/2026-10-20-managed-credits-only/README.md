@@ -27,3 +27,9 @@ integration, not a live Claude account sign-in.
 
 The private managed routing/forwarder patch is prepared separately for lead
 review. Actual-model/rate credit projections remain VUH-1890/VUH-2107.
+
+The follow-up native-hire guard is also exercised through the real operator
+conversation service (`managed-native-hires.integration.test.ts`): both Claude
+and Codex local hires return the host's explicit refusal before native startup.
+The policy distinguishes linked remote machines from the default and named local
+fleets; existing remote-hire behavior remains covered by the landing suite.

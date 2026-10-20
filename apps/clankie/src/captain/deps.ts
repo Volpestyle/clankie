@@ -101,6 +101,8 @@ export interface CaptainDeps {
   readonly herdrAvailable?: () => boolean;
   /** An optional host-selected model for Pi workers; absent, Pi keeps its own. */
   readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
+  /** Host policy: local native workers cannot use customer subscription stores. */
+  readonly localNativeHireRefusal?: string;
   /**
    * Harnesses on this machine that can drive the owner's apps and browser
    * (ADR 0199). Absent on a hosted body, which has no owner desktop.

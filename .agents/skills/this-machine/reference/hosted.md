@@ -69,7 +69,9 @@ policy live in private `clankie-ops/apps/body`; bootstrap identity alone does
 not configure a worker's model. Managed bodies hide and refuse customer model
 keys and all subscription sign-in, including native Claude Code/Codex login,
 with `managed_credits_only`: explain that hosted inference uses AI credits and
-these authentication paths are self-hosted only. Do not delete old credentials,
+these authentication paths are self-hosted only. Local Claude/Codex hires on a managed body are also refused until a credit-backed
+native adapter exists; hire them on linked self-hosted hardware instead.
+Do not delete old credentials,
 log Pi into a provider or put a key in its `models.json`. If a worker cannot
 reach its model, inspect the installed provider with `clankie doctor` and
 `clankie model`.

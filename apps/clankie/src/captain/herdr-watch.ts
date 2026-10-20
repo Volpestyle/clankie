@@ -918,6 +918,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     SpawnOperatorSeat,
     { projectId: string; projectName: string; authority?: ConversationAuthority }
   >();
+  private readonly hireRefusal: ((input: HireRequest) => Promise<string | undefined>) | undefined;
   private readonly piSeatModel: (() => Promise<PiSeatModel | undefined>) | undefined;
   private readonly hireCapacity:
     | (() => Promise<{ readonly live: number; readonly limit: number } | undefined>)
@@ -1046,6 +1047,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly awaitRound?: (conversationId: string, signal: AbortSignal) => Promise<void>;
       /** A hosted body's model for pi seats (VUH-1373); absent, pi uses its own configuration. */
       readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
+      /** Host admission before account selection, reuse or native startup. */
+      readonly hireRefusal?: (input: HireRequest) => Promise<string | undefined>;
       /**
        * How many hired agents run now and how many this body allows (VUH-1388).
        * Absent, or undefined when asked, there is no limit.
@@ -1112,6 +1115,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.accountHolds = options.accountHolds;
     this.remoteWorkspace = options.remoteWorkspace;
     this.piSeatModel = options.piSeatModel;
+    this.hireRefusal = options.hireRefusal;
     this.hireCapacity = options.hireCapacity;
     this.runner = options.runner ?? createHerdrWatchRunner(options.available);
     this.resumeInventory = options.resumeInventory;
@@ -2494,6 +2498,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     work = false,
   ): Promise<HerdrSeatSpawnResult> {
     try {
+      const refusal = await this.hireRefusal?.(input);
+      if (refusal !== undefined) return { outcome: "failed", reason: "not_ready", detail: refusal };
       input = await this.resolveHireModels(input);
       if (work) this.workHires.add(input);
       const subagentModel =

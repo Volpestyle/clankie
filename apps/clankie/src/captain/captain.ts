@@ -789,6 +789,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     requireWorkerAccess: (fleet) => requireAccess(fleet, "workers"),
+    ...(deps.localNativeHireRefusal === undefined
+      ? {}
+      : {
+          hireRefusal: async (input: import("@clankie/protocol").SpawnOperatorSeat) => {
+            if (input.harness !== "claude" && input.harness !== "codex") return undefined;
+            await refreshFleets();
+            // Named local fleets share this body's native stores too. Only a linked
+            // remote machine can provide independent self-hosted authentication.
+            return remoteFleets.some((fleet) => fleet.id === input.fleet)
+              ? undefined
+              : deps.localNativeHireRefusal;
+          },
+        }),
     ...(deps.fleets?.shell === undefined
       ? {}
       : {

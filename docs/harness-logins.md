@@ -62,3 +62,8 @@ clankie harness login claude    # prints the link, prompts for the code
 
 `/harness-login` in the console runs the same flow. Ctrl-C cancels the sign-in
 on the service.
+
+Managed bodies also refuse local Claude/Codex hires, including native-session
+reuse and named local fleets, until a credit-backed native adapter exists.
+Hire those harnesses on linked self-hosted hardware instead. Existing native
+credential stores are retained. The adapter is a follow-up on VUH-2576.

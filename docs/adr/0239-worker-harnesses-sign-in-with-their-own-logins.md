@@ -88,3 +88,8 @@ managed body) is unchanged.
 - Login links and codes are interaction data: never logged, persisted or put in
   conversation messages. The CLI shows them only on the terminal's stderr.
 - The public gateway carries the new routes after the gateway is redeployed.
+
+Managed bodies also refuse local Claude/Codex hires, including native-session
+reuse and named local fleets, until a credit-backed native adapter exists.
+Hire those harnesses on linked self-hosted hardware instead. Existing native
+credential stores are retained. The adapter is a follow-up on VUH-2576.
