@@ -48,6 +48,16 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
   // encoded queries never acquire authority through URL normalization.
   if (path === `${PROJECTS_PATH}?includeAutonomy=true`) return method === "GET";
   if (path === `${PROJECT_UPDATE_SETTINGS_PATH}?includeAutonomy=true`) return method === "POST";
+  if (path === `${FLEET_HIRE_DEFAULTS_PATH}?includeModels=true`) return method === "GET";
+  if (
+    [
+      `${FLEET_SETTINGS_PATH}?includeWorkPolicy=true`,
+      `${FLEET_SETTINGS_PATH}?includeMaximumTrust=true`,
+      `${FLEET_SETTINGS_PATH}?includeWorkPolicy=true&includeMaximumTrust=true`,
+      `${FLEET_SETTINGS_PATH}?includeMaximumTrust=true&includeWorkPolicy=true`,
+    ].includes(path)
+  )
+    return method === "GET" || method === "POST";
   // Worker accounts read one machine through the only query that route accepts.
   if (isWorkerAccountsRoute(path)) return method === "GET";
   if (path === `${USAGE_PATH}?refresh=1`) return method === "GET";

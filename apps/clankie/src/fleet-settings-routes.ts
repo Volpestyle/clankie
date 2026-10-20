@@ -225,6 +225,7 @@ export function createFleetSettingsRoutes(
       label: agent.label,
       models: Object.values(catalog[agent.provider]?.models ?? {})
         .filter((model) => model.status !== "deprecated" && model.id.length <= 200)
+        .filter((model) => model.tool_call && model.modalities?.output.includes("text"))
         .filter((model) =>
           agent.id === "claude"
             ? model.id.startsWith("claude-")

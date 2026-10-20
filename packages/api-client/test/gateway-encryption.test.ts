@@ -147,3 +147,31 @@ describe("encrypted Discord directory queries", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+describe("encrypted Settings projections", () => {
+  it.each([
+    ["GET", "/v1/operator/fleet-settings/hire?includeModels=true"],
+    ["GET", "/v1/operator/fleet-settings?includeWorkPolicy=true&includeMaximumTrust=true"],
+    ["POST", "/v1/operator/fleet-settings?includeWorkPolicy=true&includeMaximumTrust=true"],
+  ])("admits the explicit %s projection %s", async (method, path) => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 503 }));
+    const send = createGatewayEncryptedFetch({ credential: () => credential, crypto, fetchImpl });
+    await expect(send(`https://example.test/h/${credential.hostId}${path}`, { method })).rejects.toThrow(
+      "Gateway challenge unavailable",
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ["POST", "/v1/operator/fleet-settings/hire?includeModels=true"],
+    ["GET", "/v1/operator/fleet-settings/hire?includeModels=true&unknown=true"],
+    ["GET", "/v1/operator/fleet-settings?includeMaximumTrust=true&includeMaximumTrust=true"],
+    ["GET", "/v1/operator/fleet-settings?includeMaximumTrust=%74rue"],
+  ])("rejects unsupported %s projection %s before transport", async (method, path) => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const send = createGatewayEncryptedFetch({ credential: () => credential, crypto, fetchImpl });
+    await expect(send(`https://example.test/h/${credential.hostId}${path}`, { method })).rejects.toThrow(
+      "Gateway host identity mismatch",
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});

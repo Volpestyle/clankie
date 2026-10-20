@@ -403,6 +403,17 @@ export function publicGatewayTargetFor(
     path = WORK_TRACKER_SETTINGS_PATH;
   // Normalize only the explicitly validated queries. The forwarded path keeps
   // its query for the receiving route to validate again.
+  if (method === "GET" && path === `${FLEET_HIRE_DEFAULTS_PATH}?includeModels=true`)
+    path = FLEET_HIRE_DEFAULTS_PATH;
+  if (
+    [
+      `${FLEET_SETTINGS_PATH}?includeWorkPolicy=true`,
+      `${FLEET_SETTINGS_PATH}?includeMaximumTrust=true`,
+      `${FLEET_SETTINGS_PATH}?includeWorkPolicy=true&includeMaximumTrust=true`,
+      `${FLEET_SETTINGS_PATH}?includeMaximumTrust=true&includeWorkPolicy=true`,
+    ].includes(path)
+  )
+    path = FLEET_SETTINGS_PATH;
   if (method === "GET" && path === `${PROJECTS_PATH}?includeAutonomy=true`) path = PROJECTS_PATH;
   if (method === "GET" && isDiscordDirectoryRoute(path)) path = DISCORD_DIRECTORY_PATH;
   if (method === "GET" && isWorkerAccountsRoute(path)) path = WORKER_ACCOUNTS_PATH;

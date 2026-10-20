@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { publicGatewayTargetFor } from "../src/public-gateway.ts";
 import { hostedOperatorAllows } from "../src/hosted-operator.ts";
 
 it("limits hosted device authority to explicit routes and validated conversation operations", () => {
@@ -82,6 +83,41 @@ it("limits hosted device authority to explicit routes and validated conversation
     "/v1/operator/projects?include%41utonomy=true",
     "/v1/operator/fleet-settings?includeAutonomy=true",
   ]) {
+    expect(publicGatewayTargetFor("GET", path)).toBeUndefined();
+    expect(publicGatewayTargetFor("POST", path)).toBeUndefined();
+    expect(hostedOperatorAllows("GET", path)).toBe(false);
+    expect(hostedOperatorAllows("POST", path, "{}")).toBe(false);
+  }
+});
+
+it("allows explicit Settings projections without broadening query authority", () => {
+  const hire = "/v1/operator/fleet-settings/hire?includeModels=true";
+  expect(hostedOperatorAllows("GET", hire)).toBe(true);
+  expect(publicGatewayTargetFor("GET", hire)).toBe("relay");
+  expect(publicGatewayTargetFor("POST", hire)).toBeUndefined();
+  expect(hostedOperatorAllows("POST", hire, "{}")).toBe(false);
+  for (const query of [
+    "includeWorkPolicy=true",
+    "includeMaximumTrust=true",
+    "includeWorkPolicy=true&includeMaximumTrust=true",
+    "includeMaximumTrust=true&includeWorkPolicy=true",
+  ]) {
+    for (const method of ["GET", "POST"] as const) {
+      expect(hostedOperatorAllows(method, `/v1/operator/fleet-settings?${query}`, "{}")).toBe(true);
+      expect(publicGatewayTargetFor(method, `/v1/operator/fleet-settings?${query}`)).toBe("relay");
+    }
+  }
+  for (const path of [
+    hire + "&unknown=true",
+    hire + "&includeModels=true",
+    "/v1/operator/fleet-settings/hire?includeModels=false",
+    "/v1/operator/fleet-settings/hire?include%4Dodels=true",
+    "/v1/operator/fleet-settings?includeMaximumTrust=true&unknown=true",
+    "/v1/operator/fleet-settings?includeMaximumTrust=true&includeMaximumTrust=true",
+    "/v1/operator/fleet-settings?includeMaximumTrust=false",
+  ]) {
+    expect(publicGatewayTargetFor("GET", path)).toBeUndefined();
+    expect(publicGatewayTargetFor("POST", path)).toBeUndefined();
     expect(hostedOperatorAllows("GET", path)).toBe(false);
     expect(hostedOperatorAllows("POST", path, "{}")).toBe(false);
   }

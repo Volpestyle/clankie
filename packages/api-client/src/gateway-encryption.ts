@@ -11,6 +11,7 @@ import {
   type GatewayEncryptionCredential,
   type GatewayPlainRequest,
 } from "@clankie/protocol/gateway-encryption";
+import { FLEET_SETTINGS_PATH, FLEET_HIRE_DEFAULTS_PATH } from "@clankie/protocol/fleet-settings";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "@clankie/protocol/projects";
 import { isDiscordDirectoryRoute } from "@clankie/protocol";
 import { isWorkerAccountsRoute } from "@clankie/protocol/worker-accounts";
@@ -132,6 +133,19 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
       url.search === "?includeAutonomy=true" &&
       ((request.method === "GET" && hostPath?.[2] === PROJECTS_PATH) ||
         (request.method === "POST" && hostPath?.[2] === PROJECT_UPDATE_SETTINGS_PATH));
+    const fleetSettingsQuery =
+      (request.method === "GET" || request.method === "POST") &&
+      hostPath?.[2] === FLEET_SETTINGS_PATH &&
+      [
+        "?includeWorkPolicy=true",
+        "?includeMaximumTrust=true",
+        "?includeWorkPolicy=true&includeMaximumTrust=true",
+        "?includeMaximumTrust=true&includeWorkPolicy=true",
+      ].includes(url.search);
+    const hireModelsQuery =
+      request.method === "GET" &&
+      hostPath?.[2] === FLEET_HIRE_DEFAULTS_PATH &&
+      url.search === "?includeModels=true";
     const workerAccountsQuery =
       request.method === "GET" && hostPath !== null && isWorkerAccountsRoute(`${hostPath[2]}${url.search}`);
     const discordDirectoryQuery =
@@ -144,6 +158,8 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
       hostId !== credential.hostId ||
       (url.search &&
         !projectQuery &&
+        !fleetSettingsQuery &&
+        !hireModelsQuery &&
         !workerAccountsQuery &&
         !discordDirectoryQuery &&
         !fleetRosterWorkQuery) ||
