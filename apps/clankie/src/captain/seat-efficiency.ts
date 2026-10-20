@@ -94,6 +94,7 @@ export class SeatEfficiencyStore {
   private readonly now: () => number;
   private readonly path: string;
   private savedSignature = "";
+  private savedRecords = new Map<string, string>();
   private closed = false;
   public constructor(path: string, options: { now?: () => number } = {}) {
     this.path = path;
@@ -126,6 +127,7 @@ export class SeatEfficiencyStore {
       }
     }
     this.savedSignature = this.signature();
+    this.rememberRecords();
   }
 
   public close(): void {
@@ -332,7 +334,7 @@ export class SeatEfficiencyStore {
     });
     // Roster decoration (for example overlap) must not mutate durable evidence.
     record.observed = { ...result, flags: [...result.flags] };
-    this.save();
+    this.save(input.occupantId);
     return result;
   }
 
@@ -421,8 +423,15 @@ export class SeatEfficiencyStore {
     this.records[occupantId] = record;
     return record;
   }
-  private save(): void {
+  private save(observedId?: string): void {
     if (this.closed) return;
+    // A tick changes checkedAt even when all durable evidence is identical.
+    // Compare only this occupant before sorting/signing the entire retained fleet.
+    if (
+      observedId !== undefined &&
+      this.recordSignature(this.records[observedId]!) === this.savedRecords.get(observedId)
+    )
+      return;
     const entries = Object.entries(this.records).sort((a, b) =>
       a[1].firstObservedAt.localeCompare(b[1].firstObservedAt),
     );
@@ -433,8 +442,24 @@ export class SeatEfficiencyStore {
     writeFileSync(`${this.path}.tmp`, JSON.stringify(this.records), { mode: 0o600 });
     renameSync(`${this.path}.tmp`, this.path);
     this.savedSignature = signature;
+    this.rememberRecords();
+  }
+  private recordSignature(record: Record): string {
+    // No JSON replacer: V8 can serialize directly, without a callback per field.
+    return JSON.stringify({
+      ...record,
+      observed: record.observed && { ...record.observed, checkedAt: undefined },
+    });
+  }
+  private rememberRecords(): void {
+    // Update only after a successful write so a failed save is retried next tick.
+    this.savedRecords = new Map(
+      Object.entries(this.records).map(([id, record]) => [id, this.recordSignature(record)]),
+    );
   }
   private signature(): string {
-    return JSON.stringify(this.records, (key, value) => (key === "checkedAt" ? undefined : value));
+    return JSON.stringify(
+      Object.entries(this.records).map(([id, record]) => [id, this.recordSignature(record)]),
+    );
   }
 }

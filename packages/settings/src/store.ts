@@ -34,6 +34,7 @@ export class SettingsStore {
   private readonly filePath: string;
   private queue: Promise<unknown> = Promise.resolve();
   private parsed: { raw: string; normalized: string } | undefined;
+  private loaded: { version: string; settings: ClankieSettings } | undefined;
   private shared: { version: string; settings: Readonly<ClankieSettings> } | undefined;
 
   public constructor(filePath: string = defaultSettingsPath()) {
@@ -46,15 +47,23 @@ export class SettingsStore {
 
   /** Read settings, returning defaults when the file is absent. */
   public async load(): Promise<ClankieSettings> {
-    let raw: string;
     try {
-      raw = await readFile(this.filePath, "utf8");
+      // Include ctime so an in-place edit with restored mtime is not a cache hit.
+      // Stat before reading: a racing write changes the next read's version.
+      const info = await stat(this.filePath, { bigint: true });
+      const version = `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+      if (this.loaded?.version === version) return copyJson(this.loaded.settings);
+      const settings = this.parse(await readFile(this.filePath, "utf8"));
+      this.loaded = { version, settings: JSON.parse(this.parsed!.normalized) as ClankieSettings };
+      return settings;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptySettings();
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        this.loaded = undefined;
+        return emptySettings();
+      }
       // Permission and I/O failures must not replace narrowed authority with defaults.
       throw error;
     }
-    return this.parse(raw);
   }
 
   /**
@@ -129,9 +138,9 @@ export class SettingsStore {
   }
 
   private parse(raw: string): ClankieSettings {
-    // Each caller still reads the file. Reuse validation only for exactly equal
-    // bytes, never a TTL. (`read()` skips the read only on an unchanged file
-    // version that includes ctime, and shares a frozen view.) Return a private copy
+    // Fenced reads still read the descriptor's bytes. Reuse validation only for
+    // exactly equal bytes, never a TTL. load() also caches by file generation.
+    // Return a private copy
     // so a caller's edits cannot contaminate later reads or fenced snapshots.
     // Validated settings contain JSON values. Parsing their normalized bytes is
     // cheaper than structuredClone for repeated idle reads and still gives each
@@ -190,6 +199,9 @@ export class SettingsStore {
     try {
       await guard?.();
       await rename(temporaryPath, this.filePath);
+      this.loaded = undefined;
+      this.shared = undefined;
+      this.parsed = undefined;
       const directory = await open(parentDirectory, "r");
       try {
         await directory.sync();
@@ -320,4 +332,16 @@ function deepFreeze<T>(value: T): T {
     for (const child of Object.values(value)) deepFreeze(child);
   }
   return value;
+}
+
+/** Copy validated JSON values without re-parsing or structured-clone bookkeeping. */
+function copyJson<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((child: unknown) => copyJson(child)) as T;
+  if (value === null || typeof value !== "object") return value;
+  const copy = { ...value };
+  for (const key of Object.keys(copy) as (keyof T)[]) {
+    const child = copy[key];
+    if (child !== null && typeof child === "object") copy[key] = copyJson(child);
+  }
+  return copy;
 }

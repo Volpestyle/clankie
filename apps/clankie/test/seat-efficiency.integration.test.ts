@@ -732,3 +732,36 @@ it("migrates unproven generic commit progress without losing explicit report and
     }),
   ).toHaveProperty("lastProgressAt", "2026-10-05T13:40:00.000Z");
 });
+
+it("persists semantic observations across seats while ignoring only the tick timestamp", async () => {
+  const dir = await directory();
+  const path = join(dir, "efficiency.json");
+  const store = new SeatEfficiencyStore(path, { now: () => now });
+  const input = { occupantId: "cache-worker", seatId: "cache-seat", owner, status: "working" };
+  const first = store.observe(input);
+  store.observe({ ...input, occupantId: "other-worker" });
+  const saved = await readFile(path, "utf8");
+  now += 1000;
+  expect(store.observe(input).checkedAt).not.toBe(first.checkedAt);
+  expect(await readFile(path, "utf8")).toBe(saved);
+  now += 2 * 60 * 60 * 1000;
+  expect(store.observe(input).flags).toContain("no progress in 2h");
+  expect(await readFile(path, "utf8")).not.toBe(saved);
+  const restored = new SeatEfficiencyStore(path, { now: () => now });
+  const stalled = await readFile(path, "utf8");
+  now += 1000;
+  expect(restored.observe(input).flags).toContain("no progress in 2h");
+  expect(await readFile(path, "utf8")).toBe(stalled);
+});
+
+it("retries an unchanged observation after its prior durable save failed", async () => {
+  const dir = await directory();
+  const path = join(dir, "efficiency.json");
+  await mkdir(path);
+  const store = new SeatEfficiencyStore(path, { now: () => now });
+  const input = { occupantId: "retry-worker", seatId: "retry-seat", owner, status: "working" };
+  expect(() => store.observe(input)).toThrow();
+  await rm(path, { recursive: true });
+  store.observe(input);
+  expect(JSON.parse(await readFile(path, "utf8"))[input.occupantId].observed.flags).toEqual([]);
+});

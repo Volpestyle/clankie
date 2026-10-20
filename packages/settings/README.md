@@ -37,10 +37,13 @@ A missing settings file uses defaults. Invalid content, permission errors and
 other read failures propagate; they never silently replace configured access
 restrictions with defaults.
 
-Every load reads the current file bytes. Identical bytes reuse their validated
-parse, returning an independent copy to each caller. There is no time-based or
-file-metadata cache of authority. Fenced loads still check the actual descriptor
-generation and recheck the path immediately before a mutation.
+`load()` checks file identity (device and inode), size, mtime and ctime on every
+call and reuses validated settings only while that generation is unchanged.
+Each caller receives an independent copy. Writes invalidate the cache; external
+edits, replacements and deletions are seen on the next load, including an
+in-place edit that restores mtime. There is no time-based cache. Fenced loads
+still read the actual descriptor bytes, check its generation and recheck the
+path immediately before a mutation.
 
 `read()` is for hot, non-authority display and routing reads only: project
 membership and the registered execution connections (VUH-2428). It returns one

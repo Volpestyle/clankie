@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "measurements-and-methods.tar",
+      "size": 92160,
+      "sha256": "5e4b8009f9a262961b29258705c3c6251395d6dab20da6d0f69799a9378493e0",
+      "url": "clankie://evidence/sha256/5e4b8009f9a262961b29258705c3c6251395d6dab20da6d0f69799a9378493e0"
+    }
+  ]
+}
