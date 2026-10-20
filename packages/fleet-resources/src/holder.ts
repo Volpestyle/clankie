@@ -1,6 +1,9 @@
 /** Deny inherited task identity at each new native process/pane boundary. */
 export const RESOURCE_HOLDER_RESET_ENV = Object.freeze({
   CLANKIE_RESOURCE_HOLDER: "",
+  CLANKIE_SEAT_HARNESS: "",
+  CLANKIE_SEAT_SESSION_ID: "",
+  CLANKIE_SEAT_PARENT_ARGV: "",
   CODEX_THREAD_ID: "",
   CLAUDE_SESSION_ID: "",
   CLAUDE_AGENT_ID: "",

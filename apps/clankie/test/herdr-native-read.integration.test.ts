@@ -1,7 +1,10 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { readFleet } from "../src/captain/herdr-census.ts";
+import { createResourceGovernor, processIdentity } from "@clankie/fleet-resources";
+import { createFleetResourceRuntime } from "../src/fleet-resource-runtime.ts";
+import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
+import { occupantIdForHerdrSession, readFleet } from "../src/captain/herdr-census.ts";
 import { nativeHerdrRead } from "../src/herdr-native-read.ts";
 import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
@@ -90,6 +93,52 @@ it.skipIf(process.platform !== "darwin")(
       expect(pane.paneId).toBe(herdr.pane);
       expect((await runner.list!()).some((pane) => pane.paneId === herdr.pane)).toBe(true);
       expect(await runner.resolveTerminal(pane.terminalId)).toBeDefined();
+      expect(await runner.resolveTerminal(herdr.pane)).toMatchObject({
+        paneId: pane.paneId,
+        terminalId: pane.terminalId,
+        session: pane.session,
+      });
+      expect(await runner.resolveTerminal("fresh-snapshot-name")).toBeUndefined();
+      // VUH-2561: a fresh Codex pane has native session proof without a
+      // Claude messageReceiver. Prove both addresses through the real socket,
+      // on a newly created broker each time; do not boot a simulator.
+      const routed = routeHerdrFleets(runner, new Map([["owned", runner]]));
+      const process = await processIdentity(herdr.shellPid);
+      expect(process).toBeDefined();
+      const occupantId = occupantIdForHerdrSession(pane.session!);
+      for (const fleet of [undefined, "owned"]) {
+        const runtime = await createFleetResourceRuntime({
+          policy: async () => undefined,
+          governor: createResourceGovernor({ directory: join(herdr.root, "resources") }),
+        });
+        runtime.bindSeats({
+          resolve: routed.resolveTerminal,
+          isLocalFleet: async () => true,
+          proof: async (fleet, paneId) => ({
+            fleet,
+            pane: paneId,
+            nativeOccupantId: occupantId,
+            binding: { socketPath: herdr.socketPath },
+            shell: process!,
+            processes: [process!],
+          }),
+        });
+        try {
+          const prefix = fleet ? `${fleet}/` : "";
+          const expected = { seatId: `${prefix}${pane.terminalId}`, occupantId, pane: herdr.pane };
+          expect(await runtime.proveSimulatorSeat({ seatId: `${prefix}${herdr.pane}` })).toMatchObject(
+            expected,
+          );
+          expect(await runtime.proveSimulatorSeat({ seatId: `${prefix}${pane.terminalId}` })).toMatchObject(
+            expected,
+          );
+          await expect(runtime.proveSimulatorSeat({ seatId: `${prefix}missing-pane` })).rejects.toThrow(
+            "no proven live native occupant",
+          );
+        } finally {
+          await runtime.close();
+        }
+      }
       expect(nativeHerdrRead(binding, ["agent", "wait", herdr.pane])).toBeUndefined();
       expect(nativeHerdrRead(binding, ["pane", "close", herdr.pane])).toBeUndefined();
       expect(nativeHerdrRead(binding, ["pane", "list", "--workspace", "wrong"])).toBeUndefined();

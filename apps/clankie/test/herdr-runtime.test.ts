@@ -53,9 +53,13 @@ it("gives a bundled pane the owner's environment back before starting their logi
   const root = await temporary();
   // A stand-in for the owner's shell: it shows what the pane would inherit.
   const shell = join(root, "owner-shell");
-  await writeFile(shell, '#!/bin/sh\necho "$1|${XDG_CONFIG_HOME-unset}|${XDG_STATE_HOME-unset}|$SHELL"\n', {
-    mode: 0o700,
-  });
+  await writeFile(
+    shell,
+    '#!/bin/sh\necho "$1|${XDG_CONFIG_HOME-unset}|${XDG_STATE_HOME-unset}|$SHELL|${CLANKIE_SEAT_HARNESS-unset}|${CLANKIE_SEAT_SESSION_ID-unset}|${CLANKIE_SEAT_PARENT_ARGV-unset}"\n',
+    {
+      mode: 0o700,
+    },
+  );
   const script = join(root, "pane-shell");
   await writeFile(script, paneShellScript({ SHELL: shell, XDG_CONFIG_HOME: "/Users/o'wner/.config" }), {
     mode: 0o700,
@@ -67,13 +71,24 @@ it("gives a bundled pane the owner's environment back before starting their logi
       XDG_CONFIG_HOME: "/private/root",
       XDG_STATE_HOME: "/private/root",
       SHELL: script,
+      CLANKIE_SEAT_HARNESS: "claude",
+      CLANKIE_SEAT_SESSION_ID: "lead-session",
+      CLANKIE_SEAT_PARENT_ARGV: "lead-argv",
     },
   });
-  expect(stdout.trim()).toBe(`-l|/Users/o'wner/.config|unset|${shell}`);
+  expect(stdout.trim()).toBe(`-l|/Users/o'wner/.config|unset|${shell}|unset|unset|unset`);
 });
 
 it("the owned runtime drops the markers a running harness stamps on its children", () => {
-  for (const name of ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID"]) {
+  for (const name of [
+    "CLAUDECODE",
+    "CLAUDE_PID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLANKIE_SEAT_HARNESS",
+    "CLANKIE_SEAT_SESSION_ID",
+    "CLANKIE_SEAT_PARENT_ARGV",
+  ]) {
     expect(isHarnessSessionMarker(name)).toBe(true);
   }
   for (const name of ["PATH", "HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) {

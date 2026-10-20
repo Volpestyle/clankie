@@ -178,6 +178,7 @@ export async function installPaneShell({ root, socketPath, owner = process.env, 
       ...Object.entries(restore).map(([key, value]) =>
         value === undefined ? `unset ${key}` : `export ${key}=${quote(value)}`,
       ),
+      "unset CLANKIE_SEAT_HARNESS CLANKIE_SEAT_SESSION_ID CLANKIE_SEAT_PARENT_ARGV",
       `export SHELL=${quote(shell)}`,
       'if [ "${ZDOTDIR+x}" = x ]; then export CLANKIE_OWNER_ZDOTDIR_SET=1 CLANKIE_OWNER_ZDOTDIR="$ZDOTDIR"; else export CLANKIE_OWNER_ZDOTDIR_SET=0 CLANKIE_OWNER_ZDOTDIR=; fi',
       `export ZDOTDIR=${quote(overlay)}`,

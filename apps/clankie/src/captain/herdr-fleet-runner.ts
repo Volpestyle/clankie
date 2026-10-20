@@ -81,8 +81,8 @@ export function createRemoteHerdrRunner(
    * reads the list once more before reporting the terminal gone.
    */
   const terminal = async (terminalId: string): Promise<HerdrAgentSnapshot | undefined> =>
-    (await panes()).find((pane) => pane.terminalId === terminalId) ??
-    (await panes(true)).find((pane) => pane.terminalId === terminalId);
+    (await panes()).find((pane) => pane.terminalId === terminalId || pane.paneId === terminalId) ??
+    (await panes(true)).find((pane) => pane.terminalId === terminalId || pane.paneId === terminalId);
 
   const until = async (
     target: string,

@@ -273,12 +273,17 @@ per-invocation Claude fields; an inherited holder alone is ignored. Claude scope
 these fields to a command subshell and clears ancestor Codex metadata, so a
 persistent shell cannot retain a sibling identity. Hire allocation overrides all
 four fields with empty values before creating a shell or prepared command pane,
-including when the Herdr server inherited an operator's environment. Dedicated
+including when the Herdr server inherited an operator's environment. Allocation
+also clears `CLANKIE_SEAT_HARNESS`, `CLANKIE_SEAT_SESSION_ID` and
+`CLANKIE_SEAT_PARENT_ARGV`; Herdr startup drops these ancestor seat markers too. Dedicated
 Codex app-servers execute tools outside that pane: their launch also resets these
 fields after merging the selected environment. This prevents the service's own
 operator identity from leaking through its detached native server process. Other harnesses
 can pass explicit holder labels. The host still proves the original seat, occupant,
-binding and live processes; a holder label grants no authority. A seat
+binding and live processes; a holder label grants no authority. Simulator requests
+accept an exact terminal ID or pane ID (qualified for a named local fleet), and
+canonicalize it to the terminal ID after proof. Codex native proof does not depend
+on the Claude-only `messageReceiver` field. A seat
 observation that fails is unproven, not disproven: a waiting acquire keeps its
 ticket through failed observations for `UNPROVEN_GRACE_MS` (two minutes), and an
 admitted lease is kept for its next resume rather than forgotten. Only an

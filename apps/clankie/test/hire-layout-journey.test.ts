@@ -39,6 +39,9 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     SHELL: "/bin/sh",
     // The isolated Herdr server inherits an operator hook's command environment.
     CLANKIE_RESOURCE_HOLDER: "claude:operator-session",
+    CLANKIE_SEAT_HARNESS: "claude",
+    CLANKIE_SEAT_SESSION_ID: "operator-seat-session",
+    CLANKIE_SEAT_PARENT_ARGV: "operator-seat-argv",
     CODEX_THREAD_ID: "operator-thread",
     CLAUDE_SESSION_ID: "operator-session",
     CLAUDE_AGENT_ID: "operator-agent",
@@ -138,7 +141,7 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       import { writeFile } from "node:fs/promises";
       import { createResourceGovernor } from ${JSON.stringify(new URL("../../../packages/fleet-resources/src/index.ts", import.meta.url).href)};
       import { runHeavyCommand } from ${JSON.stringify(new URL("../../tui/src/command/heavy.ts", import.meta.url).href)};
-      const inherited = Object.fromEntries(["CLANKIE_RESOURCE_HOLDER", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID", "CLAUDE_AGENT_ID"].map(k => [k, process.env[k]]));
+      const inherited = Object.fromEntries(["CLANKIE_RESOURCE_HOLDER", "CLANKIE_SEAT_HARNESS", "CLANKIE_SEAT_SESSION_ID", "CLANKIE_SEAT_PARENT_ARGV", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID", "CLAUDE_AGENT_ID"].map(k => [k, process.env[k]]));
       // Native protocol fixture supplies its own executing thread, as Codex does.
       process.env.CODEX_THREAD_ID = "hired-worker-thread";
       const governor = createResourceGovernor({ directory: ${JSON.stringify(holderRegistry)}, probe: async () => ({loadRatio: 0, availableMemoryMb: 1000000}) });
@@ -166,6 +169,9 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       }
       expect(JSON.parse(await readFile(holderProof, "utf8"))).toEqual({
         CLANKIE_RESOURCE_HOLDER: "",
+        CLANKIE_SEAT_HARNESS: "",
+        CLANKIE_SEAT_SESSION_ID: "",
+        CLANKIE_SEAT_PARENT_ARGV: "",
         CODEX_THREAD_ID: "",
         CLAUDE_SESSION_ID: "",
         CLAUDE_AGENT_ID: "",

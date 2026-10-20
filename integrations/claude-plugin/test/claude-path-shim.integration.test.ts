@@ -34,7 +34,7 @@ async function fixture() {
   // A native child fixture records the process boundary, not a mocked executor.
   await writeFile(
     join(bin, "claude"),
-    `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({args:process.argv.slice(2),pid:process.pid,cwd:process.cwd(),rc:process.env.OWNER_RC,login:process.env.OWNER_LOGIN,zd:process.env.ZDOTDIR})+'\\n'); process.exit(23);\n`,
+    `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({args:process.argv.slice(2),pid:process.pid,cwd:process.cwd(),rc:process.env.OWNER_RC,login:process.env.OWNER_LOGIN,zd:process.env.ZDOTDIR,seatHarness:process.env.CLANKIE_SEAT_HARNESS??null,seatSession:process.env.CLANKIE_SEAT_SESSION_ID??null,seatParent:process.env.CLANKIE_SEAT_PARENT_ARGV??null})+'\\n'); process.exit(23);\n`,
     { mode: 0o700 },
   );
   const env = {
@@ -251,13 +251,23 @@ os.waitpid(pid, 0)
 `,
         f.paneShell,
       ],
-      { env: f.env, cwd: f.home, timeout: 10_000 },
+      {
+        env: {
+          ...f.env,
+          CLANKIE_SEAT_HARNESS: "claude",
+          CLANKIE_SEAT_SESSION_ID: "lead-session",
+          CLANKIE_SEAT_PARENT_ARGV: "lead-argv",
+        },
+        cwd: f.home,
+        timeout: 10_000,
+      },
     );
     expect(stdout).toContain(
       '"args":["--channels","plugin:clankie-worker@clankie","--resume","original-session"]',
     );
     expect(stdout).toContain('"rc":"loaded","login":"loaded"');
     expect(stdout).toContain(`"zd":"${ownerConfig}"`);
+    expect(stdout).toContain('"seatHarness":null,"seatSession":null,"seatParent":null');
   },
 );
 

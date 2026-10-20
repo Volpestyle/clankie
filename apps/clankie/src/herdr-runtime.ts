@@ -48,7 +48,12 @@ export function watchHerdrSocket(input: { socketPath: string; onLost: () => void
 
 /** Env a running harness stamps on its children; none of it belongs to a fresh seat. */
 export function isHarnessSessionMarker(name: string): boolean {
-  return name === "CLAUDECODE" || name === "CLAUDE_PID" || name.startsWith("CLAUDE_CODE_");
+  return (
+    name === "CLAUDECODE" ||
+    name === "CLAUDE_PID" ||
+    name.startsWith("CLAUDE_CODE_") ||
+    name.startsWith("CLANKIE_SEAT_")
+  );
 }
 
 const RESTORED_IN_PANES = ["XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"] as const;
@@ -75,6 +80,7 @@ export function paneShellScript(owner: NodeJS.ProcessEnv): string {
       const value = owner[name];
       return value === undefined ? `unset ${name}` : `export ${name}=${shellQuote(value)}`;
     }),
+    "unset CLANKIE_SEAT_HARNESS CLANKIE_SEAT_SESSION_ID CLANKIE_SEAT_PARENT_ARGV",
     `export SHELL=${shellQuote(shell)}`,
     `exec ${shellQuote(shell)} -l`,
     "",

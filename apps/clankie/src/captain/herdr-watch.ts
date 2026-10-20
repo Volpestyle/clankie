@@ -244,6 +244,7 @@ export interface HerdrWatchRunner {
   /** Fresh complete inventory of exactly one fleet, for native session reuse. */
   list?(fleet?: string): Promise<readonly HerdrAgentSnapshot[]>;
   get(target: string): Promise<HerdrAgentSnapshot>;
+  /** Resolve an exact terminal or pane ID; never a name or focus alias. */
   resolveTerminal(terminalId: string): Promise<HerdrAgentSnapshot | undefined>;
   wait(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
   waitForChange?(target: string, currentStatus: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
@@ -667,7 +668,7 @@ export function createHerdrWatchRunner(
     },
     resolveTerminal: async (terminalId) => {
       const agent = parseHerdrPaneList(await runHerdr(["pane", "list"])).find(
-        (pane) => pane.terminalId === terminalId,
+        (pane) => pane.terminalId === terminalId || pane.paneId === terminalId,
       );
       return agent === undefined ? undefined : recover(agent);
     },
