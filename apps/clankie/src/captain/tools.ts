@@ -1331,14 +1331,15 @@ function herdrWatchTools(
   const arm = async (agent: string, reason: string, messageId?: string) => {
     const authority = captureConversationAuthority(turn.conversationAuthority);
     await assertConversationAuthority(authority);
-    return watches.watch(
+    const args: Parameters<HerdrWatchPort["watch"]> = [
       authority.owner.conversationId,
       agent,
       reason,
       authority.owner.discord,
       () => assertConversationAuthority(authority),
-      messageId,
-    );
+    ];
+    if (messageId !== undefined) args.push(messageId);
+    return watches.watch(...args);
   };
   return [
     ...(watches.settleHireReceipt

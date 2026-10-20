@@ -5919,7 +5919,7 @@ function seatEventObservation(event: SeatEvent): string {
       ].join("\n");
     case "settlement_unconfirmed":
       return [
-        `The seat's message completion is unconfirmed (${event.reason}).`,
+        `The seat's message completion is unconfirmed (${event.reason}); completion of this message is unverified.`,
         ...(event.observedStop === undefined
           ? []
           : [

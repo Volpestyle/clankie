@@ -34,3 +34,9 @@ Raw validation/diff bytes are in the evidence-store tar linked by `evidence.json
 ## Deadcode gate correction
 
 Initial batch `8db0abca-f8e3-4155-876d-7fbb57e814db` failed the deadcode gate because `codexRecordedCompletion` was exported but used only in its own module. The helper is now private; runtime behavior is unchanged. Local `pnpm deadcode`, the swallowed-rejection check against fetched main, and file formatting pass. Existing behavioral test evidence is retained; this export-only correction does not claim a new native proof. Integration is resubmitted separately.
+
+## Compatibility correction after main rebase
+
+Batch `c26f5155-3951-4395-9447-a23183aba746` failed three assertions after integration onto main. Rebased locally onto `183d827a601840332ebe14fb1ff0e3931f5dc806`, including VUH-2499. Unscoped tool calls again omit the optional sixth messageId argument, preserving the five-argument call contract. Explicit messageId calls still forward the identity. Unconfirmed settlement wakes again say “completion of this message is unverified”; unavailable native correlation and exclusion of old replies remain unchanged. **No test assertions or fixtures were changed for this correction.**
+
+`autonomy.test.ts`, `codex-hired-seat-protocol.integration.test.ts` and `external-codex-control.test.ts` pass: **49 tests across three files**. Local deadcode, swallowed-rejections, formatting and changed-source lint pass. Deployed A/B proof still awaits the lead deployment; no new native proof is claimed.
