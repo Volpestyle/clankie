@@ -127,8 +127,10 @@ Friendly model names are registry-validated, and incompatible/retired names refu
 A cross-family override includes its harness; `subagents: null` clears inherited
 child settings for that hire. With no harness from the hire, role or fleet,
 Clankie chooses per job; passing none falls back to the hire machine's usable,
-unheld accounts (the only harness with one, else Codex when its best account
-has over half its usage left, else Claude), and refuses when none is usable.
+unheld accounts (the only harness with one; else the one whose best account is
+not on pace to run out before its reset; else Codex only when its best account
+has strictly more of its tightest window left; else Claude), and refuses when
+none is usable.
 Inspect the current schema on an older install.
 
 Use the role already configured for the intended project. `projectId`, when

@@ -11,8 +11,11 @@ try {
 } catch {
   process.exit(2);
 }
+// The operator plugin passes `lead`: that seat is the lead and reaches Linear through its own lead tools.
 const guidance =
-  "This is a Clankie plugin session. Post Linear evidence through clankie_tools / clankie_call as the Clankie app; if unavailable, ask your lead with message_clankie. Inherited Linear connectors are denied here. Plain Claude sessions without this plugin keep the owner's connector access.";
+  process.argv[2] === "lead"
+    ? "This is Clankie's operator seat. Write to Linear through your lead MCP server's linear_* tools as the Clankie app. Inherited Linear connectors are denied here. Plain Claude sessions without this plugin keep the owner's connector access."
+    : "This is a Clankie plugin session. Post Linear evidence through clankie_tools / clankie_call as the Clankie app; if unavailable, ask your lead with message_clankie. Inherited Linear connectors are denied here. Plain Claude sessions without this plugin keep the owner's connector access.";
 if (hook.hook_event_name === "SessionStart") {
   process.stdout.write(
     JSON.stringify({

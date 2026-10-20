@@ -38,8 +38,9 @@ default and let Clankie choose per job; project roles take the same `auto`
 (`clankie agents role ROLE --project P --harness auto --model auto --effort auto`).
 With no harness at any layer, Clankie picks Claude or Codex for each hire; a hire
 that still names none falls back to the machine's usable, unheld accounts (the
-only harness with one, else Codex above half its usage, else Claude) and never
-to a fixed harness. Other hire-profile fields and fleet
+only harness with one; else the one whose best account is not on pace to run
+out before its reset; else Codex only when it has strictly more of its tightest
+window left; else Claude) and never to a fixed harness. Other hire-profile fields and fleet
 resource settings are preserved. `--hire-profile FILE.json` replaces the whole
 profile; use it separately from these flags. Explicit hire choices override
 project roles, which override fleet defaults. New hires use the result; existing
@@ -103,7 +104,8 @@ bundled and not linked, doctor's `remediations` already has the link command.
 
 Clean up temporary worker panes you create once their results are saved and
 verified. Keep ownership in the existing brief, check the pane still holds your
-finished worker, then `herdr pane close ID` and verify it is gone. Keep panes
+finished worker, then close it with `close_worker_pane` (it keeps the report and
+refuses unlanded work; a refusal never authorizes a raw `herdr pane close`). Keep panes
 needed for follow-up or requested by your person; leave borrowed or repurposed
 panes and operator drafts alone. Your own finished-worker cleanup is already
 authorized.

@@ -36,7 +36,11 @@ scope; incremental reads must not silently drop human changes.
 3. **Relevant threads** — for the next deliverable, active/blocked lanes and
    issues carrying architecture or scope decisions, `get_issue` with
    `includeRelations: true` and establish their decision/evidence context on the
-   first pass; subsequent passes refresh changes. Follow parents and
+   first pass; subsequent passes refresh changes. A remote project head fenced
+   to its tracker project is refused expanded relations
+   (`remote_lead_tracker_project_denied`): omit `includeRelations`, take the
+   parent from `parentId` and list sub-issues with `list_issues` by `parentId`;
+   name blocking relations as unread. Follow parents and
    dependencies when they change the current plan. Read recently completed
    evidence for claims about what is usable now.
 4. **Canonical docs** — inspect the attached/listed documents governing that

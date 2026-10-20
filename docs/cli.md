@@ -177,7 +177,7 @@ fallback after an owner API error. See [ADR 0248](adr/0248-owner-settings-use-on
 | [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model`             |
 | [Connect machines](#runtime-setup)                     | `machines`, `connections`, `runtime`, `agents`, `herdr`     |
 | [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`                   |
-| [Use native seats and delegated tools](#seat-commands) | `seat`, `mcp`, `access`                                     |
+| [Use native seats and delegated tools](#seat-commands) | `claude`, `codex`, `mcp`, `access`                          |
 | [Evaluate agent work](#evaluation-commands)            | `evaluator`                                                 |
 
 ## Commands
@@ -6771,8 +6771,10 @@ No lookup, polling, settlement, abandonment or replay of either original is
 authorized; the work they belonged to proceeds with new calls under new receipts.
 
 `message_clankie` reports to the conversation that hired the worker. A
-host-admitted `message_seat` from another conversation adopts that worker, so
-future reports and completion watches follow the new lead. The worker does not
+host-admitted `message_seat` from another conversation delivers and names its
+`ownerConversationId`, but the hire keeps its lead, so its reports and
+completion watches stay there. Only a hire whose lead conversation is gone, or
+a hand-started seat, is adopted by the conversation that messages it. The worker does not
 choose the destination. Worker reports fall back to `global-default` when that
 conversation has been removed; a retained room with revoked grants is refused.
 Local and fleet-qualified remote workers follow the same persisted ownership

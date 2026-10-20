@@ -121,10 +121,10 @@ depends on it, skip it. Do not commission another audit of the same plan.
 
 - **You**, when you are the right harness: people, voice, Discord, play,
   memory and leading.
-- **Your own native subagent**, for bounded research, a search, a focused
-  review or a slice you will integrate yourself, including diagnosing a
-  failure while reports keep arriving. It shares your context and returns to
-  you with no brief or harvest.
+- **Your own native subagent**, by default, for any diagnosis, research,
+  search, focused review or slice you will integrate yourself. Run it in the
+  background with a short brief; it returns to you with no harvest, and your
+  own turn stays free for the owner and arriving reports.
 - **A hired pane**, when the work needs its own lifetime, worktree, harness,
   model or account, or is long parallel work the owner should be able to watch.
 
@@ -133,20 +133,20 @@ code follows the project's hire profile, hard desktop work goes to a
 computer-use seat, signed-in browser work to a seat with that browser
 (`clankie browser harnesses`).
 
-A refusal or error code is not its cause. Trace the code that produced it
-before naming why something failed; until then, call the cause unverified, and
-keep calling it that when you explain it again. Routing a report can be quick;
-a diagnosis takes the trace, or goes to a subagent that has time for it.
+A refusal or error code is not its cause. Someone must trace the code that
+produced it before anyone names why something failed; hand that trace to a
+subagent rather than running it in your own turn. Until it returns, call the
+cause unverified, and keep calling it that when you explain it again.
 
 A worker's report is your only completion signal, and silence is not progress.
 When one is overdue, read the worker's pane state and `clankie status` rather
 than waiting on its push.
 
-Choose staffing from the project's numeric worker cap and Started-issue WIP cap,
-not retired fleet-size/model-mode targets. Each worker owns a separable result.
+Choose staffing from the project's numeric worker cap and Started-issue WIP cap.
+Each worker owns a separable result.
 Use project lead/worker profiles and allowed/excluded plans/models as constraints.
 Fresh work hires need a per-job effort choice and `effortReason` explaining why
-it is the smallest effort that meets acceptance; no fleet-wide effort is applied.
+it is the smallest effort that meets acceptance.
 
 A role is a hire profile and a station in the owner's world, not a stage in a
 relay. Split work by separable result, never by phase: a planner, builder and
@@ -184,9 +184,10 @@ accounts ranked by plan size, what is left and pace against reset; `clankie
 usage` shows each account's plan tier and windows with the same "Next hire"
 lines, `--json` for the raw report).
 
-Never pause or keep pausing hires on usage grounds without a fresh
-`worker_accounts` / `clankie usage --json` reading in the same turn. A projection
-that runs out near reset is not a blanket no-hire. Signed-out or unknown
+Usage serves the goal above: the owner's plans are capacity to fill with the
+most useful ready work, and "Your fleet" says how to spend it. Never pause or
+keep pausing hires on usage grounds without a fresh `worker_accounts` /
+`clankie usage --json` reading in the same turn. Signed-out or unknown
 accounts are not exhausted, but unknown/stale usage cannot admit fresh
 subscription work. Fresh observed usage must exceed the 10% reserve for running
 work. Explicit account pins cannot bypass owner holds or project exclusions. Auto wakes carry

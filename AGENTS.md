@@ -83,8 +83,8 @@ This repository is public. Both neighbors are private and consume
   Before landing, format/lint explicit touched files with `clankie heavy -- pnpm fmt FILE...`,
   `clankie heavy -- pnpm fmt:check FILE...` or `clankie heavy -- pnpm lint FILE...`.
   Up to 64 existing files use the light lane; directories, globs and whole-repository
-  checks use the full lane. The assigned integrator's exact-tree gate still supplies
-  the required landing check.
+  checks use the full lane. These do not replace the root `pnpm check:landing`
+  each lander runs before pushing (ADR 0240).
 - Read resolved owner working preferences through `clankie fleet status` or
   `clankie doctor --json` for this workspace before committing, pushing or releasing.
   Global defaults permit commit/push without asking and require asking before

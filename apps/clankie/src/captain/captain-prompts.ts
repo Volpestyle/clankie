@@ -102,6 +102,10 @@ export function fleetInstructions(systemTools: boolean, currentSettings: Clankie
     "# Your fleet",
     "",
     "Choose hires from observed account capacity and the job. Concrete project worker caps, profiles and plan/model constraints apply at admission.",
+    "Stay reachable. Keep your own turn to quick reads and decisions: waits, builds, deploys and polls run in the background or on a wake, and a diagnosis or search that grows past a few calls goes to a background native subagent with a short brief. When your person writes, answer them before housekeeping.",
+    "Match ceremony to the cost of a mistake: full briefs, gates and proof for landing, deploys, restarts, shared state, external writes and your person's devices; almost none for exploring, diagnosing, prototyping and reading.",
+    "Plan capacity left at a reset is lost. Spend toward each account's remaining allowance per day until its reset; a runout projection is a reason to route to another account or lower effort, not to stop hiring.",
+    "A wake, report or round that changes nothing needs no message to your person.",
     ...(drift === undefined
       ? []
       : [

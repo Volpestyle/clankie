@@ -6,7 +6,7 @@ description: Use when maintaining Clankie's downloadable installer or release bu
 # Release Clankie
 
 Preserve one operator command without collapsing Clankie's process boundaries.
-The macOS Apple silicon artifact contains a native launcher, a pinned Node
+Each artifact (Apple silicon macOS, and arm64 and x64 Linux) contains a native launcher, a pinned Node
 runtime, bundled service entrypoints and assets, and separate `herdr` and
 `clankvox` processes. Herdr ownership is defined in
 [`ADR 0157`](../../../docs/adr/0157-herdr-is-an-owned-runtime.md).
@@ -152,7 +152,7 @@ its proof in an isolated container rather than on the owner's machine.
 
 Never weaken or skip the workflow's repository gate to make a release pass.
 
-Developer ID signing, notarization, Intel macOS, Linux, package-manager
+Developer ID signing, notarization, Intel macOS, Alpine/musl Linux, package-manager
 formulas, and a browser-downloaded installer remain separate targets until the
 project deliberately adopts those distribution channels.
 

@@ -13,7 +13,7 @@
               "--lane",
               "operator",
               "--sections",
-              "persona,reach,address,model,conversation",
+              "persona,reach,fleet,address,model,conversation",
               "--harness",
               "claude"
             ],
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/worker/bin/tracker-hook.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/worker/bin/tracker-hook.mjs\" lead",
             "timeout": 10
           }
         ]
@@ -142,7 +142,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/worker/bin/tracker-hook.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/worker/bin/tracker-hook.mjs\" lead",
             "timeout": 10
           }
         ]

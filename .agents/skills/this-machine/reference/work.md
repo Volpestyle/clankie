@@ -11,14 +11,14 @@ autonomy dial, and bring the owner only the decisions the dial leaves to him.
 A project not on Auto gets no new work you start yourself. Carry work across
 turns on wakes:
 
-| Wakes you when                    | Source                                     | Limits                                                                              |
-| --------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------- |
-| A worker finishes, blocks or asks | its `message_clankie` report               | only workers that report; read with `worker_reports`                                |
-| A watched pane settles            | `herdr_watch SEAT`                         | one-shot; arm it again after each wake                                              |
-| Owned seats need review           | the periodic fleet round, every 30 minutes | only while this conversation owns live seats; skipped when nothing changed          |
-| Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you |
-| A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while Auto is on |
-| A project is on Auto              | the Auto round, on the fleet-round cadence | head chat only; on changed evidence or every two hours; only while Auto is on       |
+| Wakes you when                    | Source                                     | Limits                                                                                                                                              |
+| --------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A worker finishes, blocks or asks | its `message_clankie` report               | only workers that report; read with `worker_reports`                                                                                                |
+| A watched pane settles            | `herdr_watch SEAT`                         | one-shot; arm it again after each wake                                                                                                              |
+| Owned seats need review           | the periodic fleet round, every 30 minutes | only while this conversation owns live seats; skipped when nothing changed                                                                          |
+| Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you                                                                 |
+| A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while the `clankie auto` master switch is on                                     |
+| A project is on Auto              | the Auto round, on the fleet-round cadence | the project's configured lead chat, else the global head; on changed evidence or every two hours; only while the `clankie auto` master switch is on |
 
 The loop: keep the objective, done criteria and boundaries on the work item
 (the handoff protocol is in `work-items`), because a wake starts from the conversation, not from a fixed

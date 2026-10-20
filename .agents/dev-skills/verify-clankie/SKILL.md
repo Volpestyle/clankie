@@ -29,9 +29,10 @@ for new work, in this order:
 
 Do not add unit tests by default. Existing ones are not mass-deleted; pruning is
 a separate reviewed effort. Choose checks for the changed claim and risk, reuse
-valid evidence for unchanged inputs, and record what actually ran. Follow the
-current gate assignment; workers run scoped checks when the lead owns the composed
-full check. Evals are manual-only, never implicit in a build, release or `pnpm check`.
+valid evidence for unchanged inputs, and record what actually ran. Whoever lands
+a change runs the root `pnpm check:landing` before pushing
+([ADR 0240](../../../docs/adr/0240-changes-land-directly-on-main.md)); the full
+`pnpm check` runs for releases and on request. Evals are manual-only, never implicit in a build, release or `pnpm check`.
 
 Report advertised capabilities as `live`, `refused`, or `absent`. A receipt
 that fails because a promised capability is absent is useful evidence; do not

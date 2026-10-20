@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("../../../integrations/claude-plugin/", import.meta.url));
-async function hook(input: Record<string, unknown>) {
-  const child = spawn(process.execPath, [root + "worker/bin/tracker-hook.mjs"], {
+async function hook(input: Record<string, unknown>, ...args: string[]) {
+  const child = spawn(process.execPath, [root + "worker/bin/tracker-hook.mjs", ...args], {
     env: { PATH: process.env.PATH },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -42,6 +42,13 @@ it("plugin-local guard denies inherited Linear tools without a pane or live brid
   }
   expect(await hook({ hook_event_name: "SessionStart" })).toMatchObject({
     systemMessage: expect.stringContaining("clankie_tools / clankie_call"),
+  });
+  // The operator seat is the lead: it is never told to ask a lead or use the worker bridge.
+  const lead = await hook({ hook_event_name: "SessionStart" }, "lead");
+  expect(lead.systemMessage).toContain("linear_* tools");
+  expect(lead.systemMessage).not.toContain("message_clankie");
+  expect(await hook({ hook_event_name: "PreToolUse", tool_name: denied[0] }, "lead")).toMatchObject({
+    hookSpecificOutput: { permissionDecision: "deny" },
   });
   // Hooks reside only in these plugins. Loading neither plugin adds no deny to
   // a plain session, and no hook writes owner profile configuration. Claude

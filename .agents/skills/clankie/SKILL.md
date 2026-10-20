@@ -205,8 +205,12 @@ up to 20 qualified names/descriptions, then `{names}` for up to 10 schemas. Invo
 with `clankie_call({name, arguments})`. Manual grants may expose direct names.
 Use Clankie's connected `linear_*` tools. A useful first read is
 `linear_get_issue({id: "TEAM-123", includeRelations: true})`, followed by
-`linear_list_comments({issueId: "TEAM-123"})` for current decisions. Read the
-parent when it sets scope; newer owner direction can supersede a stale issue.
+`linear_list_comments({issueId: "TEAM-123"})` for current decisions. A remote
+project head is fenced to its own tracker project and gets
+`remote_lead_tracker_project_denied` for `includeRelations`: omit it, take the
+parent from the issue's `parentId`, and list sub-issues with
+`linear_list_issues({parentId})`. Read the parent when it sets scope; newer
+owner direction can supersede a stale issue.
 Paginate when the response says more exists. For identity,
 `linear_get_user({query: "me"})` identifies the connected provider actor; compare
 it with the intended workspace/account and connection record. Names and portraits
@@ -297,10 +301,8 @@ Abandonment records one decision to stop waiting; it neither cancels nor proves
 nonexecution. A different decision is refused with `abandonment_conflict`, and an
 unproven original with `original_read_unproven`; neither records anything. After
 an uncertain abandonment reply, inspect with both IDs; never resend abandonment
-or the original. Receipts made before this contract (including
-`70136c4f-43ad-45f3-8434-5de9fd04545a` and
-`7065c6aa-fffb-4e55-9c0f-550d139af96c`) retained no classification and stay
-UNKNOWN for good.
+or the original. Receipts made before this contract retained no
+classification and stay UNKNOWN for good.
 
 A `No durable native binding` receipt
 means no new message was sent; report the pane and inspect its native binding.
@@ -606,9 +608,12 @@ actual native control receipt separately.
 ## Conversations and peer collaboration
 
 A worker's `message_clankie` routes to its hiring conversation. A host-admitted
-`message_seat` from another conversation adopts the worker, so future reports
-and its hire completion follow that lead. Workers cannot choose this route;
-only a removed conversation falls back to `global-default`. A revoked room
+`message_seat` from another conversation delivers and names the hire's
+`ownerConversationId`, but the hire keeps its lead, so its reports and
+completion watches stay there. Only a hire whose lead conversation is gone, or
+a hand-started seat, is adopted by the conversation that messages it. Workers
+cannot choose this route; reports fall back to `global-default` only when the
+lead conversation was removed. A revoked room
 remains refused. An attached `clankie claude|codex|opencode` seat drives that
 selected conversation; attachment adds no authority over other rooms.
 

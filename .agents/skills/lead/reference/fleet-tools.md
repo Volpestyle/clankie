@@ -70,8 +70,6 @@ their newly created initial-command pane into the group. Never rearrange
 existing panes or substitute the lead's or focused pane.
 
 Sub-leads without `hire_agent` use the exact [worker grid commands](../../clankie/reference/worker-layout.md).
-The old generated `lead/reference/operations.md` is now this canonical source;
-plugin builds copy the shipped skills rather than maintaining a second guide.
 
 Accounts: `worker_accounts` (omit `fleet` for this Mac, or pass one such as
 `pc`) reads that machine's Claude profiles and Codex accounts now: identity,
@@ -102,7 +100,10 @@ instruction.
 ## Report routing
 
 The hiring conversation owns the worker and receives its reports and hire
-completion. A host-admitted `message_seat` from another conversation adopts it.
+completion. Messaging another lead's live hire with `message_seat` delivers but
+does not adopt it: the result names its `ownerConversationId`, and its reports
+go there. A host-admitted `message_seat` adopts only an unowned seat or a hire
+whose lead conversation is gone.
 Without persisted adoption, reports follow the actual census parent or launcher
 pane to its attached conversation or native channel; explicit adoption wins.
 With no eligible parent, `global-default` receives the report tagged

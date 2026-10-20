@@ -137,7 +137,7 @@ wake signing material live in the Mac broker; model/account keys stay hosted.
 Status distinguishes Asleep/Waking, Sign-in expired, Access revoked and
 Unavailable. A paired Mac wakes the body with the app's device-signed challenge
 protocol. First login uses account wake. Never start a local copy to repair
-hosted access. Local sockets, lifecycle, `seat`, `mcp` and shell escapes refuse.
+hosted access. Local sockets, lifecycle, native seat launches (`claude`, `codex`, …), `mcp` and shell escapes refuse.
 `/remote-access` is self-hosted Remote access for this Mac (`/gateway` alias),
 and checks for an existing hosted tenant before configuring a doorway.
 Matching deployments and a real Mac/phone rehearsal are separate gates.

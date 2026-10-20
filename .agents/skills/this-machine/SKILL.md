@@ -352,8 +352,9 @@ and the rest is product. `/project` → Product paths edits the same setting.
 For read-only historical drift proof, use `clankie auto rounds --replay --project
 ID --since ISO --until ISO` (at most 14 days, complete local days). It reads tracker
 state spans and fetched git/mirror history without waking anyone, writing tracker
-or round records, or consuming pending drift. WIP cap stays null until VUH-2256,
-so `over_wip` is unavailable; never substitute worker cap. Project/parent/milestone
+or round records, or consuming pending drift. Replay applies today's project
+`wipCap` and can emit `over_wip`; an unset cap stays null, and never substitute
+worker cap. Project/parent/milestone
 membership and Auto selection are current, with those limits stated in output.
 
 Standing work comes from projects on Auto (ADR 0264). Auto rounds go to the
@@ -365,14 +366,14 @@ projects and wake independently when their evidence changes or after two hours
 idle. Use the same project API/CLI from every surface; no separate Auto routing
 setting exists. Carry standing work across turns on wakes:
 
-| Wakes you when                    | Source                                     | Limits                                                                                  |
-| --------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------- |
-| A worker finishes, blocks or asks | its `message_clankie` report               | only workers that report; read with `worker_reports`                                    |
-| A watched pane settles            | `herdr_watch SEAT`                         | one-shot; arm it again after each wake                                                  |
-| Owned seats need review           | the periodic fleet round, every 30 minutes | only while this conversation owns live seats; skipped when nothing changed              |
-| Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you     |
-| A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while autonomy is on |
-| A recurring time                  | `routine` (`clankie routines`)             | runs on its schedule until paused or removed; never overlaps or repeats a slot          |
+| Wakes you when                    | Source                                     | Limits                                                                                                          |
+| --------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| A worker finishes, blocks or asks | its `message_clankie` report               | only workers that report; read with `worker_reports`                                                            |
+| A watched pane settles            | `herdr_watch SEAT`                         | one-shot; arm it again after each wake                                                                          |
+| Owned seats need review           | the periodic fleet round, every 30 minutes | only while this conversation owns live seats; skipped when nothing changed                                      |
+| Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you                             |
+| A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while the `clankie auto` master switch is on |
+| A recurring time                  | `routine` (`clankie routines`)             | runs on its schedule until paused or removed; never overlaps or repeats a slot                                  |
 
 At the reporting boundary, `report_continuation` declares active, paused,
 complete, or blocked_on_owner with a concrete question. Read or set it from
