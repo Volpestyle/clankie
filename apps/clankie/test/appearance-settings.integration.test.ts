@@ -125,7 +125,7 @@ it("shares ordered primary navigation, preserving other appearance fields and re
       });
     const first = await read();
     const options = {
-      ownerFetcher: { fetch: (path: string, init?: RequestInit) => app.request(path, init) },
+      ownerFetcher: { fetch: async (path: string, init?: RequestInit) => app.request(path, init) },
     };
     expect((await runNavigationCommand(["set", "messages,work"], options)).navigation).toEqual([
       "messages",
