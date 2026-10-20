@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "implementation-validation.tar",
+      "size": 56832,
+      "sha256": "2195e271a69cad89fabea763e38c6bfba44e1b60c62804eebb5541ab5112ebc4",
+      "url": "clankie://evidence/sha256/2195e271a69cad89fabea763e38c6bfba44e1b60c62804eebb5541ab5112ebc4"
+    }
+  ]
+}

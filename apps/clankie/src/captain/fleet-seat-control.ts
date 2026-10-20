@@ -8,7 +8,7 @@ import { externalCodexQuestions, guardedCodexQuestions } from "./external-codex-
 import { openCodexSocket } from "./codex-app-server.ts";
 import { channelBody } from "./claude-worker-seat.ts";
 import type { ExternalCodexControl } from "./external-codex-control.ts";
-import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
+import type { HarnessSeatAdapter, SeatControl, SeatEvent } from "@clankie/agent-hosts";
 import { basename } from "node:path";
 import { HerdrFleetError, splitFleetQualified } from "../herdr-fleet.ts";
 import { codexControlEndpoint, codexProcess, resolveCodexHome, resolveCodexSessionId } from "./codex-seat.ts";
@@ -254,7 +254,14 @@ export function createFleetSeatControl(
       if (native !== undefined) return native;
       if (delivery === "steer") return modeUnavailable("steer");
       if (authorized && !(await authorized())) return refused();
-      if (await codexQueue(sessionId, text, home)) return queued();
+      if (endpoint === null)
+        return { outcome: "undelivered", detail: "Codex endpoint could not be observed; no queue was sent." };
+      const queuedResult =
+        endpoint === undefined && authorized === undefined
+          ? await codexQueue(sessionId, text, home)
+          : await codexQueue(sessionId, text, home, endpoint, authorized);
+      if (typeof queuedResult === "object") return queuedResult;
+      if (queuedResult) return queued();
       return {
         outcome: "unconfirmed",
         detail: "Codex queue did not confirm delivery; inspect the seat before resending.",
@@ -471,6 +478,58 @@ export function createFleetSeatControl(
   };
   return {
     inputCapabilities,
+    async settled(
+      agent: HerdrAgentSnapshot,
+      signal: AbortSignal,
+      messageId?: string,
+      armedAt?: string,
+      guard?: () => Promise<void>,
+    ): Promise<SeatEvent> {
+      const control = await attach(agent);
+      if (control && !messageId?.startsWith("codex-input:"))
+        return control.settled(signal, messageId, armedAt);
+      if (
+        messageId &&
+        agent.agent === "codex" &&
+        !splitFleetQualified(agent.paneId) &&
+        runner.codexSettled &&
+        runner.paneProcesses
+      ) {
+        const sessionId = nativeSessionId(agent);
+        const process = codexProcess(await runner.paneProcesses(agent.paneId));
+        const endpoint = codexControlEndpoint(process);
+        if (sessionId && process && endpoint !== null) {
+          const files = await runner.openFiles?.(process.pid).catch(() => "");
+          return runner.codexSettled(
+            sessionId,
+            messageId,
+            signal,
+            endpoint,
+            files ? resolveCodexHome(files, sessionId) : undefined,
+            async () => {
+              signal.throwIfAborted();
+              await guard?.();
+              const current = await runner.resolveTerminal(agent.terminalId);
+              const observed = codexProcess(await runner.paneProcesses!(agent.paneId));
+              if (
+                !current?.session ||
+                !agent.session ||
+                current.paneId !== agent.paneId ||
+                occupantIdForHerdrSession(current.session) !== occupantIdForHerdrSession(agent.session) ||
+                observed?.pid !== process.pid ||
+                codexControlEndpoint(observed) !== endpoint
+              )
+                throw new Error("Original native completion occupant or socket changed");
+            },
+          );
+        }
+      }
+      return {
+        type: "settlement_unconfirmed",
+        at: new Date().toISOString(),
+        reason: "message_correlation_unavailable",
+      };
+    },
     attach,
     attachQuestion,
     locateDelivery,

@@ -701,7 +701,8 @@ describe("HerdrWatchStore", () => {
         get: () => Promise.resolve(codex),
         resolveTerminal: () => Promise.resolve(codex),
         wait: () => new Promise<HerdrAgentSnapshot>(() => undefined),
-        paneProcesses: () => Promise.resolve([{ pid: 21290, name: "codex", argv0: "codex" }]),
+        paneProcesses: () =>
+          Promise.resolve([{ pid: 21290, name: "codex", argv0: "codex", argv: ["codex"] }]),
         openFiles: () =>
           Promise.resolve(
             "n/Users/james/.codex/sessions/2026/09/05/rollout-2026-09-05T19-12-09-01a0740e-ea76-7aa2-8795-524c00368e71.jsonl\n",

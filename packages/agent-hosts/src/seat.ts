@@ -202,6 +202,8 @@ export type SeatEvent =
   | { readonly type: "turn_started"; readonly at: string; readonly messageId?: string }
   | {
       readonly type: "turn_completed";
+      /** Exact turn containing a correlated queued native input, when distinct from messageId. */
+      readonly nativeTurnId?: string;
       readonly at: string;
       readonly messageId?: string;
       readonly ok: boolean;

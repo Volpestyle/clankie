@@ -228,6 +228,7 @@ export function routeHerdrFleets(
     ...(local.openFiles === undefined ? {} : { openFiles: local.openFiles }),
     ...(local.codexControl === undefined ? {} : { codexControl: local.codexControl }),
     ...(local.codexQueue === undefined ? {} : { codexQueue: local.codexQueue }),
+    ...(local.codexSettled === undefined ? {} : { codexSettled: local.codexSettled }),
     closePane: async (target, guard) => {
       const { runner, id } = await route(target);
       if (runner.closePane === undefined) throw new Error("Herdr close is unavailable");

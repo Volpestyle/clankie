@@ -1328,11 +1328,16 @@ function herdrWatchTools(
   available?: () => boolean,
   operator = false,
 ): ToolDefinition[] {
-  const arm = async (agent: string, reason: string) => {
+  const arm = async (agent: string, reason: string, messageId?: string) => {
     const authority = captureConversationAuthority(turn.conversationAuthority);
     await assertConversationAuthority(authority);
-    return watches.watch(authority.owner.conversationId, agent, reason, authority.owner.discord, () =>
-      assertConversationAuthority(authority),
+    return watches.watch(
+      authority.owner.conversationId,
+      agent,
+      reason,
+      authority.owner.discord,
+      () => assertConversationAuthority(authority),
+      messageId,
     );
   };
   return [
@@ -1554,13 +1559,21 @@ function herdrWatchTools(
       name: "herdr_watch",
       label: "Watch Herdr agent",
       description:
-        "Arm a persisted, event-driven one-shot watcher on a working Herdr agent pane. When the agent settles, " +
+        "Arm a persisted one-shot watcher on a Herdr agent pane. Supply messageId from message_seat for exact completion, including a turn that finished before admission. When the agent settles, " +
         "this same conversation wakes so you can inspect and harvest it; in Discord, your reply to that wake " +
         "posts in this channel, answering the message you are on now. Use this after agreeing to " +
         "harvest or after dispatching work; do not poll with schedule_wake or block the current turn with " +
         "`herdr agent wait`. A settled status is only a cue to inspect, not proof the work is correct. " +
         "If the pane switches to another native session or its agent exits first, the watch ends without a wake; inspect the seat and arm it again if you still need its next completion.",
       parameters: Type.Object({
+        messageId: Type.Optional(
+          Type.String({
+            minLength: 1,
+            maxLength: 512,
+            description:
+              "Exact messageId from message_seat, including codex-input queue IDs. Waits for that message even if it already completed; other turns and pane status never settle it.",
+          }),
+        ),
         agent: Type.String({
           minLength: 1,
           maxLength: 128,
@@ -1580,7 +1593,7 @@ function herdrWatchTools(
           // A remote fleet's pane does not depend on this machine's Herdr.
           available?.() === false && splitFleetQualified(params.agent) === undefined
             ? { outcome: "refused", reason: "herdr_unavailable" }
-            : await arm(params.agent, params.reason),
+            : await arm(params.agent, params.reason, params.messageId),
         ),
     }),
   ];

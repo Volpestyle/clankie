@@ -3,10 +3,16 @@ import { createServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WebSocketServer } from "ws";
-import { codexProxyControl } from "../src/captain/external-codex-control.ts";
+import WebSocket, { WebSocketServer } from "ws";
+import { codexProxyControl, codexSocketSettled } from "../src/captain/external-codex-control.ts";
+import { HireOwners } from "../src/captain/hire-owners.ts";
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { createFleetSeatControl } from "../src/captain/fleet-seat-control.ts";
-import type { HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
+import {
+  HerdrWatchStore,
+  type HerdrAgentSnapshot,
+  type HerdrWatchRunner,
+} from "../src/captain/herdr-watch.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -16,6 +22,7 @@ afterEach(async () => {
 async function fixture(
   options: {
     status?: string;
+    turns?: () => unknown[];
     flags?: string[];
     id?: string;
     fail?: string;
@@ -45,9 +52,17 @@ async function fixture(
           thread: {
             id: options.id ?? "thread",
             status: { type: options.status ?? "active", activeFlags: options.flags ?? [] },
+            turns: options.turns?.() ?? [],
           },
         };
       if (request.method === "thread/turns/list") result = { data: [{ id: "turn", status: "inProgress" }] };
+      if (request.method === "thread/queue/add")
+        result = {
+          queuedSubmission: {
+            id: "queue-1",
+            clientUserMessageId: request.params.clientUserMessageId,
+          },
+        };
       if (request.method === "turn/steer")
         result = { turnId: options.mismatchedReceipt ? "other-turn" : "turn" };
       if (options.approval)
@@ -72,13 +87,31 @@ async function fixture(
     ],
     1000,
   );
-  return { control, requests };
+  return {
+    control,
+    requests,
+    connect: async () => new WebSocket(`ws+unix://${path}:/`),
+    queue: codexProxyControl(
+      process.execPath,
+      [
+        "-e",
+        "const s=require('node:net').connect(process.argv[1]);process.stdin.pipe(s).pipe(process.stdout);s.on('error',()=>process.exit(1));",
+        path,
+      ],
+      1000,
+      "queue",
+    ),
+  };
 }
 
 describe("external Codex control", () => {
   it("steers the exact active turn over a raw proxy without resuming or answering approval", async () => {
     const { control, requests } = await fixture({ approval: true });
-    expect(await control("thread", "message & draft")).toEqual({ outcome: "delivered", state: "steered" });
+    expect(await control("thread", "message & draft")).toEqual({
+      outcome: "delivered",
+      state: "steered",
+      messageId: "turn",
+    });
     expect(requests.filter((r) => r.method === "turn/steer")).toEqual([
       {
         id: 4,
@@ -263,13 +296,13 @@ it.each([
       codexQueue,
       codexControl,
     } as unknown as HerdrWatchRunner;
-    expect(await createFleetSeatControl(runner, new Map()).deliverToSeat("w3Z:p2", "hello")).toMatchObject({
-      outcome: "delivered",
-      state,
-    });
+    expect(await createFleetSeatControl(runner, new Map()).deliverToSeat("w3Z:p2", "hello")).toMatchObject(
+      daemon ? { outcome: "delivered", state } : { outcome: "undelivered" },
+    );
     if (daemon) expect(codexControl).toHaveBeenCalledWith(parent, "hello", "/parent-home", undefined);
     else expect(codexControl).not.toHaveBeenCalled();
-    if (state === "queued") expect(codexQueue).toHaveBeenCalledWith(parent, "hello", "/parent-home");
+    if (state === "queued" && daemon)
+      expect(codexQueue).toHaveBeenCalledWith(parent, "hello", "/parent-home");
     else expect(codexQueue).not.toHaveBeenCalled();
   },
 );
@@ -348,10 +381,10 @@ it("does not guess the default server when process inspection is unavailable", a
     codexQueue: queue,
   } as unknown as HerdrWatchRunner;
   expect(await createFleetSeatControl(runner, new Map()).deliverToSeat("pane", "hello")).toMatchObject({
-    state: "queued",
+    outcome: "undelivered",
   });
   expect(native).not.toHaveBeenCalled();
-  expect(queue).toHaveBeenCalledOnce();
+  expect(queue).not.toHaveBeenCalled();
 });
 
 it("never substitutes a shared daemon for a --no-daemon TUI", async () => {
@@ -371,8 +404,213 @@ it("never substitutes a shared daemon for a --no-daemon TUI", async () => {
     codexQueue: queue,
   } as unknown as HerdrWatchRunner;
   expect(await createFleetSeatControl(runner, new Map()).deliverToSeat("pane", "hello")).toMatchObject({
-    state: "queued",
+    outcome: "undelivered",
   });
   expect(native).not.toHaveBeenCalled();
-  expect(queue).toHaveBeenCalledOnce();
+  expect(queue).not.toHaveBeenCalled();
+});
+
+it("returns the exact native queue input identity without waiting for its turn", async () => {
+  const f = await fixture({ status: "idle" });
+  const delivered = await f.queue("thread", "fast queued turn");
+  const sent = f.requests.find((r) => r.method === "thread/queue/add")!;
+  expect(delivered).toEqual({
+    outcome: "delivered",
+    state: "queued",
+    messageId: `codex-input:${String(sent.params!.clientUserMessageId)}`,
+  });
+  expect(f.requests.filter((r) => r.method === "thread/queue/add")).toHaveLength(1);
+});
+
+it("recovers a fast completed input after watch admission and excludes another input's completion", async () => {
+  const turns: unknown[] = [
+    {
+      id: "turn-A",
+      status: "completed",
+      items: [
+        { type: "userMessage", clientId: "input-A", content: [{ type: "text", text: "same marker" }] },
+        { type: "agentMessage", text: "A done" },
+      ],
+    },
+  ];
+  const f = await fixture({ status: "idle", turns: () => turns });
+  const dir = await mkdtemp(join(tmpdir(), "local37-watch-"));
+  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, "watches.json");
+  const agent: HerdrAgentSnapshot = {
+    paneId: "w1:p1",
+    terminalId: "term-codex",
+    title: "Owned test seat",
+    agent: "codex",
+    status: "done",
+    session: { kind: "id", source: "herdr:codex", value: "thread" },
+  };
+  new HireOwners(`${path}.owners.json`).bind(
+    agent.paneId,
+    { conversationId: "lead" },
+    agent.terminalId,
+    undefined,
+    occupantIdForHerdrSession(agent.session!),
+  );
+  const runner: HerdrWatchRunner = {
+    get: async () => agent,
+    resolveTerminal: async () => agent,
+    wait: vi.fn(async () => {
+      throw new Error("Pane status must not settle a message watch");
+    }),
+    paneProcesses: async () => [
+      { pid: 100, name: "codex", argv: ["codex", "--remote", "unix:///fixture.sock"] },
+    ],
+    codexSettled: (session, id, signal, _endpoint, _home, guard) =>
+      codexSocketSettled(f.connect, session, id, signal, guard, 5),
+  };
+  const wakes: string[] = [];
+  const store = new HerdrWatchStore(path, { runner });
+  store.start(async (_lead, prompt, _origin, guard) => {
+    await guard?.();
+    wakes.push(prompt);
+  });
+  try {
+    const a = await store.watch("lead", agent.paneId, "A", undefined, undefined, "codex-input:input-A");
+    expect(a).toMatchObject({ outcome: "watching", messageId: "codex-input:input-A" });
+    await vi.waitFor(() => expect(wakes).toHaveLength(1));
+    expect(wakes[0]).toContain("native turn: turn-A");
+    const b = await store.watch("lead", agent.paneId, "B", undefined, undefined, "codex-input:input-B");
+    expect(b).toMatchObject({ outcome: "watching", messageId: "codex-input:input-B" });
+    // Wait until the B observer has actually read A's retained completion.
+    await vi.waitFor(() =>
+      expect(f.requests.filter((r) => r.method === "thread/read").length).toBeGreaterThan(1),
+    );
+    expect(wakes).toHaveLength(1);
+    turns.push({
+      id: "turn-B",
+      status: "completed",
+      items: [
+        { type: "userMessage", clientId: "input-B", content: [{ type: "text", text: "same marker" }] },
+        { type: "agentMessage", text: "B done" },
+      ],
+    });
+    await vi.waitFor(() => expect(wakes).toHaveLength(2));
+    expect(wakes[1]).toContain("native turn: turn-B");
+    expect(wakes[1]).not.toContain("A done");
+    expect(
+      await store.watch("lead", agent.paneId, "B again", undefined, undefined, "codex-input:input-B"),
+    ).toMatchObject({
+      outcome: "settled_for_message",
+      messageId: "codex-input:input-B",
+      completion: { type: "turn_completed", nativeTurnId: "turn-B", text: "B done" },
+    });
+    expect(wakes).toHaveLength(2);
+    expect(runner.wait).not.toHaveBeenCalled();
+    expect(f.requests.every((r) => ["initialize", "initialized", "thread/read"].includes(r.method!))).toBe(
+      true,
+    );
+  } finally {
+    store.close();
+  }
+});
+
+it("aborts a pending exact native input wait without a completion or another send", async () => {
+  const f = await fixture({ turns: () => [] });
+  const abort = new AbortController();
+  const waiting = codexSocketSettled(
+    f.connect,
+    "thread",
+    "codex-input:pending",
+    abort.signal,
+    async () => {},
+    5,
+  );
+  const rejected = expect(waiting).rejects.toThrow();
+  await vi.waitFor(() => expect(f.requests.some((r) => r.method === "thread/read")).toBe(true));
+  abort.abort(new Error("watch canceled"));
+  await rejected;
+  expect(f.requests.some((r) => ["turn/start", "turn/steer", "thread/queue/add"].includes(r.method!))).toBe(
+    false,
+  );
+});
+
+it("automatically watches a queued turn that completed before its send receipt returned", async () => {
+  const turns: unknown[] = [];
+  const f = await fixture({
+    status: "idle",
+    turns: () => turns,
+    beforeReply: async (method) => {
+      if (method !== "thread/queue/add") return;
+      const sent = f.requests.findLast((r) => r.method === method)!;
+      turns.push({
+        id: "fast-turn",
+        status: "completed",
+        items: [
+          { type: "userMessage", clientId: sent.params!.clientUserMessageId },
+          { type: "agentMessage", text: "already finished" },
+        ],
+      });
+    },
+  });
+  const dir = await mkdtemp(join(tmpdir(), "local37-auto-watch-"));
+  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, "watches.json");
+  const agent: HerdrAgentSnapshot = {
+    paneId: "w1:p1",
+    terminalId: "term-codex",
+    title: "Owned test seat",
+    agent: "codex",
+    status: "done",
+    session: { kind: "id", source: "herdr:codex", value: "thread" },
+  };
+  new HireOwners(`${path}.owners.json`).bind(
+    agent.paneId,
+    { conversationId: "lead" },
+    agent.terminalId,
+    undefined,
+    occupantIdForHerdrSession(agent.session!),
+  );
+  const runner: HerdrWatchRunner = {
+    get: async () => agent,
+    resolveTerminal: async () => agent,
+    wait: async () => agent,
+    paneProcesses: async () => [
+      { pid: 100, name: "codex", argv: ["codex", "--remote", "unix:///fixture.sock"] },
+    ],
+    openFiles: async () => "",
+    codexQueue: async (...args) => (await f.queue(...args))!,
+    codexSettled: (session, id, signal, _endpoint, _home, guard) =>
+      codexSocketSettled(f.connect, session, id, signal, guard, 5),
+  };
+  const store = new HerdrWatchStore(path, { runner });
+  const wakes: string[] = [];
+  store.start(async (_lead, prompt, _origin, guard) => {
+    await guard?.();
+    wakes.push(prompt);
+  });
+  try {
+    const delivered = await store.deliverToSeat(agent.terminalId, "fast");
+    expect(delivered).toMatchObject({
+      outcome: "delivered",
+      state: "queued",
+      messageId: expect.stringMatching(/^codex-input:/),
+    });
+    if (delivered.outcome !== "delivered") throw new Error("fixture delivery failed");
+    await vi.waitFor(() => expect(wakes).toHaveLength(1));
+    expect(wakes[0]).toContain(`Settled native message: ${delivered.messageId}; native turn: fast-turn`);
+    expect(
+      await store.watch(
+        "lead",
+        agent.paneId,
+        "read completed receipt",
+        undefined,
+        undefined,
+        delivered.messageId,
+      ),
+    ).toMatchObject({
+      outcome: "settled_for_message",
+      messageId: delivered.messageId,
+      completion: { nativeTurnId: "fast-turn", text: "already finished" },
+    });
+    expect(wakes).toHaveLength(1);
+    expect(f.requests.filter((r) => r.method === "thread/queue/add")).toHaveLength(1);
+  } finally {
+    store.close();
+  }
 });

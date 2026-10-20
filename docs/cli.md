@@ -874,6 +874,21 @@ once. Concurrent requests share the new session; reconnect drains old HTTP clien
 without closing another pending call. The refreshed tool list lets the same
 attached seat inspect the result.
 
+For exact completion, pass `message_seat`'s returned `messageId` to
+`herdr_watch({agent, reason, messageId})`. A fast turn may finish before you arm
+that watch: scoped admission still observes that exact completion, never a
+pane-level `done` from another turn. Codex queued inputs return a
+`codex-input:<native client ID>` identity before the native turn exists. On local
+seats with an observed native endpoint, completion is joined by the native
+`userMessage.clientId` to its actual turn, including after service reattachment.
+Confirmed Codex follow-ups with IDs also arm an automatic watch. Re-arming a
+harvested identity returns `settled_for_message` with its retained completion
+(or `already_harvested` for legacy claims without completion data); it does not
+wake the lead again. Without `messageId`, watch status remains a pane-level cue.
+An unavailable exact native controller reports unconfirmed correlation rather
+than substituting another turn or terminal input. Remote queue transports that
+provide only legacy boolean receipts still lack message-scoped correlation.
+
 Protected `message_seat` and `hire_agent` calls receive a `deliveryId` or `hireId`
 before dispatch, carried in MCP `_meta["clankie/seat-call"]`. The service persists
 the scoped receipt before the native effect. A lost result returns typed
