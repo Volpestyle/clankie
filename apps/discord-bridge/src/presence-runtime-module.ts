@@ -292,7 +292,11 @@ async function provisionGuildId(env: NodeJS.ProcessEnv = process.env): Promise<s
     ([, policy]) => policy.role === "admin" && policy.fleetEnabled,
   );
   if (enabled) return enabled[0];
-  if (Object.keys(authority.guilds).length) throw new Error("discord_fleet_disabled");
+  if (authority.serverId !== undefined) {
+    if (authority.guilds[authority.serverId]?.role !== "admin")
+      throw new Error("discord_channel_provision_requires_admin");
+    throw new Error("discord_fleet_disabled");
+  }
   const swarm = discordManagedGuildId(env);
   if (!swarm) throw new Error("discord_swarm_guild_unset");
   if (authority.servers.find((entry) => entry.serverId === swarm)?.role !== "admin")

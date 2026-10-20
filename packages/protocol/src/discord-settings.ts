@@ -371,7 +371,7 @@ export function discordServerSettings(
     servers,
   };
   // A read-time migration preserves the body's allowlists and all legacy gates.
-  if (!mapChanged && !legacyChanged && !changed("servers")) return result;
+  if (firstUpgrade || (!mapChanged && !legacyChanged && !changed("servers"))) return result;
   const ids = Object.keys(guilds);
   if (!ids.length && !mapChanged && !previous?.serverId) return result;
   const primary = settings.serverId && guilds[settings.serverId] ? settings.serverId : ids[0];

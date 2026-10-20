@@ -168,6 +168,20 @@ it("the preferred managed-server environment name preserves stored and legacy wi
   expect(discordManagedGuildId(empty)).toBe("11111");
 });
 
+it("legacy managed-server overrides migrate without replacing command or presence guilds", () => {
+  const resolved = resolveDiscordSettings(DiscordSettingsSchema.parse({}), {
+    DISCORD_GUILD_ID: "10101",
+    DISCORD_SWARM_GUILD_ID: "20202",
+    DISCORD_SERVERS: JSON.stringify([{ serverId: "20202", role: "admin", owners: "me" }]),
+    DISCORD_PRESENCE_GUILD_IDS: "30303",
+  }).settings;
+  expect(resolved.serverId).toBeUndefined();
+  expect(resolved.guildId).toBe("10101");
+  expect(resolved.swarmGuildId).toBe("20202");
+  expect(resolved.presenceGuildIds).toEqual(["30303"]);
+  expect(resolved.guilds["20202"]).toMatchObject({ role: "admin", owners: "me", fleetEnabled: false });
+});
+
 it("the independent visibility setting keeps the team's selected server across hide and show", async () => {
   const { client, settings, fetchImpl } = fixture();
   const initial = await client.discordSettings();
