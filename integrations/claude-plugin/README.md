@@ -232,7 +232,8 @@ missing step and unavailable control. It does not type the brief into the
 terminal or launch a replacement worker.
 
 Fresh hires stage the brief in a private JSON file and take it once through a
-short native CLI startup prompt referencing that file;
+short native CLI startup prompt referencing that file. Settings and inline
+system/config text also use native file forms;
 the channel carries resumed briefs and follow-ups. A stdout ACK alone cannot
 confirm prompt acceptance: the exact native transcript must contain the complete
 decoded file attachment (or whole channel brief for a resumed session). Missing evidence stays uncertain and must not trigger a replacement send.

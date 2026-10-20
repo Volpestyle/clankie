@@ -153,7 +153,7 @@ it.each([true, false])(
       { paneId: "w1:p1", start, run: async () => undefined },
     );
     expect(start).toHaveBeenCalledWith("claude", expect.arrayContaining(["--resume", SESSION]));
-    const settings = JSON.parse(start.mock.calls[0]?.[1]?.[1] ?? "{}");
+    const settings = JSON.parse(await readFile(start.mock.calls[0]![1]![1]!, "utf8"));
     expect(settings.permissions).toEqual({
       defaultMode: "auto",
       allow: ["mcp__plugin_clankie-worker_worker", "mcp__plugin_clankie-worker_clankie"],
@@ -163,10 +163,6 @@ it.each([true, false])(
     expect(settings.permissions.allow).not.toContain("Bash");
 
     // Its Linear writes go through Clankie's account: inherited connectors are denied for the session.
-    expect(start).toHaveBeenCalledWith(
-      "claude",
-      expect.arrayContaining([expect.stringContaining('"deny":["mcp__tracker_for_cwd"]')]),
-    );
     expect(result.outcome).toBe(matching ? "started" : "failed");
     expect(deliver).not.toHaveBeenCalled();
   },

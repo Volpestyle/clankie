@@ -566,7 +566,9 @@ Describe what the receipt establishes:
 
 Fresh Claude hires stage the brief in a private JSON file and submit one short
 native CLI prompt referencing it. The full brief never crosses Herdr’s shell
-argument encoder. Never send a second channel copy. Confirmation requires the
+argument encoder. Even a plain lead brief gains multi-line working preferences
+before launch. Settings and inline system/config text also use native file forms;
+other control-bearing arguments refuse before launch. Never send a second channel copy. Confirmation requires the
 complete decoded file attachment in the exact native transcript; a bridge stdout ACK alone is
 insufficient. A slow transcript leaves `delivery_unconfirmed` / `uncertain`,
 not permission to resend. Inspect or reconcile the original hire. Its observed

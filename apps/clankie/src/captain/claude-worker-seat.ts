@@ -93,9 +93,9 @@ export interface ClaudeWorkerSeatDeps {
     env?: Readonly<Record<string, string>>,
   ) => readonly string[] | Promise<readonly string[]>;
   /**
-   * Where the launch's settings JSON is handed to Claude. Absent, inline; a
-   * remote Windows launch writes it to a file there, because Herdr's launcher
-   * would not carry its quotes intact (VUH-1527).
+   * Stage settings/config JSON or inline system-prompt text on the launch host.
+   * Absent, use private session state. Remote Windows writes it there because
+   * Herdr's launcher would not carry its quotes intact (VUH-1527).
    */
   readonly settingsArg?: (json: string) => Promise<string>;
   /** Stage the private first brief on the launch host; never pass its body through a shell. */
@@ -248,11 +248,11 @@ export class SeatHookLog {
     this.sessions = this.read();
   }
 
-  public writeBrief(json: string): string {
+  public writeLaunchFile(contents: string, kind: "brief" | "settings"): string {
     const directory = join(dirname(this.path), "claude-briefs");
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const path = join(directory, `clankie-brief-${randomUUID()}.json`);
-    writeFileSync(path, json, { mode: 0o600, flag: "wx" });
+    const path = join(directory, `clankie-${kind}-${randomUUID()}.json`);
+    writeFileSync(path, contents, { mode: 0o600, flag: "wx" });
     return path;
   }
 
@@ -584,7 +584,8 @@ async function receipt(
       return candidates.find(
         (entry) =>
           entry.type === "message" &&
-          (channelBody(entry.text)?.trim() === expected || entry.text.trim() === expected),
+          (channelBody(entry.text)?.replace(/\r\n?/gu, "\n").trim() === expected ||
+            entry.text.replace(/\r\n?/gu, "\n").trim() === expected),
       )?.id;
     },
     ms,
@@ -882,20 +883,43 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         // A one-line JSON file also keeps control characters and arbitrarily
         // many brief lines out of Claude's text-file/binary and line limits.
         const briefPath = nativePrompt
-          ? await (deps.briefFile ?? ((json) => deps.hooks.writeBrief(json)))(
+          ? await (deps.briefFile ?? ((json) => deps.hooks.writeLaunchFile(json, "brief")))(
               JSON.stringify({ clankieBrief: launch.brief }),
             )
           : undefined;
         if (briefPath !== undefined && /[\p{Cc}"\s]/u.test(briefPath))
           throw new Error("Claude brief file requires a path without whitespace, quotes or controls");
+        const stage = deps.settingsArg ?? ((text: string) => deps.hooks.writeLaunchFile(text, "settings"));
+        const harnessArgs: string[] = [];
+        const extra = launch.harnessArgs ?? [];
+        for (let index = 0; index < extra.length; index++) {
+          const argument = extra[index]!;
+          const equals = argument.indexOf("=");
+          const flag = equals < 0 ? argument : argument.slice(0, equals);
+          const value = equals < 0 ? extra[index + 1] : argument.slice(equals + 1);
+          const prompt = flag === "--system-prompt" || flag === "--append-system-prompt";
+          const json =
+            ["--settings", "--agents", "--mcp-config"].includes(flag) &&
+            value !== undefined &&
+            (value.trimStart().startsWith("{") || value.trimStart().startsWith("["));
+          if ((prompt || json) && value !== undefined) {
+            harnessArgs.push(prompt ? `${flag}-file` : flag, await stage(value));
+            if (equals < 0) index++;
+          } else harnessArgs.push(argument);
+        }
         const args = claudeWorkerLaunchArgs(
-          launch,
+          { ...launch, harnessArgs },
           trackerDeny,
-          deps.settingsArg ? await deps.settingsArg(settings) : settings,
+          await stage(settings),
           briefPath === undefined
             ? undefined
             : `Execute the assignment in the clankieBrief JSON field of @${briefPath}`,
         );
+        const unsafe = args.findIndex((argument) => /\p{Cc}/u.test(argument));
+        if (unsafe >= 0)
+          throw new Error(
+            `Claude launch argument ${unsafe} contains a control character with no native file form`,
+          );
         await view.guard?.();
         startAttempted = true;
         await view.start("claude", args);

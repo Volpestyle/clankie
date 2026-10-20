@@ -464,7 +464,7 @@ it("does not harvest a rebound native occupant or move an unowned worker", async
   store.close();
 });
 
-it("releases an unconfirmed hire once its pane is closed, so a retry can start", async () => {
+it("retains an unconfirmed hire after its pane closes until explicit operator settlement", async () => {
   const path = join(root(), "watches.json");
   let allowed = true;
   let panes: HerdrAgentSnapshot[] = [];
@@ -486,6 +486,9 @@ it("releases an unconfirmed hire once its pane is closed, so a retry can start",
   const runner: HerdrWatchRunner = {
     get: async () => agent,
     list: async () => panes,
+    paneShell: async () => {
+      throw new Error("Absent panes require no process fallback");
+    },
     resolveTerminal: async () => agent,
     wait: () => new Promise(() => {}),
     createTab,
@@ -503,9 +506,12 @@ it("releases an unconfirmed hire once its pane is closed, so a retry can start",
     title: "worker",
     workingDirectory: tmpdir(),
   };
-  expect(await store.spawnSeat(request, undefined, undefined, undefined, authority)).toMatchObject({
+  const initial = await store.spawnSeat(request, undefined, undefined, undefined, authority);
+  expect(initial).toMatchObject({
     reason: "start_unconfirmed",
+    receiptId: expect.any(String),
   });
+  if (initial.outcome !== "failed" || !initial.receiptId) throw new Error("Missing original receipt");
   allowed = true;
   // Pane still open: the uncertain hire keeps refusing a second launch.
   const blocked = { ...authority, owner: { conversationId: "owner-b" } };
@@ -513,11 +519,18 @@ it("releases an unconfirmed hire once its pane is closed, so a retry can start",
     reason: "delivery_unconfirmed",
   });
   expect(createTab).toHaveBeenCalledOnce();
-  // The owner closed it: nothing can start there later, so the retry launches.
+  // Closing the pane does not authorize replay of an uncertain original.
   panes = [];
-  expect(await store.spawnSeat(request, undefined, undefined, undefined, blocked)).not.toMatchObject({
+  expect(await store.spawnSeat(request, undefined, undefined, undefined, blocked)).toMatchObject({
     reason: "delivery_unconfirmed",
+    receiptId: initial.receiptId,
   });
+  expect(createTab).toHaveBeenCalledOnce();
+  expect(await store.settleHireReceipt(initial.receiptId, async () => {}, "abandoned")).toMatchObject({
+    state: "abandoned",
+    evidence: { pane: { paneId: agent.paneId, present: false } },
+  });
+  await store.spawnSeat(request, undefined, undefined, undefined, blocked);
   expect(createTab).toHaveBeenCalledTimes(2);
   store.close();
 });

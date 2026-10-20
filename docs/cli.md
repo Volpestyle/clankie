@@ -6334,8 +6334,12 @@ folder-trust prompts remain owner decisions.
 Fresh Claude hires write the brief once to a private, exclusively created JSON
 file in session state (directory `0700`, file `0600` locally). A short native CLI
 startup prompt references it with `@file`, so Claude expands it after startup.
-JSON keeps arbitrary brief characters and line breaks out of Herdr’s shell
-arguments and Claude’s binary-file/line limits. The file remains available for
+JSON keeps admitted brief characters and line breaks out of Herdr’s shell
+arguments and Claude’s binary-file/line limits. The existing 32 KiB/no-NUL hire
+validation remains. The service appends multi-line working preferences even
+when the lead provides a plain single-line brief. Settings are also file-backed;
+inline system/append prompts and JSON settings/agent/MCP config arguments use
+their native file forms. Remaining control-bearing arguments fail before launch. The file remains available for
 inspection of an uncertain start. They do not also send the brief over the channel. Resumed hires and follow-ups use the channel; its stdout ACK alone
 does not establish native prompt acceptance. A confirmed fresh Claude brief requires the complete decoded JSON file attachment
 in that exact session’s active native transcript; a file-reference prompt alone,

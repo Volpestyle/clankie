@@ -116,10 +116,25 @@ it("does not convert an early bridge stdout ACK into a consumed native prompt, a
 
 it("takes the fresh brief through native startup once, even when the channel is already polling before a prompt receiver exists", async () => {
   const f = await fixture();
-  const brief = "Native first prompt\nwith `backticks`, \"quotes\", 'quotes', $HOME, → 🙂\n".repeat(120);
+  const brief =
+    "Native first prompt\r\nwith `backticks`, \"quotes\", 'quotes', $HOME, → 🙂\n\t\u0000\u0085".repeat(120);
   let launches = 0;
+  const appended = "Multi-line native system context\nwith `backticks`, $HOME, →, tab\t and C1 \u0085";
   const result = await f.adapter.start(
-    { harness: "claude", cwd: f.root, brief },
+    {
+      harness: "claude",
+      cwd: f.root,
+      brief,
+      harnessArgs: [
+        "--append-system-prompt",
+        appended,
+        "--system-prompt=" + appended,
+        "--agents",
+        '{\n"helper":{"description":"x","prompt":"x"}\n}',
+        "--mcp-config",
+        '{\n"mcpServers":{}\n}',
+      ],
+    },
     {
       paneId: f.agent.paneId,
       run: async () => {
@@ -129,7 +144,17 @@ it("takes the fresh brief through native startup once, even when the channel is 
         launches++;
         // Native CLI startup owns prompt scheduling, rather than an early MCP notification.
         expect(argv.at(-1)).not.toContain(brief);
-        expect(argv.at(-1)).not.toMatch(/[\p{Cc}]/u);
+        expect(argv.every((argument) => !/\p{Cc}/u.test(argument))).toBe(true);
+        expect(argv).not.toContain("--append-system-prompt");
+        expect(argv).not.toContain("--system-prompt");
+        for (const flag of ["--append-system-prompt-file", "--system-prompt-file"]) {
+          const path = argv[argv.indexOf(flag) + 1]!;
+          expect(await readFile(path, "utf8")).toBe(appended);
+          expect((await stat(path)).mode & 0o777).toBe(0o600);
+        }
+        expect(JSON.parse(await readFile(argv[argv.indexOf("--settings") + 1]!, "utf8"))).toHaveProperty(
+          "permissions",
+        );
         const path = argv.at(-1)!.split("@").at(-1)!;
         expect((await stat(path)).mode & 0o777).toBe(0o600);
         expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ clankieBrief: brief });
