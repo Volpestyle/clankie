@@ -6,6 +6,24 @@
       "size": 451761,
       "sha256": "f4d1196dca981829703572a797d174b2653f54347ce233c92e91f45bbbf23949",
       "url": "clankie://evidence/sha256/f4d1196dca981829703572a797d174b2653f54347ce233c92e91f45bbbf23949"
+    },
+    {
+      "path": "integrator-push.zip",
+      "size": 628694,
+      "sha256": "eec0e3c352902c89dcb294a7afe88935a3c3a01ba2eedb84f9e5169e3fb649d9",
+      "url": "clankie://evidence/sha256/eec0e3c352902c89dcb294a7afe88935a3c3a01ba2eedb84f9e5169e3fb649d9"
+    },
+    {
+      "path": "landing-gate.zip",
+      "size": 8651458,
+      "sha256": "64d79d5468677e9649de05dafdc5a1ff1f0f00c9ce5c0330a64c020b9adba448",
+      "url": "clankie://evidence/sha256/64d79d5468677e9649de05dafdc5a1ff1f0f00c9ce5c0330a64c020b9adba448"
+    },
+    {
+      "path": "live-proof.zip",
+      "size": 353261,
+      "sha256": "dbcebd9ae13bb16e09d46c678655bae0a3bfc953e4e445251eb14a7def18c6af",
+      "url": "clankie://evidence/sha256/dbcebd9ae13bb16e09d46c678655bae0a3bfc953e4e445251eb14a7def18c6af"
     }
   ]
 }
