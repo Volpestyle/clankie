@@ -1246,6 +1246,7 @@ class TurnIdempotencyStore {
     const original = { op: "send" as const, schemaVersion: 1 as const, turn: request.turn };
     const entry = this.entries.get(this.key(deviceId, original));
     // Unknown, expired and upstream failures all stay unknown. No send fallback.
+    // allow-swallowed-rejection -- A failed original has no retained result; this read must stay unknown and never resend.
     const value = await entry?.result.catch(() => undefined);
     return {
       op: "send_receipt",
