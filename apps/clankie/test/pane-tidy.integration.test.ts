@@ -160,6 +160,10 @@ async function fixture(
       if (replaceHostOnClose) fixtureHost = "replacement-host";
       return "{}";
     }
+    if (args[0] === "pane" && args[1] === "rename") {
+      Object.assign(pane, { label: args[3] });
+      return JSON.stringify({ result: { pane } });
+    }
     throw new Error(`Unexpected fixture native call ${args.join(" ")}`);
   };
   let transport = execute;
@@ -186,7 +190,9 @@ async function fixture(
                 ? ["pane", "read", params.pane_id, "--source", params.source, "--format", params.format]
                 : request.method === "pane.close"
                   ? ["pane", "close", params.pane_id]
-                  : [];
+                  : request.method === "pane.rename"
+                    ? ["pane", "rename", params.pane_id, params.label]
+                    : [];
         void execute(args)
           .then((result) => {
             socket.end(
@@ -212,11 +218,21 @@ async function fixture(
     transport = async (args) => {
       const read = nativeHerdrRead(binding, args);
       if (read) return read;
-      const method = args[1] === "read" ? "pane.read" : "pane.close";
+      const method =
+        args[1] === "read"
+          ? "pane.read"
+          : args[1] === "rename"
+            ? "pane.rename"
+            : args[1] === "close"
+              ? "pane.close"
+              : undefined;
+      if (args[0] !== "pane" || method === undefined)
+        throw new Error(`Unexpected fixture native mutation ${args.join(" ")}`);
       const reply = (await nativeRequest(binding, method, {
         pane_id: args[2],
         source: args[4],
         format: args[6],
+        ...(method === "pane.rename" ? { label: args[3] } : {}),
       })) as { result: { text?: string } };
       return method === "pane.read" ? reply.result.text! : JSON.stringify(reply);
     };
@@ -808,6 +824,8 @@ it("reloads a remote Codex thread through close and ordinary hire/resume with fo
       outcome: "reopened",
       entry: { resumedSeatId: "pc/term_222" },
     });
+    expect(f.calls).toContainEqual(["pane", "rename", "w1:p2", "Pip · Work"]);
+    expect(f.closes()).toBe(1);
     expect(f.hires).toMatchObject([
       { fleet: "pc", harness: "codex", resume: `pc:${session.value}`, workingDirectory: w.tree },
     ]);
