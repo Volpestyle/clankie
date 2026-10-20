@@ -20,6 +20,7 @@ import { createModelRegistry, type Catalog, type ModelEntry } from "@clankie/mod
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
+  MANAGED_CREDITS_ONLY,
   assertModelCredentialAllowed,
   modelCredentialAllowed,
   assertChatgptLoginAllowed,
@@ -257,6 +258,10 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
             "Service connections moved to /connect (linear, email, discord). /auth stays provider keys and subscriptions.",
             "success",
           );
+          return;
+        }
+        if (isHostedModelEnvironment(services.env)) {
+          shell.insertCommandResult("/auth", MANAGED_CREDITS_ONLY, "error");
           return;
         }
         if (selector === "anthropic") {
@@ -545,7 +550,8 @@ function providerConnectionHint(
   now: number = Date.now(),
 ): string {
   const redacted = listed[id];
-  if (id === CODEX_PROVIDER_ID && isHostedModelEnvironment(env)) return "unavailable pending OpenAI approval";
+  if (id === CODEX_PROVIDER_ID && isHostedModelEnvironment(env))
+    return "unavailable: managed bodies use AI credits only";
   if (redacted !== undefined) return describeCredentialKind(id, redacted, now);
   if (providerEnvConnected(id, env)) return "env";
   return "needs /auth";
@@ -695,7 +701,7 @@ async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices
         {
           value: "codex",
           label: "Connect ChatGPT subscription",
-          hint: isHostedModelEnvironment(services.env) ? "pending OpenAI approval on hosted" : "Codex OAuth",
+          hint: "Codex OAuth",
           description: "Reuses your ChatGPT plan for Clankie's turns. Stored as openai-codex.",
         },
         {

@@ -478,8 +478,8 @@ describe("auth command", () => {
     fixture.env.CLANKIE_HOSTED_BOOTSTRAP_FILE = "/owned-test/bootstrap.json";
     const view = testShell(["codex", "done"]);
     await command(buildProviderCommands(fixture.services), "auth").run("", view.shell);
-    expect(rendered(view)).toContain("pending OpenAI approval");
-    expect(rendered(view)).toContain("API key or included model usage");
+    expect(rendered(view)).toContain("AI credits only");
+    expect(rendered(view)).toContain("self-hosted bodies");
     expect(fixture.credentials.size).toBe(0);
   });
 

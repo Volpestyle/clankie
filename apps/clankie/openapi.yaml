@@ -8154,10 +8154,12 @@ components:
           required: [ok, error]
           properties:
             ok: { type: boolean, const: false }
+            message: { type: string }
             error:
               type: string
               enum:
                 [
+                  managed_credits_only,
                   authentication_required,
                   forbidden,
                   malformed,
@@ -8179,10 +8181,12 @@ components:
           required: [ok, error]
           properties:
             ok: { const: false }
+            message: { type: string }
             error:
               type: string
               enum:
                 [
+                  managed_credits_only,
                   authentication_required,
                   forbidden,
                   malformed,

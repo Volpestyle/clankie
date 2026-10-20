@@ -280,7 +280,7 @@ export async function modelSet(
   if (parseModelRef(ref) === undefined)
     throw new Error(`Invalid model ref ${JSON.stringify(ref)}; expected providerId/modelId.`);
   const result = ModelKeyResultSchema.parse(await modelSettingsRequest(options, ref));
-  if (!result.ok) throw new Error(result.error);
+  if (!result.ok) throw new Error(result.message ?? result.error);
   return { ok: true, model: ref, restart: "applies to new turns" };
 }
 

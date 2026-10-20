@@ -26,8 +26,9 @@ use the Mac setup.
    phone (or scan its QR), review the access, and connect.
 4. Open **Messages**, choose **Clankie**, and say hello.
 
-You need no Mac install, model subscription, or API key. Add credits from your
-account if they run out. To use a terminal as well, run `clankie connect hosted`
+Hosted Clankie uses AI credits only; customer model keys and subscription
+sign-ins are available when you run him yourself. You need no Mac install,
+model subscription, or API key. Add credits from your account if they run out. To use a terminal as well, run `clankie connect hosted`
 on a Mac ([connection modes](/cli/#local-and-hosted-connection-modes)).
 
 ## DIY: start on your Mac

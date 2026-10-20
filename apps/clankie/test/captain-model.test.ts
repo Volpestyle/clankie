@@ -78,7 +78,7 @@ describe("removed and hosted subscription credentials", () => {
     await broker.set("openai-codex", token);
     for (const [provider, policy, message] of [
       ["anthropic", { env: {} }, "no longer supports Claude"],
-      ["openai-codex", { hosted: true }, "pending OpenAI approval"],
+      ["openai-codex", { hosted: true }, "AI credits only"],
     ] as const) {
       const bridge = new BrokerCredentialStore(broker, policy);
       const refresh = vi.fn();
@@ -88,7 +88,10 @@ describe("removed and hosted subscription credentials", () => {
       expect(await broker.get(provider)).toEqual(token);
     }
     await broker.set("anthropic", { type: "api", key: "sk-ant-api03-owned" });
-    expect(await new BrokerCredentialStore(broker, { hosted: true }).read("anthropic")).toEqual({
+    await expect(new BrokerCredentialStore(broker, { hosted: true }).read("anthropic")).rejects.toThrow(
+      "AI credits only",
+    );
+    expect(await new BrokerCredentialStore(broker, { env: {} }).read("anthropic")).toEqual({
       type: "api_key",
       key: "sk-ant-api03-owned",
     });

@@ -382,7 +382,7 @@ describe("subscription precedence", () => {
   });
 });
 
-it("keeps hosted OpenAI on API keys and refuses explicit ChatGPT selections", async () => {
+it("refuses hosted customer API keys and explicit ChatGPT selections", async () => {
   const store = new MemoryCredentialStore();
   await store.set("openai", { type: "api", key: "sk-api-only" });
   await store.set("openai-codex", codexCredential());
@@ -390,10 +390,9 @@ it("keeps hosted OpenAI on API keys and refuses explicit ChatGPT selections", as
     ...(await configEnv({ model: "openai/gpt-5.5" })),
     CLANKIE_HOSTED_BOOTSTRAP_FILE: "/scratch/bootstrap.json",
   };
-  expect(
-    (await resolveConfiguredLanguageModel({ env, store, catalog: withCodexSubscriptionProvider(catalog) }))
-      .providerId,
-  ).toBe("openai");
+  await expect(
+    resolveConfiguredLanguageModel({ env, store, catalog: withCodexSubscriptionProvider(catalog) }),
+  ).rejects.toThrow("AI credits only");
   const explicitEnv = {
     ...(await configEnv({ model: "openai-codex/gpt-5.5" })),
     CLANKIE_HOSTED_BOOTSTRAP_FILE: "/scratch/bootstrap.json",
@@ -404,5 +403,5 @@ it("keeps hosted OpenAI on API keys and refuses explicit ChatGPT selections", as
       store,
       catalog: withCodexSubscriptionProvider(catalog),
     }),
-  ).rejects.toThrow("pending OpenAI approval");
+  ).rejects.toThrow("AI credits only");
 });

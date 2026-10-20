@@ -1,3 +1,4 @@
+import { HarnessLoginsResponseSchema, MANAGED_CREDITS_ONLY_MESSAGE } from "@clankie/protocol/harness-logins";
 import { runEvidenceStorageMenu } from "./evidence-storage-menu.ts";
 import { HOST_SETTINGS_WORDING } from "@clankie/protocol/owner-settings";
 import type { CaptainRouteFetcher } from "./session/operator-conversations.ts";
@@ -310,6 +311,13 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             ),
             "success",
           );
+          return;
+        }
+        const available = HarnessLoginsResponseSchema.parse(
+          await login(["login", "status"], { prompt: async () => "", tell: () => undefined }),
+        );
+        if (available.harnesses.length === 0) {
+          shell.insertCommandResult("/harness-login", MANAGED_CREDITS_ONLY_MESSAGE, "error");
           return;
         }
         if (!harness) {

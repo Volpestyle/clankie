@@ -160,7 +160,10 @@ it("reads hosted settings and options without probing policy-refused subscriptio
     });
     expect(options.status).toBe(200);
     expect((await options.json()).usableProviders).toContain("clankie");
-    expect(await models.select("openai-codex/gpt-6-luna")).toEqual({ ok: false, error: "unsupported_model" });
+    expect(await models.select("openai-codex/gpt-6-luna")).toMatchObject({
+      ok: false,
+      error: "managed_credits_only",
+    });
     expect((await fetch(`${origin}/v1/model-settings`)).status).toBe(401);
     expect(await store.get("openai-codex")).toEqual(blocked);
     expect(await store.get("anthropic")).toEqual(blocked);

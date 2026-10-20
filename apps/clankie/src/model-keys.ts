@@ -1,3 +1,4 @@
+import { MANAGED_CREDITS_ONLY_MESSAGE } from "@clankie/protocol/model-keys";
 import { ModelSubscriptionSignIns, type ModelSignInAuthority } from "./model-subscriptions.ts";
 import type { BodyTelemetry, BodyModelTelemetryInput } from "@clankie/observability/body-telemetry";
 import type { CredentialStore } from "@clankie/credential-broker";
@@ -92,6 +93,12 @@ export function createModelKeys(options: {
     return next;
   };
   const env = options.env ?? process.env;
+  const managed = isHostedModelEnvironment(env);
+  const refused = {
+    ok: false,
+    error: "managed_credits_only",
+    message: MANAGED_CREDITS_ONLY_MESSAGE,
+  } as const;
   const telemetryCatalog = options.telemetry === undefined ? undefined : loadBundledCatalog();
   const report = (
     action: BodyModelTelemetryInput["action"],
@@ -139,6 +146,7 @@ export function createModelKeys(options: {
     const disabled = new Set(config.disabled_providers ?? []);
     const providers = models
       .getProviders()
+      .filter((provider) => !managed || provider.id === "clankie")
       .filter((provider) => !disabled.has(provider.id) && (enabled.size === 0 || enabled.has(provider.id)));
     return { config, catalog, models, providers };
   };
@@ -221,6 +229,7 @@ export function createModelKeys(options: {
   const port: ModelKeysPort = {
     close: () => signIns.close(),
     async subscriptionMethods() {
+      if (managed) return { methods: [] };
       const state = await snapshot();
       return {
         methods: [
@@ -239,8 +248,10 @@ export function createModelKeys(options: {
         ],
       };
     },
-    startSubscription: (input, authority) => signIns.start(input, authority),
-    subscriptionStatus: (sessionId, principal, cancel) => signIns.status(sessionId, principal, cancel),
+    startSubscription: (input, authority) =>
+      managed ? Promise.resolve(refused) : signIns.start(input, authority),
+    subscriptionStatus: (sessionId, principal, cancel) =>
+      managed ? refused : signIns.status(sessionId, principal, cancel),
     async readiness() {
       const loaded = await loadConfig({ env, ...(options.cwd ? { cwd: options.cwd } : {}) });
       if (loaded.issues.length > 0) throw new Error("model_configuration_invalid");
@@ -422,6 +433,7 @@ export function createModelKeys(options: {
       return { ok: true };
     },
     async set(providerId, apiKey, guard) {
+      if (managed) return refused;
       return mutate(async () => {
         let action: "key-set" | "key-replaced" = "key-set";
         try {
@@ -450,6 +462,7 @@ export function createModelKeys(options: {
       });
     },
     async validate(providerId, modelId) {
+      if (managed) return refused;
       const state = await apiProvider(providerId);
       if (state === undefined) return { ok: false, error: "unsupported_provider" };
       const model = piModelFor(state.models, providerId, modelId, state);
@@ -496,6 +509,7 @@ export function createModelKeys(options: {
       }
     },
     async select(model) {
+      if (managed && parseModelRef(model)?.providerId !== "clankie") return refused;
       return mutate(async () => {
         const ref = parseModelRef(model);
         // Unknown input is never an identifier in telemetry: report() checks the bundled catalog.
@@ -536,6 +550,7 @@ export function createModelKeys(options: {
       });
     },
     async remove(providerId) {
+      if (managed) return refused;
       try {
         if ((await apiProvider(providerId)) === undefined) {
           report("key-removed", "unsupported_provider", providerId);

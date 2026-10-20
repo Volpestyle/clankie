@@ -6,6 +6,30 @@ Status: Accepted (2026-10-06). Amends the hosted ChatGPT gate of
 native Codex seats only. Builds on
 [ADR 0238](0238-hosted-claude-workers-trust-their-own-workspace.md).
 
+## Amendment: managed bodies use credits only (2026-10-20, VUH-2576)
+
+James's accepted [positioning decision](https://linear.app/vuhlp/document/clankie-positioning-draft-1a1d7434ba9e)
+supersedes the managed-body portions of this decision. Managed bodies use
+Clankie's AI credits for inference and workers. They hide and refuse native
+Claude Code/Codex subscription sign-in, model subscription sign-in, customer
+API-key entry/validation, and customer-model selection and forwarding. A refusal
+explains that these paths are available on self-hosted bodies. Existing stored
+credentials are retained, never silently deleted or used as a fallback.
+
+Local and owner-operated self-hosted deployments retain their supported native
+harness logins, provider keys and model paths. A self-operated Linux deployment
+is not a managed body merely because it runs on a remote server. Existing
+provider-specific restrictions on Clankie's own subscription inference remain.
+
+The public service owns generic API and credential guards; managed routing,
+customer-loopback retirement and credit policy remain in private `clankie-ops`
+under [ADR 0183](0183-the-harness-is-public-the-hosted-service-is-private.md).
+Actual-model and rate transparency is tracked in
+[VUH-1890](https://linear.app/vuhlp/issue/VUH-1890) and
+[VUH-2107](https://linear.app/vuhlp/issue/VUH-2107); this policy does not claim
+those projections or private deployment are complete. The sections below record
+the earlier decision and rationale.
+
 ## Decision
 
 An owner can sign the Claude Code and Codex worker harnesses into their own

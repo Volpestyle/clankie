@@ -475,22 +475,21 @@ it("keeps subscription APIs honest and rejects token-shaped keys before provider
   await store.set("anthropic", token);
   await store.set("openai-codex", token);
   expect(await hosted.subscriptions?.()).toEqual({ subscriptions: [] });
-  expect(await hosted.set("anthropic", "sk-ant-oat01-stale")).toEqual({
+  const refusal = {
     ok: false,
-    error: "unsupported_provider",
-  });
+    error: "managed_credits_only",
+    message: expect.stringContaining("AI credits only"),
+  };
+  expect(await hosted.set("anthropic", "sk-ant-oat01-stale")).toEqual(refusal);
   expect(await store.get("anthropic")).toEqual(token);
   await store.set("anthropic", { type: "api", key: "sk-ant-oat01-stale" });
-  expect(await hosted.validate("anthropic", "claude-opus-5-5")).toEqual({
-    ok: false,
-    error: "validation_failed",
-  });
+  expect(await hosted.validate("anthropic", "claude-opus-5-5")).toEqual(refusal);
   const alias = runtime.getModels("opencode").find((entry) => entry.api === "anthropic-messages")!;
   await store.set("opencode", { type: "api", key: "sk-ant-oat01-stale" });
-  expect(await hosted.validate("opencode", alias.id)).toEqual({ ok: false, error: "validation_failed" });
+  expect(await hosted.validate("opencode", alias.id)).toEqual(refusal);
   expect(complete).not.toHaveBeenCalled();
-  expect(await hosted.select("openai-codex/gpt-6-luna")).toEqual({ ok: false, error: "unsupported_model" });
-  expect(await hosted.set("anthropic", "sk-ant-api03-owned")).toEqual({ ok: true });
+  expect(await hosted.select("openai-codex/gpt-6-luna")).toEqual(refusal);
+  expect(await hosted.set("anthropic", "sk-ant-api03-owned")).toEqual(refusal);
   const local = createModelKeys({ store, env, cwd: dir, runtime: async () => runtime });
   expect((await local.subscriptions?.())?.subscriptions.map((entry) => entry.providerId)).toContain(
     "openai-codex",

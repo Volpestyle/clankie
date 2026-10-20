@@ -95,10 +95,8 @@ export function createModelKeyRoutes(
     const parsed = ModelSelectRequestSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!parsed.success) return context.json({ ok: false, error: "malformed" }, 400);
     if (!models?.settings) return context.json({ ok: false, error: "unavailable" }, 503);
-    const settings = await models.settings();
-    if (!settings.choices.some((entry) => entry.ref === parsed.data.model && entry.available))
-      return context.json({ ok: false, error: "unsupported_model" }, 400);
-    return context.json(ModelKeyResultSchema.parse(await models!.select(parsed.data.model)));
+    const result = ModelKeyResultSchema.parse(await models!.select(parsed.data.model));
+    return context.json(result, result.ok ? 200 : result.error === "managed_credits_only" ? 403 : 400);
   });
   app.get(MODEL_SUBSCRIPTIONS_PATH, async (context) => {
     try {
@@ -138,7 +136,15 @@ export function createModelKeyRoutes(
       const safe = ModelSubscriptionResultSchema.parse(result ?? { ok: false, error: "unavailable" });
       return context.json(
         safe,
-        safe.ok ? 200 : safe.error === "busy" ? 409 : safe.error === "session_not_found" ? 404 : 400,
+        safe.ok
+          ? 200
+          : safe.error === "managed_credits_only"
+            ? 403
+            : safe.error === "busy"
+              ? 409
+              : safe.error === "session_not_found"
+                ? 404
+                : 400,
       );
     });
   }
@@ -198,7 +204,10 @@ export function createModelKeyRoutes(
           return { ok: false, error: "malformed" } as const;
         })();
         const safe = ModelKeyResultSchema.parse(result);
-        return context.json(safe, safe.ok ? 200 : safe.error === "forbidden" ? 403 : 400);
+        return context.json(
+          safe,
+          safe.ok ? 200 : ["forbidden", "managed_credits_only"].includes(safe.error) ? 403 : 400,
+        );
       } catch {
         // Broker failures and upstream errors may contain a key. Never forward or log them.
         return context.json({ ok: false, error: "unavailable" }, 503);

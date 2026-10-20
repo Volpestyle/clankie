@@ -24,7 +24,7 @@ describe("Clankie subscription policy", () => {
     ).toThrow("no longer supports Claude");
     expect(
       modelCredentialAllowed("anthropic", { type: "api", key: "sk-ant-api03-owned" }, { env: hosted }),
-    ).toBe(true);
+    ).toBe(false);
     expect(modelCredentialAllowed("openai-codex", { type: "oauth" }, { env: {} })).toBe(true);
     expect(modelCredentialAllowed("openai-codex", { type: "oauth" }, { env: hosted })).toBe(false);
   });
@@ -33,13 +33,13 @@ describe("Clankie subscription policy", () => {
     const openUrl = vi.fn();
     const fetchImpl = vi.fn<typeof fetch>();
     await expect(runCodexBrowserLogin({ env: hosted, openUrl, fetchImpl })).rejects.toThrow(
-      "pending OpenAI approval",
+      "AI credits only",
     );
     await expect(runCodexDeviceLogin({ env: hosted, fetchImpl, onUserCode: vi.fn() })).rejects.toThrow(
-      "pending OpenAI approval",
+      "AI credits only",
     );
     expect(() => createCodexFetch({ env: hosted, store: new MemoryCredentialStore(), fetchImpl })).toThrow(
-      "pending OpenAI approval",
+      "AI credits only",
     );
     expect(openUrl).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();

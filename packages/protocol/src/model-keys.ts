@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const MANAGED_CREDITS_ONLY_MESSAGE =
+  "Managed Clankie uses AI credits only. Subscription sign-in and customer model keys are available on self-hosted bodies.";
+
 /** Promotion order shared by /auth and account setup; actual support comes from the body catalog. */
 export const FEATURED_MODEL_PROVIDERS = [
   "anthropic",
@@ -194,7 +197,9 @@ export const ModelKeyResultSchema = z.discriminatedUnion("ok", [
   z
     .object({
       ok: z.literal(false),
+      message: z.string().optional(),
       error: z.enum([
+        "managed_credits_only",
         "authentication_required",
         "forbidden",
         "malformed",
@@ -255,7 +260,9 @@ export const ModelSubscriptionResultSchema = z.discriminatedUnion("ok", [
   z
     .object({
       ok: z.literal(false),
+      message: z.string().optional(),
       error: z.enum([
+        "managed_credits_only",
         "authentication_required",
         "forbidden",
         "malformed",

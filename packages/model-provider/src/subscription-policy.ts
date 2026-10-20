@@ -1,14 +1,25 @@
-/** Product policy for Clankie's own inference, never the native harness login. */
+/** Credential policy for Clankie's own inference. */
+export const MANAGED_CREDITS_ONLY =
+  "Managed Clankie uses AI credits only. Subscription sign-in and customer model keys are available on self-hosted bodies.";
 export const CLAUDE_SUBSCRIPTION_REMOVED =
   "Clankie no longer supports Claude subscription login. Use /auth anthropic with an Anthropic API key. Native Claude Code keeps its own login.";
-export const HOSTED_CHATGPT_APPROVAL_REQUIRED =
-  "ChatGPT subscription login for hosted Clankie/Pi is unavailable pending OpenAI approval. Use your own provider API key or included model usage. Local/self-hosted Clankie and native Codex login are unchanged.";
+/** Legacy exported name retained for installed provider compatibility. */
+export const HOSTED_CHATGPT_APPROVAL_REQUIRED = MANAGED_CREDITS_ONLY;
 
 export class ModelSubscriptionPolicyError extends Error {
-  public readonly code: "claude_subscription_removed" | "hosted_chatgpt_approval_required";
-  public constructor(code: "claude_subscription_removed" | "hosted_chatgpt_approval_required") {
+  public readonly code:
+    | "claude_subscription_removed"
+    | "hosted_chatgpt_approval_required"
+    | "managed_credits_only";
+  public constructor(
+    code: "claude_subscription_removed" | "hosted_chatgpt_approval_required" | "managed_credits_only",
+  ) {
     super(
-      code === "claude_subscription_removed" ? CLAUDE_SUBSCRIPTION_REMOVED : HOSTED_CHATGPT_APPROVAL_REQUIRED,
+      code === "managed_credits_only"
+        ? MANAGED_CREDITS_ONLY
+        : code === "claude_subscription_removed"
+          ? CLAUDE_SUBSCRIPTION_REMOVED
+          : HOSTED_CHATGPT_APPROVAL_REQUIRED,
     );
     this.code = code;
   }
@@ -39,6 +50,8 @@ export function assertModelCredentialAllowed(
     throw new ModelSubscriptionPolicyError("claude_subscription_removed");
   if (providerId === "openai-codex" && (options.hosted ?? isHostedModelEnvironment(options.env)))
     throw new ModelSubscriptionPolicyError("hosted_chatgpt_approval_required");
+  if (providerId !== "clankie" && (options.hosted ?? isHostedModelEnvironment(options.env)))
+    throw new ModelSubscriptionPolicyError("managed_credits_only");
 }
 
 /** Shared by setup, doctor and Pi listing so stale entries are never shown as usable auth. */

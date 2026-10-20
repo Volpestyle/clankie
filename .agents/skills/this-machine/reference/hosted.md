@@ -63,23 +63,21 @@ renewal and signs each request. `pairing_key_required` triggers one
 re-registration attempt. Persistent `body_signature_invalid` after three
 attempts indicates clock skew beyond five minutes or a pairing-key mismatch;
 inspect those conditions without exposing tokens, signatures or private keys.
-The installed managed provider supplies a hired Pi worker's model configuration
-(ADR 0197). Its forwarding and included/customer policy live in private
-`clankie-ops/apps/body`; bootstrap identity alone does not configure a worker's
-model. Do not log Pi into a provider or put a key in its `models.json`. If a
-worker cannot reach its model, inspect the installed provider and the owner's
-selection with `clankie doctor` and `clankie model`; manage the credential through
-the owner model-key API above.
-Clankie's Claude subscription auth is removed; `/auth anthropic` is API-key-only.
-Hosted ChatGPT login and forwarding refuse pending OpenAI approval; offer a
-provider API key or included usage. Never submit the waitlist, invent an approval
-date or enable this path on the owner's behalf. Local/self-hosted ChatGPT and
-native unmodified Claude Code/Codex seat logins keep their own supported paths:
-on any deployment, including managed, the owner signs worker harnesses into
-their own Claude subscription or ChatGPT plan with `clankie harness login
-claude|codex` or the app (ADR 0239). Login links and codes are for the owner's
-screen only; never put them in a conversation. `clankie harness login status`
-shows which workers can run.
+The installed managed provider supplies a hired Pi worker's credit-funded model
+configuration (ADRs 0197/0239, amended by VUH-2576). Its forwarding and credit
+policy live in private `clankie-ops/apps/body`; bootstrap identity alone does
+not configure a worker's model. Managed bodies hide and refuse customer model
+keys and all subscription sign-in, including native Claude Code/Codex login,
+with `managed_credits_only`: explain that hosted inference uses AI credits and
+these authentication paths are self-hosted only. Do not delete old credentials,
+log Pi into a provider or put a key in its `models.json`. If a worker cannot
+reach its model, inspect the installed provider with `clankie doctor` and
+`clankie model`.
+
+Self-hosted native harness sign-ins remain available through `clankie harness
+login claude|codex` or the app. Login links and codes are for the owner's screen
+only; never put them in a conversation. Clankie's own Claude subscription auth
+remains removed; self-hosted `/auth anthropic` is API-key-only.
 
 ## Managed Discord connection
 

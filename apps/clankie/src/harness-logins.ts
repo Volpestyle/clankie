@@ -3,6 +3,8 @@
  * body's user so its credentials land in the harness's own store. Only the
  * login link and code pass through here; they are never logged or persisted.
  */
+import { isHostedModelEnvironment } from "@clankie/model-provider";
+import { MANAGED_CREDITS_ONLY_MESSAGE } from "@clankie/protocol/harness-logins";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -47,6 +49,7 @@ export class HarnessSignIns {
 
   /** Secret-free status from each harness's own status command. */
   async list(): Promise<HarnessLoginsResponse> {
+    if (isHostedModelEnvironment(this.options.env)) return { harnesses: [] };
     const harnesses = await Promise.all(
       (["claude", "codex"] as const).map(async (harness) => ({ harness, ...(await this.signedIn(harness)) })),
     );
@@ -54,6 +57,8 @@ export class HarnessSignIns {
   }
 
   async start(harness: LoginHarness, principal: string): Promise<HarnessLoginResult> {
+    if (isHostedModelEnvironment(this.options.env))
+      return { ok: false, error: "managed_credits_only", message: MANAGED_CREDITS_ONLY_MESSAGE };
     this.prune();
     if (
       [...this.jobs.values()].some((job) => ["pending", "needs_code", "verifying"].includes(job.view.state))
@@ -93,6 +98,8 @@ export class HarnessSignIns {
   }
 
   status(sessionId: string, principal: string, cancel = false): HarnessLoginResult {
+    if (isHostedModelEnvironment(this.options.env))
+      return { ok: false, error: "managed_credits_only", message: MANAGED_CREDITS_ONLY_MESSAGE };
     this.prune();
     const job = this.jobs.get(sessionId);
     if (!job || job.principal !== principal) return { ok: false, error: "session_not_found" };
@@ -101,6 +108,8 @@ export class HarnessSignIns {
   }
 
   code(sessionId: string, principal: string, code: string): HarnessLoginResult {
+    if (isHostedModelEnvironment(this.options.env))
+      return { ok: false, error: "managed_credits_only", message: MANAGED_CREDITS_ONLY_MESSAGE };
     this.prune();
     const job = this.jobs.get(sessionId);
     if (!job || job.principal !== principal) return { ok: false, error: "session_not_found" };

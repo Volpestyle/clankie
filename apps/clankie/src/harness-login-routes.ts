@@ -54,6 +54,7 @@ export function createHarnessLoginRoutes(
     const parsed = HarnessLoginResultSchema.parse(result);
     if (parsed.ok) return { body: parsed, status: 200 as const };
     const status = {
+      managed_credits_only: 403,
       busy: 409,
       not_installed: 404,
       session_not_found: 404,

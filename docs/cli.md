@@ -8540,8 +8540,10 @@ The owner API exposes `GET /v1/operator/projects` and revision-guarded
 
 `clankie harness login [status | claude | codex | cancel SESSION_ID]` signs the
 Claude Code or Codex worker harness into the owner's own account with that
-harness's official login, on any deployment ([ADR 0239](adr/0239-worker-harnesses-sign-in-with-their-own-logins.md)).
-`status` prints JSON for both harnesses (`installed`, `signedIn`, `method`).
+harness's official login on self-hosted bodies ([ADR 0239](adr/0239-worker-harnesses-sign-in-with-their-own-logins.md)).
+Managed bodies return an empty harness list and refuse login with
+`managed_credits_only` and an explanatory message; use AI credits there.
+On self-hosted bodies, `status` prints JSON for both harnesses (`installed`, `signedIn`, `method`).
 `codex` prints a link and one-time code on stderr and waits for the device
 sign-in; `claude` prints the authorization link and prompts for the code the
 page shows (it needs a terminal; a wrong code prompts again). Stdout gets only

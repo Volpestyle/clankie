@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const MANAGED_CREDITS_ONLY_MESSAGE =
+  "Managed Clankie uses AI credits only. Subscription sign-in and customer model keys are available on self-hosted bodies.";
+
 /**
  * Sign a worker harness into the owner's own account with that harness's
  * official login (`claude auth login`, `codex login --device-auth`), from a
@@ -61,7 +64,16 @@ export const HarnessLoginResultSchema = z.discriminatedUnion("ok", [
   z
     .object({
       ok: z.literal(false),
-      error: z.enum(["busy", "not_installed", "session_not_found", "malformed", "unavailable", "forbidden"]),
+      message: z.string().optional(),
+      error: z.enum([
+        "managed_credits_only",
+        "busy",
+        "not_installed",
+        "session_not_found",
+        "malformed",
+        "unavailable",
+        "forbidden",
+      ]),
     })
     .strict(),
 ]);
