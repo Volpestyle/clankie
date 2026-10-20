@@ -3867,7 +3867,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
           live,
           live.paneId,
           live.name ?? live.terminalId,
-          { ...input, workingDirectory: live.workingDirectory ?? input.workingDirectory },
+          {
+            ...input,
+            title: live.title || input.title,
+            workingDirectory: live.workingDirectory ?? input.workingDirectory,
+          },
           account,
         );
       }
@@ -5997,7 +6001,7 @@ function spawnedSeat(
       occupantId: occupantIdForHerdrSession(agent.session!),
       harness: agent.agent,
       status: agent.status,
-      title: agent.title || input.title,
+      title: input.title,
       workingDirectory: input.workingDirectory,
     },
   };

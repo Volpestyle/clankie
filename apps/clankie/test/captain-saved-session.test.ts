@@ -63,7 +63,7 @@ it("native continuation goes through one hire/adoption path and preserves the ex
     const seat = {
       schemaVersion: 1 as const,
       harness: "claude" as const,
-      title: "Resume claude",
+      title: "Wren",
       workingDirectory: root,
       resume: session.ref,
     };

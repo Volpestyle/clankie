@@ -76,7 +76,7 @@ async function fixture(owner?: ConversationAuthority) {
     terminalId: "term_test",
     agent: "codex",
     status: "idle",
-    title: "Test",
+    title: "Chats drawer | /tmp/wt-vuh2541",
     session: { source: "herdr:codex", kind: "id", value: "thread" },
   };
   const promptAgent = vi.fn(async () => undefined);
@@ -144,7 +144,7 @@ async function fixture(owner?: ConversationAuthority) {
     undefined,
     owner,
   );
-  expect(hired).toMatchObject({ outcome: "spawned" });
+  expect(hired).toMatchObject({ outcome: "spawned", seat: { title: "Test" } });
   return {
     store,
     get agent() {
