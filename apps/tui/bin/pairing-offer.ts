@@ -111,6 +111,16 @@ export async function requestPairingOffer(options: RequestPairingOfferOptions = 
   const payload: unknown = await response.json().catch(() => undefined);
   const parsed = PairingOfferSchema.safeParse(payload);
   if (!parsed.success) throw new PairingOfferError("malformed");
+  if (
+    options.run !== undefined &&
+    (parsed.data.run?.runId !== options.run.runId ||
+      parsed.data.run.purpose !== options.run.purpose ||
+      Date.parse(parsed.data.run.expiresAt) <= Date.now())
+  )
+    throw new PairingOfferError(
+      "malformed",
+      "This service did not confirm an automation pairing lifetime. Update it before running a capture.",
+    );
   if (Date.parse(parsed.data.expiresAt) <= Date.now()) throw new PairingOfferError("expired");
   return parsed.data;
 }

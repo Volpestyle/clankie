@@ -379,7 +379,10 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       { offerId: offer.offerId, operatorId: operator.operatorId, expiresAt: offer.expiresAt },
       "pairing offer minted",
     );
-    const protectedWire = publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer);
+    const protectedWire = {
+      ...(publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer)),
+      ...(offer.run === undefined ? {} : { run: offer.run }),
+    };
     // Preserve encrypted/default links and the existing single-use redemption;
     // only this authenticated ordinary operator response exposes the short code.
     const wire =

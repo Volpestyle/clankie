@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { requestPairingOffer } from "../../tui/bin/pairing-offer.ts";
 import { runPairCommand } from "../../tui/src/command/pair.ts";
 import { createQaService } from "./fixtures/qa-service.ts";
 
@@ -69,6 +70,28 @@ it("a simulator capture command leaves no active pairing after success or failur
       expect(devices.every((device: { status: string }) => device.status === "revoked")).toBe(true);
       expect(devices.at(-1).run.purpose).toBe("simulator");
     }
+  } finally {
+    await host.close();
+  }
+});
+
+it("refuses an older service that silently ignores automation metadata", async () => {
+  const host = await createQaService();
+  host.advance(Date.now() - host.now());
+  try {
+    await expect(
+      requestPairingOffer({
+        controlPlaneUrl: host.baseUrl,
+        operatorToken: host.operatorToken,
+        run: { runId: "old-service", purpose: "test", ttlSeconds: 900 },
+        // Compatibility carrier models the old wire response using the real HTTP producer.
+        fetchImpl: async (input, init) => {
+          const response = await fetch(input, init);
+          const { run: _run, ...oldWire } = await response.json();
+          return Response.json(oldWire);
+        },
+      }),
+    ).rejects.toThrow("did not confirm an automation pairing lifetime");
   } finally {
     await host.close();
   }

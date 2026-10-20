@@ -139,6 +139,7 @@ export type PairingOfferRequest = z.infer<typeof PairingOfferRequestSchema>;
 
 /** Canonical `clankie pair` offer wire shape (server mints it, `clankie pair` renders it). */
 export const PairingOfferWireSchema = z.object({
+  run: PairingRunSchema.optional(),
   version: z.literal(1),
   deepLink: z.string().min(1),
   code: z.string().min(1),

@@ -432,6 +432,7 @@ export async function runPairCommand(args: readonly string[], options: PairComma
   if (json) {
     outputJson(stdout, {
       ok: true,
+      ...(offer.run === undefined ? {} : { run: offer.run }),
       code: offer.code,
       ...(offer.localCode === undefined ? {} : { localCode: offer.localCode }),
       deepLink: offer.deepLink,

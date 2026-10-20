@@ -116,7 +116,12 @@ export function mintPairingOffer(options: MintPairingOfferOptions): StoredPairin
     mintedBy: options.mintedBy,
     ...(options.run === undefined ? {} : { run: options.run }),
     createdAt: options.now.toISOString(),
-    expiresAt: new Date(options.now.getTime() + ttlMs).toISOString(),
+    expiresAt: new Date(
+      Math.min(
+        options.now.getTime() + ttlMs,
+        options.run === undefined ? Infinity : Date.parse(options.run.expiresAt),
+      ),
+    ).toISOString(),
     ...(options.review === undefined ? {} : { review: true as const }),
     ...(options.supportGrantId === undefined ? {} : { supportGrantId: options.supportGrantId }),
     ...(options.browser === undefined ? {} : { browser: options.browser }),
@@ -136,6 +141,7 @@ export function pairingOfferRecord(offer: StoredPairingOffer): PairingOfferRecor
 export function pairingOfferWire(offer: StoredPairingOffer): PairingOfferWire {
   return {
     version: PAIRING_OFFER_VERSION,
+    ...(offer.run === undefined ? {} : { run: offer.run }),
     deepLink: `${PAIRING_DEEP_LINK_BASE}?v=${PAIRING_OFFER_VERSION}&offer=${offer.offerSecret}`,
     code: offer.code,
     expiresAt: offer.expiresAt,
