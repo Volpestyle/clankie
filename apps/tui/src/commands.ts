@@ -1165,8 +1165,9 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "navigation",
       aliases: [],
+      description: "Choose app navigation",
+      argumentHint: "[status|set work,messages,world]",
       takesArgument: true,
-      description: "Choose app navigation: [status|set work,messages,world]",
       async run(argument, shell) {
         try {
           const result = await context.commandNavigation?.(argument.trim().split(/\s+/u).filter(Boolean));
