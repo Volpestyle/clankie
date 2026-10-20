@@ -1694,7 +1694,7 @@ describe("hiring a seat", () => {
     });
     expect(createTab).toHaveBeenCalledWith({
       cwd: tmpdir(),
-      label: "Release prep",
+      label: "Release prep · Work",
       env: expect.objectContaining({ CODEX_HOME: codexHome }),
     });
     expect(startAgent.mock.calls[0]?.[0]).toMatchObject({ kind: "codex", paneId: "w1C:p9" });
