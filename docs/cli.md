@@ -1353,6 +1353,28 @@ URLs. Production stacks may use custom state directories and canonical ports. Ma
 configured scratch stacks must set the same peer variables as the preset;
 changing just `PORT` is insufficient.
 
+#### Durable Pi room prototype (VUH-2574)
+
+A service host may opt one text-room target into restart recovery with
+`CLANKIE_DURABLE_PI_ROOM=guildId:channelId` (or `dm:channelId`). It is disabled
+when absent and refuses a linked main conversation or native room driver. It
+uses existing channel-turn POST/GET routes and delivery IDs; the setting grants
+no room or machine authority. Keep it on a private scratch service until the
+[rollout requirements](adr/0284-a-service-restart-pauses-one-pi-room-turn.md) pass.
+
+Run the manual real-model proof from the checkout with an existing API credential
+for the chosen model (no OAuth credential is copied):
+
+```bash
+clankie heavy --server -- node --import ./scripts/dependency-types.mjs \
+  apps/clankie/scripts/prove-durable-pi-room.ts .local/durable-proof openai/gpt-5.4-mini
+```
+
+Use a new output directory. The runner generates a scratch preset, starts and
+kills only its private service/tool, removes its injected API credential at the
+end, and retains logs, journals and `result.json`. It does not connect to Discord;
+one saved HTTP reply is the tested boundary. No live restart is part of this proof.
+
 #### Guarded project/settings proofs (LOCAL-VUH-14)
 
 The original preset uses an environment-only operator test bearer. Guarded

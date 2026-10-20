@@ -121,6 +121,17 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     systemTools: boolean,
     run?: ConversationServiceRun,
   ): Promise<LaneSession> {
+    if (normalized.journal !== undefined)
+      return ctx.buildSession(
+        normalized.lane,
+        normalized.journal.manager(ctx.workingDirectory),
+        systemTools,
+        ctx.workingDirectory,
+        false,
+        undefined,
+        run,
+        normalized.access,
+      );
     if (!normalized.durable || normalized.access !== undefined) {
       // One-shot for context, durable for evidence: a fresh session per turn
       // (nothing carries forward), but written to disk under the room's own
@@ -575,6 +586,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       conversationId,
       () => {
         const outbox = ctx.seatOutbox(conversationId);
+        if (normalized.journal !== undefined) return undefined;
         if (normalized.handoffConversationId !== undefined) {
           // Host-selected Pi room work bypasses the operator inbox without changing
           // its existing social or machine grant. Native admission uses the child path.
@@ -676,12 +688,16 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         };
         run.signal.addEventListener("abort", onAbort, { once: true });
         const unsubscribe = lane.session.subscribe((event) => run.observe(event));
+        let detachJournal: (() => void) | undefined;
         try {
+          detachJournal = normalized.journal?.attach(lane.session, lane.capture, guard);
           return await waitForConversationRun(
             runDiscordTurn(lane, normalized, deliveryId, toolProgressEnabled, origin, run, onAdmitted, guard),
             run.signal,
           );
         } finally {
+          detachJournal?.();
+          if (normalized.journal !== undefined) lane.session.dispose();
           unsubscribe();
           run.signal.removeEventListener("abort", onAbort);
         }
@@ -911,7 +927,8 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         // read it off that session rather than resolving the config a second time.
         metrics?.recordExecution(sessionExecutionIdentity(lane.session));
         const prepared = await serviceRun.wait("room guidance", guidancePrompt());
-        const prompt = prepared();
+        const preparedPrompt = prepared();
+        const prompt = normalized.journal?.prompt(preparedPrompt) ?? preparedPrompt;
         const images = normalized.images.map(toImageContent);
         await serviceRun.wait("room Pi admission authority", admissionGuard?.() ?? Promise.resolve());
         serviceRun.signal.throwIfAborted();

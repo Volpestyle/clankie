@@ -96,6 +96,7 @@
         "scripts/fleet-resource-burst.ts",
         "scripts/fleet-load-worker.mjs",
         "scripts/runtime-canary-live-proof.ts",
+        "scripts/prove-durable-pi-room.ts",
         "scripts/tracker-sync-roundtrip.ts",
         "scripts/linear-mirror-roundtrip.ts",
         "scripts/linear-cutover-rehearsal.ts",

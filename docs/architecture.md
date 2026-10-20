@@ -197,6 +197,13 @@ blanket retry override or automatic reconciliation from another session's transc
 `stored`, an explicit native acknowledgment means `consumed` (not model-read), and a completed
 channel result reports `responded`; unknown failures stay `uncertain`.
 
+A host-selected prototype can recover one Pi text room after restart
+([ADR 0284](adr/0284-a-service-restart-pauses-one-pi-room-turn.md)). It retains the
+admitted request, session leaf and model/tool steps, replays completed results,
+and reports interrupted mutations as possibly run. Other lanes retain their
+existing interruption behavior. The real-dependency proof ends at the public
+HTTP reply result; the Discord-mouth hop remains unproven.
+
 The service normalizes each admitted message — untrusted body
 fenced and labelled, images resolved to bytes at the last hop, channel context
 attached — and prompts a pi session. Every room gets a continuing session (a pi

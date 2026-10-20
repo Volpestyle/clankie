@@ -176,6 +176,8 @@ export type FleetHealthAlertDelivery =
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  /** Host-selected prototype lane; does not grant room or machine authority. */
+  canResumeDiscordTurn?(request: DiscordPresenceChannelTurnRequest): boolean;
   fleetRoster?(options?: {
     includeWork?: boolean;
   }): Promise<import("@clankie/protocol/fleet-roster").FleetRosterSnapshot>;

@@ -91,6 +91,17 @@ Plain `clankie` opens the existing main Clankie conversation from any directory;
 `clankie --chat ID` opens another thread. Reopening the TUI does not reset model
 context.
 
+## Pi turn recovery prototype
+
+One host-selected text room may use `CLANKIE_DURABLE_PI_ROOM` to resume an admitted
+Pi turn after service restart. It replays saved results and only explicit safe
+reads; an interrupted mutation says it possibly ran, so inspect its original
+receipt or destination before proposing another call. Other lanes still lose
+in-flight execution. Do not enable the prototype or restart the live service to
+try it: the checkout's private real-model proof and limits are in
+[ADR 0284](../../../docs/adr/0284-a-service-restart-pauses-one-pi-room-turn.md).
+Discord-mouth delivery remains unproven; the current proof ends at HTTP receipts.
+
 ## Updating and restarting yourself
 
 Landed code is not live until the pinned runtime is updated. From an admitted

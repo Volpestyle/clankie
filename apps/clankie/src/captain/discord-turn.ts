@@ -21,6 +21,7 @@ export function replyIsUnderway(streamedText: string): boolean {
 }
 
 export interface NormalizedDiscordTurn {
+  readonly journal?: import("./pi-turn-journal.ts").PiTurnJournal;
   readonly access?: DiscordSessionAccess;
   /** Both planes continue a durable session per channel (ADR 0118). */
   readonly sessionKey: string;

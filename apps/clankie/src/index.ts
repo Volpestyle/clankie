@@ -1702,6 +1702,9 @@ const captain = createCaptain(
       ? {}
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
+    ...(process.env.CLANKIE_DURABLE_PI_ROOM === undefined
+      ? {}
+      : { durablePiRoom: process.env.CLANKIE_DURABLE_PI_ROOM }),
     settings: settingsStore,
     joinedMachines: machineJoins,
     reportRoundMs: REPORT_ROUND_MS,

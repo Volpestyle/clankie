@@ -26,6 +26,8 @@ import type { ProjectHireProcessProof } from "./project-hires.ts";
 import { type TurnContext } from "./tools.ts";
 
 export interface CaptainOptions {
+  /** Prototype only: one guild:channel (or dm:channel) text lane; absent disables recovery. */
+  readonly durablePiRoom?: string;
   readonly builtInTracker?: import("@clankie/work-items").TrackerToolBackend;
   /** Current owner-selected machine ceiling, separate from Discord actor authority. */
   readonly requireMachineAccess?: (

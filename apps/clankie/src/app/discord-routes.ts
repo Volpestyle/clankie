@@ -1,4 +1,5 @@
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
+import { PiTurnPausedError } from "../captain/pi-turn-journal.ts";
 import {
   DISCORD_PRESENCE_LIVE_PHASE_HEADER,
   DISCORD_PRESENCE_LIVE_REVISION_HEADER,
@@ -920,6 +921,67 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     }
   }
 
+  function startRecoverableTurn(
+    request: DiscordPresenceChannelTurnRequest,
+    fingerprint: string,
+    expectedLane: "discord_text" | "discord_voice",
+  ) {
+    const deliveryKey = `discord:${request.deliveryId}`;
+    const existing = ctx.captainTurnResults.get(deliveryKey);
+    if (existing !== undefined) return existing;
+    const turn = Promise.resolve().then(async () => {
+      let result: CaptainChannelTurnResult;
+      try {
+        result = CaptainChannelTurnResultSchema.parse(
+          await ctx.dependencies.captain.submitDiscordTurn(request),
+        );
+      } catch (error) {
+        if (error instanceof PiTurnPausedError) throw error;
+        // A thrown turn is as final as a failed one; settle it so the bridge
+        // stops asking. If even that cannot be recorded, it stays uncertain.
+        const failed = settleUnfinishedTurn(
+          deliveryKey,
+          fingerprint,
+          unanswered(request),
+          "captain_turn_failed",
+        );
+        if (failed === undefined) throw new Error("captain_channel_turn_uncertain");
+        return failed;
+      }
+      const staged = { ...result, deliveryStage: discordDeliveryStage(result) };
+      ctx.discordTurnReceipts.settle(deliveryKey, fingerprint, staged);
+      observeReceipt(deliveryKey);
+      if (staged.state === "failed") alertUnanswered(unanswered(request), staged.code);
+      return staged;
+    });
+    const record = { fingerprint, lane: expectedLane, result: turn } as NonNullable<
+      ReturnType<typeof ctx.captainTurnResults.get>
+    >;
+    ctx.captainTurnResults.set(deliveryKey, record);
+    const observed = record;
+    void turn.then(
+      (result) => {
+        observed.settled = result;
+      },
+      () => {
+        observed.rejected = true;
+      },
+    );
+    return record;
+  }
+
+  // Only explicitly admitted prototype work can restart. Re-evaluate room grants
+  // inside submitDiscordTurn; a saved request is never saved authority.
+  try {
+    for (const receipt of ctx.discordTurnReceipts.recoverable(ctx.clock())) {
+      const request = receipt.recoveryRequest!;
+      if (ctx.dependencies.captain.canResumeDiscordTurn?.(request))
+        startRecoverableTurn(request, receipt.fingerprint, receipt.lane);
+    }
+  } catch (error) {
+    logger.error({ error: String(error) }, "Durable Pi room recovery unavailable");
+  }
+
   /** One Discord text/voice message becomes one captain turn. Discord family only. */
   ctx.app.post("/v1/captain/channel-turns", async (context) => {
     const body = await readJson(context.req.raw);
@@ -949,6 +1011,13 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     }
     if (receipt?.settled !== undefined) return context.json(receipt.settled);
     let record = ctx.captainTurnResults.get(deliveryKey);
+    if (
+      record === undefined &&
+      receipt?.recoveryRequest !== undefined &&
+      ctx.dependencies.captain.canResumeDiscordTurn?.(request) &&
+      ctx.discordTurnReceipts.abandoned(receipt, ctx.clock())
+    )
+      record = startRecoverableTurn(request, fingerprint, expectedLane);
     if (record === undefined && receipt !== undefined) {
       // Begun by a service process that has since exited without settling it.
       // Its run may have had effects, so it is never replayed; settling it says
@@ -965,6 +1034,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
         ctx.discordTurnReceipts.begin(deliveryKey, {
           fingerprint,
           lane: expectedLane,
+          ...(ctx.dependencies.captain.canResumeDiscordTurn?.(request) ? { recoveryRequest: request } : {}),
           origin: {
             baseSessionKey: discordTurnSessionKey(request),
             presenceSessionId:
@@ -984,41 +1054,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
         return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
       }
       void recordDiscordArrival(request);
-      const turn = Promise.resolve().then(async () => {
-        let result: CaptainChannelTurnResult;
-        try {
-          result = CaptainChannelTurnResultSchema.parse(
-            await ctx.dependencies.captain.submitDiscordTurn(request),
-          );
-        } catch {
-          // A thrown turn is as final as a failed one; settle it so the bridge
-          // stops asking. If even that cannot be recorded, it stays uncertain.
-          const failed = settleUnfinishedTurn(
-            deliveryKey,
-            fingerprint,
-            unanswered(request),
-            "captain_turn_failed",
-          );
-          if (failed === undefined) throw new Error("captain_channel_turn_uncertain");
-          return failed;
-        }
-        const staged = { ...result, deliveryStage: discordDeliveryStage(result) };
-        ctx.discordTurnReceipts.settle(deliveryKey, fingerprint, staged);
-        observeReceipt(deliveryKey);
-        if (staged.state === "failed") alertUnanswered(unanswered(request), staged.code);
-        return staged;
-      });
-      record = { fingerprint, lane: expectedLane, result: turn };
-      ctx.captainTurnResults.set(deliveryKey, record);
-      const observed = record;
-      void turn.then(
-        (result) => {
-          observed.settled = result;
-        },
-        () => {
-          observed.rejected = true;
-        },
-      );
+      record = startRecoverableTurn(request, fingerprint, expectedLane);
     }
     if (context.req.header("prefer") === "respond-async") {
       if (record.rejected)

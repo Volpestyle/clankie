@@ -185,3 +185,5 @@ scope is archived; readers should follow the successor for its implementation.
 
 - [0281 — Paired devices read a shipping projection](0281-paired-devices-read-a-shipping-projection.md)
 - [0282: Settings can save trust with autonomy](0282-settings-can-save-trust-with-autonomy.md) — VUH-2525.
+
+- [0284: A service restart pauses one Pi room turn](0284-a-service-restart-pauses-one-pi-room-turn.md) — VUH-2574 (bounded prototype).

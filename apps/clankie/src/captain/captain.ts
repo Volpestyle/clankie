@@ -1,5 +1,6 @@
 import { discordGuildSettings } from "@clankie/protocol";
 import { createDurableSessions } from "./durable-sessions.ts";
+import { DurablePiRoom, PiTurnPausedError } from "./pi-turn-journal.ts";
 import { projectTrackerTool } from "./project-tracker-access.ts";
 import {
   autoPlanCapacity,
@@ -1918,6 +1919,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     buildSession,
     recoveryContext: (id) => conversations.compactionRecoveryContext(id),
   });
+  const durablePiRoom = new DurablePiRoom(join(options.stateDir, "durable-pi-room"), options.durablePiRoom);
 
   function seatEventKind(
     conversationId: string,
@@ -6001,6 +6003,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ? { schemaVersion: 1 as const, state: "not_projected" as const }
         : { schemaVersion: 1 as const, state: "accepted" as const, ...accepted };
     },
+    canResumeDiscordTurn: (request) => durablePiRoom.accepts(request),
     async submitDiscordTurn(
       request: DiscordPresenceChannelTurnRequest,
       authority?: { readonly verifiedOwner: boolean; readonly sourceCurrent?: () => boolean },
@@ -6175,6 +6178,57 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ]);
         return { discord, plan, owner, sender, key, access, mainConversation };
       };
+      if (durablePiRoom.accepts(request)) {
+        try {
+          const admitted = await resolveGrant();
+          // Prototype never takes over a native seat or a linked main conversation.
+          if (admitted.mainConversation || seatOutbox(parentId).routesToSeat(request.trigger.body ?? ""))
+            throw new Error("durable_pi_room_requires_service_lane");
+          return await durablePiRoom.run(request, admitted.key, async (journal) => {
+            const guard = async () => {
+              shutdown.signal.throwIfAborted();
+              if ((await resolveGrant()).key !== admitted.key)
+                throw new Error("durable_pi_room_authority_changed");
+            };
+            await guard();
+            const heard = await normalizeDiscordTurn(request, deps, {
+              ...(admitted.sender === undefined ? {} : { sender: admitted.sender }),
+              carriesHistory: false,
+            });
+            const normalized: NormalizedDiscordTurn = {
+              ...heard,
+              durable: false,
+              access: admitted.access,
+              readAuthoritySettings,
+              journal,
+            };
+            const result = await dispatchDiscordTurn(
+              normalized,
+              request.deliveryId,
+              false,
+              {
+                baseSessionKey: discordTurnSessionKey(request),
+                deliveryId: request.deliveryId,
+                targetId,
+                actorId: heard.actorId,
+                ...(heard.guildId === undefined ? {} : { guildId: heard.guildId }),
+                channelId: heard.channelId,
+                messageId: heard.messageId,
+                transportKind: request.identity.transportKind,
+              },
+              admitted.plan.systemTools,
+              guard,
+              "message",
+              true,
+            );
+            if (shutdown.signal.aborted) throw new PiTurnPausedError();
+            return result;
+          });
+        } catch (error) {
+          if (shutdown.signal.aborted) throw new PiTurnPausedError();
+          throw error;
+        }
+      }
       // Even a saved private reply must pass today's audience/identity checks.
       if (prior?.result !== undefined) {
         await resolveGrant();

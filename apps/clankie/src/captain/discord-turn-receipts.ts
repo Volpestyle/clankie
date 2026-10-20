@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import {
   CaptainChannelTurnResultSchema,
   DiscordPresenceWriteResultSchema,
+  DiscordPresenceChannelTurnRequestSchema,
   type DiscordPresenceWriteResult,
   type CaptainChannelTurnResult,
   type DiscordRoomEvidence,
@@ -18,6 +19,8 @@ const ReceiptSchema = z
     beganBy: z.strictObject({ instanceId: z.string().min(1), pid: z.number().int() }).optional(),
     lane: z.enum(["discord_text", "discord_voice"]),
     settled: CaptainChannelTurnResultSchema.optional(),
+    /** Only the explicitly selected durable Pi prototype lane retains its input. */
+    recoveryRequest: DiscordPresenceChannelTurnRequestSchema.optional(),
     bodyConversationId: z.string().optional(),
     writeResult: DiscordPresenceWriteResultSchema.optional(),
     writeAbsent: z.boolean().optional(),
@@ -60,6 +63,13 @@ export class DiscordTurnReceipts {
   public get(id: string): Receipt | undefined {
     if (this.unreadable) throw new Error("Discord delivery receipts unavailable");
     return this.records.get(id);
+  }
+
+  public recoverable(now: Date): Receipt[] {
+    if (this.unreadable) throw new Error("Discord delivery receipts unavailable");
+    return [...this.records.values()].filter(
+      (receipt) => receipt.recoveryRequest !== undefined && this.abandoned(receipt, now),
+    );
   }
 
   /** Repair the content-free room projection from durable service outcomes. */
