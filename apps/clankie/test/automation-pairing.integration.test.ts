@@ -4,7 +4,7 @@ import { runPairCommand } from "../../tui/src/command/pair.ts";
 import { createQaService } from "./fixtures/qa-service.ts";
 
 // Real HTTP, signed credentials, native child process and durable teardown.
-// No Simulator boot is claimed: this exercises the wrapper used by capture commands.
+// CI exercises child teardown. An explicit owned simulator enables the native capture proof.
 it("a simulator capture command leaves no active pairing after success or failure", async () => {
   const host = await createQaService();
   host.advance(Date.now() - host.now());
@@ -29,6 +29,11 @@ it("a simulator capture command leaves no active pairing after success or failur
     const self = await fetch(base + '/v1/devices/self', {
       headers: { authorization: 'Bearer ' + paired.deviceToken } });
     if (!self.ok) throw new Error('capture could not read device');
+    if (process.env.VUH_2565_SIMULATOR_UDID) {
+      const { execFileSync } = await import('node:child_process');
+      execFileSync('xcrun', ['simctl', 'io', process.env.VUH_2565_SIMULATOR_UDID,
+        'screenshot', process.env.VUH_2565_CAPTURE_ROOT + '/capture-' + process.env.CAPTURE_EXIT + '.png'], { stdio: 'inherit' });
+    }
     process.exit(Number(process.env.CAPTURE_EXIT));
   `;
   try {

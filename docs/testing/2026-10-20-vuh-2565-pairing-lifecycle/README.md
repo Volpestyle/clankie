@@ -17,3 +17,10 @@ was modified. Core source is the commit containing this record.
   paths. Raw logs are retained in the evidence store, indexed by evidence.json.
 
 The integrator's landing and paired app gate remain authoritative for delivery.
+
+The command regression also supports an explicit manual native-capture proof:
+lease and verify a simulator through Clankie, create an output directory, then
+set `VUH_2565_SIMULATOR_UDID` to that exact UDID and `VUH_2565_CAPTURE_ROOT` to
+an absolute output path when running the focused regression. Both children call
+`xcrun simctl io <UDID> screenshot` before exiting. Release the simulator in
+teardown. Without those inputs, the regression never boots or drives a device.
