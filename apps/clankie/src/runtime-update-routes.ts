@@ -398,6 +398,7 @@ export function createRuntimeUpdateRoutes(options: {
             deploy,
             {
               guard,
+              queueIntegration: options.updater.queuesIntegrationWait === true,
               ...(parsed.data.overrideHolds
                 ? { overrideAll: { actor: actor!, reason: parsed.data.reason! } }
                 : {}),
@@ -406,7 +407,11 @@ export function createRuntimeUpdateRoutes(options: {
         : await deploy();
       return context.json(
         result,
-        result.accepted || result.deferred !== undefined ? 202 : result.upToDate ? 200 : 409,
+        result.accepted || result.deferred !== undefined || result.waitingForIntegration !== undefined
+          ? 202
+          : result.upToDate
+            ? 200
+            : 409,
       );
     } catch (error) {
       return context.json(

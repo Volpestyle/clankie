@@ -290,13 +290,31 @@ A caller-supplied `--id UUID` makes a lost response reconcilable: repeated ident
 requests read the existing batch, and different input under that ID is refused.
 No network mutation is automatically retried.
 
-After a service crash, an active record reports `interrupted`, not a pass.
+Every running attempt automatically holds runtime deploys through composition,
+gating and push, for at most sixty minutes without renewal. Immediate updates and
+deferred updates past `dueAt` wait for its safe point. `clankie update status`
+shows the batch UUID and remaining hold time. Immediate callers receive a durable
+`waitingForIntegration` intent promptly; it survives restart and `update cancel`
+can cancel it. A waiting or accepted deploy keeps
+new attempts queued until it settles; it never holds pushes on main. An explicit
+owner override or expiry can still interrupt a gate.
+
+New requests retain exact approved commit objects. A runner interruption or
+service restart automatically resubmits each unfinished request once, with the
+same request UUID following a fresh attempt. The lead receives a recovery notice;
+a second interruption needs review. Recovery fetches remote main before composing
+and checks its ref before pushing. An already-present candidate is recorded
+without sending another push, including after a lost push receipt. Old requests
+without recovery metadata remain inspection-only.
+
+After a service crash, an active record reports `interrupted`, not a pass,
+until startup recovery claims its one retry.
 `queue.lock`, `push.lock` and `landing.lock` directories name their PID and
 time. A lock whose owner took it before the current process started and whose
 PID is dead is reclaimed: it moves aside in one rename and its owner is checked
 again, so only one process takes it over. When the queue reclaims `queue.lock`,
 the batches the dead owner left running are recorded `interrupted` with that
-reason; resubmit them. A lock with a live owner still refuses. Inspect the
+reason. Recovery-enabled requests receive their one automatic retry. A lock with a live owner still refuses. Inspect the
 record, logs, processes and origin before starting a fresh batch. Batch
 worktrees, stores and evidence are retained for review; cleanup is manual after
 their processes have ended. Never move a tree while its gate is running.

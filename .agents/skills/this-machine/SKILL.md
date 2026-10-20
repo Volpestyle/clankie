@@ -215,6 +215,19 @@ including startup worktree reclamation. Read its existing UUID rather than
 resubmitting or removing the lock. An unproven owner or unrecoverable stale lock
 retains its actual error for review.
 
+Each active integration attempt automatically holds deploys for at most sixty
+minutes, through composition, gate and push. Immediate and due deferred updates
+wait; `clankie update status` names their blocking batch UUIDs and expiry. An
+immediate request returns a durable `waitingForIntegration` intent promptly rather
+than keeping the CLI connected for the whole gate. `update cancel` cancels it. New
+attempts wait once a deploy is waiting or accepted. Do not override an automatic
+hold merely to hasten a routine update. Runner interruptions and service restarts
+resubmit newly accepted requests once with their exact approved commits. Follow
+the original UUID; the lead receives a recovery notice. Recovery reads remote main
+before any push and records an already-present candidate without sending twice.
+A second interruption needs review. Historical records without restart recovery
+metadata still need manual inspection.
+
 Failed shared integration gates retry members at their original admission
 priority, before later arrivals. Read `progress.queuePosition` and the isolation
 chain together. A retained `gateReuse` pass covers only its unchanged exact tree,

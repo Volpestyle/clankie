@@ -174,6 +174,7 @@ export function batchRuntimeUpdates(options: UpdateBatchingOptions): RuntimeUpda
   timer.unref();
 
   return {
+    ...(updater.queuesIntegrationWait ? { queuesIntegrationWait: true } : {}),
     runtime: updater.runtime,
     status,
     ...(updater.preview === undefined ? {} : { preview: updater.preview }),
@@ -192,7 +193,7 @@ export function batchRuntimeUpdates(options: UpdateBatchingOptions): RuntimeUpda
     cancelDeferred() {
       const deferred = readDeferredUpdate(path);
       clear();
-      return deferred !== undefined;
+      return (updater.cancelDeferred?.() ?? false) || deferred !== undefined;
     },
     check,
     close: () => clearInterval(timer),

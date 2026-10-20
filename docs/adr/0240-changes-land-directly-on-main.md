@@ -112,3 +112,53 @@ time.
 - A forgotten or overrunning hold delays deploys for at most an hour. A holder
   that needs longer places a new hold, which shows up as a new decision with its
   own receipt.
+
+## Integration batches protect their own runtime (VUH-2534, 2026-10-20)
+
+Runtime cutovers repeatedly terminated gate runners with exit 143 and no completion
+receipt, including deferred source updates reaching `dueAt`. Each manual resubmit
+lost 15–20 minutes. Depending on the lead to place a hold before every batch
+leaves a race and cannot coordinate a deferred update's deadline.
+
+The integration queue now acquires a service-owned deploy hold for each active
+attempt before composition, and releases it after gating and any push have
+settled. It uses the same registry, lock and expiry receipts as manual holds,
+names the batch UUID in update status, and expires after sixty minutes without
+renewal. Gate isolation and remote fallback remain inside that attempt's hold.
+A deploy waits outside the registry lock for automatic holds, so batches can
+finish and status stays readable. Manual and canary holds retain their explicit
+refusal and audited override semantics. Explicit owner overrides can still
+interrupt a batch.
+
+An immediate update waiting on these holds returns HTTP 202 promptly, with
+`waitingForIntegration` and a pending intent UUID, instead of timing out its
+thirty-second CLI request. The private `updates/integration-wait.json` survives
+service restart; the service retries admission every fifteen seconds under the
+same hold lock. Status shows the intent, and `update cancel` removes it. Ordinary
+and canary holds are checked again; prior overrides are never silently reused.
+
+A waiting deploy fences admission of another attempt. Once the updater accepts
+it, its pending operation keeps that fence until the runtime is replaced or the
+operation settles. Thus an update admitted before a new batch cannot restart
+under its gate, and an unending queue cannot starve the update. Queued approved
+work is recovered by the next service instance. This applies to immediate
+updates and deferred updates even after their deadline; `dueAt` never overrides
+a batch's bounded protection. Expiry bounds how long a stuck gate holds deploys.
+
+Accepted requests retain their exact approved commit objects and opt into restart
+recovery. An interrupted request gets one durable automatic retry, shared across
+process restarts and independent of failed-gate isolation. The original request
+UUID follows its fresh attempt, retaining old logs and commit stores. Startup
+recovers under the exclusive queue lock, releases only the old automatic holds,
+and uses the previously admitted approval, never a new caller's authority.
+Historical requests without recovery metadata remain inspection-only. Shutdown
+stops queue draining before closing the governor, leaving an interrupted batch's
+retry queued for the replacement service rather than spending it in the outgoing
+process.
+
+Composition fetches remote main again before applying the same approved objects.
+Landing reads the remote ref before sending, records an already-present candidate
+without another push, and keeps the existing uncertain-push reconciliation rules.
+This covers a push whose receipt was lost during restart. A second interruption
+stops for review; recovery and exhaustion notify the lead through runtime health
+notices. Neither retries nor holds deploy a runtime or change review authority.

@@ -543,7 +543,9 @@ exits 0. The service checks every minute and applies the newest `main` once the
 body is idle or `dueAt` passes, under its own authority and through the same
 deploy holds, canary and rollback; a batch whose `main` has no new commits is
 dropped without a restart. A hold or a failed fetch keeps the batch waiting.
-`update status` shows a pending batch as `deferred`.
+`update status` shows a pending batch as `deferred`. An active integration attempt
+holds deployment until its safe point or its sixty-minute automatic hold expires,
+even after `dueAt`; status names the blocking batch UUIDs.
 
 `clankie update now` (`{"now": true}`, or `now: true` on `update_runtime`)
 applies at once. So do an explicit `--ref` (a commit, tag or other branch, such
@@ -859,6 +861,15 @@ also exposes `processHealth`: a boot UUID, PID, uptime and cumulative process
 CPU microseconds. Boot identity comes from the running updater's immutable
 identity; liveness probes do not reread update transaction files. The response
 carries no messages, prompts, tenant content or credentials.
+
+Integration attempts automatically acquire bounded deploy holds through composition,
+gating and push. Updates wait on these holds; waiting or accepted deploys keep new
+attempts queued. `update status` names each `integrationBatchId` and its time left.
+An immediate request answers HTTP 202 with `accepted: false`, `pending` and
+`waitingForIntegration: {id, ref}`; the CLI exits 0. That intent survives service
+restart and retries hold admission every fifteen seconds. `update cancel` cancels
+it, including when the underlying source-update batch has already become due.
+Manual and canary holds retain their refusal and explicit override behavior.
 
 Deploy holds block runtime-update admission. `update status` and an `update`
 refusal list each hold's holder, how long it has held, the time left and the
@@ -1198,8 +1209,12 @@ restarts or resubmits a batch. Inspect the named receipt with `integrate status`
 If the local install/gate runner stops without a completed phase receipt, the
 batch is `interrupted`, with the phase, runner exit and retained log paths in its
 reason. Signaled commands are also interrupted. Completed nonzero installs or
-gates remain failures. An interruption never attests a pass or triggers automatic
-resubmission; inspect the receipt before submitting a fresh batch.
+gates remain failures. An interruption never attests a pass. Newly accepted requests
+retain exact approved commit objects and resubmit once automatically after a runner
+interruption or service restart; the original UUID follows the fresh attempt.
+Recovery checks remote main before any push and records an already-present
+candidate without sending it again. The lead is notified. A second interruption
+or an older record without recovery metadata requires review before resubmission.
 
 `cancel UUID --actor NAME --reason TEXT` withdraws a waiting request or active
 isolated retry before landing. It reads `cancelled` with who and why. An in-flight

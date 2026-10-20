@@ -174,6 +174,7 @@ export class DeployHeldError extends Error {
  * a receipt; landing on main never waits for one (ADR 0240, VUH-2049).
  */
 export class DeployHolds {
+  private deployRequests = 0;
   readonly directory: string;
   private readonly presence: ((hold: DeployHold) => Promise<DeployHold["presence"]>) | undefined;
   private readonly now: () => number;
@@ -246,7 +247,10 @@ export class DeployHolds {
   }
   /** An operator hold names its minutes; without them a hold gets the ceiling, except the canary's. */
   async acquire(
-    input: Pick<DeployHold, "id" | "holder" | "reason" | "pane" | "seat"> & { minutes?: number },
+    input: Pick<DeployHold, "id" | "holder" | "reason" | "pane" | "seat" | "integrationBatchId"> & {
+      minutes?: number;
+    },
+    guard?: () => Promise<void>,
   ): Promise<DeployHold[]> {
     const minutes = input.minutes;
     if (
@@ -254,36 +258,85 @@ export class DeployHolds {
       (!Number.isInteger(minutes) || minutes < 1 || minutes > DEPLOY_HOLD_MAX_MINUTES)
     )
       throw Error(`A hold lasts 1 to ${DEPLOY_HOLD_MAX_MINUTES} minutes`);
-    return withDirectoryLock(this.lock, async () => {
-      const registry = await this.read();
-      this.lapse(registry);
-      const existing = registry.holds.find((h) => h.id === input.id);
-      if (
-        existing &&
-        (existing.holder !== input.holder ||
-          existing.reason !== input.reason ||
-          existing.pane !== input.pane ||
-          existing.seat !== input.seat)
-      )
-        throw Error("Hold ID already has a different owner/reason");
-      if (!existing) {
-        const createdAt = this.now();
-        registry.holds.push({
-          id: input.id,
-          holder: input.holder,
-          reason: input.reason,
-          createdAt: new Date(createdAt).toISOString(),
-          ...(minutes === undefined
-            ? {}
-            : { expiresAt: new Date(createdAt + minutes * 60_000).toISOString() }),
-          ...(input.pane === undefined ? {} : { pane: input.pane }),
-          ...(input.seat === undefined ? {} : { seat: input.seat }),
-          presence: "unknown",
-        });
+    return withDirectoryLock(
+      this.lock,
+      async () => {
+        await guard?.();
+        const registry = await this.read();
+        this.lapse(registry);
+        const existing = registry.holds.find((h) => h.id === input.id);
+        if (
+          existing &&
+          (existing.holder !== input.holder ||
+            existing.reason !== input.reason ||
+            existing.integrationBatchId !== input.integrationBatchId ||
+            existing.pane !== input.pane ||
+            existing.seat !== input.seat)
+        )
+          throw Error("Hold ID already has a different owner/reason");
+        if (!existing) {
+          const createdAt = this.now();
+          registry.holds.push({
+            id: input.id,
+            holder: input.holder,
+            reason: input.reason,
+            createdAt: new Date(createdAt).toISOString(),
+            ...(minutes === undefined
+              ? {}
+              : { expiresAt: new Date(createdAt + minutes * 60_000).toISOString() }),
+            ...(input.pane === undefined ? {} : { pane: input.pane }),
+            ...(input.seat === undefined ? {} : { seat: input.seat }),
+            presence: "unknown",
+            ...(input.integrationBatchId ? { integrationBatchId: input.integrationBatchId } : {}),
+          });
+        }
+        await durableJson(this.path, registry);
+        return this.list();
+      },
+      undefined,
+      { waitForLiveOwner: true },
+    );
+  }
+  /** Fence admission against a waiting or already accepted deploy, under the same registry lock. */
+  async integration<T>(
+    id: string,
+    deployPending: () => boolean,
+    work: () => Promise<T>,
+    guard: () => Promise<void> = async () => {},
+  ): Promise<T> {
+    const holder = `Integration batch ${id}`;
+    const reason = "Integration compose, gate and push in flight";
+    for (;;) {
+      await guard();
+      if (!this.deployRequests && !deployPending()) {
+        try {
+          await this.acquire(
+            { id, holder, reason, minutes: DEPLOY_HOLD_MAX_MINUTES, integrationBatchId: id },
+            async () => {
+              if (this.deployRequests || deployPending()) throw Error("integration_deploy_pending");
+            },
+          );
+          break;
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== "integration_deploy_pending") throw error;
+        }
       }
-      await durableJson(this.path, registry);
-      return this.list();
-    });
+      await delay(250);
+    }
+    try {
+      await guard();
+      return await work();
+    } finally {
+      // An expired or explicitly released hold needs no second receipt.
+      if ((await this.list()).some((hold) => hold.id === id))
+        await this.release(id, "Clankie", "Integration attempt reached its safe point", {
+          holder,
+          reason,
+        }).catch((error: unknown) => {
+          if (!String(error).includes(`Hold ${id} already ended`))
+            console.warn("Integration hold release deferred to expiry", error);
+        });
+    }
   }
   /** Anyone's hold, by its holder, the lead or the owner; the receipt names holder, actor and reason. */
   async release(
@@ -292,37 +345,44 @@ export class DeployHolds {
     reason: string,
     expected?: Pick<DeployHold, "holder" | "reason" | "pane" | "seat"> & { createdAt?: string },
   ): Promise<{ holds: DeployHold[]; receipt: DeployHoldReceipt }> {
-    return withDirectoryLock(this.lock, async () => {
-      const registry = await this.read();
-      const lapsed = this.lapse(registry);
-      const hold = registry.holds.find((h) => h.id === id);
-      if (!hold) {
-        const ended = [...registry.events].reverse().find((e) => e.hold.id === id && e.action !== "override");
-        if (lapsed.length) await durableJson(this.path, registry);
-        throw Error(ended ? `Hold ${id} already ended (${ended.action} at ${ended.at})` : "Unknown hold");
-      }
-      if (
-        expected &&
-        (hold.holder !== expected.holder ||
-          hold.reason !== expected.reason ||
-          hold.pane !== expected.pane ||
-          hold.seat !== expected.seat ||
-          (expected.createdAt !== undefined && hold.createdAt !== expected.createdAt))
-      )
-        throw Error("Hold ownership changed before release");
-      const receipt: DeployHoldReceipt = {
-        action: "release",
-        hold,
-        actor,
-        reason,
-        at: new Date(this.now()).toISOString(),
-        operation: "release",
-      };
-      registry.events.push(receipt);
-      registry.holds = registry.holds.filter((h) => h.id !== id);
-      await durableJson(this.path, registry);
-      return { holds: await this.list(), receipt };
-    });
+    return withDirectoryLock(
+      this.lock,
+      async () => {
+        const registry = await this.read();
+        const lapsed = this.lapse(registry);
+        const hold = registry.holds.find((h) => h.id === id);
+        if (!hold) {
+          const ended = [...registry.events]
+            .reverse()
+            .find((e) => e.hold.id === id && e.action !== "override");
+          if (lapsed.length) await durableJson(this.path, registry);
+          throw Error(ended ? `Hold ${id} already ended (${ended.action} at ${ended.at})` : "Unknown hold");
+        }
+        if (
+          expected &&
+          (hold.holder !== expected.holder ||
+            hold.reason !== expected.reason ||
+            hold.pane !== expected.pane ||
+            hold.seat !== expected.seat ||
+            (expected.createdAt !== undefined && hold.createdAt !== expected.createdAt))
+        )
+          throw Error("Hold ownership changed before release");
+        const receipt: DeployHoldReceipt = {
+          action: "release",
+          hold,
+          actor,
+          reason,
+          at: new Date(this.now()).toISOString(),
+          operation: "release",
+        };
+        registry.events.push(receipt);
+        registry.holds = registry.holds.filter((h) => h.id !== id);
+        await durableJson(this.path, registry);
+        return { holds: await this.list(), receipt };
+      },
+      undefined,
+      { waitForLiveOwner: true },
+    );
   }
   /** Records receipts for holds that reached their expiry; a busy lock leaves them for the next sweep. */
   async expire(): Promise<DeployHoldReceipt[]> {
@@ -366,39 +426,75 @@ export class DeployHolds {
     work: (overriddenHolds: DeployHold[]) => Promise<T>,
     admission?: {
       overrideAll?: { actor: string; reason: string };
+      queueIntegration?: boolean;
       guard: () => Promise<void>;
     },
   ): Promise<T> {
-    return withDirectoryLock(this.lock, async () => {
-      const registry = await this.read();
-      const lapsed = this.lapse(registry);
-      await admission?.guard();
-      if (admission?.overrideAll)
-        overrides = registry.holds.map((hold) => ({ holdId: hold.id, ...admission.overrideAll! }));
-      // A reviewed hold that lifted meanwhile needs no override.
-      else overrides = overrides.filter((o) => !lapsed.some((receipt) => receipt.hold.id === o.holdId));
-      const ids = new Set(overrides.map((o) => o.holdId));
-      if (
-        ids.size !== overrides.length ||
-        overrides.some((o) => !registry.holds.some((h) => h.id === o.holdId))
-      )
-        throw Error("Override must name each existing hold exactly once");
-      const blocked = registry.holds.filter((h) => !ids.has(h.id));
-      if (blocked.length) {
-        if (lapsed.length) await durableJson(this.path, registry);
-        throw new DeployHeldError(blocked, this.now());
+    this.deployRequests++;
+    try {
+      for (;;) {
+        try {
+          return await this.admit(operation, overrides, work, admission);
+        } catch (error) {
+          // Ordinary and canary holds retain their explicit refusal/override contract.
+          // Release the registry lock while the batch finishes; status remains readable.
+          if (!(error instanceof DeployHeldError) || !error.holds.every((hold) => hold.integrationBatchId))
+            throw error;
+          await admission?.guard();
+          await delay(250);
+        }
       }
-      for (const override of overrides)
-        registry.events.push({
-          action: "override",
-          hold: registry.holds.find((h) => h.id === override.holdId)!,
-          actor: override.actor,
-          reason: override.reason,
-          at: new Date(this.now()).toISOString(),
-          operation,
-        });
-      if (overrides.length || lapsed.length) await durableJson(this.path, registry, admission?.guard);
-      return work(registry.holds.filter((hold) => ids.has(hold.id)));
-    });
+    } finally {
+      this.deployRequests--;
+    }
+  }
+  private async admit<T>(
+    operation: string,
+    overrides: HoldOverride[],
+    work: (overriddenHolds: DeployHold[]) => Promise<T>,
+    admission?: {
+      overrideAll?: { actor: string; reason: string };
+      queueIntegration?: boolean;
+      guard: () => Promise<void>;
+    },
+  ): Promise<T> {
+    return withDirectoryLock(
+      this.lock,
+      async () => {
+        const registry = await this.read();
+        const lapsed = this.lapse(registry);
+        await admission?.guard();
+        if (admission?.overrideAll)
+          overrides = registry.holds.map((hold) => ({ holdId: hold.id, ...admission.overrideAll! }));
+        // A reviewed hold that lifted meanwhile needs no override.
+        else overrides = overrides.filter((o) => !lapsed.some((receipt) => receipt.hold.id === o.holdId));
+        const ids = new Set(overrides.map((o) => o.holdId));
+        if (
+          ids.size !== overrides.length ||
+          overrides.some((o) => !registry.holds.some((h) => h.id === o.holdId))
+        )
+          throw Error("Override must name each existing hold exactly once");
+        const blocked = registry.holds.filter(
+          (h) => !ids.has(h.id) && !(admission?.queueIntegration && h.integrationBatchId),
+        );
+        if (blocked.length) {
+          if (lapsed.length) await durableJson(this.path, registry);
+          throw new DeployHeldError(blocked, this.now());
+        }
+        for (const override of overrides)
+          registry.events.push({
+            action: "override",
+            hold: registry.holds.find((h) => h.id === override.holdId)!,
+            actor: override.actor,
+            reason: override.reason,
+            at: new Date(this.now()).toISOString(),
+            operation,
+          });
+        if (overrides.length || lapsed.length) await durableJson(this.path, registry, admission?.guard);
+        return work(registry.holds.filter((hold) => ids.has(hold.id)));
+      },
+      undefined,
+      { waitForLiveOwner: true },
+    );
   }
 }

@@ -574,6 +574,12 @@ paths:
         recorded zero-exit exact HEAD may land. Core pushes first; app failure retains
         partial core-landed/app-pending evidence. Revert selects a passed batch via restore
         and creates a new commit restoring its tree. No force push or automatic push retry.
+        Each active attempt automatically holds runtime updates until its safe point, bounded at 60 minutes.
+        Updates wait on these holds even past a deferred dueAt; update status names each integrationBatchId.
+        Waiting and accepted deploys fence new attempts. Interrupted newly accepted requests recover once
+        with the same approved commits and a lead notice. Recovery checks remote main before pushing
+        and records an already-present candidate without another send. Historical requests without
+        recovery metadata and second interruptions require review.
         Deploy holds protect the running service from runtime updates and never gate landing.
         A hold names its minutes (1-60) and lifts on its own at expiresAt with an expire receipt;
         the runtime canary's own holds end with their canary. Releases and expiries return

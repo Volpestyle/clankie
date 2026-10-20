@@ -219,6 +219,7 @@ import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./publi
 import { loadRuntimeProvider } from "./runtime-provider.ts";
 import { bodyIdleCheck, startScheduledUpdates, withBodyActivity } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
+import { integrationSafeUpdates } from "./integration-update.ts";
 import { startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
 import { HarnessSignIns } from "./harness-logins.ts";
 import { BrokerCredentialStore } from "./captain/model.ts";
@@ -960,6 +961,9 @@ const integration =
   hostedBody === undefined && existsSync(join(repoRoot, ".git"))
     ? new IntegrationQueue({
         directory: integrationDirectory,
+        holds: deployHolds,
+        deployPending: () => runtimeUpdater?.status().pending !== undefined,
+        notify: (text) => captain.notifyRuntimeHealthAlert(text),
         governor: () => fleetResources.governor,
         ...(await integrationSources(repoRoot)),
         // A saturated Mac may gate on a linked machine's fleet workspace (VUH-2066).
@@ -1307,10 +1311,20 @@ const updateBatchIdle = bodyIdleCheck({
     return working;
   },
 });
-const updateBatching =
+const integrationUpdates =
   checkoutRuntime && installedUpdater !== undefined
-    ? batchRuntimeUpdates({
+    ? integrationSafeUpdates({
         updater: installedUpdater,
+        holds: deployHolds,
+        path: join(process.env.HOME || homedir(), ".clankie", "updates", "integration-wait.json"),
+        onError: (error) =>
+          logger.warn({ event: "runtime.update.integration_wait", error }, "Runtime update is waiting"),
+      })
+    : undefined;
+const updateBatching =
+  integrationUpdates !== undefined
+    ? batchRuntimeUpdates({
+        updater: integrationUpdates,
         path: join(process.env.HOME || homedir(), ".clankie", "updates", "deferred.json"),
         intervalMs:
           parsePositiveInt(process.env.CLANKIE_UPDATE_BATCH_MINUTES, DEFAULT_UPDATE_BATCH_MS / 60_000) *
@@ -1318,7 +1332,10 @@ const updateBatching =
         bootedAt: Date.now() - process.uptime() * 1_000,
         idle: async () => await updateBatchIdle().catch(() => false),
         apply: (ref, authority) =>
-          deployHolds.landing(`runtime-batch:${ref}`, [], () => installedUpdater.request(ref, authority)),
+          deployHolds.landing(`runtime-batch:${ref}`, [], () => integrationUpdates.request(ref, authority), {
+            guard: authority.guard,
+            queueIntegration: true,
+          }),
         logger,
       })
     : undefined;
@@ -1329,7 +1346,10 @@ const scheduledUpdates =
         updater: {
           ...runtimeUpdater,
           request: (ref, authority) =>
-            deployHolds.landing(`runtime-schedule:${ref}`, [], () => runtimeUpdater.request(ref, authority)),
+            deployHolds.landing(`runtime-schedule:${ref}`, [], () => runtimeUpdater.request(ref, authority), {
+              guard: authority.guard,
+              queueIntegration: runtimeUpdater.queuesIntegrationWait === true,
+            }),
         },
         enabled: scheduledUpdateEnabled,
         idle: scheduledUpdateIdle,
@@ -1455,8 +1475,11 @@ const captain = createCaptain(
               authority: import("../../tui/bin/runtime-updater.ts").UpdateAuthority,
               options?: { readonly now?: boolean },
             ) =>
-              deployHolds.landing(`runtime-tool:${ref}`, [], () =>
-                runtimeUpdater.request(ref, authority, options),
+              deployHolds.landing(
+                `runtime-tool:${ref}`,
+                [],
+                () => runtimeUpdater.request(ref, authority, options),
+                { guard: authority.guard, queueIntegration: runtimeUpdater.queuesIntegrationWait === true },
               ),
           },
         }),
@@ -1970,6 +1993,7 @@ operatorCredentialStore.observeHealth?.((health) => {
 });
 
 bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
+integration?.resume();
 const fleetProgress = new FleetProgressObserver({
   path: join(stateRoot, "fleet-progress-incidents.json"),
   sources: [
@@ -2529,6 +2553,7 @@ let shutdownStarted = false;
 function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   if (shutdownStarted) return;
   shutdownStarted = true;
+  integration?.close();
   // Fence new admissions immediately; retain rejection until the existing drain chain awaits it.
   const admissionsClosed = nativeFixtureAdmissions.close().then(
     () => ({ ok: true as const }),
@@ -2565,6 +2590,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     localFleetServer === undefined ? undefined : drainHttpServer(localFleetServer);
   scheduledUpdates?.close();
   updateBatching?.close();
+  integrationUpdates?.close();
   clearInterval(serviceLogRotation);
   void ownerCheckoutSync.close();
   harnessLogins.close();

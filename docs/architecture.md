@@ -87,9 +87,11 @@ or active isolated request before landing; a gate containing withdrawn input
 cannot authorize a push.
 Each batch has independent Git clones and detached sibling worktrees, private gate environments and durable tested-HEAD
 records. Exact passed trees land core before app; partial landings preserve each
-confirmed SHA. Timed deploy holds guard runtime-update admission only, never
-landing; each lifts on its own within an hour with a receipt, and operator
-overrides are audited. [Integration](integration.md) owns the contract,
+confirmed SHA. Each running attempt automatically holds runtime deploys through
+its safe point, bounded at an hour; waiting and accepted deploys fence new attempts.
+Startup recovers interrupted approved requests once with the same commit objects,
+checking remote main before any push and notifying the lead. Timed deploy holds
+never block landing; each lifts with a receipt, and operator overrides are audited. [Integration](integration.md) owns the contract,
 isolation boundary and recovery rules.
 
 ```mermaid

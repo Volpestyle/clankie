@@ -36,6 +36,7 @@ interface View {
   needsReconciliation?: boolean;
   appliesTo?: string;
   deferred?: import("../../bin/runtime-updater.ts").DeferredRuntimeUpdate;
+  waitingForIntegration?: { id: string; ref: string };
   cancelled?: boolean;
 }
 // oxlint-disable-next-line no-control-regex -- terminal output must strip every C0/C1 control
@@ -230,7 +231,14 @@ export function formatUpdateOutput(input: unknown): string {
     }
   }
   const groups = new Map<string, Hold[]>();
+  const integrations = (view.holds ?? []).filter((hold) => hold.integrationBatchId);
+  if (integrations.length)
+    lines.push(
+      `Deploy waiting for integration batches: ${integrations.map((hold) => clean(hold.integrationBatchId!)).join(", ")}. The update continues when their bounded holds end.`,
+    );
+  for (const hold of integrations) lines.push(`  ${clean(describeDeployHold(hold))}`);
   for (const hold of view.holds ?? []) {
+    if (hold.integrationBatchId) continue;
     const cause =
       hold.canary?.error ??
       (hold.canary?.state === "pending" ? "canary-pending" : `${hold.holder}: ${hold.reason}`);
@@ -254,6 +262,10 @@ export function formatUpdateOutput(input: unknown): string {
       "Each hold gets its own audited override. Verified canary holds are released after the admitted canary passes; independent holds require an explicit release.",
     );
   }
+  if (view.waitingForIntegration)
+    lines.push(
+      `Update ${clean(view.waitingForIntegration.id)} for ${clean(view.waitingForIntegration.ref)} is queued until integration reaches a safe point. Read clankie update status; clankie update cancel drops it.`,
+    );
   if (view.deferred)
     lines.push(
       `Batched: ${view.deferred.requests} update request${view.deferred.requests === 1 ? "" : "s"} since ${clean(view.deferred.firstRequestedAt)}. The newest main applies once the body is idle, or at ${clean(view.deferred.dueAt)}. clankie update now applies it at once; clankie update cancel drops it.`,
@@ -265,7 +277,7 @@ export function formatUpdateOutput(input: unknown): string {
     lines.push(
       "Update accepted. Finish this turn, then run clankie update status to check health and canary.",
     );
-  if (view.accepted === false && view.blockedReason && !view.deferred)
+  if (view.accepted === false && view.blockedReason && !view.deferred && !view.waitingForIntegration)
     lines.push(
       view.blockedReason === "runtime-maintenance-busy"
         ? "No update was scheduled: runtime retention maintenance is busy. Let maintenance finish, then retry."
@@ -303,7 +315,7 @@ export async function runUpdateCli(
     const view = result as View;
     return view.error ||
       view.phase === "canary-failed" ||
-      (view.accepted === false && !view.upToDate && !view.deferred)
+      (view.accepted === false && !view.upToDate && !view.deferred && !view.waitingForIntegration)
       ? 1
       : 0;
   }
@@ -317,13 +329,14 @@ export async function runUpdateCli(
   if (status) return preview.error || preview.phase === "canary-failed" ? 1 : 0;
   if (preview.error || preview.needsReconciliation) return 1;
   let updateArgs = rest;
-  if (preview.holds?.length && !rest.includes("--override-holds") && !rest.includes("--override-hold")) {
+  const manualHolds = preview.holds?.filter((hold) => !hold.integrationBatchId) ?? [];
+  if (manualHolds.length && !rest.includes("--override-holds") && !rest.includes("--override-hold")) {
     const input = options.input ?? process.stdin;
     if (!(input as NodeJS.ReadStream).isTTY) return 1;
     const prompt = createInterface({ input, output: stdout as NodeJS.WritableStream });
     try {
       const answer = await prompt.question(
-        `Override ${preview.holds.length} holds and update as the authenticated owner? [y/N] `,
+        `Override ${manualHolds.length} holds and update as the authenticated owner? [y/N] `,
       );
       if (!/^y(?:es)?$/iu.test(answer.trim())) return 1;
       const reason = (await prompt.question("Reason for each audited override: ")).trim();
@@ -332,12 +345,15 @@ export async function runUpdateCli(
         return 1;
       }
       // Name exactly the reviewed holds. A newly acquired hold still blocks admission.
-      updateArgs = [...rest, ...preview.holds.flatMap((h) => ["--override-hold", h.id]), "--reason", reason];
+      updateArgs = [...rest, ...manualHolds.flatMap((h) => ["--override-hold", h.id]), "--reason", reason];
     } finally {
       prompt.close();
     }
   }
   const result = (await runUpdateCommand(updateArgs, options)) as View;
   stdout.write(`${formatUpdateOutput(result)}\n`);
-  return result.error || (result.accepted === false && !result.upToDate && !result.deferred) ? 1 : 0;
+  return result.error ||
+    (result.accepted === false && !result.upToDate && !result.deferred && !result.waitingForIntegration)
+    ? 1
+    : 0;
 }

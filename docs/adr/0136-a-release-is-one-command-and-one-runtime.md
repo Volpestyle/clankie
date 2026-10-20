@@ -219,3 +219,11 @@ old release stays in place throughout, so the helper runs from it without a copy
 Status, the health canary, the restart guard and self-healing reconciliation are
 shared with checkouts. A release that predates this helper cannot update itself;
 its owner runs the installer once.
+
+## Integration-safe admission (VUH-2534, 2026-10-20)
+
+Immediate and due deferred updates now wait on automatic, sixty-minute integration
+holds before updater admission. A waiting or accepted deploy fences new batches;
+interrupted approved requests recover once with remote-ref reconciliation and a
+lead notice. The hold registry and canary behavior stay shared. The integration
+contract and rationale are amended in [ADR 0240](0240-changes-land-directly-on-main.md#integration-batches-protect-their-own-runtime-vuh-2534-2026-10-20).

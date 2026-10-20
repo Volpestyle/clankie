@@ -28,6 +28,10 @@ import { FleetProgressObserver } from "../src/fleet-progress.ts";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
+import { createRuntimeUpdateRoutes } from "../src/runtime-update-routes.ts";
+import { batchRuntimeUpdates } from "../src/update-batching.ts";
+import { integrationSafeUpdates } from "../src/integration-update.ts";
+import { formatUpdateOutput } from "../../tui/src/command/update-output.ts";
 import { deployHoldPresence } from "../src/deploy-hold-presence.ts";
 import { createIntegrationRoutes } from "../src/integrate-routes.ts";
 import { runIntegrationCommand } from "../../tui/src/command/integrate.ts";
@@ -378,7 +382,14 @@ assert.ok(stopped, 'exact owned driver ancestor must be found');
   expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
   const stored = JSON.parse(await readFile(batch.evidence, "utf8"));
   expect(stored.state).toBe("interrupted");
-  expect((await f.queue.snapshot()).interrupted.map((entry) => entry.id)).toContain(request.id);
+  expect((await f.queue.snapshot()).interrupted.map((entry) => entry.id)).toContain(
+    batch.batchId ?? request.id,
+  );
+  const original = JSON.parse(
+    await readFile(join(f.directory, "batches", request.id, "record.json"), "utf8"),
+  );
+  expect(original.interruptionRetry.batchId).toBe(request.id);
+  expect(original.attempts).toHaveLength(1);
   console.log(
     "Interrupted driver proof:",
     JSON.stringify({
@@ -2037,4 +2048,328 @@ it("a failed gate removes its scratch tree immediately and preserves its record 
   expect(existsSync(batch.repos[0]!.directory)).toBe(false);
   expect(existsSync(batch.evidence)).toBe(true);
   expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toContain("fixture-gate-isolated");
+});
+
+it.each(["immediate", "deferred"] as const)(
+  "%s deploy waits for a real gating batch and exposes its hold in update status",
+  async (mode) => {
+    const f = await fixture((root) => barrier(root));
+    f.queue.options.holds = f.holds;
+    const approved = await commit(f.core.source, "feature", "protected gate");
+    const pin = join(f.root, ".clankie", "pinned");
+    await mkdir(join(f.root, ".clankie"), { mode: 0o700 });
+    await git(f.core.source, "worktree", "add", "--detach", pin, f.core.base);
+    // A different incoming commit gives the deferred updater a real newer target.
+    await git(f.core.source, "checkout", "-b", "runtime", f.core.base);
+    await commit(f.core.source, "runtime-change", "new runtime");
+    await git(f.core.source, "push", "origin", "HEAD:main");
+    const underlying = createRuntimeUpdater({ repoRoot: pin, env: { HOME: f.root } });
+    const updater = integrationSafeUpdates({
+      updater: underlying,
+      holds: f.holds,
+      path: join(f.root, ".clankie", "updates", "integration-wait.json"),
+      intervalMs: 1_000_000,
+      onError(error) {
+        throw error;
+      },
+    });
+    cleanups.push(() => updater.close());
+    f.queue.options.deployPending = () => updater.status().pending !== undefined;
+    // A real maintenance lock refuses helper scheduling after the integration hold ends.
+    // This proof never deploys even its disposable runtime.
+    await mkdir(join(f.root, ".clankie", "updates", "maintenance.lock"), { recursive: true, mode: 0o700 });
+    let clock = Date.now();
+    const authority = { guard, current: () => true, initiator: { kind: "operator" as const } };
+    const batched = batchRuntimeUpdates({
+      updater,
+      path: join(f.root, ".clankie", "updates", "deferred.json"),
+      bootedAt: clock,
+      intervalMs: 60_000,
+      now: () => clock,
+      idle: async () => false,
+      checkIntervalMs: 1_000_000,
+      apply: (ref, auth) =>
+        f.holds.landing("deferred-proof", [], () => updater.request(ref, auth), {
+          guard,
+          queueIntegration: true,
+        }),
+      logger: { info() {}, warn() {} },
+    });
+    cleanups.push(() => batched.close());
+    if (mode === "deferred") expect((await batched.request("main", authority)).deferred).toBeDefined();
+    const request = IntegrationRunSchema.parse({
+      action: "run",
+      id: randomUUID(),
+      core: [approved],
+      push: true,
+    });
+    await f.queue.start(request, guard);
+    await until(async () => existsSync(join(f.root, "started")));
+    const routes = createRuntimeUpdateRoutes({
+      updater: mode === "deferred" ? batched : updater,
+      holds: f.holds,
+      authorize: async () => authority,
+    });
+    const result =
+      mode === "deferred"
+        ? ((clock += 60_001), batched.check())
+        : routes.request("/v1/runtime-update", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ now: true }),
+          });
+    const queued = await result; // Caller receives a durable waiting intent before the real gate is released.
+    if (queued instanceof Response) {
+      expect(queued.status).toBe(202);
+      expect((await queued.json()).waitingForIntegration.id).toBeDefined();
+    }
+    expect(updater.status().waitingForIntegration?.id).toBeDefined();
+    updater.close();
+    const recoveredUpdater = integrationSafeUpdates({
+      updater: underlying,
+      holds: f.holds,
+      path: join(f.root, ".clankie", "updates", "integration-wait.json"),
+      intervalMs: 1_000_000,
+      onError(error) {
+        throw error;
+      },
+    });
+    cleanups.push(() => recoveredUpdater.close());
+    const draining = recoveredUpdater.check();
+    let finished = false;
+    void draining.finally(() => {
+      finished = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(finished).toBe(false);
+    const status = await (await routes.request("/v1/runtime-update")).json();
+    expect(status.holds).toContainEqual(expect.objectContaining({ integrationBatchId: request.id }));
+    expect(formatUpdateOutput(status)).toContain(`Deploy waiting for integration batches: ${request.id}`);
+    expect((await f.queue.status(request.id)).state).toBe("gating");
+    await writeFile(join(f.root, "release"), "go");
+    await f.queue.wait();
+    await draining;
+    expect((await f.queue.status(request.id)).state).toBe("pushed");
+    expect(await f.holds.list()).toEqual([]);
+    expect(
+      (await f.holds.receipts()).some(
+        (event) => event.action === "release" && event.hold.integrationBatchId === request.id,
+      ),
+    ).toBe(true);
+    console.log(
+      "VUH-2534 deploy wait proof",
+      JSON.stringify({ mode, batch: request.id, heldDuringGate: true, landedBeforeAdmission: true }),
+    );
+  },
+);
+
+it("bounds automatic holds and fences new batches while a deploy waits and after it is accepted", async () => {
+  const f = await fixture((root) => barrier(root));
+  let clock = Date.now();
+  const holds = new DeployHolds(f.directory, undefined, () => clock);
+  f.queue.options.holds = holds;
+  let accepted = false;
+  f.queue.options.deployPending = () => accepted;
+  const request = IntegrationRunSchema.parse({
+    action: "run",
+    id: randomUUID(),
+    core: [await commit(f.core.source, "first", "first")],
+    push: true,
+  });
+  await f.queue.start(request, guard);
+  await until(async () => existsSync(join(f.root, "started")));
+  const deploy = holds.landing("expiry-proof", [], async () => {
+    accepted = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const next = IntegrationRunSchema.parse({
+    action: "run",
+    id: randomUUID(),
+    core: [await commit(f.core.source, "second", "second")],
+    push: true,
+  });
+  await f.queue.start(next, guard);
+  clock += 60 * 60_000 + 1;
+  await deploy;
+  expect(accepted).toBe(true);
+  expect(
+    (await holds.receipts()).some(
+      (event) => event.action === "expire" && event.hold.integrationBatchId === request.id,
+    ),
+  ).toBe(true);
+  await writeFile(join(f.root, "release"), "go");
+  await until(async () => (await f.queue.status(request.id)).state === "pushed");
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  expect((await f.queue.status(next.id)).state).toBe("queued");
+  expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(1);
+  accepted = false; // The simulated cutover settled; the pending-operation fence lifts.
+  await f.queue.wait();
+  expect((await f.queue.status(next.id)).state).toBe("pushed");
+});
+
+it("recovers interrupted requests once after restart and never repeats a push whose receipt was lost", async () => {
+  const f = await fixture();
+  const approved = await commit(f.core.source, "feature", "same approved commit");
+  const id = randomUUID();
+  const at = new Date(performance.timeOrigin - 1000).toISOString();
+  const record = join(f.directory, "batches", id, "record.json");
+  // The remote accepted the original send, but the service died before its receipt.
+  await git(f.core.source, "push", "origin", `${approved}:main`);
+  const pushes = join(f.root, "receive-count");
+  await writeFile(join(f.core.origin, "hooks", "pre-receive"), `#!/bin/sh\necho push >> '${pushes}'\n`);
+  await chmod(join(f.core.origin, "hooks", "pre-receive"), 0o755);
+  const request = { action: "run", id, core: [approved], push: true };
+  await durableJson(record, {
+    schemaVersion: 1,
+    id,
+    request,
+    resolvedRequest: request,
+    restartRecovery: true,
+    state: "pushing",
+    createdAt: at,
+    updatedAt: at,
+    evidence: record,
+    repos: [],
+  });
+  const notices: string[] = [];
+  f.queue.options.notify = async (text) => {
+    notices.push(text);
+  };
+  f.queue.options.holds = f.holds;
+  await f.holds.acquire({
+    id,
+    holder: `Integration batch ${id}`,
+    reason: "Integration compose, gate and push in flight",
+    minutes: 60,
+    integrationBatchId: id,
+  });
+  f.queue.resume();
+  await f.queue.wait();
+  const recovered = await f.queue.status(id);
+  expect(recovered.state, JSON.stringify(recovered)).toBe("pushed");
+  expect(recovered.repos[0]!.commits).toContainEqual(
+    expect.objectContaining({ commit: approved, state: "already_present" }),
+  );
+  expect(existsSync(pushes)).toBe(false);
+  expect(notices.some((text) => text.includes(id) && text.includes("automatically resubmitting once"))).toBe(
+    true,
+  );
+  const original = JSON.parse(await readFile(record, "utf8"));
+  expect(original.interruptionRetry.batchId).toBe(id);
+  expect(original.attempts).toHaveLength(1);
+  const again = new IntegrationQueue({ ...f.queue.options });
+  queues.push(again);
+  again.resume();
+  await again.wait();
+  expect((await again.status(id)).state).toBe("pushed");
+  expect(notices).toHaveLength(1);
+  console.log(
+    "VUH-2534 recovery proof",
+    JSON.stringify({
+      request: id,
+      attempt: recovered.batchId,
+      remoteAlreadyPresent: approved,
+      repeatedPushes: 0,
+      notices: notices.length,
+    }),
+  );
+});
+
+it("cancels a durable waiting update without admitting it after its integration hold ends", async () => {
+  const f = await fixture();
+  const id = randomUUID();
+  await f.holds.acquire({
+    id,
+    holder: `Integration batch ${id}`,
+    reason: "fixture gate",
+    minutes: 60,
+    integrationBatchId: id,
+  });
+  const errors: unknown[] = [];
+  const base = createRuntimeUpdater({ repoRoot: f.core.source, env: { HOME: f.root } });
+  const updater = integrationSafeUpdates({
+    updater: base,
+    holds: f.holds,
+    path: join(f.root, ".clankie", "updates", "integration-wait.json"),
+    intervalMs: 1_000_000,
+    onError: (error) => errors.push(error),
+  });
+  cleanups.push(() => updater.close());
+  const routes = createRuntimeUpdateRoutes({
+    updater,
+    holds: f.holds,
+    authorize: async () => ({ guard, current: () => true }),
+  });
+  const queued = await routes.request("/v1/runtime-update", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ now: true }),
+  });
+  expect(queued.status).toBe(202);
+  expect((await queued.json()).waitingForIntegration.id).toBeDefined();
+  const draining = updater.check();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const cancelled = await routes.request("/v1/runtime-update/deferred", { method: "DELETE" });
+  expect(await cancelled.json()).toEqual({ cancelled: true });
+  await draining;
+  await f.holds.release(id, "fixture", "gate ended");
+  await updater.check();
+  expect(updater.status().waitingForIntegration).toBeUndefined();
+  expect(updater.status().pending).toBeUndefined();
+  expect(errors).toEqual([]);
+  expect(existsSync(join(f.root, ".clankie", "updates", "active"))).toBe(false);
+});
+
+it("leaves an interrupted batch's retry for the replacement service when shutdown has begun", async () => {
+  const f = await fixture((root) =>
+    barrier(
+      root,
+      `
+if (!existsSync(join(root, 'stopped-once'))) {
+  fs.writeFileSync(join(root, 'stopped-once'), 'stopped');
+  let parent = process.ppid;
+  let stopped = false;
+  for (let depth = 0; depth < 6 && parent > 1; depth++) {
+    const row = execFileSync('ps', ['-p', String(parent), '-o', 'ppid=', '-o', 'command='], { encoding: 'utf8' }).trim();
+    const next = Number(row.split(/\\s+/, 1)[0]);
+    if (row.includes('integrate-gate-driver.mjs')) {
+      process.kill(parent, 'SIGTERM');
+      stopped = true;
+      break;
+    }
+    parent = next;
+  }
+  assert.ok(stopped);
+}
+`,
+    ),
+  );
+  const request = IntegrationRunSchema.parse({
+    action: "run",
+    id: randomUUID(),
+    core: [await commit(f.core.source, "feature", "restart-safe retry")],
+    push: true,
+  });
+  await f.queue.start(request, guard);
+  await until(async () => existsSync(join(f.root, "started")));
+  f.queue.close();
+  await writeFile(join(f.root, "release"), "go");
+  await f.queue.wait();
+  const original = JSON.parse(
+    await readFile(join(f.directory, "batches", request.id, "record.json"), "utf8"),
+  );
+  expect(original.interruptionRetry.batchId).toBe(request.id);
+  expect(original.attempts).toBeUndefined(); // The outgoing governor never starts the retry.
+  expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(1);
+  await expect(
+    f.queue.start(IntegrationRunSchema.parse({ ...request, id: randomUUID() }), guard),
+  ).rejects.toThrow("stopping");
+  const replacement = new IntegrationQueue({ ...f.queue.options });
+  queues.push(replacement);
+  replacement.resume();
+  await replacement.wait();
+  const landed = await replacement.status(request.id);
+  expect(landed.state, JSON.stringify(landed)).toBe("pushed");
+  expect(landed.repos[0]!.commits[0]!.commit).toBe(request.core[0]);
+  expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(2);
 });

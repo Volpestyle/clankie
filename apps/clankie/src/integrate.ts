@@ -15,7 +15,7 @@ import {
   type IntegrationRun,
   type IntegrationQueueStatus,
 } from "@clankie/protocol/integrate";
-import { durableJson, withDirectoryLock, type LockOwner } from "./deploy-holds.ts";
+import { DeployHolds, durableJson, withDirectoryLock, type LockOwner } from "./deploy-holds.ts";
 import { integrationEnvironment } from "./integrate-environment.ts";
 import { darwinOnlySkips, remoteGateDeadline, type GateRunner } from "./integrate-remote.ts";
 import {
@@ -67,6 +67,9 @@ function nextJob(pending: PendingIntegration[], retries: IntegrationJob[]) {
   return { members, fresh: false, regates: 0 };
 }
 interface IntegrationOptions {
+  holds?: DeployHolds;
+  deployPending?: () => boolean;
+  notify?: (text: string) => Promise<unknown>;
   /** The service owns admission; fixtures use the service-only isolated registry. */
   governor?: () => FleetResourceGovernor;
   directory: string;
@@ -146,6 +149,7 @@ export class IntegrationQueue {
   private durations: number[] = [];
   private writes = new Map<string, Promise<void>>();
   private draining = false;
+  private closing = false;
   private readonly commands = new Map<
     string,
     {
@@ -259,7 +263,7 @@ export class IntegrationQueue {
           isolation: receipt.isolation,
         }
       : shared;
-    if (receipt.batchId && ["conflict", "failed", "cancelled"].includes(receipt.state))
+    if (receipt.batchId && ["conflict", "failed", "cancelled", "interrupted"].includes(receipt.state))
       return { ...batch, state: receipt.state, error: receipt.error, cancelled: receipt.cancelled };
     // A held attempt remains durable evidence while its request waits for a fresh gate.
     if (this.retries.some((job) => job.members.some((member) => member.batch.id === id)))
@@ -393,6 +397,7 @@ export class IntegrationQueue {
     ];
   }
   async start(request: IntegrationRun, guard: () => Promise<void>): Promise<IntegrationBatch> {
+    if (this.closing) throw Error("Integration queue is stopping; retry after the service restarts");
     try {
       const previous = await this.status(request.id);
       if (JSON.stringify(previous.request) !== JSON.stringify(request))
@@ -405,6 +410,25 @@ export class IntegrationQueue {
       schemaVersion: 1,
       id: request.id,
       request,
+      resolvedRequest: {
+        ...request,
+        core: await Promise.all(
+          request.core.map((sha) =>
+            this.git(this.options.core, ["rev-parse", "--verify", `${sha}^{commit}`]),
+          ),
+        ),
+        ...(request.app
+          ? {
+              app: await Promise.all(
+                request.app.map((sha) => {
+                  if (!this.options.app) throw Error("App repository is unavailable");
+                  return this.git(this.options.app, ["rev-parse", "--verify", `${sha}^{commit}`]);
+                }),
+              ),
+            }
+          : {}),
+      },
+      restartRecovery: true,
       state: "queued",
       createdAt: now(),
       updatedAt: now(),
@@ -420,6 +444,7 @@ export class IntegrationQueue {
       },
     );
     const admission = this.nextAdmission++;
+    batch.admission = admission;
     this.running.add(batch.id);
     await this.save(batch);
     this.pending.push({ batch, guard, admission });
@@ -466,7 +491,8 @@ export class IntegrationQueue {
           await withDirectoryLock(
             join(this.options.directory, "queue.lock"),
             async () => {
-              while (this.pending.length || this.retries.length) {
+              await this.recoverInterrupted();
+              while (!this.closing && (this.pending.length || this.retries.length)) {
                 const job = nextJob(this.pending, this.retries);
                 this.current = { job, startedAt: Date.now() };
                 try {
@@ -518,7 +544,7 @@ export class IntegrationQueue {
           }
         } finally {
           this.draining = false;
-          if (this.pending.length || this.retries.length) this.schedule();
+          if (!this.closing && (this.pending.length || this.retries.length)) this.schedule();
         }
       });
   }
@@ -527,15 +553,138 @@ export class IntegrationQueue {
    * (VUH-2073). Requests this service accepted are running here and stay untouched.
    */
   private async interruptAbandoned(owner: LockOwner | undefined): Promise<void> {
-    const ids = await readdir(join(this.options.directory, "batches")).catch(() => []);
+    const ids = await readdir(join(this.options.directory, "batches")).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+      },
+    );
     for (const id of ids) {
       if (!/^[a-f0-9-]{36}$/u.test(id) || this.running.has(id)) continue;
       const record = await this.read(id).catch(() => undefined);
       // A member's receipt follows its shared batch.
-      if (!record || record.batchId || !active.has(record.state)) continue;
+      if (!record || record.restartRecovery || record.batchId || !active.has(record.state)) continue;
       record.error = `The queue stopped while this was ${record.state}: its lock owner (${owner ? `pid ${owner.pid} since ${owner.at}` : "unrecorded"}) died, and this service reclaimed the lock. Logs are retained; submit the request again`;
       record.state = "interrupted";
       await this.save(record);
+    }
+  }
+  /** Startup and live interruption use the same durable once-only retry claim. Queue lock required. */
+  private async recoverInterrupted(): Promise<void> {
+    const ids = await readdir(join(this.options.directory, "batches")).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+      },
+    );
+    if (ids.length > 4096) throw Error("Integration batch census exceeds its bound");
+    for (const hold of (await this.options.holds?.list()) ?? [])
+      if (hold.integrationBatchId)
+        await this.options.holds!.release(
+          hold.id,
+          "Clankie",
+          "Recovering the prior integration queue owner",
+          hold,
+        );
+    const records: IntegrationBatch[] = [];
+    for (const id of ids) {
+      if (!/^[a-f0-9-]{36}$/u.test(id) || this.running.has(id)) continue;
+      const receipt = await this.read(id).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (receipt) records.push(receipt);
+    }
+    records.sort(
+      (a, b) =>
+        a.createdAt.localeCompare(b.createdAt) ||
+        (a.admission ?? 0) - (b.admission ?? 0) ||
+        a.id.localeCompare(b.id),
+    );
+    let admission = -records.length;
+    for (const receipt of records) {
+      const id = receipt.id;
+      if (
+        !receipt?.restartRecovery ||
+        (!active.has(receipt.state) &&
+          receipt.state !== "interrupted" &&
+          !(receipt.state === "passed" && receipt.request.push))
+      )
+        continue;
+      const attempt = receipt.batchId ? await this.read(receipt.batchId) : receipt;
+      const excluded = attempt.excluded?.find((member) => member.id === id);
+      if (excluded) {
+        receipt.state = excluded.state;
+        receipt.error = excluded.error;
+        await this.save(receipt);
+        continue;
+      }
+      if (attempt.state === "pushed" || (attempt.state === "passed" && !receipt.request.push)) continue;
+      // Only uncompleted work is recoverable; ordinary failures, withdrawals and held passes stay put.
+      if (
+        !active.has(attempt.state) &&
+        attempt.state !== "interrupted" &&
+        !(attempt.state === "passed" && receipt.request.push)
+      )
+        continue;
+      const unstarted =
+        (receipt.state === "queued" && !receipt.batchId) ||
+        (attempt.state === "queued" && attempt.repos.length === 0);
+      if (receipt.interruptionRetry && !(receipt.state === "queued" && (!receipt.batchId || unstarted))) {
+        attempt.state = "interrupted";
+        attempt.error =
+          "Integration stopped after its one automatic interruption retry; inspect retained logs and remote refs";
+        await this.save(attempt);
+        receipt.restartRecovery = false;
+        receipt.state = "interrupted";
+        receipt.error = attempt.error;
+        await this.save(receipt);
+        await this.notify(`Integration request ${id}: ${attempt.error}. clankie integrate status ${id}`);
+        continue;
+      }
+      attempt.state = "interrupted";
+      attempt.error ??= "Service restarted before integration completed";
+      await this.save(attempt);
+      await this.retryInterrupted(
+        attempt,
+        [{ batch: receipt, guard: async () => {}, admission: admission++ }],
+        unstarted,
+      );
+    }
+  }
+  /** Called once after captain construction, so recovery can notify the lead without another request. */
+  resume(): void {
+    this.schedule();
+  }
+  /** Preserve pending retries for the next service; the outgoing governor is closing. */
+  close(): void {
+    this.closing = true;
+  }
+  private async retryInterrupted(
+    batch: IntegrationBatch,
+    members: PendingIntegration[],
+    unstarted = false,
+  ): Promise<void> {
+    const retry: PendingIntegration[] = [];
+    for (const member of members) {
+      const receipt = await this.read(member.batch.id);
+      if (receipt.interruptionRetry && !unstarted) continue;
+      receipt.interruptionRetry ??= { batchId: batch.id, at: now() };
+      receipt.state = "queued";
+      delete receipt.batchId;
+      await this.save(receipt);
+      retry.push({ ...member, batch: receipt });
+      await this.notify(
+        `Integration request ${receipt.id} interrupted in batch ${batch.id}; automatically resubmitting once with the same approved commits. Remote main is checked before any push. Follow clankie integrate status ${receipt.id}.`,
+      );
+    }
+    if (retry.length) await this.retry(retry, 0, `Automatic recovery of interrupted batch ${batch.id}`);
+  }
+  private async notify(text: string): Promise<void> {
+    try {
+      await this.options.notify?.(text);
+    } catch (error) {
+      console.warn("Integration recovery notice unavailable", error);
     }
   }
   async wait(): Promise<void> {
@@ -744,7 +893,7 @@ export class IntegrationQueue {
     }
   }
   private async runMembers(job: IntegrationJob): Promise<void> {
-    const { members: input, fresh, regates, regateReason } = job;
+    const { members: input, fresh, regateReason } = job;
     const members: PendingIntegration[] = [];
     for (const member of input) {
       if (this.withdrawn.has(member.batch.id)) continue;
@@ -760,7 +909,7 @@ export class IntegrationQueue {
     }
     if (!members.length) return;
     const first = members[0]!.batch;
-    const requests = members.map((m) => m.batch.request);
+    const requests = members.map((m) => m.batch.resolvedRequest ?? m.batch.request);
     const id = members.length === 1 && !fresh ? first.id : randomUUID();
     const batch: IntegrationBatch =
       id === first.id
@@ -792,6 +941,26 @@ export class IntegrationQueue {
       member.batch.attempts = [...(member.batch.attempts ?? []), id];
       await this.save(member.batch);
     }
+    const execute = () => this.executeMembers(job, batch, members, isolationRoot);
+    if (this.options.holds)
+      await this.options.holds.integration(
+        id,
+        this.options.deployPending ?? (() => false),
+        execute,
+        async () => {
+          for (const member of members) await member.guard();
+        },
+      );
+    else await execute();
+  }
+  private async executeMembers(
+    job: IntegrationJob,
+    batch: IntegrationBatch,
+    members: PendingIntegration[],
+    isolationRoot?: string,
+  ): Promise<void> {
+    const { regates } = job;
+    const id = batch.id;
     let remaining = members;
     try {
       try {
@@ -822,6 +991,24 @@ export class IntegrationQueue {
         batch.error = `Withdrawn requests ${withdrawn.map((m) => m.batch.id).join(", ")}; surviving requests need a fresh tree and gate`;
         await this.save(batch);
         await this.retry(remaining, regates, batch.error, isolationRoot);
+      } else if (batch.state === "interrupted") {
+        await this.retryInterrupted(batch, remaining);
+        if (
+          !this.retries.some((retry) =>
+            retry.members.some((member) => remaining.some((m) => m.batch.id === member.batch.id)),
+          )
+        ) {
+          for (const member of remaining) {
+            const receipt = await this.read(member.batch.id);
+            receipt.restartRecovery = false;
+            receipt.state = "interrupted";
+            receipt.error = batch.error;
+            await this.save(receipt);
+          }
+          await this.notify(
+            `Integration batch ${id} interrupted after its one automatic retry; manual review required. clankie integrate status ${id}`,
+          );
+        }
       } else if (batch.state === "failed" && remaining.length > 1) {
         batch.error = `${batch.error ?? "Shared gate failed"}; individual retries queued (use request IDs)`;
         await this.save(batch);
@@ -1619,6 +1806,26 @@ export class IntegrationQueue {
     if (!["passed", "held", "partial"].includes(batch.state))
       throw Error(`Batch ${id} has no landable pass (${batch.state})`);
     const wasRunning = this.running.has(id);
+    if (!wasRunning && this.options.holds)
+      return withDirectoryLock(
+        join(this.options.directory, "queue.lock"),
+        () =>
+          this.options.holds!.integration(
+            id,
+            this.options.deployPending ?? (() => false),
+            async () => {
+              this.running.add(id);
+              try {
+                return await this.land(id, guard, onUncovered);
+              } finally {
+                this.running.delete(id);
+              }
+            },
+            guard,
+          ),
+        (owner) => this.interruptAbandoned(owner),
+        { waitForLiveOwner: true },
+      );
     this.running.add(id);
     try {
       return await withDirectoryLock(join(dirname(batch.evidence), "push.lock"), async () => {
@@ -1632,6 +1839,7 @@ export class IntegrationQueue {
           }
           recorded.repos.sort((a, b) => (a.name === b.name ? 0 : a.name === "core" ? -1 : 1));
           if (!recorded.repos.length) throw Error("No repositories were gated");
+          const alreadyPresent = new Set<IntegrationRepo>();
           for (const repo of recorded.repos) {
             if (
               repo.gateReuse &&
@@ -1654,6 +1862,11 @@ export class IntegrationQueue {
             const remote = async () =>
               (await this.git(repo.directory, ["ls-remote", "origin", "refs/heads/main"])).split(/\s/u)[0];
             let current = await remote();
+            if (current === repo.head && !repo.push) {
+              // Fresh recovery may find the exact candidate already on main. Never send it twice.
+              alreadyPresent.add(repo);
+              continue;
+            }
             if (repo.push && repo.push.state !== "confirmed" && repo.push.state !== "rejected") {
               // Reconcile an uncertain send, never replay it.
               if (current !== repo.head)
@@ -1693,6 +1906,13 @@ export class IntegrationQueue {
           await this.save(recorded);
           for (const repo of recorded.repos) {
             if (repo.push?.state === "confirmed") continue;
+            if (alreadyPresent.has(repo)) {
+              const log = join(dirname(recorded.evidence), `${repo.name}-push-already-present.json`);
+              await durableJson(log, { remote: repo.head, sent: false });
+              repo.push = { state: "confirmed", skipped: true, at: now(), exitCode: 0, log };
+              await this.save(recorded);
+              continue;
+            }
             await guard();
             // Recheck both HEADs after each network operation, including the sibling dependency.
             for (const sibling of recorded.repos) {
@@ -1740,11 +1960,11 @@ export class IntegrationQueue {
           if (error instanceof GateNotCovering) onUncovered?.();
           // Keep successful/uncertain individual repo landings; two origins have no atomic transaction.
           const latest = await this.stored(id);
-          latest.state = latest.repos.some((r) => r.push) ? "partial" : "held";
+          latest.state = latest.repos.some((r) => r.push && !r.push.skipped) ? "partial" : "held";
           const core = latest.repos.find((r) => r.name === "core");
           const app = latest.repos.find((r) => r.name === "app");
           latest.error =
-            core?.push?.state === "confirmed" && app?.push?.state !== "confirmed"
+            core?.push?.state === "confirmed" && !core.push.skipped && app?.push?.state !== "confirmed"
               ? `Core landed at ${core.head}; app pending. ${String(error)}`
               : String(error);
           await this.save(latest);

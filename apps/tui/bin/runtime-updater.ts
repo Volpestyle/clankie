@@ -68,6 +68,8 @@ export interface DeferredRuntimeUpdate {
   readonly initiator: RuntimeUpdateInitiator;
 }
 export interface RuntimeUpdateStatus {
+  /** Accepted intent waiting for bounded integration holds, before helper admission. */
+  readonly waitingForIntegration?: { readonly id: string; readonly ref: string };
   readonly runtime: RuntimeBootIdentity;
   /** A source checkout's pending batched update, if any. */
   readonly deferred?: DeferredRuntimeUpdate;
@@ -86,6 +88,8 @@ export interface RuntimeUpdateStatus {
   readonly error?: "update_record_unreadable";
 }
 export interface RuntimeUpdater {
+  /** The service can persist a waiting deploy instead of holding its caller's connection. */
+  readonly queuesIntegrationWait?: boolean;
   /** Immutable boot identity; liveness probes never need transaction-file reads. */
   readonly runtime: RuntimeBootIdentity;
   status(): RuntimeUpdateStatus;

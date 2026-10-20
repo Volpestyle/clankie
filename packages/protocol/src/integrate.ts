@@ -69,6 +69,8 @@ export const DeployHoldSchema = z.object({
   expiresAt: z.iso.datetime().optional(),
   pane: Text.optional(),
   seat: Text.optional(),
+  /** Service-owned, bounded protection for an active integration attempt. */
+  integrationBatchId: Id.optional(),
   presence: z.enum(["present", "gone", "unknown", "person"]),
 });
 export type DeployHold = z.infer<typeof DeployHoldSchema>;
@@ -176,6 +178,8 @@ const IntegrationRepoSchema = z.object({
   push: z
     .object({
       state: z.enum(["attempting", "confirmed", "rejected", "unconfirmed"]),
+      /** Remote already held this candidate; no send occurred. */
+      skipped: z.boolean().optional(),
       at: z.iso.datetime(),
       exitCode: z.number().int().nullable(),
       log: z.string(),
@@ -203,11 +207,19 @@ export const IntegrationBatchSchema = z.object({
   schemaVersion: z.literal(1),
   id: Id,
   request: RecordedRunSchema,
+  /** Exact accepted objects, while request retains the caller's idempotency spelling. */
+  resolvedRequest: RecordedRunSchema.optional(),
   state: IntegrationStateSchema,
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
+  /** Stable ordering for requests accepted within the same clock tick. */
+  admission: z.number().int().nonnegative().optional(),
   evidence: z.string(),
   repos: z.array(IntegrationRepoSchema),
+  /** Only requests admitted with restart recovery enabled are recovered automatically. */
+  restartRecovery: z.boolean().optional(),
+  /** One retry across runner interruption and service restarts, independent of gate isolation. */
+  interruptionRetry: z.object({ batchId: Id, at: z.iso.datetime() }).optional(),
   /** Reclaimed private install/gate homes and caches; root gate logs remain. */
   isolationReclamation: z
     .object({ path: z.string(), freedBytes: z.number().nonnegative(), at: z.iso.datetime() })
