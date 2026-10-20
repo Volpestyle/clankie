@@ -88,6 +88,15 @@ files passed all 47 tests. The native-start captures above are retained evidence
 from the original implementation; the follow-up changes deadline cleanup and
 wake-failure diagnostics.
 
+The subsequent five failing tests exposed one product regression and two stale
+watch setups. Preparation failures now return `not_sent` before native startup
+is attempted, instead of spending 30 seconds waiting for a nonexistent session.
+The watch fixtures now explicitly resume their existing session for channel
+follow-ups; their Stop-correlation assertions are unchanged. Both requested files
+(`herdr-watch.test.ts`, `remote-claude-isolation.test.ts`) passed all 100 tests,
+and the original Claude startup/seat files passed all 47 tests. The swallowed
+rejections check passed over 144 added code lines against `dd6647b39`.
+
 ## Limits
 
 No production service restart, deployed runtime repair, remote Windows Claude

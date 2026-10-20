@@ -114,7 +114,7 @@ describe("HerdrWatchStore", () => {
     };
     const original = createClaudeWorkerSeatAdapter(deps);
     const started = await original.start(
-      { harness: "claude", cwd: root, brief: "queued followup" },
+      { harness: "claude", cwd: root, brief: "queued followup", resumeSessionId: agent.session.value },
       { paneId: agent.paneId, run: async () => undefined, start: async () => undefined },
     );
     expect(started.outcome).toBe("started");
@@ -182,7 +182,7 @@ describe("HerdrWatchStore", () => {
       trackerDeny: () => [],
     };
     const started = await createClaudeWorkerSeatAdapter(deps).start(
-      { harness: "claude", cwd: root, brief: "followup" },
+      { harness: "claude", cwd: root, brief: "followup", resumeSessionId: agent.session.value },
       { paneId: agent.paneId, run: async () => undefined, start: async () => undefined },
     );
     expect(started.outcome).toBe("started");

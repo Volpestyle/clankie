@@ -857,6 +857,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
       const nativePrompt = launch.resumeSessionId === undefined && launch.brief.length > 0;
       await view.guard?.();
+      let startAttempted = false;
       let startError: unknown;
       try {
         const trackerDeny = await (deps.trackerDeny ?? defaultTrackerDeny)(launch.cwd, launch.env);
@@ -872,8 +873,16 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           deps.settingsArg ? await deps.settingsArg(settings) : settings,
         );
         await view.guard?.();
+        startAttempted = true;
         await view.start("claude", args);
       } catch (error) {
+        if (!startAttempted)
+          return {
+            outcome: "failed",
+            reason: "not_ready",
+            briefDelivery: "not_sent",
+            detail: `Claude launch preparation failed; no native start was attempted: ${error instanceof Error ? error.message : String(error)}`,
+          };
         // Herdr can time out after launching the TUI. Still retain its native
         // identity before reporting uncertainty; never launch a replacement.
         startError = error;
