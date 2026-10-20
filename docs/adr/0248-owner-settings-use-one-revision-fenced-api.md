@@ -54,3 +54,16 @@ pack ID; absent or null selects original 2D Clankie. World/chat lead art follows
 `leadSkin` as before. Clients that cannot render a pet pack show original 2D
 Clankie without overwriting the saved ID. Updates preserve the other appearance
 fields, and use the same owner authority and revision fence.
+
+## Primary app navigation (VUH-2560, 2026-10-20)
+
+`appearance.navigation` is an optional nonempty ordered list of unique app
+destinations: `world`, `messages`, `work`, `terminal`, `settings`. Absence retains
+World → Messages → Work → Terminal. The first item is the landing view; omitted
+items remain reachable in the app's expanded menu. There is one owner choice,
+without device overrides. Existing appearance GET/POST, revision fencing,
+authority, persistence and hosted forwarding apply unchanged. Other appearance
+writes preserve navigation. Older readers ignore this additive field.
+
+CLI: `clankie navigation` reads the current list; `clankie navigation set
+work,messages,world` reads its revision and writes through the same API.

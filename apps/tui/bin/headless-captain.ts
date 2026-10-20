@@ -476,6 +476,13 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await (await import("../src/command/fleet.ts")).runAutonomyCommand(rest, options));
       return 0;
     }
+    if (command === "navigation") {
+      outputJson(
+        stdout,
+        await (await import("../src/command/navigation.ts")).runNavigationCommand(rest, options),
+      );
+      return 0;
+    }
     if (command === "maximum-trust-mode") {
       outputJson(
         stdout,

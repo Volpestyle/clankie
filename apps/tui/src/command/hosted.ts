@@ -260,6 +260,8 @@ export async function hostedCommand(
   if (command === "fleet" && ["set", "clear", "show"].includes(action ?? ""))
     return runFleetCommand(args.slice(1), { ownerFetcher });
   if (command === "autonomy") return runAutonomyCommand(args.slice(1), { ownerFetcher });
+  if (command === "navigation")
+    return (await import("./navigation.ts")).runNavigationCommand(args.slice(1), { ownerFetcher });
   if (command === "maximum-trust-mode")
     return (await import("./maximum-trust-mode.ts")).runMaximumTrustModeCommand(args.slice(1), {
       ownerFetcher,

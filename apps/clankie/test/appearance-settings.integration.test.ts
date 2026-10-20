@@ -5,6 +5,7 @@ import { expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { APPEARANCE_SETTINGS_PATH, AppearanceSettingsSnapshotSchema } from "@clankie/protocol/owner-settings";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
+import { runNavigationCommand } from "../../tui/src/command/navigation.ts";
 import { createAppearanceRoutes } from "../src/appearance-routes.ts";
 
 it("stores Clankie's look once for every surface, fenced by revision and owner authority", async () => {
@@ -107,4 +108,47 @@ it("reaches hosted devices through the operator and gateway allowlists", async (
   expect(hostedOperatorAllows("GET", APPEARANCE_SETTINGS_PATH)).toBe(true);
   expect(hostedOperatorAllows("POST", APPEARANCE_SETTINGS_PATH)).toBe(true);
   expect(hostedOperatorAllows("DELETE", APPEARANCE_SETTINGS_PATH)).toBe(false);
+});
+
+it("shares ordered primary navigation, preserving other appearance fields and rejecting invalid lists", async () => {
+  const root = await mkdtemp(join(tmpdir(), "navigation-settings-"));
+  try {
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const app = createAppearanceRoutes(async () => true, settings);
+    const read = async () =>
+      AppearanceSettingsSnapshotSchema.parse(await (await app.request(APPEARANCE_SETTINGS_PATH)).json());
+    const write = async (revision: string, changes: unknown) =>
+      app.request(APPEARANCE_SETTINGS_PATH, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ schemaVersion: 1, expectedRevision: revision, changes }),
+      });
+    const first = await read();
+    const options = {
+      ownerFetcher: { fetch: (path: string, init?: RequestInit) => app.request(path, init) },
+    };
+    expect((await runNavigationCommand(["set", "messages,work"], options)).navigation).toEqual([
+      "messages",
+      "work",
+    ]);
+    expect((await runNavigationCommand([], options)).navigation).toEqual(["messages", "work"]);
+    const current = await read();
+    expect((await write(current.revision, { navigation: ["work", "messages", "world"] })).status).toBe(200);
+    const saved = await read();
+    expect(saved.appearance.navigation).toEqual(["work", "messages", "world"]);
+    expect((await new SettingsStore(settings.path).load()).appearance.navigation).toEqual(
+      saved.appearance.navigation,
+    );
+    expect((await write(first.revision, { navigation: ["terminal"] })).status).toBe(409);
+    for (const navigation of [[], ["work", "work"], ["unknown"], ["search"]]) {
+      expect((await write(saved.revision, { navigation })).status).toBe(400);
+    }
+    await write(saved.revision, { leadSkin: "hoodie" });
+    expect((await read()).appearance).toEqual({
+      leadSkin: "hoodie",
+      navigation: ["work", "messages", "world"],
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

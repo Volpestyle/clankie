@@ -352,6 +352,26 @@ export async function runHostedConsole() {
     },
     ...buildHostedConnectionCommands(settings),
     {
+      name: "navigation",
+      aliases: [],
+      takesArgument: true,
+      description: "Choose app navigation: [status|set work,messages,world]",
+      async run(argument, active) {
+        try {
+          const result = await (
+            await import("./command/navigation.ts")
+          ).runNavigationCommand(argument.trim().split(/\s+/u).filter(Boolean), { ownerFetcher });
+          active.insertCommandResult("/navigation", result.navigation.join(" → "), "success");
+        } catch (error) {
+          active.insertCommandResult(
+            "/navigation",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
       name: "settings",
       aliases: [],
       description: "Hosted settings and connection",

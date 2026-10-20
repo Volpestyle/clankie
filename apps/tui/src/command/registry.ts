@@ -441,6 +441,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["navigation"],
+    lines: [
+      "  navigation [status|set work,messages,world]",
+      "                           Choose primary app destinations; first is the landing view (JSON)",
+    ],
+  },
+  {
     nouns: ["maximum-trust-mode"],
     lines: [
       "  maximum-trust-mode [status|on|off]",

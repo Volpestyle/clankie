@@ -150,6 +150,7 @@ export interface ConsoleCommandContext {
   /** The owner's autonomy dial (ADR 0263). */
   readonly commandAutonomy?: (args: readonly string[]) => Promise<AutonomyCommandResult>;
   /** The owner's maximum trust mode (VUH-2048). */
+  readonly commandNavigation?: (args: readonly string[]) => Promise<{ navigation: string[] }>;
   readonly commandMaximumTrustMode?: (args: readonly string[]) => Promise<MaximumTrustModeResult>;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
@@ -1161,6 +1162,28 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       wakes: conversations?.autonomy,
       formatWakes: formatAutonomyStatus,
     }),
+    {
+      name: "navigation",
+      aliases: [],
+      takesArgument: true,
+      description: "Choose app navigation: [status|set work,messages,world]",
+      async run(argument, shell) {
+        try {
+          const result = await context.commandNavigation?.(argument.trim().split(/\s+/u).filter(Boolean));
+          shell.insertCommandResult(
+            "/navigation",
+            result ? result.navigation.join(" → ") : "Navigation settings are unavailable here.",
+            result ? "success" : "error",
+          );
+        } catch (error) {
+          shell.insertCommandResult(
+            "/navigation",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
     maximumTrustModeCommand(context.commandMaximumTrustMode),
     {
       name: "cd",

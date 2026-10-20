@@ -206,22 +206,50 @@ export type HostSettingsSnapshot = z.infer<typeof HostSettingsSnapshotSchema>;
  */
 export const APPEARANCE_SETTINGS_PATH = "/v1/operator/appearance";
 export const LeadSkinIdSchema = z.string().regex(/^[a-z0-9][a-z0-9.-]{0,127}$/u);
+/** Primary app destinations in display order; omitted destinations remain in More. */
+export const NavigationItemSchema = z.enum(["world", "messages", "work", "terminal", "settings"]);
+export const NavigationItemsSchema = z
+  .array(NavigationItemSchema)
+  .min(1)
+  .max(5)
+  .refine((items) => new Set(items).size === items.length, "Duplicate navigation item");
+export const DEFAULT_NAVIGATION_ITEMS: z.infer<typeof NavigationItemSchema>[] = [
+  "world",
+  "messages",
+  "work",
+  "terminal",
+];
+export type NavigationItem = z.infer<typeof NavigationItemSchema>;
+export type NavigationItems = z.infer<typeof NavigationItemsSchema>;
+
 export const AppearanceSettingsSchema = z
-  .object({ leadSkin: LeadSkinIdSchema.default("pack"), petSkin: LeadSkinIdSchema.nullable().optional() })
+  .object({
+    leadSkin: LeadSkinIdSchema.default("pack"),
+    petSkin: LeadSkinIdSchema.nullable().optional(),
+    navigation: NavigationItemsSchema.optional(),
+  })
   .strict();
 export type AppearanceSettings = z.infer<typeof AppearanceSettingsSchema>;
 /** Not strict, so a later layer (agents, scene) reaches older readers as an ignored key. */
 export const AppearanceSettingsSnapshotSchema = z.object({
   schemaVersion: z.literal(1),
   revision: RevisionSchema,
-  appearance: z.object({ leadSkin: LeadSkinIdSchema, petSkin: LeadSkinIdSchema.nullable().optional() }),
+  appearance: z.object({
+    leadSkin: LeadSkinIdSchema,
+    petSkin: LeadSkinIdSchema.nullable().optional(),
+    navigation: NavigationItemsSchema.optional(),
+  }),
 });
 export const UpdateAppearanceSettingsSchema = z
   .object({
     schemaVersion: z.literal(1),
     expectedRevision: RevisionSchema,
     changes: z
-      .object({ leadSkin: LeadSkinIdSchema.optional(), petSkin: LeadSkinIdSchema.nullable().optional() })
+      .object({
+        leadSkin: LeadSkinIdSchema.optional(),
+        petSkin: LeadSkinIdSchema.nullable().optional(),
+        navigation: NavigationItemsSchema.optional(),
+      })
       .strict()
       .refine((v) => Object.values(v).some((x) => x !== undefined), "No appearance change"),
   })

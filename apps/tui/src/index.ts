@@ -545,6 +545,8 @@ const commands = [
         host: serviceUrl,
       }),
     commandAutonomy: async (args) => readAutonomy(args),
+    commandNavigation: async (args) =>
+      (await import("./command/navigation.ts")).runNavigationCommand(args, brokeredCommands),
     commandMaximumTrustMode: async (args) =>
       (await import("./command/maximum-trust-mode.ts")).runMaximumTrustModeCommand(args, brokeredCommands),
     conversations: conversationsContext,
