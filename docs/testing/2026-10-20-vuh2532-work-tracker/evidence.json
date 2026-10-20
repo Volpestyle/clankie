@@ -6,6 +6,54 @@
       "size": 28812,
       "sha256": "70693dd6e19454435d27fb6a248cecf8938e09e1b9bd7bf662a0f995783a4357",
       "url": "clankie://evidence/sha256/70693dd6e19454435d27fb6a248cecf8938e09e1b9bd7bf662a0f995783a4357"
+    },
+    {
+      "path": "ipad-global.png",
+      "size": 271403,
+      "sha256": "bbf5f925b9df5bd6b5cfc86823f4a5dec710a7f1cf35b600d13f53d8da0fba18",
+      "url": "clankie://evidence/sha256/bbf5f925b9df5bd6b5cfc86823f4a5dec710a7f1cf35b600d13f53d8da0fba18"
+    },
+    {
+      "path": "ipad-project.png",
+      "size": 287560,
+      "sha256": "56f7119f130681385971165c7a1c344c8e89e43cdb0edfb3f6379b26563ff62c",
+      "url": "clankie://evidence/sha256/56f7119f130681385971165c7a1c344c8e89e43cdb0edfb3f6379b26563ff62c"
+    },
+    {
+      "path": "iphone-confirm.png",
+      "size": 268528,
+      "sha256": "0ee26a24b747e889f5cdc9025255a9100c0e32c2e09fb3fdaf0f623ff0d47253",
+      "url": "clankie://evidence/sha256/0ee26a24b747e889f5cdc9025255a9100c0e32c2e09fb3fdaf0f623ff0d47253"
+    },
+    {
+      "path": "iphone-global.png",
+      "size": 228788,
+      "sha256": "1028f0a94514d111feaee1e5604f57e2a82bbc48f8432a589e531408da3491a7",
+      "url": "clankie://evidence/sha256/1028f0a94514d111feaee1e5604f57e2a82bbc48f8432a589e531408da3491a7"
+    },
+    {
+      "path": "iphone-project.png",
+      "size": 243272,
+      "sha256": "023d542243454e74891122df59b661f2c757e88d9fd9af896e9161c5cd4c0f5e",
+      "url": "clankie://evidence/sha256/023d542243454e74891122df59b661f2c757e88d9fd9af896e9161c5cd4c0f5e"
+    },
+    {
+      "path": "mac-confirm.png",
+      "size": 604136,
+      "sha256": "df6cff5b37712ecfbd440669e7280025627a28fbf39a969466cf7d5e07f99a0a",
+      "url": "clankie://evidence/sha256/df6cff5b37712ecfbd440669e7280025627a28fbf39a969466cf7d5e07f99a0a"
+    },
+    {
+      "path": "mac-global.png",
+      "size": 564341,
+      "sha256": "fae5417986ee766b7611711ecfe0673df953a36a09e42aa648929f5a76baedd9",
+      "url": "clankie://evidence/sha256/fae5417986ee766b7611711ecfe0673df953a36a09e42aa648929f5a76baedd9"
+    },
+    {
+      "path": "mac-project.png",
+      "size": 591810,
+      "sha256": "3bbbc48d71595e2c65a072fb4b641a0991aec593fd08deee56586a6c55666ed3",
+      "url": "clankie://evidence/sha256/3bbbc48d71595e2c65a072fb4b641a0991aec593fd08deee56586a6c55666ed3"
     }
   ]
 }
