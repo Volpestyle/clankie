@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { requestPairingOffer } from "../../tui/bin/pairing-offer.ts";
+import { runDevicesCommand } from "../../tui/src/command/devices.ts";
 import { runPairCommand } from "../../tui/src/command/pair.ts";
 import { createQaService } from "./fixtures/qa-service.ts";
 
@@ -74,6 +75,27 @@ it("a simulator capture command leaves no active pairing after success or failur
       expect(devices).toHaveLength(status === 0 ? 1 : 2);
       expect(devices.every((device: { status: string }) => device.status === "revoked")).toBe(true);
       expect(devices.at(-1).run.purpose).toBe("simulator");
+      let deviceRows = "";
+      expect(
+        await runDevicesCommand(["--grouped", "--json"], {
+          host: host.baseUrl,
+          env: { ...process.env, CLANKIE_OPERATOR_TOKEN: host.operatorToken },
+          stdout: {
+            write: (text) => {
+              deviceRows += text;
+            },
+          },
+          stderr: output,
+        }),
+      ).toBe(0);
+      const listed = JSON.parse(deviceRows);
+      expect(listed.devices).toHaveLength(devices.length);
+      expect(
+        listed.devices.every(
+          (row: { status: string; pairingIds: string[] }) =>
+            row.status === "revoked" && row.pairingIds.length === 1,
+        ),
+      ).toBe(true);
     }
   } finally {
     await host.close();

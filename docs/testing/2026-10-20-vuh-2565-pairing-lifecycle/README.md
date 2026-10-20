@@ -24,3 +24,12 @@ set `VUH_2565_SIMULATOR_UDID` to that exact UDID and `VUH_2565_CAPTURE_ROOT` to
 an absolute output path when running the focused regression. Both children call
 `xcrun simctl io <UDID> screenshot` before exiting. Release the simulator in
 teardown. Without those inputs, the regression never boots or drives a device.
+
+Follow-up verification: the native regression passed with two actual simulator
+screenshots (success and deliberate exit 7); both runs left no active pairing.
+The simulator leases were released. Encrypted grouped-device read and revoke,
+including exact-query refusals, passed with 59 focused gateway/protocol tests.
+`clankie devices --grouped --json` now exposes the same API projection; the
+real-HTTP capture regression also checks this CLI read after teardown (16 tests
+passed in the focused CLI/capture run). Default CLI listing remains individual
+registrations. The combined log includes these later runs.

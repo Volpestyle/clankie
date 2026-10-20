@@ -11,7 +11,7 @@ import {
 import { commandHost, outputJson, type Writable } from "./io.ts";
 
 const DEVICES_USAGE =
-  "Usage: clankie devices [--json] | clankie devices revoke <id> [--json] | clankie devices end-run <run-id> [--json]";
+  "Usage: clankie devices [--grouped] [--json] | clankie devices revoke <id> [--json] | clankie devices end-run <run-id> [--json]";
 const DEFAULT_DEVICES_TIMEOUT_MS = 10_000;
 
 export interface DevicesCliCommandOptions {
@@ -25,20 +25,26 @@ export interface DevicesCliCommandOptions {
 
 type DevicesCliOptions =
   | { readonly json: boolean; readonly subcommand: "end-run"; readonly runId: string }
-  | { readonly json: boolean; readonly subcommand: "list" }
+  | { readonly json: boolean; readonly subcommand: "list"; readonly grouped: boolean }
   | { readonly json: boolean; readonly subcommand: "revoke"; readonly deviceId: string };
 
 function parseDevicesArgs(args: readonly string[]): DevicesCliOptions {
   let json = false;
+  let grouped = false;
   const positional: string[] = [];
   for (const arg of args) {
+    if (arg === "--grouped") {
+      grouped = true;
+      continue;
+    }
     if (arg === "--json") {
       json = true;
       continue;
     }
     positional.push(arg);
   }
-  if (positional.length === 0) return { json, subcommand: "list" };
+  if (positional.length === 0) return { json, subcommand: "list", grouped };
+  if (grouped) throw new Error(DEVICES_USAGE);
   if (positional[0] === "end-run" && positional.length === 2)
     return { json, subcommand: "end-run", runId: positional[1]! };
   if (positional[0] === "revoke") {
@@ -119,7 +125,7 @@ export async function runDevicesCommand(
       else stdout.write(`Revoked ${device.deviceId} (${device.name}).\n`);
       return 0;
     }
-    const devices = await listDevices(request);
+    const devices = await listDevices({ ...request, grouped: parsed.grouped });
     if (parsed.json) outputJson(stdout, { ok: true, devices });
     else stdout.write(`${formatDevicesTable(devices)}\n`);
     return 0;

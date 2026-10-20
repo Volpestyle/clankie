@@ -1757,7 +1757,10 @@ The API equivalent is `POST /v1/pairing/offer` with a `run` object and
 can be revoked through the existing device revoke API. Devices without a shared
 registration stay separate even if their names match.
 
-### `devices [--json]`
+### `devices [--grouped] [--json]`
+
+Pass `--grouped` to read the same shared-registration rows as Settings, with
+`pairingIds` in JSON. The default retains every individual registration.
 
 List paired devices. Human mode is a table whose `SOURCE` column reads `review`
 for devices paired through a review offer (revoke those after the review) and

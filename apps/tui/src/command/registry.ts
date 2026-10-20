@@ -267,7 +267,7 @@ const HEADLESS_COMMAND_HELP = [
       "                           One-time device pairing QR + code (human default; --json for agents)",
     ],
   },
-  { nouns: ["devices"], lines: ["  devices [--json]         List paired devices"] },
+  { nouns: ["devices"], lines: ["  devices [--grouped] [--json]         List paired devices"] },
   {
     nouns: ["support"],
     lines: [
