@@ -173,6 +173,75 @@ describe("the work-items service", () => {
 });
 
 describe("the work routes", () => {
+  it("returns oversized stored summaries in full through CLI and device APIs and accepts them from both writers", async () => {
+    const { service, repo, stateDirectory, workspace } = await fixture();
+    await service.handle(
+      { action: "init", repo, backend: "linear", linearTeam: "VUH", linearProject: "Clankie" },
+      true,
+    );
+    const summary = `Stored prose\n${"x".repeat(24_000)}\nEnd of stored prose.`;
+    const saved = (await service.callTracker(
+      "save_issue",
+      { team: "VUH", project: "Clankie", title: "Large canonical item", description: summary },
+      { repo, local: true },
+    )) as { identifier: string };
+    // Reopen the real persisted tracker rather than reading a writer's return value.
+    const reopened = createWorkItemsService({
+      stateDirectory,
+      workspace: () => workspace,
+      run: noGit,
+      clock,
+    });
+    const { app, close } = await createClankieApp({
+      captain: createStubCaptain(),
+      workItems: reopened,
+      authenticateOperator: async () => ({ operatorId: "owner" }),
+      authenticateCaptain: async () => ({ captainId: "operator", steerSourceLane: "api" }),
+    });
+    const post = async (path: string, body: unknown) => {
+      const response = await app.request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    try {
+      expect(await post("/v1/work", { action: "show", repo, id: saved.identifier })).toMatchObject({
+        item: { summary },
+      });
+      expect(await post("/v1/work", { action: "list", repo })).toMatchObject({ items: [{ summary }] });
+      const repos = await reopened.handle({ action: "repos" }, true);
+      if (!("repos" in repos)) throw new Error("Expected repos");
+      const repoId = repos.repos.find((entry) => entry.root === repo)!.id;
+      const device = OperatorConversationServiceResultSchema.parse(
+        await post(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+          op: "work_items",
+          schemaVersion: 1,
+          repoId,
+          itemId: saved.identifier,
+        }),
+      );
+      expect(device).toMatchObject({ result: { outcome: "ready", items: [{ summary }] } });
+      expect(
+        await post("/v1/work", { action: "create", repo, title: "Large CLI item", summary }),
+      ).toMatchObject({
+        item: { summary },
+      });
+      await reopened.callTracker(
+        "save_issue",
+        { id: saved.identifier, patch: [{ op: "append", text: "\nCanonical patch retained." }] },
+        { repo, local: true },
+      );
+      expect(await post("/v1/work", { action: "show", repo, id: saved.identifier })).toMatchObject({
+        item: { summary: `${summary}\nCanonical patch retained.` },
+      });
+    } finally {
+      close();
+    }
+  });
+
   it("serves the CLI contract to the operator and read-only ops to devices", async () => {
     const { service, workspace } = await fixture();
     await service.handle({ action: "create", repo: "workspace", title: "Seen from the phone" }, true);

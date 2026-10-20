@@ -122,7 +122,8 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       action: z.literal("create"),
       repo: z.string().min(1).max(4096),
       title: z.string().trim().min(1).max(200),
-      summary: z.string().max(20_000).optional(),
+      // Match canonical save_issue descriptions; this is not a display-size limit.
+      summary: z.string().optional(),
       owner: z.string().trim().min(1).max(128).optional(),
       criteria: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
       dependsOn: z.array(z.string().trim().min(1).max(64)).max(50).optional(),

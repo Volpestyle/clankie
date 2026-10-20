@@ -37,6 +37,9 @@ Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `canceled`. Ite
 the backend's `labels` (Linear, GitHub, or Markdown `labels:` front matter);
 label an item with a role name (`designer`, `builder`, …) to put it on that
 role's station in the owner's world. Criterion numbers are 1-based.
+Issue summaries have no separate 20,000-character limit: `work create --summary`
+matches canonical `save_issue` descriptions, and `work show`/API reads return
+the full summary. Provider and transport request limits still apply.
 Clankie and workers use the same `linear_*` tracker tools, discovered through
 `mcp_tool_search` or `clankie_tools` and called through the corresponding tool
 directory. Their issue, comment, project and status-update shapes work with

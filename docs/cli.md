@@ -2810,6 +2810,9 @@ plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
   operator-only, and their `preview` route is unchanged.
 - `clankie work create TITLE [--summary S] [--owner NAME] [--criterion C]...
 [--status S] [--priority 0..4]`.
+  Summary prose has no separate 20,000-character cap, matching canonical
+  `save_issue` descriptions. `work show` and API item reads return it in full;
+  provider and transport request limits still apply.
 - `clankie work update ID [--status S] [--owner NAME | --no-owner] [--title T]
 [--priority 0..4] [--check N]... [--uncheck N]... [--add-criterion C]...`; criterion numbers are
   1-based and may be comma-separated.

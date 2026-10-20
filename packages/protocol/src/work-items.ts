@@ -135,7 +135,8 @@ export const WorkItemSchema = z
       .optional(),
     owner: z.string().trim().min(1).max(128).optional(),
     dependsOn: z.array(z.string().trim().min(1).max(64)).max(50),
-    summary: z.string().max(20_000),
+    /** Stored issue prose is returned in full, matching canonical tracker reads. */
+    summary: z.string(),
     criteria: z.array(WorkCriterionSchema).max(WORK_ITEM_CRITERIA_MAX),
     evidence: z.array(WorkEvidenceSchema).max(WORK_ITEM_EVIDENCE_MAX),
     /** Where to open it: an issue URL, or the repo-relative file path. */
