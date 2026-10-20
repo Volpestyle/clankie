@@ -963,6 +963,10 @@ export class ConversationStore {
         }
         return { op: "tail", schemaVersion: 1, result };
       }
+      // Send results belong to the device relay's exact-request cache. A direct
+      // service read cannot prove a relay result and must never re-dispatch.
+      case "send_receipt":
+        return { op: "send_receipt", schemaVersion: 1 };
       case "send":
         return { op: "send", schemaVersion: 1, result: await this.send(request.turn, authority) };
       case "upload_begin":

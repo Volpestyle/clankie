@@ -830,9 +830,11 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               ? options.dispatch(serviceRequest, abort.signal)
               : options.dispatch(serviceRequest);
       const result =
-        serviceRequest.op === "send"
-          ? await idempotency.run(currentAuthorization.device.deviceId, serviceRequest, dispatch)
-          : await dispatch();
+        serviceRequest.op === "send_receipt"
+          ? await idempotency.read(currentAuthorization.device.deviceId, serviceRequest)
+          : serviceRequest.op === "send"
+            ? await idempotency.run(currentAuthorization.device.deviceId, serviceRequest, dispatch)
+            : await dispatch();
       if (abort.signal.aborted) return true;
       // Recheck even a retained send receipt. Never downgrade owner authority
       // after a dispatch, or route/retry a write under another principal.
@@ -1236,17 +1238,40 @@ class TurnIdempotencyStore {
     this.clock = clock;
   }
 
+  public async read(
+    deviceId: string,
+    request: Extract<OperatorConversationServiceRequest, { op: "send_receipt" }>,
+  ): Promise<OperatorConversationServiceResult> {
+    this.expire();
+    const original = { op: "send" as const, schemaVersion: 1 as const, turn: request.turn };
+    const entry = this.entries.get(this.key(deviceId, original));
+    // Unknown, expired and upstream failures all stay unknown. No send fallback.
+    const value = await entry?.result.catch(() => undefined);
+    return {
+      op: "send_receipt",
+      schemaVersion: 1,
+      ...(value?.op === "send" ? { result: value.result } : {}),
+    };
+  }
+
+  private key(
+    deviceId: string,
+    request: Extract<OperatorConversationServiceRequest, { op: "send" }>,
+  ): string {
+    return createHash("sha256")
+      .update(deviceId)
+      .update("\0")
+      .update(JSON.stringify(request))
+      .digest("base64url");
+  }
+
   public run(
     deviceId: string,
     request: Extract<OperatorConversationServiceRequest, { op: "send" }>,
     dispatch: () => Promise<OperatorConversationServiceResult>,
   ): Promise<OperatorConversationServiceResult> {
     this.expire();
-    const key = createHash("sha256")
-      .update(deviceId)
-      .update("\0")
-      .update(JSON.stringify(request))
-      .digest("base64url");
+    const key = this.key(deviceId, request);
     const existing = this.entries.get(key);
     if (existing !== undefined) return existing.result;
     const result = dispatch()

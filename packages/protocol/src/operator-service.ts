@@ -344,6 +344,12 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       turn: SubmitOperatorConversationTurnSchema,
     })
     .strict(),
+  // Read the relay's retained result for the exact original send. Never dispatches it.
+  z.strictObject({
+    op: z.literal("send_receipt"),
+    schemaVersion: z.literal(1),
+    turn: SubmitOperatorConversationTurnSchema,
+  }),
   z.strictObject({
     op: z.literal("pending_messages"),
     schemaVersion: z.literal(1),
@@ -935,6 +941,11 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     })
     .strict(),
   z.strictObject({
+    op: z.literal("send_receipt"),
+    schemaVersion: z.literal(1),
+    result: SubmitOperatorConversationTurnResultSchema.optional(),
+  }),
+  z.strictObject({
     op: z.literal("pending_messages"),
     schemaVersion: z.literal(1),
     result: PendingNativeMessagesResultSchema,
@@ -1360,6 +1371,10 @@ interface CloseSeatOutcome {
   readonly refusal?: { reason: "unlanded_work"; worktrees: z.infer<typeof WorktreeReconciliationSchema>[] };
 }
 export interface OperatorConversationServiceClient {
+  /** Missing/expired receipts remain unknown; this read never authorizes a resend. */
+  sendReceipt?(
+    turn: SubmitOperatorConversationTurn,
+  ): Promise<SubmitOperatorConversationTurnResult | undefined>;
   ownerUpdateList?(filter?: OwnerUpdateListFilter): Promise<OwnerUpdateList>;
   ownerUpdateRead?(id: string): Promise<OwnerUpdateResult>;
   ownerUpdateDismiss?(id: string): Promise<OwnerUpdateResult>;
@@ -2052,6 +2067,11 @@ export function createOperatorConversationServiceClient(
           if (remaining > 0) await sleep(remaining);
         }
       }
+    },
+    async sendReceipt(turn) {
+      const result = await dispatch({ op: "send_receipt", schemaVersion: 1, turn });
+      if (result.op !== "send_receipt") throw new Error(`Unexpected ${result.op} result for send receipt`);
+      return result.result;
     },
     async send(turn) {
       const result = await dispatch({ op: "send", schemaVersion: 1, turn });

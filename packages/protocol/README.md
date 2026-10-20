@@ -60,6 +60,15 @@ Explicit Steer to next-turn-only Claude is rejected without sending or storage,
 including when the same text already has a next-turn receipt. Plain Send keeps
 its existing automatic routing.
 
+After an uncertain app send, `send_receipt` reads the relay's retained result
+using the exact original turn and the current paired-device identity. It never
+dispatches a send. Missing, expired or upstream-failed results stay unknown;
+clients keep the original blocked rather than interpreting absence as permission
+to resend. Direct service clients return unknown because that relay cache is not
+theirs. The existing revision fence and relay deduplication remain unchanged.
+Definitive HTTP refusals (including a read-only room's 409) are not uncertain
+transport outcomes. Room transcripts remain read-only.
+
 This additive service contract supports the separate VUH-1882 composer work and
 VUH-1883 Send-to-Stop UI. No app UI is changed in this repository.
 

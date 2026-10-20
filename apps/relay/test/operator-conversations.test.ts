@@ -642,11 +642,19 @@ describe("authenticated operator conversation relay", () => {
       },
     });
     const turn = sendRequest("hello", 0);
+    const check = () => post(relay.url, "/operator/v1/dispatch", { ...turn, op: "send_receipt" });
+    // A check before the original exists is unknown and dispatches nothing.
+    expect(await (await check()).json()).toEqual({ op: "send_receipt", schemaVersion: 1 });
+    expect(sends).toBe(0);
     const [first, duplicate] = await Promise.all([
       post(relay.url, "/operator/v1/dispatch", turn),
       post(relay.url, "/operator/v1/dispatch", turn),
     ]);
     expect(await first.json()).toEqual(await duplicate.json());
+    expect(sends).toBe(1);
+    const receipt = await check();
+    expect(receipt.status).toBe(200);
+    expect((await receipt.json()).result).toMatchObject({ status: "accepted", runId: "run-1" });
     expect(sends).toBe(1);
     const laterRetry = await post(relay.url, "/operator/v1/dispatch", turn);
     expect((await laterRetry.json()).result).toMatchObject({ status: "accepted", runId: "run-1" });
@@ -674,6 +682,45 @@ describe("authenticated operator conversation relay", () => {
       },
     );
     expect(sends).toBe(4);
+  });
+
+  it("keeps send checks device-bound, expiring to unknown without dispatch", async () => {
+    let deviceId = activeDevice.deviceId;
+    let now = 0;
+    let sends = 0;
+    const relay = await startRelay({
+      clock: () => now,
+      authorizeDevice: {
+        authorize: async () => ({ authorized: true, device: { ...activeDevice, deviceId } }),
+      },
+      dispatch: async (request) => {
+        if (request.op !== "send") throw new Error("receipt dispatched upstream");
+        sends++;
+        return {
+          op: "send",
+          schemaVersion: 1,
+          result: {
+            schemaVersion: 1,
+            status: "accepted",
+            conversationId: request.turn.conversationId,
+            runId: "run-one",
+            revision: 1,
+            safeCursor: "000000000001",
+          },
+        };
+      },
+    });
+    const turn = sendRequest("hello", 0);
+    await post(relay.url, "/operator/v1/dispatch", turn);
+    const check = async () =>
+      (await post(relay.url, "/operator/v1/dispatch", { ...turn, op: "send_receipt" })).json();
+    expect((await check()).result).toMatchObject({ runId: "run-one" });
+    deviceId = "other-device";
+    expect((await check()).result).toBeUndefined();
+    deviceId = activeDevice.deviceId;
+    now = 24 * 60 * 60 * 1000;
+    expect((await check()).result).toBeUndefined();
+    expect(sends).toBe(1);
   });
 
   it("fails closed when an upstream record tries to expose private Eve state", async () => {

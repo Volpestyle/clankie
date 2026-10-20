@@ -100,3 +100,76 @@ it.each([false, true])("steers past queued work while a human/internal (%s) turn
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("queues an owner message behind a busy turn and rejects its stale duplicate without another run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-busy-send-"));
+  let finish!: () => void;
+  const busy = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const heard: string[] = [];
+  const store = new ConversationStore(root, async (_id, message, publish) => {
+    heard.push(message);
+    if (message === "first") {
+      started();
+      await busy;
+    }
+    publish({ type: "message", role: "captain", text: `answer: ${message}`, streaming: false });
+  });
+  const send = (message: string, revision: number, delivery?: "queue") =>
+    store.serve({
+      op: "send",
+      schemaVersion: 1,
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: "global-default",
+        surfaceClientId: "command-center-mobile",
+        expectedRevision: revision,
+        message,
+        ...(delivery ? { delivery } : {}),
+      },
+    });
+  try {
+    await send("first", 0);
+    await running;
+    const queued = await send("second", 1, "queue");
+    expect(queued).toMatchObject({
+      op: "send",
+      result: { status: "accepted", deliveryStage: "stored", seatDelivery: { state: "queued" } },
+    });
+    expect(heard).toEqual(["first"]);
+    expect(await send("second", 1, "queue")).toMatchObject({
+      op: "send",
+      result: { status: "revision_conflict" },
+    });
+    finish();
+    if (queued.op !== "send" || queued.result.status !== "accepted") throw new Error("not accepted");
+    await store.awaitRun(queued.result.runId);
+    expect(heard).toEqual(["first", "second"]);
+    const replay = await store.serve({
+      op: "replay",
+      schemaVersion: 1,
+      replay: {
+        schemaVersion: 1,
+        conversationId: "global-default",
+        surfaceClientId: "test",
+        limit: 50,
+      },
+    });
+    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("no page");
+    expect(
+      replay.result.events
+        .filter((e) => e.type === "message" && e.role === "captain")
+        .map((e) => e.type === "message" && e.text),
+    ).toEqual(["answer: first", "answer: second"]);
+  } finally {
+    finish();
+    await store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
