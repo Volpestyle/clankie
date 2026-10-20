@@ -7038,7 +7038,9 @@ paths:
       description: |
         Owner operators and active paired devices may read these secret-free rows.
         With grouped=true, shared push registrations on the same platform become
-        one row with pairingIds and the maximum lastSeenAt. Active registrations
+        one row with pairingIds and the maximum lastSeenAt. The exact GET query
+        is also supported through encrypted gateway transport; other query forms
+        remain refused there. Active registrations
         take precedence over revoked ones, then newest creation. Automation rows
         stay separate and include run metadata. Revoke every pairingId explicitly
         to remove a grouped device's access; listing never revokes a device.

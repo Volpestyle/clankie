@@ -401,6 +401,7 @@ export function publicGatewayTargetFor(
   if (method === "POST" && /^\/v1\/devices\/[A-Za-z0-9_-]{1,128}\/revoke$/u.test(path)) return "control";
   if (method === "GET" && /^\/v1\/operator\/work-tracker\?projectId=[a-z][a-z0-9_-]{0,63}$/u.test(path))
     path = WORK_TRACKER_SETTINGS_PATH;
+  if (method === "GET" && path === "/v1/devices?grouped=true") path = "/v1/devices";
   // Normalize only the explicitly validated queries. The forwarded path keeps
   // its query for the receiving route to validate again.
   if (method === "GET" && path === `${FLEET_HIRE_DEFAULTS_PATH}?includeModels=true`)

@@ -129,6 +129,8 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
     const credential = GatewayEncryptionCredentialSchema.parse(options.credential());
     const pushBody = isPush ? ((await request.json()) as Record<string, unknown>) : undefined;
     const hostId = hostPath?.[1] ?? pushBody?.hostId;
+    const groupedDevicesQuery =
+      request.method === "GET" && hostPath?.[2] === "/v1/devices" && url.search === "?grouped=true";
     const projectQuery =
       url.search === "?includeAutonomy=true" &&
       ((request.method === "GET" && hostPath?.[2] === PROJECTS_PATH) ||
@@ -157,6 +159,7 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
     if (
       hostId !== credential.hostId ||
       (url.search &&
+        !groupedDevicesQuery &&
         !projectQuery &&
         !fleetSettingsQuery &&
         !hireModelsQuery &&

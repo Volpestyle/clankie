@@ -474,3 +474,75 @@ it("carries account-connection codes only in the encrypted envelope and never re
     expect.any(Function),
   );
 });
+
+it("groups real device registrations through encrypted transport and refuses other queries", async () => {
+  const first = await account("grouped-devices", undefined, undefined, TAKE_CONTROL_GRANTS);
+  const firstCredential = { ...first.getCredential() };
+  const operatorPost = async (path: string, body: unknown) => {
+    const response = await first.app.app.request(path, {
+      method: "POST",
+      headers: { authorization: "Bearer owner", "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(200);
+    return response.json();
+  };
+  const wire = await operatorPost("/v1/pairing/offer", {});
+  const pending = await operatorPost("/v1/pairing/redeem", {
+    code: wire.code,
+    device: { name: "Phone", platform: "ios" },
+  });
+  const second = await operatorPost("/v1/pairing/complete", {
+    completionToken: pending.completionToken,
+    acceptedGrants: pending.offeredGrants,
+  });
+  // The fixture publisher selects its latest offer; restore the first client’s existing session.
+  Object.assign(first.getCredential(), firstCredential);
+  const push = { registrationId: "11111111-1111-4111-8111-111111111111", sequence: 1, enabled: true };
+  expect(
+    (
+      await first.client(`${first.base}/v1/devices/self/push`, {
+        method: "POST",
+        headers: first.headers,
+        body: JSON.stringify(push),
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await first.app.app.request("/v1/devices/self/push", {
+        method: "POST",
+        headers: { authorization: `Bearer ${second.deviceToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ ...push, sequence: 2 }),
+      })
+    ).status,
+  ).toBe(200);
+  const response = await first.client(`${first.base}/v1/devices?grouped=true`, { headers: first.headers });
+  expect(response.status).toBe(200);
+  const grouped = await response.json();
+  expect(grouped).toHaveLength(1);
+  expect(grouped[0].pairingIds.sort()).toEqual([first.device.deviceId, second.deviceId].sort());
+  expect(grouped[0].lastSeenAt).toBeTruthy();
+  for (const suffix of [
+    "?grouped=false",
+    "?grouped=true&extra=1",
+    "?grouped=true&grouped=true",
+    "?grouped=%74rue",
+  ])
+    await expect(
+      first.client(`${first.base}/v1/devices${suffix}`, { headers: first.headers }),
+    ).rejects.toThrow("Gateway host identity mismatch");
+  await expect(
+    first.client(`${first.base}/v1/devices?grouped=true`, { method: "POST", headers: first.headers }),
+  ).rejects.toThrow("Gateway host identity mismatch");
+  // Revoke each exact member through the existing encrypted endpoint; current session last.
+  for (const id of [second.deviceId, first.device.deviceId])
+    expect(
+      (
+        await first.client(`${first.base}/v1/devices/${id}/revoke`, {
+          method: "POST",
+          headers: first.headers,
+        })
+      ).status,
+    ).toBe(200);
+});
