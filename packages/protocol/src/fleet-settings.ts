@@ -58,6 +58,8 @@ export const FleetSettingsSnapshotSchema = z
     /** The owner's autonomy dial read back from the leaves (ADR 0263); absent on an older service. */
     autonomyLevel: AutonomyLevelReadingSchema.optional(),
     autonomyDrift: AutonomyDriftSchema.optional(),
+    /** Opt-in read; writes can change trust and autonomy together under one revision. */
+    maximumTrustMode: z.boolean().optional(),
   })
   .strict()
   .refine(
@@ -87,6 +89,7 @@ export const UpdateFleetSettingsSchema = z
         hire: HireProfileSchema.nullable().optional(),
         /** Writes the level's leaves first; explicit leaves in the same change win. */
         autonomyLevel: AutonomyLevelSchema.optional(),
+        maximumTrustMode: z.boolean().optional(),
       })
       .refine(
         (value) => Object.values(value).some((field) => field !== undefined),
@@ -213,6 +216,18 @@ export const FleetHireDefaultsSnapshotSchema = z
     /** Covers the whole stored hire profile, so a concurrent account or subagent edit also fences. */
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
     hire: HireDefaultsSchema,
+    /** Requested with includeModels=true; values come from the host model registry. */
+    agents: z
+      .array(
+        z
+          .object({
+            id: z.enum(OPERATOR_SEAT_HARNESSES),
+            label: z.string(),
+            models: z.array(z.object({ id: z.string().min(1).max(200), name: z.string() }).strict()),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict();
 export type FleetHireDefaultsSnapshot = z.infer<typeof FleetHireDefaultsSnapshotSchema>;

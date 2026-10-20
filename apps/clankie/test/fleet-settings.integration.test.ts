@@ -988,3 +988,68 @@ it("exposes retained Balanced drift without raising saved leaves and removes it 
   expect(full.autonomyLevel).toBe("full");
   expect(full.autonomyDrift).toBeUndefined();
 });
+
+it("opts Settings into an atomic trust and autonomy edit and fences changes from either API", async () => {
+  const f = await fixture();
+  const path = "/v1/operator/fleet-settings?includeMaximumTrust=true";
+  const before = FleetSettingsSnapshotSchema.parse(await (await f.request(path)).json());
+  expect(before.maximumTrustMode).toBe(false);
+  const saved = FleetSettingsSnapshotSchema.parse(
+    await (
+      await f.request(path, {
+        schemaVersion: 1,
+        expectedRevision: before.revision,
+        changes: { autonomyLevel: "full", maximumTrustMode: true },
+      })
+    ).json(),
+  );
+  expect(saved.maximumTrustMode).toBe(true);
+  expect(saved.autonomyLevel).toBe("full");
+  expect((await f.settings.load()).maximumTrustMode).toBe(true);
+  expect(
+    (
+      await f.request(path, {
+        schemaVersion: 1,
+        expectedRevision: before.revision,
+        changes: { maximumTrustMode: false },
+      })
+    ).status,
+  ).toBe(409);
+  await f.request("/v1/operator/maximum-trust-mode", { schemaVersion: 1, enabled: false });
+  expect(
+    (
+      await f.request(path, {
+        schemaVersion: 1,
+        expectedRevision: saved.revision,
+        changes: { autonomyLevel: "low" },
+      })
+    ).status,
+  ).toBe(409);
+  expect(await (await f.request("/v1/operator/fleet-settings")).json()).not.toHaveProperty(
+    "maximumTrustMode",
+  );
+  f.revoke();
+  expect((await f.request(path)).status).toBe(401);
+});
+
+it("offers registry models by coding agent only to an authorized opt-in read without changing saved hire defaults", async () => {
+  const f = await fixture();
+  const before = await f.settings.load();
+  expect(await (await f.request(FLEET_HIRE_DEFAULTS_PATH)).json()).not.toHaveProperty("agents");
+  const catalog = FleetHireDefaultsSnapshotSchema.parse(
+    await (await f.request(`${FLEET_HIRE_DEFAULTS_PATH}?includeModels=true`)).json(),
+  );
+  expect(
+    catalog.agents
+      ?.find((agent) => agent.id === "claude")
+      ?.models.some((model) => model.id.startsWith("claude-")),
+  ).toBe(true);
+  expect(
+    catalog.agents
+      ?.find((agent) => agent.id === "codex")
+      ?.models.some((model) => model.id.startsWith("gpt-")),
+  ).toBe(true);
+  expect((await f.settings.load()).fleet.hire).toEqual(before.fleet.hire);
+  f.revoke();
+  expect((await f.request(`${FLEET_HIRE_DEFAULTS_PATH}?includeModels=true`)).status).toBe(401);
+});

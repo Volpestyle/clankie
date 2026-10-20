@@ -4495,6 +4495,18 @@ worker, peer, room or tool can set it. The command prints
 `seatsOnOtherMode` when the service could observe its seats. In the console,
 `/maximum-trust-mode` opens the switch, and `/maximum-trust-mode on|off|status`
 sets or reads it; the hosted console lists it under `/settings`.
+Settings presents Maximum trust as the top autonomy choice. The existing CLI switch
+and its stored value remain available. API clients can request
+`GET /v1/operator/fleet-settings?includeMaximumTrust=true`; the returned revision
+covers both fleet policy and `maximumTrustMode`. A POST to the same opt-in URL
+can save `autonomyLevel: "full"` and `maximumTrustMode: true` atomically, or disable
+trust while choosing another level. Omitting the opt-in keeps the legacy snapshot
+and revision shape. A maximum-trust write requires the opt-in revision.
+
+The hire-defaults GET accepts `includeModels=true` to return `agents` with their
+registry model IDs and display names. This read changes no saved default. Legacy
+reads and writes retain their existing wire shapes.
+
 `clankie claude|codex|grok --dry-run` shows the resulting flags and `maximumTrustMode`.
 When the service cannot report the mode, the seat launches in auto mode and
 says so.

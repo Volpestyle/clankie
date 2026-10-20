@@ -1,3 +1,4 @@
+import { createModelRegistry } from "@clankie/model-registry";
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -25,7 +26,11 @@ import {
 } from "./fleet-settings-context.ts";
 import { resourceMachine, machineResourcePolicy } from "./machine-fleet-resources.ts";
 
-function fleetSettingsSnapshot(settings: ClankieSettings, includeWorkPolicy = false): FleetSettingsSnapshot {
+function fleetSettingsSnapshot(
+  settings: ClankieSettings,
+  includeWorkPolicy = false,
+  includeMaximumTrust = false,
+): FleetSettingsSnapshot {
   const fleet = {
     ...settings.fleet,
     size: settings.fleet.size,
@@ -47,9 +52,14 @@ function fleetSettingsSnapshot(settings: ClankieSettings, includeWorkPolicy = fa
       : {}),
     fleetGates: true,
     resourceMachines: ["local", ...settings.machines.map((machine) => machine.id)],
-    revision: createHash("sha256").update(JSON.stringify(fleet)).digest("hex"),
+    revision: createHash("sha256")
+      .update(
+        JSON.stringify(includeMaximumTrust ? { fleet, maximumTrustMode: settings.maximumTrustMode } : fleet),
+      )
+      .digest("hex"),
     fleet,
     autonomyLevel: matchingAutonomyLevel(settings.autonomy.fleet),
+    ...(includeMaximumTrust ? { maximumTrustMode: settings.maximumTrustMode } : {}),
     ...(drift === undefined ? {} : { autonomyDrift: drift }),
   };
 }
@@ -87,17 +97,31 @@ export function createFleetSettingsRoutes(
     const current = await settings.load();
     const authority = await authorize(context.req.raw);
     if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
-    return context.json(fleetSettingsSnapshot(current, context.req.query("includeWorkPolicy") === "true"));
+    return context.json(
+      fleetSettingsSnapshot(
+        current,
+        context.req.query("includeWorkPolicy") === "true",
+        context.req.query("includeMaximumTrust") === "true",
+      ),
+    );
   });
   app.post(FLEET_SETTINGS_PATH, bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
     const input = UpdateFleetSettingsSchema.safeParse(await context.req.json().catch(() => null));
     if (!input.success) return context.json({ error: "malformed" }, 400);
+    if (
+      input.data.changes.maximumTrustMode !== undefined &&
+      context.req.query("includeMaximumTrust") !== "true"
+    )
+      return context.json({ error: "malformed" }, 400);
     let before: string | undefined;
     try {
       const updated = await settings.update(
         (current) => {
-          if (fleetSettingsSnapshot(current).revision !== input.data.expectedRevision)
+          if (
+            fleetSettingsSnapshot(current, false, context.req.query("includeMaximumTrust") === "true")
+              .revision !== input.data.expectedRevision
+          )
             throw new Error("Fleet settings changed");
           before = JSON.stringify(current);
           const {
@@ -113,6 +137,7 @@ export function createFleetSettingsRoutes(
             autoTidy,
             hire,
             autonomyLevel,
+            maximumTrustMode,
             ...preferences
           } = input.data.changes;
           if (machineResources)
@@ -129,6 +154,7 @@ export function createFleetSettingsRoutes(
           );
           return {
             ...current,
+            ...(maximumTrustMode === undefined ? {} : { maximumTrustMode }),
             fleet: {
               ...current.fleet,
               ...(size === undefined ? {} : { size }),
@@ -173,7 +199,13 @@ export function createFleetSettingsRoutes(
         await dependencies.configureResources?.(machineResourcePolicy(updated, "local"));
       for (const machine of Object.keys(input.data.changes.machineResources ?? {}))
         await dependencies.configureResources?.(machineResourcePolicy(updated, machine), machine);
-      return context.json(fleetSettingsSnapshot(updated, context.req.query("includeWorkPolicy") === "true"));
+      return context.json(
+        fleetSettingsSnapshot(
+          updated,
+          context.req.query("includeWorkPolicy") === "true",
+          context.req.query("includeMaximumTrust") === "true",
+        ),
+      );
     } catch {
       return context.json({ error: "fleet_settings_conflict" }, 409);
     }
@@ -182,7 +214,33 @@ export function createFleetSettingsRoutes(
     const current = await settings.load();
     const authority = await authorize(context.req.raw);
     if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
-    return context.json(fleetHireDefaultsSnapshot(current));
+    const snapshot = fleetHireDefaultsSnapshot(current);
+    if (context.req.query("includeModels") !== "true") return context.json(snapshot);
+    const catalog = await createModelRegistry().catalog();
+    const agents = [
+      { id: "claude" as const, label: "Claude", provider: "anthropic" },
+      { id: "codex" as const, label: "Codex", provider: "openai" },
+    ].map((agent) => ({
+      id: agent.id,
+      label: agent.label,
+      models: Object.values(catalog[agent.provider]?.models ?? {})
+        .filter((model) => model.status !== "deprecated" && model.id.length <= 200)
+        .filter((model) =>
+          agent.id === "claude"
+            ? model.id.startsWith("claude-")
+            : model.id.startsWith("gpt-") || /^(o[1-9])/.test(model.id),
+        )
+        .map((model) => ({ id: model.id, name: model.name }))
+        .sort((a, b) => b.id.localeCompare(a.id, undefined, { numeric: true })),
+    }));
+    // Registry reads never waive the caller's current authority.
+    const authorityAfterCatalog = await authorize(context.req.raw);
+    if (authorityAfterCatalog !== true)
+      return context.json(
+        { error: authorityAfterCatalog },
+        authorityAfterCatalog === "forbidden" ? 403 : 401,
+      );
+    return context.json({ ...snapshot, agents });
   });
   app.post(FLEET_HIRE_DEFAULTS_PATH, bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);

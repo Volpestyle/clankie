@@ -184,3 +184,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0280: Automatic tidy requires positive work proof](0280-automatic-tidy-requires-positive-work-proof.md) — VUH-2462.
 
 - [0281 — Paired devices read a shipping projection](0281-paired-devices-read-a-shipping-projection.md)
+- [0282: Settings can save trust with autonomy](0282-settings-can-save-trust-with-autonomy.md) — VUH-2525.
