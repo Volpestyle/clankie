@@ -1,3 +1,4 @@
+import { discordRoleInviteUrl } from "@clankie/protocol";
 import { parseArgs } from "node:util";
 import {
   DiscordSetupClient,
@@ -30,16 +31,13 @@ export async function runDiscordSetupCommand(args: readonly string[], api: Disco
     return view;
   if (positionals[0] === "invite") {
     if (positionals.length !== 1 || Object.keys(values).some((key) => key !== "role")) throw new Error(USAGE);
-    if (values.role) {
-      const connect = view.snapshot.setup!.definition.sentences.find((sentence) => sentence.id === "connect");
-      const pickerIndex = connect && discordSetupPickers(connect).findIndex((part) => part.picker === "role");
-      if (pickerIndex === undefined || pickerIndex < 0)
-        throw new Error("This host does not offer the server role setup model.");
-      view = await client.apply(view, "connect", pickerIndex, { value: values.role });
-    }
-    if (!view.snapshot.setup!.invite)
-      throw new Error("Set the bot Application ID in Advanced before creating its invite link.");
-    return view.snapshot.setup!.invite;
+    const invite = view.snapshot.setup!.invite;
+    if (!invite) throw new Error("Set the bot Application ID in Advanced before creating its invite link.");
+    const role = values.role ?? "participant";
+    if (role !== "participant" && role !== "admin") throw new Error(USAGE);
+    const applicationId = new URL(invite.url).searchParams.get("client_id");
+    if (!applicationId) throw new Error("Discord invitation unavailable.");
+    return { role, url: discordRoleInviteUrl(applicationId, role) };
   }
   if (positionals[0] === "test-post") {
     if (positionals.length !== 1 || !values.channel || Object.keys(values).some((key) => key !== "channel"))

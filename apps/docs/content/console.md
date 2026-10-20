@@ -69,7 +69,7 @@ CLI. This table is generated from the console's command registry.
 
 {{TUI_README_OPERATOR_BEHAVIOR}}
 
-`/discord` connects a server with a Participant or Admin role, a fleet toggle,
+`/discord` edits each joined server’s Participant or Admin role, owners, fleet toggle,
 and a tracking level, and requests exactly that role's permissions. Setup marks
 proven missing permissions **needs** and unknown ones **not checked**. Admin
 controls its dedicated server except deleting it or transferring ownership. Raw

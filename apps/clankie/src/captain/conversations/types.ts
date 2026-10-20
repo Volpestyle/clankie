@@ -408,6 +408,8 @@ export interface ChannelProjection {
   swarmGuildId?: () => string | undefined;
   /** Refresh the connected server before any explicit or automatic projection mutation. */
   currentGuildId?: () => Promise<string | undefined>;
+  /** Current cached policy, refreshed by settings reads before resolving or posting. */
+  allowsGuild?: (guildId: string) => boolean;
   /**
    * Delete one webhook in Discord — the cleanup half of `provision`, called
    * when a room is unprojected or removed. Authenticated by the token itself,

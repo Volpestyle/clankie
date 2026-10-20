@@ -7,10 +7,9 @@ revision fences, directory reads and permission evidence remain foundations.
 
 ## Decision
 
-Discord setup is one connected server, Clankie's role, fleet display on/off and
-a tracking level. The shared definition belongs to protocol; the app, TUI and
-hosted dashboard consume it. The normal setup has no channel or Discord-role
-picker. IDs, machine grants and body diagnostics live under Advanced.
+Discord setup lists every joined server. Each has Clankie's role, owners, fleet
+display on/off and a tracking level (VUH-2554, 2026-10-20). The shared definition belongs to protocol; the app, TUI and
+hosted dashboard consume it. Owner-role and Participant projection-channel choices belong to each server. IDs, machine grants and body diagnostics live under Advanced.
 
 **Participant** means a normal server member. Discord permissions and channel
 overwrites decide where Clankie can read, speak and join voice. Connecting the
@@ -50,7 +49,7 @@ Discord's Administrator permission still bypasses channel overwrites.
 
 ```mermaid
 flowchart LR
-  Setup[Server + role + fleet + tracking] --> Settings[Revision-fenced settings]
+  Setup[Guild map: role + owners + fleet + tracking] --> Settings[Revision-fenced settings]
   Settings --> Checks[Role invite and gateway grant check]
   Settings --> Adapter[Discord adapter]
   Adapter --> Participant[Participant: permitted rooms and designated projection channel]
@@ -107,3 +106,26 @@ Discord remains the final authority over platform permissions and role
 hierarchy. [Discord's permission documentation](https://docs.discord.com/developers/topics/permissions)
 defines Administrator and channel overwrites; [its server API](https://docs.discord.com/developers/resources/guild)
 defines guild deletion and the ownership-transfer field.
+
+## Many servers (VUH-2554)
+
+`discord.guilds` is the canonical map keyed by guild ID. Each entry has `role`,
+`owners`, optional `ownerRoleId`, `fleetEnabled`, optional `fleetChannelId`, and
+`trackingLevel`. The latter is the extension point for VUH-2531's forum tracker;
+this change does not implement its two-way built-in-tracker mirror.
+
+The existing single server's role, owner policy and projection options migrate
+on read and persist on the next ordinary write. Other known server policies
+retain role/owners and start with fleet/tracking off. Migration does not enable
+another server's projection. Legacy selected fields and `servers` remain
+compatibility projections for older clients; edits to them affect only the named
+guild. Revision fencing protects the whole map. The bridge resolves the target
+guild's policy again before mutations and preserves owner-only audience proofs.
+
+Settings screens edit each joined server independently. Inviting another server
+requests a role without changing existing servers. Participant fleet messages
+use each enabled guild's own channel. Existing Admin group webhooks stay bound
+to their actual guild; new automatic group rooms use the first enabled Admin
+in map order. A group retains one webhook destination. Tracking events have
+separate durable deliveries per guild, so disabling one never changes another
+and uncertain writes never replay. Guild-scoped permission checks carry `guildId`.

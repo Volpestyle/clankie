@@ -4,9 +4,11 @@ import {
   type DiscordServerActionResult,
   type DiscordSettings,
   DiscordServerPolicySchema,
+  DiscordSettingsSchema,
 } from "@clankie/protocol";
 
 export interface DiscordServerAuthority {
+  guilds?: DiscordSettings["guilds"] | undefined;
   servers?: DiscordSettings["servers"] | undefined;
   ownerUserId?: string | undefined;
   serverId?: string | undefined;
@@ -154,13 +156,15 @@ export async function executeDiscordServerAction(
       (parts.length === 2 && Object.hasOwn(record(action.body) ?? {}, "owner_id")))
   )
     return refuse("I never delete a server or transfer its ownership.");
+  const features = authority.guilds?.[serverId] ?? (serverId === authority.serverId ? authority : undefined);
   const participantPost =
     channelRoute &&
     parts.length === 3 &&
     parts[2] === "messages" &&
     action.method === "POST" &&
-    parts[1] === authority.fleetChannelId &&
-    (authority.fleetEnabled || authority.trackingLevel !== "off");
+    features !== undefined &&
+    parts[1] === features.fleetChannelId &&
+    (features.fleetEnabled || features.trackingLevel !== "off");
   if (
     role !== "admin" &&
     !participantPost &&
@@ -225,6 +229,9 @@ export async function executeDiscordServerAction(
 export function discordServerAuthority(env: NodeJS.ProcessEnv = process.env): DiscordServerAuthority {
   const tracking = env.DISCORD_TRACKING_LEVEL;
   return {
+    guilds: env.DISCORD_GUILDS
+      ? DiscordSettingsSchema.shape.guilds.parse(JSON.parse(env.DISCORD_GUILDS))
+      : {},
     servers: env.DISCORD_SERVERS
       ? JSON.parse(env.DISCORD_SERVERS).map((entry: unknown) => DiscordServerPolicySchema.parse(entry))
       : [],

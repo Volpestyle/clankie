@@ -44,6 +44,7 @@ export function resolveDiscordSettings(
   const { overridden, takeString, takeList, takeBoolean, takeInteger } = envOverrideReaders(env);
 
   for (const [field, name] of [
+    ["guilds", "DISCORD_GUILDS"],
     ["servers", "DISCORD_SERVERS"],
     ["roomSkills", "DISCORD_ROOM_SKILLS"],
   ] as const) {
@@ -165,6 +166,7 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
     if (values.length > 0) env[name] = values.join(",");
   };
 
+  env.DISCORD_GUILDS = JSON.stringify(settings.guilds);
   env.DISCORD_SERVERS = JSON.stringify(settings.servers);
   env.DISCORD_ROOM_SKILLS = JSON.stringify(settings.roomSkills);
   put("DISCORD_SERVER_ID", settings.serverId);

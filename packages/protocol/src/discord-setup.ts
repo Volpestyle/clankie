@@ -16,6 +16,7 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
   {
     title: "Server setup",
     fields: [
+      { key: "guilds", label: "Per-server settings (JSON)", kind: "text" },
       { key: "serverId", label: "Connected server ID", kind: "text" },
       { key: "role", label: "Clankie’s role", kind: "choice", choices: ["participant", "admin"] },
       { key: "fleetEnabled", label: "Fleet in Discord", kind: "boolean" },
@@ -439,6 +440,10 @@ export const DiscordSetupSnapshotSchema = z
       .array(
         z
           .object({
+            guildId: z
+              .string()
+              .regex(/^\d{5,32}$/u)
+              .optional(),
             sentenceId: z.enum(["connect", "fleet", "tracking", "talk", "team"]),
             kind: z.enum([
               "view_channel",

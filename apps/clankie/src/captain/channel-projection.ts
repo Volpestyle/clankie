@@ -8,7 +8,7 @@
 // be a fleet's worth of violations for a fleet.
 
 import { planDiscordWebhookPost } from "@clankie/discord-presence-core";
-import type { DiscordSettings } from "@clankie/protocol";
+import { discordFleetGuild, discordGuildSettings, type DiscordSettings } from "@clankie/protocol";
 import type { ChannelProjection } from "./conversations.ts";
 
 const DISCORD_API = "https://discord.com/api/v10";
@@ -39,7 +39,13 @@ export function createChannelProjection(
   };
   const requireAdmin = async (guildId?: string, requireFleet = true) => {
     if (options.fleetSettings === undefined) return;
-    const settings = await fleetSettings();
+    const all = await fleetSettings();
+    const target =
+      guildId ??
+      (requireFleet
+        ? discordFleetGuild(all)
+        : Object.keys(all.guilds).find((id) => all.guilds[id]?.role === "admin"));
+    const settings = target ? discordGuildSettings(all, target) : all;
     if (
       settings.serverId === undefined ||
       settings.role !== "admin" ||
@@ -64,7 +70,9 @@ export function createChannelProjection(
     },
     resolve: async (input) => {
       await requireAdmin();
-      return resolve(fetchImpl)(input);
+      const target = await resolve(fetchImpl)(input);
+      await requireAdmin(target.guildId);
+      return target;
     },
     remove: async (input) => {
       await requireAdmin(undefined, false);
@@ -90,45 +98,39 @@ export function createChannelProjection(
             return options.rooms!();
           },
         }),
+    ...(options.fleetSettings === undefined
+      ? {}
+      : {
+          allowsGuild: (guildId: string) =>
+            latestSettings?.guilds[guildId]?.role === "admin" &&
+            latestSettings.guilds[guildId]?.fleetEnabled === true,
+        }),
     swarmGuildId: () =>
-      latestSettings === undefined
-        ? options.swarmGuildId?.()
-        : latestSettings.role === "admin"
-          ? latestSettings.serverId
-          : undefined,
+      latestSettings === undefined ? options.swarmGuildId?.() : discordFleetGuild(latestSettings),
     ...(options.fleetSettings === undefined
       ? {}
       : {
           currentGuildId: async () => {
             await requireAdmin();
-            return latestSettings?.serverId;
+            return latestSettings && discordFleetGuild(latestSettings);
           },
           autoProvision: async () => {
             const settings = await fleetSettings();
-            return !!(
-              options.provision &&
-              settings.serverId &&
-              settings.role === "admin" &&
-              settings.fleetEnabled &&
-              settings.teamVisible !== false
-            );
+            return !!(options.provision && discordFleetGuild(settings));
           },
           participantPost: async (input) => {
             const settings = await fleetSettings();
-            if (settings.role !== "participant") return false;
-            if (
-              settings.serverId &&
-              settings.fleetEnabled &&
-              settings.teamVisible !== false &&
-              settings.fleetChannelId &&
-              options.participantPost
-            ) {
-              await options.participantPost(
-                settings.fleetChannelId,
-                bounded(`**${input.username}**\n${input.content}`, CONTENT_MAX),
-              );
+            let participant = false;
+            for (const policy of Object.values(settings.guilds)) {
+              if (policy.role !== "participant") continue;
+              participant = true;
+              if (policy.fleetEnabled && policy.fleetChannelId && options.participantPost)
+                await options.participantPost(
+                  policy.fleetChannelId,
+                  bounded(`**${input.username}**\n${input.content}`, CONTENT_MAX),
+                );
             }
-            return true;
+            return participant && !discordFleetGuild(settings);
           },
         }),
   };

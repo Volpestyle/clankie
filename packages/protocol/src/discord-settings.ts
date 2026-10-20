@@ -15,6 +15,23 @@ export const DiscordTrackingLevelSchema = z.enum([
   "all_issues",
 ]);
 
+/** One guild's options. Forum work tracking can extend this without a second server selector. */
+export const DiscordGuildSettingsSchema = z
+  .object({
+    role: DiscordRoleSchema.default("participant"),
+    owners: z.enum(["me", "everyone", "role"]).default("me"),
+    ownerRoleId: SnowflakeSchema.optional(),
+    fleetEnabled: z.boolean().default(false),
+    fleetChannelId: SnowflakeSchema.optional(),
+    trackingLevel: DiscordTrackingLevelSchema.default("off"),
+  })
+  .strict()
+  .refine(
+    (value) => value.owners !== "role" || value.ownerRoleId !== undefined,
+    "Choose the Discord role that owns Clankie.",
+  );
+export type DiscordGuildSettings = z.infer<typeof DiscordGuildSettingsSchema>;
+
 export const DiscordServerPolicySchema = z
   .object({
     serverId: SnowflakeSchema,
@@ -61,7 +78,12 @@ export const HouseHuntingAuthorBindingSchema = z
 
 export const DiscordSettingsSchema = z
   .object({
-    /** One connected server. Discord permissions decide the rooms Clankie can inhabit. */
+    /** Canonical settings keyed by Discord guild ID. */
+    guilds: z
+      .record(SnowflakeSchema, DiscordGuildSettingsSchema)
+      .default({})
+      .refine((guilds) => Object.keys(guilds).length <= 64, "Too many server policies"),
+    /** Compatibility projection for older clients; new writers edit guilds. */
     serverId: SnowflakeSchema.optional(),
     role: DiscordRoleSchema.default("participant"),
     servers: z
@@ -239,10 +261,7 @@ export const DiscordSettingsSchema = z
 export type DiscordSettings = z.infer<typeof DiscordSettingsSchema>;
 
 /** Project the server role model into the existing body configuration without granting machine access. */
-export function discordServerSettings(
-  settings: DiscordSettings,
-  previous?: DiscordSettings,
-): DiscordSettings {
+function legacyDiscordServerSettings(settings: DiscordSettings, previous?: DiscordSettings): DiscordSettings {
   if (!settings.serverId)
     return previous?.serverId
       ? {
@@ -288,6 +307,119 @@ export function discordServerSettings(
     userSessionGuildIds: guilds,
     // The lab body’s recorded opt-in is a separate trust ceiling, retained in Advanced.
   };
+}
+
+/** Upgrade once, retaining the selected server's projection and every ownership policy. */
+export function discordServerSettings(
+  settings: DiscordSettings,
+  previous?: DiscordSettings,
+): DiscordSettings {
+  const changed = (key: keyof DiscordSettings) =>
+    previous !== undefined && JSON.stringify(settings[key]) !== JSON.stringify(previous[key]);
+  const mapChanged = changed("guilds");
+  let guilds = { ...settings.guilds };
+  const firstUpgrade = !Object.keys(guilds).length && !mapChanged;
+  if (firstUpgrade || (!mapChanged && changed("servers"))) {
+    const policies = Object.fromEntries(
+      settings.servers.map(({ serverId, ...policy }) => [serverId, policy]),
+    );
+    if (!firstUpgrade)
+      guilds = Object.fromEntries(
+        Object.entries(guilds).filter(([id]) => id in policies || id === settings.serverId),
+      );
+    for (const [id, policy] of Object.entries(policies))
+      guilds[id] = DiscordGuildSettingsSchema.parse({ ...guilds[id], ...policy });
+  }
+  const legacyChanged = [
+    "serverId",
+    "role",
+    "fleetEnabled",
+    "fleetChannelId",
+    "trackingLevel",
+    "teamVisible",
+  ].some((key) => changed(key as keyof DiscordSettings));
+  if (!mapChanged && changed("serverId") && previous?.serverId && !settings.serverId)
+    delete guilds[previous.serverId];
+  if (!mapChanged && settings.serverId && (firstUpgrade || legacyChanged)) {
+    const existing = guilds[settings.serverId];
+    guilds[settings.serverId] = DiscordGuildSettingsSchema.parse({
+      ...existing,
+      role: changed("role") ? settings.role : (existing?.role ?? settings.role),
+      fleetEnabled:
+        firstUpgrade || changed("fleetEnabled") || !changed("serverId")
+          ? settings.fleetEnabled
+          : existing?.fleetEnabled,
+      fleetChannelId:
+        firstUpgrade || changed("fleetChannelId") || !changed("serverId")
+          ? settings.fleetChannelId
+          : existing?.fleetChannelId,
+      trackingLevel:
+        firstUpgrade || changed("trackingLevel") || !changed("serverId")
+          ? settings.trackingLevel
+          : existing?.trackingLevel,
+    });
+  }
+  const servers = Object.entries(guilds).map(([serverId, { role, owners, ownerRoleId }]) => ({
+    serverId,
+    role,
+    owners,
+    ...(ownerRoleId ? { ownerRoleId } : {}),
+  }));
+  const result = {
+    ...(firstUpgrade ? legacyDiscordServerSettings(settings, previous) : settings),
+    guilds,
+    servers,
+  };
+  // A read-time migration preserves the body's allowlists and all legacy gates.
+  if (!mapChanged && !legacyChanged && !changed("servers")) return result;
+  const ids = Object.keys(guilds);
+  if (!ids.length && !mapChanged && !previous?.serverId) return result;
+  const primary = settings.serverId && guilds[settings.serverId] ? settings.serverId : ids[0];
+  const policy = primary ? guilds[primary] : undefined;
+  return {
+    ...result,
+    serverId: primary,
+    role: policy?.role ?? "participant",
+    fleetEnabled: policy?.fleetEnabled ?? false,
+    fleetChannelId: policy?.fleetChannelId,
+    trackingLevel: policy?.trackingLevel ?? "off",
+    guildId: primary,
+    swarmGuildId: primary && policy?.role === "admin" ? primary : undefined,
+    teamVisible: policy?.fleetEnabled ?? false,
+    textIngressEnabled: ids.length > 0,
+    ingressGuildIds: ids,
+    ingressChannelIds: [],
+    presenceGuildIds: ids,
+    presenceChannelIds: [],
+    voiceEnabled: ids.length > 0,
+    voiceGuildIds: ids,
+    voiceChannelIds: [],
+    voiceChannelId: undefined,
+    voiceJoinPolicy: "guild_members",
+    userSessionGuildIds: ids,
+  };
+}
+
+/** Select a guild for an operation, never borrowing another guild's role or feature gates. */
+export function discordGuildSettings(settings: DiscordSettings, guildId: string): DiscordSettings {
+  const policy = settings.guilds[guildId];
+  return {
+    ...settings,
+    serverId: guildId,
+    role: policy?.role ?? "participant",
+    fleetEnabled: policy?.fleetEnabled ?? false,
+    fleetChannelId: policy?.fleetChannelId,
+    trackingLevel: policy?.trackingLevel ?? "off",
+    teamVisible: policy?.fleetEnabled ?? false,
+    swarmGuildId: policy?.role === "admin" ? guildId : undefined,
+  };
+}
+
+/** New automatic mirrors use the first enabled Admin; existing mirrors retain their own guild. */
+export function discordFleetGuild(settings: DiscordSettings): string | undefined {
+  return Object.entries(settings.guilds).find(
+    ([, policy]) => policy.role === "admin" && policy.fleetEnabled,
+  )?.[0];
 }
 
 /** Read-time upgrade; only recorded legacy configurations receive personal migration bindings. */

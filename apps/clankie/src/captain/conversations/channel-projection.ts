@@ -103,7 +103,7 @@ export async function resolveProjection(
     // A pasted URL is otherwise the back door around the swarm fence: a
     // webhook from a guild Clankie merely inhabits would put his agents in a
     // server he does not control, without any grant being involved.
-    if (resolved.guildId !== swarmGuildId) {
+    if (!(ctx["projection"].allowsGuild?.(resolved.guildId) ?? resolved.guildId === swarmGuildId)) {
       throw new Error("That webhook is not in Clankie’s swarm server.");
     }
     const resolvedRoom = (await ctx["projection"].rooms?.())?.find(
@@ -169,7 +169,9 @@ export function liveProjection(
   meta: ConversationMeta,
 ): ConversationMeta["channelDiscord"] {
   const swarmGuildId = ctx["projection"]?.swarmGuildId?.();
-  return swarmGuildId !== undefined && meta.channelDiscord?.guildId === swarmGuildId
+  const guildId = meta.channelDiscord?.guildId;
+  return guildId &&
+    (ctx["projection"]?.allowsGuild?.(guildId) ?? (swarmGuildId !== undefined && guildId === swarmGuildId))
     ? meta.channelDiscord
     : undefined;
 }

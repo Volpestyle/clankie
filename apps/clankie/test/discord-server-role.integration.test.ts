@@ -753,3 +753,113 @@ it("host membership proves role ownership and outreach refuses every unproven re
   f.removeRole("50001");
   expect(await f.owns("50001")).toBe(false);
 });
+
+it("migrates the single projection once and retains independent guild options across writes and reloads", async () => {
+  const f = await fixture();
+  const { writeFile } = await import("node:fs/promises");
+  const legacy = JSON.parse(await readFile(f.settings.path, "utf8"));
+  delete legacy.discord.guilds;
+  legacy.discord.fleetEnabled = true;
+  legacy.discord.fleetChannelId = CHANNEL;
+  legacy.discord.trackingLevel = "project_activity";
+  legacy.discord.servers = [
+    { serverId: SERVER, role: "admin", owners: "me" },
+    { serverId: "10002", role: "participant", owners: "role", ownerRoleId: "60001" },
+  ];
+  await writeFile(f.settings.path, JSON.stringify(legacy));
+  const migrated = (await new SettingsStore(f.settings.path).load()).discord;
+  expect(migrated.guilds[SERVER]).toMatchObject({
+    role: "admin",
+    owners: "me",
+    fleetEnabled: true,
+    fleetChannelId: CHANNEL,
+    trackingLevel: "project_activity",
+  });
+  expect(migrated.guilds["10002"]).toMatchObject({
+    role: "participant",
+    owners: "role",
+    ownerRoleId: "60001",
+    fleetEnabled: false,
+    trackingLevel: "off",
+  });
+  await f.settings.update((current) => ({
+    ...current,
+    discord: {
+      ...current.discord,
+      guilds: {
+        ...current.discord.guilds,
+        "10002": { ...current.discord.guilds["10002"]!, fleetEnabled: true, fleetChannelId: OTHER },
+      },
+    },
+  }));
+  const saved = (await new SettingsStore(f.settings.path).load()).discord;
+  expect(saved.guilds[SERVER]).toEqual(migrated.guilds[SERVER]);
+  expect(saved.guilds["10002"]).toMatchObject({ fleetEnabled: true, fleetChannelId: OTHER });
+  expect(resolveDiscordSettings(saved, discordSettingsToEnvironment(saved)).settings.guilds).toEqual(
+    saved.guilds,
+  );
+});
+
+it("the final REST boundary applies each guild's role, ownership and projection toggles independently", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => ({
+    ...current,
+    discord: {
+      ...current.discord,
+      guilds: {
+        [SERVER]: { role: "admin", owners: "everyone", fleetEnabled: false, trackingLevel: "off" },
+        "10002": {
+          role: "participant",
+          owners: "everyone",
+          fleetEnabled: true,
+          fleetChannelId: OTHER,
+          trackingLevel: "off",
+        },
+      },
+    },
+  }));
+  expect(
+    (await f.execute({ method: "POST", path: `/guilds/${SERVER}/channels`, body: { name: "fixture" } })).ok,
+  ).toBe(true);
+  expect(
+    (await f.execute({ method: "POST", path: "/guilds/10002/channels", body: { name: "denied" } })).ok,
+  ).toBe(false);
+  expect(
+    (await f.execute({ method: "POST", path: `/channels/${OTHER}/messages`, body: { content: "fixture" } }))
+      .ok,
+  ).toBe(true);
+  const projection = createChannelProjection({
+    fleetSettings: async () => (await f.settings.load()).discord,
+    participantPost: async (channelId, content) => {
+      const result = await f.execute({
+        method: "POST",
+        path: `/channels/${channelId}/messages`,
+        body: { content },
+      });
+      if (!result.ok) throw new Error(result.message);
+    },
+  });
+  expect(await projection.autoProvision!()).toBe(false);
+  await projection.participantPost!({ username: "fixture", content: "per-server fleet" });
+  const before = f.calls.filter((call) => call.method === "POST").length;
+  await f.settings.update((current) => ({
+    ...current,
+    discord: {
+      ...current.discord,
+      guilds: {
+        ...current.discord.guilds,
+        "10002": { ...current.discord.guilds["10002"]!, fleetEnabled: false },
+      },
+    },
+  }));
+  expect(
+    (await f.execute({ method: "POST", path: `/channels/${OTHER}/messages`, body: { content: "denied" } }))
+      .ok,
+  ).toBe(false);
+  await projection.participantPost!({ username: "fixture", content: "disabled" });
+  expect(f.calls.filter((call) => call.method === "POST")).toHaveLength(before);
+  expect(
+    (await f.execute({ method: "POST", path: `/guilds/${SERVER}/channels`, body: { name: "still-admin" } }))
+      .ok,
+  ).toBe(true);
+});

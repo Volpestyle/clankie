@@ -405,8 +405,8 @@ it("the real CLI connects a server and role, toggles fleet and selects tracking 
   expect(tracking.snapshot.settings.trackingLevel).toBe("project_activity");
   const invite = await f.cli("setup", "invite", "--role", "admin");
   expect(new URL(invite.url).searchParams.get("permissions")).toBe("8");
-  expect((await f.settings.load()).discord.role).toBe("admin");
-  expect((await f.settings.load()).discord.swarmGuildId).toBe("10002");
+  expect((await f.settings.load()).discord.role).toBe("participant");
+  expect((await f.settings.load()).discord.swarmGuildId).toBeUndefined();
   const hidden = await f.cli("setup", "fleet", "--enabled", "off");
   expect(hidden.snapshot.settings.serverId).toBe("10002");
   expect(hidden.snapshot.settings.teamVisible).toBe(false);
@@ -451,6 +451,8 @@ it("real TUI overlays use the shared role, fleet and tracking writer and keep ra
     await choose(shell, "Clankie's role", "Admin");
     await choose(shell, "Owners here", "A Discord role");
     await choose(shell, "Owner role", "Builders");
+    await choose(shell, "Fleet in this server", "On");
+    await choose(shell, "Project tracking in this server", "Project activity");
     await choose(shell, "Invite Clankie to a server", "This room can use");
     await choose(shell, "Server", "Garden");
     await choose(shell, "Room", "general");

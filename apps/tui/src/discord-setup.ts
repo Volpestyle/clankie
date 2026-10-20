@@ -1,3 +1,4 @@
+import { discordRoleInviteUrl } from "@clankie/protocol";
 import {
   DiscordSetupClient,
   discordSetupPickers,
@@ -154,8 +155,8 @@ export async function runDiscordSetup(
             ? [
                 {
                   value: "owners",
-                  label: "Server owners",
-                  description: "Just me, everyone, or a Discord role.",
+                  label: "Server owners and options",
+                  description: "Edit each joined server independently.",
                 },
                 {
                   value: "room-skill",
@@ -219,13 +220,16 @@ export async function runDiscordSetup(
           "Clankie’s role in the invited server",
         );
         if (!selection) continue;
-        const saved = await client.apply(view, "connect", pickerIndex, selection);
+        const role = "value" in selection && selection.value === "admin" ? "admin" : "participant";
+        const applicationId =
+          view.snapshot.setup?.invite &&
+          new URL(view.snapshot.setup.invite.url).searchParams.get("client_id");
         shell.insertCommandResult(
           "/discord",
-          saved.snapshot.setup?.invite
-            ? `Invite Clankie as ${discordSetupLabel(saved.snapshot, saved.snapshot.settings.role)}:\n${saved.snapshot.setup.invite.url}\n\nAfter inviting, choose the server under Connect and recheck setup.`
+          applicationId
+            ? `Invite Clankie as ${role}:\n${discordRoleInviteUrl(applicationId, role)}\n\nAfter inviting, refresh the server list and edit that server's options.`
             : "Set the bot Application ID in Advanced before creating its invite link.",
-          saved.snapshot.setup?.invite ? "success" : "error",
+          applicationId ? "success" : "error",
         );
         continue;
       }
