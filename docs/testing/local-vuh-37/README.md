@@ -30,3 +30,7 @@ The packet retains the final successful checks, earlier failed iterations, scope
 - Integration and deployment status are reported separately on the work item and to the lead; this README does not claim a landed or running candidate.
 
 Raw validation/diff bytes are in the evidence-store tar linked by `evidence.json`. Only this README and the manifest belong in Git.
+
+## Deadcode gate correction
+
+Initial batch `8db0abca-f8e3-4155-876d-7fbb57e814db` failed the deadcode gate because `codexRecordedCompletion` was exported but used only in its own module. The helper is now private; runtime behavior is unchanged. Local `pnpm deadcode`, the swallowed-rejection check against fetched main, and file formatting pass. Existing behavioral test evidence is retained; this export-only correction does not claim a new native proof. Integration is resubmitted separately.

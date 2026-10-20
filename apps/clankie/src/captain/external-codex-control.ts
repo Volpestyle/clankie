@@ -159,7 +159,7 @@ export function codexProxyControl(
 }
 
 /** A native queue input ID is distinct from the turn ID assigned when it runs. */
-export function codexRecordedCompletion(
+function codexRecordedCompletion(
   value: unknown,
   sessionId: string,
   messageId: string,

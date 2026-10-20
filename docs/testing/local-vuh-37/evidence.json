@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "deadcode-repair.tar",
+      "size": 59904,
+      "sha256": "93f432cfee5f90aca79e5703b31bb5463a20e55aae31bd1a539d1800cc8caa66",
+      "url": "clankie://evidence/sha256/93f432cfee5f90aca79e5703b31bb5463a20e55aae31bd1a539d1800cc8caa66"
+    },
+    {
       "path": "implementation-validation.tar",
       "size": 56832,
       "sha256": "2195e271a69cad89fabea763e38c6bfba44e1b60c62804eebb5541ab5112ebc4",
