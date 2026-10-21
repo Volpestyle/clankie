@@ -1,4 +1,8 @@
-# Clankie v0.4.7
+# Clankie v0.4.8
+
+This replaces the unpublished v0.4.7 release; its macOS release check found
+the Windows fleet probe over Windows' command-line limit.
+[VUH-2645](https://linear.app/vuhlp/issue/VUH-2645)
 
 A new install on a clean Mac now finishes without an error. Clankie can also
 move his whole self from one body to another, hire workers on
