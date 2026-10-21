@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
-import type { DiscordServerAction, DiscordServerActionResult } from "@clankie/protocol";
+import type {
+  DiscordForumEventRequest,
+  DiscordServerAction,
+  DiscordServerActionResult,
+} from "@clankie/protocol";
 import {
   TRACKER_OWNER,
   TrackerWriteRefused,
@@ -85,6 +89,8 @@ export type DiscordForumEvent =
 export interface DiscordForumNotice {
   readonly forumId: string;
   readonly reason: "display_only_status" | "member_limit" | "post_locked" | "post_uncertain" | "write_failed";
+  /** What the notice is about: an item, a post, a day or the whole forum. One notice per subject and reason. */
+  readonly subject: string;
   readonly detail: string;
 }
 export interface DiscordForumMirrorOptions {
@@ -92,8 +98,8 @@ export interface DiscordForumMirrorOptions {
   readonly tracker: Pick<LocalTrackerBackend, "call" | "subscribe" | "storeId">;
   bindings(): Promise<readonly DiscordForumBinding[]>;
   serverAction(action: DiscordServerAction): Promise<DiscordServerActionResult>;
-  /** The body's own Discord user id; its messages never import. */
-  readonly botUserId: string;
+  /** The body's own Discord user id; its messages never import. The body also drops its own events. */
+  readonly botUserId?: string;
   onNotice?(notice: DiscordForumNotice): void;
   onError?(error: unknown): void;
   clock?(): Date;
@@ -141,6 +147,8 @@ interface Issue {
   readonly priority: number;
 }
 const PRIORITY = ["", "Urgent", "High", "Medium", "Low"];
+/** Discord answered and refused: nothing changed. */
+class DiscordRefusal extends Error {}
 
 /** The status tag that shows a built-in status; custom statuses fall back to their type. */
 function discordStatusTag(status: string, type: string): StatusTag {
@@ -233,6 +241,7 @@ export class DiscordForumMirror {
       this.notice({
         forumId: "*",
         reason: "write_failed",
+        subject: "store",
         detail: "The built-in tracker store changed; the Discord forum view stopped instead of reposting.",
       });
       return;
@@ -251,6 +260,52 @@ export class DiscordForumMirror {
   /** Apply one normalized gateway event from a bound forum. */
   receive(event: DiscordForumEvent): Promise<void> {
     return this.serial(() => this.inbound(event));
+  }
+
+  /**
+   * A body-reported event: only a forum bound in its own guild is accepted, and
+   * every author's standing is the host's verdict (ADR 0251), never the body's.
+   */
+  async accept(
+    wire: DiscordForumEventRequest,
+    owns: (guildId: string, userId: string) => Promise<boolean>,
+  ): Promise<"accepted" | "not_bound"> {
+    const binding = await this.binding({ forumId: wire.forumId });
+    if (!binding || binding.serverId !== wire.guildId) return "not_bound";
+    const author = async (person: { userId: string; name: string }) => ({
+      ...person,
+      owner: await owns(wire.guildId, person.userId),
+    });
+    const base = { forumId: wire.forumId, threadId: wire.threadId };
+    await this.receive(
+      wire.kind === "post"
+        ? {
+            ...base,
+            kind: "post",
+            title: wire.title,
+            content: wire.content,
+            author: await author(wire.author),
+            appliedTags: wire.appliedTags,
+          }
+        : wire.kind === "reply"
+          ? {
+              ...base,
+              kind: "reply",
+              messageId: wire.messageId,
+              content: wire.content,
+              author: await author(wire.author),
+            }
+          : {
+              ...base,
+              kind: "tags",
+              appliedTags: wire.appliedTags,
+              attribution:
+                wire.attribution.kind === "audit_log"
+                  ? { ...wire.attribution, by: await author(wire.attribution.by) }
+                  : wire.attribution,
+            },
+    );
+    return "accepted";
   }
 
   /** Resolves once queued work, and the work it queued, has finished. */
@@ -285,12 +340,20 @@ export class DiscordForumMirror {
     renameSync(temp, this.options.path);
   }
 
+  /** At most one notice per subject and reason until that subject recovers. */
   private notice(notice: DiscordForumNotice): void {
-    const key = `${notice.forumId}:${notice.reason}`;
-    if (this.journal.notices[key] === notice.detail) return;
+    const key = `${notice.forumId}:${notice.reason}:${notice.subject}`;
+    if (this.journal.notices[key] !== undefined) return;
     this.journal.notices[key] = notice.detail;
     this.save();
     this.options.onNotice?.(notice);
+  }
+
+  private recovered(forumId: string, subject: string): void {
+    const key = `${forumId}:write_failed:${subject}`;
+    if (this.journal.notices[key] === undefined) return;
+    delete this.journal.notices[key];
+    this.save();
   }
 
   private async binding(where: { projectId?: string | null; forumId?: string }) {
@@ -307,11 +370,14 @@ export class DiscordForumMirror {
 
   private async rest(action: DiscordServerAction): Promise<DiscordServerActionResult> {
     const result = await this.options.serverAction(action);
-    if (!result.ok) throw new Error(`Discord ${action.method} ${action.path}: ${result.message}`);
+    if (!result.ok) throw new DiscordRefusal(`Discord ${action.method} ${action.path}: ${result.message}`);
     return result;
   }
 
-  /** Run a write once: a recorded key never dispatches again, and a crash mid-write leaves it uncertain. */
+  /**
+   * Run a write once. A refusal changed nothing and may be tried again; a transport
+   * failure or a crash mid-write may have reached Discord, so it is never repeated.
+   */
   private async once<T>(key: string, write: () => Promise<T>): Promise<T | undefined> {
     if (this.journal.effects[key] !== undefined) return undefined;
     this.journal.effects[key] = { state: "dispatching" };
@@ -323,7 +389,7 @@ export class DiscordForumMirror {
       return result;
     } catch (error) {
       this.journal.effects[key] = {
-        state: "failed",
+        state: error instanceof DiscordRefusal ? "failed" : "uncertain",
         detail: cut(error instanceof Error ? error.message : String(error), 500),
       };
       this.save();
@@ -348,23 +414,37 @@ export class DiscordForumMirror {
     const issue = await this.issue(event.issueId);
     const binding = await this.binding({ projectId: issue.projectId });
     if (!binding) return;
-    const threadId = await this.ensurePost(binding, issue);
-    if (threadId === undefined) return;
-    await this.syncTags(binding, threadId, issue);
-    if (event.type === "comment" && event.commentId !== undefined && event.body !== undefined)
-      await this.postComment(threadId, event);
+    try {
+      const threadId = await this.ensurePost(binding, issue);
+      if (threadId === undefined) return;
+      await this.syncTags(binding, threadId, issue);
+      if (event.type === "comment" && event.commentId !== undefined && event.body !== undefined)
+        await this.postComment(threadId, event);
+      this.recovered(binding.forumId, issue.id);
+    } catch (error) {
+      // Not retried: the owner hears once per post, and the next change to it tries again.
+      this.notice({
+        forumId: binding.forumId,
+        reason: "write_failed",
+        subject: issue.id,
+        detail: `${issue.identifier} did not fully reach Discord: ${cut(error instanceof Error ? error.message : String(error), 300)}. Its post and tags are tried again on its next change; a failed comment is not.`,
+      });
+      throw error;
+    }
   }
 
   private async ensurePost(binding: DiscordForumBinding, issue: Issue): Promise<string | undefined> {
     const known = this.journal.issues[issue.id];
     if (known !== undefined) return known;
     const key = `post:${issue.id}`;
+    if (this.journal.effects[key]?.state === "failed") delete this.journal.effects[key];
     const effect = this.journal.effects[key];
     if (effect !== undefined) {
       if (effect.state === "uncertain")
         this.notice({
           forumId: binding.forumId,
           reason: "post_uncertain",
+          subject: issue.id,
           detail: `${issue.identifier} may already have a post; Clankie did not post it again.`,
         });
       return undefined;
@@ -466,6 +546,7 @@ export class DiscordForumMirror {
       this.notice({
         forumId: binding.forumId,
         reason: "post_locked",
+        subject: issue.id,
         detail: `${issue.identifier}'s post is locked; Clankie left its tags as they are.`,
       });
       return;
@@ -528,6 +609,7 @@ export class DiscordForumMirror {
       this.notice({
         forumId: binding.forumId,
         reason: "member_limit",
+        subject: day,
         detail: `Members reached today's limit of ${binding.memberDailyLimit} posts and replies. Later member posts wait for an owner's status tag; later replies stay in Discord only.`,
       });
       return false;
@@ -596,6 +678,7 @@ export class DiscordForumMirror {
       this.notice({
         forumId: binding.forumId,
         reason: "write_failed",
+        subject: threadId,
         detail: `"${cut(post.title, 80)}": ${error.message}. Clankie filed it in Backlog.`,
       });
       issue = await save("Backlog", `discord:${threadId}:backlog`);
@@ -645,6 +728,7 @@ export class DiscordForumMirror {
         this.notice({
           forumId: binding.forumId,
           reason: "display_only_status",
+          subject: "forum",
           detail:
             "Status tags are display-only in this forum: Clankie cannot read the audit log to tell who changed them. Give his bot View Audit Log, or change status in Clankie.",
         });
@@ -675,6 +759,7 @@ export class DiscordForumMirror {
       this.notice({
         forumId: binding.forumId,
         reason: "write_failed",
+        subject: `${event.threadId}:${event.attribution.entryId}`,
         detail: `${issue.identifier}: ${error.message}. Clankie restored its tags.`,
       });
     }

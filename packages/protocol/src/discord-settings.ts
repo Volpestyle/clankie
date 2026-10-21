@@ -76,6 +76,24 @@ export const HouseHuntingAuthorBindingSchema = z
   })
   .strict();
 
+/**
+ * A forum that shows one built-in tracker project as a two-way view (VUH-2531).
+ * Binding it publishes that project's items to everyone who can read the forum.
+ */
+export const DiscordTrackerForumSchema = z
+  .object({
+    serverId: SnowflakeSchema,
+    forumId: SnowflakeSchema,
+    /** The built-in tracker project the forum shows. */
+    projectId: z.string().uuid(),
+    /** auto: a member's post becomes an untrusted Backlog item; owner_tag: it waits for an owner's status tag. */
+    memberPosts: z.enum(["auto", "owner_tag"]).default("auto"),
+    /** Member posts and replies imported per UTC day; 0 imports none. */
+    memberDailyLimit: z.number().int().min(0).max(500).default(20),
+  })
+  .strict();
+export type DiscordTrackerForum = z.infer<typeof DiscordTrackerForumSchema>;
+
 export const DiscordSettingsSchema = z
   .object({
     /** Canonical settings keyed by Discord guild ID. */
@@ -104,6 +122,16 @@ export const DiscordSettingsSchema = z
       ),
     /** Explicit owner choice: these private text channels reach the main conversation. */
     mainConversationChannelIds: SnowflakeListSchema,
+    trackerForums: z
+      .array(DiscordTrackerForumSchema)
+      .max(16)
+      .default([])
+      .refine(
+        (forums) =>
+          new Set(forums.map((forum) => forum.forumId)).size === forums.length &&
+          new Set(forums.map((forum) => forum.projectId)).size === forums.length,
+        "A forum shows one project, and a project one forum",
+      ),
     houseHuntingAuthorBindings: z
       .array(HouseHuntingAuthorBindingSchema)
       .max(64)

@@ -2,7 +2,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import type { DiscordServerAction, DiscordServerActionResult } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker, TRACKER_LEAD, TRACKER_OWNER, type TrackerItemEvent } from "@clankie/work-items";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -13,125 +12,21 @@ import {
   type DiscordForumNotice,
 } from "../src/discord-forum-mirror.ts";
 import { startTrackerOwnerLoop } from "../src/tracker-owner-loop.ts";
+import { FakeDiscord, FORUM, GUILD } from "./helpers/fake-discord-forum.ts";
 
 /**
- * VUH-2531 slice 1 against a real built-in tracker and the real owner loop. Discord
- * is a stateful fake of its REST API that enforces the documented caps (20 forum
- * tags, 5 per post, 100-character titles, 2000-character messages) and its
- * archived-thread rules. Live Discord behaviour is the slice 4 trial.
+ * VUH-2531 slice 1 against a real built-in tracker and the real owner loop, with
+ * a stateful fake of Discord's REST API (helpers/fake-discord-forum.ts).
  */
 const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
-const FORUM = "500000000000000001";
 const BOT = "500000000000000002";
 const OWNER = { userId: "500000000000000003", name: "James", owner: true };
 const MEMBER = { userId: "500000000000000004", name: "Friend", owner: false };
 const lead = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
 const owner = { ...TRACKER_OWNER, onBehalfOf: [] };
-
-interface Thread {
-  id: string;
-  type: 11;
-  parent_id: string;
-  name: string;
-  applied_tags: string[];
-  thread_metadata: { archived: boolean; locked: boolean };
-}
-class FakeDiscord {
-  private next = 600000000000000000n;
-  readonly forum = {
-    id: FORUM,
-    type: 15,
-    available_tags: [] as { id: string; name: string; moderated: boolean }[],
-  };
-  readonly threads = new Map<string, Thread>();
-  readonly messages = new Map<string, { id: string; content: string }[]>();
-  readonly requests: DiscordServerAction[] = [];
-  hang: ((action: DiscordServerAction) => boolean) | undefined;
-  private id = () => String(this.next++);
-  serverAction = async (action: DiscordServerAction): Promise<DiscordServerActionResult> => {
-    this.requests.push(structuredClone(action));
-    if (this.hang?.(action)) return new Promise(() => {});
-    const body = (action.body ?? {}) as Record<string, unknown>;
-    const [, , id, sub] = action.path.split("/");
-    const fail = (message: string): DiscordServerActionResult => ({ ok: false, message });
-    const ok = (data: unknown, resourceId?: string): DiscordServerActionResult => ({
-      ok: true,
-      message: "ok",
-      data: structuredClone(data) as never,
-      ...(resourceId ? { resourceId } : {}),
-    });
-    const validTags = (tags: unknown) =>
-      Array.isArray(tags) &&
-      tags.length <= 5 &&
-      tags.every((tag) => this.forum.available_tags.some((known) => known.id === tag));
-    if (id === FORUM) {
-      if (action.method === "GET") return ok(this.forum);
-      if (action.method === "PATCH") {
-        const tags = body.available_tags as { id?: string; name: string; moderated?: boolean }[];
-        if (tags.length > 20 || tags.some((tag) => tag.name.length > 20))
-          return fail("400 Invalid Form Body");
-        this.forum.available_tags = tags.map((tag) => ({
-          id: tag.id ?? this.id(),
-          name: tag.name,
-          moderated: tag.moderated === true,
-        }));
-        return ok(this.forum);
-      }
-      if (action.method === "POST" && sub === "threads") {
-        const message = body.message as { content: string };
-        if (String(body.name).length > 100 || message.content.length > 2000 || !validTags(body.applied_tags))
-          return fail("400 Invalid Form Body");
-        const thread: Thread = {
-          id: this.id(),
-          type: 11,
-          parent_id: FORUM,
-          name: String(body.name),
-          applied_tags: [...(body.applied_tags as string[])],
-          thread_metadata: { archived: false, locked: false },
-        };
-        this.threads.set(thread.id, thread);
-        this.messages.set(thread.id, [{ id: thread.id, content: message.content }]);
-        return ok(thread, thread.id);
-      }
-    }
-    const thread = this.threads.get(id!);
-    if (!thread) return fail("404 Unknown Channel");
-    if (action.method === "GET") return ok(thread);
-    if (action.method === "PATCH") {
-      if (thread.thread_metadata.locked) return fail("403 Missing Permissions");
-      if (thread.thread_metadata.archived && !(Object.keys(body).length === 1 && body.archived === false))
-        return fail("400 Thread is archived");
-      if ("applied_tags" in body) {
-        if (!validTags(body.applied_tags)) return fail("400 Invalid Form Body");
-        thread.applied_tags = [...(body.applied_tags as string[])];
-      }
-      if ("archived" in body) thread.thread_metadata.archived = body.archived === true;
-      return ok(thread);
-    }
-    if (action.method === "POST" && sub === "messages") {
-      if (thread.thread_metadata.locked) return fail("403 Missing Permissions");
-      if (String(body.content).length > 2000) return fail("400 Invalid Form Body");
-      // Discord unarchives a thread when a message is sent in it.
-      thread.thread_metadata.archived = false;
-      const message = { id: this.id(), content: String(body.content) };
-      this.messages.get(thread.id)!.push(message);
-      return ok(message, message.id);
-    }
-    return fail("405 Method Not Allowed");
-  };
-  tagId(name: string): string {
-    return this.forum.available_tags.find((tag) => tag.name === name)!.id;
-  }
-  tagNames(thread: Thread): string[] {
-    return thread.applied_tags.map((id) => this.forum.available_tags.find((tag) => tag.id === id)!.name);
-  }
-  post(issueTitle: string): Thread {
-    return [...this.threads.values()].find((thread) => thread.name.endsWith(issueTitle))!;
-  }
-}
 
 async function fixture(overrides: Partial<DiscordForumBinding> = {}) {
   const root = await mkdtemp(join(tmpdir(), "discord-forum-mirror-"));
@@ -149,7 +44,7 @@ async function fixture(overrides: Partial<DiscordForumBinding> = {}) {
   const binding: DiscordForumBinding = {
     projectId: project.id,
     team: "LOCAL",
-    serverId: "500000000000000009",
+    serverId: GUILD,
     forumId: FORUM,
     memberPosts: "auto",
     memberDailyLimit: 10,
@@ -267,15 +162,7 @@ it("an owner's post, status tag and reply update the tracker once and never echo
     appliedTags: [f.discord.tagId("Now")],
   };
   // The post exists in Discord; the gateway reports it, twice.
-  f.discord.threads.set(post.threadId, {
-    id: post.threadId,
-    type: 11,
-    parent_id: FORUM,
-    name: post.title,
-    applied_tags: [...post.appliedTags],
-    thread_metadata: { archived: false, locked: false },
-  });
-  f.discord.messages.set(post.threadId, [{ id: post.threadId, content: post.content }]);
+  f.discord.thread(post.threadId, post.title, [...(post.kind === "post" ? post.appliedTags : [])]);
   await mirror.receive(post);
   await mirror.receive(post);
   await mirror.idle();
@@ -354,14 +241,7 @@ it("member posts are untrusted, limited and cannot set status; unattributed tag 
   });
   for (const n of [1, 2]) {
     const event = memberPost(n) as Extract<DiscordForumEvent, { kind: "post" }>;
-    f.discord.threads.set(event.threadId, {
-      id: event.threadId,
-      type: 11,
-      parent_id: FORUM,
-      name: event.title,
-      applied_tags: [...event.appliedTags],
-      thread_metadata: { archived: false, locked: false },
-    });
+    f.discord.thread(event.threadId, event.title, [...event.appliedTags]);
     await mirror.receive(event);
   }
   await mirror.idle();
@@ -435,14 +315,7 @@ it("owner-tag mode holds member posts until an owner sets a status", async () =>
   const mirror = f.mirror();
   await mirror.start();
   const threadId = "700000000000000301";
-  f.discord.threads.set(threadId, {
-    id: threadId,
-    type: 11,
-    parent_id: FORUM,
-    name: "Paint the shed",
-    applied_tags: [],
-    thread_metadata: { archived: false, locked: false },
-  });
+  f.discord.thread(threadId, "Paint the shed");
   await mirror.receive({
     kind: "post",
     forumId: FORUM,

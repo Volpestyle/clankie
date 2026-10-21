@@ -206,7 +206,12 @@ export function parseDiscordSettingValue(
   current: DiscordSettings,
 ): unknown {
   if (field === "guilds") return raw === "none" ? {} : JSON.parse(raw);
-  if (field === "servers" || field === "roomSkills" || field === "houseHuntingAuthorBindings")
+  if (
+    field === "servers" ||
+    field === "roomSkills" ||
+    field === "houseHuntingAuthorBindings" ||
+    field === "trackerForums"
+  )
     return raw === "none" ? [] : JSON.parse(raw);
   if (field === "systemActorGuildIds" || field === "systemActorChannelIds")
     throw new Error("Use server owners and room skills; trusted guild/channel machine grants are retired.");

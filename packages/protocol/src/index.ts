@@ -21,6 +21,7 @@ export * from "./discord-settings.ts";
 export * from "./discord-setup.ts";
 export * from "./discord-directory.ts";
 export * from "./discord-rooms.ts";
+export * from "./discord-tracker-forum.ts";
 export * from "./delivery.ts";
 export * from "./agent-work.ts";
 export * from "./connections.ts";

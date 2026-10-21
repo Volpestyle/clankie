@@ -64,6 +64,9 @@ These come from the current docs, not from memory. Sources:
 The six status tags are `moderated`, so Discord itself stops anyone without
 `MANAGE_THREADS` from setting a status. Label tags are not moderated.
 
+A label-only edit in the tracker emits no item event, so its tags reach Discord
+at the item's next status change or comment (accepted for now, 2026-10-21).
+
 ## Flows
 
 ```mermaid
@@ -172,17 +175,29 @@ so slice 2 adds an exception for exactly the owner-bound forum.
    an archived post before an edit, a crash mid-dispatch becoming `uncertain`,
    a member post as untrusted Backlog, and a member status change reverted.
 
-2. **Body wiring:**
-   - forward `THREAD_CREATE`, `THREAD_UPDATE` and `MESSAGE_CREATE` for bound
-     forums from the bridge, attributing tag changes from the audit log;
-   - accept the mirror's writes to the owner-bound forum despite its shared
-     audience;
-   - allow the bounded archived-list and audit-log `GET` query strings in
-     `DiscordServerActionSchema`;
-   - startup reconciliation.
-3. **Owner surface:** make the Discord forum option available in work-tracker
-   settings (API, then CLI, TUI, app and hosted), bound to a built-in project,
-   with docs and skill updates.
+2. **Body wiring** (built):
+   - the bot body reports `THREAD_CREATE` (new posts), `THREAD_UPDATE` (tag
+     changes) and `MESSAGE_CREATE` (replies) from bound forums to
+     `POST /v1/captain/discord-forum-events`. Only the `discord_text` captain
+     may call it, and the service decides who is an owner;
+   - a tag change is credited only to an audit-log entry for that thread, from
+     the last minute, that records `applied_tags`. The view's own edits are
+     dropped as its echo; anything else is `not_found` and display-only;
+   - `discord.trackerForums` binds a forum to a project. The body's REST fences
+     allow exactly the view's writes there (reads, the forum's tags, new posts,
+     a post's tags and archive state, replies) without the admin role or an
+     owner-only audience;
+   - a refused write raises one owner notice per post. The notice clears when
+     that post next syncs, and the write is retried on the item's next change.
+     A transport failure may have reached Discord, so it stays uncertain and is
+     never repeated;
+   - not yet: catching up on Discord activity from while the service was down
+     (archived listing and audit-log backfill), the user-session body and the
+     hosted official bot.
+3. **Owner surface:** the setting, its API and CLI and the TUI's Advanced JSON
+   field ship with slice 2. Slice 3 adds the app and hosted dashboard (a
+   generic `json` field kind), a guided binding flow, and the work-tracker
+   "Discord forum" option, with docs and skill updates.
 4. **Live trial** on the lead's chosen test server, channel and bot:
    - each of post, tag change and reply round-trips;
    - an archived post;

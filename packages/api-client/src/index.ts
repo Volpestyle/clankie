@@ -107,6 +107,9 @@ import {
   DiscordChannelProjectionMessagePath,
   DiscordChannelProjectionMessageResultSchema,
   DiscordChannelProjectionMessageSchema,
+  DISCORD_FORUM_EVENT_PATH,
+  DiscordForumEventResultSchema,
+  DiscordForumEventSchema,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteResultSchema,
   DiscordPresenceWriteSchema,
@@ -120,6 +123,8 @@ import {
   type CaptainTurnMetricsPage,
   type DiscordChannelProjectionMessage,
   type DiscordChannelProjectionMessageResult,
+  type DiscordForumEventRequest,
+  type DiscordForumEventResult,
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
   type DiscordPresenceChannelTurnRequest,
@@ -575,6 +580,17 @@ export class ClankieApiClient {
    * (ADR 0146). `not_projected` means the service took nothing and the caller
    * carries on with ordinary ingress.
    */
+  /** A gateway event from a forum bound as a tracker view (VUH-2531); the service decides authority. */
+  public async submitDiscordForumEvent(input: DiscordForumEventRequest): Promise<DiscordForumEventResult> {
+    const request = DiscordForumEventSchema.parse(input);
+    const result = await this.request<unknown>(DISCORD_FORUM_EVENT_PATH, {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(request),
+    });
+    return parseProtocolResponse(DiscordForumEventResultSchema, result);
+  }
+
   public async submitDiscordChannelProjectionMessage(
     input: DiscordChannelProjectionMessage,
   ): Promise<DiscordChannelProjectionMessageResult> {

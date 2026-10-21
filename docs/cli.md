@@ -7980,6 +7980,18 @@ entry individually. Older clients that omit the field preserve existing bindings
 Use `[]` (or CLI `none`) to clear it explicitly. Numeric legacy authors are
 refused; they already identify Discord speakers.
 
+`discord set --tracker-forums JSON` binds forums as two-way views of built-in
+tracker projects (VUH-2531), e.g. `[{"serverId":"100000","forumId":"200000",
+"projectId":"<built-in project UUID>","memberPosts":"auto","memberDailyLimit":20}]`.
+The same revision-fenced `POST /v1/discord/settings` accepts `trackerForums`.
+Everyone who can read the forum sees that project. Posts are items, moderated
+status tags carry their status and replies are comments; members' posts are
+untrusted Backlog items, or wait for an owner's status tag with `owner_tag`.
+Status tags count only when the audit log names an owner, so give the bot View
+Audit Log. Restart the Discord body after binding the first forum: it then asks
+for the message-content intent. Design and limits:
+[the forum view proposal](proposals/2026-10-21-discord-forum-tracker-view.md).
+
 Binding alone changes no decisions. Only a new `house_hunting` reconsideration
 by that authenticated ID appends its authorized legacy targets. Original author
 labels remain readable; other people and later rejections keep excluding homes.

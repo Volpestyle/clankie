@@ -1441,6 +1441,13 @@ async function showEnvironmentExport(
   );
 }
 
+const DISCORD_JSON_FIELDS: readonly string[] = [
+  "guilds",
+  "servers",
+  "roomSkills",
+  "houseHuntingAuthorBindings",
+  "trackerForums",
+];
 export const DISCORD_EDITABLE_FIELDS = DISCORD_SETTING_GROUPS.flatMap((group) =>
   group.fields.map((field) => field.key),
 );
@@ -1458,7 +1465,7 @@ async function editAllDiscordSettings(
     options: fields.map((entry) => ({
       value: entry.key,
       label: entry.label,
-      hint: ["guilds", "servers", "roomSkills", "houseHuntingAuthorBindings"].includes(entry.key)
+      hint: DISCORD_JSON_FIELDS.includes(entry.key)
         ? JSON.stringify(current[entry.key])
         : String(current[entry.key] ?? "unset"),
     })),
@@ -1466,8 +1473,8 @@ async function editAllDiscordSettings(
   if (field === undefined) return;
   const key = field as keyof DiscordSettings;
   const raw = await shell.setupFlow.readText({
-    message: `${key} — ${["guilds", "servers", "roomSkills", "houseHuntingAuthorBindings"].includes(key) ? "JSON" : "lists use commas"}; 'none' clears; blank keeps`,
-    placeholder: ["guilds", "servers", "roomSkills", "houseHuntingAuthorBindings"].includes(key)
+    message: `${key} — ${DISCORD_JSON_FIELDS.includes(key) ? "JSON" : "lists use commas"}; 'none' clears; blank keeps`,
+    placeholder: DISCORD_JSON_FIELDS.includes(key)
       ? JSON.stringify(current[key])
       : String(current[key] ?? "unset"),
     validate: (value) => {

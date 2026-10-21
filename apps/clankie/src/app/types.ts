@@ -206,6 +206,10 @@ export interface ClankieAppDependencies {
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;
   /** The built-in tracker, for the owner's own authenticated writes (VUH-1917). */
   builtInTracker?: import("@clankie/work-items").LocalTrackerBackend;
+  /** Forums bound as two-way views of built-in tracker projects (VUH-2531). */
+  discordForum?: {
+    receive(event: import("@clankie/protocol").DiscordForumEventRequest): Promise<"accepted" | "not_bound">;
+  };
   /** Owner project-binding validation through the connected Linear app, never a fallback. */
   linearProjectExists?: (id: string) => Promise<boolean>;
   importLinear?: (projectId: string, scratch: string, assertCurrent: () => Promise<void>) => Promise<unknown>;

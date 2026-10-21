@@ -16,6 +16,24 @@ export interface DiscordServerAuthority {
   fleetEnabled: boolean;
   fleetChannelId?: string | undefined;
   trackingLevel: "off" | "project_updates" | "project_activity" | "all_issues";
+  /** Forums the owner bound as views of built-in tracker projects (VUH-2531). */
+  trackerForums?: DiscordSettings["trackerForums"] | undefined;
+}
+
+/**
+ * The few writes a bound tracker forum's view needs. Binding is the owner's
+ * choice to show that project to the forum's readers, so these skip the admin
+ * role and owner-audience fences; nothing else in the forum does.
+ */
+function trackerForumWrite(action: DiscordServerAction, parts: readonly string[], forum: boolean): boolean {
+  const keys = Object.keys(record(action.body) ?? {});
+  const only = (allowed: readonly string[]) => keys.length > 0 && keys.every((key) => allowed.includes(key));
+  if (parts.length === 2)
+    return (
+      action.method === "GET" ||
+      (action.method === "PATCH" && only(forum ? ["available_tags"] : ["applied_tags", "archived"]))
+    );
+  return parts.length === 3 && action.method === "POST" && parts[2] === (forum ? "threads" : "messages");
 }
 
 /** The credential-owning transport implements this; it never exposes its token. */
@@ -156,6 +174,19 @@ export async function executeDiscordServerAction(
       (parts.length === 2 && Object.hasOwn(record(action.body) ?? {}, "owner_id")))
   )
     return refuse("I never delete a server or transfer its ownership.");
+  let trackerForum = false;
+  const forums = (authority.trackerForums ?? []).filter((forum) => forum.serverId === serverId);
+  if (channelRoute && forums.length > 0)
+    try {
+      const channel = record(await request({ method: "GET", path: `/channels/${parts[1]!}` }));
+      const isForum = forums.some((forum) => forum.forumId === parts[1]);
+      trackerForum =
+        channel?.guild_id === serverId &&
+        (isForum || forums.some((forum) => forum.forumId === channel.parent_id)) &&
+        trackerForumWrite(action, parts, isForum);
+    } catch {
+      trackerForum = false;
+    }
   const features = authority.guilds?.[serverId] ?? (serverId === authority.serverId ? authority : undefined);
   const participantPost =
     channelRoute &&
@@ -168,6 +199,7 @@ export async function executeDiscordServerAction(
   if (
     role !== "admin" &&
     !participantPost &&
+    !trackerForum &&
     !(
       action.method === "GET" &&
       origin?.source === "operator" &&
@@ -200,7 +232,7 @@ export async function executeDiscordServerAction(
       if (webhook?.guild_id !== serverId)
         return refuse("That webhook is outside my connected Discord server.");
     }
-    if (action.method === "POST" && (parts[2] === "messages" || parts[2] === "threads")) {
+    if (!trackerForum && action.method === "POST" && (parts[2] === "messages" || parts[2] === "threads")) {
       if (!(await discordOwnerAudience(authority, serverId, parts[1]!, request)))
         return refuse("discord_owner_audience_required");
     }

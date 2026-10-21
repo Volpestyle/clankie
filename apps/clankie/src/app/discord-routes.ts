@@ -18,6 +18,8 @@ import {
   DISCORD_VOICE_TRANSCRIPTS_PATH,
   DISCORD_VOICE_TRANSCRIPT_PAGE_LIMIT_MAX,
   DiscordChannelProjectionMessagePath,
+  DISCORD_FORUM_EVENT_PATH,
+  DiscordForumEventSchema,
   DiscordChannelProjectionMessageSchema,
   DiscordPresenceChannelTurnRequestSchema,
   type DiscordPresenceChannelTurnRequest,
@@ -1114,6 +1116,31 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     return record.settled === undefined
       ? context.json({ state: "pending", deliveryStage: "stored" }, 202)
       : context.json(record.settled);
+  });
+
+  /**
+   * A post, tag change or reply in a forum bound as a tracker view (VUH-2531).
+   * Only the Discord text body reports these; the service decides who is an owner.
+   */
+  ctx.app.post(DISCORD_FORUM_EVENT_PATH, async (context) => {
+    const parsed = DiscordForumEventSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_discord_forum_event" }, 400);
+    const captain = await authenticateCaptain(context.req.raw, ctx.dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (captain.steerSourceLane !== "discord_text")
+      return context.json({ error: "discord_channel_authority_required" }, 403);
+    if (!ctx.dependencies.discordForum) return context.json({ schemaVersion: 1, state: "not_bound" });
+    try {
+      const state = await ctx.dependencies.discordForum.receive(parsed.data);
+      return context.json({ schemaVersion: 1, state });
+    } catch (error) {
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        "Discord forum event failed",
+      );
+      return context.json({ error: "discord_forum_event_failed" }, 502);
+    }
   });
 
   /**

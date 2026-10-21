@@ -35,6 +35,13 @@ import {
 import { observeBotSetupPermissions } from "./setup-permissions.ts";
 import { readBotDiscordDirectory } from "./directory.ts";
 import {
+  reportForumPost,
+  reportForumReply,
+  reportForumTags,
+  type TrackerForumBody,
+} from "./tracker-forum.ts";
+import {
+  AuditLogEvent,
   ChannelType,
   Client,
   GatewayIntentBits,
@@ -307,13 +314,18 @@ const voiceChannelIds = parseDiscordIdSet(process.env.DISCORD_VOICE_CHANNEL_IDS)
 if (voiceEnabled && voiceGuildIds.size === 0) {
   throw new Error("Discord voice is enabled but DISCORD_VOICE_GUILD_IDS is empty.");
 }
+// A tracker forum view (VUH-2531) reads posts and replies, which needs the
+// privileged message-content intent; a binding made later applies on restart.
+const trackerForumsBound = (await settingsStore.load()).discord.trackerForums.length > 0;
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
     ...(textIngressEnabled
       ? [GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent]
-      : []),
+      : trackerForumsBound
+        ? [GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+        : []),
   ],
   partials: textIngressEnabled ? [Partials.Channel] : [],
 });
@@ -871,7 +883,76 @@ async function handleDiscordMessage(message: Message, recovering = false): Promi
   }
 }
 client.on("messageCreate", (message) => {
+  if (message.channel.isThread())
+    void reportForum(reportForumReply(trackerForums, forumThread(message.channel), message));
   void handleDiscordMessage(message);
+});
+
+const trackerForums: TrackerForumBody = {
+  botUserId: () => client.user?.id,
+  forums: async () => (await settingsStore.load()).discord.trackerForums,
+  submit: (event) => api.submitDiscordForumEvent(event),
+  threadUpdates: async (guildId) => {
+    const guild = await client.guilds.fetch(guildId);
+    const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.ThreadUpdate, limit: 10 });
+    return [...logs.entries.values()].map((entry) => ({
+      id: entry.id,
+      targetId: entry.targetId,
+      createdTimestamp: entry.createdTimestamp,
+      changes: entry.changes,
+      executor:
+        entry.executor === null
+          ? null
+          : {
+              id: entry.executor.id,
+              bot: entry.executor.bot ?? false,
+              username: entry.executor.username ?? entry.executor.id,
+              globalName: entry.executor.globalName ?? null,
+            },
+    }));
+  },
+};
+function forumThread(thread: {
+  id: string;
+  guildId: string;
+  parentId: string | null;
+  name: string;
+  ownerId: string | null;
+  appliedTags: string[];
+}) {
+  return {
+    id: thread.id,
+    guildId: thread.guildId,
+    parentId: thread.parentId,
+    name: thread.name,
+    ownerId: thread.ownerId,
+    appliedTags: [...thread.appliedTags],
+  };
+}
+async function reportForum(report: Promise<void>): Promise<void> {
+  await report.catch((error: unknown) =>
+    console.error(
+      { error: error instanceof Error ? error.message : String(error) },
+      "Discord tracker forum event was not delivered",
+    ),
+  );
+}
+client.on("threadCreate", (thread, newlyCreated) => {
+  if (!newlyCreated) return;
+  void reportForum(
+    (async () => {
+      // A forum post's starter message can trail its thread briefly.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        // allow-swallowed-rejection -- retried below; a miss means the starter is not available yet
+        const starter = await thread.fetchStarterMessage().catch(() => null);
+        if (starter) return reportForumPost(trackerForums, forumThread(thread), starter);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    })(),
+  );
+});
+client.on("threadUpdate", (before, after) => {
+  void reportForum(reportForumTags(trackerForums, forumThread(before), forumThread(after)));
 });
 
 client.on("interactionCreate", async (interaction) => {

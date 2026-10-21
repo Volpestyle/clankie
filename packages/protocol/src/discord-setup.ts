@@ -8,7 +8,8 @@ export type DiscordField = {
   key: keyof DiscordSettings;
   label: string;
   help?: string;
-  kind: "boolean" | "ids" | "text" | "number" | "choice";
+  /** json: a structured value edited as JSON. Older clients leave out a kind they do not know. */
+  kind: "boolean" | "ids" | "text" | "number" | "choice" | "json";
   choices?: readonly string[];
   /** Directory kinds accepted by this field when a sentence picks rooms. */
   directoryKinds?: readonly DiscordDirectoryEntry["kind"][];
@@ -59,6 +60,12 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
       },
       { key: "servers", label: "Server ownership policies (JSON; Advanced)", kind: "text" },
       { key: "roomSkills", label: "Room skills (JSON; Advanced)", kind: "text" },
+      {
+        key: "trackerForums",
+        label: "Tracker forums (JSON; Advanced)",
+        kind: "json",
+        help: "Each entry shows one built-in tracker project in a forum, both ways: serverId, forumId, projectId, memberPosts (auto or owner_tag) and memberDailyLimit. Everyone who can read the forum sees that project. Restart the Discord body after binding the first forum.",
+      },
       {
         key: "mainConversationChannelIds",
         label: "Use my main conversation in these channels",
@@ -374,7 +381,7 @@ const DiscordFieldSchema = z
     key: SettingKey,
     label: z.string(),
     help: z.string().optional(),
-    kind: additiveEnum(["boolean", "ids", "text", "number", "choice"]),
+    kind: additiveEnum(["boolean", "ids", "text", "number", "choice", "json"]),
     choices: z.array(z.string()).optional(),
     directoryKinds: z.array(DirectoryKind).optional(),
   })

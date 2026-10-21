@@ -90,7 +90,7 @@ import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { serve, type WebSocketServerLike } from "@hono/node-server";
 import { drainHttpServer } from "./http-drain.ts";
-import { MAX_REALTIME_AUDIO_APPEND_BYTES } from "@clankie/discord-presence-core";
+import { discordActorOwnsServer, MAX_REALTIME_AUDIO_APPEND_BYTES } from "@clankie/discord-presence-core";
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
@@ -147,6 +147,7 @@ import { linearFollowStatus } from "@clankie/settings";
 import { loadGameExtensionModules, recoverExternalPlay } from "./game-extension-modules.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
+import { DiscordForumMirror } from "./discord-forum-mirror.ts";
 import {
   createDiscordVoicePresenceClient,
   resolveDiscordVoiceTarget,
@@ -1721,6 +1722,68 @@ void startTrackerOwnerLoop({
     "built-in tracker owner loop did not start",
   ),
 );
+// Forums bound as two-way views of built-in tracker projects (VUH-2531). Its
+// notices reach the owner once per post or day, never as a model turn.
+const discordForum = new DiscordForumMirror({
+  path: join(stateRoot, "discord-forum.json"),
+  tracker: builtInTracker,
+  bindings: async () => {
+    const { discord } = await settingsStore.load();
+    const forums = resolveDiscordSettings(discord, captainDiscordEnvironment).settings.trackerForums;
+    const bound = await Promise.all(
+      forums.map(async (forum) => {
+        const project = (await builtInTracker
+          .call("get_project", { query: forum.projectId })
+          // allow-swallowed-rejection -- an unreadable project leaves its forum unbound, which fails closed
+          .catch(() => undefined)) as { id?: unknown; leadTeam?: { id?: unknown } } | undefined;
+        return project?.id === forum.projectId && typeof project.leadTeam?.id === "string"
+          ? { ...forum, team: project.leadTeam.id }
+          : undefined;
+      }),
+    );
+    return bound.filter((forum) => forum !== undefined);
+  },
+  serverAction: async (action) => {
+    const current = await settingsStore.load();
+    const body = resolveDiscordSettings(current.discord, captainDiscordEnvironment).settings.activeBody;
+    return createDiscordCaptainActionClient({ ...process.env, DISCORD_ACTIVE_BODY: body }).serverAction(
+      action,
+    );
+  },
+  onNotice: (notice) => captain.recordRuntimeHealthNotice(`Discord forum: ${notice.detail}`),
+  onError: (error) =>
+    logger.warn(
+      { event: "discord.forum.failed", detail: error instanceof Error ? error.message : String(error) },
+      "Discord forum view step failed",
+    ),
+});
+void discordForum
+  .start()
+  .catch((error: unknown) =>
+    logger.warn(
+      { event: "discord.forum.unavailable", detail: error instanceof Error ? error.message : String(error) },
+      "Discord forum view did not start",
+    ),
+  );
+// The host decides who is an owner (ADR 0251); a role policy is proved by a member read.
+const discordForumOwner = async (guildId: string, userId: string) => {
+  const { discord } = await settingsStore.load();
+  return discordActorOwnsServer(
+    resolveDiscordSettings(discord, captainDiscordEnvironment).settings,
+    guildId,
+    userId,
+    async (action) => {
+      const current = await settingsStore.load();
+      const body = resolveDiscordSettings(current.discord, captainDiscordEnvironment).settings.activeBody;
+      const result = await createDiscordCaptainActionClient({
+        ...process.env,
+        DISCORD_ACTIVE_BODY: body,
+      }).serverAction(action);
+      if (!result.ok) throw new Error("Discord membership unavailable");
+      return result.data;
+    },
+  );
+};
 // VUH-1527: each ssh fleet reaches the seat routes, and only those, through its link.
 fleetProjectMembership = new FleetProjectMembership({
   settings: async () => (await settingsStore.load()).projects,
@@ -2137,6 +2200,7 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   evidenceStore,
   builtInTracker,
+  discordForum: { receive: (event) => discordForum.accept(event, discordForumOwner) },
   linearProjectExists: (id) => linearProjectExists(mcpHost, id),
   linearMirrors,
   linearCutover: new LinearCutover({
@@ -2551,6 +2615,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await discordTracking.close();
+    await discordForum.close();
     await runtimeCanary?.close();
     runtimeRetentionReady = false;
     await runtimeRetentionTask;
