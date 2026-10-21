@@ -10,6 +10,8 @@ import {
   discordSetupDefinition,
   discordServerSettings,
   DiscordSettingsSchema,
+  DISCORD_OPTIONAL_SETTING_WRITERS,
+  type DiscordSettings,
   discordRoleInviteUrl,
   DISCORD_ADMIN_INVITE_PERMISSIONS,
   DISCORD_PARTICIPANT_INVITE_PERMISSIONS,
@@ -303,24 +305,20 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
         if (!authority.current()) throw new Error("operator_revoked");
         if (discordSettingsRevision(current.discord) !== parsed.data.expectedRevision)
           throw new Error("settings_revision_conflict");
-        // Older clients cannot carry the new server model back. Omission must
-        // preserve current authority rather than resetting role/toggles to defaults.
+        // Older clients cannot carry newer settings back. Omission must
+        // preserve current authority rather than resetting settings to defaults.
         const incoming = (request as { settings: Record<string, unknown> }).settings;
-        const serverModelWriter = ["role", "fleetEnabled", "trackingLevel"].every((key) =>
-          Object.hasOwn(incoming, key),
-        );
-        const discord = { ...parsed.data.settings };
-        for (const key of new Set([
-          ...DEFAULTED_DISCORD_SETTINGS,
-          "serverId",
-          "fleetChannelId",
-          "teamVisible",
-        ]) as Set<keyof typeof discord>)
+        const discord: Record<string, unknown> = { ...parsed.data.settings };
+        for (const key of DEFAULTED_DISCORD_SETTINGS)
+          if (!Object.hasOwn(incoming, key)) discord[key] = current.discord[key as keyof DiscordSettings];
+        // An optional setting is cleared by omission only from a writer that knows it.
+        for (const [key, writers] of Object.entries(DISCORD_OPTIONAL_SETTING_WRITERS))
           if (
             !Object.hasOwn(incoming, key) &&
-            !(serverModelWriter && (key === "serverId" || key === "fleetChannelId"))
+            writers.length > 0 &&
+            !writers.some((writer) => Object.hasOwn(incoming, writer))
           )
-            (discord as Record<string, unknown>)[key] = current.discord[key];
+            discord[key] = current.discord[key as keyof DiscordSettings];
         return {
           ...current,
           discord: discordServerSettings(DiscordSettingsSchema.parse(discord), current.discord),

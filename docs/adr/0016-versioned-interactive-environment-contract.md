@@ -71,7 +71,11 @@ entry that is also malformed in a known way, still fails. Statuses, versions
 and discriminators a client must act on stay plain enums. Because an older
 client cannot carry a newer setting back, the Discord settings write keeps the
 current value of every defaulted setting the writer omits; current writers send
-every defaulted setting they know.
+every defaulted setting they know. VUH-2648 extends this to optional settings,
+which a writer omits both to clear them and when it predates them. Each one
+names the defaulted settings introduced with it, and an omitted optional
+setting is cleared only when the save names one of those; otherwise it keeps
+its value. A new optional setting names such settings or ships with a default.
 
 ## Options weighed
 

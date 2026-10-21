@@ -182,15 +182,27 @@ it("a client reads a newer host's setup with setting keys and catalog values it 
   expect(view.sentences.map((sentence) => sentence.id)).toEqual(["connect", "fleet", "tracking"]);
 });
 it("an older client's save keeps the newer settings it cannot carry back", async () => {
-  const { fetchImpl, client } = fixture();
+  const { fetchImpl, client, settings } = fixture();
   const initial = await client.discordSettings();
   const seeded = await client.updateDiscordSettings({
     expectedRevision: initial.revision,
-    settings: { ...initial.settings, mainConversationChannelIds: ["10007"], officialBotEnabled: true },
+    settings: {
+      ...initial.settings,
+      mainConversationChannelIds: ["10007"],
+      officialBotEnabled: true,
+      wakeTrigger: "name",
+    },
   });
-  // A client from before these settings existed strips them on read and omits them on save.
+  // A client from before 928af62d1: it strips the newer settings on read and omits them on save.
   const Old = DiscordSettingsSnapshotSchema.omit({ setup: true }).extend({
-    settings: DiscordSettingsSchema.omit({ mainConversationChannelIds: true, officialBotEnabled: true }),
+    settings: DiscordSettingsSchema.omit({
+      wakeTrigger: true,
+      ambientChannelIds: true,
+      officialBotEnabled: true,
+      roomSkills: true,
+      houseHuntingAuthorBindings: true,
+      mainConversationChannelIds: true,
+    }),
   });
   const wire = await (
     await fetchImpl("http://fixture.invalid/v1/discord/settings", {
@@ -199,6 +211,7 @@ it("an older client's save keeps the newer settings it cannot carry back", async
   ).json();
   const old = parseProtocolResponse(Old, wire);
   expect(old.settings).not.toHaveProperty("mainConversationChannelIds");
+  expect(old.settings).not.toHaveProperty("wakeTrigger");
   const response = await fetchImpl("http://fixture.invalid/v1/discord/settings", {
     method: "POST",
     headers: { authorization: "Bearer fixture-operator", "content-type": "application/json" },
@@ -207,20 +220,26 @@ it("an older client's save keeps the newer settings it cannot carry back", async
   expect(response.ok).toBe(true);
   const saved = await response.json();
   expect(saved.settings.guildId).toBe("12345");
-  expect(saved.settings.mainConversationChannelIds).toEqual(["10007"]);
-  expect(saved.settings.officialBotEnabled).toBe(true);
-  // A current writer still clears them by sending their empty values.
+  // A new reader sees every setting the older writer could not carry, optional or defaulted.
+  const reread = await client.discordSettings();
+  expect(reread.settings.wakeTrigger).toBe("name");
+  expect(reread.settings.mainConversationChannelIds).toEqual(["10007"]);
+  expect(reread.settings.officialBotEnabled).toBe(true);
+  // A current writer still clears them: an empty value, or an omitted optional setting.
   const cleared = await client.updateDiscordSettings({
-    expectedRevision: saved.revision,
+    expectedRevision: reread.revision,
     settings: {
       ...seeded.settings,
       guildId: "12345",
       mainConversationChannelIds: [],
       officialBotEnabled: false,
+      wakeTrigger: undefined,
     },
   });
   expect(cleared.settings.mainConversationChannelIds).toEqual([]);
   expect(cleared.settings.officialBotEnabled).toBe(false);
+  expect(cleared.settings).not.toHaveProperty("wakeTrigger");
+  expect((await settings.load()).discord.wakeTrigger).toBeUndefined();
 });
 it("API and CLI receive the same server, role, fleet and tracking setup and all Advanced fields from the host", async () => {
   const { client, fetchImpl } = fixture("his cloud computer");

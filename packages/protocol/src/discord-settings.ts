@@ -259,6 +259,34 @@ export const DiscordSettingsSchema = z
   })
   .strict();
 export type DiscordSettings = z.infer<typeof DiscordSettingsSchema>;
+type OptionalDiscordSetting = {
+  [K in keyof DiscordSettings]-?: undefined extends DiscordSettings[K] ? K : never;
+}[keyof DiscordSettings];
+type DefaultedDiscordSetting = Exclude<keyof DiscordSettings, OptionalDiscordSetting>;
+
+/**
+ * Which writers know each optional setting. A save omits an optional setting to
+ * clear it, and a writer that predates the setting omits it too. Writers send
+ * every defaulted setting they know, so a save that names a defaulted setting
+ * introduced with this one knows it and is clearing it; a save naming none of
+ * them keeps the current value. An empty list means every supported writer
+ * knows the setting. A new optional setting names the defaulted settings that
+ * arrive with it, or ships with a default itself (VUH-2648, ADR 0016).
+ */
+export const DISCORD_OPTIONAL_SETTING_WRITERS = {
+  serverId: ["role", "fleetEnabled", "trackingLevel"],
+  fleetChannelId: ["role", "fleetEnabled", "trackingLevel"],
+  teamVisible: ["role", "fleetEnabled", "trackingLevel"],
+  wakeTrigger: ["ambientChannelIds", "officialBotEnabled"],
+  applicationId: [],
+  guildId: [],
+  swarmGuildId: [],
+  ownerUserId: [],
+  voiceChannelId: [],
+  activityApplicationIdGba: [],
+  activityTunnelName: [],
+  activityTunnelHostname: [],
+} as const satisfies Record<OptionalDiscordSetting, readonly DefaultedDiscordSetting[]>;
 
 /** Project the server role model into the existing body configuration without granting machine access. */
 function legacyDiscordServerSettings(settings: DiscordSettings, previous?: DiscordSettings): DiscordSettings {
