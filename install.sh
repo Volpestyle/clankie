@@ -172,17 +172,29 @@ else
   if ! refreshed=$("$bin_link" harness install --refresh-linked 2>&1); then
     case "$refreshed" in
       *'unknown command "harness"'*) exit 0 ;;
+      # Releases before v0.4.7 refuse before the first service start, when nothing is linked yet.
+      *'Machine setup policy needs the operator credential'*) refreshed='{"skipped":"service-not-started"}' ;;
+      *)
+        printf '%s\n' "$refreshed" >&2
+        exit 1
+        ;;
     esac
-    printf '%s\n' "$refreshed" >&2
-    exit 1
   fi
-  printf '%s\n' "$refreshed"
-  # Review new optional harness installations only in an interactive owner terminal.
-  if [ -t 0 ] && [ -t 1 ]; then
-    "$bin_link" harness install
-  else
-    echo "Run clankie harness install in a terminal to review optional harness linking."
-  fi
+  case "$refreshed" in
+    # A fresh Mac: harness linking needs the service's policy, so it waits for the first start.
+    *'"skipped":"service-not-started"'*)
+      echo "Optional harness linking waits for the first start: run clankie, then clankie harness install."
+      ;;
+    *)
+      printf '%s\n' "$refreshed"
+      # Review new optional harness installations only in an interactive owner terminal.
+      if [ -t 0 ] && [ -t 1 ]; then
+        "$bin_link" harness install
+      else
+        echo "Run clankie harness install in a terminal to review optional harness linking."
+      fi
+      ;;
+  esac
 fi
 
 # Skip launch when no artifact is pinned or the owner opted out. Pairing output is private.

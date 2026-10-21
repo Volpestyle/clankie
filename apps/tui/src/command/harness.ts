@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
-import { refreshLinkedHarnesses } from "../harness-refresh.ts";
+import { refreshLinkedHarnesses, type HarnessRefreshResult } from "../harness-refresh.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 import { automaticCodexConsent, codexSourceSetupCommand, installHarnessBridges } from "../harness-install.ts";
 import { confirmMachineSetupApproval, machineSetupContext } from "./machine-setup.ts";
@@ -62,6 +62,22 @@ export async function runHarnessCommand(
     ...options,
     ...(requestedProject === undefined ? {} : { projectId: requestedProject }),
   };
+  // The first service start mints the operator credential, so a machine without
+  // one has linked nothing yet; a fresh install has nothing to refresh (VUH-2516).
+  if (
+    refreshLinked &&
+    !(await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+    }))
+  )
+    return {
+      ok: true,
+      skipped: "service-not-started",
+      local: [],
+      fleets: [],
+      notices: { state: "deferred", detail: "No Clankie service has started on this machine yet." },
+    } satisfies HarnessRefreshResult;
   const initial = await machineSetupContext("local", contextOptions);
   let approved = false;
   if (approvalRequested) {

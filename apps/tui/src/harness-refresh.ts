@@ -12,6 +12,8 @@ import type { HarnessInstallResult } from "../../../integrations/claude-plugin/w
 
 export interface HarnessRefreshResult {
   readonly ok: boolean;
+  /** Set when nothing could be linked yet, so nothing was refreshed. */
+  readonly skipped?: "service-not-started";
   readonly local: readonly HarnessInstallResult[];
   readonly fleets: readonly { fleet: string; ok: boolean; result?: unknown; error?: string }[];
   readonly notices: { state: "announced" | "deferred"; detail?: string };

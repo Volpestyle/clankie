@@ -8705,6 +8705,9 @@ once. The CLI rechecks current project policy and target linkage before each
 profile or remote destination. Under `owner`, refresh requires the owner's
 interactive confirmation with `--approve`; under `lead`, automatic refresh requires an already-linked
 target. Unlinked profiles and existing Claude channel policy stay unchanged.
+Before the machine's first service start there is no operator credential and
+nothing linked: refresh changes nothing and returns
+`{"ok":true,"skipped":"service-not-started"}`, so a fresh install succeeds.
 A source-managed Codex profile without a matching recorded source hook reports
 `source-manager-required`: `source-managed: needs setup in <home>`. Doctor reports
 the configuration owner and the source setup command. `clankie update status`
