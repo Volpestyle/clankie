@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "proof-10.tar",
+      "size": 65024,
+      "sha256": "e99d16108dca93dd8d28462a1cdd53631593da78b1980c1d3aae0afe2cd24653",
+      "url": "clankie://evidence/sha256/e99d16108dca93dd8d28462a1cdd53631593da78b1980c1d3aae0afe2cd24653"
+    },
+    {
+      "path": "proof-7.tar",
+      "size": 64512,
+      "sha256": "b1bdb15a77cbb4a98c55fa3dd92d59bcfe27394819070c574a7dde1ae13267de",
+      "url": "clankie://evidence/sha256/b1bdb15a77cbb4a98c55fa3dd92d59bcfe27394819070c574a7dde1ae13267de"
+    }
+  ]
+}

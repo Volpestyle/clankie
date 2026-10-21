@@ -149,6 +149,11 @@ export interface ClankieAppDependencies {
     typeof import("../runtime-update-routes.ts").createRuntimeUpdateRoutes
   >[0]["scheduledCutover"];
   runtimeCanary?: import("../runtime-canary.ts").RuntimeCanary;
+  /** Owner transfer routes and the self record `/health` reports (ADR 0286). */
+  bodyTransfer?: {
+    readonly routes: import("hono").Hono;
+    readonly authority: () => import("@clankie/protocol/body-transfer").BodyAuthority;
+  };
   refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
   refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;

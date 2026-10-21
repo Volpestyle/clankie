@@ -147,6 +147,13 @@ lifecycle, transport, signed pairing and device-security recovery stay public.
 The [Linux guide](../infra/hosted/README.md#optional-runtime-provider) documents
 module selection across launcher restarts.
 
+One body holds Clankie at a time
+([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)). The self record
+(`<state>/self.json`) is read first at boot. A body that is frozen or released
+starts dormant ([`body-transfer.ts`](../apps/clankie/src/body-transfer.ts)) and
+serves only `/health` and the owner's transfer routes, which `clankie transfer`
+drives between two bodies.
+
 ## How a message becomes a turn
 
 Each surface authenticates a request and selects a conversation. The service

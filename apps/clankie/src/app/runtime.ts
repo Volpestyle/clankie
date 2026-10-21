@@ -1125,6 +1125,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     ),
   );
   app.route("/", createMachineJoinRoutes(dependencies.machineJoins, authorizeOwnerSecrets));
+  if (dependencies.bodyTransfer !== undefined) app.route("/", dependencies.bodyTransfer.routes);
   app.route(
     "/",
     createAccountRoutes(
@@ -1857,6 +1858,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ...(doorway === undefined ? {} : { doorway }),
       ...(power === undefined ? {} : { power }),
       ...(runtime === undefined ? {} : { runtime }),
+      ...(dependencies.bodyTransfer === undefined ? {} : { self: dependencies.bodyTransfer.authority() }),
       ...(() => {
         try {
           const observation = RuntimeHealthObservationSchema.safeParse(dependencies.runtimeHealth?.());

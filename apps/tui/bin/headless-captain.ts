@@ -109,6 +109,9 @@ export async function runHeadlessCaptainCommand(
       ).connectHostedCli(["hosted", ...rest.slice(1)], env, stdout, { target: "this-mac" });
       return 0;
     }
+    // A transfer names both bodies itself, so it never takes the hosted transport.
+    if (command === "transfer")
+      return (await import("../src/command/transfer.ts")).runTransferCommand(rest, stdout, options);
     // Joining/resuming is a local foreground transport even when the CLI talks to hosted Clankie.
     if (command === "join" && rest[0] !== "approve")
       return (await import("../src/command/join.ts")).runJoinCommand(rest, options);

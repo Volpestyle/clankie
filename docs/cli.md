@@ -176,6 +176,7 @@ fallback after an owner API error. See [ADR 0248](adr/0248-owner-settings-use-on
 | [List shipped skills](#skill-setup)                    | `skills`                                                    |
 | [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model`             |
 | [Connect machines](#runtime-setup)                     | `machines`, `connections`, `runtime`, `agents`, `herdr`     |
+| [Move Clankie to another body](#transfer)              | `transfer`                                                  |
 | [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`                   |
 | [Use native seats and delegated tools](#seat-commands) | `claude`, `codex`, `mcp`, `access`                          |
 | [Evaluate agent work](#evaluation-commands)            | `evaluator`                                                 |
@@ -4699,6 +4700,78 @@ clankie fleet set --commit lead --push lead --release owner
 ```
 
 <a id="runtime-setup"></a>
+
+### `transfer`
+
+```bash
+clankie transfer --to URL --to-token-file FILE [--transfer-id UUID] [--replace]
+clankie transfer --from URL --from-token-file FILE --to local --destination-machine JOIN_ID
+clankie transfer status [--at URL --token-file FILE]
+clankie transfer rebind --transfer-id UUID --machine JOIN_ID [--at URL --token-file FILE]
+clankie transfer abort --transfer-id UUID --to URL --to-token-file FILE
+clankie transfer reclaim --force --reason TEXT
+```
+
+Moves Clankie to another body and back. One body holds him at a time
+([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)). `local` (the default
+`--from`) is this machine's service with its operator credential. Any other body
+is a URL plus a file holding that body's operator bearer; tokens are never
+command arguments.
+
+The command freezes the source and waits for it to restart dormant. It then
+downloads the bundle, stages it on the destination, applies it and waits for the
+destination to restart as Clankie. Only then is the source released.
+
+- **Freeze** waits for no running turn, voice stay or activity share. Worker
+  panes keep running.
+- **Restarts** need a supervisor (autostart's recover pass or the hosted
+  launcher). Without one, the command says which body to `clankie start`.
+
+Each step is repeatable: rerun with the printed `--transfer-id` after any failure.
+The source stays frozen until the destination reports itself active with the same
+self id, epoch and transfer id.
+
+The destination admits a bundle only in three cases:
+
+- it is unclaimed, with no memory or model conversation of its own;
+- it holds the same Clankie, released at a lower epoch;
+- `--replace` is given, which archives its own history under
+  `transfer/archive/<id>/` and never merges.
+
+**What moves:**
+
+- the self record, persona and appearance, Discord ownership and room settings,
+  fleet, autonomy and trust settings;
+- memory, conversations and room turns with their receipts, attachments,
+  routines and Auto history;
+- project settings, the built-in tracker, registered repos, Linear bindings and
+  receipts, views and evidence.
+
+**What stays:** the credential broker, model and harness sign-ins, account
+tokens, paired devices and the event log, gateway identity, machines and joins,
+Herdr bindings and live hire records. The manifest lists every state entry that
+stayed.
+
+Workspaces on the source's `local` machine arrive as `transferred:<id>`. After the
+old machine [joins](#join) the destination, `rebind` points them at its join id.
+On the way back, `--destination-machine` names that join id so those workspaces
+become `local` again.
+
+A frozen or released body serves only `/health` and these routes. `/health`
+carries `self` (`selfId`, `epoch`, `state`, `releasedTo`), so `clankie status` on
+the old machine shows where Clankie went. Every other route answers
+`503 body_dormant`.
+
+- **`abort`** returns the source to active only after the destination burns the
+  transfer id.
+- **`reclaim --force`** reactivates a dormant body at a higher epoch without the
+  other body. It records the reason, and any work the other body did is not
+  merged.
+
+A managed hosted body is not yet reachable for transfers through the gateway
+([VUH-2582](https://linear.app/vuhlp/issue/VUH-2582)). The real-model proof
+between two private bodies is `apps/clankie/scripts/prove-body-transfer.ts`
+([evidence](testing/2026-10-21-vuh-2577-body-transfer/README.md)).
 
 ### `join`
 

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { BodyAuthoritySchema, type BodyAuthority } from "@clankie/protocol/body-transfer";
 import {
   CLANKIE_ACCOUNT_PROVIDER_ID,
   PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID,
@@ -126,6 +127,8 @@ export async function probeHealth(options: GatewayCommandOptions = {}): Promise<
   readonly doorway: GatewayDoorwayReport;
   readonly lastSleep?: HostPowerReport["lastSleep"];
   readonly runtimeHealth?: RuntimeHealthObservation;
+  /** Which body holds Clankie (ADR 0286); a dormant body says where he went. */
+  readonly self?: BodyAuthority;
 }> {
   const env = options.env ?? process.env;
   const url = `${commandHost({ ...options, env }).replace(/\/+$/u, "")}/health`;
@@ -137,7 +140,9 @@ export async function probeHealth(options: GatewayCommandOptions = {}): Promise<
     if (!body.success) return { doorway: { state: "unreachable" } };
     const power = HostPowerReportSchema.safeParse(body.data.power);
     const runtimeHealth = RuntimeHealthObservationSchema.safeParse(body.data.runtimeHealth);
+    const self = BodyAuthoritySchema.safeParse(body.data.self);
     return {
+      ...(self.success ? { self: self.data } : {}),
       doorway: body.data.doorway ?? { state: "unreachable" },
       ...(power.success && power.data.lastSleep !== undefined ? { lastSleep: power.data.lastSleep } : {}),
       ...(runtimeHealth.success ? { runtimeHealth: runtimeHealth.data } : {}),

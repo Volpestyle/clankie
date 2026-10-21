@@ -123,7 +123,20 @@ lists and revokes paired devices. The
 options and recovery.
 
 Closing the console leaves the service running, but a sleeping or offline Mac
-cannot be reached. Pairing does not move your Clankie to hosted infrastructure.
+cannot be reached. Pairing does not move your Clankie anywhere.
+
+## Move your Clankie to another body
+
+`clankie transfer` moves the same Clankie to another body, such as a hosted one,
+and back. One body holds him at a time: the old one freezes before anything is
+copied, and it serves only a note saying where he went. His identity, memory,
+conversations, projects and tracker move. Credentials, model and harness
+sign-ins and paired devices stay where they are: pair your devices with the
+new body and connect accounts there. Your Mac can then join the new body as a
+machine, so his workers still run on it
+([ADR 0286](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0286-one-body-holds-clankie-at-a-time.md)).
+Reaching a managed hosted body for a transfer through your account is not
+available yet ([VUH-2582](https://linear.app/vuhlp/issue/VUH-2582)).
 
 ## Your first conversation
 

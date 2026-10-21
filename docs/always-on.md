@@ -129,6 +129,21 @@ Setup and pricing are in the [public field guide](https://docs.clankie.bot/get-s
 Self-hosting the same body on your own Linux host is in
 [Linux self-hosting](../infra/hosted/README.md).
 
+### Moving an existing Clankie to a hosted body
+
+A hosted body you sign up for starts as a new, unclaimed Clankie.
+[`clankie transfer`](cli.md#transfer) moves your Mac's Clankie there as the same
+one: identity, memory, conversations, projects and tracker. It moves him back the same way
+([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)). One body holds him at
+a time. The Mac freezes before the copy, comes back dormant even after a crash,
+and afterwards answers only `/health`, which names where he went. Credentials stay
+in each body's own broker, so the hosted body stays credits-only and the Mac
+keeps its sign-ins for his return. The Mac can then
+[join](cli.md#join) the hosted body as a machine, so workers keep running in its
+checkouts while it is awake. Transfers through the managed gateway are pending
+([VUH-2582](https://linear.app/vuhlp/issue/VUH-2582)); the protocol is proven
+between private bodies today.
+
 `awake` is local only: it refuses in hosted mode and on non-macOS hosts, and a
 hosted loadout never runs it.
 

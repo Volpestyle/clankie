@@ -187,3 +187,5 @@ scope is archived; readers should follow the successor for its implementation.
 - [0282: Settings can save trust with autonomy](0282-settings-can-save-trust-with-autonomy.md) — VUH-2525.
 
 - [0284: A service restart pauses one Pi room turn](0284-a-service-restart-pauses-one-pi-room-turn.md) — VUH-2574 (bounded prototype).
+- [0285: Hosted presence has no idle clock](0285-hosted-presence-has-no-idle-clock.md) — VUH-2575.
+- [0286: One body holds Clankie at a time](0286-one-body-holds-clankie-at-a-time.md) — VUH-2577.

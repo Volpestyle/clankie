@@ -207,6 +207,12 @@ import { createCaptainMemory } from "./captain-memory.ts";
 import { createWorldPlayExecution } from "./play-execution-world.ts";
 import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-host.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
+import {
+  BodyTransfer,
+  bodyTransferRoots,
+  createBodyTransferRoutes,
+  serveDormantBody,
+} from "./body-transfer.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import {
@@ -279,6 +285,31 @@ const captainDiscordEnvironment = { ...process.env };
 await verifyLocalSandbox();
 assertScratchNetwork("clankie");
 const settingsStore = new SettingsStore();
+const stateRoot = resolve(process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie"));
+// One body holds Clankie at a time (ADR 0286). Finish a committed transfer before
+// any store opens; a body that is not Clankie serves only health and transfers.
+const bodyTransfer = new BodyTransfer({
+  roots: bodyTransferRoots(stateRoot, process.env),
+  settings: settingsStore,
+});
+await bodyTransfer.boot();
+if (bodyTransfer.dormant()) {
+  const store = createDefaultCredentialStore();
+  await ensureOperatorCredential({ env: process.env, store });
+  process.exit(
+    await serveDormantBody({
+      transfer: bodyTransfer,
+      authenticateOperator: createCredentialBackedOperatorAuthenticator({
+        env: process.env,
+        store,
+        identity: { operatorId: process.env.CLANKIE_OPERATOR_ID ?? "local-operator", steerSourceLane: "tui" },
+      }),
+      hostname: "127.0.0.1",
+      port: Number(process.env.PORT ?? 4310),
+      log: (event, message) => logger.info(event, message),
+    }),
+  );
+}
 const startupSettings = await settingsStore.load();
 const settingsFilledNames = [
   ...applyDiscordSettingsToEnvironment(startupSettings.discord),
@@ -287,7 +318,6 @@ const settingsFilledNames = [
 ];
 assertScratchNetwork("clankie");
 
-const stateRoot = resolve(process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie"));
 // Workers inherit private Herdr XDG paths; Clankie commands still use this owner settings file.
 process.env.CLANKIE_SETTINGS_FILE = settingsStore.path;
 const herdr = await startHerdrConnection({
@@ -2135,6 +2165,27 @@ const clankie = await createClankieApp({
     return { outcome: "ready" };
   },
   ...(runtimeCanary === undefined ? {} : { runtimeCanary }),
+  bodyTransfer: {
+    routes: createBodyTransferRoutes({
+      transfer: bodyTransfer,
+      authenticateOperator: createCredentialBackedOperatorAuthenticator({
+        env: process.env,
+        store: operatorCredentialStore,
+        identity: { operatorId: process.env.CLANKIE_OPERATOR_ID ?? "local-operator", steerSourceLane: "tui" },
+      }),
+      // Like a release cutover, minus worker panes: they keep running on their machine.
+      cutover: async (commit) => {
+        if (bodyLeaseStore.status("voice") !== undefined || !stopAdmissionWhenIdle()) return "busy";
+        try {
+          await commit();
+        } finally {
+          requestShutdown("SIGTERM");
+        }
+        return "ready";
+      },
+    }),
+    authority: () => bodyTransfer.authority(),
+  },
   refreshHarnesses: async (authority) =>
     refreshLinkedHarnesses({
       repoRoot,

@@ -468,6 +468,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["transfer"],
+    lines: [
+      "  transfer --to URL|local [--from URL|local] | status | abort | reclaim --force | rebind",
+      "                           Move Clankie to another body and back; one body holds him at a time",
+    ],
+  },
+  {
     nouns: ["join"],
     lines: [
       "  join --gateway URL --host HOST_ID [--directory PATH] | approve CODE --access LEVEL | resume|status|leave",

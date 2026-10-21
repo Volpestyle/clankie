@@ -36,6 +36,8 @@ export interface StatusCommandResult {
   readonly presence?: OperatorPresenceSnapshot;
   readonly presenceState?: "unreachable";
   readonly runtimeHealth?: import("@clankie/protocol").RuntimeHealthObservation;
+  /** Which body holds Clankie (ADR 0286). */
+  readonly self?: import("@clankie/protocol/body-transfer").BodyAuthority;
   /** Launcher-owned services that crashed in the last day, or that recovery left stopped. */
   readonly recovery?: readonly ServiceRecoverySummary[];
 }
@@ -95,12 +97,14 @@ export async function statusCommand(options: StatusCommandOptions): Promise<Stat
   }
   return {
     ...(presence === undefined ? { presenceState: "unreachable" as const } : { presence }),
-    ok: serviceHealthy && operatorCredentialHealthy,
+    ok: serviceHealthy && operatorCredentialHealthy && !access.self?.dormant,
     status: !serviceHealthy
       ? (clankie?.state ?? "unreachable")
-      : operatorCredentialHealthy
-        ? "ready"
-        : `operator_credential_${operatorCredential.consistency}`,
+      : access.self?.dormant
+        ? "dormant"
+        : operatorCredentialHealthy
+          ? "ready"
+          : `operator_credential_${operatorCredential.consistency}`,
     host:
       options.host ?? env.CLANKIE_CONTROL_PLANE_URL ?? env.CLANKIE_CAPTAIN_URL ?? DEFAULT_CONTROL_PLANE_URL,
     ...(clankie === undefined ? {} : { owned: clankie.owned }),
@@ -125,7 +129,7 @@ async function phoneAccess(
   options: StatusCommandOptions,
   env: NodeJS.ProcessEnv,
   serviceHealthy: boolean,
-): Promise<Pick<StatusCommandResult, "connection" | "doorway" | "nextStep" | "runtimeHealth">> {
+): Promise<Pick<StatusCommandResult, "connection" | "doorway" | "nextStep" | "runtimeHealth" | "self">> {
   try {
     const settings = await new SettingsStore(defaultSettingsPath(env)).load();
     const connection = await hostedWhoami(env);
@@ -138,9 +142,21 @@ async function phoneAccess(
         })
       : { doorway: { state: "unreachable" as const } };
     const { doorway } = health;
+    const self = "self" in health ? health.self : undefined;
+    if (self?.dormant)
+      return {
+        connection,
+        doorway,
+        self,
+        nextStep:
+          self.state === "released" && self.releasedTo !== undefined
+            ? `Clankie lives at ${self.releasedTo.peer} now; this body is dormant. \`clankie transfer\` brings him back.`
+            : "A transfer is in progress; this body is dormant. See `clankie transfer status`.",
+      };
     return {
       connection,
       doorway,
+      ...(self === undefined ? {} : { self }),
       ...(health.runtimeHealth === undefined ? {} : { runtimeHealth: health.runtimeHealth }),
       nextStep: nextStepLine({
         doorway,

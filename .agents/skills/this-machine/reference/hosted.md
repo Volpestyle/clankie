@@ -164,3 +164,25 @@ before describing a particular installation as continuously present. Explicit
 owner pauses, billing suspension and protective data limits remain. Linked
 machines must be awake for their desktop tools and simulators. Burst is deferred
 from Premium's first release. Hosted operations and deployment stay in clankie-ops.
+
+## Moving Clankie between bodies
+
+[ADR 0286](../../../../docs/adr/0286-one-body-holds-clankie-at-a-time.md): one
+body holds Clankie at a time. `clankie transfer` freezes the source, copies
+identity, memory, conversations, projects and tracker, and activates the
+destination. The source is released only after the destination is active. A
+frozen or released body is dormant: `/health` carries `self` with
+`releasedTo`, and everything else answers `503 body_dormant`.
+
+- Never copy a state directory by hand. That starts a second Clankie with the
+  same history.
+- Never use `reclaim --force` unless the owner asks for it. It can leave two
+  histories that are never merged.
+- After a failure, rerun with the same `--transfer-id` and do not start a new
+  transfer. The source stays frozen until the destination reports itself active.
+- Credentials, sign-ins and paired devices never move. A managed destination
+  stays credits-only.
+- The old machine joins the new body (`clankie join`, then `transfer rebind`) to
+  keep running workers.
+- A managed body is not reachable for transfers through the gateway until
+  VUH-2582 ships.
