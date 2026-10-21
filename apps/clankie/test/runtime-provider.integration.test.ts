@@ -443,6 +443,18 @@ it("injected quota routes keep paired-device authorization and heartbeat tracks 
   expect(finishes).toBe(4);
 });
 
+// Under a loaded gate a round can outlast one long-poll window (VUH-2657).
+async function nextAutoRound(captain: ReturnType<typeof createCaptain>, conversationId: string) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const round = (await captain.pollSeatEvents(5_000, undefined, conversationId)).find((event) =>
+      event.content.startsWith("Auto round."),
+    );
+    if (round) return round;
+  }
+  return undefined;
+}
+
 // VUH-2029 acceptance: a real captain wakes each project's lead without an owner
 // prompt, independently deduplicates leads, and starts no work for an off project.
 it("routes Auto rounds to the configured project lead and independently wakes the fallback head", async () => {
@@ -450,7 +462,7 @@ it("routes Auto rounds to the configured project lead and independently wakes th
   const lead = f.projectLead!;
   const events = (id: string, wait = 5_000) => f.captain.pollSeatEvents(wait, undefined, id);
   const accept = async (id: string) => {
-    const round = (await events(id)).find((event) => event.content.startsWith("Auto round."));
+    const round = await nextAutoRound(f.captain, id);
     expect(round).toBeDefined();
     expect(await f.captain.acknowledgeSeatEvent(round!.id, id)).toBe(true);
     return round!;
@@ -520,9 +532,7 @@ it("keeps clankie Auto at the global head when another project owns the matching
     conversationId: "global-default",
     command: { action: "set_enabled", enabled: true },
   });
-  const head = (await f.captain.pollSeatEvents(5_000, undefined, "global-default")).find((event) =>
-    event.content.startsWith("Auto round."),
-  );
+  const head = await nextAutoRound(f.captain, "global-default");
   expect(head?.content).toContain("clankie (clankie)");
   expect(head?.content).not.toContain("Clankie Work");
   expect(await f.captain.acknowledgeSeatEvent(head!.id, "global-default")).toBe(true);
@@ -535,9 +545,7 @@ it("keeps clankie Auto at the global head when another project owns the matching
     changes: { auto: true },
   });
   expect(enabled.status).toBe(200);
-  const round = (await f.captain.pollSeatEvents(5_000, undefined, lead)).find((event) =>
-    event.content.startsWith("Auto round."),
-  );
+  const round = await nextAutoRound(f.captain, lead);
   expect(round?.content).toContain("Clankie Work (clankie-work)");
   expect(round?.content).not.toContain("clankie (clankie)");
   expect(await f.captain.acknowledgeSeatEvent(round!.id, lead)).toBe(true);
@@ -572,9 +580,7 @@ it("a live tracker parent closure wakes its Auto lead once and links the post in
   });
   const lead = f.projectLead!;
   const accept = async (id: string) => {
-    const event = (await f.captain.pollSeatEvents(5_000, undefined, id)).find((entry) =>
-      entry.content.startsWith("Auto round."),
-    );
+    const event = await nextAutoRound(f.captain, id);
     expect(event).toBeDefined();
     expect(await f.captain.acknowledgeSeatEvent(event!.id, id)).toBe(true);
     return event!;
@@ -681,9 +687,7 @@ it("Auto reaches native delivery despite repeated early restarts, then preserves
   await f.restart();
   await expect.poll(async () => (await cadence()).nextTickAt).toBeGreaterThan(initialDeadline);
   const receive = async (conversationId: string) => {
-    const event = (await f.captain.pollSeatEvents(8_000, undefined, conversationId)).find((entry) =>
-      entry.content.startsWith("Auto round."),
-    );
+    const event = await nextAutoRound(f.captain, conversationId);
     expect(event).toBeDefined();
     expect(await f.captain.acknowledgeSeatEvent(event!.id, conversationId)).toBe(true);
     return event!;
@@ -775,9 +779,7 @@ it("an isolated Auto runtime records the lead's drift choice and checks started 
   await git("remote", "set-head", "origin", "main");
   const leadId = f.projectLead!;
   const accept = async () => {
-    const event = (await f.captain.pollSeatEvents(5_000, undefined, leadId)).find((entry) =>
-      entry.content.startsWith("Auto round."),
-    );
+    const event = await nextAutoRound(f.captain, leadId);
     expect(event).toBeDefined();
     await f.captain.acknowledgeSeatEvent(event!.id, leadId);
     return event!;
