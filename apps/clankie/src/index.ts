@@ -69,7 +69,6 @@ import { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import { createHostedDiscordIngress, createHostedDiscordVoiceCallback } from "./discord-ingress.ts";
 import { OfficialDiscordControl, OfficialDiscordIngress } from "./official-discord.ts";
 import { createModelKeys } from "./model-keys.ts";
-import { createHostedPairing } from "./hosted-pairing.ts";
 import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorway.ts";
 import { WorkerMcp } from "./worker-mcp.ts";
 import { OpenCodeProfiles } from "./opencode-profiles.ts";
@@ -92,18 +91,14 @@ import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
   CLANKIE_ACCOUNT_PROVIDER_ID,
-  ClankieAccountAuthError,
   LINEAR_WEBHOOK_PROVIDER_ID,
-  clankieAccountSignInRequired,
   createClankieAccountTokenProvider,
-  derivePublicGatewayHostId,
   ensureDiscordBridgeCredential,
   ensureDiscordUserBridgeCredential,
   ensureDiscordUserVoiceBridgeCredential,
   ensureDiscordVoiceBridgeCredential,
   ensureOperatorCredential,
   ensureCaptainCredential,
-  resolvePublicGatewayCredential,
 } from "@clankie/credential-broker";
 import { createLogger } from "@clankie/observability";
 import { modelCredentialEventLogger } from "./captain/model-credential-health.ts";
@@ -207,16 +202,12 @@ import { createCaptainMemory } from "./captain-memory.ts";
 import { createWorldPlayExecution } from "./play-execution-world.ts";
 import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-host.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
-import { BodyTransfer, bodyTransferRoots, serveDormantBody } from "./body-transfer.ts";
+import { BodyTransfer, bodyTransferRoots } from "./body-transfer.ts";
+import { serveDormantBody } from "./dormant-body.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
-import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
-import {
-  applyHostedAccountApps,
-  readHostedBodyBootstrap,
-  createHostedBodyClient,
-  HostedBodyDeniedError,
-} from "./hosted-body.ts";
-import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
+import { connectBodyToGateway, openHostedBody } from "./body-doorway.ts";
+import { applyHostedAccountApps, readHostedBodyBootstrap } from "./hosted-body.ts";
+import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { loadRuntimeProvider } from "./runtime-provider.ts";
 import { bodyIdleCheck, startScheduledUpdates, withBodyActivity } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
@@ -294,14 +285,15 @@ if (bodyTransfer.dormant()) {
   process.exit(
     await serveDormantBody({
       transfer: bodyTransfer,
-      authenticateOperator: createCredentialBackedOperatorAuthenticator({
-        env: process.env,
-        store,
-        identity: { operatorId: process.env.CLANKIE_OPERATOR_ID ?? "local-operator", steerSourceLane: "tui" },
-      }),
-      hostname: "127.0.0.1",
+      settingsStore,
+      store,
+      stateRoot,
+      eventLogPath: process.env.CLANKIE_EVENT_LOG?.trim() || join(stateRoot, "events.jsonl"),
+      env: process.env,
       port: Number(process.env.PORT ?? 4310),
-      log: (event, message) => logger.info(event, message),
+      relayPort: Number(process.env.CLANKIE_RELAY_PORT ?? 4321),
+      logger,
+      ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
     }),
   );
 }
@@ -344,19 +336,11 @@ const hostedBootstrap = readHostedBodyBootstrap(process.env);
 if (hostedBootstrap !== undefined && !process.env.CLANKIE_RUNTIME_PROVIDER_MODULE?.trim())
   throw new Error("runtime_provider_required");
 if (hostedBootstrap !== undefined) await applyHostedAccountApps(hostedBootstrap, settingsStore);
-const hostedBody =
-  hostedBootstrap === undefined
-    ? undefined
-    : await createHostedBodyClient(hostedBootstrap, operatorCredentialStore);
-// Register before any signed fleet request or connector-triggered renewal.
-const hostedPairing =
-  hostedBody === undefined
-    ? undefined
-    : await createHostedPairing(
-        hostedBody,
-        operatorCredentialStore,
-        join(stateRoot, "hosted-pair-tickets.json"),
-      );
+const { hostedBody, hostedPairing } = await openHostedBody(
+  hostedBootstrap,
+  operatorCredentialStore,
+  stateRoot,
+);
 await accountDiagnostics.refresh();
 const managedDiscord =
   hostedBody === undefined
@@ -402,36 +386,29 @@ function closeRuntimeProvider(): Promise<void> {
     }
   })());
 }
-let publicGatewayConnector: PublicGatewayConnector | undefined;
-/** The signed-in account route, which the free official Discord bot (VUH-1766) also uses. */
-let accountGatewayRoute:
-  | { gatewayUrl: string; installationId: string; resolveAccountToken: () => Promise<{ token: string }> }
-  | undefined;
-/** Set when the account credential is rejected before a connector can even exist. */
-let publicGatewaySignInRequiredSince: string | undefined;
 // A sleeping host is a normal condition (ADR 0203): report it, never treat it as a fault.
 const hostPower = createHostPowerMonitor({
   keepAwakeRequested: async () => keepAwakeEnabled(await settingsStore.load()),
   onSleep: (sleep) => logger.info({ event: "host.slept", ...sleep }, "the host slept underneath the service"),
 });
+const bodyConnection = await connectBodyToGateway({
+  hostedBody,
+  publicGateway: startupSettings.publicGateway,
+  store: operatorCredentialStore,
+  env: process.env,
+  port,
+  relayPort,
+  logger,
+  ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
+  ...(runtimeProvider.quota?.gatewayRoutes === undefined
+    ? {}
+    : { gatewayRoutes: runtimeProvider.quota.gatewayRoutes }),
+  onAuthenticatedRequest: (isWork) => runtimeProvider.heartbeat?.authenticatedWork(isWork),
+});
+const publicGatewayConnector = bodyConnection.connector;
+const accountGatewayRoute = bodyConnection.accountGatewayRoute;
+const publicGatewaySignInRequiredSince = bodyConnection.signInRequiredSince;
 if (hostedBody !== undefined) {
-  publicGatewayConnector = new PublicGatewayConnector({
-    ...(runtimeProvider.quota?.gatewayRoutes === undefined
-      ? {}
-      : { gatewayRoutes: runtimeProvider.quota.gatewayRoutes }),
-    encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
-    gatewayUrl: hostedBody.bootstrap.gatewayOrigin,
-    hostId: hostedBody.hostId,
-    onAuthenticatedRequest: (isWork) => runtimeProvider.heartbeat?.authenticatedWork(isWork),
-    onHostRejected: () => hostedBody.reject(),
-    installationId: hostedBody.bootstrap.installationId,
-    resolveHostToken: () => hostedBody.resolveHostToken(),
-    tokenErrorIsTerminal: (error) => error instanceof HostedBodyDeniedError,
-    controlPlaneUrl: `http://127.0.0.1:${String(port)}`,
-    relayUrl: `http://127.0.0.1:${String(relayPort)}`,
-    logger,
-    ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
-  });
   hostedBody.onDenied = () => {
     publicGatewayConnector?.close();
     void closeRuntimeProvider().catch(() =>
@@ -440,100 +417,6 @@ if (hostedBody !== undefined) {
   };
   hostedBody.onSignatureInvalid = () =>
     logger.warn({ event: "body_signature_invalid" }, "hosted fleet signature rejected");
-}
-if (
-  hostedBody === undefined &&
-  startupSettings.publicGateway.url !== undefined &&
-  startupSettings.publicGateway.hostId !== undefined
-) {
-  try {
-    const hostToken = await resolvePublicGatewayCredential({
-      env: process.env,
-      store: operatorCredentialStore,
-    });
-    if (hostToken === undefined) {
-      logger.warn(
-        { hostId: startupSettings.publicGateway.hostId },
-        "public gateway is configured but its credential is missing; direct access remains available",
-      );
-    } else {
-      publicGatewayConnector = new PublicGatewayConnector({
-        ...(runtimeProvider.quota?.gatewayRoutes === undefined
-          ? {}
-          : { gatewayRoutes: runtimeProvider.quota.gatewayRoutes }),
-        encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
-        gatewayUrl: startupSettings.publicGateway.url,
-        hostId: startupSettings.publicGateway.hostId,
-        hostToken,
-        controlPlaneUrl: `http://127.0.0.1:${String(port)}`,
-        relayUrl: `http://127.0.0.1:${String(relayPort)}`,
-        logger,
-        ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
-      });
-    }
-  } catch (error) {
-    logger.warn(
-      {
-        hostId: startupSettings.publicGateway.hostId,
-        error: error instanceof Error ? error.name : "UnknownError",
-      },
-      "public gateway configuration is unusable; direct access remains available",
-    );
-  }
-}
-if (
-  hostedBody === undefined &&
-  publicGatewayConnector === undefined &&
-  startupSettings.publicGateway.url !== undefined &&
-  startupSettings.publicGateway.installationId !== undefined
-) {
-  try {
-    const resolveAccountToken = createClankieAccountTokenProvider({
-      gatewayUrl: startupSettings.publicGateway.url,
-      store: operatorCredentialStore,
-    });
-    // Derive the stable route locally. Network/token resolution belongs to the
-    // connector's retry loop, so an offline startup can recover after wake.
-    const stored = await operatorCredentialStore.get(CLANKIE_ACCOUNT_PROVIDER_ID);
-    if (stored?.type !== "oauth" || stored.accountId === undefined) {
-      throw new ClankieAccountAuthError("account_not_invited", "Sign in to your Clankie account first");
-    }
-    const hostId = derivePublicGatewayHostId(stored.accountId, startupSettings.publicGateway.installationId);
-    accountGatewayRoute = {
-      gatewayUrl: startupSettings.publicGateway.url,
-      installationId: startupSettings.publicGateway.installationId,
-      resolveAccountToken,
-    };
-    publicGatewayConnector = new PublicGatewayConnector({
-      ...(runtimeProvider.quota?.gatewayRoutes === undefined
-        ? {}
-        : { gatewayRoutes: runtimeProvider.quota.gatewayRoutes }),
-      encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
-      gatewayUrl: startupSettings.publicGateway.url,
-      hostId,
-      installationId: startupSettings.publicGateway.installationId,
-      resolveHostToken: async () => {
-        const credential = await resolveAccountToken();
-        return { token: credential.token, expiresAt: credential.expiresAt };
-      },
-      tokenErrorIsTerminal: clankieAccountSignInRequired,
-      controlPlaneUrl: `http://127.0.0.1:${String(port)}`,
-      relayUrl: `http://127.0.0.1:${String(relayPort)}`,
-      logger,
-      ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
-    });
-  } catch (error) {
-    if (clankieAccountSignInRequired(error)) publicGatewaySignInRequiredSince = new Date().toISOString();
-    logger.warn(
-      {
-        error: error instanceof Error ? error.name : "UnknownError",
-        ...(typeof (error as { readonly code?: unknown }).code === "string"
-          ? { code: (error as { readonly code: string }).code }
-          : {}),
-      },
-      "Clankie account cannot connect to the public gateway; direct access remains available",
-    );
-  }
 }
 const discordBridgeToken = await ensureDiscordBridgeCredential({
   env: process.env,

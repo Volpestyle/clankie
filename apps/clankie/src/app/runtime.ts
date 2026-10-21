@@ -524,6 +524,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   storedEvents.length = 0;
 
   const app = new Hono();
+  // A dormant body (ADR 0286) admits only its doorway; inner hosted requests pass here too.
+  if (dependencies.admit !== undefined)
+    app.use("*", async (context, next) => {
+      if (!dependencies.admit!(context.req.method, context.req.path))
+        return context.json(
+          {
+            error: "body_dormant",
+            ...(dependencies.bodyTransfer === undefined
+              ? {}
+              : { self: dependencies.bodyTransfer.transfer.authority() }),
+          },
+          503,
+        );
+      await next();
+    });
   app.use("*", async (context, next) => {
     const cors = await httpCors({
       path: context.req.path,
@@ -1132,7 +1147,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       createBodyTransferRoutes({
         transfer: dependencies.bodyTransfer.transfer,
         authorize: authorizeOwnerSecrets,
-        cutover: dependencies.bodyTransfer.cutover,
+        ...(dependencies.bodyTransfer.cutover === undefined
+          ? {}
+          : { cutover: dependencies.bodyTransfer.cutover }),
+        ...(dependencies.bodyTransfer.restart === undefined
+          ? {}
+          : { restart: dependencies.bodyTransfer.restart }),
       }),
     );
   app.route(

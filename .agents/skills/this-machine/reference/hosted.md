@@ -185,6 +185,9 @@ frozen or released body is dormant: `/health` carries `self` with
 - The old machine joins the new body (`clankie join`, then `transfer rebind`) to
   keep running workers.
 - `clankie transfer --to hosted` moves Clankie into the managed body this
-  terminal is signed in to, through the gateway as a Take Control device. The
-  return trip from a dormant managed body waits for VUH-2583. Do not offer "move
-  to hosted" to an owner until then: it would be one way.
+  terminal is signed in to, through the gateway as a Take Control device.
+  `--from hosted --to local` brings him back: a frozen managed body keeps its
+  doorway (VUH-2583).
+- A dormant body answers only health, transfers and device session upkeep.
+  Anything else is `503 body_dormant`, which means "he lives elsewhere", not an
+  outage.

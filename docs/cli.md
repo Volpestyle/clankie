@@ -4705,6 +4705,7 @@ clankie fleet set --commit lead --push lead --release owner
 
 ```bash
 clankie transfer --to hosted [--transfer-id UUID] [--replace]
+clankie transfer --from hosted --to local --destination-machine JOIN_ID
 clankie transfer --to URL --to-token-file FILE [--transfer-id UUID] [--replace]
 clankie transfer --from URL --from-token-file FILE --to local --destination-machine JOIN_ID
 clankie transfer status [--at hosted | --at URL --token-file FILE]
@@ -4776,14 +4777,26 @@ the old machine shows where Clankie went. Every other route answers
   other body. It records the reason, and any work the other body did is not
   merged.
 
-A managed body can receive Clankie (`--to hosted`), but cannot yet send him back.
-Once frozen, it is dormant, and a dormant managed body has no gateway doorway
-until [VUH-2583](https://linear.app/vuhlp/issue/VUH-2583) ships. No user-facing
-"move to hosted" entry point ships before the return trip works. The real-model
+A dormant body keeps its doorway ([VUH-2583](https://linear.app/vuhlp/issue/VUH-2583)).
+It runs the same app composition as an active body, with no captain and a gate
+that admits only:
+
+- `/health`;
+- the transfer routes;
+- the hosted-operator envelope, whose inner request is gated again;
+- device session refresh.
+
+Its gateway connection, hosted security and device authority are the active
+body's. So a frozen managed body can export its bundle and be released by the
+owner's Take Control device, and `--from hosted` brings Clankie back. A frozen
+body builds its bundle at boot, before anything else opens. `dormant` in status
+means the process booted dormant: a body that froze itself and is still shutting
+down reports `frozen` but not dormant, so nothing exports from it. The real-model
 proof between two private bodies is `apps/clankie/scripts/prove-body-transfer.ts`
 ([evidence](testing/2026-10-21-vuh-2577-body-transfer/README.md)). The hosted CLI
 and gateway proofs are in
-[VUH-2582 evidence](testing/2026-10-21-vuh-2582-transfer-gateway/README.md).
+[VUH-2582 evidence](testing/2026-10-21-vuh-2582-transfer-gateway/README.md) and
+[VUH-2583 evidence](testing/2026-10-21-vuh-2583-dormant-doorway/README.md).
 
 ### `join`
 

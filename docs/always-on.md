@@ -141,10 +141,10 @@ in each body's own broker, so the hosted body stays credits-only and the Mac
 keeps its sign-ins for his return. The Mac can then
 [join](cli.md#join) the hosted body as a machine, so workers keep running in its
 checkouts while it is awake. The gateway carries
-transfers to a managed body (`clankie transfer --to hosted`, VUH-2582). The return
-trip from a dormant managed body is
-[VUH-2583](https://linear.app/vuhlp/issue/VUH-2583), and no user-facing "move to
-hosted" ships before it.
+transfers both ways: `clankie transfer --to hosted` (VUH-2582) and `--from hosted`,
+because a dormant managed body keeps its doorway
+([VUH-2583](https://linear.app/vuhlp/issue/VUH-2583)). Both are proven against a
+local gateway stack, not yet on a production body.
 
 `awake` is local only: it refuses in hosted mode and on non-macOS hosts, and a
 hosted loadout never runs it.

@@ -135,8 +135,9 @@ sign-ins and paired devices stay where they are: pair your devices with the
 new body and connect accounts there. Your Mac can then join the new body as a
 machine, so his workers still run on it
 ([ADR 0286](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0286-one-body-holds-clankie-at-a-time.md)).
-Moving to a managed hosted body is not offered yet. Clankie has to be able to
-come back the same way first ([VUH-2583](https://linear.app/vuhlp/issue/VUH-2583)).
+With a hosted Clankie connected (`clankie connect hosted`),
+`clankie transfer --to hosted` moves your Mac's Clankie there, and
+`clankie transfer --from hosted --to local` brings him back.
 
 ## Your first conversation
 

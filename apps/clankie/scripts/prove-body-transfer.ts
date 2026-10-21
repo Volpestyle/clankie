@@ -24,6 +24,8 @@ const provider = model.slice(0, model.indexOf("/"));
 const sourcePaths = [
   "apps/clankie/src/body-transfer.ts",
   "apps/clankie/src/captain/personas.ts",
+  "apps/clankie/src/dormant-body.ts",
+  "apps/clankie/src/body-doorway.ts",
   "apps/clankie/src/index.ts",
   "apps/clankie/src/app/runtime.ts",
   "packages/protocol/src/body-transfer.ts",
@@ -317,7 +319,7 @@ try {
   const afterCrash = await until(async () => {
     const response = await fetch(`${mac.url}/health`);
     const body = response.ok ? ((await response.json()) as Record<string, any>) : undefined;
-    return body?.dormant ? body : undefined;
+    return body?.self?.dormant ? body : undefined;
   }, "mac back after the crash");
   assert.equal(afterCrash.self.state, "frozen");
   const supervisor = await readFile(join(root, "supervisor.log"), "utf8");

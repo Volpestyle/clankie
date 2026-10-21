@@ -27,7 +27,6 @@ import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
-import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import type { SettingsStore } from "@clankie/settings";
 import {
@@ -159,6 +158,12 @@ export class BodyTransfer {
   private readonly now: () => Date;
   /** Set when boot could not apply a staged transfer; the body stays dormant. */
   bootError: string | undefined;
+  /**
+   * What this process is, fixed at boot. A body that froze itself stays a
+   * shutting-down active process until it restarts, so it never reports itself
+   * dormant or exports from a store something may still write.
+   */
+  private bootedDormant: boolean | undefined;
 
   constructor(options: {
     roots: BodyTransferRoots;
@@ -223,7 +228,7 @@ export class BodyTransfer {
   }
 
   dormant(): boolean {
-    return this.current().state !== "active";
+    return this.bootedDormant ?? this.current().state !== "active";
   }
 
   authority(options: { transfers?: boolean } = {}): BodyAuthority {
@@ -232,7 +237,7 @@ export class BodyTransfer {
       ...(self.selfId === undefined ? {} : { selfId: self.selfId }),
       epoch: self.epoch,
       state: self.state,
-      dormant: self.state !== "active",
+      dormant: this.dormant(),
       ...(self.transferId === undefined ? {} : { transferId: self.transferId }),
       ...(self.releasedTo === undefined ? {} : { releasedTo: self.releasedTo }),
       ...(options.transfers ? { transfers: self.transfers } : {}),
@@ -446,6 +451,7 @@ export class BodyTransfer {
 
   private outgoingBundle(transferId: string): Promise<{ path: string; size: number; sha256: string }> {
     return this.serial(async () => {
+      if (this.bootedDormant === false) throw new BodyTransferError("source_still_shutting_down");
       const { record } = this.frozenSource(transferId);
       if (record.outcome !== "frozen") throw new BodyTransferError("transfer_not_frozen_here");
       const path = this.dir("outgoing", `${transferId}.bundle`);
@@ -459,7 +465,7 @@ export class BodyTransfer {
       }
       const { stream } = await this.exportBundle(transferId);
       await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      const temporary = `${path}.${process.pid}.tmp`;
+      const temporary = `${path}.${randomUUID()}.tmp`;
       const hash = createHash("sha256");
       let size = 0;
       await pipeline(
@@ -478,6 +484,14 @@ export class BodyTransfer {
       await writeFile(summary, JSON.stringify({ size, sha256 }), { mode: 0o600 });
       return { path, size, sha256 };
     });
+  }
+
+  /** A frozen source builds its bundle at boot, before anything else opens. */
+  async prepareOutgoing(): Promise<void> {
+    const self = this.read();
+    const record = self?.transferId === undefined ? undefined : self.transfers[self.transferId];
+    if (self?.state !== "frozen" || record?.role !== "source" || record.outcome !== "frozen") return;
+    await this.outgoingBundle(self.transferId!);
   }
 
   private async removeOutgoing(transferId: string): Promise<void> {
@@ -675,13 +689,18 @@ export class BodyTransfer {
     const self = this.read();
     const id = self?.transferId;
     const record = id === undefined ? undefined : self?.transfers[id];
-    if (self?.state !== "frozen" || id === undefined || record?.role !== "destination") return;
-    if (record.outcome !== "applying") return;
-    try {
-      await this.applyStaged(self, id, record);
-    } catch (error) {
-      this.bootError = error instanceof Error ? error.message : String(error);
-    }
+    if (
+      self?.state === "frozen" &&
+      id !== undefined &&
+      record?.role === "destination" &&
+      record.outcome === "applying"
+    )
+      try {
+        await this.applyStaged(self, id, record);
+      } catch (error) {
+        this.bootError = error instanceof Error ? error.message : String(error);
+      }
+    this.bootedDormant = this.current().state !== "active";
   }
 
   private async applyStaged(self: BodySelf, id: string, record: BodyTransferRecord): Promise<void> {
@@ -903,7 +922,6 @@ class ByteReader {
   }
 }
 
-type OperatorAuthenticator = (request: Request) => Promise<unknown>;
 type OwnerAuthorizer = (request: Request) => Promise<true | "authentication_required" | "forbidden">;
 
 /**
@@ -992,46 +1010,4 @@ export function createBodyTransferRoutes(options: {
     handle(context, async () => transfer.rebind(await context.req.json())),
   );
   return app;
-}
-
-/**
- * A body that is not Clankie serves `/health` (saying where he went) and the
- * transfer routes, and nothing else. It returns only when the process should exit.
- */
-export async function serveDormantBody(options: {
-  transfer: BodyTransfer;
-  authenticateOperator: OperatorAuthenticator;
-  hostname: string;
-  port: number;
-  log: (event: Record<string, unknown>, message: string) => void;
-}): Promise<number> {
-  let finish: (code: number) => void = () => undefined;
-  const finished = new Promise<number>((resolve) => (finish = resolve));
-  const app = new Hono();
-  app.get("/health", (context) =>
-    context.json({
-      ok: true,
-      dormant: true,
-      self: options.transfer.authority(),
-      ...(options.transfer.bootError === undefined ? {} : { bootError: options.transfer.bootError }),
-    }),
-  );
-  app.route(
-    "/",
-    createBodyTransferRoutes({
-      transfer: options.transfer,
-      // Only the operator bearer: a dormant body has no device authority yet (VUH-2583).
-      authorize: async (request) =>
-        (await options.authenticateOperator(request)) === undefined ? "authentication_required" : true,
-      restart: () => finish(0),
-    }),
-  );
-  app.all("*", (context) => context.json({ error: "body_dormant", self: options.transfer.authority() }, 503));
-  const server = serve({ fetch: app.fetch, hostname: options.hostname, port: options.port });
-  options.log({ event: "body.dormant", self: options.transfer.authority() }, "clankie body is dormant");
-  for (const signal of ["SIGINT", "SIGTERM"] as const)
-    process.once(signal, () => finish(signal === "SIGINT" ? 130 : 143));
-  const code = await finished;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return code;
 }

@@ -152,8 +152,13 @@ export interface ClankieAppDependencies {
   /** Owner transfer routes and the self record `/health` reports (ADR 0286). */
   bodyTransfer?: {
     readonly transfer: import("../body-transfer.ts").BodyTransfer;
-    readonly cutover: import("../body-transfer.ts").BodyCutover;
+    /** An active body freezes and applies through a cutover; a dormant one has none. */
+    readonly cutover?: import("../body-transfer.ts").BodyCutover;
+    /** A dormant body restarts so boot applies what it committed. */
+    readonly restart?: () => void;
   };
+  /** Set only on a dormant body: the routes its doorway admits (ADR 0286, VUH-2583). */
+  admit?: (method: string, path: string) => boolean;
   refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
   refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;

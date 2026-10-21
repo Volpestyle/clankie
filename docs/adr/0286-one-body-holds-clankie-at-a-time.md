@@ -145,11 +145,13 @@ leaves its join.
   It is an explicit owner action, never automatic failover.
 - The gateway carries the transfer routes inside the encrypted device envelope,
   in envelope-sized chunks, for an owner device with Take Control
-  ([VUH-2582](https://linear.app/vuhlp/issue/VUH-2582)). A dormant managed body
-  still needs its doorway (device authority and the connector) to export and be
-  released. That is [VUH-2583](https://linear.app/vuhlp/issue/VUH-2583), which
-  extracts the doorway composition rather than booting a gated full service.
-  Until it ships, Clankie can move to a managed body but not back, so no
-  user-facing "move to hosted" entry point ships.
+  ([VUH-2582](https://linear.app/vuhlp/issue/VUH-2582)).
+- A dormant body keeps its doorway ([VUH-2583](https://linear.app/vuhlp/issue/VUH-2583)).
+  It runs the active body's own app composition (device authority, hosted
+  security, the hosted-operator seam, the gateway connection) with no captain,
+  behind a gate that admits only health, transfers and device session upkeep. It
+  is not a gated full service: nothing else of Clankie starts. A frozen body
+  builds its bundle at boot, before anything else opens. "Dormant" describes the
+  process, so a body still shutting down after its own freeze never exports.
 - Two bodies never merge state. Reclaim is the only path that can leave two
   histories, and it requires `--force` and is recorded.
