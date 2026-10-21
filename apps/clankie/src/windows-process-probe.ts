@@ -10,7 +10,10 @@ import { WINDOWS_CODEX_ARGV, windowsCodexArgvSet } from "./windows-codex-argv.ts
 function probeCommand(script: string): string {
   const command = powershellScriptCommand(script);
   if (command.length < 32_000) return command;
-  const compressed = gzipSync(Buffer.from(script, "utf8")).toString("base64");
+  // Indentation and whole-line comments (`# ` PowerShell, `// ` C#) mean nothing to
+  // either language, and gzip size varies by Node's zlib; every runtime's must fit.
+  const minified = script.replace(/^[ \t]+/gmu, "").replace(/^(?:# |\/\/ ).*\n/gmu, "");
+  const compressed = gzipSync(Buffer.from(minified, "utf8"), { level: 9 }).toString("base64");
   const bounded = powershellScriptCommand(`$ErrorActionPreference='Stop'
 $bytes=[Convert]::FromBase64String('${compressed}')
 $memory=[System.IO.MemoryStream]::new($bytes)

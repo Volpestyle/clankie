@@ -255,6 +255,10 @@ try {
   capture(process.execPath, [join(repoRoot, "packages", "vox-client", "test", "ipc-smoke.ts")], {
     env: { ...process.env, CLANKIE_VOX_BIN: join(extracted, "apps", "vox", "target", "release", "clankvox") },
   });
+  // Gzip output varies by zlib; Windows probes must fit on the Node this release ships.
+  capture(join(extracted, "libexec", "node"), [
+    join(repoRoot, "apps", "clankie", "test", "windows-probe-size.ts"),
+  ]);
 
   if (process.env.CLANKIE_RELEASE_SMOKE_SKIP_LAUNCHER_START !== "1") {
     launcherStarted = true;
