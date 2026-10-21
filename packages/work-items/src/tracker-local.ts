@@ -889,7 +889,7 @@ function appendEvent(
     identifier: issue.identifier,
     ...event,
     actor: context.actor,
-    selfEcho: !isOwnerActivity(context.actor),
+    selfEcho: !isOwnerActivity(context.actor) && context.actor.type !== "external",
     ...(context.via === undefined ? {} : { via: context.via }),
     prevHash: store.events.at(-1)?.hash ?? "",
   };

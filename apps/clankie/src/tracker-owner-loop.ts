@@ -201,7 +201,13 @@ export async function startTrackerOwnerLoop(options: TrackerOwnerLoopOptions): P
       }
     }
     // Owner answers already wake their source chat through ADR 0245; never twice.
-    if (!event.selfEcho && event.via !== "owner_ask" && WAKING.has(event.type)) {
+    // External input (a Discord member's post) is untrusted data and never wakes.
+    if (
+      !event.selfEcho &&
+      event.actor.type !== "external" &&
+      event.via !== "owner_ask" &&
+      WAKING.has(event.type)
+    ) {
       const { conversationId, issue } = await route(event.issueId);
       const woke = await options.captain.wakeConversation(
         { conversationId },

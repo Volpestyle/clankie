@@ -79,6 +79,8 @@ and retained diagnostics.
   implemented replacement for the desktop-control path.
 - [Clankie's own computer-use loop](proposals/2026-10-04-sota-computer-use.md)
   proposes direct native/provider loops, a shared hosted body and a manual comparison.
+- [Discord forum tracker view](proposals/2026-10-21-discord-forum-tracker-view.md)
+  designs the two-way forum view of the built-in tracker (VUH-2531) and its slices.
 - [Discord surface review](proposals/2026-09-30-discord-surface-review.md) preserves
   the declined proposal to retire the Activity and the user-session lab body.
 - [Ruthless cut audit](proposals/2026-09-30-ruthless-cut-audit.md) is a dated

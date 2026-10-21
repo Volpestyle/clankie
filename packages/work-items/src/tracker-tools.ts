@@ -54,8 +54,12 @@ export interface TrackerToolCallOptions {
   readonly via?: string;
 }
 
-/** human: the owner; agent-worker: Clankie or a hired worker; app: an enrolled device. */
-export type TrackerActorType = "human" | "agent-worker" | "app";
+/**
+ * human: the owner; agent-worker: Clankie or a hired worker; app: an enrolled device;
+ * external: someone outside the owner's authority, such as a Discord member posting in a
+ * forum view. External writes are untrusted data: never the owner, never Clankie's echo.
+ */
+export type TrackerActorType = "human" | "agent-worker" | "app" | "external";
 export interface TrackerActorRef {
   readonly type: TrackerActorType;
   readonly id: string;
@@ -151,7 +155,10 @@ export interface TrackerItemEvent {
     | "stop"
     | "resume";
   readonly actor: TrackerActor;
-  /** True when Clankie or his workers wrote it; owner activity (human or the owner's app) is false. */
+  /**
+   * True when Clankie or his workers wrote it; owner activity (human or the owner's app)
+   * and external input are false. Check `actor.type` before treating it as the owner's.
+   */
   readonly selfEcho: boolean;
   readonly body?: string;
   readonly from?: string;

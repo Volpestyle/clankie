@@ -824,3 +824,15 @@ Linear and GitHub reuse connected accounts. Built-in needs none. The Discord
 forum slot remains unavailable pending VUH-2531: it will be a two-way view of
 the built-in source of truth, not another store. CLI/API shapes are in
 [the CLI reference](../cli.md#work-tracker-settings).
+
+## Amendment: external actors (2026-10-21, VUH-2531)
+
+The Discord forum view lets people outside the owner's authority, such as server
+members, file items and comments. The tracker records them as a fourth actor
+type, `external`. An external actor is never the owner (`human`) and its events
+are never `selfEcho`, so consumers must check `actor.type` before treating a
+non-echo event as the owner's. The owner loop does not wake on external
+activity. The host stamps the actor from the forum event, never from tool
+arguments, and the text carries a provenance line that marks it untrusted.
+Owner-only moves stay with `human`. The design and its trust rules are in
+[the forum view proposal](../proposals/2026-10-21-discord-forum-tracker-view.md).
