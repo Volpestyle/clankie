@@ -187,7 +187,9 @@ import {
   renderMemoryCard,
   SESSION_PROMPT_SECTIONS,
 } from "./captain-prompts.ts";
+import { gateServiceTools } from "./service-tools.ts";
 import {
+  assertFixedPromptFits,
   assistantText,
   cloneSideConversationSession,
   seatEventKindFor,
@@ -1880,6 +1882,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         purpose,
         route,
         budget,
+        serviceTools: { lane, withheld: new Set() },
         lastAssistantText: "",
         turnCounter: 0,
       };
@@ -1931,9 +1934,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       lane.session.setThinkingLevel(selection.thinkingLevel);
     }
     if (lane.session.resourceLoader instanceof CaptainResourceLoader) {
-      // Not a no-op: resetting the same tools makes pi rebuild the system
-      // prompt, which re-reads skills and context files from disk.
-      lane.session.setActiveToolsByName(lane.session.getActiveToolNames());
+      // Not a no-op: resetting the tools makes pi rebuild the system prompt,
+      // which re-reads skills and context files from disk.
+      const active = lane.session.getActiveToolNames();
+      // Unreadable readiness lists every tool, as before the gate existed.
+      const readiness = await deps.serviceReadiness?.().catch((error: unknown) => {
+        console.warn(
+          "Service readiness unavailable:",
+          error instanceof Error ? error.message : String(error),
+        );
+        return undefined;
+      });
+      lane.session.setActiveToolsByName(
+        readiness === undefined
+          ? active
+          : gateServiceTools(
+              active,
+              new Set(lane.session.getAllTools().map((tool) => tool.name)),
+              readiness,
+              lane.serviceTools.lane,
+              lane.serviceTools.withheld,
+            ),
+      );
+      assertFixedPromptFits(lane.session, selection.ref);
     }
   }
 

@@ -3414,8 +3414,17 @@ The probe is `GET {normalizedBaseURL}/models` with a 3-second timeout. Local
 runtimes are unknown to models.dev, so the endpoint itself is the catalog. A
 model the list gives no context length (Ollama's `/v1` never does) is asked
 again at Ollama's native `POST /api/show`, which reports the model's own window;
-other runtimes leave it at `--context`. Clankie's first request alone is about
-32k tokens, so a model with a smaller window compacts on every turn.
+other runtimes leave it at `--context`.
+
+Ollama can serve a smaller context than that native window: `num_ctx` comes from
+a Modelfile `PARAMETER num_ctx`, `OLLAMA_CONTEXT_LENGTH` or a default sized to the
+machine's memory, its `/v1` route ignores a requested size, and it silently drops
+the start of a longer prompt. Before each turn Clankie reads the context Ollama
+has loaded the model with (`GET /api/ps`, loading it first with `POST
+/api/generate` if needed) and narrows the window to it. When his instructions and
+tool schemas alone do not fit, the turn fails with that reason instead of being
+truncated; raise `num_ctx` or pick a larger model. His first request on a fresh
+install is about 26k tokens, so give a local model at least 64k.
 
 ```bash
 clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set

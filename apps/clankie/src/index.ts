@@ -22,7 +22,11 @@ import { ActivityPlaySource } from "./activity-play-source.ts";
 import { createActivityArtifactSources } from "./activity-artifact-source.ts";
 import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
 import { ActivitySharing } from "./activity-sharing.ts";
-import { resolveActivityProducerCredential } from "@clankie/credential-broker";
+import {
+  DISCORD_BOT_PROVIDER_ID,
+  DISCORD_USER_SESSION_PROVIDER_ID,
+  resolveActivityProducerCredential,
+} from "@clankie/credential-broker";
 import { PeekabooComputerAdapter } from "./computer-peekaboo.ts";
 import { detectWindowsComputerUseHarnesses } from "./computer-windows-discovery.ts";
 import { detectComputerUseHarnesses } from "./computer-use-harnesses.ts";
@@ -1441,6 +1445,21 @@ const captain = createCaptain(
     skinDrafts,
     mcp: mcpHost,
     email,
+    serviceReadiness: async () => {
+      const [settings, bot, userSession, mailbox, tracker] = await Promise.all([
+        settingsStore.load(),
+        operatorCredentialStore.get(DISCORD_BOT_PROVIDER_ID),
+        operatorCredentialStore.get(DISCORD_USER_SESSION_PROVIDER_ID),
+        email.configured(),
+        mcpHost.trackerStatus?.(),
+      ]);
+      return {
+        minecraft: settings.minecraft.profiles.length > 0,
+        discordBody: discordBodyInLoadout && (bot?.type === "api" || userSession !== undefined),
+        mailbox,
+        linear: tracker?.backend === "linear",
+      };
+    },
     minecraft,
     minecraftHost,
     gameExtensions,

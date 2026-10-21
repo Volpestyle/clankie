@@ -10,7 +10,10 @@ join an approved external world as a non-premium bot. He needs no Microsoft
 account. Premium human joins, public connectivity and Discord code delivery
 need live acceptance; local conformance and a configured viewer do not prove them.
 
-Use the `minecraft_*` tools in the owning conversation. Clankie's existing mind
+Use the `minecraft_*` tools in the owning conversation. Until a server profile
+exists only the setup tools are listed; play and administration tools arrive on
+the next turn after `minecraft_configure` or the first hosted start saves one.
+Clankie's existing mind
 chooses the actions; the service-owned MCP motor supplies navigation and physics,
 and his continuous play mind drives by default. Call `minecraft_join` without a
 profile id to list approved profile names, then select one. Endpoint and account

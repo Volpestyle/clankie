@@ -1,0 +1,152 @@
+{
+  "model": "ollama/qwen3-vl:8b (Ollama 0.30.10), same first message as VUH-2623",
+  "before": {
+    "commit": "43041e765",
+    "evidence": "clankie://evidence/sha256/c595fdfc55f1cbbdb3e226e048e5a31b59f978e4e44f06a042bd99c3e582cd76",
+    "promptTokens": 31996,
+    "tools": 103,
+    "toolChars": 119582,
+    "systemPromptChars": 35429
+  },
+  "after": {
+    "promptTokens": 27916,
+    "tools": 70,
+    "toolChars": 94240,
+    "systemPromptChars": 35415
+  },
+  "withheld": [
+    {
+      "name": "activity_share",
+      "chars": 1420
+    },
+    {
+      "name": "discord_server_action",
+      "chars": 1490
+    },
+    {
+      "name": "discord_tracking_project",
+      "chars": 672
+    },
+    {
+      "name": "email_list",
+      "chars": 557
+    },
+    {
+      "name": "email_read",
+      "chars": 303
+    },
+    {
+      "name": "email_search",
+      "chars": 390
+    },
+    {
+      "name": "email_send",
+      "chars": 459
+    },
+    {
+      "name": "linear_wake",
+      "chars": 2329
+    },
+    {
+      "name": "minecraft_act",
+      "chars": 3781
+    },
+    {
+      "name": "minecraft_cancel",
+      "chars": 429
+    },
+    {
+      "name": "minecraft_chat",
+      "chars": 414
+    },
+    {
+      "name": "minecraft_driver",
+      "chars": 836
+    },
+    {
+      "name": "minecraft_host_admin",
+      "chars": 3904
+    },
+    {
+      "name": "minecraft_host_approve_enrollment",
+      "chars": 550
+    },
+    {
+      "name": "minecraft_host_backup",
+      "chars": 296
+    },
+    {
+      "name": "minecraft_host_invite",
+      "chars": 287
+    },
+    {
+      "name": "minecraft_host_request_enrollment",
+      "chars": 570
+    },
+    {
+      "name": "minecraft_join",
+      "chars": 498
+    },
+    {
+      "name": "minecraft_leave",
+      "chars": 323
+    },
+    {
+      "name": "minecraft_observe",
+      "chars": 344
+    },
+    {
+      "name": "minecraft_pause",
+      "chars": 459
+    },
+    {
+      "name": "minecraft_status",
+      "chars": 447
+    },
+    {
+      "name": "music_now",
+      "chars": 178
+    },
+    {
+      "name": "music_pause",
+      "chars": 148
+    },
+    {
+      "name": "music_play",
+      "chars": 378
+    },
+    {
+      "name": "music_queue",
+      "chars": 304
+    },
+    {
+      "name": "music_resume",
+      "chars": 157
+    },
+    {
+      "name": "music_skip",
+      "chars": 158
+    },
+    {
+      "name": "music_stop",
+      "chars": 166
+    },
+    {
+      "name": "observe_share",
+      "chars": 497
+    },
+    {
+      "name": "voice_join",
+      "chars": 1705
+    },
+    {
+      "name": "voice_leave",
+      "chars": 297
+    },
+    {
+      "name": "youtube_search",
+      "chars": 596
+    }
+  ],
+  "added": []
+}

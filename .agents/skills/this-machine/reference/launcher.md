@@ -204,6 +204,9 @@ failed-delivery recovery are in [Discord rooms](../../../../docs/discord-rooms.m
 and `docs/cli.md` under `discord`; wake triggers and ambient buffers in
 [Discord ingress](../../../../docs/discord-ingress.md). What to keep in mind:
 
+- Outside Discord rooms, the Discord body tools (voice, music,
+  `discord_server_action`, tracking and Activity sharing) are listed only once a
+  Discord body has its credential.
 - Admin manages its dedicated server through `discord_server_action`, never
   grants machine access to other members, and never deletes the server or
   transfers ownership. Outreach requires an owner-only audience.

@@ -34,6 +34,38 @@ export function cloneSideConversationSession(
   manager.appendCustomMessageEntry("clankie.side-conversation-boundary", SIDE_CONVERSATION_BOUNDARY, false);
   return manager;
 }
+/** Pi's own estimate: four characters a token, which overcounts most tokenizers. */
+const ESTIMATED_CHARS_PER_TOKEN = 4;
+
+/**
+ * Refuses a run whose instructions and active tool schemas alone exceed the
+ * model's context window. Pi can only compact history, so such a run would
+ * clamp every reply to one token, and a local runtime such as Ollama silently
+ * drops the start of the prompt (VUH-2647). The owner hears why and what to
+ * change instead.
+ */
+export function assertFixedPromptFits(
+  session: Pick<AgentSession, "model" | "systemPrompt" | "getActiveToolNames" | "getAllTools">,
+  ref: string,
+): void {
+  const window = session.model?.contextWindow;
+  if (window === undefined || window <= 0) return;
+  const active = new Set(session.getActiveToolNames());
+  const tools = session
+    .getAllTools()
+    .filter((tool) => active.has(tool.name))
+    .map(({ name, description, parameters }) => ({ name, description, parameters }));
+  const fixed = Math.ceil(
+    (session.systemPrompt.length + JSON.stringify(tools).length) / ESTIMATED_CHARS_PER_TOKEN,
+  );
+  if (fixed <= window) return;
+  throw new Error(
+    `${ref} serves ${window.toLocaleString("en-US")} tokens of context, but Clankie's instructions and tools alone ` +
+      `are about ${fixed.toLocaleString("en-US")} tokens, so the turn cannot fit. Give the model a larger context ` +
+      "(for Ollama, OLLAMA_CONTEXT_LENGTH or num_ctx in its Modelfile) or choose a model with a larger window.",
+  );
+}
+
 /**
  * How long a Discord turn may show no sign of life before it is declared dead.
  *

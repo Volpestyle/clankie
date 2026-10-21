@@ -53,6 +53,8 @@ export interface CaptainDeps {
     targetAllowed(conversationId: string): boolean;
     received?(conversationId: string, wakeId: string): Promise<unknown>;
   };
+  /** Which optional services are set up; tools for the rest stay out of the model's request. */
+  readonly serviceReadiness?: () => Promise<import("./service-tools.ts").ServiceReadiness>;
   readonly discordTracking?: Pick<DiscordTracking, "configureProject">;
   /** This captain's fresh settings and explicit environment, supplied by its host. */
   readonly discordSettings?: () => Promise<import("@clankie/protocol").DiscordSettings>;

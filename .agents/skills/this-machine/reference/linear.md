@@ -77,7 +77,8 @@ remove the project's entry instead.
 
 ## Wake rules
 
-Use the operator-only `linear_wake({ action: "show" })` or authenticated
+`linear_wake` is listed only while Linear is connected; on the built-in tracker
+there is nothing to wake on. Use the operator-only `linear_wake({ action: "show" })` or authenticated
 `clankie linear wake show` to inspect rules. These are your non-secret settings:
 you can set them yourself from an operator conversation through
 `linear_wake({ action: "set", wake: {…}, conversationId: "global-default" })`

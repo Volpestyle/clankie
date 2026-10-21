@@ -15,6 +15,7 @@ import {
   registerConfiguredPiProviders,
   resolvePiModelSelection,
   routeFor,
+  servedLocalContextModel,
   type ModelPurpose,
   type ModelRoute,
   type PiModelSelection,
@@ -232,7 +233,7 @@ export async function createCaptainModelRuntime(repoRoot: string): Promise<Capta
       });
       assertModelCredentialAllowed(selection.model.provider, await broker.get(selection.model.provider));
       await assertPiModelAuthAllowed(runtime, selection.model);
-      return selection;
+      return { ...selection, model: await servedLocalContextModel(config, selection.model) };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new CaptainModelError(label === undefined ? message : `${label}: ${message}`);

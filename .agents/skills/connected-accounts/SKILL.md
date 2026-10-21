@@ -19,7 +19,7 @@ disconnecting are in [consent](reference/consent.md).
 ## His mailbox
 
 The mail tools work only in the owner's private operator conversation, never in
-Discord or a shared room. List at most 25 messages at a time and read bodies only
+Discord or a shared room, and are listed only once a mailbox is connected. List at most 25 messages at a time and read bodies only
 when needed. A message is its folder plus IMAP UID; a UID alone is not an ID.
 There is no save-draft, archive or label operation, so a reply draft lives in the
 conversation and is never "saved to the mailbox". Send with `email_send` only

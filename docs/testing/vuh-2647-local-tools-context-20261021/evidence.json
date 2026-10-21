@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "runtime-context/ctx64k-ollama-requests.jsonl",
+      "size": 119259,
+      "sha256": "a704d86f7672b9963fe5feaebf30270f7e697b664ea113d8d3b75a7e543fef34",
+      "url": "clankie://evidence/sha256/a704d86f7672b9963fe5feaebf30270f7e697b664ea113d8d3b75a7e543fef34"
+    },
+    {
+      "path": "tool-trim/after-ollama-requests.jsonl",
+      "size": 126359,
+      "sha256": "c759b6b18c3d7dbc8128340217007b6738097ba99863dfee899393748fda93ae",
+      "url": "clankie://evidence/sha256/c759b6b18c3d7dbc8128340217007b6738097ba99863dfee899393748fda93ae"
+    }
+  ]
+}

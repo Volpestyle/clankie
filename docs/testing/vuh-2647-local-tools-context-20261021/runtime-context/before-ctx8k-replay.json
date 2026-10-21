@@ -1,0 +1,10 @@
+{
+  "replayed": "VUH-2623 first request (31,996 prompt tokens at 262,144)",
+  "model": "vuh2647-qwen3-vl-8b-ctx8k (FROM qwen3-vl:8b, PARAMETER num_ctx 8192)",
+  "result": {
+    "prompt_tokens": 8191,
+    "completion_tokens": 1,
+    "total_tokens": 8192
+  },
+  "apiPs": [["vuh2647-qwen3-vl-8b-ctx8k:latest", 8192]]
+}

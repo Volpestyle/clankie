@@ -252,6 +252,7 @@ async function fixture(
       },
     },
     budget: { compactBeforeNextRun: false },
+    serviceTools: { lane: "operator", withheld: new Set() },
     session,
     credentialRecovery: control,
     capture: {},

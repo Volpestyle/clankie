@@ -3,6 +3,7 @@ import type { VelocityDeps } from "./auto-velocity.ts";
 import type { RemoteOriginReader } from "./project-mirrors.ts";
 import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import { type ModelPurpose } from "@clankie/model-provider";
+import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { type AgentSession } from "@earendil-works/pi-coding-agent";
 import type { DeliveredFileStore } from "../delivered-files.ts";
@@ -170,6 +171,8 @@ export interface LaneSession {
   };
   /** Set when a request had to be trimmed to fit; the next sync compacts first. */
   readonly budget: { compactBeforeNextRun: boolean };
+  /** The lane's service-tool gate: tools withheld until their service is set up (VUH-2647). */
+  readonly serviceTools: { readonly lane: CaptainSessionLaneV2; readonly withheld: Set<string> };
   lastAssistantText: string;
   turnCounter: number;
   /** Settlement of the in-flight run, while one is active: true if it succeeded. */

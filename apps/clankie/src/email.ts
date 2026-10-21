@@ -87,6 +87,12 @@ export type EmailPort = MailBackend & {
    * service answers this install's Clankie account with his address first.
    */
   useClankieMailbox(): Promise<"ok" | "unconfigured" | "unavailable" | "account_required">;
+  /**
+   * Whether a mailbox is set up at all, read from settings and stored
+   * credentials without a network call. False hides his mail tools (VUH-2647);
+   * true still leaves sign-in and reachability to `status`.
+   */
+  configured(): Promise<boolean>;
 };
 
 type ImapSession = {
@@ -144,6 +150,18 @@ export function createEmailPort(options: {
     return (await options.hosted!.available()) ? hosted : imap;
   }
   return {
+    async configured() {
+      const email = (await options.settings.load()).email;
+      const imapReady = async () =>
+        email.imapHost !== undefined &&
+        email.username !== undefined &&
+        (await options.credentials
+          .get(EMAIL_PROVIDER_ID)
+          .then((stored) => stored?.type === "api" && stored.key.trim().length > 0));
+      if (email.provider === "imap" || options.hosted === undefined) return await imapReady();
+      if (email.provider === "clankie") return true;
+      return (await imapReady()) || (await options.hosted.available());
+    },
     status: async () => (await backend()).status(),
     disconnect: async () => (await backend()).disconnect(),
     list: async (input) => (await backend()).list(input),

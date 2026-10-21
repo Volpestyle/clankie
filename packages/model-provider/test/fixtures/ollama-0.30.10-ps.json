@@ -1,0 +1,48 @@
+{
+  "source": "Ollama 0.30.10 on macOS, captured 2026-10-21 for VUH-2647. GET /api/ps verbatim after loading qwen3-vl:8b aliases whose Modelfile sets PARAMETER num_ctx (8192 and 65536); /api/show still reports 262144 for both.",
+  "nothingLoaded": {
+    "models": []
+  },
+  "ctx8kLoaded": {
+    "models": [
+      {
+        "name": "vuh2647-qwen3-vl-8b-ctx8k:latest",
+        "model": "vuh2647-qwen3-vl-8b-ctx8k:latest",
+        "size": 6002520882,
+        "digest": "61f3fafcca705889ec05211fd5950277abb951c50aace55515dd684d38c95f37",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen3vl",
+          "families": ["qwen3vl"],
+          "parameter_size": "8.8B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-10-21T16:09:40.987846-05:00",
+        "size_vram": 6002520882,
+        "context_length": 8192
+      }
+    ]
+  },
+  "ctx64kLoaded": {
+    "models": [
+      {
+        "name": "vuh2647-qwen3-vl-8b-ctx64k:latest",
+        "model": "vuh2647-qwen3-vl-8b-ctx64k:latest",
+        "size": 11014745619,
+        "digest": "7648c35a36a5f581480d8703dda7fa8e0e9ac60bb887f46e532f44a760bd24f5",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen3vl",
+          "families": ["qwen3vl"],
+          "parameter_size": "8.8B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-10-21T16:21:38.860916-05:00",
+        "size_vram": 11014745619,
+        "context_length": 65536
+      }
+    ]
+  }
+}

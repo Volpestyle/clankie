@@ -10,6 +10,8 @@ import { parseModelRef, updateGlobalConfig, type ClankieConfig } from "./config.
  */
 export const LOCAL_CONTEXT_FALLBACK = 131_072;
 export const OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible";
+/** The display-name suffix {@link localProviderConfig} writes; it marks an endpoint Clankie declared as local. */
+const LOCAL_PROVIDER_NAME_SUFFIX = " (local)";
 /**
  * Bearer sent to a locally declared endpoint that asks for none. A local
  * runtime (llama.cpp, vLLM, Ollama, LM Studio) ignores the value, but Pi
@@ -111,6 +113,69 @@ async function probeOllamaContext(
   }
 }
 
+/**
+ * The context Ollama actually serves `model` with, which can be smaller than
+ * the native window `/api/show` reports: `num_ctx` comes from a Modelfile,
+ * `OLLAMA_CONTEXT_LENGTH` or a default sized to the machine's memory, and
+ * Ollama silently drops the start of a prompt longer than that (VUH-2647).
+ * Its `/v1` route ignores a requested `num_ctx`, so the only exact answer is the
+ * loaded runner's `context_length` in `/api/ps`. A model not yet loaded is
+ * loaded first, with the same default options `/v1` requests get; the turn
+ * about to run would load it anyway. Any other runtime answers with an error,
+ * which returns undefined.
+ */
+export async function ollamaServedContext(
+  baseURL: string,
+  model: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<number | undefined> {
+  const base = normalizeLocalBaseUrl(baseURL);
+  const loaded = async (): Promise<number | null | undefined> => {
+    const response = await fetchImpl(new URL("/api/ps", base), { signal: AbortSignal.timeout(3_000) });
+    if (!response.ok) return undefined;
+    const body = (await response.json()) as { models?: unknown };
+    if (!Array.isArray(body.models)) return undefined;
+    const names = new Set([model, model.includes(":") ? model : `${model}:latest`]);
+    const runner = (body.models as Array<Record<string, unknown>>).find(
+      (entry) => names.has(String(entry.name)) || names.has(String(entry.model)),
+    );
+    if (runner === undefined) return null;
+    const context = runner.context_length;
+    return typeof context === "number" && Number.isInteger(context) && context > 0 ? context : undefined;
+  };
+  try {
+    const first = await loaded();
+    if (first !== null) return first;
+    const load = await fetchImpl(new URL("/api/generate", base), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model, stream: false }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!load.ok) return undefined;
+    return (await loaded()) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A model from a local endpoint Clankie declared, narrowed to the context its
+ * runtime serves. Other providers, and runtimes that do not say, keep the
+ * declared window.
+ */
+export async function servedLocalContextModel<
+  T extends { provider: string; id: string; contextWindow: number },
+>(config: ClankieConfig, model: T, fetchImpl: typeof fetch = fetch): Promise<T> {
+  const provider = config.provider?.[model.provider];
+  const baseURL = provider?.options?.baseURL;
+  if (provider?.npm !== OPENAI_COMPATIBLE_NPM || !provider.name?.endsWith(LOCAL_PROVIDER_NAME_SUFFIX))
+    return model;
+  if (typeof baseURL !== "string") return model;
+  const served = await ollamaServedContext(baseURL, model.id, fetchImpl);
+  return served !== undefined && served < model.contextWindow ? { ...model, contextWindow: served } : model;
+}
+
 export interface DeclareLocalProviderInput {
   readonly providerId: string;
   readonly baseURL: string;
@@ -131,7 +196,7 @@ export function localProviderConfig(
   if (input.models.length === 0) throw new Error(`No models given for ${providerId}.`);
   const fallbackContext = input.fallbackContext ?? LOCAL_CONTEXT_FALLBACK;
   return {
-    name: `${providerId} (local)`,
+    name: `${providerId}${LOCAL_PROVIDER_NAME_SUFFIX}`,
     npm: OPENAI_COMPATIBLE_NPM,
     options: { baseURL },
     models: Object.fromEntries(
