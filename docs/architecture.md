@@ -1066,7 +1066,8 @@ managed-runtime, live or unverified starts stay protected. Saved resumes retain
 their directory. The service's `owner-checkout-sync.ts` observes enrolled local
 owner refs every five seconds and fetches once a minute: direct pushes trigger
 the same safe sync, including catch-up on startup. Blocking edits and ages
-produce a service notice and structured log. Tidy's exact-worktree removal preserves `.local`
+go to the structured log only, never the owner's chat (VUH-2586); `clankie doctor`
+names a checkout left behind. Tidy's exact-worktree removal preserves `.local`
 evidence in the configured state directory and rechecks complete local pane
 and Git inventories. `captain/auto-tidy.ts` runs the owner's `autoTidy` fleet
 setting on two timers: every five minutes it closes settled local hires whose

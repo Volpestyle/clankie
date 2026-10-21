@@ -5,6 +5,22 @@ import {
   syncOwnerCheckout,
   type CheckoutSyncResult,
 } from "@clankie/settings";
+import type { createLogger } from "@clankie/observability";
+
+/**
+ * The service's report of each sync (VUH-2586). A blocked or unavailable sync is
+ * operator plumbing: it goes to the structured log, and `clankie doctor` names a
+ * checkout left behind with its recovery step. It never reaches the owner's chat;
+ * nothing here needs him, since every hire verifies fresh main before it launches.
+ */
+export function ownerCheckoutSyncReport(logger: Pick<ReturnType<typeof createLogger>, "info" | "warn">) {
+  return (result: CheckoutSyncResult): void => {
+    if (result.outcome === "updated")
+      logger.info({ event: "checkouts.auto_sync", ...result }, "Owner checkout advanced after main changed");
+    else
+      logger.warn({ event: "checkouts.auto_sync_blocked", ...result }, "Owner checkout sync needs attention");
+  };
+}
 
 /** Git updates the shared remote-tracking ref only after a successful push.
  * Observe that ref across linked worktrees; periodically fetch for other clones.

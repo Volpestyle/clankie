@@ -9083,8 +9083,10 @@ updates targeting `origin/main` also run it and retain the result. The running
 service observes shared `origin/main` refs every five seconds and
 fetches once a minute to catch pushes from separate clones or machines. It syncs
 registered local owner checkouts automatically on startup and after main advances.
-Blocked syncs produce a service notice and structured log with blocking files and
-age; repeated observations of the same blocker are quiet. Manual sync remains
+Blocked syncs produce a structured log entry (`checkouts.auto_sync_blocked`) with
+the blocking files and their age; repeated observations of the same blocker are
+quiet. They never appear in the owner's chat (VUH-2586); `clankie doctor` names a
+checkout left behind or unavailable, with its recovery step. Manual sync remains
 available when the service is stopped or for immediate recovery. A blocked owner
 checkout does not undo a successful push or prevent the fetched runtime from updating.
 

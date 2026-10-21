@@ -213,7 +213,7 @@ import { loadRuntimeProvider } from "./runtime-provider.ts";
 import { bodyIdleCheck, startScheduledUpdates, withBodyActivity } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
 import { integrationSafeUpdates } from "./integration-update.ts";
-import { startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
+import { ownerCheckoutSyncReport, startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
 import { HarnessSignIns } from "./harness-logins.ts";
 import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
@@ -2379,16 +2379,7 @@ const ownerCheckoutSync = startOwnerCheckoutSync({
         .map((workspace) => workspace.path),
       ...project.worktreeRoots.filter((root) => root.machineId === "local").map((root) => root.repoPath),
     ]),
-  report: (result) => {
-    if (result.outcome === "updated")
-      logger.info({ event: "checkouts.auto_sync", ...result }, "Owner checkout advanced after main changed");
-    else {
-      logger.warn({ event: "checkouts.auto_sync_blocked", ...result }, "Owner checkout sync needs attention");
-      captain.recordRuntimeHealthNotice(
-        `Owner checkout ${result.path}: ${result.reason}. ${result.blockers.map((file) => `${JSON.stringify(file.path)} (${file.ageSeconds ?? "unknown"} seconds old)`).join(", ")}`,
-      );
-    }
-  },
+  report: ownerCheckoutSyncReport(logger),
 });
 
 const listenHost = "127.0.0.1";
