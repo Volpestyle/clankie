@@ -1,4 +1,5 @@
 import { SHIPPING_PATH } from "./integrate.ts";
+import { BODY_TRANSFER_ROUTES } from "./body-transfer.ts";
 import { WORK_TRACKER_SETTINGS_PATH } from "./work-tracker-settings.ts";
 import {
   APPEARANCE_SETTINGS_PATH,
@@ -34,6 +35,8 @@ import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */
 export function hostedOperatorAllows(method: string, path: string, body?: string): boolean {
+  // Moving Clankie between bodies is the owner's own action (ADR 0286).
+  if (BODY_TRANSFER_ROUTES.some((route) => route.method === method && route.path === path)) return true;
   if (
     method === "GET" &&
     (path === WORK_TRACKER_SETTINGS_PATH ||

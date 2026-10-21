@@ -4704,9 +4704,10 @@ clankie fleet set --commit lead --push lead --release owner
 ### `transfer`
 
 ```bash
+clankie transfer --to hosted [--transfer-id UUID] [--replace]
 clankie transfer --to URL --to-token-file FILE [--transfer-id UUID] [--replace]
 clankie transfer --from URL --from-token-file FILE --to local --destination-machine JOIN_ID
-clankie transfer status [--at URL --token-file FILE]
+clankie transfer status [--at hosted | --at URL --token-file FILE]
 clankie transfer rebind --transfer-id UUID --machine JOIN_ID [--at URL --token-file FILE]
 clankie transfer abort --transfer-id UUID --to URL --to-token-file FILE
 clankie transfer reclaim --force --reason TEXT
@@ -4714,9 +4715,16 @@ clankie transfer reclaim --force --reason TEXT
 
 Moves Clankie to another body and back. One body holds him at a time
 ([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)). `local` (the default
-`--from`) is this machine's service with its operator credential. Any other body
-is a URL plus a file holding that body's operator bearer; tokens are never
-command arguments.
+`--from`) is this machine's service with its operator credential. `hosted` is
+the managed body this terminal is signed in to (`clankie connect hosted`). It is
+reached as the paired hosted device through the gateway's encrypted envelope, so
+no token leaves the Mac. Any other body is a URL plus a file holding that body's
+operator bearer; tokens are never command arguments. Through the gateway, a
+paired device needs Take Control. Supervise is refused.
+
+Bundles move in chunks that fit the envelope: 384 KiB per upload request and
+4 MiB per download response. The destination verifies the whole bundle's size
+and SHA-256 before staging, and a resent chunk rewrites from its offset.
 
 The command freezes the source and waits for it to restart dormant. It then
 downloads the bundle, stages it on the destination, applies it and waits for the
@@ -4768,10 +4776,14 @@ the old machine shows where Clankie went. Every other route answers
   other body. It records the reason, and any work the other body did is not
   merged.
 
-A managed hosted body is not yet reachable for transfers through the gateway
-([VUH-2582](https://linear.app/vuhlp/issue/VUH-2582)). The real-model proof
-between two private bodies is `apps/clankie/scripts/prove-body-transfer.ts`
-([evidence](testing/2026-10-21-vuh-2577-body-transfer/README.md)).
+A managed body can receive Clankie (`--to hosted`), but cannot yet send him back.
+Once frozen, it is dormant, and a dormant managed body has no gateway doorway
+until [VUH-2583](https://linear.app/vuhlp/issue/VUH-2583) ships. No user-facing
+"move to hosted" entry point ships before the return trip works. The real-model
+proof between two private bodies is `apps/clankie/scripts/prove-body-transfer.ts`
+([evidence](testing/2026-10-21-vuh-2577-body-transfer/README.md)). The hosted CLI
+and gateway proofs are in
+[VUH-2582 evidence](testing/2026-10-21-vuh-2582-transfer-gateway/README.md).
 
 ### `join`
 

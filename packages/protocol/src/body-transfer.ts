@@ -8,6 +8,7 @@ import { z } from "zod";
 export const BODY_TRANSFER_STATUS_PATH = "/v1/body-transfer/status";
 export const BODY_TRANSFER_FREEZE_PATH = "/v1/body-transfer/freeze";
 export const BODY_TRANSFER_BUNDLE_PATH = "/v1/body-transfer/bundle";
+export const BODY_TRANSFER_STAGE_CHUNK_PATH = "/v1/body-transfer/stage-chunk";
 export const BODY_TRANSFER_STAGE_PATH = "/v1/body-transfer/stage";
 export const BODY_TRANSFER_APPLY_PATH = "/v1/body-transfer/apply";
 export const BODY_TRANSFER_RELEASE_PATH = "/v1/body-transfer/release";
@@ -16,6 +17,28 @@ export const BODY_TRANSFER_ABORT_PATH = "/v1/body-transfer/abort";
 export const BODY_TRANSFER_RECLAIM_PATH = "/v1/body-transfer/reclaim";
 export const BODY_TRANSFER_REBIND_PATH = "/v1/body-transfer/rebind";
 export const BODY_TRANSFER_FORMAT = "clankie-body-transfer/1";
+/**
+ * Bundles move in chunks that fit the gateway's encrypted envelope (1 MiB
+ * requests, 16 MiB responses), so one protocol serves loopback and hosted bodies.
+ */
+export const BODY_TRANSFER_UPLOAD_CHUNK_BYTES = 384 * 1024;
+export const BODY_TRANSFER_DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
+/** Every transfer route, all owner-only; GET only for status. */
+export const BODY_TRANSFER_ROUTES = [
+  { method: "GET" as const, path: BODY_TRANSFER_STATUS_PATH },
+  ...[
+    BODY_TRANSFER_FREEZE_PATH,
+    BODY_TRANSFER_BUNDLE_PATH,
+    BODY_TRANSFER_STAGE_CHUNK_PATH,
+    BODY_TRANSFER_STAGE_PATH,
+    BODY_TRANSFER_APPLY_PATH,
+    BODY_TRANSFER_RELEASE_PATH,
+    BODY_TRANSFER_DISCARD_PATH,
+    BODY_TRANSFER_ABORT_PATH,
+    BODY_TRANSFER_RECLAIM_PATH,
+    BODY_TRANSFER_REBIND_PATH,
+  ].map((path) => ({ method: "POST" as const, path })),
+] as const satisfies readonly { method: "GET" | "POST"; path: string }[];
 
 export const BodyTransferIdSchema = z.uuid();
 export const BodySelfStateSchema = z.enum(["active", "frozen", "released"]);
@@ -132,6 +155,34 @@ export const BodyTransferManifestSchema = z.strictObject({
 });
 export type BodyTransferManifest = z.infer<typeof BodyTransferManifestSchema>;
 
+const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+const Base64Schema = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/u);
+export const BodyTransferBundleRequestSchema = z.strictObject({
+  transferId: BodyTransferIdSchema,
+  offset: z.number().int().nonnegative(),
+});
+export const BodyTransferBundleChunkSchema = z.strictObject({
+  transferId: BodyTransferIdSchema,
+  size: z.number().int().nonnegative(),
+  sha256: Sha256Schema,
+  offset: z.number().int().nonnegative(),
+  bytesBase64: Base64Schema.max(Math.ceil((BODY_TRANSFER_DOWNLOAD_CHUNK_BYTES * 4) / 3) + 4),
+});
+export const BodyTransferStageChunkRequestSchema = z.strictObject({
+  transferId: BodyTransferIdSchema,
+  offset: z.number().int().nonnegative(),
+  bytesBase64: Base64Schema.min(1).max(Math.ceil((BODY_TRANSFER_UPLOAD_CHUNK_BYTES * 4) / 3) + 4),
+});
+export const BodyTransferStageChunkResultSchema = z.strictObject({
+  transferId: BodyTransferIdSchema,
+  received: z.number().int().nonnegative(),
+});
+export const BodyTransferStageRequestSchema = z.strictObject({
+  transferId: BodyTransferIdSchema,
+  size: z.number().int().nonnegative(),
+  sha256: Sha256Schema,
+  replace: z.boolean().optional(),
+});
 export const BodyTransferStageResultSchema = z.strictObject({
   transferId: BodyTransferIdSchema,
   outcome: z.enum(["staged", "applied"]),

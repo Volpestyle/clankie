@@ -10,7 +10,18 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { hostname, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
@@ -29,7 +40,13 @@ import {
   BODY_TRANSFER_REBIND_PATH,
   BODY_TRANSFER_RECLAIM_PATH,
   BODY_TRANSFER_RELEASE_PATH,
+  BODY_TRANSFER_DOWNLOAD_CHUNK_BYTES,
+  BODY_TRANSFER_STAGE_CHUNK_PATH,
   BODY_TRANSFER_STAGE_PATH,
+  BODY_TRANSFER_UPLOAD_CHUNK_BYTES,
+  BodyTransferBundleRequestSchema,
+  BodyTransferStageChunkRequestSchema,
+  BodyTransferStageRequestSchema,
   BODY_TRANSFER_STATUS_PATH,
   BodySelfSchema,
   BodyTransferAbortRequestSchema,
@@ -132,7 +149,7 @@ class BodyTransferError extends Error {
 }
 
 /** Runs `commit` only once the body is idle and closed to new turns, then shuts the service down. */
-type BodyCutover = (commit: () => Promise<void>) => Promise<"ready" | "busy">;
+export type BodyCutover = (commit: () => Promise<void>) => Promise<"ready" | "busy">;
 
 export class BodyTransfer {
   private queue: Promise<unknown> = Promise.resolve();
@@ -359,6 +376,7 @@ export class BodyTransfer {
       )
         throw new BodyTransferError("destination_not_active_for_transfer");
       const at = this.now().toISOString();
+      await this.removeOutgoing(request.transferId);
       this.write({
         ...this.record(frozen, request.transferId, { ...record!, outcome: "released" }),
         state: "released",
@@ -375,6 +393,7 @@ export class BodyTransfer {
       const { self, record } = this.frozenSource(request.transferId);
       if (request.discarded.transfers?.[request.transferId]?.outcome !== "burned")
         throw new BodyTransferError("destination_has_not_burned_transfer");
+      await this.removeOutgoing(request.transferId);
       this.write({
         ...this.record(self, request.transferId, { ...record, outcome: "aborted" }),
         state: "active",
@@ -403,8 +422,126 @@ export class BodyTransfer {
     });
   }
 
+  /** Source, dormant: the bundle is written once, then read in chunks the carrier can hold. */
+  async bundleChunk(input: unknown) {
+    const request = BodyTransferBundleRequestSchema.parse(input);
+    const { path, size, sha256 } = await this.outgoingBundle(request.transferId);
+    if (request.offset > size) throw new BodyTransferError("bundle_offset_out_of_range", 400);
+    const length = Math.min(BODY_TRANSFER_DOWNLOAD_CHUNK_BYTES, size - request.offset);
+    const handle = await open(path, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, request.offset);
+      return {
+        transferId: request.transferId,
+        size,
+        sha256,
+        offset: request.offset,
+        bytesBase64: buffer.subarray(0, bytesRead).toString("base64"),
+      };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private outgoingBundle(transferId: string): Promise<{ path: string; size: number; sha256: string }> {
+    return this.serial(async () => {
+      const { record } = this.frozenSource(transferId);
+      if (record.outcome !== "frozen") throw new BodyTransferError("transfer_not_frozen_here");
+      const path = this.dir("outgoing", `${transferId}.bundle`);
+      const summary = `${path}.json`;
+      if (existsSync(summary)) {
+        const { size, sha256 } = JSON.parse(await readFile(summary, "utf8")) as {
+          size: number;
+          sha256: string;
+        };
+        return { path, size, sha256 };
+      }
+      const { stream } = await this.exportBundle(transferId);
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      const temporary = `${path}.${process.pid}.tmp`;
+      const hash = createHash("sha256");
+      let size = 0;
+      await pipeline(
+        stream,
+        async function* (chunks) {
+          for await (const chunk of chunks) {
+            hash.update(chunk as Buffer);
+            size += (chunk as Buffer).length;
+            yield chunk;
+          }
+        },
+        createWriteStream(temporary, { mode: 0o600 }),
+      );
+      await rename(temporary, path);
+      const sha256 = hash.digest("hex");
+      await writeFile(summary, JSON.stringify({ size, sha256 }), { mode: 0o600 });
+      return { path, size, sha256 };
+    });
+  }
+
+  private async removeOutgoing(transferId: string): Promise<void> {
+    const path = this.dir("outgoing", `${transferId}.bundle`);
+    await rm(path, { force: true });
+    await rm(`${path}.json`, { force: true });
+  }
+
+  private incomingBundle(transferId: string): string {
+    return this.dir("incoming", `${transferId}.bundle`);
+  }
+
+  /** Destination: append one chunk; a resent chunk rewrites from its offset. */
+  stageChunk(input: unknown) {
+    const request = BodyTransferStageChunkRequestSchema.parse(input);
+    return this.serial(async () => {
+      const known = this.current().transfers[request.transferId];
+      if (known !== undefined && known.outcome !== "staged") throw new BodyTransferError("transfer_id_used");
+      const bytes = Buffer.from(request.bytesBase64, "base64");
+      if (bytes.length > BODY_TRANSFER_UPLOAD_CHUNK_BYTES)
+        throw new BodyTransferError("chunk_too_large", 400);
+      const path = this.incomingBundle(request.transferId);
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      if (!existsSync(path)) await writeFile(path, "", { mode: 0o600 });
+      if (request.offset > (await stat(path)).size) throw new BodyTransferError("stage_offset_gap");
+      const handle = await open(path, "r+");
+      try {
+        await handle.truncate(request.offset);
+        await handle.write(bytes, 0, bytes.length, request.offset);
+      } finally {
+        await handle.close();
+      }
+      return { transferId: request.transferId, received: request.offset + bytes.length };
+    });
+  }
+
+  /** Destination: the uploaded bundle is complete and intact; stage it. Repeatable. */
+  async stage(input: unknown) {
+    const request = BodyTransferStageRequestSchema.parse(input);
+    const known = this.current().transfers[request.transferId];
+    const path = this.incomingBundle(request.transferId);
+    if (known?.role === "destination" && known.outcome !== "burned" && !existsSync(path)) {
+      // allow-swallowed-rejection -- an applied stage removed its manifest; the counts then read 0
+      const manifest = await this.stagedManifest(request.transferId).catch(() => undefined);
+      return {
+        transferId: request.transferId,
+        outcome: known.outcome === "staged" ? ("staged" as const) : ("applied" as const),
+        files: manifest?.files.length ?? 0,
+        bytes: manifest?.files.reduce((total, file) => total + file.size, 0) ?? 0,
+      };
+    }
+    if (!existsSync(path)) throw new BodyTransferError("bundle_missing", 400);
+    const received = await digest(path);
+    if (received.size !== request.size || received.sha256 !== request.sha256)
+      throw new BodyTransferError("bundle_incomplete", 400);
+    const result = await this.stageStream(request.transferId, createReadStream(path), {
+      replace: request.replace === true,
+    });
+    await rm(path, { force: true });
+    return result;
+  }
+
   /** Destination: verify every byte before anything is admitted. */
-  stage(transferId: string, body: Readable, options: { replace: boolean }) {
+  private stageStream(transferId: string, body: Readable, options: { replace: boolean }) {
     const id = BodyTransferIdSchema.parse(transferId);
     return this.serial(async () => {
       const known = this.current().transfers[id];
@@ -767,6 +904,7 @@ class ByteReader {
 }
 
 type OperatorAuthenticator = (request: Request) => Promise<unknown>;
+type OwnerAuthorizer = (request: Request) => Promise<true | "authentication_required" | "forbidden">;
 
 /**
  * Owner-only transfer routes. An active body freezes, stages, applies, discards
@@ -775,7 +913,8 @@ type OperatorAuthenticator = (request: Request) => Promise<unknown>;
  */
 export function createBodyTransferRoutes(options: {
   transfer: BodyTransfer;
-  authenticateOperator: OperatorAuthenticator;
+  /** The owner: the operator bearer, or a paired device with Take Control. */
+  authorize: OwnerAuthorizer;
   cutover?: BodyCutover;
   /** Dormant body: restart so boot applies what was committed. */
   restart?: () => void;
@@ -784,8 +923,8 @@ export function createBodyTransferRoutes(options: {
   const app = new Hono();
   app.use("/v1/body-transfer/*", async (context, next) => {
     context.header("cache-control", "no-store");
-    if ((await options.authenticateOperator(context.req.raw)) === undefined)
-      return context.json({ error: "authentication_required" }, 401);
+    const allowed = await options.authorize(context.req.raw);
+    if (allowed !== true) return context.json({ error: allowed }, allowed === "forbidden" ? 403 : 401);
     await next();
   });
   const handle = async (context: Context, run: () => Promise<unknown>) => {
@@ -810,29 +949,14 @@ export function createBodyTransferRoutes(options: {
       return transfer.freeze(await context.req.json(), options.cutover);
     }),
   );
-  app.get(BODY_TRANSFER_BUNDLE_PATH, async (context) => {
-    try {
-      const { stream } = await transfer.exportBundle(context.req.query("transferId") ?? "");
-      return new Response(Readable.toWeb(stream) as ReadableStream, {
-        headers: { "content-type": "application/octet-stream", "cache-control": "no-store" },
-      });
-    } catch (error) {
-      if (error instanceof BodyTransferError) return context.json({ error: error.code }, error.status);
-      if (error instanceof Error && error.name === "ZodError")
-        return context.json({ error: "malformed" }, 400);
-      throw error;
-    }
-  });
+  app.post(BODY_TRANSFER_BUNDLE_PATH, (context) =>
+    handle(context, async () => transfer.bundleChunk(await context.req.json())),
+  );
+  app.post(BODY_TRANSFER_STAGE_CHUNK_PATH, (context) =>
+    handle(context, async () => transfer.stageChunk(await context.req.json())),
+  );
   app.post(BODY_TRANSFER_STAGE_PATH, (context) =>
-    handle(context, async () => {
-      const body = context.req.raw.body;
-      if (body === null) throw new BodyTransferError("bundle_missing", 400);
-      return transfer.stage(
-        context.req.query("transferId") ?? "",
-        Readable.fromWeb(body as import("node:stream/web").ReadableStream),
-        { replace: context.req.query("replace") === "1" },
-      );
-    }),
+    handle(context, async () => transfer.stage(await context.req.json())),
   );
   app.post(BODY_TRANSFER_APPLY_PATH, (context) =>
     handle(context, async () => {
@@ -896,7 +1020,9 @@ export async function serveDormantBody(options: {
     "/",
     createBodyTransferRoutes({
       transfer: options.transfer,
-      authenticateOperator: options.authenticateOperator,
+      // Only the operator bearer: a dormant body has no device authority yet (VUH-2583).
+      authorize: async (request) =>
+        (await options.authenticateOperator(request)) === undefined ? "authentication_required" : true,
       restart: () => finish(0),
     }),
   );

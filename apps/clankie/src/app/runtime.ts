@@ -1,6 +1,7 @@
 import { createWorkTrackerSettingsRoutes } from "../work-tracker-settings.ts";
 import { createMachineFleetResources } from "../machine-fleet-resources.ts";
 import { createMachineJoinRoutes } from "../machine-join-routes.ts";
+import { createBodyTransferRoutes } from "../body-transfer.ts";
 import { createJoinedSeats } from "../joined-seats.ts";
 import { createPersonaVoiceSettingsRoutes } from "../persona-voice-settings-routes.ts";
 import { createMachineAccessRoutes } from "../machine-access-routes.ts";
@@ -1125,7 +1126,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     ),
   );
   app.route("/", createMachineJoinRoutes(dependencies.machineJoins, authorizeOwnerSecrets));
-  if (dependencies.bodyTransfer !== undefined) app.route("/", dependencies.bodyTransfer.routes);
+  if (dependencies.bodyTransfer !== undefined)
+    app.route(
+      "/",
+      createBodyTransferRoutes({
+        transfer: dependencies.bodyTransfer.transfer,
+        authorize: authorizeOwnerSecrets,
+        cutover: dependencies.bodyTransfer.cutover,
+      }),
+    );
   app.route(
     "/",
     createAccountRoutes(
@@ -1858,7 +1867,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ...(doorway === undefined ? {} : { doorway }),
       ...(power === undefined ? {} : { power }),
       ...(runtime === undefined ? {} : { runtime }),
-      ...(dependencies.bodyTransfer === undefined ? {} : { self: dependencies.bodyTransfer.authority() }),
+      ...(dependencies.bodyTransfer === undefined
+        ? {}
+        : { self: dependencies.bodyTransfer.transfer.authority() }),
       ...(() => {
         try {
           const observation = RuntimeHealthObservationSchema.safeParse(dependencies.runtimeHealth?.());

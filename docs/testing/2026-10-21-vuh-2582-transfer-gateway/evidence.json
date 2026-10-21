@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "loopback-proof-3.tar",
+      "size": 65024,
+      "sha256": "266aa11eebd1c73f57590ad31d761788206eef493c2a0d61cb6ed725eae671be",
+      "url": "clankie://evidence/sha256/266aa11eebd1c73f57590ad31d761788206eef493c2a0d61cb6ed725eae671be"
+    }
+  ]
+}

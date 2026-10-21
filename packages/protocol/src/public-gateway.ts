@@ -1,4 +1,5 @@
 import { SHIPPING_PATH } from "./integrate.ts";
+import { BODY_TRANSFER_ROUTES } from "./body-transfer.ts";
 import { WORK_TRACKER_SETTINGS_PATH } from "./work-tracker-settings.ts";
 import {
   MACHINE_JOIN_START_PATH,
@@ -118,6 +119,8 @@ import {
 export { HOSTED_OPERATOR_PATH } from "./hosted-operator.ts";
 
 export const PUBLIC_GATEWAY_ROUTES = [
+  // Owner-only transfers between bodies (ADR 0286), behind the encryption gate.
+  ...BODY_TRANSFER_ROUTES.map((route) => ({ ...route, target: "control" as const })),
   ...[
     MACHINE_JOIN_START_PATH,
     MACHINE_JOIN_STATUS_PATH,

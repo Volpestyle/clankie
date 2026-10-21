@@ -179,6 +179,83 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
 function buildNetworkRows() {
   const routeDetails = new Map([
     [
+      "GET /v1/body-transfer/status",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Read which body holds Clankie: self id, epoch, state and transfer records.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/freeze",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Stop being Clankie for a transfer once idle; the body restarts dormant.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/bundle",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Read one chunk of a frozen body's transfer bundle.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/stage-chunk",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Upload one chunk of an incoming transfer bundle.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/stage",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Verify a complete bundle and stage it for this body.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/apply",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Commit a staged transfer; the body restarts and applies it before anything opens.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/release",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Become a tombstone after the destination reports itself active.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/discard",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Burn a transfer id this body never applied.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/abort",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Return a frozen source to active after its destination burned the id.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/reclaim",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Reactivate a dormant body at a higher epoch, recorded as an explicit override.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/rebind",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Point transferred workspaces at the old machine once it joins.",
+      },
+    ],
+    [
       "POST /v1/machine-joins/start",
       {
         access: "Unauthenticated bootstrap metadata; grants no machine access",

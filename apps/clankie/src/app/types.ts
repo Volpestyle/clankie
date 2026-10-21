@@ -151,8 +151,8 @@ export interface ClankieAppDependencies {
   runtimeCanary?: import("../runtime-canary.ts").RuntimeCanary;
   /** Owner transfer routes and the self record `/health` reports (ADR 0286). */
   bodyTransfer?: {
-    readonly routes: import("hono").Hono;
-    readonly authority: () => import("@clankie/protocol/body-transfer").BodyAuthority;
+    readonly transfer: import("../body-transfer.ts").BodyTransfer;
+    readonly cutover: import("../body-transfer.ts").BodyCutover;
   };
   refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;

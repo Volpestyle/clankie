@@ -1,12 +1,10 @@
-import { randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, open, readFile, rm } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import { parseArgs } from "node:util";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
+import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import {
   BODY_TRANSFER_ABORT_PATH,
   BODY_TRANSFER_APPLY_PATH,
@@ -16,9 +14,12 @@ import {
   BODY_TRANSFER_REBIND_PATH,
   BODY_TRANSFER_RECLAIM_PATH,
   BODY_TRANSFER_RELEASE_PATH,
+  BODY_TRANSFER_STAGE_CHUNK_PATH,
   BODY_TRANSFER_STAGE_PATH,
+  BODY_TRANSFER_UPLOAD_CHUNK_BYTES,
   BODY_TRANSFER_STATUS_PATH,
   BodyAuthoritySchema,
+  BodyTransferBundleChunkSchema,
   BodyTransferIdSchema,
   BodyTransferStageResultSchema,
   type BodyAuthority,
@@ -26,9 +27,9 @@ import {
 import { commandHost, outputJson, type Writable } from "./io.ts";
 
 const USAGE = `Usage:
-  clankie transfer --to URL|local [--from URL|local] [--to-token-file FILE] [--from-token-file FILE]
+  clankie transfer --to hosted|URL|local [--from hosted|URL|local] [--to-token-file FILE] [--from-token-file FILE]
                    [--destination-machine ID] [--replace] [--transfer-id UUID]
-  clankie transfer status [--at URL|local] [--token-file FILE]
+  clankie transfer status [--at hosted|URL|local] [--token-file FILE]
   clankie transfer abort --transfer-id UUID --to URL|local [--from URL|local] [token files]
   clankie transfer reclaim --force --reason TEXT [--at URL|local] [--token-file FILE]
   clankie transfer rebind --transfer-id UUID --machine ID [--at URL|local] [--token-file FILE]`;
@@ -46,7 +47,9 @@ export interface TransferCommandOptions {
 interface Endpoint {
   readonly label: string;
   readonly url: string;
-  readonly token: string;
+  /** Absent for the hosted transport, which signs each request as this device. */
+  readonly token?: string;
+  readonly fetch: typeof fetch;
 }
 
 /**
@@ -90,18 +93,39 @@ export async function runTransferCommand(
       });
       if (!credential?.token)
         throw new Error("No operator credential is available for this machine's Clankie");
-      return { label: `local:${hostname()}`, url: commandHost({ ...options, env }), token: credential.token };
+      return {
+        label: `local:${hostname()}`,
+        url: commandHost({ ...options, env }),
+        token: credential.token,
+        fetch: fetcher,
+      };
+    }
+    if (target === "hosted") {
+      // The signed-in hosted device, through the gateway's encrypted envelope (VUH-2582).
+      const env = options.env ?? process.env;
+      const hosted = await import("./hosted.ts");
+      const transport = await hosted.hostedTransportFor(env, options.fetchImpl);
+      const client = (await new SettingsStore(defaultSettingsPath(env)).load()).client;
+      return {
+        label: `hosted:${client?.mode === "hosted" ? client.hostId : "unknown"}`,
+        url: transport.host,
+        fetch: transport.fetchImpl,
+      };
     }
     const url = new URL(target);
     if (tokenFile === undefined) throw new Error(`${target} needs a token file with its operator credential`);
     const token = (await readFile(tokenFile, "utf8")).trim();
     if (token.length === 0) throw new Error(`${tokenFile} is empty`);
-    return { label: url.origin, url: url.origin, token };
+    return { label: url.origin, url: url.origin, token, fetch: fetcher };
   };
-  const call = async (at: Endpoint, path: string, init: RequestInit & { duplex?: "half" } = {}) => {
-    const response = await fetcher(new URL(path, at.url), {
+  const call = async (at: Endpoint, path: string, init: RequestInit = {}) => {
+    const response = await at.fetch(new URL(path, at.url), {
       ...init,
-      headers: { authorization: `Bearer ${at.token}`, "content-type": "application/json", ...init.headers },
+      headers: {
+        ...(at.token === undefined ? {} : { authorization: `Bearer ${at.token}` }),
+        "content-type": "application/json",
+        ...init.headers,
+      },
     });
     if (!response.ok) {
       const text = await response.text();
@@ -120,12 +144,18 @@ export async function runTransferCommand(
   const post = async (at: Endpoint, path: string, body: unknown) =>
     (await call(at, path, { method: "POST", body: JSON.stringify(body) })).json();
   // A body restarts after freeze and apply; wait until it answers in the expected state.
-  const waitFor = async (at: Endpoint, what: string, ready: (self: BodyAuthority) => boolean) => {
+  const waitFor = async (
+    at: Endpoint,
+    what: string,
+    ready: (self: BodyAuthority) => boolean,
+    notReady?: (self: BodyAuthority) => Promise<void>,
+  ) => {
     let told = false;
     for (let attempt = 0; attempt < 600_000 / pollMs; attempt++) {
       try {
         const self = await status(at);
         if (ready(self)) return self;
+        await notReady?.(self);
       } catch (error) {
         if (error instanceof TransferRefused && error.status !== 503) throw error;
       }
@@ -212,35 +242,77 @@ export async function runTransferCommand(
     const directory = await mkdtemp(join(tmpdir(), "clankie-transfer-"));
     try {
       const bundle = join(directory, "bundle");
-      const download = await call(source, `${BODY_TRANSFER_BUNDLE_PATH}?transferId=${transferId}`);
-      await pipeline(
-        Readable.fromWeb(download.body! as import("node:stream/web").ReadableStream),
-        createWriteStream(bundle, { mode: 0o600 }),
-      );
+      // Chunks fit the gateway's encrypted envelope, so the same steps reach a hosted body.
+      const output = await open(bundle, "w", 0o600);
+      let expected: { size: number; sha256: string } | undefined;
+      try {
+        for (let offset = 0; expected === undefined || offset < expected.size;) {
+          const chunk = BodyTransferBundleChunkSchema.parse(
+            await post(source, BODY_TRANSFER_BUNDLE_PATH, { transferId, offset }),
+          );
+          if (expected !== undefined && (chunk.size !== expected.size || chunk.sha256 !== expected.sha256))
+            throw new Error(
+              `${source.label} changed its bundle during download; rerun with the same --transfer-id`,
+            );
+          expected = { size: chunk.size, sha256: chunk.sha256 };
+          const bytes = Buffer.from(chunk.bytesBase64, "base64");
+          if (bytes.length === 0 && offset < chunk.size)
+            throw new Error(`${source.label} sent an empty chunk`);
+          await output.write(bytes, 0, bytes.length, offset);
+          offset += bytes.length;
+        }
+      } finally {
+        await output.close();
+      }
+      const downloaded = createHash("sha256")
+        .update(await readFile(bundle))
+        .digest("hex");
+      if (downloaded !== expected!.sha256)
+        throw new Error(`The bundle from ${source.label} failed its checksum`);
+      const input = await open(bundle, "r");
+      try {
+        const buffer = Buffer.alloc(BODY_TRANSFER_UPLOAD_CHUNK_BYTES);
+        for (let offset = 0; offset < expected!.size;) {
+          const { bytesRead } = await input.read(buffer, 0, buffer.length, offset);
+          await post(destination, BODY_TRANSFER_STAGE_CHUNK_PATH, {
+            transferId,
+            offset,
+            bytesBase64: buffer.subarray(0, bytesRead).toString("base64"),
+          });
+          offset += bytesRead;
+        }
+      } finally {
+        await input.close();
+      }
       const staged = BodyTransferStageResultSchema.parse(
-        await (
-          await call(
-            destination,
-            `${BODY_TRANSFER_STAGE_PATH}?transferId=${transferId}${values.replace ? "&replace=1" : ""}`,
-            {
-              method: "POST",
-              body: Readable.toWeb(createReadStream(bundle)) as ReadableStream,
-              duplex: "half",
-              headers: { "content-type": "application/octet-stream" },
-            },
-          )
-        ).json(),
+        await post(destination, BODY_TRANSFER_STAGE_PATH, {
+          transferId,
+          size: expected!.size,
+          sha256: expected!.sha256,
+          ...(values.replace ? { replace: true } : {}),
+        }),
       );
       stderr.write(`Staged ${staged.files} files (${staged.bytes} bytes) at ${destination.label}.\n`);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-    await post(destination, BODY_TRANSFER_APPLY_PATH, { transferId });
+    try {
+      await post(destination, BODY_TRANSFER_APPLY_PATH, { transferId });
+    } catch (error) {
+      if (error instanceof TransferRefused && error.status < 500) throw error;
+      // The reply can be lost to the restart the apply starts; its status decides.
+      stderr.write(`${destination.label} did not answer the apply; checking its status.\n`);
+    }
   }
   to = await waitFor(
     destination,
     "restart as Clankie",
     (self) => !self.dormant && self.state === "active" && self.transferId === transferId,
+    async (self) => {
+      // Re-apply only when the destination is up and never committed the apply.
+      if (!self.dormant && self.transfers?.[transferId]?.outcome === "staged")
+        await post(destination, BODY_TRANSFER_APPLY_PATH, { transferId });
+    },
   );
   from = BodyAuthoritySchema.parse(
     await post(source, BODY_TRANSFER_RELEASE_PATH, {

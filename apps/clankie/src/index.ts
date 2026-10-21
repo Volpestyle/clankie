@@ -207,12 +207,7 @@ import { createCaptainMemory } from "./captain-memory.ts";
 import { createWorldPlayExecution } from "./play-execution-world.ts";
 import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-host.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
-import {
-  BodyTransfer,
-  bodyTransferRoots,
-  createBodyTransferRoutes,
-  serveDormantBody,
-} from "./body-transfer.ts";
+import { BodyTransfer, bodyTransferRoots, serveDormantBody } from "./body-transfer.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import {
@@ -2166,25 +2161,18 @@ const clankie = await createClankieApp({
   },
   ...(runtimeCanary === undefined ? {} : { runtimeCanary }),
   bodyTransfer: {
-    routes: createBodyTransferRoutes({
-      transfer: bodyTransfer,
-      authenticateOperator: createCredentialBackedOperatorAuthenticator({
-        env: process.env,
-        store: operatorCredentialStore,
-        identity: { operatorId: process.env.CLANKIE_OPERATOR_ID ?? "local-operator", steerSourceLane: "tui" },
-      }),
-      // Like a release cutover, minus worker panes: they keep running on their machine.
-      cutover: async (commit) => {
-        if (bodyLeaseStore.status("voice") !== undefined || !stopAdmissionWhenIdle()) return "busy";
-        try {
-          await commit();
-        } finally {
-          requestShutdown("SIGTERM");
-        }
-        return "ready";
-      },
-    }),
-    authority: () => bodyTransfer.authority(),
+    transfer: bodyTransfer,
+    // Like a release cutover, minus worker panes: they keep running on their machine.
+    cutover: async (commit) => {
+      if (bodyLeaseStore.status("voice") !== undefined || !stopAdmissionWhenIdle()) return "busy";
+      try {
+        await commit();
+      } finally {
+        // Admission is already closed; let this reply leave before the restart.
+        setTimeout(() => requestShutdown("SIGTERM"), 500);
+      }
+      return "ready";
+    },
   },
   refreshHarnesses: async (authority) =>
     refreshLinkedHarnesses({

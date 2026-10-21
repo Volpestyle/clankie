@@ -143,10 +143,13 @@ leaves its join.
   proven end to end with real data.
 - A transfer interrupts presence for the length of one freeze, copy and restart.
   It is an explicit owner action, never automatic failover.
-- Production hosted transfer needs the gateway to carry the transfer routes inside
-  the encrypted device envelope, and the account page to start a transfer. That
-  routing lives in `clankie-ops` (ADR 0183) and is a follow-up
-  ([VUH-2582](https://linear.app/vuhlp/issue/VUH-2582)). The public body protocol
-  does not depend on it.
+- The gateway carries the transfer routes inside the encrypted device envelope,
+  in envelope-sized chunks, for an owner device with Take Control
+  ([VUH-2582](https://linear.app/vuhlp/issue/VUH-2582)). A dormant managed body
+  still needs its doorway (device authority and the connector) to export and be
+  released. That is [VUH-2583](https://linear.app/vuhlp/issue/VUH-2583), which
+  extracts the doorway composition rather than booting a gated full service.
+  Until it ships, Clankie can move to a managed body but not back, so no
+  user-facing "move to hosted" entry point ships.
 - Two bodies never merge state. Reclaim is the only path that can leave two
   histories, and it requires `--force` and is recorded.

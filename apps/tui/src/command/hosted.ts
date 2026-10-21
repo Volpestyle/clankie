@@ -368,7 +368,7 @@ export async function hostedCommand(
     );
   throw new Error(`Unsupported hosted command: ${args.join(" ")}`);
 }
-export async function hostedTransportFor(env: NodeJS.ProcessEnv) {
+export async function hostedTransportFor(env: NodeJS.ProcessEnv, fetchImpl?: typeof fetch) {
   const store = createDefaultCredentialStore({ env });
   const session = await loadHostedSession(store);
   const client = (await new SettingsStore(defaultSettingsPath(env)).load()).client;
@@ -378,7 +378,7 @@ export async function hostedTransportFor(env: NodeJS.ProcessEnv) {
     client.gatewayUrl !== session.gatewayUrl
   )
     throw new Error("Hosted connection identity mismatch; clankie connect hosted");
-  return createHostedTransport(session, store);
+  return createHostedTransport(session, store, fetchImpl);
 }
 
 export async function hostedWhoami(env: NodeJS.ProcessEnv) {
