@@ -29,7 +29,7 @@ import { logger } from "../src/app/log.ts";
 import { machineJoinHash, machineJoinKey } from "../src/machine-join-crypto.ts";
 import { openGatewayValue } from "../src/gateway-encryption.ts";
 import { runJoinedMachineChannel, saveJoinedMachineCredential } from "../../tui/bin/joined-machine-client.ts";
-import { runJoinedSeatHook } from "../../tui/src/command/joined-seat.ts";
+import { joinedSeatTransport, runJoinedSeatHook } from "../../tui/src/command/joined-seat.ts";
 import { joinedWorkerPorts } from "../../tui/src/command/joined-worker.ts";
 import type { McpCommandOptions } from "../../tui/src/command/mcp.ts";
 import type { HeadlessCaptainCommandOptions } from "../../tui/bin/headless-captain.ts";
@@ -122,6 +122,23 @@ setInterval(() => {}, 1 << 30);
 `,
   );
   await chmod(join(herdrRoot, "bin/claude"), 0o755);
+  // Codex mints its own session and Herdr learns it from Codex's first turn.
+  const codexRecord = join(herdrRoot, "codex-launch.json");
+  await writeFile(
+    join(herdrRoot, "bin/codex"),
+    `#!${process.execPath}
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
+const session = randomUUID();
+writeFileSync(${JSON.stringify(codexRecord)}, JSON.stringify({ argv: process.argv.slice(2), env: process.env, session }));
+const report = (id) => execFileSync("herdr", ["pane", "report-agent", process.env.HERDR_PANE_ID, "--source", "herdr:codex",
+  "--agent", "codex", "--state", "idle", "--agent-session-id", id]);
+report(session);
+setInterval(() => {}, 1 << 30);
+`,
+  );
+  await chmod(join(herdrRoot, "bin/codex"), 0o755);
   const herdrEnv: NodeJS.ProcessEnv = {
     ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("HERDR_"))),
     PATH: `${join(herdrRoot, "bin")}:${process.env.PATH}`,
@@ -152,6 +169,8 @@ setInterval(() => {}, 1 << 30);
     ports: {
       workers: joinedWorkerPorts(credential, {
         env: herdrEnv,
+        // Read from the machine's own Codex configuration in production.
+        codexTrackerOverrides: async () => ["mcp_servers.linear.enabled=false"],
         // Real Herdr, but its answer to `agent start` is held, as Herdr holds it
         // until a briefed Claude finishes its first turn.
         run: async (args, signal) => {
@@ -178,7 +197,10 @@ setInterval(() => {}, 1 << 30);
     },
   }));
   const turn = { autonomous: false as boolean | undefined };
-  const [hire] = joinedHireTools(base, joins, settings, { conversationId: "global-default", turn });
+  const [hire, messageSeat] = joinedHireTools(base, joins, settings, {
+    conversationId: "global-default",
+    turn,
+  });
   const call = async (params: Record<string, unknown>) =>
     (
       await (hire!.execute as (id: string, params: Record<string, unknown>) => Promise<{ details: unknown }>)(
@@ -247,12 +269,85 @@ setInterval(() => {}, 1 << 30);
   expect(staged.clankieBrief).toContain(`Your seat is ${seat}.`);
   finishFirstTurn();
 
+  // Codex (VUH-2609): the adapter admits the session Codex minted in the new pane, and the
+  // worker bridge refuses that pane once its session changes.
+  const codexHire = await call({ ...request, title: "Kit", harness: "codex" });
+  expect(codexHire).toMatchObject({ outcome: "started", conversationId: "global-default" });
+  const codexLaunch = JSON.parse(await readFile(codexRecord, "utf8")) as {
+    argv: string[];
+    env: NodeJS.ProcessEnv;
+    session: string;
+  };
+  expect(codexLaunch.argv).toContain("--no-daemon");
+  expect(codexLaunch.argv).toContain("mcp_servers.linear.enabled=false");
+  expect(codexLaunch.argv.some((argument) => /\p{Cc}/u.test(argument))).toBe(false);
+  expect(JSON.parse(String(codexHire.detail))).toMatchObject({ nativeSessionId: codexLaunch.session });
+  const codexPane = String(codexHire.seatId).slice(machineId.length + 1);
+  // Admission binds once: the worker's own grant cannot admit another session or pane.
+  const readmit = await joinedSeatTransport(credential, fetch).rpc({
+    method: "POST",
+    path: "/workers/admit",
+    headers: { authorization: `Bearer ${codexLaunch.env.CLANKIE_JOINED_SEAT_TOKEN}` },
+    body: JSON.stringify({
+      paneId: codexPane,
+      sessionId: codexLaunch.env.CLANKIE_JOINED_WORKER_SESSION,
+      nativeSessionId: randomUUID(),
+    }),
+  });
+  expect(readmit.status).toBe(403);
+  // Codex hands its MCP server only the variables its config names.
+  const named = JSON.parse(
+    codexLaunch.argv.find((argument) => argument.startsWith("mcp_servers.worker.env_vars="))!.split("=")[1]!,
+  ) as string[];
+  const [codexHarness, codexBridge] = InMemoryTransport.createLinkedPair();
+  const codexBridgeEnv = Object.fromEntries(
+    named.flatMap((name) => (codexLaunch.env[name] ? [[name, codexLaunch.env[name]]] : [])),
+  );
+  // The worker plugin's bridge as Codex starts it, with only the environment Codex passes.
+  const codexBridgeFor = (env: NodeJS.ProcessEnv, transport: InMemoryTransport) => {
+    const options: HeadlessCaptainCommandOptions & McpCommandOptions = {
+      repoRoot,
+      env,
+      transport,
+      stderr: { write: () => true },
+    };
+    return runJoinedSeatHook("mcp", ["--seat"], options);
+  };
+  const codexBridged = codexBridgeFor(codexBridgeEnv, codexBridge);
+  const codexClient = new Client({ name: "codex-worker", version: "1" }, { capabilities: {} });
+  await codexClient.connect(codexHarness);
+  const codexReport = await codexClient.callTool({
+    name: "message_clankie",
+    arguments: { text: "Kit: done.", deliveryId: randomUUID() },
+  });
+  expect(codexReport.isError).not.toBe(true);
+  // Each request re-checks the live pane against the session the home admitted: a pane
+  // holding any other Codex session (here, a second worker's) is refused.
+  const otherHire = await call({ ...request, title: "Ash", harness: "codex" });
+  expect(otherHire).toMatchObject({ outcome: "started" });
+  const otherPane = String(otherHire.seatId).slice(machineId.length + 1);
+  expect(otherPane).not.toBe(codexPane);
+  await codexClient.close();
+  await codexBridged;
+  const [, movedBridge] = InMemoryTransport.createLinkedPair();
+  // The bridge connects to its home at start, so it refuses before serving anything.
+  await expect(codexBridgeFor({ ...codexBridgeEnv, HERDR_PANE_ID: otherPane }, movedBridge)).rejects.toThrow(
+    "joined_worker_native_session_mismatch",
+  );
+  // Its bridge delivers messages only as Claude channel events, so a message to it is refused.
+  await expect(
+    (messageSeat!.execute as (id: string, params: Record<string, unknown>) => Promise<unknown>)("call", {
+      seat: codexHire.seatId,
+      message: "Anything else?",
+    }),
+  ).rejects.toThrow("joined_codex_worker_takes_no_messages");
+
   // Named refusals: a folder not approved at join, another harness, an autonomous turn, a level below workers.
   expect(await call({ ...request, workingDirectory: "/tmp" })).toMatchObject({
     outcome: "failed",
     reason: "unknown_directory",
   });
-  expect(await call({ ...request, harness: "codex" })).toMatchObject({
+  expect(await call({ ...request, harness: "gemini" })).toMatchObject({
     outcome: "failed",
     reason: "harness_unavailable",
   });

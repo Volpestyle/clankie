@@ -204,6 +204,8 @@ export function createJoinedSeats(input: {
         sessionId: worker.sessionId,
         directory: worker.directory,
         conversationId: worker.binding.conversationId,
+        // The worker bridge re-checks its pane against this before every request.
+        ...(worker.nativeSessionId === undefined ? {} : { nativeSessionId: worker.nativeSessionId }),
       });
     if (worker && url.pathname === "/workers/admit" && frame.method === "POST") {
       try {

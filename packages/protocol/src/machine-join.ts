@@ -235,7 +235,13 @@ export const machineJoinExchangeAad = (
 /** Bounded native launch, carried only inside an approved workers operation. */
 export const JoinedWorkerLaunchSchema = z.strictObject({
   token: MachineJoinSecretSchema,
+  /**
+   * Claude's native session id, fixed at launch. Codex mints its own, so for Codex
+   * this is only the launch nonce and the adapter admits the session it observes.
+   */
   sessionId: z.uuid(),
+  /** Absent means Claude, so receivers from before VUH-2609 keep working. */
+  harness: z.enum(["claude", "codex"]).optional(),
   conversationId: z.string().min(1).max(256),
   title: z.string().min(1).max(128),
   brief: z.string().min(1).max(32_768),

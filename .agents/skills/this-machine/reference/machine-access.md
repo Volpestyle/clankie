@@ -80,11 +80,12 @@ it starts in an approved folder; 30 s; 8192 characters; the first line is its ex
 everything the command started stops when it ends or is revoked). Each call is audited for the owner
 (`machines shell-audit`). A lost delivery is never re-run, so check state before
 repeating an effect. At `workers` or above, your own `hire_agent` with
-`fleet: "join-UUID"` hires a native Claude worker on that machine (owner-started
-turns in the owner console only; `workingDirectory` inside a folder approved at
-join, else `unknown_directory`; only `harness: "claude"`). It reports into the
-chat that hired it; reach it with `message_seat` to the returned `join-UUID/PANE`
-seat. Keep `join` running there for launches. A new join needs
+`fleet: "join-UUID"` hires a native Claude or Codex worker on that machine, signed
+in with that machine's own account (owner-started turns in the owner console only;
+`workingDirectory` inside a folder approved at join, else `unknown_directory`). It
+reports into the chat that hired it; reach a Claude worker with `message_seat` to
+the returned `join-UUID/PANE` seat. A Codex worker there cannot be messaged yet,
+so put everything it needs in its brief. Keep `join` running there for launches. A new join needs
 new owner approval. Lease and machine exchanges are authenticated AES-256-GCM
 envelopes with one-use challenges and independently keyed responses. The
 gateway cannot read or forge work or broker capabilities. Never print or copy

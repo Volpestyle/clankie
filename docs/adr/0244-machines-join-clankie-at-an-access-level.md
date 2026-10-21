@@ -180,6 +180,29 @@ the worker reports into the chat that hired it; `message_seat` to the returned
 shell: the owner console lane with machine tools, turns the owner started only,
 a live level of at least `workers`, and a working directory inside a folder
 approved at join. A folder outside those is refused as `unknown_directory`,
-another harness as `harness_unavailable` (Codex is a follow-up), and a lower
-level by the access refusal above. This needs no SSH fleet, and his shell there
-stays refused at `workers`.
+another harness as `harness_unavailable`, and a lower level by the access
+refusal above. This needs no SSH fleet, and his shell there stays refused at
+`workers`.
+
+Amended 2026-10-21 (VUH-2609): the hire may also start a Codex worker, signed in
+with that machine's own Codex login. Claude takes its session id at launch;
+Codex mints its own, so the trust shape differs only in how the session is
+bound:
+
+- The home's launch id is a nonce for Codex. The machine's adapter checks that
+  the new pane holds no native session before launch, then admits the first
+  Codex session that appears in it. The home binds the worker to that pane and
+  session once, and refuses any later admission of another pane or session.
+- Before every request, the worker's bridge compares its pane's live session
+  with the one the home admitted, read fresh from the home. Claude's is compared
+  with its launch id as before. Herdr keeps an agent's first session, so the
+  check only ever refuses a pane now held by another agent.
+- Codex launches with `--no-daemon` (its own process, so Herdr learns the
+  session from its first turn) and the brief as its first turn. Its MCP worker
+  bridge receives only the variables it names.
+- A message to a Codex worker is refused: its bridge delivers messages only as
+  Claude channel events, and nothing is typed into its terminal. A later option
+  runs a local `codex app-server` and sends messages as turns.
+
+The launch's `harness` field is additive: a Claude launch omits it, so receivers
+from before VUH-2609 keep working.

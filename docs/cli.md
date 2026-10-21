@@ -4920,11 +4920,13 @@ native panes remain open. Keep `join` / `join resume` running for worker launche
 
 Clankie himself hires there too: at `workers` or above, his own `hire_agent` with
 `fleet: "join-UUID"` and a `workingDirectory` inside a folder approved at join
-starts a Claude worker through the same adapter. Only turns the owner started in
-the owner console may hire there; a folder outside those approved at join is
-refused as `unknown_directory`, another harness as `harness_unavailable`, and a
-lower level names the level required. The worker reports into the chat that hired
-it, and `message_seat` to the returned `join-UUID/PANE` seat reaches it.
+starts a Claude worker through the same adapter, or a Codex worker with
+`harness: "codex"`, each signed in with that machine's own account. Only turns the
+owner started in the owner console may hire there; a folder outside those approved
+at join is refused as `unknown_directory`, another harness as `harness_unavailable`,
+and a lower level names the level required. The worker reports into the chat that
+hired it, and `message_seat` to the returned `join-UUID/PANE` seat reaches a Claude
+worker; a Codex worker there takes no messages yet.
 
 Other harness seats, Windows release packaging, legacy SSH chat migration and
 real native PC/production-gateway proof remain follow-ups. Plain `clankie`

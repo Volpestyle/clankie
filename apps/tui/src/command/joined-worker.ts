@@ -2,12 +2,22 @@ import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { CLAUDE_WORKER_PLUGIN, CLAUDE_WORKER_PLUGIN_ID } from "@clankie/protocol";
 import { SEAT_PLUGIN_ID } from "./seat.ts";
 import { JoinedWorkerLaunchSchema } from "@clankie/protocol/machine-join";
-import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-isolation.ts";
+import { MAXIMUM_TRUST_CODEX_CONFIG } from "@clankie/protocol/owner-settings";
+import {
+  claudeTrackerDenyRules,
+  codexTrackerOverrides,
+} from "../../../clankie/src/captain/tracker-isolation.ts";
+import {
+  fleetSeatCodexStartArgs,
+  fleetSeatEffortArgs,
+  fleetSeatModelArgs,
+} from "../../../clankie/src/captain/fleet-seat.ts";
 import { createHireLayout } from "../../../clankie/src/captain/hire-layout.ts";
 import { herdrAgentName } from "../../../clankie/src/captain/hire-name.ts";
 import type { JoinedMachineCredential, JoinedMachinePorts } from "../../bin/joined-machine-client.ts";
@@ -18,18 +28,42 @@ const Native = z.object({
   result: z.object({
     agent: z.object({
       pane_id: z.string().optional(),
-      agent_session: z.object({ kind: z.literal("id"), value: z.string() }),
+      // The reported session names its harness; the agent's own label waits for launch.
+      agent_session: z.object({
+        agent: z.string(),
+        kind: z.enum(["id", "path"]),
+        value: z.string().min(1).max(4096),
+      }),
     }),
   }),
 });
+type Native = z.infer<typeof Native>;
+/** This install's worker bridge; its joined branch serves the worker over the join channel. */
+const WORKER_BRIDGE = fileURLToPath(
+  new URL("../../../../integrations/claude-plugin/worker/bin/swarm-mcp.mjs", import.meta.url),
+);
+/** What the bridge needs from the pane; Codex passes an MCP server only the variables it names. */
+const CODEX_BRIDGE_ENV = [
+  "HERDR_PANE_ID",
+  "HERDR_SOCKET_PATH",
+  "CLANKIE_STATE",
+  "CLANKIE_CREDENTIALS_FILE",
+  "CLANKIE_JOINED_SEAT_TOKEN",
+  "CLANKIE_JOINED_WORKER_SESSION",
+  "CLANKIE_JOINED_WORKER_HARNESS",
+  "PATH",
+  "HOME",
+];
 
-/** A workers-level adapter starts only native Claude in a new, visible Herdr pane. */
+/** A workers-level adapter starts only native Claude or Codex in a new, visible Herdr pane. */
 export function joinedWorkerPorts(
   credential: JoinedMachineCredential,
   options: {
     env: NodeJS.ProcessEnv;
     fetchImpl?: typeof fetch;
     run?: (args: readonly string[], signal?: AbortSignal) => Promise<string>;
+    /** Codex's inherited tracker connectors to switch off, as on a local hire. */
+    codexTrackerOverrides?: (cwd: string, env: NodeJS.ProcessEnv) => Promise<string[]>;
   },
 ): NonNullable<JoinedMachinePorts["workers"]> {
   const run =
@@ -40,6 +74,7 @@ export function joinedWorkerPorts(
   const layout = createHireLayout((args) => run(args));
   return async (request, directory, signal) => {
     const launch = JoinedWorkerLaunchSchema.parse(JSON.parse(request));
+    const harness = launch.harness ?? "claude";
     const wire = joinedSeatTransport(credential, options.fetchImpl ?? fetch);
     const check = async () => {
       signal.throwIfAborted();
@@ -65,6 +100,7 @@ export function joinedWorkerPorts(
         ...(options.env.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: options.env.CLAUDE_CONFIG_DIR } : {}),
         CLANKIE_JOINED_SEAT_TOKEN: launch.token,
         CLANKIE_JOINED_WORKER_SESSION: launch.sessionId,
+        CLANKIE_JOINED_WORKER_HARNESS: harness,
         CLANKIE_CONVERSATION_ID: launch.conversationId,
         // Never project an inherited home/SSH bearer into a new joined worker.
         CLANKIE_OPERATOR_TOKEN: "",
@@ -73,6 +109,13 @@ export function joinedWorkerPorts(
         CLANKIE_REMOTE_LEAD_TOKEN: "",
       },
     });
+    const observe = async () => {
+      // allow-swallowed-rejection -- a pane with no reported agent yet answers with an error
+      const raw = await run(["agent", "get", paneId], signal).catch(() => undefined);
+      return raw === undefined ? undefined : Native.safeParse(JSON.parse(raw)).data;
+    };
+    // Only a session that first appears in this new pane, after this launch, is admitted.
+    if ((await observe()) !== undefined) throw Error("joined_worker_pane_occupied");
     await check();
     // As a local hire: the brief goes in a private file named by a one-line
     // startup prompt, since Herdr refuses arguments it cannot encode for the shell.
@@ -90,77 +133,105 @@ export function joinedWorkerPorts(
       }),
       { mode: 0o600, flag: "wx" },
     );
-    // Herdr answers `agent start` once Claude is idle, which for a briefed worker is
-    // after its first turn, or with a timeout while it still works. As on a local
-    // hire, admission waits only for the native session Claude reports (VUH-2607).
+    const prompt =
+      harness === "codex"
+        ? `Read the JSON file ${briefPath} and execute the assignment in its clankieBrief field.`
+        : `Execute the assignment in the clankieBrief JSON field of @${briefPath}`;
+    const native =
+      harness === "codex"
+        ? [
+            // Its own process, so Herdr learns the session from its first turn (VUH-1398).
+            ...fleetSeatCodexStartArgs(),
+            ...[
+              ...(await (options.codexTrackerOverrides ?? codexTrackerOverrides)(directory, options.env)),
+              ...(launch.maximumTrust ? MAXIMUM_TRUST_CODEX_CONFIG : []),
+              "mcp_servers.clankie.enabled=false",
+              "mcp_servers.worker.enabled=true",
+              `mcp_servers.worker.command=${JSON.stringify(process.execPath)}`,
+              `mcp_servers.worker.args=${JSON.stringify([WORKER_BRIDGE])}`,
+              `mcp_servers.worker.env_vars=${JSON.stringify(CODEX_BRIDGE_ENV)}`,
+              // Clankie's own bridge needs no native prompt; other servers keep theirs.
+              'mcp_servers.worker.default_tools_approval_mode="approve"',
+            ].flatMap((override) => ["-c", override]),
+            ...(launch.model ? (fleetSeatModelArgs("codex", launch.model) ?? []) : []),
+            ...(launch.effort ? (fleetSeatEffortArgs("codex", launch.effort) ?? []) : []),
+            prompt,
+          ]
+        : [
+            "--session-id",
+            launch.sessionId,
+            // The installed worker plugin, as on any hire: an owner-approved channel
+            // (managed allowedChannelPlugins), never a development channel whose
+            // warning nobody is there to answer (VUH-2607).
+            "--channels",
+            `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
+            "--settings",
+            JSON.stringify({
+              enabledPlugins: { [SEAT_PLUGIN_ID]: false, [CLAUDE_WORKER_PLUGIN_ID]: true },
+              permissions: {
+                defaultMode: "auto",
+                allow: [`mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_worker`],
+                deny: claudeTrackerDenyRules(directory, options.env),
+              },
+            }),
+            ...(launch.maximumTrust ? ["--dangerously-skip-permissions"] : []),
+            ...(launch.model ? ["--model", launch.model] : []),
+            ...(launch.effort ? ["--effort", launch.effort] : []),
+            prompt,
+          ];
+    // Herdr answers `agent start` once the agent is idle, which for a briefed worker
+    // is after its first turn, or with a timeout while it still works. As on a local
+    // hire, admission waits only for the native session it reports (VUH-2607).
     let started: { error?: unknown } | undefined;
     void run(
-      [
-        "agent",
-        "start",
-        herdrAgentName(launch.title),
-        "--kind",
-        "claude",
-        "--pane",
-        paneId,
-        "--",
-        "--session-id",
-        launch.sessionId,
-        // The installed worker plugin, as on any hire: an owner-approved channel
-        // (managed allowedChannelPlugins), never a development channel whose
-        // warning nobody is there to answer (VUH-2607).
-        "--channels",
-        `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
-        "--settings",
-        JSON.stringify({
-          enabledPlugins: { [SEAT_PLUGIN_ID]: false, [CLAUDE_WORKER_PLUGIN_ID]: true },
-          permissions: {
-            defaultMode: "auto",
-            allow: [`mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_worker`],
-            deny: claudeTrackerDenyRules(directory, options.env),
-          },
-        }),
-        ...(launch.maximumTrust ? ["--dangerously-skip-permissions"] : []),
-        ...(launch.model ? ["--model", launch.model] : []),
-        ...(launch.effort ? ["--effort", launch.effort] : []),
-        `Execute the assignment in the clankieBrief JSON field of @${briefPath}`,
-      ],
+      ["agent", "start", herdrAgentName(launch.title), "--kind", harness, "--pane", paneId, "--", ...native],
       signal,
     ).then(
       () => (started = {}),
       (error: unknown) => (started = { error }),
     );
-    let observed: z.infer<typeof Native> | undefined;
+    let observed: Native | undefined;
     for (const deadline = Date.now() + 60_000; observed === undefined;) {
       signal.throwIfAborted();
-      // allow-swallowed-rejection -- a pane with no reported agent yet answers with an error; the deadline decides
-      const raw = await run(["agent", "get", paneId], signal).catch(() => undefined);
-      observed = raw === undefined ? undefined : Native.safeParse(JSON.parse(raw)).data;
+      observed = await observe();
       if (observed !== undefined) break;
       if (started?.error !== undefined || Date.now() > deadline)
         throw started?.error ?? Error("joined_worker_native_session_missing");
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    if (observed.result.agent.agent_session.value !== launch.sessionId)
+    const session = observed.result.agent.agent_session.value;
+    if (
+      observed.result.agent.agent_session.agent !== harness ||
+      (harness === "claude" && session !== launch.sessionId)
+    )
       throw Error("joined_worker_native_session_mismatch");
     const response = await joinedSeatTransport(credential, options.fetchImpl ?? fetch).rpc(
       {
         method: "POST",
         path: "/workers/admit",
         headers: { authorization: `Bearer ${launch.token}` },
-        body: JSON.stringify({ paneId, sessionId: launch.sessionId }),
+        body: JSON.stringify({
+          paneId,
+          sessionId: launch.sessionId,
+          ...(harness === "codex" ? { nativeSessionId: session } : {}),
+        }),
       },
       signal,
     );
     if (!response.ok) throw Error("joined_worker_admission_refused");
-    return JSON.stringify({ paneId, sessionId: launch.sessionId, admitted: true });
+    return JSON.stringify({ paneId, sessionId: launch.sessionId, nativeSessionId: session, admitted: true });
   };
 }
 
-/** Observe the exact native occupant before each worker bridge request. */
-export async function verifyJoinedWorker(env: NodeJS.ProcessEnv) {
+/**
+ * Observe the exact native occupant before each worker bridge request. Claude's
+ * session was fixed at launch; Codex's is the one its home admitted, read fresh
+ * each time, so a pane whose session changed is refused (VUH-2609).
+ */
+export async function verifyJoinedWorker(env: NodeJS.ProcessEnv, admitted?: () => Promise<unknown>) {
   if (!env.CLANKIE_JOINED_WORKER_SESSION) return;
   if (!env.HERDR_PANE_ID) throw Error("joined_worker_native_pane_required");
+  const harness = env.CLANKIE_JOINED_WORKER_HARNESS === "codex" ? "codex" : "claude";
   const observed = Native.parse(
     JSON.parse(
       (
@@ -172,6 +243,11 @@ export async function verifyJoinedWorker(env: NodeJS.ProcessEnv) {
       ).stdout,
     ),
   );
-  if (observed.result.agent.agent_session.value !== env.CLANKIE_JOINED_WORKER_SESSION)
+  const expected = harness === "codex" ? await admitted?.() : env.CLANKIE_JOINED_WORKER_SESSION;
+  if (
+    observed.result.agent.agent_session.agent !== harness ||
+    expected === undefined ||
+    observed.result.agent.agent_session.value !== expected
+  )
     throw Error("joined_worker_native_session_mismatch");
 }

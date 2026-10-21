@@ -61,7 +61,7 @@ export function joinedHireTools<T extends { name: string; description: string; e
         ...tool,
         description:
           tool.description +
-          " A machine that joined you with `clankie join` (id `join-…`) is a fleet too: name it as fleet to hire a Claude worker there, in a folder approved when it joined, while its level allows workers. It uses that machine's own Claude login; only turns the owner started may hire there.",
+          " A machine that joined you with `clankie join` (id `join-…`) is a fleet too: name it as fleet to hire a Claude or Codex worker there, in a folder approved when it joined, while its level allows workers. It uses that machine's own Claude or Codex login; only turns the owner started may hire there. A Codex worker there reports with message_clankie but cannot be sent messages yet.",
         execute: async (id: unknown, params: Record<string, unknown>, ...rest: unknown[]) => {
           const fleet = params.fleet;
           if (typeof fleet !== "string" || !fleet.startsWith("join-")) return original(id, params, ...rest);
@@ -72,11 +72,11 @@ export function joinedHireTools<T extends { name: string; description: string; e
             );
           // Live owner policy at the call; the receiver enforces its own ceiling again.
           await requireMachineAccess(settings, fleet, "workers", joins);
-          if (params.harness !== undefined && params.harness !== "claude")
+          if (params.harness !== undefined && params.harness !== "claude" && params.harness !== "codex")
             return result({
               outcome: "failed",
               reason: "harness_unavailable",
-              detail: "A joined machine runs Claude workers in this release; Codex there is a follow-up.",
+              detail: "A joined machine runs Claude or Codex workers.",
             });
           if (typeof params.brief !== "string" || params.brief.length === 0)
             return result({
@@ -91,6 +91,7 @@ export function joinedHireTools<T extends { name: string; description: string; e
               title: String(params.title),
               brief: params.brief,
               workingDirectory: String(params.workingDirectory),
+              ...(params.harness === "codex" ? { harness: "codex" as const } : {}),
               ...(typeof params.model === "string" ? { model: params.model } : {}),
               ...(typeof params.effort === "string" && JOINED_EFFORTS.has(params.effort)
                 ? { effort: params.effort as "low" | "medium" | "high" | "max" }

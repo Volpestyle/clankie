@@ -460,6 +460,8 @@ export interface JoinedWorkerHireRequest {
   readonly title: string;
   readonly brief: string;
   readonly workingDirectory: string;
+  /** Absent means Claude; either signs in with the joined machine's own account. */
+  readonly harness?: "claude" | "codex";
   readonly model?: string;
   readonly effort?: "low" | "medium" | "high" | "max";
 }

@@ -215,7 +215,17 @@ export async function runJoinedSeatHook(
     env: { ...env, CLANKIE_OPERATOR_TOKEN: SENTINEL },
     host: HOST,
     fetchImpl: async (resource, init) => {
-      await (await import("./joined-worker.ts")).verifyJoinedWorker(env);
+      await (
+        await import("./joined-worker.ts")
+      ).verifyJoinedWorker(env, async () => {
+        const response = await wire.rpc({
+          method: "GET",
+          path: "/workers/check",
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) throw Error("joined_worker_grant_revoked");
+        return (await response.json()).nativeSessionId;
+      });
       return wire.fetchFor(token)(resource, init);
     },
   };

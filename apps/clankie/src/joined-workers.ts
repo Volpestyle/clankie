@@ -18,7 +18,7 @@ const Hire = z.strictObject({
       "Brief must be at most 32768 UTF-8 bytes, without NUL",
     ),
   workingDirectory: z.string().min(1).max(4096).optional(),
-  harness: z.literal("claude").optional(),
+  harness: z.enum(["claude", "codex"]).optional(),
   model: z.string().min(1).max(128).optional(),
   effort: z.enum(["low", "medium", "high", "max"]).optional(),
 });
@@ -43,9 +43,13 @@ const tool = (name: string, description: string, schema: z.ZodType, call: LaneTo
 interface Worker extends RemoteSeatAuthority {
   machineId: string;
   directory: string;
+  /** Claude's session; Codex's launch nonce. */
   sessionId: string;
+  harness: "claude" | "codex";
   token: string;
   paneId?: string;
+  /** The native session admitted in that pane: Claude's from launch, Codex's as first observed. */
+  nativeSessionId?: string;
   /** Settles when the machine's adapter admits the native session. */
   admitted: Promise<void>;
   markAdmitted: () => void;
@@ -77,11 +81,26 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
     return worker;
   };
   const admit = async (worker: Worker, raw: unknown) => {
-    const value = z.strictObject({ paneId: z.string().min(1).max(256), sessionId: z.uuid() }).parse(raw);
-    if (value.sessionId !== worker.sessionId || (worker.paneId && worker.paneId !== value.paneId))
+    const value = z
+      .strictObject({
+        paneId: z.string().min(1).max(256),
+        sessionId: z.uuid(),
+        nativeSessionId: z.string().min(1).max(256).optional(),
+      })
+      .parse(raw);
+    // Codex mints its own session, so the adapter names the one it first observed in
+    // that pane after this launch; Claude's was fixed at launch (VUH-2609).
+    const native = worker.harness === "codex" ? value.nativeSessionId : value.sessionId;
+    if (
+      value.sessionId !== worker.sessionId ||
+      native === undefined ||
+      (worker.harness === "claude" && value.nativeSessionId !== undefined) ||
+      (worker.paneId !== undefined && (worker.paneId !== value.paneId || worker.nativeSessionId !== native))
+    )
       throw Error("joined_worker_session_mismatch");
-    // Only the approved machine's native adapter observes and admits this launch.
+    // Only the approved machine's native adapter observes and admits this launch, once.
     worker.paneId = value.paneId;
+    worker.nativeSessionId = native;
     worker.markAdmitted();
     return { admitted: true };
   };
@@ -96,6 +115,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
     conversationId: string;
     title: string;
     brief: string;
+    harness?: "claude" | "codex";
     model?: string;
     effort?: "low" | "medium" | "high" | "max";
     maximumTrust: boolean;
@@ -117,6 +137,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
       id: randomUUID(),
       token,
       sessionId,
+      harness: args.harness ?? "claude",
       machineId: machine.machineId,
       directory,
       abort,
@@ -206,6 +227,8 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
     const request = JoinedWorkerLaunchSchema.parse({
       token,
       sessionId,
+      // Claude launches omit it, so receivers from before VUH-2609 still accept them.
+      ...(args.harness === "codex" ? { harness: "codex" } : {}),
       conversationId: args.conversationId,
       title: args.title,
       brief: args.brief,
@@ -249,6 +272,9 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
         `${worker.machineId}/${worker.paneId}` === seat && worker.binding.conversationId === conversationId,
     );
     if (!worker || !(await worker.authorize())) throw Error("joined_worker_unknown");
+    // Its bridge delivers messages as Claude channel events; a Codex worker launched
+    // without an app-server has no such channel, and is never typed into (VUH-2609).
+    if (worker.harness === "codex") throw Error("joined_codex_worker_takes_no_messages");
     const result = await worker.outbox.deliver({
       kind: "message",
       conversationId: worker.binding.conversationId,
@@ -274,7 +300,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
         ...bank.tools.filter((entry) => entry.name !== "hire_agent" && entry.name !== "message_seat"),
         tool(
           "hire_agent",
-          "Launch an interactive Claude worker in Herdr on this joined machine, bound to this folder and lead chat. Other directories and harnesses require their own joined lead. A lost reply never authorizes another hire.",
+          "Launch an interactive Claude or Codex worker in Herdr on this joined machine, signed in with that machine's own account, bound to this folder and lead chat. Other directories require their own joined lead. A lost reply never authorizes another hire.",
           Hire,
           async (args) => {
             const hire = Hire.parse(args);
@@ -288,6 +314,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
                 conversationId: lead.binding.conversationId,
                 title: hire.title,
                 brief: hire.brief,
+                ...(hire.harness ? { harness: hire.harness } : {}),
                 ...(hire.model ? { model: hire.model } : {}),
                 ...(hire.effort ? { effort: hire.effort } : {}),
                 maximumTrust,
@@ -335,6 +362,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
       conversationId: request.conversationId,
       title: request.title,
       brief: request.brief,
+      ...(request.harness ? { harness: request.harness } : {}),
       ...(request.model ? { model: request.model } : {}),
       ...(request.effort ? { effort: request.effort } : {}),
       maximumTrust,
