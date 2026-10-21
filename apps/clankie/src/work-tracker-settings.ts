@@ -178,6 +178,7 @@ export function createWorkTrackerSettingsRoutes(
             : "Applies to new projects only. Existing projects keep their saved tracker and items.",
           confirmationRequired: !!project && input.action !== "read",
           connections,
+          ...forumView(current.discord.trackerForums, project?.trackerProjectId),
         },
       };
     };
@@ -313,4 +314,20 @@ export function createWorkTrackerSettingsRoutes(
     }
   });
   return app;
+}
+
+/** The forum bound to a built-in project, shown beside its tracker (VUH-2531). */
+function forumView(
+  forums: readonly {
+    serverId: string;
+    forumId: string;
+    projectId: string;
+    memberPosts: "auto" | "owner_tag";
+  }[],
+  trackerProjectId: string | undefined,
+) {
+  const forum = trackerProjectId && forums.find((entry) => entry.projectId === trackerProjectId);
+  return forum
+    ? { discordForum: { serverId: forum.serverId, forumId: forum.forumId, memberPosts: forum.memberPosts } }
+    : {};
 }

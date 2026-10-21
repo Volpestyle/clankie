@@ -35,6 +35,8 @@ const DISCORD_USAGE = [
   "       clankie discord server --server ID [--role participant|admin] [--owners me|everyone|role] [--owner-role ID] [--fleet on|off] [--fleet-channel ID|none] [--tracking LEVEL]",
   "       clankie discord owners --server ID --owners me|everyone|role [--owner-role ID] [--role participant|admin]",
   "       clankie discord room-skill --server ID --channel ID --skill house-hunting|off",
+  "       clankie discord forum bind --server ID --forum ID --project TRACKER_PROJECT_ID [--member-posts auto|owner_tag] [--member-limit N] --confirm-audience",
+  "       clankie discord forum unbind --forum ID",
   "       clankie discord legacy-author --household existing|SERVER-CHANNEL --user ID --author LABEL --confirm|--remove",
   "       clankie discord setup connect [--server NAME] [--role participant|admin]",
   "       clankie discord setup invite [--role participant|admin]",
@@ -112,6 +114,10 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
         `server ${entry.serverId}: ${entry.role}; owners ${entry.owners}${entry.ownerRoleId ? ` (${entry.ownerRoleId})` : ""}; fleet ${settings.guilds[entry.serverId]?.fleetEnabled ? "on" : "off"}; tracking ${settings.guilds[entry.serverId]?.trackingLevel ?? "off"}`,
     ),
     ...settings.roomSkills.map((entry) => `room ${entry.serverId}/${entry.channelId}: ${entry.skill}`),
+    ...settings.trackerForums.map(
+      (entry) =>
+        `tracker forum ${entry.serverId}/${entry.forumId}: project ${entry.projectId}; member posts ${entry.memberPosts}, ${entry.memberDailyLimit}/day`,
+    ),
     ...settings.houseHuntingAuthorBindings.map(
       (entry) => `household ${entry.household}: ${entry.legacyAuthor} → ${entry.userId} (owner-confirmed)`,
     ),
@@ -386,6 +392,55 @@ export async function runDiscordCommand(
                   ownerConfirmed: true as const,
                 },
               ]),
+        ],
+      }),
+      options,
+    );
+  }
+  if (verb === "forum") {
+    const { values, positionals } = parseArgs({
+      args: args.slice(1),
+      allowPositionals: true,
+      options: {
+        server: { type: "string" },
+        forum: { type: "string" },
+        project: { type: "string" },
+        "member-posts": { type: "string" },
+        "member-limit": { type: "string" },
+        "confirm-audience": { type: "boolean" },
+      },
+    });
+    const [action, ...rest] = positionals;
+    if (rest.length || !values.forum || (action !== "bind" && action !== "unbind"))
+      throw new Error(DISCORD_USAGE);
+    if (action === "unbind")
+      return discordTransform(
+        (current) => ({
+          ...current,
+          trackerForums: current.trackerForums.filter((forum) => forum.forumId !== values.forum),
+        }),
+        options,
+      );
+    if (!values.server || !values.project) throw new Error(DISCORD_USAGE);
+    // Binding publishes the project to every reader of the forum: the owner says so explicitly.
+    if (!values["confirm-audience"])
+      throw new Error(
+        "Everyone who can read this forum will see the project's items. Confirm with --confirm-audience.",
+      );
+    return discordTransform(
+      (current) => ({
+        ...current,
+        trackerForums: [
+          ...current.trackerForums.filter(
+            (forum) => forum.forumId !== values.forum && forum.projectId !== values.project,
+          ),
+          {
+            serverId: values.server!,
+            forumId: values.forum!,
+            projectId: values.project!,
+            memberPosts: (values["member-posts"] ?? "auto") as "auto" | "owner_tag",
+            memberDailyLimit: values["member-limit"] === undefined ? 20 : Number(values["member-limit"]),
+          },
         ],
       }),
       options,

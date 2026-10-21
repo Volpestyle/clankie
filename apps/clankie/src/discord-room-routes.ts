@@ -63,6 +63,8 @@ export interface DiscordRoomRoutesOptions {
     body: DiscordDirectorySnapshot["body"],
   ): Promise<DiscordDirectorySnapshot>;
   environment?: NodeJS.ProcessEnv;
+  /** Whether a built-in tracker project exists, for a new forum view binding (VUH-2531). */
+  trackerProjectExists?(projectId: string): Promise<boolean>;
   policy?: Pick<ManagedDiscord, "sync" | "status" | "invitationApplicationId">;
   /** The free official bot on a self-hosted machine (VUH-1766); absent on a hosted body. */
   officialBot?: {
@@ -293,6 +295,43 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
     if (freshBody !== body) return context.json({ error: "discord_body_changed" }, 409);
     return context.json(snapshot);
   });
+  /**
+   * A new forum view binding publishes a project to the forum's readers, so it
+   * must name a real built-in project and a forum channel the body can see in
+   * that server. Unproven bindings are refused; existing ones are untouched.
+   */
+  async function trackerForumRefusal(forums: ClankieSettings["discord"]["trackerForums"]) {
+    const current = await options.settings.load();
+    const known = new Set(current.discord.trackerForums.map((forum) => JSON.stringify(forum)));
+    const body = resolveDiscordSettings(current.discord, options.environment ?? {}).settings.activeBody;
+    for (const forum of forums) {
+      if (known.has(JSON.stringify(forum))) continue;
+      // allow-swallowed-rejection -- an unreadable project refuses the binding (fails closed)
+      if (!(await options.trackerProjectExists?.(forum.projectId).catch(() => false)))
+        return "tracker_forum_project_not_found";
+      if (!options.directory) return "tracker_forum_unverified";
+      let after: string | undefined;
+      let kind: string | undefined;
+      for (let page = 0; page < 10 && kind === undefined; page++) {
+        const snapshot = await options
+          .directory(
+            { kind: "channels", guildId: forum.serverId, limit: 200, ...(after ? { after } : {}) },
+            body,
+          )
+          // allow-swallowed-rejection -- an unreadable directory refuses the binding (fails closed)
+          .catch(() => undefined);
+        if (!snapshot || snapshot.state === "unavailable" || snapshot.state === "disconnected")
+          return "tracker_forum_unverified";
+        kind = snapshot.entries.find((entry) => entry.id === forum.forumId)?.kind;
+        if (!snapshot.hasMore || snapshot.entries.length === 0) break;
+        after = snapshot.entries.at(-1)!.id;
+      }
+      if (kind !== "forum")
+        return kind === undefined ? "tracker_forum_not_found" : "tracker_forum_not_a_forum";
+    }
+    return undefined;
+  }
+
   app.post(DISCORD_SETTINGS_PATH, async (context) => {
     const authority = await options.authorize(context.req.raw, "settings");
     if (!authority) return context.json({ error: "operator_required" }, 403);
@@ -300,6 +339,8 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
     const parsed = DiscordSettingsUpdateSchema.safeParse(request);
     if (!parsed.success) return context.json({ error: "invalid_discord_settings" }, 400);
     if (!options.settings.update) return context.json({ error: "settings_unavailable" }, 503);
+    const refusal = await trackerForumRefusal(parsed.data.settings.trackerForums);
+    if (refusal) return context.json({ error: refusal }, 400);
     const updated = await options.settings.update(
       (current) => {
         if (!authority.current()) throw new Error("operator_revoked");

@@ -194,10 +194,19 @@ so slice 2 adds an exception for exactly the owner-bound forum.
    - not yet: catching up on Discord activity from while the service was down
      (archived listing and audit-log backfill), the user-session body and the
      hosted official bot.
-3. **Owner surface:** the setting, its API and CLI and the TUI's Advanced JSON
-   field ship with slice 2. Slice 3 adds the app and hosted dashboard (a
-   generic `json` field kind), a guided binding flow, and the work-tracker
-   "Discord forum" option, with docs and skill updates.
+3. **Owner surface:**
+   - built: `clankie discord forum bind|unbind` with an explicit
+     `--confirm-audience`, over the same revision-fenced settings API;
+   - built: the host refuses a new binding unless the project exists in the
+     built-in tracker and the body's directory shows a forum channel in that
+     server; unchanged bindings are not proved again;
+   - built: the work-tracker read shows a built-in project's bound forum
+     (`discordForum`, optional so older apps drop it). Discord stays a view in
+     the tracker choices, never a selectable store: adding it to the selection
+     union would break older apps' reads;
+   - built: the TUI's Advanced JSON field, and in clankie-app a generic `json`
+     Advanced field kind plus the bound forum in the work-tracker panel;
+   - later, with the hosted follow-up: the hosted dashboard.
 4. **Live trial** on the lead's chosen test server, channel and bot:
    - each of post, tag change and reply round-trips;
    - an archived post;

@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 export const WORK_TRACKER_SETTINGS_PATH = "/v1/operator/work-tracker";
-/** Discord is a future two-way view of builtin (VUH-2531), not a selectable store. */
+/**
+ * Discord is a two-way view of a built-in project (VUH-2531), not a selectable store:
+ * bind a forum to the project in Discord settings (`discord.trackerForums`).
+ */
 export const WORK_TRACKER_OPTIONS = [
   { backend: "builtin", name: "Built-in", provider: null, available: true },
   { backend: "linear", name: "Linear", provider: "linear", available: true },
@@ -65,6 +68,15 @@ export const WorkTrackerSettingsSnapshotSchema = z
     effect: z.string(),
     confirmationRequired: z.boolean(),
     connections: z.object({ linear: z.boolean(), github: z.boolean() }).strict(),
+    /** The Discord forum showing this built-in project, when one is bound; read-only here. */
+    discordForum: z
+      .object({
+        serverId: z.string().regex(/^\d{5,32}$/u),
+        forumId: z.string().regex(/^\d{5,32}$/u),
+        memberPosts: z.enum(["auto", "owner_tag"]),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type WorkTrackerSettingsSnapshot = z.infer<typeof WorkTrackerSettingsSnapshotSchema>;

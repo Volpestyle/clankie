@@ -872,6 +872,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         ...(dependencies.discordTestPost ? { testPost: dependencies.discordTestPost } : {}),
         ...(dependencies.managedDiscord ? { policy: dependencies.managedDiscord } : {}),
         ...(dependencies.officialDiscord ? { officialBot: dependencies.officialDiscord } : {}),
+        ...(dependencies.builtInTracker
+          ? {
+              trackerProjectExists: async (projectId: string) => {
+                const project = (await dependencies.builtInTracker!.call("get_project", {
+                  query: projectId,
+                })) as { id?: unknown };
+                return project.id === projectId;
+              },
+            }
+          : {}),
         authorize: authorizeRoom,
         captain: dependencies.captain,
         observations: dependencies.roomObservations,

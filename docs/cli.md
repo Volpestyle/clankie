@@ -7980,10 +7980,19 @@ entry individually. Older clients that omit the field preserve existing bindings
 Use `[]` (or CLI `none`) to clear it explicitly. Numeric legacy authors are
 refused; they already identify Discord speakers.
 
-`discord set --tracker-forums JSON` binds forums as two-way views of built-in
-tracker projects (VUH-2531), e.g. `[{"serverId":"100000","forumId":"200000",
-"projectId":"<built-in project UUID>","memberPosts":"auto","memberDailyLimit":20}]`.
-The same revision-fenced `POST /v1/discord/settings` accepts `trackerForums`.
+`discord forum bind --server ID --forum ID --project TRACKER_PROJECT_ID
+[--member-posts auto|owner_tag] [--member-limit N] --confirm-audience` binds a
+forum as a two-way view of a built-in tracker project (VUH-2531); `discord forum
+unbind --forum ID` removes it, and `discord status` lists bindings. The project
+is the built-in tracker's project UUID (`trackerProjectId`). `discord set
+--tracker-forums JSON` and the revision-fenced `POST /v1/discord/settings`
+(`trackerForums`) are the Advanced paths. The host refuses a new binding unless
+the project exists in the built-in tracker and the body's directory shows the
+channel as a forum in that server (`tracker_forum_project_not_found`,
+`tracker_forum_not_found`, `tracker_forum_not_a_forum`,
+`tracker_forum_unverified`); unchanged bindings are not proved again. The work
+tracker read (`clankie project settings PROJECT`, `GET /v1/operator/work-tracker?projectId=ID`)
+shows a project's bound forum as `discordForum`.
 Everyone who can read the forum sees that project. Posts are items, moderated
 status tags carry their status and replies are comments; members' posts are
 untrusted Backlog items, or wait for an owner's status tag with `owner_tag`.
