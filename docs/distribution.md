@@ -282,3 +282,7 @@ full repository check and fleet load gate, builds and smoke-tests the archive on
 GitHub runner, builds the `linux-arm64` and `linux-x64` archives that hosted bodies
 install ([ADR 0237](adr/0237-hosted-bodies-update-themselves-to-official-releases.md)),
 and uploads all three archives with their checksums to the matching GitHub Release.
+When that load gate fails on the runner but not locally, the manual
+`Load gate A/B` workflow (`gh workflow run load-ab.yml -f refs="vA vB"`) measures
+`pnpm check:load` for each revision interleaved on one runner, so a code
+regression can be told apart from runner variance.

@@ -1,0 +1,56 @@
+name: Load gate A/B
+# Manual only. Measures check:load for several revisions interleaved on one
+# runner, so a release load-gate failure can be told apart from runner variance.
+on:
+  workflow_dispatch:
+    inputs:
+      refs:
+        description: Space-separated revisions to compare
+        required: true
+        default: v0.4.6 v0.4.8
+      rounds:
+        description: Interleaved rounds per revision
+        required: true
+        default: "2"
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+      - name: Interleaved check:load
+        env:
+          REFS: ${{ inputs.refs }}
+          ROUNDS: ${{ inputs.rounds }}
+        run: |
+          out="$RUNNER_TEMP/load-ab"
+          mkdir -p "$out"
+          status=0
+          for round in $(seq "$ROUNDS"); do
+            for ref in $REFS; do
+              git checkout --quiet --force "$ref"
+              pnpm install --frozen-lockfile
+              rm -f .data/qa/fleet-load.json
+              pnpm check:load || status=1
+              cp .data/qa/fleet-load.json "$out/$ref-$round.json" || status=1
+            done
+          done
+          exit "$status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-ab
+          path: ${{ runner.temp }}/load-ab/
+          retention-days: 7
