@@ -3406,12 +3406,16 @@ Studio, vLLM, llama.cpp) into global `clankie.json`. The TUI
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--id`       | Provider id. Lowercased. Letters, digits, `.`, `_`, `-`; no slashes.                                                                                |
 | `--base-url` | `http://` or `https://`. A bare origin is rewritten to `/v1` (`http://127.0.0.1:8000` → `http://127.0.0.1:8000/v1`). Trailing slashes are stripped. |
-| `--context`  | Fallback context window in tokens when the probe does not report one. Default `32768`. Must be a positive integer.                                  |
+| `--context`  | Fallback context window in tokens when the probe does not report one. Default `131072`. Must be a positive integer.                                 |
 | `--models`   | Comma-separated model ids used when the probe returns nothing.                                                                                      |
 | `--set`      | Select the first listed model as captain (`providerId/firstId`).                                                                                    |
 
 The probe is `GET {normalizedBaseURL}/models` with a 3-second timeout. Local
-runtimes are unknown to models.dev, so the endpoint itself is the catalog.
+runtimes are unknown to models.dev, so the endpoint itself is the catalog. A
+model the list gives no context length (Ollama's `/v1` never does) is asked
+again at Ollama's native `POST /api/show`, which reports the model's own window;
+other runtimes leave it at `--context`. Clankie's first request alone is about
+32k tokens, so a model with a smaller window compacts on every turn.
 
 ```bash
 clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set

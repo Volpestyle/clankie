@@ -1,0 +1,75 @@
+{
+  "model": "ollama/qwen3-vl:8b (Ollama 0.30.10)",
+  "firstRequest": {
+    "promptTokens": 31995,
+    "userOnlyTokens": 31,
+    "systemPlusUserTokens": 8450,
+    "toolSchemaTokensByDifference": 23545,
+    "systemPromptChars": 35430,
+    "toolCount": 103,
+    "toolSchemaChars": 119582
+  },
+  "measuredWith": "POST /v1/chat/completions max_tokens 1 against the installed Ollama with the captured first request; user only, system+user, and the full request",
+  "largestToolSchemasChars": [
+    {
+      "name": "hire_agent",
+      "chars": 9051
+    },
+    {
+      "name": "propose_project_create",
+      "chars": 6865
+    },
+    {
+      "name": "message_seat",
+      "chars": 4558
+    },
+    {
+      "name": "linear_save_issue",
+      "chars": 4249
+    },
+    {
+      "name": "minecraft_host_admin",
+      "chars": 3904
+    },
+    {
+      "name": "minecraft_act",
+      "chars": 3781
+    },
+    {
+      "name": "routine",
+      "chars": 3663
+    },
+    {
+      "name": "request_user_input",
+      "chars": 3051
+    },
+    {
+      "name": "close_worker_pane",
+      "chars": 3016
+    },
+    {
+      "name": "skin_draft",
+      "chars": 2613
+    },
+    {
+      "name": "minecraft_configure",
+      "chars": 2542
+    },
+    {
+      "name": "draw_er_diagram",
+      "chars": 2471
+    },
+    {
+      "name": "linear_wake",
+      "chars": 2329
+    },
+    {
+      "name": "desktop",
+      "chars": 2130
+    },
+    {
+      "name": "mail_owner_update",
+      "chars": 1780
+    }
+  ]
+}

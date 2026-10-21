@@ -1,0 +1,114 @@
+{
+  "source": "Ollama 0.30.10 on macOS, captured 2026-10-21 for VUH-2623. /v1/models verbatim; /api/show trimmed to capabilities, general.architecture and the context length.",
+  "v1Models": {
+    "object": "list",
+    "data": [
+      {
+        "id": "nomic-embed-text:latest",
+        "object": "model",
+        "created": 1785642335,
+        "owned_by": "library"
+      },
+      {
+        "id": "qwen3.6:27b-mlx",
+        "object": "model",
+        "created": 1782526107,
+        "owned_by": "library"
+      },
+      {
+        "id": "qwen3-vl:32b",
+        "object": "model",
+        "created": 1782362772,
+        "owned_by": "library"
+      },
+      {
+        "id": "qwen3-vl:8b",
+        "object": "model",
+        "created": 1782362206,
+        "owned_by": "library"
+      },
+      {
+        "id": "qwen3.6:27b-mlx-bf16",
+        "object": "model",
+        "created": 1782305925,
+        "owned_by": "library"
+      },
+      {
+        "id": "qwen3-coder-next:latest",
+        "object": "model",
+        "created": 1782247707,
+        "owned_by": "library"
+      },
+      {
+        "id": "qwen3.6:35b-mlx",
+        "object": "model",
+        "created": 1782247015,
+        "owned_by": "library"
+      },
+      {
+        "id": "glm-4.7-flash:latest",
+        "object": "model",
+        "created": 1782241307,
+        "owned_by": "library"
+      }
+    ]
+  },
+  "apiShow": {
+    "nomic-embed-text:latest": {
+      "capabilities": ["embedding"],
+      "model_info": {
+        "general.architecture": "nomic-bert",
+        "nomic-bert.context_length": 2048
+      }
+    },
+    "qwen3.6:27b-mlx": {
+      "capabilities": ["completion", "vision", "thinking", "tools"],
+      "model_info": {
+        "general.architecture": "qwen3_5",
+        "qwen3_5.context_length": 262144
+      }
+    },
+    "qwen3-vl:32b": {
+      "capabilities": ["completion", "vision", "tools", "thinking"],
+      "model_info": {
+        "general.architecture": "qwen3vl",
+        "qwen3vl.context_length": 262144
+      }
+    },
+    "qwen3-vl:8b": {
+      "capabilities": ["completion", "vision", "tools", "thinking"],
+      "model_info": {
+        "general.architecture": "qwen3vl",
+        "qwen3vl.context_length": 262144
+      }
+    },
+    "qwen3.6:27b-mlx-bf16": {
+      "capabilities": ["completion", "vision", "thinking", "tools"],
+      "model_info": {
+        "general.architecture": "qwen3_5",
+        "qwen3_5.context_length": 262144
+      }
+    },
+    "qwen3-coder-next:latest": {
+      "capabilities": ["completion", "tools"],
+      "model_info": {
+        "general.architecture": "qwen3next",
+        "qwen3next.context_length": 262144
+      }
+    },
+    "qwen3.6:35b-mlx": {
+      "capabilities": ["completion", "vision", "thinking", "tools"],
+      "model_info": {
+        "general.architecture": "qwen3_5_moe",
+        "qwen3_5_moe.context_length": 262144
+      }
+    },
+    "glm-4.7-flash:latest": {
+      "capabilities": ["completion", "tools", "thinking"],
+      "model_info": {
+        "general.architecture": "glm4moelite",
+        "glm4moelite.context_length": 202752
+      }
+    }
+  }
+}

@@ -628,6 +628,25 @@ describe("provider and model commands", () => {
     expect(rendered(view)).toContain("clankie restart");
   });
 
+  it("skips the context question when Ollama reports every model's window", async () => {
+    const fixture = await testServices({
+      fetchImpl: (input) =>
+        Promise.resolve(
+          String(input).endsWith("/api/show")
+            ? Response.json({ model_info: { "qwen3vl.context_length": 262_144 } })
+            : Response.json({ data: [{ id: "qwen3-vl:8b" }] }),
+        ),
+    });
+    const view = testShell(["__local__", "ollama"], [], ["ollama", "http://localhost:11434/v1"]);
+
+    await command(buildProviderCommands(fixture.services), "provider").run("", view.shell);
+
+    const { config } = await loadConfig({ cwd: fixture.services.cwd, env: fixture.env });
+    expect(config.provider?.["ollama"]?.models).toEqual({
+      "qwen3-vl:8b": { tool_call: true, limit: { context: 262_144, output: 8_192 } },
+    });
+  });
+
   it("falls back to typed model ids when the local endpoint is unreachable", async () => {
     const fixture = await testServices({ fetchImpl: () => Promise.reject(new Error("ECONNREFUSED")) });
     const view = testShell(

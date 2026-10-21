@@ -55,7 +55,7 @@ describe("local endpoint helpers", () => {
 
   it("probes OpenAI-shaped /models lists and keeps per-model context", async () => {
     const models = await probeLocalModels("http://127.0.0.1:8000", async (input) => {
-      expect(String(input)).toBe("http://127.0.0.1:8000/v1/models");
+      if (String(input) !== "http://127.0.0.1:8000/v1/models") return new Response(null, { status: 404 });
       return Response.json({
         data: [{ id: "deepseek-v4-flash" }, { id: "gpt-oss:20b", max_context_length: 131_072 }],
       });
@@ -77,7 +77,7 @@ describe("declareLocalProvider / setCaptainModel", () => {
     expect(declared.provider?.["ds4"]?.npm).toBe("@ai-sdk/openai-compatible");
     expect(declared.provider?.["ds4"]?.models?.["deepseek-v4-flash"]).toEqual({
       tool_call: true,
-      limit: { context: 32_768, output: 8_192 },
+      limit: { context: 131_072, output: 8_192 },
     });
 
     const next = await setCaptainModel("ds4/deepseek-v4-flash", { env });

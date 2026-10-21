@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "after/ollama-requests.jsonl",
+      "size": 1481145,
+      "sha256": "c595fdfc55f1cbbdb3e226e048e5a31b59f978e4e44f06a042bd99c3e582cd76",
+      "url": "clankie://evidence/sha256/c595fdfc55f1cbbdb3e226e048e5a31b59f978e4e44f06a042bd99c3e582cd76"
+    },
+    {
+      "path": "before/ollama-requests.jsonl",
+      "size": 1229997,
+      "sha256": "e281cf23a0754c913424ae94c1506f60874a41e34ca0376c311e72642bc339ec",
+      "url": "clankie://evidence/sha256/e281cf23a0754c913424ae94c1506f60874a41e34ca0376c311e72642bc339ec"
+    }
+  ]
+}

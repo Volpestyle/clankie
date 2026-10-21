@@ -1169,16 +1169,20 @@ async function addLocalProviderFlow(
     return undefined;
   }
 
-  const typedContext = await flow.readText({
-    message: "Context window in tokens (used for models the endpoint does not report)",
-    defaultValue: String(
-      models.find((model) => model.context !== undefined)?.context ?? LOCAL_CONTEXT_FALLBACK,
-    ),
-    validate: validateContextWindow,
-    allowBack: true,
-  });
-  if (typedContext === undefined) return undefined;
-  const fallbackContext = Number(typedContext.trim());
+  // Only a model the endpoint left unreported needs a typed window.
+  let fallbackContext = LOCAL_CONTEXT_FALLBACK;
+  if (models.some((model) => model.context === undefined)) {
+    const typedContext = await flow.readText({
+      message: "Context window in tokens (used for models the endpoint does not report)",
+      defaultValue: String(
+        models.find((model) => model.context !== undefined)?.context ?? LOCAL_CONTEXT_FALLBACK,
+      ),
+      validate: validateContextWindow,
+      allowBack: true,
+    });
+    if (typedContext === undefined) return undefined;
+    fallbackContext = Number(typedContext.trim());
+  }
 
   const added = await modelDeclareLocal(
     {
