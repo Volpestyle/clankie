@@ -136,6 +136,8 @@ export async function tidyPaneDirectories(runner: Pick<HerdrWatchRunner, "list">
     if (!pane.workingDirectory || !canonicalProjectPath(pane.workingDirectory, platform))
       throw new Error("Unknown pane directory");
     // Resolve aliases so a pane reached through a symlink still protects its real worktree.
+    // A directory that no longer resolves leaves the inventory unknown, never skipped: its
+    // literal path may be an alias into a live tree (VUH-2608). Closing the pane clears it.
     const path = await realpath(pane.workingDirectory);
     if (!(await stat(path)).isDirectory()) throw new Error("Unknown pane directory");
     paths.push(path);

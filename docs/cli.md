@@ -9110,8 +9110,9 @@ new commit invalidates it.
 reclaims ignored package-manager `node_modules` and Rust `target` directories
 bearing a valid `CACHEDIR.TAG` in registered local agent worktrees. Trees must
 be clean and inactive for six hours; complete native process cwd and pane
-inventories must show no live use. Main, managed runtime, locked and alias trees
-are protected. Missing or changing observations refuse cleanup. A sweep examines
+inventories must show no live use. A pane left in a directory deleted under it
+makes the pane inventory unknown, so the sweep refuses and names that path until
+the pane closes. Main, managed runtime, locked and alias trees are protected. Missing or changing observations refuse cleanup. A sweep examines
 at most 32 worktrees, checking every cache in each; a `cache_worktree_limit`
 receipt names every deferred tree. Select each exact tree with `--path` to continue.
 Commits, source files, `.local` evidence and logs stay.

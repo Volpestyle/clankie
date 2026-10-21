@@ -18,9 +18,47 @@ beforeAll(async () => {
   if (process.platform === "darwin")
     await exec(process.execPath, [join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs")]);
 });
-it.runIf(
-  process.platform === "darwin" && existsSync(join(userInfo().homedir, ".config", "herdr", "herdr.sock")),
-)(
+// A Herdr namespace of its own (short path: the macOS socket limit), so no pane of the
+// owner's or another agent's decides this proof (VUH-2608).
+async function isolatedHerdr() {
+  const root = await mkdtemp("/tmp/cache-herdr-");
+  await mkdir(join(root, "config"), { recursive: true });
+  await writeFile(
+    join(root, "config/config.toml"),
+    'onboarding = false\n[terminal]\ndefault_shell = "/bin/sh"\n[update]\nversion_check = false\nmanifest_check = false\n',
+  );
+  const env: NodeJS.ProcessEnv = {
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("HERDR_"))),
+    HERDR_SOCKET_PATH: join(root, "herdr.sock"),
+    HERDR_CONFIG_PATH: join(root, "config/config.toml"),
+    XDG_CONFIG_HOME: join(root, "config"),
+    XDG_STATE_HOME: join(root, "state"),
+    XDG_DATA_HOME: join(root, "data"),
+    XDG_CACHE_HOME: join(root, "cache"),
+    SHELL: "/bin/sh",
+  };
+  spawn("herdr", ["server"], { env, stdio: "ignore" }).unref();
+  await expect.poll(() => existsSync(env.HERDR_SOCKET_PATH!), { timeout: 10_000 }).toBe(true);
+  const cli = async (...args: string[]) => JSON.parse((await exec("herdr", args, { env })).stdout);
+  return {
+    socketPath: env.HERDR_SOCKET_PATH!,
+    /** A pane whose directory is then deleted under it, as when its worktree is removed. */
+    paneLeftIn: async (directory: string) => {
+      await mkdir(directory, { recursive: true });
+      const created = await cli("workspace", "create", "--cwd", directory, "--no-focus");
+      await rm(directory, { recursive: true });
+      return created.result.root_pane.pane_id as string;
+    },
+    close: async (pane: string) => await cli("pane", "close", pane),
+    stop: async () => {
+      // allow-swallowed-rejection -- a server already gone has nothing to stop
+      await exec("herdr", ["server", "stop"], { env }).catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    },
+  };
+}
+
+it.runIf(process.platform === "darwin")(
   "real installed dependencies and tagged Rust outputs reclaim only when clean, idle and expired, preserving unlanded commits",
   async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-cache-proof-")));
@@ -34,6 +72,7 @@ it.runIf(
           { timeout: 5000 },
         )
       ).stdout.trimEnd();
+    const herdr = await isolatedHerdr();
     try {
       await mkdir(repo);
       await git(repo, ["init", "--initial-branch=main"]);
@@ -94,16 +133,21 @@ it.runIf(
       await writeFile(join(tree, ".local", "evidence.log"), "keep evidence\n");
       const runner = createHerdrWatchRunner(undefined, undefined, undefined, {
         localCodexRecovery: false,
-        localReadBinding: async () => ({
-          socketPath: join(userInfo().homedir, ".config", "herdr", "herdr.sock"),
-          session: "default",
-        }),
+        localReadBinding: async () => ({ socketPath: herdr.socketPath, session: "default" }),
       });
       const sweep = (retentionMs?: number) =>
         reclaimWorktreeCaches(repo, runner, {
           roots: [join(root, "agents")],
           ...(retentionMs === undefined ? {} : { retentionMs }),
         });
+      // A pane left in a deleted directory makes the pane census unknown: the sweep refuses,
+      // naming the path, until that pane closes (VUH-2608).
+      const stranded = await herdr.paneLeftIn(join(root, "removed"));
+      const unknown = await sweep(0);
+      expect(unknown.outcome).toBe("unavailable");
+      expect(unknown.reclaimed).toEqual([]);
+      expect(JSON.stringify(unknown.kept)).toContain(join(root, "removed"));
+      await herdr.close(stranded);
       const recent = await sweep();
       expect(recent.outcome, JSON.stringify(recent)).toBe("reclaimed");
       expect(recent.reclaimed).toEqual([]);
@@ -211,6 +255,7 @@ it.runIf(
         JSON.stringify({ head, reclaimed: cleared.reclaimed, keptEvidence: true, untaggedTargetKept: true }),
       );
     } finally {
+      await herdr.stop();
       await rm(root, { recursive: true, force: true });
     }
   },
