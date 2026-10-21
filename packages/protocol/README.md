@@ -93,6 +93,12 @@ such as a seat's `owner` (VUH-1763). A new value in an existing enum or
 discriminated union is a known-field change that an older reader rejects;
 give it a new optional key, or a new `schemaVersion`, instead.
 
+Unknown enum values are not unknown keys. A response enum a newer host may
+extend, such as a setting key in the Discord setup catalog, uses
+`additiveEnum(values)`: strict parsing rejects a new value, and the response
+readers drop the nearest list entry holding one. Keep statuses, versions and
+discriminators a client must act on as plain enums (VUH-2530).
+
 VUH-1635 exposed this distinction when new subagent metadata made an older
 app reject an entire successful fleet response. Existing installed clients
 with strict response parsing need new bundled JavaScript to gain tolerance.

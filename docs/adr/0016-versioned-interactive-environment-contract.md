@@ -60,6 +60,19 @@ cannot grant authority or make a malformed known field valid. Already shipped
 strict readers need updated JavaScript; the host can temporarily omit optional
 metadata to recover them, but cannot retrofit a client parser remotely.
 
+VUH-2530 extends the rule to lists whose values grow. A new enum value is not
+an unknown key, so a display catalog that names settings, pickers or checks
+failed its whole response when a host added one: a new Discord setting made
+older apps reject the entire setup snapshot. A response enum a newer host may
+extend is declared with the protocol's `additiveEnum`. Strict parsing still
+rejects an unknown value; the response reader drops the nearest list entry that
+holds one and validates the rest again. An additive value outside a list, or an
+entry that is also malformed in a known way, still fails. Statuses, versions
+and discriminators a client must act on stay plain enums. Because an older
+client cannot carry a newer setting back, the Discord settings write keeps the
+current value of every defaulted setting the writer omits; current writers send
+every defaulted setting they know.
+
 ## Options weighed
 
 - **Expose every Minecraft MCP tool to every captain session** — rejected

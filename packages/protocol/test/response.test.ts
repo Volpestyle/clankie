@@ -6,7 +6,7 @@ import {
   OperatorFleetSnapshotSchema,
   OperatorSeatSubagentsSchema,
 } from "../src/index.ts";
-import { parseProtocolResponse, safeParseProtocolResponse } from "../src/response.ts";
+import { additiveEnum, parseProtocolResponse, safeParseProtocolResponse } from "../src/response.ts";
 
 // Freeze the client shape from before VUH-1587/VUH-1607; do not extend it when
 // hosts grow more optional fields. This client must keep reading schema v1.
@@ -163,5 +163,45 @@ describe("additive protocol response reads", () => {
     expect(projected.known).toEqual({ value: "retained" });
     expect(original.known.added).toBe(true);
     expect(original.added).toBe(true);
+  });
+
+  it("drops the list entry holding a new additive value and keeps every other rule", () => {
+    const Kind = additiveEnum(["text", "ids"]);
+    const schema = z
+      .object({
+        fields: z.array(z.object({ key: Kind, label: z.string() }).strict()).min(1),
+        keys: z.array(Kind),
+        primary: Kind,
+        status: z.enum(["passed", "failed"]),
+      })
+      .strict();
+    const value = {
+      fields: [
+        { key: "text", label: "Known" },
+        { key: "future", label: "Newer", added: true },
+      ],
+      keys: ["ids", "future", "text"],
+      primary: "text",
+      status: "passed",
+    };
+    expect(schema.safeParse(value).success).toBe(false);
+    expect(parseProtocolResponse(schema, value)).toEqual({
+      fields: [{ key: "text", label: "Known" }],
+      keys: ["ids", "text"],
+      primary: "text",
+      status: "passed",
+    });
+    expect(value.keys).toHaveLength(3);
+    for (const patch of [
+      { primary: "future" },
+      { status: "future" },
+      { keys: [42] },
+      { fields: [{ key: "future", label: "Newer" }] },
+      { fields: [{ key: "future", label: 42 }, value.fields[0]], keys: [] },
+    ])
+      expect(() => parseProtocolResponse(schema, { ...value, ...patch })).toThrow(z.ZodError);
+    expect(schema.safeParse({ ...value, primary: "future" }).error?.issues[0]?.message).toMatch(
+      /expected one of text\|ids/u,
+    );
   });
 });

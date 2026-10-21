@@ -38,6 +38,9 @@ import { discordSetupChecks } from "./discord-setup.ts";
 import type { ManagedDiscord } from "./managed-discord.ts";
 
 export type RoomAccess = "observe" | "guidance" | "settings";
+// Current writers send every defaulted setting they know. Omitting one means an
+// older client that cannot carry a newer setting back, so it keeps its value.
+const DEFAULTED_DISCORD_SETTINGS = Object.keys(DiscordSettingsSchema.parse({}));
 export interface RoomAuthorization {
   guard(): Promise<void>;
   current(): boolean;
@@ -307,18 +310,12 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
           Object.hasOwn(incoming, key),
         );
         const discord = { ...parsed.data.settings };
-        for (const key of [
+        for (const key of new Set([
+          ...DEFAULTED_DISCORD_SETTINGS,
           "serverId",
-          "role",
-          "fleetEnabled",
           "fleetChannelId",
-          "trackingLevel",
           "teamVisible",
-          "servers",
-          "guilds",
-          "roomSkills",
-          "houseHuntingAuthorBindings",
-        ] as const)
+        ]) as Set<keyof typeof discord>)
           if (
             !Object.hasOwn(incoming, key) &&
             !(serverModelWriter && (key === "serverId" || key === "fleetChannelId"))

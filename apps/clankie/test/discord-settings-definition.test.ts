@@ -3,8 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { z } from "zod";
-import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
-import { DiscordSettingsSchema, parseProtocolResponse } from "@clankie/protocol";
+import { ClankieApiClient, DiscordSetupClient } from "../../../packages/api-client/src/index.ts";
+import {
+  DiscordSettingsSchema,
+  DiscordSettingsSnapshotSchema,
+  parseProtocolResponse,
+} from "@clankie/protocol";
 import {
   SettingsStore,
   applyDiscordSettingsToEnvironment,
@@ -114,6 +118,109 @@ it("an old-shape client reads the new host definition response and still revisio
   expect(invalidInput.status).toBe(400);
   expect((await settings.load()).discord.systemActorUserIds).toEqual([]);
   expect((await settings.load()).discord.systemActorGuildIds).toEqual([]);
+});
+it("a client reads a newer host's setup with setting keys and catalog values it does not know", async () => {
+  const { fetchImpl } = fixture();
+  const current = await (
+    await fetchImpl("http://fixture.invalid/v1/discord/settings", {
+      headers: { authorization: "Bearer fixture-operator" },
+    })
+  ).json();
+  // A newer host adds a setting and binds it everywhere the display catalog can
+  // name one, and grows the catalog's other lists (VUH-2530).
+  const newer = structuredClone(current);
+  const futureKey = "futureChannelIds";
+  newer.settings[futureKey] = ["10009"];
+  const connect = newer.setup.definition.sentences[0];
+  const server = connect.parts.find((part: { picker?: string }) => part.picker === "server");
+  server.fields.push(futureKey);
+  server.enables = [{ field: futureKey, kinds: ["text", "future_room"] }];
+  connect.checks.push("future_permission");
+  newer.setup.definition.sentences.push({
+    id: "future",
+    parts: [{ kind: "picker", picker: "future_picker", fields: [futureKey], placeholder: "future" }],
+    help: "A sentence this client cannot render.",
+    checks: [],
+  });
+  newer.setup.definition.advancedGroups[0].fields.push(
+    { key: futureKey, label: "Future rooms", kind: "ids", directoryKinds: ["future_room"] },
+    { key: "serverId", label: "Server as a future control", kind: "future_control" },
+  );
+  newer.setup.checks = [
+    { sentenceId: "connect", kind: "view_channel", status: "passed" },
+    { sentenceId: "future", kind: "view_channel", status: "passed" },
+    { sentenceId: "connect", kind: "future_permission", status: "passed" },
+    { sentenceId: "connect", kind: "send_messages", status: "future_status" },
+  ];
+  expect(DiscordSettingsSnapshotSchema.safeParse(newer).success).toBe(false);
+
+  const client = new ClankieApiClient({
+    baseUrl: "http://fixture.invalid",
+    operatorToken: "fixture-operator",
+    fetchImpl: async (url, init) =>
+      String(url).endsWith("/v1/discord/settings") ? Response.json(newer) : fetchImpl(url, init),
+  });
+  const read = await client.discordSettings();
+  const expected = structuredClone(current);
+  expected.setup.definition.sentences[0].parts.find(
+    (part: { picker?: string }) => part.picker === "server",
+  ).enables = [];
+  expected.setup.checks = [{ sentenceId: "connect", kind: "view_channel", status: "passed" }];
+  expect(read).toEqual(DiscordSettingsSnapshotSchema.parse(expected));
+  expect(read.settings).not.toHaveProperty(futureKey);
+  // Known data stays strict: a malformed known value still fails the read.
+  const malformed = structuredClone(newer);
+  malformed.setup.definition.advancedGroups[0].fields[0].label = 42;
+  const strictClient = new ClankieApiClient({
+    baseUrl: "http://fixture.invalid",
+    operatorToken: "fixture-operator",
+    fetchImpl: async () => Response.json(malformed),
+  });
+  await expect(strictClient.discordSettings()).rejects.toThrow();
+  // The shared view renders the sentences this client knows.
+  const view = await new DiscordSetupClient(client).read();
+  expect(view.sentences.map((sentence) => sentence.id)).toEqual(["connect", "fleet", "tracking"]);
+});
+it("an older client's save keeps the newer settings it cannot carry back", async () => {
+  const { fetchImpl, client } = fixture();
+  const initial = await client.discordSettings();
+  const seeded = await client.updateDiscordSettings({
+    expectedRevision: initial.revision,
+    settings: { ...initial.settings, mainConversationChannelIds: ["10007"], officialBotEnabled: true },
+  });
+  // A client from before these settings existed strips them on read and omits them on save.
+  const Old = DiscordSettingsSnapshotSchema.omit({ setup: true }).extend({
+    settings: DiscordSettingsSchema.omit({ mainConversationChannelIds: true, officialBotEnabled: true }),
+  });
+  const wire = await (
+    await fetchImpl("http://fixture.invalid/v1/discord/settings", {
+      headers: { authorization: "Bearer fixture-operator" },
+    })
+  ).json();
+  const old = parseProtocolResponse(Old, wire);
+  expect(old.settings).not.toHaveProperty("mainConversationChannelIds");
+  const response = await fetchImpl("http://fixture.invalid/v1/discord/settings", {
+    method: "POST",
+    headers: { authorization: "Bearer fixture-operator", "content-type": "application/json" },
+    body: JSON.stringify({ expectedRevision: old.revision, settings: { ...old.settings, guildId: "12345" } }),
+  });
+  expect(response.ok).toBe(true);
+  const saved = await response.json();
+  expect(saved.settings.guildId).toBe("12345");
+  expect(saved.settings.mainConversationChannelIds).toEqual(["10007"]);
+  expect(saved.settings.officialBotEnabled).toBe(true);
+  // A current writer still clears them by sending their empty values.
+  const cleared = await client.updateDiscordSettings({
+    expectedRevision: saved.revision,
+    settings: {
+      ...seeded.settings,
+      guildId: "12345",
+      mainConversationChannelIds: [],
+      officialBotEnabled: false,
+    },
+  });
+  expect(cleared.settings.mainConversationChannelIds).toEqual([]);
+  expect(cleared.settings.officialBotEnabled).toBe(false);
 });
 it("API and CLI receive the same server, role, fleet and tracking setup and all Advanced fields from the host", async () => {
   const { client, fetchImpl } = fixture("his cloud computer");

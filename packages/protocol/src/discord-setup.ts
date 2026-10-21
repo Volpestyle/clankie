@@ -3,6 +3,7 @@ import { DiscordSettingsSchema } from "./discord-settings.ts";
 import type { DiscordSettings } from "./discord-settings.ts";
 import { DiscordDirectoryEntrySchema, type DiscordDirectoryEntry } from "./discord-directory.ts";
 import { DiscordPermissionStatusSchema } from "./discord-permissions.ts";
+import { additiveEnum } from "./response.ts";
 export type DiscordField = {
   key: keyof DiscordSettings;
   label: string;
@@ -228,10 +229,14 @@ export const DISCORD_CHOICE_LABELS: Readonly<Record<string, string>> = {
   partial_directory: "Some choices may be missing from the connected account’s list.",
 };
 
-const SettingKey = z.enum(
+// The definition is a display catalog that grows with the host. Its enums are
+// additive: an older client leaves out an entry naming a value it does not
+// know, such as a newer setting key, and reads the rest (ADR 0016).
+const SettingKey = additiveEnum(
   Object.keys(DiscordSettingsSchema.shape) as [keyof DiscordSettings, ...Array<keyof DiscordSettings>],
 );
-const PickerKind = z.enum([
+const DirectoryKind = additiveEnum(DiscordDirectoryEntrySchema.shape.kind.options);
+const PickerKind = additiveEnum([
   "server",
   "role",
   "fleet",
@@ -253,11 +258,7 @@ const SentencePart = z.discriminatedUnion("kind", [
       serverFields: z.array(SettingKey).optional(),
       /** Additive bindings: surfaces apply these instead of maintaining field mappings. */
       enables: z
-        .array(
-          z
-            .object({ field: SettingKey, kinds: z.array(DiscordDirectoryEntrySchema.shape.kind).optional() })
-            .strict(),
-        )
+        .array(z.object({ field: SettingKey, kinds: z.array(DirectoryKind).optional() }).strict())
         .optional(),
       accessFields: z
         .object({ people: SettingKey, servers: SettingKey, channels: SettingKey })
@@ -269,11 +270,11 @@ const SentencePart = z.discriminatedUnion("kind", [
 ]);
 export const DiscordSetupSentenceSchema = z
   .object({
-    id: z.enum(["connect", "fleet", "tracking", "home", "talk", "computer", "team"]),
+    id: additiveEnum(["connect", "fleet", "tracking", "home", "talk", "computer", "team"]),
     parts: z.array(SentencePart),
     help: z.string(),
     checks: z.array(
-      z.enum([
+      additiveEnum([
         "account",
         "view_channel",
         "send_messages",
@@ -373,9 +374,9 @@ const DiscordFieldSchema = z
     key: SettingKey,
     label: z.string(),
     help: z.string().optional(),
-    kind: z.enum(["boolean", "ids", "text", "number", "choice"]),
+    kind: additiveEnum(["boolean", "ids", "text", "number", "choice"]),
     choices: z.array(z.string()).optional(),
-    directoryKinds: z.array(DiscordDirectoryEntrySchema.shape.kind).optional(),
+    directoryKinds: z.array(DirectoryKind).optional(),
   })
   .strict();
 export const DiscordSetupDefinitionSchema = z
@@ -444,8 +445,8 @@ export const DiscordSetupSnapshotSchema = z
               .string()
               .regex(/^\d{5,32}$/u)
               .optional(),
-            sentenceId: z.enum(["connect", "fleet", "tracking", "talk", "team"]),
-            kind: z.enum([
+            sentenceId: additiveEnum(["connect", "fleet", "tracking", "talk", "team"]),
+            kind: additiveEnum([
               "view_channel",
               "send_messages",
               "manage_channels",
@@ -463,7 +464,7 @@ export const DiscordSetupSnapshotSchema = z
               "use_application_commands",
               "create_public_threads",
             ]),
-            status: DiscordPermissionStatusSchema,
+            status: additiveEnum(DiscordPermissionStatusSchema.options),
           })
           .strict(),
       )
