@@ -135,3 +135,29 @@ direct route.
   revocation asks once to reconnect and never revives the revoked identity.
   Other-device pairing and remote saved sessions keep their existing flow.
   The Mac consumer decision is amended in clankie-app ADR 0085.
+
+- Amended 2026-10-21 (VUH-2604): the handoff goes only to an app the owner
+  trusts, not to every same-user process. Two isolated proof builds took the
+  owner's "Clankie on this Mac" session on launch, because the same-UID file,
+  socket and loopback checks bound the handoff to the account, not the app.
+  The service now identifies the process on the client end of a redeem's
+  loopback connection (`lsof`). It mints a session only when that process's
+  running code satisfies one of the owner's trusted code requirements
+  (`codesign --verify -R`).
+  - **Recording trust:** `clankie companion trust APP_PATH` records an app's
+    designated requirement. A Developer ID release is bound to its team and
+    bundle id and keeps working across updates. An ad-hoc or development build
+    can only be bound to its exact code hash, so each new build is trusted
+    again explicitly. An ad-hoc bundle id alone proves nothing.
+  - **Default:** the list starts empty, and an empty list refuses every
+    handoff. No team is hardcoded, because no signed release exists yet.
+  - **Refusals:** a refused redeem answers `403 companion_app_untrusted`,
+    consumes nothing, and records `pairing.local_companion.refused` with the
+    app's pid, identifier, team, code hash and path.
+  - **Audit:** an accepted redeem records the same identity, and the trusted
+    entry's id, on `device.activated` or `device.session.refreshed`.
+  - **Scope:** trusted apps are machine settings. They never move with a body
+    transfer (ADR 0286).
+  - **What it doesn't stop:** code that already runs as the owner can still read
+    the owner's files and settings. This binds the automatic handoff to the
+    app; it does not make the account boundary stronger.

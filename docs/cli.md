@@ -1699,6 +1699,26 @@ contains only the handoff path. Re-running it reuses the active companion's
 device identity; it cannot be combined with review offers. See
 [the local companion handoff](local-companion.md) for the typed API and security
 contract. Signed app distribution and the installer's call remain separate work.
+Only an app trusted with [`companion trust`](#companion) can redeem the handoff.
+
+### `companion`
+
+```bash
+clankie companion trust /Applications/Clankie.app [--label TEXT]
+clankie companion list
+clankie companion remove ID
+```
+
+Chooses which apps on this Mac may take the same-Mac companion handoff
+([ADR 0204, VUH-2604](adr/0204-a-self-hosted-mac-pairs-the-app-directly.md)).
+`trust` checks the app's signature strictly. It then records its designated
+requirement (team and bundle id for a Developer ID build, the exact code hash for
+an ad-hoc or development build) and prints the trusted list. The service runs
+these checks against the process that actually connects, so a different
+bundle, or a rebuild claiming the same bundle id, is refused. The list starts
+empty and refuses every app. It is a machine setting, never moved by a
+transfer. The route is `POST /v1/pairing/local/trusted-apps`, operator bearer
+over native loopback only.
 
 Public-gateway pairing uses a secure QR or full pasted link; the encryption
 credential is in its fragment. Short codes are for direct private connections.

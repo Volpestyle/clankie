@@ -28,9 +28,13 @@ import {
 import { HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
 import { DEVICE_WAKE_KEY_PATH, DeviceWakeKeyRequestSchema } from "@clankie/protocol/wake";
 import { Hono, type Context } from "hono";
+import type { CompanionAppVerdict } from "../companion-app-identity.ts";
 import {
   LOCAL_COMPANION_OFFER_PATH,
   LOCAL_COMPANION_REDEEM_PATH,
+  LOCAL_COMPANION_TRUSTED_APPS_PATH,
+  TrustedCompanionAppsRequestSchema,
+  TrustedCompanionAppsResponseSchema,
   LocalCompanionOfferSchema,
   LocalCompanionRedeemRequestSchema,
   type LocalCompanionSession,
@@ -120,7 +124,13 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
   // bodyLimit replaces req.raw; retain private IPC provenance on the context,
   // not on a header that an HTTP caller could supply.
   const localOwners = new WeakMap<Context, TrustedOperatorIdentity>();
-  for (const path of [LOCAL_COMPANION_OFFER_PATH, LOCAL_COMPANION_REDEEM_PATH]) {
+  // Which app sent a redeem, proven before bodyLimit replaces the raw request.
+  const companionApps = new WeakMap<Context, CompanionAppVerdict>();
+  for (const path of [
+    LOCAL_COMPANION_OFFER_PATH,
+    LOCAL_COMPANION_REDEEM_PATH,
+    LOCAL_COMPANION_TRUSTED_APPS_PATH,
+  ]) {
     ctx.app.use(path, async (context, next) => {
       context.header("cache-control", "no-store");
       if (
@@ -133,10 +143,67 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       const localOwner = ctx.dependencies.localCompanionOwner?.(context.req.raw);
       if (localOwner) localOwners.set(context, localOwner);
       if (!ctx.deviceSessionSigner) return context.json({ error: "device_authentication_unavailable" }, 503);
+      if (path === LOCAL_COMPANION_REDEEM_PATH)
+        companionApps.set(
+          context,
+          (await ctx.dependencies.verifyLocalCompanionApp?.(context.req.raw)) ?? {
+            ok: false,
+            reason: "untrusted",
+          },
+        );
       await next();
     });
-    ctx.app.use(path, bodyLimit({ maxSize: 1024 }));
+    ctx.app.use(path, bodyLimit({ maxSize: path === LOCAL_COMPANION_TRUSTED_APPS_PATH ? 16 * 1024 : 1024 }));
   }
+  ctx.app.post(LOCAL_COMPANION_TRUSTED_APPS_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (!operator || operator === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = TrustedCompanionAppsRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    const settings = ctx.dependencies.settings;
+    if (settings?.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
+    const update = settings.update.bind(settings);
+    const request = parsed.data;
+    const next =
+      request.op === "list"
+        ? await settings.load()
+        : await update((current) => {
+            const apps = current.localCompanion.trustedApps;
+            return {
+              ...current,
+              localCompanion: {
+                trustedApps:
+                  request.op === "remove"
+                    ? apps.filter((app) => app.id !== request.id)
+                    : // Re-trusting the same code (each update of a release) changes nothing.
+                      apps.some((app) => app.requirement === request.app.requirement)
+                      ? apps
+                      : [
+                          ...apps,
+                          { ...request.app, id: ctx.idFactory(), addedAt: ctx.clock().toISOString() },
+                        ],
+              },
+            };
+          });
+    if (request.op !== "list")
+      ctx.recordEvent(
+        "pairing.local_companion.trust_changed",
+        "pairing:local-companion",
+        ctx.clock().toISOString(),
+        {
+          op: request.op,
+          operatorId: operator.operatorId,
+          ...(request.op === "remove"
+            ? { id: request.id }
+            : {
+                identifier: request.app.identifier,
+                ...(request.app.teamId ? { teamId: request.app.teamId } : {}),
+              }),
+        },
+      );
+    return context.json(TrustedCompanionAppsResponseSchema.parse({ apps: next.localCompanion.trustedApps }));
+  });
   ctx.app.post(LOCAL_COMPANION_OFFER_PATH, async (context) => {
     const operator =
       localOwners.get(context) ?? (await authenticateOperator(context.req.raw, ctx.dependencies));
@@ -165,6 +232,26 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     );
   });
   ctx.app.post(LOCAL_COMPANION_REDEEM_PATH, async (context) => {
+    // Only the owner's trusted app takes the handoff (VUH-2604). A refusal
+    // consumes nothing, so the real app's offer survives another app's attempt.
+    const verdict = companionApps.get(context) ?? { ok: false as const, reason: "untrusted" as const };
+    if (!verdict.ok) {
+      ctx.recordEvent(
+        "pairing.local_companion.refused",
+        "pairing:local-companion",
+        ctx.clock().toISOString(),
+        {
+          reason: verdict.reason,
+          ...(verdict.app === undefined ? {} : { app: verdict.app }),
+        },
+      );
+      logger.warn(
+        { event: "pairing.local_companion.refused", reason: verdict.reason, app: verdict.app },
+        "Refused a same-Mac companion handoff from an app the owner has not trusted",
+      );
+      return context.json({ error: "companion_app_untrusted", reason: verdict.reason }, 403);
+    }
+    const companionApp = { ...verdict.app, trustedAppId: verdict.trusted.id };
     const parsed = LocalCompanionRedeemRequestSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "malformed" }, 400);
     return withSerializedLock(ctx.deviceLocks, "local-companion", async () => {
@@ -209,7 +296,8 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
             existing ? "device.session.refreshed" : "device.activated",
             `device:${deviceId}`,
             now.toISOString(),
-            { schemaVersion: 1, deviceId, grants, sessionExpiresAt },
+            // Which app took the session, for the device's own audit trail.
+            { schemaVersion: 1, deviceId, grants, sessionExpiresAt, companionApp },
           ),
         );
         const { controlPlaneUrl, relayUrl } = sameMacAddresses(context.req.raw);

@@ -6868,7 +6868,10 @@ paths:
       summary: Redeem the owner-local handoff once over native loopback
       description: |
         Refuses browser pages, forwarded requests, the gateway and the LAN device
-        doorway. Reuses the active companion's durable device ID and grants on
+        doorway. Only a process whose running code satisfies an owner-trusted
+        code requirement may redeem (VUH-2604); any other app is refused without
+        consuming the offer and recorded as pairing.local_companion.refused.
+        Reuses the active companion's durable device ID and grants on
         reinstall. Revoked identities never revive. Session uses the existing
         device signer and includes host, grants and loopback control/relay routes.
       requestBody:
@@ -6903,11 +6906,81 @@ paths:
                       controlPlaneUrl: { type: string, format: uri }
                       relayUrl: { type: string, format: uri }
         "400": { description: malformed }
-        "403": { description: native_loopback_required or revoked }
+        "403": { description: native_loopback_required, revoked, or companion_app_untrusted with a reason }
         "404": { description: not_found }
         "409": { description: consumed }
         "410": { description: expired }
         "503": { description: device_authentication_unavailable }
+  /v1/pairing/local/trusted-apps:
+    post:
+      tags: [Operator]
+      operationId: manageTrustedCompanionApps
+      summary: List, add or remove the apps that may take the same-Mac handoff
+      description: |
+        Self-hosted macOS only, native loopback and operator bearer. Each entry
+        is a code requirement in Apple's requirement language, as
+        `codesign -d -r-` prints an app's designated requirement. The list starts
+        empty, which refuses every companion redeem. Changes are recorded as
+        pairing.local_companion.trust_changed.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - {
+                    type: object,
+                    additionalProperties: false,
+                    required: [op],
+                    properties: { op: { const: list } },
+                  }
+                - type: object
+                  additionalProperties: false
+                  required: [op, app]
+                  properties:
+                    op: { const: add }
+                    app:
+                      type: object
+                      additionalProperties: false
+                      required: [label, requirement, identifier]
+                      properties:
+                        label: { type: string, maxLength: 100 }
+                        requirement: { type: string, maxLength: 4096 }
+                        identifier: { type: string, maxLength: 256 }
+                        teamId: { type: string, pattern: "^[A-Z0-9]{10}$" }
+                - type: object
+                  additionalProperties: false
+                  required: [op, id]
+                  properties:
+                    op: { const: remove }
+                    id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The trusted apps after the change
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [apps]
+                properties:
+                  apps:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, label, requirement, identifier, addedAt]
+                      properties:
+                        id: { type: string, format: uuid }
+                        label: { type: string }
+                        requirement: { type: string }
+                        identifier: { type: string }
+                        teamId: { type: string }
+                        addedAt: { type: string, format: date-time }
+        "400": { description: malformed }
+        "401": { description: operator_authentication_required }
+        "403": { description: native_loopback_required }
+        "404": { description: not_found }
+        "503": { description: settings_unavailable or device_authentication_unavailable }
   /v1/pairing/offer:
     post:
       tags: [Pairing]

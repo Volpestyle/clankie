@@ -34,6 +34,22 @@ async function fixture() {
       isLocalCompanionRequest: (request) => boundary.has(request),
       localCompanionOwner: (request) => boundary.privateOwner(request),
       isSameMacRequest: (request) => boundary.isSameMac(request),
+      // This suite proves the transport boundary; the signed-app check (VUH-2604)
+      // has its own real-codesign proof. Here every same-Mac socket is the trusted app.
+      verifyLocalCompanionApp: async (request) =>
+        boundary.loopbackPorts(request) === undefined
+          ? { ok: false, reason: "peer_unknown" }
+          : {
+              ok: true,
+              app: { pid: process.pid, identifier: "fixture.companion" },
+              trusted: {
+                id: "00000000-0000-4000-8000-000000000001",
+                label: "fixture",
+                requirement: 'identifier "fixture.companion"',
+                identifier: "fixture.companion",
+                addedAt: new Date(0).toISOString(),
+              },
+            },
       authenticateOperator: async (request) =>
         request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
     });

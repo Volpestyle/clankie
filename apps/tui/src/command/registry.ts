@@ -468,6 +468,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["companion"],
+    lines: [
+      "  companion trust APP_PATH [--label TEXT] | list | remove ID",
+      "                           Choose which signed apps on this Mac may take the same-Mac handoff",
+    ],
+  },
+  {
     nouns: ["transfer"],
     lines: [
       "  transfer --to URL|local [--from URL|local] | status | abort | reclaim --force | rebind",

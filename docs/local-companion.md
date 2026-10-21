@@ -23,11 +23,32 @@ bearer crosses this request and no TCP route exposes it. The existing
 versions: it sends its operator bearer only to the validated private Unix issuer
 and prints only `handoffPath`, never the offer. Do not run either owner handoff as
 root or place its state in a shared folder. Same-user processes share the macOS
-account boundary; loopback reachability or headers alone grant no authority.
+account boundary for this private issuer; the session itself goes only to a
+trusted app (below). Loopback reachability or headers alone grant no authority.
 
 The companion reads the same-UID file with no symlink following, verifies its
 ownership, mode, size and expiry, then posts `{ "offerSecret": "…" }` to
-`POST /v1/pairing/local/redeem` at its `controlPlaneUrl`. Use
+`POST /v1/pairing/local/redeem` at its `controlPlaneUrl`.
+
+Only an app the owner trusts can redeem
+([ADR 0204, VUH-2604](adr/0204-a-self-hosted-mac-pairs-the-app-directly.md)).
+The service finds the process holding the client end of the redeem's loopback
+connection. It mints a session only when that process's running code satisfies
+one of the owner's trusted code requirements. Trust an app with
+`clankie companion trust /Applications/Clankie.app`.
+
+- A Developer ID build is trusted by team and bundle id.
+- An ad-hoc or development build is trusted only by its exact code hash, so it
+  is trusted again after each rebuild.
+
+The list starts empty, and an empty list refuses every app. Any other app gets
+`403 companion_app_untrusted` with a `reason` (`untrusted`, `not_signed` or
+`peer_unknown`), and the offer stays valid for the trusted app. Each refusal is
+recorded as `pairing.local_companion.refused` with the app's pid, identifier,
+team, code hash and path. An accepted redeem records the same identity on its
+`device.activated` or `device.session.refreshed` event. Proof builds for other
+work pair through `clankie pair --purpose proof`; they are not trusted
+companions. Use
 `@clankie/protocol/local-companion` for the file, request and session schemas.
 Remove the file after redemption. Keep the returned device token in the app's
 credential store; restore and refresh through the existing device APIs.

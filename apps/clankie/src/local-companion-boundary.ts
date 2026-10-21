@@ -1,11 +1,17 @@
 import type { HttpBindings, Http2Bindings } from "@hono/node-server";
 import type { TrustedOperatorIdentity } from "./app/types.ts";
+import type { LoopbackPorts } from "./companion-app-identity.ts";
 
 /** Socket provenance, scoped to the service's primary loopback listener. Headers confer no authority. */
 export class LocalCompanionBoundary {
   private readonly admitted = new WeakSet<Request>();
   private readonly sameMac = new WeakSet<Request>();
   private readonly privateOwners = new WeakMap<Request, TrustedOperatorIdentity>();
+  private readonly ports = new WeakMap<Request, LoopbackPorts>();
+  /** The same-Mac socket's ports, so the redeeming process can be identified (VUH-2604). */
+  loopbackPorts(request: Request): LoopbackPorts | undefined {
+    return this.ports.get(request);
+  }
   privateOwner(request: Request): TrustedOperatorIdentity | undefined {
     return this.privateOwners.get(request);
   }
@@ -67,6 +73,10 @@ export class LocalCompanionBoundary {
         ["127.0.0.1", "[::1]"].includes(url.hostname) &&
         request.headers.get("host") === url.host;
       if (sameMac) this.sameMac.add(request);
+      const client = env.incoming.socket.remotePort;
+      const server = env.incoming.socket.localPort;
+      if (sameMac && client !== undefined && server !== undefined)
+        this.ports.set(request, { client, server });
       if (sameMac && request.headers.get("content-type")?.split(";")[0]?.trim() === "application/json") {
         this.admitted.add(request);
       }
@@ -75,6 +85,7 @@ export class LocalCompanionBoundary {
       } finally {
         this.admitted.delete(request);
         this.sameMac.delete(request);
+        this.ports.delete(request);
       }
     };
   }

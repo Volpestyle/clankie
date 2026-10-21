@@ -354,6 +354,13 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, result);
       return 0;
     }
+    if (command === "companion") {
+      outputJson(
+        stdout,
+        await (await import("../src/command/companion.ts")).runCompanionCommand(rest, options),
+      );
+      return 0;
+    }
     if (command === "body") {
       outputJson(stdout, await (await import("../src/command/body.ts")).runBodyCommand(rest, options));
       return 0;

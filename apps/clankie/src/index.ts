@@ -204,6 +204,7 @@ import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { BodyTransfer, bodyTransferRoots } from "./body-transfer.ts";
 import { serveDormantBody } from "./dormant-body.ts";
+import { verifyCompanionApp } from "./companion-app-identity.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { connectBodyToGateway, openHostedBody } from "./body-doorway.ts";
 import { applyHostedAccountApps, readHostedBodyBootstrap } from "./hosted-body.ts";
@@ -2170,6 +2171,11 @@ const clankie = await createClankieApp({
   isLocalCompanionRequest: (request) => localCompanionBoundary.has(request),
   localCompanionOwner: (request) => localCompanionBoundary.privateOwner(request),
   isSameMacRequest: (request) => localCompanionBoundary.isSameMac(request),
+  verifyLocalCompanionApp: async (request) => {
+    const ports = localCompanionBoundary.loopbackPorts(request);
+    if (ports === undefined) return { ok: false, reason: "peer_unknown" };
+    return verifyCompanionApp(ports, (await settingsStore.load()).localCompanion.trustedApps);
+  },
   modelDeviceSetup: { platform: process.platform, hosted: hostedBody !== undefined },
   harnessLogins,
   modelKeys: createModelKeys({

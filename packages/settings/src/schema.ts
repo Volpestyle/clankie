@@ -2,6 +2,7 @@ import { WorkTrackerSelectionSchema } from "@clankie/protocol";
 import { EvidenceSettingsSchema, HttpSettingsSchema } from "@clankie/protocol/owner-settings";
 import { LinearWakeSettingsSchema } from "@clankie/protocol/linear-settings";
 import { MachineAccessSettingsSchema } from "@clankie/protocol/machine-access";
+import { TrustedCompanionAppSchema } from "@clankie/protocol/local-companion";
 import { DesktopSettingsSchema } from "./desktop.ts";
 import { AutonomySettingsSchema, FLEET_WORKING_PREFERENCE_FIELDS } from "@clankie/protocol/autonomy";
 import { EmbodimentBudgetSchema } from "@clankie/protocol/embodiment";
@@ -817,6 +818,10 @@ export const ClankieSettingsSchema = z
     email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),
     linearWebhook: LinearWebhookSettingsSchema.default(() => LinearWebhookSettingsSchema.parse({})),
     oauthApps: OauthAppsSettingsSchema.default(() => OauthAppsSettingsSchema.parse({})),
+    /** Apps on this Mac the owner trusts to take the companion handoff (VUH-2604). Empty refuses all. */
+    localCompanion: z
+      .strictObject({ trustedApps: z.array(TrustedCompanionAppSchema).max(32).default([]) })
+      .default(() => ({ trustedApps: [] })),
   })
   .strict()
   .superRefine((settings, context) => {

@@ -179,6 +179,13 @@ export interface ClankieAppDependencies {
   localCompanionOwner?: (request: Request) => TrustedOperatorIdentity | undefined;
   /** A native client on this Mac over loopback, not forwarded by the gateway; picks addresses only. */
   isSameMacRequest?: (request: Request) => boolean;
+  /**
+   * Proves which app on this Mac sent a companion redeem and whether the owner
+   * trusts it (VUH-2604). Absent means no app is trusted: every redeem is refused.
+   */
+  verifyLocalCompanionApp?: (
+    request: Request,
+  ) => Promise<import("../companion-app-identity.ts").CompanionAppVerdict>;
   modelDeviceSetup?: { platform: NodeJS.Platform; hosted: boolean };
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;

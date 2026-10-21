@@ -670,6 +670,7 @@ it("release helper installs the pinned fixture app and prepares a private handof
   expect(readFileSync(join(f.applications, "Clankie.app/Contents/MacOS/Clankie"), "utf8")).toContain(
     "fixture",
   );
+  expect(f.calls()).toContainEqual(expect.objectContaining({ action: "companion", target: "trust" }));
   expect(f.calls()).toContainEqual(expect.objectContaining({ action: "pair", target: "--local-companion" }));
   expect(
     JSON.parse(readFileSync(join(f.home, ".clankie/updates", accepted.pending!, "app-handoff.json"), "utf8")),
