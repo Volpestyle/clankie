@@ -418,7 +418,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   const connectionServices = (): ConnectionsMenuServices => ({
     machines: (args) => runMachinesCommand(args, context.repoRoot ? { repoRoot: context.repoRoot } : {}),
     runtime: (args) => runRuntimeCommand(args),
-    agents: (args) => runAgentsCommand(args),
+    agents: (args) => runAgentsCommand(args, context.repoRoot ? { repoRoot: context.repoRoot } : {}),
     accounts: (args, input) =>
       runAccountsCommand(args, {
         ...(context.ownerFetcher === undefined ? {} : { ownerFetcher: context.ownerFetcher }),
@@ -781,7 +781,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           return;
         }
         if (argument.trim()) {
-          const result = await runAgentsCommand(splitQuotedArguments(argument));
+          const result = await runAgentsCommand(
+            splitQuotedArguments(argument),
+            context.repoRoot ? { repoRoot: context.repoRoot } : {},
+          );
           shell.insertCommandResult("/agents", JSON.stringify(result, null, 2), "success");
           return;
         }
@@ -855,7 +858,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           return;
         }
         try {
-          const result = await runAgentsCommand(argument.trim().split(/\s+/u).filter(Boolean));
+          const result = await runAgentsCommand(
+            argument.trim().split(/\s+/u).filter(Boolean),
+            context.repoRoot ? { repoRoot: context.repoRoot } : {},
+          );
           shell.insertCommandResult("/sessions", JSON.stringify(result, null, 2), "success");
         } catch (error) {
           shell.insertCommandResult(

@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { CLAUDE_WORKER_PLUGIN, CLAUDE_WORKER_PLUGIN_ID } from "@clankie/protocol";
@@ -20,6 +19,7 @@ import {
 } from "../../../clankie/src/captain/fleet-seat.ts";
 import { createHireLayout } from "../../../clankie/src/captain/hire-layout.ts";
 import { herdrAgentName } from "../../../clankie/src/captain/hire-name.ts";
+import { shippedWorkerFile } from "../../../clankie/src/worker-plugin-path.ts";
 import type { JoinedMachineCredential, JoinedMachinePorts } from "../../bin/joined-machine-client.ts";
 import { joinedSeatTransport } from "./joined-seat.ts";
 
@@ -39,9 +39,7 @@ const Native = z.object({
 });
 type Native = z.infer<typeof Native>;
 /** This install's worker bridge; its joined branch serves the worker over the join channel. */
-const WORKER_BRIDGE = fileURLToPath(
-  new URL("../../../../integrations/claude-plugin/worker/bin/swarm-mcp.mjs", import.meta.url),
-);
+const WORKER_BRIDGE = shippedWorkerFile("bin", "swarm-mcp.mjs");
 /** What the bridge needs from the pane; Codex passes an MCP server only the variables it names. */
 const CODEX_BRIDGE_ENV = [
   "HERDR_PANE_ID",

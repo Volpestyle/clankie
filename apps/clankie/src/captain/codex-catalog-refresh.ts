@@ -1,15 +1,11 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { shippedWorkerFile } from "../worker-plugin-path.ts";
 
 /** A hired Codex seat's worker bridge: Node runs this install's entry, with no CLI wrapper (VUH-2390). */
 export const CODEX_WORKER_BRIDGE = {
   command: "node",
-  args: [
-    fileURLToPath(
-      new URL("../../../../integrations/claude-plugin/worker/bin/fleet-mcp.mjs", import.meta.url),
-    ),
-  ],
+  args: [shippedWorkerFile("bin", "fleet-mcp.mjs")],
 } as const;
 // Seats hired before VUH-2390 keep the wrapper until they are relaunched.
 const LEGACY_CODEX_WORKER_BRIDGE = { command: "clankie", args: ["mcp", "--fleet"] } as const;

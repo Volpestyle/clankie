@@ -1,8 +1,9 @@
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { connectLaneUpstream } from "./mcp.ts";
 import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { FreeAgentIntentSchema } from "@clankie/protocol";
 import { readMessageStatus } from "../../../../integrations/claude-plugin/worker/bin/message-status.mjs";
-import { callNativeReceipt } from "../../../../integrations/claude-plugin/worker/bin/seat-channel.mjs";
 import { runProjectRoleCommand } from "./project-role.ts";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
@@ -98,6 +99,7 @@ export async function runAgentsCommand(
     fetchImpl?: typeof fetch;
     operatorCredentialStore?: CredentialStore;
     stdin?: Parameters<typeof text>[0];
+    repoRoot?: string;
   } = {},
 ): Promise<unknown> {
   if (args[0] === "call-receipt") {
@@ -115,6 +117,12 @@ export async function runAgentsCommand(
       (action === "abandon-read" && (!reason?.trim() || reason.length > 500))
     )
       throw new Error(AGENTS_USAGE);
+    if (!options.repoRoot) throw new Error("Call receipts need the Clankie installation root.");
+    // Load the worker bridge from its shipped location: it reads its plugin
+    // manifest beside itself, which bundling it into the console would move.
+    const { callNativeReceipt } = (await import(
+      pathToFileURL(join(options.repoRoot, "integrations/claude-plugin/worker/bin/seat-channel.mjs")).href
+    )) as typeof import("../../../../integrations/claude-plugin/worker/bin/seat-channel.mjs");
     return decodeMcpResult(
       await callNativeReceipt(
         action === "inspect"
