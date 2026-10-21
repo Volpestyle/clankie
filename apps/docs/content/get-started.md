@@ -137,7 +137,9 @@ machine, so his workers still run on it
 ([ADR 0286](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0286-one-body-holds-clankie-at-a-time.md)).
 With a hosted Clankie connected (`clankie connect hosted`),
 `clankie transfer --to hosted` moves your Mac's Clankie there, and
-`clankie transfer --from hosted --to local` brings him back.
+`clankie transfer --from hosted --to local` brings him back. Hosted transfer is
+not available yet: it is proven against a test gateway and waits for the hosted
+service update.
 
 ## Your first conversation
 

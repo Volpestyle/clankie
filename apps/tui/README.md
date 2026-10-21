@@ -125,7 +125,7 @@ flowchart LR
   Launcher --> Mouth["discord-bridge <i>or</i><br/>discord-user-session<br/>(the active body)"]
   Launcher --> Activity["activity<br/>watch surface"]
   Launcher --> Tunnel["tunnel<br/>cloudflared to the Activity"]
-  Launcher -.-> Awake["awake (opt-in)<br/>keeps the Mac up"]
+  Launcher -.-> Awake["awake (default on a self-hosted Mac)<br/>keeps the Mac up"]
   Relay --> Service
   Mouth --> Service
   Mouth --> Vox["one clankvox child<br/>when media is enabled"]

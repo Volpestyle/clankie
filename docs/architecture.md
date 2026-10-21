@@ -709,7 +709,7 @@ call-time revocation checks still apply.
   transcripts and the home's session ownership checks. Reset uses the existing
   revision-guarded conversation archive while retaining its machine/folder scope.
   `joined-workers.ts` gives each lead hire a separate machine/chat/session grant;
-  the bounded local adapter starts Claude in a new Herdr pane and admits only its
+  the bounded local adapter starts Claude or Codex in a new Herdr pane and admits only its
   observed session. Its MCP bank exposes report/status tools; reports enter the
   existing durable inbound receipt and lead inbox path. Replies use a worker
   outbox over join, not terminal typing. Every request rechecks current consent;

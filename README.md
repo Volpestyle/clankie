@@ -117,7 +117,8 @@ Code or Codex, the terminal you already use. In the iPhone and iPad app,
 Messages is home, Commons shows the team as little figures, and Terminal opens
 the real worker panes.
 [Pair the app](https://docs.clankie.bot/get-started/#bring-your-mac-s-clankie-into-the-app)
-with your Mac and keep the Mac awake to reach him away from your desk.
+with your Mac to reach him away from your desk; he stays reachable while the
+Mac is plugged in.
 
 **Hangs out after hours.** In Discord he chats, joins voice, plays requested
 music, and streams his Pokémon play (from his own PokeAgents seat) through an

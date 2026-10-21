@@ -74,8 +74,9 @@ hosted availability is listed on [clankie.bot](https://clankie.bot).
 ## A team around him
 
 **Work stays where you track it.** Clankie and his workers share one
-Linear-shaped tracker. It uses your connected Linear account, or durable local
-storage without one; `clankie doctor` shows which. Built-in work carries evidence
+Linear-shaped tracker. It uses the tracker you choose for all projects or one
+project, such as your connected Linear account or durable local storage;
+`clankie doctor` shows which. Built-in work carries evidence
 bundles that someone else checks, and owner questions and run approvals arrive
 in the same [owner mailbox](/cli/). You can [mirror a Linear project](/cli/) into
 a scratch built-in store for inspection while Linear remains authoritative.
@@ -86,8 +87,9 @@ and Grok Build through each harness's own channel, never by typing into the
 pane, and reports when delivery is uncertain. Agents on other machines join
 through an approved outbound connection. A joined install can open its own
 `clankie claude` seat in the home's workspace chat; identity, tools and memory
-stay with the one Clankie. It can resume or reset that folder’s lead and hire
-Claude workers who report through the same joined connection. See the [join command](/cli/#join) for current limits.
+stay with the one Clankie. It can resume or reset that folder’s lead, and that
+lead, or Clankie himself at workers access, can hire Claude or Codex workers
+there who report through the same joined connection. See the [join command](/cli/#join) for current limits.
 Older remote workers use a fleet link. In Machines, the owner chooses portal, workers, shell or
 screen access. Ordinary self-hosted limits are service preferences. On an installed
 Mac, the owner can prepare an OS-bounded launch with a private home and approved

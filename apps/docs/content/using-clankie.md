@@ -102,7 +102,8 @@ separate personal-lab body. Start with [Discord and play setup](/diy/#hang-out-a
 ## Leaving work running
 
 Closing a window does not stop the service. A local Mac must stay awake and
-online; hosted availability follows your plan.
+online (by default it does while plugged in); hosted availability follows your
+plan.
 
 <a id="give-him-ongoing-work"></a>
 
