@@ -1,8 +1,10 @@
-# Clankie v0.4.8
+# Clankie v0.4.9
 
-This replaces the unpublished v0.4.7 release; its macOS release check found
-the Windows fleet probe over Windows' command-line limit.
-[VUH-2645](https://linear.app/vuhlp/issue/VUH-2645)
+This replaces the unpublished v0.4.7 and v0.4.8 releases. v0.4.7's macOS
+release check found the Windows fleet probe over Windows' command-line limit
+([VUH-2645](https://linear.app/vuhlp/issue/VUH-2645)); v0.4.8's release job
+failed its fleet CPU gate and ran past its time limit
+([VUH-2516](https://linear.app/vuhlp/issue/VUH-2516)).
 
 A new install on a clean Mac now finishes without an error. Clankie can also
 move his whole self from one body to another, hire workers on
@@ -36,6 +38,13 @@ machines that joined him, and keep a self-hosted Mac running more reliably.
   harness links that could not exist yet. It now finishes, and says harness
   linking waits until after you first run `clankie`.
   [VUH-2619](https://linear.app/vuhlp/issue/VUH-2619)
+- **Local models get their real context window.** `/setup` now reads each
+  Ollama model's own context window, instead of assuming 32k for all of them.
+  Clankie also leaves out tools for services this install hasn't set up, and
+  he fits his requests to the context Ollama is actually serving. Before, a
+  local model's first turn could fill the whole window.
+  [VUH-2623](https://linear.app/vuhlp/issue/VUH-2623),
+  [VUH-2647](https://linear.app/vuhlp/issue/VUH-2647)
 
 ## One Clankie, wherever he lives
 
@@ -100,14 +109,16 @@ machines that joined him, and keep a self-hosted Mac running more reliably.
   per Discord server, and Clankie can post to an owner-chosen channel he has not
   talked in yet. [VUH-2554](https://linear.app/vuhlp/issue/VUH-2554),
   [VUH-2581](https://linear.app/vuhlp/issue/VUH-2581)
+- **Older apps keep working with newer settings.** An app that predates a
+  setting can still load Clankie's setup and settings, and saving from it no
+  longer clears settings it doesn't know about.
+  [VUH-2530](https://linear.app/vuhlp/issue/VUH-2530),
+  [VUH-2648](https://linear.app/vuhlp/issue/VUH-2648)
 
 ## Known issues
 
 Found in this release's fresh-install pass and not yet fixed:
 
-- With a local model, the default 32k context is mostly used by the first turn.
-  Enter a larger context window during `/setup`.
-  [VUH-2623](https://linear.app/vuhlp/issue/VUH-2623)
 - `/setup` suggests Clankie's install directory as the first agent's folder.
   Type the folder you want instead.
   [VUH-2624](https://linear.app/vuhlp/issue/VUH-2624)
