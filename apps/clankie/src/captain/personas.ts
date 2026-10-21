@@ -309,7 +309,13 @@ export class PersonaStore {
       const owner = JSON.parse(readFileSync(join(this.journalLock.path, "owner.json"), "utf8")) as {
         nonce?: string;
       };
-      if (owner.nonce === this.journalLock.nonce) rmSync(this.journalLock.path, { recursive: true });
+      if (owner.nonce === this.journalLock.nonce) {
+        // Rename before removing: a crash mid-removal must leave either a recoverable
+        // lock (owner.json naming a dead pid) or nothing, never an ownerless directory.
+        const retired = `${this.journalLock.path}.${this.journalLock.nonce}.retired`;
+        renameSync(this.journalLock.path, retired);
+        rmSync(retired, { recursive: true });
+      }
       this.journalLock = undefined;
     }
   }
