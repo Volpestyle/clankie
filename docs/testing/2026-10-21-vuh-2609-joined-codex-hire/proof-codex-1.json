@@ -1,0 +1,168 @@
+{
+  "steps": [
+    {
+      "name": "home is connected to the local gateway",
+      "detail": {
+        "doorway": {
+          "state": "connected"
+        },
+        "hostId": "proofhost1a4a399d7925d1df"
+      }
+    },
+    {
+      "name": "the laptop joined through the gateway at workers",
+      "detail": {
+        "approved": {
+          "ok": true,
+          "machineId": "join-36c82601-9f25-4327-b3e4-952e119e8a4f",
+          "accessLevel": "workers"
+        },
+        "listed": {
+          "id": "join-36c82601-9f25-4327-b3e4-952e119e8a4f",
+          "name": "proof-laptop",
+          "platform": "darwin",
+          "transport": "join",
+          "configured": true,
+          "state": "available",
+          "workerCount": null,
+          "sessions": [],
+          "accessLevel": "workers",
+          "accessEnforcement": "joined-host"
+        }
+      }
+    },
+    {
+      "name": "Clankie's hire_agent on the laptop returned",
+      "detail": {
+        "schemaVersion": 1,
+        "conversationId": "global-default",
+        "cursor": "000000000010",
+        "revision": 1,
+        "occurredAt": "2026-10-21T10:57:37.206Z",
+        "type": "tool",
+        "toolCallId": "toolu_013ZFTrisEzbQnbUY8TAAFWF",
+        "name": "hire_agent",
+        "phase": "completed",
+        "detail": "{\"outcome\":\"started\",\"seatId\":\"join-36c82601-9f25-4327-b3e4-952e119e8a4f/w1:p2\",\"sessionId\":\"e3f038b7-fa36-4188-973c-a524662d4c27\",\"conversationId\":\"global-default\",\"detail\":\"{\\\"paneId\\\":\\\"w1:p2\\\",\\\"sessionId\\\":\\\"e3f038b7-fa36-4188-973c-a524662d4c27\\\",\\\"nativeSessionId\\\":\\\"01a15e1b-fada-7ab1-a832-c73feb41f6cf\\\",\\\"admitted\\\":true}\"}"
+      }
+    },
+    {
+      "name": "the worker wrote its file on the laptop and reported back",
+      "detail": {
+        "proof": "joined-hire-ed69f4cb",
+        "report": {
+          "id": "report:bb01ff43-349a-43b5-9d49-fe9fbd0c65d0",
+          "sequence": 1,
+          "at": "2026-10-21T10:58:08.690Z",
+          "kind": "worker_report",
+          "from": {
+            "kind": "worker",
+            "label": "join-36c82601-9f25-4327-b3e4-952e119e8a4f/w1:p2"
+          },
+          "to": {
+            "kind": "lead",
+            "label": "Clankie",
+            "conversationId": "global-default"
+          },
+          "text": "joined-hire-ed69f4cb-done",
+          "links": {
+            "issues": [],
+            "commits": []
+          },
+          "thread": {
+            "conversationId": "global-default"
+          },
+          "delivery": {
+            "stage": "stored"
+          }
+        },
+        "agents": [
+          {
+            "agent": "codex",
+            "agent_session": {
+              "agent": "codex",
+              "kind": "id",
+              "source": "herdr:codex",
+              "value": "01a15e1b-fada-7ab1-a832-c73feb41f6cf"
+            },
+            "agent_status": "working",
+            "cwd": "/Users/james/dev/wt-vuh2604/.local/vuh-2609/proof-codex-1/laptop/workspace",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/wt-vuh2604/.local/vuh-2609/proof-codex-1/laptop/workspace",
+            "pane_id": "w1:p2",
+            "revision": 4,
+            "state_change_seq": 1,
+            "tab_id": "w1:t2",
+            "terminal_id": "term_65e579d1e460f2",
+            "terminal_title": "⠴ wt-vuh2604",
+            "terminal_title_stripped": "wt-vuh2604",
+            "tokens": {
+              "clankie_grid": "2x2",
+              "clankie_pipeline": "4dae16cb7356c5ed9d029af4c8583123f36aef449814f13043c89ae3022bff96",
+              "clankie_repo": "3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102"
+            },
+            "workspace_id": "w1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Clankie's shell on the laptop is refused at workers",
+      "detail": {
+        "tool": {
+          "schemaVersion": 1,
+          "conversationId": "global-default",
+          "cursor": "000000000061",
+          "revision": 3,
+          "occurredAt": "2026-10-21T10:58:26.611Z",
+          "type": "tool",
+          "toolCallId": "toolu_015jTNxvtJoMHqvR2j68cT3f",
+          "name": "joined_machine_shell",
+          "phase": "failed",
+          "detail": "Machine join-36c82601-9f25-4327-b3e4-952e119e8a4f has workers access; this request requires shell. An owner can change its level in Machines."
+        },
+        "audit": "{\"entries\":[{\"id\":\"4e5a6367-0da6-4d48-9336-c2062136cac7\",\"requestedAt\":\"2026-10-21T10:58:26.601Z\",\"finishedAt\":\"2026-10-21T10:58:26.602Z\",\"lane\":\"operator\",\"origin\":\"owner\",\"conversationId\":\"global-default\",\"machineId\":\"join-36c82601-9f25-4327-b3e4-952e119e8a4f\",\"directory\":\"/Users/james/dev/wt-vuh2604/.local/vuh-2609/proof-codex-1/laptop/workspace\",\"commandSha256\":\"bc266fdc5cb47bfac3cf312511672b7c4b4def69afb62ee5e75b1250419ed876\",\"outcome\":\"refused\",\"error\":\"Machine join-36c82601-9f25-4327-b3e4-952e119e8a4f has workers access; this request requires shell. An owner can change its level in Machines.\"}]}\n"
+      }
+    },
+    {
+      "name": "pane w1:p1 at teardown",
+      "detail": ["james@Jamess-MacBook-Pro clankie %"]
+    },
+    {
+      "name": "pane w1:p2 at teardown",
+      "detail": [
+        "",
+        "• Ran clankie --help",
+        "  └ Local LLM servers are not launcher-owned; start them yourself.",
+        "",
+        "    Full reference: docs/cli.md (at `clankie doctor`'s repoRoot on every install).",
+        "    + 280 lines (⌃t to expand)",
+        "",
+        "• Ran python3 - <<'PY' …",
+        "  └ clankie mcp: serving the operator lane over stdio",
+        "    {\"result\": {\"protocolVersion\": \"2024-11-05\", \"capabilities\": {\"tools\": {\"listChanged\": true}, \"experimental\": {\"cla…",
+        "    {\"result\": {\"tools\": [{\"name\": \"message_clankie\", \"description\": \"Send agent output to your hiring lead chat. Choos…",
+        "    + 2 lines (⌃t to expand)",
+        "",
+        "• Ran python3 - <<'PY' …",
+        "  └ clankie mcp: serving the operator lane over stdio",
+        "    bb01ff43-349a-43b5-9d49-fe9fbd0c65d0",
+        "    {\"result\": {\"content\": [{\"type\": \"text\", \"text\": \"Message stored.\"}], \"structuredContent\": {\"schemaVersion\": 1, \"re…",
+        "    + 1 line (⌃t to expand)",
+        "",
+        "• Created proof.txt with the exact content and sent the completion report. Receipt: stored.",
+        "",
+        "  Used the Clankie skill (/Users/james/dev/wt-vuh2604/.agents/skills/clankie/SKILL.md).",
+        "",
+        "  Worked for 36s • 5:58 AM",
+        "",
+        "",
+        "› Ask Codex to do anything",
+        "",
+        "  GPT-6.1-Sol low · ~/dev/wt-vuh2604/.local/vuh-2609/proof-codex-1/laptop/workspace · Context 8% used",
+        "  ? for shortcuts                                                                             ⚠ 2 warnings · f2 to view"
+      ]
+    }
+  ],
+  "outcome": "passed"
+}

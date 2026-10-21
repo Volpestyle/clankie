@@ -1,7 +1,8 @@
 /**
  * Manual real-dependency proof for VUH-2607 (ADR 0244, VUH-1792): a machine joins
  * Clankie through a real gateway at `workers`, Clankie hires a Claude worker there
- * that reports back, and his own shell there is refused.
+ * (or a Codex worker with PROOF_HARNESS=codex, VUH-2609) that reports back, and his
+ * own shell there is refused.
  *
  * Stack: the clankie-ops gateway as a local process (CLANKIE_OPS_ROOT), a
  * self-hosted scratch home behind it, and a scratch "laptop" (its own Clankie
@@ -165,6 +166,11 @@ await chmod(join(bin, "herdr"), 0o755);
 // Claude does, and the runner then drives the installed worker plugin's MCP server
 // itself, as Claude would: the whole chain except the model turn.
 const standIn = process.env.PROOF_CLAUDE === "stand-in";
+// PROOF_HARNESS=codex hires a Codex worker instead (VUH-2609), signed in with this Mac's
+// native-default Codex login; the Codex stand-in lives in joined-hire.integration.test.ts.
+const harness = process.env.PROOF_HARNESS === "codex" ? "codex" : "claude";
+assert(!(standIn && harness === "codex"), "The runner's stand-in is Claude only");
+assert(!process.env.CODEX_HOME, "Unset CODEX_HOME: the worker uses the native default Codex login");
 const claudeLaunch = join(root, "claude-launch.json");
 if (standIn) {
   await writeFile(
@@ -279,7 +285,7 @@ try {
     "send",
     "--conversation",
     "global-default",
-    `Authorized private proof. Call hire_agent exactly once with: title "Pip", role "worker", fleet "${machineId}", workingDirectory "${workspace}", harness "claude", effort "low", effortReason "one small file", brief "Create the file proof.txt in your working folder containing exactly ${marker}. Then call message_clankie with text exactly ${marker}-done and a new UUID deliveryId. Then stop." Do nothing else, then reply with the hire result.`,
+    `Authorized private proof. Call hire_agent exactly once with: title "Pip", role "worker", fleet "${machineId}", workingDirectory "${workspace}", harness "${harness}", effort "low", effortReason "one small file", brief "Create the file proof.txt in your working folder containing exactly ${marker}. Then call message_clankie with text exactly ${marker}-done and a new UUID deliveryId. Then stop." Do nothing else, then reply with the hire result.`,
   );
   const hired = await until(() => toolResult("hire_agent"), "hire_agent result", 300_000);
   step("Clankie's hire_agent on the laptop returned", hired);
