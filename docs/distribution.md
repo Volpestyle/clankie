@@ -278,8 +278,8 @@ and persistence. The [hosted deployment guide](../infra/hosted/README.md) owns
 setup, supported capabilities and remaining managed-hosting requirements.
 
 Pushing a version tag matching `package.json` (for example `v0.4.8`) runs the
-full repository check and fleet load gate, builds and smoke-tests the archive on an Apple silicon
-GitHub runner, builds the `linux-arm64` and `linux-x64` archives that hosted bodies
+full repository check, builds and smoke-tests the archive on an Apple silicon
+GitHub runner, runs the fleet load gate on a fresh runner of its own, builds the `linux-arm64` and `linux-x64` archives that hosted bodies
 install ([ADR 0237](adr/0237-hosted-bodies-update-themselves-to-official-releases.md)),
 and uploads all three archives with their checksums to the matching GitHub Release.
 When that load gate fails on the runner but not locally, the manual

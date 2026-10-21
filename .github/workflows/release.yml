@@ -35,8 +35,6 @@ jobs:
           echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
       - name: Full check with one isolated failed-file rerun
         run: node scripts/check-release.mjs
-      - name: Fleet CPU and latency release gate
-        run: pnpm check:load
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -55,6 +53,33 @@ jobs:
             dist/clankie-darwin-arm64.tar.gz
             dist/clankie-darwin-arm64.tar.gz.sha256
           if-no-files-found: error
+
+  # Its own fresh runner, beside the full check: after an hour of tests the same
+  # runner measured twice the CPU for unchanged code (VUH-2516).
+  load:
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Fleet CPU and latency release gate
+        run: pnpm check:load
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fleet-load
+          path: .data/qa/fleet-load.json
+          include-hidden-files: true
+          retention-days: 7
 
   # Hosted bodies install these themselves (ADR 0237). The image's own build
   # stage builds them, so native code matches the body's glibc.
@@ -100,7 +125,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [build, build-linux]
+    needs: [build, load, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
