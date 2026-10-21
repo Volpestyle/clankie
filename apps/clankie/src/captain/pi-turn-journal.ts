@@ -188,6 +188,10 @@ export class PiTurnJournal {
       const output = createAssistantMessageEventStream();
       if (step.output !== undefined) {
         const message = step.output as unknown as AssistantMessage;
+        if (message.stopReason === "pending") {
+          this.poisoned = true;
+          throw new Error("pi_turn_model_outcome_incomplete");
+        }
         if (message.stopReason === "error" || message.stopReason === "aborted")
           output.push({ type: "error", reason: message.stopReason, error: message });
         else output.push({ type: "done", reason: message.stopReason, message });
@@ -279,7 +283,7 @@ export class PiTurnJournal {
           const replayed = this.replayedTools.get(id);
           return replayed === undefined
             ? execute(id, args, toolSignal, update)
-            : { ...replayed, content: replayed.content ?? [] };
+            : { ...replayed, content: replayed.content ?? [], details: replayed.details };
         };
       }
       if (step === undefined) {
@@ -295,16 +299,30 @@ export class PiTurnJournal {
       const replayed = this.replayedTools.get(call.toolCall.id);
       if (replayed !== undefined) {
         this.replayedTools.delete(call.toolCall.id);
-        return replayed;
+        // The substituted executor already returned the final saved result.
+        return undefined;
       }
       const override = await after?.(call, signal);
-      const result = { ...call.result, isError: call.isError, ...override };
+      // Match Pi 1.0's effective hook result, including dropping stale structured
+      // content when a hook replaces only content (e.g. image normalization).
+      const result = { ...call.result, isError: override?.isError ?? call.isError };
+      if (override) {
+        result.content = override.content ?? result.content;
+        result.details = override.details ?? result.details;
+        if (override.usage !== undefined) result.usage = override.usage;
+        if (override.terminate !== undefined) result.terminate = override.terminate;
+        const structured =
+          override.structuredContent ?? (override.content ? undefined : result.structuredContent);
+        if (structured === undefined) delete result.structuredContent;
+        else result.structuredContent = structured;
+      }
       const step = this.record.steps.find((entry) => entry.key === `tool:${call.toolCall.id}`);
       if (step === undefined) throw new Error("pi_turn_tool_intent_missing");
       step.output = json(result);
       if (capture.media !== undefined) step.media = capture.media;
       this.save();
-      return result;
+      // Pi applies its own merge to the live call; do not apply it twice.
+      return override;
     };
     return () => {
       agent.streamFunction = stream;

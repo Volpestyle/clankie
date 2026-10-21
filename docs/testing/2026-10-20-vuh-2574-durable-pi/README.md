@@ -49,14 +49,21 @@ killing its recorded tool PID.
   counts the original effect command and independently checks its actual output,
   allowing the model to choose how to inspect it without allowing duplicate effects.
 
+- `proof-4` / `proof-term`: both passed unchanged-source behavior checks before
+  the first landing gate. That gate caught two journal type errors (`pending`
+  cannot be emitted as completed, and tool executors require `details`). A follow-up
+  also corrected the effective result-hook snapshot so content replacement drops
+  stale structured output and live hooks are not merged twice. The corrected
+  module passed a focused typecheck; both real-service proofs were rerun below.
+
 Final source-pinned results and the evidence bundle are recorded below.
 
 ## Final results
 
-| Proof                 | Service PIDs          | Interrupted tool PID | Memory notes | Shell appends | Saved HTTP replies | Outcome |
-| --------------------- | --------------------- | -------------------- | ------------ | ------------- | ------------------ | ------- |
-| SIGKILL, `proof-4`    | 24509 → 24922 → 25346 | 24909                | 1            | 1             | 1                  | passed  |
-| SIGTERM, `proof-term` | 28632 → 29589 → 31013 | 29306                | 1            | 1             | 1                  | passed  |
+| Proof                   | Service PIDs          | Interrupted tool PID | Memory notes | Shell appends | Saved HTTP replies | Outcome |
+| ----------------------- | --------------------- | -------------------- | ------------ | ------------- | ------------------ | ------- |
+| SIGKILL, `proof-5`      | 82091 → 82621 → 83179 | 82607                | 1            | 1             | 1                  | passed  |
+| SIGTERM, `proof-term-2` | 83641 → 84136 → 84710 | 84122                | 1            | 1             | 1                  | passed  |
 
 Both use unchanged source across all three service lifetimes. The bundle records
 the ten per-file SHA-256 digests, original revision, original native session leaf,
@@ -70,6 +77,6 @@ The focused Discord route/room checks passed **21 tests in three files**. Scoped
 lint, dead-code analysis and local documentation links also passed. The required
 landing-gate receipt is reported on VUH-2574 with the submitted commit.
 
-[Raw proof bundle](clankie://evidence/sha256/4692ae99258e0eea316c146653abbd49bc9088dc9cf1378429e30289ed0a8fa9)
+[Raw proof bundle](clankie://evidence/sha256/5a0cef4d80caf892bf78ab4f409171a89c870fe5171185fd53a87419b0ae4aca)
 contains the measured results and logs. Upload receipt:
-`b15839d9e040d94b0d20bf6ab88a9247b4da47e81bd8013137d80b1dc3356850` (applied).
+`10151ba61fce6b975880e48605cdb94994658651307584ca8ab0710eb0dc763a` (applied).
