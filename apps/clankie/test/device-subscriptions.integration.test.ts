@@ -309,7 +309,7 @@ describe("device subscription setup", () => {
     expect(await readFile(join(f.dir, "events.jsonl"), "utf8")).not.toContain("synthetic-token-marker");
   });
 
-  it("allows device keys only during current first-run readiness, reflects terminal completion, and preserves hosted behavior", async () => {
+  it("allows self-hosted device keys only during first-run readiness and refuses managed customer keys", async () => {
     const f = await fixture();
     const device = await f.pair();
     expect(
@@ -347,19 +347,19 @@ describe("device subscription setup", () => {
     ).toBe(403);
     const hosted = await fixture({ hosted: true });
     const phone = await hosted.pair();
-    await hosted.store.set("openai", { type: "api", key: "existing" });
-    await setCaptainModel(hosted.model("openai"), { env: hosted.env });
-    expect(
-      (
-        await hosted.call(
-          "/v1/model-keys/set",
-          { providerId: "openai", apiKey: "hosted-key-marker" },
-          phone.deviceToken,
-        )
-      ).status,
-    ).toBe(200);
+    const existing = { type: "api" as const, key: "existing" };
+    await hosted.store.set("openai", existing);
+    await setCaptainModel("openai/legacy-selection", { env: hosted.env });
+    const refused = await hosted.call(
+      "/v1/model-keys/set",
+      { providerId: "openai", apiKey: "hosted-key-marker" },
+      phone.deviceToken,
+    );
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ ok: false, error: "managed_credits_only" });
+    expect(await hosted.store.get("openai")).toEqual(existing);
     const methods = await (await hosted.call("/v1/model-keys/subscriptions/methods")).json();
-    expect(methods.methods.some((p: { providerId: string }) => p.providerId === "openai-codex")).toBe(false);
+    expect(methods.methods).toEqual([]);
   });
 
   it("cancels and expires pending browser sign-ins without storing credentials, and rejects supervise/provider-policy bypasses", async () => {

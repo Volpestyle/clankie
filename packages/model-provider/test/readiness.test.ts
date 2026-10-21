@@ -60,14 +60,14 @@ describe("captainReadiness", () => {
   });
 });
 
-it("does not present hosted ChatGPT or a Claude token environment as ready", () => {
+it("does not present managed customer credentials or a Claude token environment as ready", () => {
   const env = { CLANKIE_HOSTED_BOOTSTRAP_FILE: "/scratch/bootstrap.json" };
   for (const model of ["openai/gpt-5.5", "openai-codex/gpt-5.5"]) {
     expect(captainReadiness({ config: { model }, credentialIds: ["openai-codex"], env }).ready).toBe(false);
   }
   expect(
     captainReadiness({ config: { model: "openai/gpt-5.5" }, credentialIds: ["openai", "openai-codex"], env }),
-  ).toMatchObject({ ready: true, auth: "credential" });
+  ).toMatchObject({ ready: false, reason: "no_credential" });
   expect(
     captainReadiness({
       config: { model: "anthropic/claude-opus-5-5" },
