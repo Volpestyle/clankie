@@ -7,7 +7,7 @@ import type {
 import { nativeHerdrRead } from "../herdr-native-read.ts";
 import { nativeAgentWait } from "../herdr-native-wait.ts";
 import { createHireLayout, HireLayoutNotStarted, HireLayoutUnconfirmed } from "./hire-layout.ts";
-import { hirePaneLabel } from "./hire-name.ts";
+import { herdrAgentName, hirePaneLabel } from "./hire-name.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { ResourceAdmissionError, type FleetResourceRuntime } from "../fleet-resource-runtime.ts";
 import { realpath } from "node:fs/promises";
@@ -816,22 +816,6 @@ function spawnFailureReason(detail: string): "harness_unavailable" | "not_ready"
 /** `tab create` on a server with no workspace: herdr answers `workspace_not_found`. */
 export function isHerdrWorkspaceMissing(caught: unknown): boolean {
   return caught instanceof Error && /workspace_not_found/u.test(caught.message);
-}
-
-/**
- * Herdr agent names are `[a-z][a-z0-9_-]{0,31}` and must be unique among live
- * agents, so the operator's free-text title has to become one. A short suffix
- * makes the immutable subject unique while the roster title carries the
- * operator's original words.
- */
-export function herdrAgentName(title: string, suffix: string = randomUUID().slice(0, 4)): string {
-  const slug = title
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/gu, "-")
-    .replace(/^[^a-z]+/u, "")
-    .replace(/-+$/u, "");
-  const base = (slug.length === 0 ? "agent" : slug).slice(0, 32 - suffix.length - 1);
-  return `${base}-${suffix}`;
 }
 
 /**

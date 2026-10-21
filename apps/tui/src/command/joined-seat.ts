@@ -199,6 +199,13 @@ export async function runJoinedSeatHook(
 ): Promise<number | undefined> {
   const env = options.env ?? process.env;
   const token = env.CLANKIE_JOINED_SEAT_TOKEN;
+  // A joined worker runs the installed worker plugin (VUH-2607). Its home observes
+  // it through the join channel, so the plugin's lifecycle hook has nothing to send.
+  const worker = token !== undefined && env.CLANKIE_JOINED_WORKER_SESSION !== undefined;
+  if (worker && command === "seat-hook") {
+    process.stdin.resume();
+    return 0;
+  }
   if (!token || !["mcp", "prompt", "memory-card", "seat-sync"].includes(command ?? "")) return undefined;
   const credential = await readJoinedMachineCredential(createDefaultCredentialStore({ env }));
   if (!credential) throw Error("Joined machine registration missing; use clankie join resume");
@@ -212,7 +219,12 @@ export async function runJoinedSeatHook(
       return wire.fetchFor(token)(resource, init);
     },
   };
-  if (command === "mcp") return (await import("./mcp.ts")).runMcpCommand(args, routed);
+  if (command === "mcp")
+    // The worker plugin starts `mcp --seat`; a joined worker's tools are its joined lead bank.
+    return (await import("./mcp.ts")).runMcpCommand(
+      worker && args.includes("--seat") ? ["--lane", "operator"] : args,
+      worker ? { ...routed, readParentArgv: async () => env.CLANKIE_SEAT_PARENT_ARGV } : routed,
+    );
   if (command === "prompt") return (await import("./prompt.ts")).runPromptCommand(args, routed);
   if (command === "memory-card") return (await import("./memory-card.ts")).runMemoryCardCommand(args, routed);
   return (await import("./seat-sync.ts")).runSeatSyncCommand(args, routed);

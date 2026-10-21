@@ -7,6 +7,7 @@ import {
 import { Type } from "typebox";
 import type { SettingsStore } from "@clankie/settings";
 import type { MachineAccessLevel } from "@clankie/protocol";
+import type { JoinedWorkerHireRequest } from "../machine-joins.ts";
 import type {
   JoinedMachineOperation,
   JoinedMachineResult,
@@ -21,6 +22,101 @@ export interface JoinedShellMachines {
   accessCeiling(id: string): MachineAccessLevel | undefined;
   request(id: string, operation: JoinedMachineOperation, timeoutMs?: number): Promise<JoinedMachineResult>;
   recordShell(entry: JoinedShellAuditEntry): Promise<void>;
+  /** Clankie's own Claude worker on a joined machine at the workers level (VUH-2607). */
+  hireWorker?(request: JoinedWorkerHireRequest): Promise<Record<string, unknown>>;
+  messageWorker?(input: {
+    seat: string;
+    conversationId: string;
+    message: string;
+  }): Promise<Record<string, unknown>>;
+}
+
+const JOINED_EFFORTS = new Set(["low", "medium", "high", "max"]);
+const result = (value: unknown) => ({
+  content: [{ type: "text" as const, text: JSON.stringify(value) }],
+  details: value,
+});
+
+/**
+ * Lets hire_agent and message_seat reach a joined machine (VUH-2607): `fleet` naming
+ * a `join-` machine hires a Claude worker there, in a folder approved at join, while
+ * the machine's live level allows workers. Owner-started turns only, like its shell.
+ * Every other target keeps the original tool unchanged.
+ */
+export function joinedHireTools<T extends { name: string; description: string; execute: unknown }>(
+  tools: readonly T[],
+  joins: JoinedShellMachines,
+  settings: SettingsStore,
+  caller: { conversationId: string; turn: { readonly autonomous?: boolean | undefined } },
+): T[] {
+  if (joins.hireWorker === undefined || joins.messageWorker === undefined) return [...tools];
+  const hireWorker = joins.hireWorker.bind(joins);
+  const messageWorker = joins.messageWorker.bind(joins);
+  const joinedSeat = (seat: unknown) =>
+    typeof seat === "string" && seat.startsWith("join-") && joins.has(seat.slice(0, seat.indexOf("/")));
+  return tools.map((tool) => {
+    const original = tool.execute as (...args: unknown[]) => Promise<unknown>;
+    if (tool.name === "hire_agent")
+      return {
+        ...tool,
+        description:
+          tool.description +
+          " A machine that joined you with `clankie join` (id `join-…`) is a fleet too: name it as fleet to hire a Claude worker there, in a folder approved when it joined, while its level allows workers. It uses that machine's own Claude login; only turns the owner started may hire there.",
+        execute: async (id: unknown, params: Record<string, unknown>, ...rest: unknown[]) => {
+          const fleet = params.fleet;
+          if (typeof fleet !== "string" || !fleet.startsWith("join-")) return original(id, params, ...rest);
+          if (!joins.has(fleet)) throw new Error(`No joined machine ${fleet}.`);
+          if (caller.turn.autonomous === true)
+            throw new Error(
+              "A joined machine hire runs only in a turn the owner started; an autonomous turn cannot start one.",
+            );
+          // Live owner policy at the call; the receiver enforces its own ceiling again.
+          await requireMachineAccess(settings, fleet, "workers", joins);
+          if (params.harness !== undefined && params.harness !== "claude")
+            return result({
+              outcome: "failed",
+              reason: "harness_unavailable",
+              detail: "A joined machine runs Claude workers in this release; Codex there is a follow-up.",
+            });
+          if (typeof params.brief !== "string" || params.brief.length === 0)
+            return result({
+              outcome: "failed",
+              reason: "not_ready",
+              detail: "A joined machine hire needs a brief.",
+            });
+          return result(
+            await hireWorker({
+              machineId: fleet,
+              conversationId: caller.conversationId,
+              title: String(params.title),
+              brief: params.brief,
+              workingDirectory: String(params.workingDirectory),
+              ...(typeof params.model === "string" ? { model: params.model } : {}),
+              ...(typeof params.effort === "string" && JOINED_EFFORTS.has(params.effort)
+                ? { effort: params.effort as "low" | "medium" | "high" | "max" }
+                : {}),
+            }),
+          );
+        },
+      };
+    if (tool.name === "message_seat")
+      return {
+        ...tool,
+        execute: async (id: unknown, params: Record<string, unknown>, ...rest: unknown[]) => {
+          if (!joinedSeat(params.seat)) return original(id, params, ...rest);
+          if (typeof params.message !== "string")
+            throw new Error("A worker on a joined machine takes a plain message.");
+          return result(
+            await messageWorker({
+              seat: String(params.seat),
+              conversationId: caller.conversationId,
+              message: params.message,
+            }),
+          );
+        },
+      };
+    return tool;
+  });
 }
 
 /**

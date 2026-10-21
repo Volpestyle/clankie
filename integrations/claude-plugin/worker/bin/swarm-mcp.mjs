@@ -19,7 +19,20 @@ const run = (command, args, env) => {
   child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 };
 
-if (hasLinks()) {
+if (process.env.CLANKIE_JOINED_SEAT_TOKEN && process.env.CLANKIE_JOINED_WORKER_SESSION) {
+  // A worker Clankie hired on a joined machine (VUH-2607) reaches its home through
+  // that machine's join channel, even when the machine is also in an ssh fleet.
+  let parent = "";
+  try {
+    parent = execFileSync("ps", ["-o", "args=", "-p", String(process.ppid)], {
+      encoding: "utf8",
+      timeout: 5_000,
+    }).trim();
+  } catch {
+    parent = "";
+  }
+  run("clankie", ["mcp", "--seat"], { ...process.env, CLANKIE_SEAT_PARENT_ARGV: parent });
+} else if (hasLinks()) {
   // A machine in one of his ssh fleets (VUH-1527) reaches him through its link,
   // with no `clankie` CLI or operator credential here.
   runSeatChannel({ paneId: process.env.HERDR_PANE_ID?.trim(), parentArgv: parentCommandLine() });

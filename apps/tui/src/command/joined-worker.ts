@@ -1,23 +1,24 @@
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { z } from "zod";
-import { CLAUDE_WORKER_PLUGIN_ID } from "@clankie/protocol";
+import { CLAUDE_WORKER_PLUGIN, CLAUDE_WORKER_PLUGIN_ID } from "@clankie/protocol";
 import { SEAT_PLUGIN_ID } from "./seat.ts";
 import { JoinedWorkerLaunchSchema } from "@clankie/protocol/machine-join";
 import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-isolation.ts";
 import { createHireLayout } from "../../../clankie/src/captain/hire-layout.ts";
+import { herdrAgentName } from "../../../clankie/src/captain/hire-name.ts";
 import type { JoinedMachineCredential, JoinedMachinePorts } from "../../bin/joined-machine-client.ts";
 import { joinedSeatTransport } from "./joined-seat.ts";
-import { clankieStateHome } from "../state-home.ts";
 
 const exec = promisify(execFile);
 const Native = z.object({
   result: z.object({
     agent: z.object({
       pane_id: z.string().optional(),
-      session: z.object({ kind: z.literal("id"), value: z.string() }),
+      agent_session: z.object({ kind: z.literal("id"), value: z.string() }),
     }),
   }),
 });
@@ -56,18 +57,6 @@ export function joinedWorkerPorts(
         throw Error("joined_worker_launch_mismatch");
     };
     await check();
-    const plugin = join(clankieStateHome(options.env), "clankie", "joined-worker-plugin");
-    await mkdir(join(plugin, ".claude-plugin"), { recursive: true, mode: 0o700 });
-    await writeFile(
-      join(plugin, ".claude-plugin", "plugin.json"),
-      JSON.stringify({ name: "clankie", version: "1.0.0", description: "Joined native worker channel" }),
-      { mode: 0o600 },
-    );
-    await writeFile(
-      join(plugin, ".mcp.json"),
-      JSON.stringify({ mcpServers: { lead: { command: "clankie", args: ["mcp", "--lane", "operator"] } } }),
-      { mode: 0o600 },
-    );
     await check();
     const paneId = await layout({
       cwd: directory,
@@ -85,11 +74,31 @@ export function joinedWorkerPorts(
       },
     });
     await check();
-    await run(
+    // As a local hire: the brief goes in a private file named by a one-line
+    // startup prompt, since Herdr refuses arguments it cannot encode for the shell.
+    const briefs = join(
+      options.env.CLANKIE_STATE?.trim() || join(options.env.HOME ?? homedir(), ".clankie"),
+      "claude-briefs",
+    );
+    const briefPath = join(briefs, `clankie-brief-${launch.sessionId}.json`);
+    if (/[\p{Cc}"\s]/u.test(briefPath)) throw Error("joined_worker_brief_path_unsafe");
+    await mkdir(briefs, { recursive: true, mode: 0o700 });
+    await writeFile(
+      briefPath,
+      JSON.stringify({
+        clankieBrief: `You are a worker Clankie hired on this machine. Report with message_clankie. Your lead chat is ${launch.conversationId}. Your seat is ${credential.lease.machineId}/${paneId}.\n\n${launch.brief}`,
+      }),
+      { mode: 0o600, flag: "wx" },
+    );
+    // Herdr answers `agent start` once Claude is idle, which for a briefed worker is
+    // after its first turn, or with a timeout while it still works. As on a local
+    // hire, admission waits only for the native session Claude reports (VUH-2607).
+    let started: { error?: unknown } | undefined;
+    void run(
       [
         "agent",
         "start",
-        launch.title,
+        herdrAgentName(launch.title),
         "--kind",
         "claude",
         "--pane",
@@ -97,32 +106,42 @@ export function joinedWorkerPorts(
         "--",
         "--session-id",
         launch.sessionId,
-        "--plugin-dir",
-        plugin,
-        "--dangerously-load-development-channels",
-        "plugin:clankie@inline",
+        // The installed worker plugin, as on any hire: an owner-approved channel
+        // (managed allowedChannelPlugins), never a development channel whose
+        // warning nobody is there to answer (VUH-2607).
+        "--channels",
+        `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
         "--settings",
         JSON.stringify({
-          enabledPlugins: {
-            [SEAT_PLUGIN_ID]: false,
-            [CLAUDE_WORKER_PLUGIN_ID]: false,
-            "clankie@inline": true,
-          },
+          enabledPlugins: { [SEAT_PLUGIN_ID]: false, [CLAUDE_WORKER_PLUGIN_ID]: true },
           permissions: {
             defaultMode: "auto",
-            allow: ["mcp__plugin_clankie_lead"],
+            allow: [`mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_worker`],
             deny: claudeTrackerDenyRules(directory, options.env),
           },
         }),
         ...(launch.maximumTrust ? ["--dangerously-skip-permissions"] : []),
         ...(launch.model ? ["--model", launch.model] : []),
         ...(launch.effort ? ["--effort", launch.effort] : []),
-        `You are a worker hired by Clankie's joined lead. Report with message_clankie. Your lead chat is ${launch.conversationId}. Your seat is ${credential.lease.machineId}/${paneId}.\n\n${launch.brief}`,
+        `Execute the assignment in the clankieBrief JSON field of @${briefPath}`,
       ],
       signal,
+    ).then(
+      () => (started = {}),
+      (error: unknown) => (started = { error }),
     );
-    const observed = Native.parse(JSON.parse(await run(["agent", "get", paneId], signal)));
-    if (observed.result.agent.session.value !== launch.sessionId)
+    let observed: z.infer<typeof Native> | undefined;
+    for (const deadline = Date.now() + 60_000; observed === undefined;) {
+      signal.throwIfAborted();
+      // allow-swallowed-rejection -- a pane with no reported agent yet answers with an error; the deadline decides
+      const raw = await run(["agent", "get", paneId], signal).catch(() => undefined);
+      observed = raw === undefined ? undefined : Native.safeParse(JSON.parse(raw)).data;
+      if (observed !== undefined) break;
+      if (started?.error !== undefined || Date.now() > deadline)
+        throw started?.error ?? Error("joined_worker_native_session_missing");
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (observed.result.agent.agent_session.value !== launch.sessionId)
       throw Error("joined_worker_native_session_mismatch");
     const response = await joinedSeatTransport(credential, options.fetchImpl ?? fetch).rpc(
       {
@@ -153,6 +172,6 @@ export async function verifyJoinedWorker(env: NodeJS.ProcessEnv) {
       ).stdout,
     ),
   );
-  if (observed.result.agent.session.value !== env.CLANKIE_JOINED_WORKER_SESSION)
+  if (observed.result.agent.agent_session.value !== env.CLANKIE_JOINED_WORKER_SESSION)
     throw Error("joined_worker_native_session_mismatch");
 }

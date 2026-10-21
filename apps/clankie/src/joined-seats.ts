@@ -236,5 +236,18 @@ export function createJoinedSeats(input: {
     );
   };
   input.joins.setSeatHandler(handler);
+  // Clankie's own hires on a joined machine (VUH-2607): the same workers, led by a home conversation.
+  input.joins.setWorkerHire({
+    hire: async (request) => {
+      const machine = input.joins.seatMachine(request.machineId);
+      if (machine === undefined) throw Error(`No joined machine ${request.machineId}.`);
+      await machine.authorize();
+      const maximumTrust = input.settings ? (await input.settings.load()).maximumTrustMode : false;
+      return workers.hire(machine, request, maximumTrust);
+    },
+    message: async ({ seat, conversationId, message }) => ({
+      ...(await workers.deliver(seat, conversationId, message)),
+    }),
+  });
   return { close: bridge.close };
 }

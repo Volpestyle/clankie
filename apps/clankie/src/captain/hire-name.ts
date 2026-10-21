@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { OperatorAgentNameSchema } from "@clankie/protocol";
 
 // Compatibility for older callers that used task/routing labels. These are
@@ -29,4 +29,20 @@ export function hirePaneLabel(name: string, taskTitle?: string, role?: string): 
       .trim();
   const task = shortTask(taskTitle ?? "") || shortTask(role ?? "") || "Work";
   return `${hireDisplayName(name)} · ${Array.from(task).slice(0, 60).join("")}`;
+}
+
+/**
+ * Herdr agent names are `[a-z][a-z0-9_-]{0,31}` and must be unique among live
+ * agents, so the operator's free-text title has to become one. A short suffix
+ * makes the immutable subject unique while the roster title carries the
+ * operator's original words.
+ */
+export function herdrAgentName(title: string, suffix: string = randomUUID().slice(0, 4)): string {
+  const slug = title
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/gu, "-")
+    .replace(/^[^a-z]+/u, "")
+    .replace(/-+$/u, "");
+  const base = (slug.length === 0 ? "agent" : slug).slice(0, 32 - suffix.length - 1);
+  return `${base}-${suffix}`;
 }

@@ -99,6 +99,7 @@
         "scripts/prove-durable-pi-room.ts",
         "scripts/prove-body-transfer.ts",
         "scripts/prove-companion-identity.ts",
+        "scripts/prove-joined-hire.ts",
         "scripts/tracker-sync-roundtrip.ts",
         "scripts/linear-mirror-roundtrip.ts",
         "scripts/linear-cutover-rehearsal.ts",

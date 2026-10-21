@@ -171,3 +171,15 @@ convention, not secrecy. It is readable through
 `GET /v1/machines/shell-audit`, `clankie machines shell-audit` and doctor.
 Hiding `shell` for joined machines was rejected: `screen` includes it, so one
 hidden rung would break the single ordered vocabulary above.
+
+Amended 2026-10-21 (VUH-2607): at `workers`, Clankie himself hires onto a joined
+machine. His own `hire_agent` with `fleet: "join-UUID"` starts a native Claude
+worker there through the same bounded workers adapter the joined lead uses, and
+the worker reports into the chat that hired it; `message_seat` to the returned
+`join-UUID/PANE` seat reaches it. The hire carries the same limits as his joined
+shell: the owner console lane with machine tools, turns the owner started only,
+a live level of at least `workers`, and a working directory inside a folder
+approved at join. A folder outside those is refused as `unknown_directory`,
+another harness as `harness_unavailable` (Codex is a follow-up), and a lower
+level by the access refusal above. This needs no SSH fleet, and his shell there
+stays refused at `workers`.

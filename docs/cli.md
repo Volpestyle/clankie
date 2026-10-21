@@ -4904,7 +4904,10 @@ The joined lead's `hire_agent` starts Claude workers in new Herdr panes on the
 same approved folder, using the bounded workers adapter in the running `join`
 channel. Supply `title`, `brief`, optional `model`/`effort`; `harness` can only be
 `claude`, and an optional `workingDirectory` must equal the lead's folder. The
-adapter observes the exact native session before admission. The worker gets
+brief is staged in a private file under that machine's Clankie state and named by
+Claude's one-line startup prompt. The adapter admits the exact native session
+Claude reports, without waiting for its first turn to finish, so a report from
+inside that turn is accepted. The worker gets
 only `message_clankie` (text, a caller-chosen UUID `deliveryId` and optional `urgent`) and
 `message_clankie_status` (`deliveryId`). Reports are durable in its lead chat;
 the lead reads and acknowledges them through `worker_reports` and
@@ -4914,6 +4917,14 @@ owner bearer, connected-account grant or general shell in this transport.
 Uncertain launches and reports must be reconciled, never repeated. Grant expiry,
 reset, access downgrade, leave and home restart refuse later traffic; existing
 native panes remain open. Keep `join` / `join resume` running for worker launches.
+
+Clankie himself hires there too: at `workers` or above, his own `hire_agent` with
+`fleet: "join-UUID"` and a `workingDirectory` inside a folder approved at join
+starts a Claude worker through the same adapter. Only turns the owner started in
+the owner console may hire there; a folder outside those approved at join is
+refused as `unknown_directory`, another harness as `harness_unavailable`, and a
+lower level names the level required. The worker reports into the chat that hired
+it, and `message_seat` to the returned `join-UUID/PANE` seat reaches it.
 
 Other harness seats, Windows release packaging, legacy SSH chat migration and
 real native PC/production-gateway proof remain follow-ups. Plain `clankie`

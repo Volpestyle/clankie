@@ -167,6 +167,8 @@ export interface McpCommandOptions {
   readonly repoRoot?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly host?: string;
+  /** The service transport: a joined seat's encrypted join channel instead of a direct fetch. */
+  readonly fetchImpl?: typeof fetch;
   readonly operatorCredentialStore?: CredentialStore;
   /** Test seam: the upstream to bridge instead of the live service. */
   readonly connectUpstream?: (input: {
@@ -1314,7 +1316,11 @@ export async function runMcpCommand(
   const parentArgv = await (options.readParentArgv ?? defaultReadParentArgv)().catch(() => undefined);
   // `clankie claude` loads the projected plugin as the session-only
   // `clankie@inline`; an installed marketplace copy is `clankie@clankie`.
-  const channel = OPERATOR_CHANNEL_ENTRIES.some((entry) => parentArgvLoadsChannel(parentArgv, entry));
+  const channel =
+    OPERATOR_CHANNEL_ENTRIES.some((entry) => parentArgvLoadsChannel(parentArgv, entry)) ||
+    // A joined worker loads the installed worker plugin as an approved channel (VUH-2607).
+    (env.CLANKIE_JOINED_WORKER_SESSION !== undefined &&
+      parentArgvApprovesChannel(parentArgv, WORKER_CHANNEL_PLUGIN));
   const journal =
     lane === "operator" && channel ? seatPumpJournal(env, conversationId ?? "global-default") : undefined;
   const upstream = await (options.connectUpstream ?? defaultUpstream)({
@@ -1398,6 +1404,8 @@ export async function runMcpCommand(
     return connectLaneUpstream({
       host: commandHost({ ...options, env }),
       bearer: credential.token,
+      // A joined seat's requests ride its join channel, never a direct fetch (VUH-2607).
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
       onTransportEvent: lifecycle,
       ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
     });

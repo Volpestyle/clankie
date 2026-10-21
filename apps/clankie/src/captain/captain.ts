@@ -27,6 +27,7 @@ import {
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
 import {
   joinedMachineShellTool,
+  joinedHireTools,
   machineCodingTools,
   offersJoinedMachineShell,
 } from "./machine-coding-tools.ts";
@@ -1826,7 +1827,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           thinkingLevel: selection.thinkingLevel,
           modelRuntime: models,
           customTools: evalTools?.customTools ?? [
-            ...authored,
+            ...(options.joinedMachines &&
+            offersJoinedMachineShell({ lane, systemTools, discordAccess: access })
+              ? joinedHireTools(authored, options.joinedMachines, settingsStore, {
+                  conversationId: _conversationId ?? "operator",
+                  turn: capture,
+                })
+              : authored),
             ...(systemTools ? machineCodingTools(cwd, settingsStore) : []),
             ...(options.joinedMachines &&
             offersJoinedMachineShell({ lane, systemTools, discordAccess: access })

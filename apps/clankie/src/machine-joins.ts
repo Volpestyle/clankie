@@ -72,6 +72,43 @@ export class MachineJoins {
   setSeatHandler(handler: NonNullable<MachineJoins["seatHandler"]>): void {
     this.seatHandler = handler;
   }
+  private workerHire?: JoinedWorkerHire;
+  /** Registered by the joined seats module, which owns joined workers (VUH-2607). */
+  setWorkerHire(handler: JoinedWorkerHire): void {
+    this.workerHire = handler;
+  }
+  /** Clankie hires a worker on a joined machine at the workers level. */
+  hireWorker(request: JoinedWorkerHireRequest): Promise<Record<string, unknown>> {
+    if (!this.workerHire) return Promise.reject(Error("joined_hires_unavailable"));
+    return this.workerHire.hire(request);
+  }
+  messageWorker(input: { seat: string; conversationId: string; message: string }) {
+    if (!this.workerHire) return Promise.reject(Error("joined_hires_unavailable"));
+    return this.workerHire.message(input);
+  }
+  /** The machine as a joined seat sees it, for work the home starts itself. */
+  seatMachine(id: string): JoinedSeatMachine | undefined {
+    const record = this.registrations.get(id);
+    return record === undefined
+      ? undefined
+      : {
+          machineId: record.id,
+          platform: record.platform,
+          directories: record.directories,
+          authorize: this.workersAuthority(record),
+        };
+  }
+  /** Current registration and a live level of at least workers, or a named refusal. */
+  private workersAuthority(record: Registration) {
+    return async () => {
+      if (this.registrations.get(record.id) !== record) throw Error("revoked");
+      const level = machineAccessLevel(await this.options.settings.load(), record.id, this);
+      if (this.registrations.get(record.id) !== record) throw Error("revoked");
+      // Records the owner observation and names the machine, its level and the requirement.
+      if (!machineAccessAllows(level, "workers"))
+        await refuseMachineAccess(this.options.settings, record.id, level, "workers");
+    };
+  }
   private readonly registrations = new Map<string, Registration>();
   private readonly tickets = new Map<string, Ticket>();
   private readonly seen = new Map<string, number>();
@@ -283,14 +320,7 @@ export class MachineJoins {
     )
       throw Error("invalid_machine_request");
     this.challenges.delete(envelope.challenge); // Consume before any dispatch; a replay cannot execute again.
-    const authorize = async () => {
-      if (this.registrations.get(record.id) !== record) throw Error("revoked");
-      const level = machineAccessLevel(await this.options.settings.load(), record.id, this);
-      if (this.registrations.get(record.id) !== record) throw Error("revoked");
-      // Records the owner observation and names the machine, its level and the requirement.
-      if (!machineAccessAllows(level, "workers"))
-        await refuseMachineAccess(this.options.settings, record.id, level, "workers");
-    };
+    const authorize = this.workersAuthority(record);
     const result =
       payload.op === "seat"
         ? await (async (): Promise<JoinedSeatResponse> => {
@@ -423,6 +453,20 @@ export class MachineJoins {
   }
 }
 
+export interface JoinedWorkerHireRequest {
+  readonly machineId: string;
+  /** The hiring conversation; the worker's reports return there. */
+  readonly conversationId: string;
+  readonly title: string;
+  readonly brief: string;
+  readonly workingDirectory: string;
+  readonly model?: string;
+  readonly effort?: "low" | "medium" | "high" | "max";
+}
+export interface JoinedWorkerHire {
+  hire(request: JoinedWorkerHireRequest): Promise<Record<string, unknown>>;
+  message(input: { seat: string; conversationId: string; message: string }): Promise<Record<string, unknown>>;
+}
 export interface JoinedSeatMachine {
   readonly machineId: string;
   readonly platform: "darwin" | "win32" | "linux";

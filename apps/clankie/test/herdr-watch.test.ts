@@ -16,7 +16,6 @@ import { fleetSeatCodexStartArgs } from "../src/captain/fleet-seat.ts";
 import {
   createHerdrWatchRunner,
   distillHerdrSeatReply,
-  herdrAgentName,
   HerdrWatchStore,
   parseHerdrAgentResult,
   parseHerdrForegroundProcessId,
@@ -26,6 +25,7 @@ import {
   type HerdrWatchWakeContext,
   type PiSeatModel,
 } from "../src/captain/herdr-watch.ts";
+import { herdrAgentName } from "../src/captain/hire-name.ts";
 import { isHerdrWorkspaceMissing } from "../src/captain/herdr-watch.ts";
 
 const roots: string[] = [];
